@@ -10,7 +10,8 @@
 - Compose:
 - Direct executor:
 - TTY/logs:
-- Storage:
+- Storage: shared layer pool counted once; image/rootfs apparent sizes overlap;
+  container upperdir/private bytes verified separately.
 - Network/ports:
 
 ## Device Testing
@@ -30,6 +31,7 @@
 - Signing material is not included in the repository.
 - Release APK signature:
 - Secret audit:
+- Release readiness:
 
 ## Docs
 

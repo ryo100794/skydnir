@@ -1,6 +1,6 @@
 # llama.cpp Runtime Benchmarks
 
-Snapshot date: 2026-05-04.
+Snapshot date: 2026-05-05.
 
 ## Purpose
 
@@ -28,6 +28,68 @@ bash scripts/android-llama-bench.sh --predict 8 --repeat 1
 
 Use the same prompt, token count, and model when comparing CPU fallback with
 future Vulkan/CUDA-compatible runs.
+
+For the small-model GPU green path, keep the default 8B file intact by writing
+the alternate GGUF to a separate model path:
+
+```sh
+SMALL_GGUF_URL=https://.../small.gguf
+bash scripts/android-llama-gpu-compare.sh --model-path /models/small.gguf --model-url "$SMALL_GGUF_URL" --gpu-layers 1 --gpu-ctx 512 --predict 2 --repeat 1
+```
+
+## 2026-05-05 Copy-Buffer Semantics Probe Result
+
+- Local path: `docs/test/llama-gpu-compare-latest.json`.
+- Device path: `files/pdocker/bench/llama-gpu-compare-latest.json`.
+- Scenario: `scripts/android-llama-gpu-compare.sh --gpu-layers 1 --gpu-ctx 512 --predict 2 --repeat 1`.
+- Policy: llama.cpp was not modified; the container used the standard Vulkan
+  loader and pdocker's glibc-facing Vulkan ICD.
+- Result: CPU 0.4246 tokens/s, GPU 0.3426 tokens/s, speedup 0.807x,
+  `target_met=false`.
+- Change tested: `pdocker-vulkan-icd.so` now records `vkCmdCopyBuffer`
+  operations on the command buffer and replays them at `vkQueueSubmit`, which
+  matches Vulkan command-buffer semantics better than immediate `memmove`.
+  This did not yet improve throughput; it clarifies that semantics and
+  transport reuse have to be solved together.
+- Bridge profile: 184 generic SPIR-V samples, mean upload 6.90 ms, mean
+  dispatch 4.03 ms, mean download 0.06 ms, plus 558 logged copy-buffer
+  operations covering about 528 MB in the captured log excerpt.
+- Current blocker: the executor-side resident cache is real but incomplete.
+  The dominant path is copy-buffer staging plus repeated bridge-visible memory
+  movement, not generic-dispatch binding upload alone.
+- Next action: record `vkCmdCopyBuffer` operations in the command buffer and
+  execute them during `vkQueueSubmit` is now complete; next, move repeated
+  large copy sources onto reusable/resident bridge handles and batch command
+  submission so copy-buffer traffic stops crossing the boundary every token.
+
+## 2026-05-05 Pipeline Cache GPU-Only Probe Result
+
+- Scenario: `scripts/android-llama-gpu-compare.sh --gpu-only --gpu-layers 1
+  --gpu-ctx 512 --predict 2 --repeat 1`.
+- CPU baseline: reused from the latest JSON at 0.4246 tokens/s.
+- Result: GPU 0.3989 tokens/s, speedup 0.939x, `target_met=false`.
+- Change tested: the Android Vulkan executor now caches repeated generic
+  SPIR-V shader modules, pipeline layouts, descriptor set layouts, and compute
+  pipelines by shader hash, entry point, specialization data, layout count, and
+  push-constant size.
+- Evidence: the captured executor responses include
+  `pipeline_cache.hit=true`; the large 26,784-byte specialized dispatch dropped
+  to 19.57 ms in the log excerpt.
+- Current blocker: upload/copy movement is still dominant. The same run still
+  records 558 copy-buffer operations covering about 528 MB in the excerpt, and
+  mean upload is 8.23 ms. The next high-impact target is to keep repeated
+  read-only/staging buffers resident across dispatches and reduce per-dispatch
+  bridge traffic.
+
+## 2026-05-05 Resident Cache Probe Result
+
+- Scenario: same short compare flow before command-buffer copy replay.
+- Result: CPU 0.4153 tokens/s, GPU 0.3668 tokens/s, speedup 0.883x,
+  `target_met=false`.
+- Evidence: the APK-side Android Vulkan executor retained the
+  510,504,960-byte model-side generic-dispatch binding for at least one
+  dispatch (`resident_bindings=1`, `hits=1`), but most traffic still arrived
+  through `vkCmdCopyBuffer` transfer-only command buffers.
 
 ## 2026-05-04 Vulkan Bridge Execution Result
 
@@ -506,14 +568,18 @@ default.
   download 4.57 ms.
 - Next action: reduce bridge upload/copy overhead with persistent registered
   buffers, then rerun with larger `n_predict`.
-- Recovery: the script restored CPU mode; `pdocker-llama-cpp` returned to
-  `Up (healthy)` and `/v1/models` returned `model.gguf`.
+- Recovery: this older run restored CPU mode; current compare runs leave the
+  last measured mode running unless `--restore` is explicitly requested.
 - UI note: the `llama.cpp GPU compare` card shown while this script runs is a
   daemon operation/progress card, not a container. The container itself is
-  `pdocker-llama-cpp` and is the only object expected in `docker ps`.
-- Operation cleanup: the compare operation is marked failed on nonzero exit,
-  ADB port forwarding is removed, and CPU mode is restored by default unless
-  the diagnostic run explicitly passes `--no-restore`.
+  `pdocker-llama-cpp` and is the only object expected in `docker ps`. Direct
+  Engine API launches now apply the same pdocker project/compose labels as
+  UI-launched compose services so project cards and `docker ps` reconcile
+  against the same container identity.
+- Operation cleanup: the compare operation is marked failed on nonzero exit and
+  ADB port forwarding is removed. CPU mode is no longer restored by default;
+  pass `--restore` when a post-benchmark CPU fallback server is needed. The
+  next compare run recreates the required mode before measuring.
 
 ## Previous HTTP API Result
 

@@ -179,7 +179,8 @@ Known gaps:
   build and compose workloads.
 - Real listener health is not yet a compatibility gate: service health must
   prove the listener belongs to the current Engine container ID, not merely that
-  a configured port or stale name exists.
+  a configured port or stale name exists, and UI cards must not display healthy
+  from configured ports, compose metadata, or successful background jobs alone.
 - Active port publishing remains unimplemented; requested mappings are visible
   metadata until listener/proxy/rewrite state is recorded and verified.
 - Android storage metrics still need device verification for nonnegative values

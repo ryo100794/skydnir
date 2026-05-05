@@ -33,16 +33,22 @@ time with `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, and
 
 The default Compose project mounts app-owned pdocker paths into the container:
 
-- `/workspace`: editable VS Code workspace for this dev project.
+- `/workspace`: editable VS Code workspace for this dev project. The Android
+  app maps this to app-private fast storage by default so editor state, build
+  caches, and frequent logs do not constantly hit Documents/SD-card storage.
 - `/pdocker/project`: this project directory, including its `Dockerfile`,
   `compose.yaml`, `scripts`, `vscode`, and `continue` folders.
-- `/pdocker/projects`: the app project root, matching
-  `filesDir/pdocker/projects` on Android.
+- `/pdocker/projects`: the app project root, normally backed by the selected
+  Android Documents folder at `pdocker/projects`.
 - `/pdocker/host`: the app pdocker home, matching `filesDir/pdocker` on
   Android.
 - `/pdocker/host/pdockerd.sock`: pdocker Engine socket when pdockerd is running.
-- `/documents`: shared Documents volume, mounted from `./documents` by default.
-  Override with `PDOCKER_DOCUMENTS_HOST` or `PDOCKER_DOCUMENTS_MOUNT`.
+- `/documents`: the selected Android Documents folder. Use this path when a
+  containerized app explicitly needs to import, export, or exchange data on
+  SD/Documents storage. Override with `PDOCKER_DOCUMENTS_HOST` or
+  `PDOCKER_DOCUMENTS_MOUNT`.
+- `/shared`: cross-project shared Documents volume. Point multiple projects at
+  the same folder by setting `PDOCKER_SHARED_DOCUMENTS_HOST`.
 
 Run `pdocker-paths` in the code-server terminal to see which paths are mounted
 and whether an Engine socket is available.

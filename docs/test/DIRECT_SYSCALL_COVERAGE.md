@@ -73,8 +73,8 @@ Current active syscall groups:
   protected `close(rootfs_fd)`.
 - Exec: `execve` and `execveat`, including loader argv rebuild, shebang
   handling, rootfs/PATH resolution, and guest `/proc/self/exe` reporting.
-- Sockets: `connect(AF_UNIX)` path rewrite for guest absolute socket paths.
-  `bind` rewrite remains explicitly planned, not active.
+- Sockets: `bind(AF_UNIX)` and `connect(AF_UNIX)` path rewrite for guest
+  absolute socket paths.
 - Compatibility fallbacks: `set_robust_list`, `rseq`, `clone3`,
   `close_range`, `io_uring_*`, NUMA policy calls, and container-root credential
   identity calls.
@@ -87,8 +87,8 @@ Current active syscall groups:
 
 The manifest defines Android/device cases without running them in the fast
 gate. They cover direct rootfs open/stat/access/getcwd, cwd ERANGE, exec argv
-and rootfs resolution, AF_UNIX connect rewrite, NUMA ENOSYS, credential/pid
-state, PTY exec/wait status, and copy-on-write path operations.
+and rootfs resolution, AF_UNIX bind/connect rewrite, NUMA ENOSYS,
+credential/pid state, PTY exec/wait status, and copy-on-write path operations.
 
 Do not run these from `scripts/verify-fast.sh`; they require an Android device,
 an installed compat/direct runtime, or a locally built libcow.
@@ -103,10 +103,11 @@ python3 scripts/run_direct_syscall_scenarios.py --tier heavy-android --status ru
 
 Android-heavy entries stay marked as planned until the manifest has a concrete
 `adb shell run-as ...` invocation and explicit `"runnable": true`. The AF_UNIX
-socket case still needs host-side socket setup, and the PTY case still needs
-the APK/JNI terminal path, so they remain plans rather than self-contained
-device commands. Use `--list --tier heavy-android --verbose` or
-`--tier heavy-android --json` to inspect the current Android execution plan.
+socket case still needs host-side socket setup to exercise both active
+bind/connect rewrite hooks, and the PTY case still needs the APK/JNI terminal
+path, so they remain plans rather than self-contained device commands. Use
+`--list --tier heavy-android --verbose` or `--tier heavy-android --json` to
+inspect the current Android execution plan.
 
 ## Acceptance
 
@@ -119,6 +120,7 @@ python3 scripts/run_direct_syscall_scenarios.py --lane local
 Before promoting a device scenario from planned to runnable, make sure its
 manifest entry has a concrete `adb shell run-as ...` command, names `ROOTFS`,
 sets the expected direct-runtime trace flag where useful, and documents the
-observable checks. Keep AF_UNIX bind rewrite listed as a known gap until the
-direct executor adds an active `bind` hook; the current socket scenario covers
-`connect(AF_UNIX)` path rewrite only.
+observable checks. Do not re-add AF_UNIX bind rewrite to `known_gaps`; the
+direct executor has active `bind` and `connect` rewrite hooks. The remaining
+socket scenario gap is executable device coverage for a host-side socket setup,
+not hook availability.

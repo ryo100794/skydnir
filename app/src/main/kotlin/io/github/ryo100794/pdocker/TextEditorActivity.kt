@@ -10,7 +10,10 @@ class TextEditorActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_NOSENSOR
         val requested = intent.getStringExtra(EXTRA_PATH).orEmpty()
-        setContentView(CodeEditorView(this, resolveProjectFile(requested), MAX_EDIT_BYTES, ::defaultContent))
+        val file = resolveProjectFile(requested)
+        setContentView(CodeEditorView(this, file, MAX_EDIT_BYTES) { name ->
+            defaultContent(file, name)
+        })
     }
 
     private fun resolveProjectFile(requested: String): File {
@@ -34,12 +37,16 @@ class TextEditorActivity : AppCompatActivity() {
         return canonical
     }
 
-    private fun defaultContent(name: String): String =
+    private fun defaultContent(file: File, name: String): String =
         when (name) {
             "compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml" ->
                 "services:\n  app:\n    image: ubuntu:22.04\n    command: [\"/bin/bash\", \"-lc\", \"echo hello from compose\"]\n"
             "Dockerfile" ->
-                "FROM ubuntu:22.04\nCMD [\"/bin/bash\", \"-lc\", \"echo hello from Dockerfile\"]\n"
+                if (file.parentFile?.name == "default") {
+                    assets.open("default-project/Dockerfile").bufferedReader().use { it.readText() }
+                } else {
+                    "FROM ubuntu:22.04\nCMD [\"/bin/bash\", \"-lc\", \"echo hello from Dockerfile\"]\n"
+                }
             else -> ""
         }
 

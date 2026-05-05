@@ -1,0 +1,92 @@
+[pdocker smoke] device: 10.8.135.134:37669
+Warning: Activity not started, its current task has been brought to the front
+[pdocker smoke] staging test-only Docker CLI/Compose outside APK
+[pdocker smoke] docker version
+Client:
+ Version:           29.4.0
+ API version:       1.43 (downgraded from 1.54)
+ Go version:        go1.26.1
+ Git commit:        9d7ad9f
+ Built:             Tue Apr  7 08:34:25 2026
+ OS/Arch:           linux/arm64
+ Context:           default
+
+Server: pdockerd
+ Engine:
+  Version:          0.1.0
+  API version:      1.43 (minimum version 1.12)
+  Go version:       none
+  Git commit:       pdocker
+  Built:            Fri Apr 17 00:00:00 2026
+  OS/Arch:          linux/arm64
+  Experimental:     false
+[pdocker smoke] direct executor probe
+[pdocker smoke] compat direct process probe
+[pdocker smoke] compat memory pager syscall probe
+[pdocker smoke] compat memory pager poc
+[pdocker smoke] creating tiny project
+[pdocker smoke] docker build
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            BuildKit is currently disabled; enable it by removing the DOCKER_BUILDKIT=0
+            environment-variable.
+
+Sending build context to Docker daemon  3.072kB
+Step: FROM ubuntu:22.04
+  materializing base layers
+  build-profile materialize-base: 1.556s layers=1
+Step: RUN printf 'pdocker-smoke-build\n' > /pdocker-smoke.txt
+  build-profile run-exec: 0.096s rc=0
+  snapshotting layer: RUN
+  build-profile snapshot RUN: prev-index=0.048s walk=0.140s whiteouts=0.007s stage=0.553s tar=0.168s digest=0.680s extract=0.965s relink=0.237s cleanup=0.183s changed=2646 seen=3509 prev=3507 whiteout=0 mode=scan
+  layer sha256:918fc7a57927 (3.0s)
+Step: CMD ["/bin/sh", "-lc", "cat /pdocker-smoke.txt && sleep 300"]
+Successfully built docker.io/local/pdocker-device-smoke:latest
+Successfully tagged local/pdocker-device-smoke:latest
+[pdocker smoke] compose up/down
+ Service app  Building
+Sending build context to Docker daemon     264B
+Step: FROM ubuntu:22.04
+  materializing base layers
+  build-profile materialize-base: 2.448s layers=1
+Step: RUN printf 'pdocker-smoke-build\n' > /pdocker-smoke.txt
+  Using cache sha256:918fc7a57927
+Step: CMD ["/bin/sh", "-lc", "cat /pdocker-smoke.txt && sleep 300"]
+Successfully built docker.io/library/device-smoke-app:latest
+Successfully tagged device-smoke-app
+ Service app  Built
+ Network device-smoke_default  Creating
+ Network device-smoke_default  Created
+ Container device-smoke-app-1  Creating
+ app pdocker records Docker/Compose network metadata, but Android runtime is host-network-only: there is no TUN, bridge namespace, iptables, or embedded DNS yet. Named-network aliases are /etc/hosts compatibility entries and all process traffic still uses the Android app network. 
+ app pdocker treats network mode 'device-smoke_default' as a compose-compatible host-network stub. 
+ Container device-smoke-app-1  Created
+ Container device-smoke-app-1  Starting
+ Container device-smoke-app-1  Started
+pdocker-exec-ok
+pdocker-bracket-ok
+NAME                 IMAGE                     COMMAND                  SERVICE   CREATED       STATUS    PORTS
+device-smoke-app-1   device-smoke-app:latest   "/bin/sh -lc 'cat /p…"   app       9 hours ago   Up        
+[pdocker smoke] docker ps filters
+[pdocker smoke] engine exec -it
+HTTP/1.1 101 UPGRADED
+Content-Type: application/vnd.docker.raw-stream
+Connection: Upgrade
+Upgrade: tcp
+Api-Version: 1.43
+
+/bin/sh: 0: can't access tty; job control turned off
+# pdocker-it-bracket-ok
+pdocker-it-ok
+/
+ Container device-smoke-app-1  Stopping
+ Container device-smoke-app-1  Stopped
+ Container device-smoke-app-1  Removing
+ Container device-smoke-app-1  Removed
+ Network device-smoke_default  Removing
+ Network device-smoke_default  No resource found to remove
+[pdocker smoke] checking UI-visible job state path
+drwx------ 9 u0_a734 u0_a734 3452 2026-05-05 15:39 files/pdocker-runtime
+drwxrwxrwx 2 u0_a734 u0_a734 3452 2026-05-06 08:46 files/pdocker/projects/device-smoke
+[pdocker smoke] passed
+
+verify-heavy (android-full): PASS

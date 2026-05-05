@@ -13,6 +13,8 @@ run it, and where the latest result is stored.
 | Document | Scope |
 |---|---|
 | [`COMPATIBILITY.md`](COMPATIBILITY.md) | Docker API, data exchange, protocol, APK payload, and UI compatibility coverage |
+| [`TEST_DESIGN_STANDARD.md`](TEST_DESIGN_STANDARD.md) | Minimum test design criteria and the automated gate that enforces them |
+| [`SCENARIOS.md`](SCENARIOS.md) | Feature-level scenario ledger and combined test runner |
 | [`compat-audit-latest.md`](compat-audit-latest.md) | Latest recorded compatibility audit result |
 | [`ANDROID_SELFDEBUG.md`](ANDROID_SELFDEBUG.md) | Android Wi-Fi ADB and self-debug workflow |
 | [`DIRECT_SYSCALL_COVERAGE.md`](DIRECT_SYSCALL_COVERAGE.md) | Direct runtime syscall hook inventory and fast/static coverage gate |
@@ -28,6 +30,11 @@ run it, and where the latest result is stored.
 
 - Use [`COMPATIBILITY.md`](COMPATIBILITY.md) as the canonical repeatable
   compatibility procedure and matrix.
+- Use [`SCENARIOS.md`](SCENARIOS.md) and `tests/feature_scenarios.json` as the
+  feature-level test ledger.
+- Use [`TEST_DESIGN_STANDARD.md`](TEST_DESIGN_STANDARD.md) and
+  `tests/test_design_criteria.json` as the automated quality bar for test
+  design, check density, random/stress process, and build-set artifacts.
 - Use [`compat-audit-latest.md`](compat-audit-latest.md) as the latest generated
   compatibility snapshot.
 - Use [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md) as the human-readable

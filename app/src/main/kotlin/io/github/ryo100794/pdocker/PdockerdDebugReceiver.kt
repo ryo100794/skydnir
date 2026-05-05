@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.os.Build
 import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 class PdockerdDebugReceiver : BroadcastReceiver() {
@@ -52,8 +53,7 @@ class PdockerdDebugReceiver : BroadcastReceiver() {
     private fun runDirectExecProbe(context: Context) {
         val runtime = PdockerdRuntime.prepare(context)
         val home = File(context.filesDir, "pdocker")
-        val rootfs = File(home, "containers").walkTopDown()
-            .firstOrNull { it.isDirectory && it.name == "rootfs" }
+        val rootfs = firstRootfs(File(home, "containers"))
         val out = File(home, "direct-exec-probe.txt").apply { parentFile?.mkdirs() }
         if (rootfs == null) {
             out.writeText("rootfs-missing\n")
@@ -76,9 +76,22 @@ class PdockerdDebugReceiver : BroadcastReceiver() {
             .redirectErrorStream(true)
             .apply { environment().putAll(env) }
             .start()
+        val finished = proc.waitFor(10, TimeUnit.SECONDS)
+        if (!finished) proc.destroyForcibly()
         val text = proc.inputStream.bufferedReader().readText()
-        val rc = proc.waitFor()
+        val rc = if (finished) proc.exitValue() else -124
         out.writeText("rc=$rc\nrootfs=${rootfs.absolutePath}\n$text")
+    }
+
+    private fun firstRootfs(root: File): File? {
+        if (!root.exists()) return null
+        var visited = 0
+        return root.walkTopDown()
+            .onEnter { visited < 512 }
+            .firstOrNull {
+                visited += 1
+                it.isDirectory && it.name == "rootfs"
+            }
     }
 
     companion object {

@@ -46,6 +46,11 @@ import uuid
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
 
+
+class BadRequest(Exception):
+    """Client input failed request validation and should return HTTP 400."""
+
+
 # ---- Configuration ----
 
 PDOCKER_HOME = os.environ.get("PDOCKER_HOME", os.path.expanduser("~/.pdocker"))
@@ -55,6 +60,7 @@ CONTAINERS_DIR = os.path.join(PDOCKER_HOME, "containers")
 META_DIR = os.path.join(PDOCKER_HOME, "meta")
 BUILD_CACHE_DIR = os.path.join(META_DIR, "build-cache")
 LOGS_DIR = os.path.join(PDOCKER_HOME, "logs")
+DIAGNOSTICS_DIR = os.path.join(LOGS_DIR, "diagnostics")
 VOLUMES_DIR = os.path.join(PDOCKER_HOME, "volumes")
 NETWORKS_DIR = os.path.join(PDOCKER_HOME, "networks")
 # Staging for crane blob downloads, layer tars, image save/load etc. On
@@ -106,6 +112,30 @@ def _prepare_rootfs_runtime_files(rootfs):
         os.makedirs(apt_conf, exist_ok=True)
         with open(os.path.join(apt_conf, "00pdocker-direct-sandbox"), "w") as f:
             f.write('APT::Sandbox::User "root";\n')
+    if os.environ.get("PDOCKER_BUILD_TOOLS", "1") != "0":
+        build_bin = os.path.join(rootfs, "usr", "local", "pdocker-build-bin")
+        os.makedirs(build_bin, exist_ok=True)
+        glslc = os.path.join(build_bin, "glslc")
+        with open(glslc, "w") as f:
+            f.write("""#!/bin/sh
+profile="${PDOCKER_BUILD_VULKAN_SHADER_PROFILE:-bridge-safe}"
+if [ "$profile" = "bridge-safe" ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      *feature-tests/coopmat.comp)
+        echo "error: extension not supported: GL_KHR_cooperative_matrix" >&2
+        exit 1
+        ;;
+      *feature-tests/coopmat2.comp)
+        echo "error: extension not supported: GL_NV_cooperative_matrix2" >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
+exec /usr/bin/glslc "$@"
+""")
+        os.chmod(glslc, 0o755)
 
 # Optional prefix injected before every crane invocation. This is an explicit
 # developer-supplied diagnostic hook only; the Android app uses the bridge-side
@@ -410,6 +440,78 @@ def _read_json_file(path):
         return {}
 
 
+def _read_env_file(path):
+    env = {}
+    if not path:
+        return env
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] == '"':
+                    value = value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+                env[key.strip()] = value
+    except OSError:
+        pass
+    return env
+
+
+def collect_documents_environment():
+    common_env = _read_env_file(os.path.join(PDOCKER_HOME, "projects", ".pdocker-common.env"))
+    get = lambda key: os.environ.get(key) or common_env.get(key, "")
+    mirror = get("PDOCKER_DOCUMENTS_SAF_MIRROR_HOST")
+    sidecar = get("PDOCKER_DOCUMENTS_SAF_SIDECAR_HOST")
+    contract = _read_json_file(os.path.join(sidecar, "contract.json")) if sidecar else {}
+    access = get("PDOCKER_DOCUMENTS_ACCESS") or get("PDOCKER_DOCUMENTS_MODE")
+    mediator = get("PDOCKER_DOCUMENTS_MEDIATOR")
+    return {
+        "Access": access,
+        "Mediator": mediator,
+        "TreeUri": get("PDOCKER_DOCUMENTS_TREE_URI"),
+        "SelectedHostPath": get("PDOCKER_DOCUMENTS_SELECTED_HOST"),
+        "DirectHostPath": get("PDOCKER_DOCUMENTS_DIRECT_HOST"),
+        "MediatedHostPath": get("PDOCKER_DOCUMENTS_MEDIATED_HOST"),
+        "MirrorRoot": mirror,
+        "SidecarRoot": sidecar,
+        "Mirror": _path_info(mirror),
+        "Sidecar": _path_info(sidecar),
+        "Contract": contract,
+        "PosixBindMount": access == "direct-path-writable",
+        "ConflictPolicy": "phase1-no-conflict-detection",
+        "SyncApi": {
+            "Status": "/system/documents/status",
+            "SyncToTree": "/system/documents/sync-to-tree",
+            "SyncFromTree": "/system/documents/sync-from-tree",
+            "AndroidMediatorRequired": True,
+        },
+    }
+
+
+def record_documents_sync_request(direction):
+    status = collect_documents_environment()
+    sidecar = status.get("SidecarRoot") or ""
+    request = {
+        "Direction": direction,
+        "Status": "accepted",
+        "Message": "Android SAF sync is executed by the app mediator; daemon records the requested operation only.",
+        "CreatedAtMs": int(time.time() * 1000),
+        "Documents": status,
+    }
+    if sidecar:
+        try:
+            os.makedirs(sidecar, exist_ok=True)
+            with open(os.path.join(sidecar, f"requested-{direction}.json"), "w") as f:
+                json.dump(request, f, indent=2)
+                f.write("\n")
+        except OSError as e:
+            request["SidecarWriteError"] = str(e)
+    return request
+
+
 def collect_media_environment():
     """Return the Phase-1 media bridge contract without claiming capture."""
     container_dir = os.environ.get("PDOCKER_MEDIA_CONTAINER_DIR", "/run/pdocker-media")
@@ -514,6 +616,10 @@ def collect_host_environment(api_version):
         "PDOCKER_MEDIA_CAPTURE_READY",
         "PDOCKER_MEDIA_CAMERA_READY",
         "PDOCKER_MEDIA_AUDIO_READY",
+        "PDOCKER_DOCUMENTS_ACCESS",
+        "PDOCKER_DOCUMENTS_MEDIATOR",
+        "PDOCKER_DOCUMENTS_SAF_MIRROR_HOST",
+        "PDOCKER_DOCUMENTS_SAF_SIDECAR_HOST",
         "PDOCKER_PLATFORM",
         "ANDROID_ROOT",
         "ANDROID_DATA",
@@ -569,6 +675,7 @@ def collect_host_environment(api_version):
             "VulkanApiVersion": os.environ.get("PDOCKER_VULKAN_API_VERSION", "1.2.0"),
             "VulkanLoaderIcdJson": os.environ.get("VK_ICD_FILENAMES", ""),
         },
+        "Documents": collect_documents_environment(),
         "Media": collect_media_environment(),
         "Frameworks": {
             "Vulkan": {
@@ -745,8 +852,7 @@ def _direct_runtime_argv(rootfs, argv, inner_env, workdir="/", binds=None, cow_b
     cmd.extend(str(x) for x in (argv or []))
     return cmd
 
-
-for d in [IMAGES_DIR, LAYERS_DIR, CONTAINERS_DIR, META_DIR, LOGS_DIR, VOLUMES_DIR, NETWORKS_DIR]:
+for d in [IMAGES_DIR, LAYERS_DIR, CONTAINERS_DIR, META_DIR, LOGS_DIR, DIAGNOSTICS_DIR, VOLUMES_DIR, NETWORKS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # In-memory state for running processes
@@ -842,6 +948,133 @@ def finish_operation(op_id, status="done", detail=None):
         op["UpdatedAt"] = time.time()
         op["EndedAt"] = op["UpdatedAt"]
         active_operations.pop(op_id, None)
+
+
+def _read_key_value_file(path):
+    data = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                data[key.strip()] = value.strip()
+    except OSError:
+        pass
+    return data
+
+
+def _proc_status(pid):
+    status = _read_key_value_file(f"/proc/{pid}/status")
+    out = {}
+    for key in ("Name", "State", "PPid", "TracerPid", "VmSize", "VmRSS", "RssAnon", "RssFile", "VmSwap", "Threads"):
+        if key in status:
+            out[key] = status[key]
+    for name in ("oom_score", "oom_score_adj", "cmdline"):
+        try:
+            with open(f"/proc/{pid}/{name}", "rb") as f:
+                raw = f.read(4096)
+            if name == "cmdline":
+                out[name] = raw.replace(b"\0", b" ").decode("utf-8", "replace").strip()
+            else:
+                out[name] = raw.decode("utf-8", "replace").strip()
+        except OSError:
+            pass
+    return out
+
+
+def _proc_children(root_pid):
+    children = []
+    root_pid = str(root_pid)
+    try:
+        pids = [name for name in os.listdir("/proc") if name.isdigit()]
+    except OSError:
+        return children
+    ppid_map = {}
+    for pid in pids:
+        status = _read_key_value_file(f"/proc/{pid}/status")
+        ppid_map[pid] = status.get("PPid", "").split()[0] if status.get("PPid") else ""
+    pending = [root_pid]
+    seen = {root_pid}
+    while pending:
+        parent = pending.pop(0)
+        for pid, ppid in ppid_map.items():
+            if pid in seen or ppid != parent:
+                continue
+            seen.add(pid)
+            pending.append(pid)
+            children.append(int(pid))
+    return children
+
+
+def _memory_pressure_snapshot(root_pid=None):
+    meminfo = _read_key_value_file("/proc/meminfo")
+    pressure = {}
+    for kind in ("memory", "cpu", "io"):
+        try:
+            with open(f"/proc/pressure/{kind}") as f:
+                pressure[kind] = f.read().strip()
+        except OSError:
+            pass
+    procs = []
+    if root_pid:
+        for pid in [root_pid] + _proc_children(root_pid):
+            item = _proc_status(pid)
+            if item:
+                item["Pid"] = pid
+                procs.append(item)
+    return {
+        "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "monotonic": time.monotonic(),
+        "meminfo": {k: meminfo.get(k) for k in ("MemTotal", "MemFree", "MemAvailable", "SwapTotal", "SwapFree", "Cached", "Active(anon)", "Inactive(anon)") if k in meminfo},
+        "pressure": pressure,
+        "pdockerd": _proc_status(os.getpid()),
+        "root_pid": root_pid,
+        "processes": procs,
+    }
+
+
+def _write_jsonl(path, obj):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a") as f:
+        f.write(json.dumps(obj, sort_keys=True) + "\n")
+
+
+def record_diagnostic_sample(path, phase, root_pid=None, extra=None):
+    if os.environ.get("PDOCKER_DIAGNOSTICS", "1") == "0":
+        return
+    sample = _memory_pressure_snapshot(root_pid)
+    sample["phase"] = phase
+    if extra:
+        sample["extra"] = extra
+    try:
+        _write_jsonl(path, sample)
+    except OSError as exc:
+        log(f"diagnostic sample write failed: {exc}")
+
+
+def list_diagnostics(limit=20):
+    items = []
+    try:
+        names = os.listdir(DIAGNOSTICS_DIR)
+    except OSError:
+        return items
+    for name in names:
+        if not name.endswith(".jsonl"):
+            continue
+        path = os.path.join(DIAGNOSTICS_DIR, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        items.append({
+            "Name": name,
+            "Path": path,
+            "Size": st.st_size,
+            "ModifiedAt": st.st_mtime,
+        })
+    items.sort(key=lambda item: item["ModifiedAt"], reverse=True)
+    return items[:limit]
 
 
 def prune_stale_operations(now=None):
@@ -2830,7 +3063,28 @@ def build_run_argv(rootfs, argv, env, workdir="/", binds=None, cow_bind=None, mo
     if not cow_bind and os.path.exists(os.path.join(rootfs, ".libcow.so")) \
        and os.environ.get("PDOCKER_NO_COW") != "1":
         inner_env.append("LD_PRELOAD=/.libcow.so")
-    for k, v in (env or {}).items():
+    run_env = dict(env or {})
+    if mode == "build" and os.environ.get("PDOCKER_BUILD_PROFILE", "android-low-memory") != "off":
+        default_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        path = run_env.get("PATH") or default_path
+        build_bin = "/usr/local/pdocker-build-bin"
+        if build_bin not in path.split(":"):
+            run_env["PATH"] = f"{build_bin}:{path}"
+        run_env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", os.environ.get("PDOCKER_BUILD_PARALLEL", "1"))
+        run_env.setdefault("MAKEFLAGS", os.environ.get("PDOCKER_BUILD_MAKEFLAGS", "-j1"))
+        run_env.setdefault("NINJA_STATUS", os.environ.get("PDOCKER_BUILD_NINJA_STATUS", "[%f/%t] "))
+        run_env.setdefault(
+            "PDOCKER_BUILD_VULKAN_SHADER_PROFILE",
+            os.environ.get("PDOCKER_BUILD_VULKAN_SHADER_PROFILE", "bridge-safe"),
+        )
+        run_env.setdefault("PDOCKER_DIRECT_TRACE_MEMORY", os.environ.get("PDOCKER_BUILD_TRACE_MEMORY", "1"))
+        run_env.setdefault("PDOCKER_DIRECT_TRACE_MEMORY_THRESHOLD", os.environ.get("PDOCKER_BUILD_TRACE_MEMORY_THRESHOLD", "64M"))
+        run_env.setdefault("PDOCKER_DIRECT_MEMORY_GUARD", os.environ.get("PDOCKER_BUILD_MEMORY_GUARD", "1"))
+        run_env.setdefault("PDOCKER_DIRECT_MEMORY_GUARD_MIN_REQUEST", os.environ.get("PDOCKER_BUILD_MEMORY_GUARD_MIN_REQUEST", "64M"))
+        run_env.setdefault("PDOCKER_DIRECT_MEMORY_GUARD_MIN_AVAILABLE", os.environ.get("PDOCKER_BUILD_MEMORY_GUARD_MIN_AVAILABLE", "384M"))
+        run_env.setdefault("PDOCKER_DIRECT_MEMORY_GUARD_MIN_SWAP", os.environ.get("PDOCKER_BUILD_MEMORY_GUARD_MIN_SWAP", "128M"))
+        run_env.setdefault("PDOCKER_BUILD_PROFILE", os.environ.get("PDOCKER_BUILD_PROFILE", "android-low-memory"))
+    for k, v in run_env.items():
         inner_env.append(f"{k}={v}")
 
     return RUNTIME_BACKEND.build_argv(
@@ -3772,6 +4026,22 @@ def reconcile_container_state(state):
         return state
     cid = state.get("Id")
     st = state.get("State") or {}
+    if cid and not st.get("Running"):
+        live_pid = _container_live_pid(state)
+        if live_pid > 0:
+            _refresh_container_process_snapshot(cid, [live_pid])
+            state = load_container_state(cid) or state
+            st = state.setdefault("State", {})
+            st["Running"] = True
+            st["Status"] = "running"
+            st["Pid"] = live_pid
+            start_time = _pid_start_time(live_pid)
+            if start_time:
+                st["PidStartTime"] = start_time
+            _refresh_port_mapping_status(state)
+            _start_health_monitor(cid)
+            save_container_state(cid, state)
+            return state
     if not cid or not st.get("Running"):
         if st:
             _normalize_container_exit_state(st)
@@ -3788,6 +4058,7 @@ def reconcile_container_state(state):
         return state
     pid = _container_live_pid(state)
     if pid > 0:
+        _refresh_container_process_snapshot(cid, [pid])
         st["Running"] = True
         st["Status"] = "running"
         start_time = _pid_start_time(pid)
@@ -3970,19 +4241,169 @@ def _pid_start_time(pid):
         return ""
 
 
-def _container_live_pid(state):
+def _process_identity(pid):
     try:
-        pid = int(((state or {}).get("State") or {}).get("Pid") or 0)
+        pid = int(pid)
     except (TypeError, ValueError):
-        return 0
+        return None
     if pid <= 0 or not _pid_alive(pid):
+        return None
+    start_time = _pid_start_time(pid)
+    if not start_time:
+        return None
+    return {"Pid": pid, "StartTime": str(start_time)}
+
+
+def _process_identity_alive(entry):
+    if not isinstance(entry, dict):
+        return False
+    try:
+        pid = int(entry.get("Pid") or 0)
+    except (TypeError, ValueError):
+        return False
+    expected_start = str(entry.get("StartTime") or "")
+    if pid <= 0 or not expected_start or not _pid_alive(pid):
+        return False
+    actual_start = _pid_start_time(pid)
+    return bool(actual_start and actual_start == expected_start)
+
+
+def _container_process_entries(state):
+    st = (state or {}).get("State") or {}
+    entries = []
+    pid = st.get("Pid")
+    start = st.get("PidStartTime")
+    if pid and start:
+        entries.append({"Pid": pid, "StartTime": str(start)})
+    launcher_pid = st.get("PdockerLauncherPid")
+    launcher_start = st.get("PdockerLauncherPidStartTime")
+    if launcher_pid and launcher_start:
+        entries.append({"Pid": launcher_pid, "StartTime": str(launcher_start)})
+    entries.extend(st.get("PdockerKnownPids") or [])
+    seen = set()
+    out = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            key = (int(entry.get("Pid") or 0), str(entry.get("StartTime") or ""))
+        except (TypeError, ValueError):
+            continue
+        if key[0] <= 0 or not key[1] or key in seen:
+            continue
+        seen.add(key)
+        out.append({"Pid": key[0], "StartTime": key[1]})
+    return out
+
+
+def _live_container_process_entries(state):
+    return [entry for entry in _container_process_entries(state)
+            if _process_identity_alive(entry)]
+
+
+def _container_known_pids(state):
+    return [int(entry["Pid"]) for entry in _live_container_process_entries(state)]
+
+
+def _refresh_container_process_snapshot(cid, root_pids=None):
+    """Record live launcher/workload PIDs so reparented services stay visible.
+
+    The direct Android executor can leave a durable workload process behind
+    after the short-lived launcher exits. Docker-visible state must follow the
+    live workload, not only the original Popen PID.
+    """
+    state = load_container_state(cid)
+    if not state:
+        return []
+    st = state.setdefault("State", {})
+    candidates = set()
+    for entry in _live_container_process_entries(state):
+        candidates.add(int(entry["Pid"]))
+    for pid in root_pids or []:
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if pid <= 0:
+            continue
+        candidates.add(pid)
+        candidates.update(_descendant_pids(pid))
+    for pid in list(candidates):
+        candidates.update(_descendant_pids(pid))
+    entries = []
+    seen = set()
+    for pid in sorted(candidates):
+        ident = _process_identity(pid)
+        if not ident:
+            continue
+        key = (ident["Pid"], ident["StartTime"])
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(ident)
+    launcher_pid = st.get("PdockerLauncherPid")
+    live_pids = [entry["Pid"] for entry in entries]
+    preferred = None
+    current_pid = st.get("Pid")
+    for pid in [current_pid] + [p for p in live_pids if p != launcher_pid] + live_pids:
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if pid in live_pids:
+            preferred = pid
+            break
+    if entries:
+        st["PdockerKnownPids"] = entries
+        if preferred:
+            st["Pid"] = preferred
+            start = _pid_start_time(preferred)
+            if start:
+                st["PidStartTime"] = start
+    else:
+        st["PdockerKnownPids"] = []
+    state["State"] = st
+    save_container_state(cid, state)
+    return entries
+
+
+def _start_container_process_tracker(cid, root_pid):
+    def tracker():
+        while True:
+            entries = _refresh_container_process_snapshot(cid, [root_pid])
+            state = load_container_state(cid)
+            if not state:
+                return
+            running = ((state.get("State") or {}).get("Running") is True)
+            if not entries and not running:
+                return
+            if not entries and not _pid_alive(root_pid):
+                return
+            time.sleep(0.5 if _pid_alive(root_pid) else 1.0)
+
+    threading.Thread(
+        target=tracker,
+        daemon=True,
+        name=f"pdocker-procs-{str(cid)[:12]}",
+    ).start()
+
+
+def _container_live_pid(state):
+    entries = _live_container_process_entries(state)
+    if not entries:
         return 0
     st = (state or {}).get("State") or {}
-    expected_start = str(st.get("PidStartTime") or "")
-    actual_start = _pid_start_time(pid)
-    if not expected_start or not actual_start or expected_start != actual_start:
-        return 0
-    return pid
+    launcher_pid = st.get("PdockerLauncherPid")
+    current_pid = st.get("Pid")
+    live = [int(entry["Pid"]) for entry in entries]
+    for pid in [current_pid] + [p for p in live if p != launcher_pid] + live:
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if pid in live:
+            return pid
+    return live[0]
 
 
 def _docker_exit_code(returncode):
@@ -4016,6 +4437,9 @@ def _normalize_container_exit_state(st):
         st["PdockerLastPid"] = pid
         st["Pid"] = 0
     st.pop("PidStartTime", None)
+    if st.get("PdockerKnownPids"):
+        st["PdockerLastKnownPids"] = st.get("PdockerKnownPids")
+    st["PdockerKnownPids"] = []
     try:
         exit_code = int(st.get("ExitCode", 0))
     except (TypeError, ValueError):
@@ -4042,6 +4466,101 @@ def _signal_pid_group(pid, sig):
             return False
         except OSError:
             return False
+
+
+def _process_ppid(pid):
+    try:
+        with open(f"/proc/{int(pid)}/stat", "r", encoding="utf-8", errors="replace") as f:
+            stat_line = f.read()
+    except (OSError, ValueError):
+        return 0
+    rparen = stat_line.rfind(")")
+    if rparen < 0:
+        return 0
+    rest = stat_line[rparen + 2:].split()
+    if len(rest) < 2:
+        return 0
+    try:
+        return int(rest[1])
+    except ValueError:
+        return 0
+
+
+def _descendant_pids(root_pid):
+    try:
+        root_pid = int(root_pid)
+    except (TypeError, ValueError):
+        return []
+    children = {}
+    try:
+        entries = [int(name) for name in os.listdir("/proc") if name.isdigit()]
+    except OSError:
+        return []
+    for pid in entries:
+        ppid = _process_ppid(pid)
+        if ppid:
+            children.setdefault(ppid, []).append(pid)
+    result = []
+    stack = list(children.get(root_pid, []))
+    seen = set()
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        result.append(pid)
+        stack.extend(children.get(pid, []))
+    return result
+
+
+def _signal_pid_tree(pid, sig):
+    """Signal a container leader and any descendants that escaped its pgid."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    signalled = _signal_pid_group(pid, sig)
+    for child in reversed(_descendant_pids(pid)):
+        try:
+            os.kill(child, sig)
+            signalled = True
+        except ProcessLookupError:
+            pass
+        except OSError:
+            pass
+    try:
+        os.kill(pid, sig)
+        signalled = True
+    except ProcessLookupError:
+        pass
+    except OSError:
+        pass
+    return signalled
+
+
+def _pid_tree_alive(pid):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    return _pid_alive(pid) or any(_pid_alive(child) for child in _descendant_pids(pid))
+
+
+def _pid_list_alive(pids):
+    return any(_pid_alive(pid) for pid in pids)
+
+
+def _signal_pid_list(pids, sig):
+    sent = False
+    for pid in reversed([int(p) for p in pids if p]):
+        try:
+            os.kill(pid, sig)
+            sent = True
+        except ProcessLookupError:
+            pass
+        except OSError:
+            pass
+    return sent
 
 
 def _container_matches_filters(summary, filters):
@@ -4249,6 +4768,11 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
     start_time = _pid_start_time(proc.pid)
     if start_time:
         state["State"]["PidStartTime"] = start_time
+        state["State"]["PdockerLauncherPid"] = proc.pid
+        state["State"]["PdockerLauncherPidStartTime"] = start_time
+    state["State"]["PdockerKnownPids"] = [
+        entry for entry in [_process_identity(proc.pid)] if entry
+    ]
     state["State"]["StartedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
     if _container_healthcheck(state):
         state["State"]["Health"] = {
@@ -4259,14 +4783,25 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
     _refresh_port_mapping_status(state)
     save_container_state(cid, state)
     record_event("container", "start", cid, _container_event_attrs(state))
+    _start_container_process_tracker(cid, proc.pid)
     _start_health_monitor(cid)
 
     def watcher():
         rc = proc.wait()
         s = load_container_state(cid)
         if s:
+            _refresh_container_process_snapshot(cid, [proc.pid])
+            s = load_container_state(cid) or s
             current_pid = _container_live_pid(s)
-            if current_pid and current_pid != proc.pid:
+            if current_pid:
+                s["State"]["Running"] = True
+                s["State"]["Status"] = "running"
+                s["State"]["Pid"] = current_pid
+                start_time = _pid_start_time(current_pid)
+                if start_time:
+                    s["State"]["PidStartTime"] = start_time
+                _refresh_port_mapping_status(s)
+                save_container_state(cid, s)
                 with running_lock:
                     if running_containers.get(cid) is proc:
                         running_containers.pop(cid, None)
@@ -4299,32 +4834,56 @@ def stop_container(cid, timeout=10):
     with running_lock:
         proc = running_containers.get(cid)
     state = load_container_state(cid)
+    if state:
+        _refresh_container_process_snapshot(
+            cid,
+            [((state.get("State") or {}).get("Pid") or 0)]
+        )
+        state = load_container_state(cid) or state
     pid = int(((state or {}).get("State") or {}).get("Pid") or 0)
+    saved_pids = _container_known_pids(state)
     stopped = False
     if proc and proc.poll() is None:
+        known_pids = sorted(set([proc.pid] + saved_pids + _descendant_pids(proc.pid)))
         try:
-            _signal_pid_group(proc.pid, signal.SIGTERM)
+            _signal_pid_tree(proc.pid, signal.SIGTERM)
+            _signal_pid_list(known_pids, signal.SIGTERM)
             try:
                 proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
-                _signal_pid_group(proc.pid, signal.SIGKILL)
+                _signal_pid_tree(proc.pid, signal.SIGKILL)
+                _signal_pid_list(known_pids, signal.SIGKILL)
                 proc.wait()
                 if state:
                     record_event("container", "kill", cid,
                                  _container_event_attrs(state))
+            if _pid_tree_alive(proc.pid) or _pid_list_alive(known_pids):
+                _signal_pid_tree(proc.pid, signal.SIGKILL)
+                _signal_pid_list(known_pids, signal.SIGKILL)
             stopped = True
             if state:
                 record_event("container", "stop", cid,
                              _container_event_attrs(state))
         except Exception as e:
             log(f"stop {cid} error: {e}")
-    elif pid > 0 and _pid_alive(pid):
-        _signal_pid_group(pid, signal.SIGTERM)
+    elif (pid > 0 and _pid_alive(pid)) or _pid_list_alive(saved_pids):
+        known_pids = sorted(set(([pid] if pid > 0 else []) + saved_pids +
+                                _descendant_pids(pid)))
+        for known in list(known_pids):
+            known_pids.extend(_descendant_pids(known))
+        known_pids = sorted(set(known_pids))
+        if pid > 0:
+            _signal_pid_tree(pid, signal.SIGTERM)
+        _signal_pid_list(known_pids, signal.SIGTERM)
         deadline = time.time() + timeout
-        while time.time() < deadline and _pid_alive(pid):
+        while time.time() < deadline and (
+            (pid > 0 and _pid_tree_alive(pid)) or _pid_list_alive(known_pids)
+        ):
             time.sleep(0.05)
-        if _pid_alive(pid):
-            _signal_pid_group(pid, signal.SIGKILL)
+        if (pid > 0 and _pid_tree_alive(pid)) or _pid_list_alive(known_pids):
+            if pid > 0:
+                _signal_pid_tree(pid, signal.SIGKILL)
+            _signal_pid_list(known_pids, signal.SIGKILL)
             if state:
                 record_event("container", "kill", cid,
                              _container_event_attrs(state))
@@ -4335,7 +4894,11 @@ def stop_container(cid, timeout=10):
     if state:
         state["State"]["Running"] = False
         state["State"]["Status"] = "exited"
+        if state["State"].get("PdockerKnownPids"):
+            state["State"]["PdockerLastKnownPids"] = state["State"].get("PdockerKnownPids")
+        state["State"]["PdockerKnownPids"] = []
         state["State"]["Pid"] = 0
+        state["State"].pop("PidStartTime", None)
         state["State"]["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
         if stopped and not state["State"].get("ExitCode"):
             state["State"]["ExitCode"] = 143
@@ -4348,7 +4911,9 @@ def remove_container(cid, force=False):
     state = load_container_state(cid)
     if not state:
         return False
-    if state.get("State", {}).get("Running"):
+    state = reconcile_container_state(state)
+    live_pids = _container_known_pids(state)
+    if state.get("State", {}).get("Running") or live_pids:
         if not force:
             return False
         stop_container(cid)
@@ -4374,7 +4939,35 @@ def remove_container(cid, force=False):
     return True
 
 
-def prune_build_artifacts():
+def _path_referenced_by_process(path):
+    real_path = os.path.realpath(path)
+    proc_dir = "/proc"
+    try:
+        pids = os.listdir(proc_dir)
+    except OSError:
+        return False
+    for pid in pids:
+        if not pid.isdigit():
+            continue
+        base = os.path.join(proc_dir, pid)
+        try:
+            with open(os.path.join(base, "cmdline"), "rb") as f:
+                cmdline = f.read().replace(b"\x00", b" ")
+            if real_path.encode() in cmdline or path.encode() in cmdline:
+                return True
+        except OSError:
+            pass
+        for link_name in ("cwd", "root"):
+            try:
+                target = os.path.realpath(os.readlink(os.path.join(base, link_name)))
+            except OSError:
+                continue
+            if target == real_path or target.startswith(real_path + os.sep):
+                return True
+    return False
+
+
+def prune_build_artifacts(min_age_seconds=0, skip_active=True):
     """Remove failed/interrupted Dockerfile build rootfs directories.
 
     Build containers are internal implementation detail (`build_*` under the
@@ -4390,6 +4983,13 @@ def prune_build_artifacts():
             if not os.path.isdir(path):
                 continue
             try:
+                if min_age_seconds > 0:
+                    age = time.time() - os.path.getmtime(path)
+                    if age < min_age_seconds:
+                        continue
+                if skip_active and _path_referenced_by_process(path):
+                    log(f"build prune skipped active {name}")
+                    continue
                 shutil.rmtree(path)
                 removed.append(name)
             except OSError as exc:
@@ -4643,6 +5243,15 @@ def prune_unreferenced_layers(min_age_seconds=60):
         except OSError as exc:
             log(f"layer prune {name} error: {exc}")
     return {"Deleted": removed, "SpaceReclaimed": reclaimed}
+
+
+def build_child_preexec():
+    os.setsid()
+    try:
+        with open("/proc/self/oom_score_adj", "w") as f:
+            f.write(os.environ.get("PDOCKER_BUILD_OOM_SCORE_ADJ", "700"))
+    except OSError:
+        pass
 
 
 def spawn_in_container(cid, cmd, env=None, workdir=None, tty=False,
@@ -4907,9 +5516,19 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             return None
 
         def pump():
+            import select
             try:
                 while proc.poll() is None:
-                    chunk = self.rfile.read(4096)
+                    try:
+                        ready, _, _ = select.select([self.connection], [], [], 0.25)
+                    except (OSError, ValueError):
+                        break
+                    if not ready:
+                        continue
+                    try:
+                        chunk = self.connection.recv(4096)
+                    except socket.timeout:
+                        continue
                     if not chunk:
                         break
                     if getattr(proc, "_pdocker_pipe_tty_fallback", False):
@@ -4979,7 +5598,13 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         b = self._read_body()
         if not b:
             return {}
-        return json.loads(b)
+        try:
+            data = json.loads(b)
+        except json.JSONDecodeError as exc:
+            raise BadRequest(f"invalid JSON request body: {exc.msg}") from exc
+        if not isinstance(data, dict):
+            raise BadRequest("JSON request body must be an object")
+        return data
 
     def _parse_path(self):
         parsed = urllib.parse.urlsplit(self.path)
@@ -5002,6 +5627,8 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         try:
             path, query = self._parse_path()
             self._route("GET", path, query)
+        except BadRequest as e:
+            self._send_json(400, {"message": str(e)})
         except Exception as e:
             log(f"GET error: {e}")
             self._safe_500(e)
@@ -5010,6 +5637,8 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         try:
             path, query = self._parse_path()
             self._route("POST", path, query)
+        except BadRequest as e:
+            self._send_json(400, {"message": str(e)})
         except Exception as e:
             log(f"POST error: {e}")
             log(f"POST traceback:\n{traceback.format_exc()}")
@@ -5019,6 +5648,8 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         try:
             path, query = self._parse_path()
             self._route("DELETE", path, query)
+        except BadRequest as e:
+            self._send_json(400, {"message": str(e)})
         except Exception as e:
             log(f"DELETE error: {e}")
             self._safe_500(e)
@@ -5027,6 +5658,8 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         try:
             path, query = self._parse_path()
             self._route("PUT", path, query)
+        except BadRequest as e:
+            self._send_json(400, {"message": str(e)})
         except Exception as e:
             log(f"PUT error: {e}")
             self._safe_500(e)
@@ -5158,6 +5791,14 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, collect_storage_summary())
             return
 
+        if path == "/system/diagnostics" and method == "GET":
+            try:
+                limit = int(query.get("limit", ["20"])[0])
+            except (TypeError, ValueError):
+                limit = 20
+            self._send_json(200, list_diagnostics(limit=max(1, min(limit, 100))))
+            return
+
         if path == "/system/operations" and method == "POST":
             payload = self._read_json()
             op_id = payload.get("Id") or payload.get("id") or ""
@@ -5177,6 +5818,18 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
 
         if path == "/system/host" and method == "GET":
             self._send_json(200, collect_host_environment(self.API_VERSION))
+            return
+
+        if path == "/system/documents/status" and method == "GET":
+            self._send_json(200, collect_documents_environment())
+            return
+
+        if path == "/system/documents/sync-to-tree" and method == "POST":
+            self._send_json(202, record_documents_sync_request("sync-to-tree"))
+            return
+
+        if path == "/system/documents/sync-from-tree" and method == "POST":
+            self._send_json(202, record_documents_sync_request("sync-from-tree"))
             return
 
         if path == "/system/media" and method == "GET":
@@ -6234,7 +6887,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                         break
                 self.wfile.write(json.dumps({"stream": text}).encode() + b"\r\n")
                 self.wfile.flush()
-            except BrokenPipeError:
+            except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
 
         def emit_error(msg):
@@ -6242,7 +6895,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 payload = {"errorDetail": {"message": msg}, "error": msg}
                 self.wfile.write(json.dumps(payload).encode() + b"\r\n")
                 self.wfile.flush()
-            except BrokenPipeError:
+            except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
 
         try:
@@ -6260,6 +6913,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
 
                 result = execute_dockerfile_build(
                     dockerfile_path, ctx_dir, tag, buildargs, emit,
+                    operation_id=op_id,
                 )
                 if result:
                     record_event("image", "build", image_id(result),
@@ -6278,7 +6932,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             log(traceback.format_exc())
 
 
-def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit):
+def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit, operation_id=None):
     """Execute a Dockerfile. Returns the final image name on success."""
     with open(dockerfile_path) as f:
         lines = []
@@ -6298,6 +6952,12 @@ def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit)
 
     build_id = uuid.uuid4().hex
     build_dir = os.path.join(CONTAINERS_DIR, "build_" + build_id)
+    diagnostic_path = os.path.join(DIAGNOSTICS_DIR, f"build-{build_id}.jsonl")
+    record_diagnostic_sample(diagnostic_path, "build-start", extra={
+        "operation_id": operation_id,
+        "tag": tag or "",
+        "dockerfile": dockerfile_path,
+    })
     rootfs = None
     workdir = "/"
     env = {}
@@ -6339,6 +6999,7 @@ def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit)
         "etc/resolv.conf",
         "etc/hosts",
         "etc/apt/apt.conf.d/00pdocker-direct-sandbox",
+        "usr/local/pdocker-build-bin/glslc",
     )
 
     def _rootfs_size():
@@ -6501,6 +7162,12 @@ def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit)
             s = s.replace("${" + k + "}", str(v)).replace("$" + k, str(v))
         return s
 
+    def split_instruction(line):
+        parts = line.split(None, 1)
+        if len(parts) < 2:
+            return "", ""
+        return parts[0].upper(), parts[1]
+
     def parse_from_base(from_args):
         tokens = shlex.split(from_args)
         while tokens and tokens[0].startswith("--"):
@@ -6580,12 +7247,10 @@ def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit)
                 return False
 
         for original in lines:
-            line = cache_expand(original)
-            parts = line.split(None, 1)
-            if len(parts) < 2:
+            instr, raw_args = split_instruction(original)
+            if not instr:
                 continue
-            instr = parts[0].upper()
-            args = parts[1]
+            args = raw_args if instr == "ARG" else cache_expand(raw_args)
             if instr == "FROM":
                 base = parse_from_base(args)
                 if not base:
@@ -6670,12 +7335,10 @@ def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit)
         return reusable_tag
 
     for line in lines:
-        line = expand(line)
-        parts = line.split(None, 1)
-        if len(parts) < 2:
+        instr, raw_args = split_instruction(line)
+        if not instr:
             continue
-        instr = parts[0].upper()
-        args = parts[1]
+        args = raw_args if instr == "ARG" else expand(raw_args)
 
         if instr == "FROM":
             base = parse_from_base(args)
@@ -6738,6 +7401,7 @@ def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit)
         elif instr == "RUN":
             emit(f"Step: RUN {args}")
             full_env = dict(env)
+            full_env.update({str(k): str(v) for k, v in args_dict.items()})
             cache_key = build_cache_key(
                 "RUN", args, diff_ids,
                 build_state_for_cache({"run_env": dict(sorted(full_env.items()))}),
@@ -6785,12 +7449,19 @@ def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit)
                 emit("RUN skipped because the Android execution backend is unavailable")
                 return fail_build()
             run_start = time.perf_counter()
+            run_start_mono = time.monotonic()
             proc = subprocess.Popen(
                 build_run_argv(rootfs, build_run_command(args),
                                full_env, workdir=workdir, mode="build"),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                preexec_fn=build_child_preexec,
             )
+            record_diagnostic_sample(diagnostic_path, "run-start", root_pid=proc.pid, extra={
+                "operation_id": operation_id,
+                "instruction": args,
+            })
+            next_diagnostic_sample = time.monotonic() + float(os.environ.get("PDOCKER_DIAGNOSTIC_SAMPLE_SECONDS", "2.0"))
             captured = bytearray()
             if proc.stdout:
                 read_chunk = getattr(proc.stdout, "read1", proc.stdout.read)
@@ -6798,11 +7469,25 @@ def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit)
                     chunk = read_chunk(8192)
                     if not chunk:
                         break
+                    now = time.monotonic()
+                    if now >= next_diagnostic_sample:
+                        record_diagnostic_sample(diagnostic_path, "run-sample", root_pid=proc.pid, extra={
+                            "operation_id": operation_id,
+                            "instruction": args,
+                            "elapsed": now - run_start_mono,
+                        })
+                        next_diagnostic_sample = now + float(os.environ.get("PDOCKER_DIAGNOSTIC_SAMPLE_SECONDS", "2.0"))
                     captured.extend(chunk)
                     if len(captured) > 512 * 1024:
                         del captured[:len(captured) - 512 * 1024]
                     emit(chunk.decode(errors="replace"), newline=False)
             proc.wait()
+            record_diagnostic_sample(diagnostic_path, "run-exit", root_pid=proc.pid, extra={
+                "operation_id": operation_id,
+                "instruction": args,
+                "elapsed": time.perf_counter() - run_start,
+                "returncode": proc.returncode,
+            })
             emit(f"  build-profile run-exec: {time.perf_counter() - run_start:.3f}s rc={proc.returncode}")
             if proc.returncode != 0:
                 fault = runner_fault_message(bytes(captured))
@@ -7104,6 +7789,10 @@ def main():
         log(f"Listening on {addr}")
     log(f"PDOCKER_HOME: {PDOCKER_HOME}")
     log("Use DOCKER_HOST=" + servers[0][0])
+    if os.environ.get("PDOCKER_AUTO_PRUNE_BUILD_ARTIFACTS", "1") == "1":
+        removed = prune_build_artifacts(min_age_seconds=30, skip_active=True)
+        if removed:
+            log("auto-pruned stale build artifacts", removed=",".join(removed))
 
     threads = []
     for _, srv in servers:

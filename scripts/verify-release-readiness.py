@@ -111,6 +111,7 @@ def check_docs() -> None:
         "Issue #9",
         "release candidate",
         "host-only",
+        "Storage metrics release evidence",
     )
     for token in required_fdroid_tokens:
         if token not in fdroid:

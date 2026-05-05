@@ -19,9 +19,20 @@ It includes:
 - `scripts/pdocker-gpu-profile.sh`, which writes a local GPU profile and
   JSON diagnostics based on the runtime environment.
 - `models/` and `workspace/` bind directories for GGUF models and experiments.
-- A shared Documents bind mount at `/documents` by default. Override the host
-  path or container path with `PDOCKER_DOCUMENTS_HOST` and
-  `PDOCKER_DOCUMENTS_MOUNT`.
+  Model downloads happen at container startup, not during image build. With the
+  default Android configuration, `/models` is backed by app-private pdocker
+  storage through `PDOCKER_MODEL_HOST` so large GGUF files do not become image
+  layers and do not constantly write to SD-card/Documents storage. Copy
+  selected model artifacts to `/documents` only when you explicitly want to
+  exchange them.
+- The selected Android Documents folder is mounted at `/documents` by default.
+  Use it only when llama.cpp or helper scripts explicitly need to import,
+  export, or exchange files on SD/Documents storage. Project definitions live
+  under `pdocker/projects` in the selected Documents root.
+- A cross-project shared bind mount at `/shared`. Override
+  `PDOCKER_DOCUMENTS_HOST`, `PDOCKER_DOCUMENTS_MOUNT`,
+  `PDOCKER_SHARED_DOCUMENTS_HOST`, or `PDOCKER_SHARED_DOCUMENTS_MOUNT` when two
+  projects intentionally need the same folder or mount path.
 
 Usage from pdocker:
 
@@ -48,11 +59,20 @@ has a visible running state.
 
 The entrypoint adds `--jinja` by default because the bundled Qwen3 GGUF uses a
 chat template. Override `LLAMA_EXTRA_ARGS` if you need different llama-server
-options.
+options. The template defaults `PDOCKER_GPU_MODE` to `vulkan-raw` and
+`LLAMA_ARG_N_GPU_LAYERS` to `2` so the first normal Compose run exercises the
+pdocker Vulkan ICD beyond output-layer-only offload. Raise
+`LLAMA_ARG_N_GPU_LAYERS` for deeper offload while tuning the bridge.
 
-The image build defaults llama.cpp CMake parallelism to two jobs to avoid
-swap-heavy Android builds. Set `LLAMA_CPP_BUILD_JOBS` if you need to cap it
-further or raise it on a faster device.
+The image build pins `LLAMA_CPP_REF` to `b9030` and records the resolved commit
+inside `/opt/llama.cpp/.pdocker-llama-cpp-commit`. It defaults CMake to
+`MinSizeRel` and one build job. This is slower than a desktop-style `Release`
+build, but avoids Android LMK/OOM failures while the direct executor and Vulkan
+bridge are still being tuned. Raise `LLAMA_CPP_BUILD_JOBS` or set
+`LLAMA_CPP_BUILD_TYPE=Release` only when the device has enough free memory and
+swap for shader or Vulkan backend compilation. pdocker may apply an Android
+build-executor profile outside the Dockerfile to keep upstream Dockerfiles
+unchanged while reducing peak memory pressure on device.
 
 The GPU profile action writes:
 

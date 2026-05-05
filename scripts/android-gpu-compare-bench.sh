@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
 PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+CLASS_PREFIX="${PDOCKER_CLASS_PREFIX:-io.github.ryo100794.pdocker}"
 RUNS="${1:-${PDOCKER_GPU_COMPARE_RUNS:-10}}"
 WARMUP_DISCARD="${PDOCKER_GPU_COMPARE_WARMUP_DISCARD:-3}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -90,7 +91,7 @@ install_container_helpers() {
 }
 
 mkdir -p "$(dirname "$OUT_JSON")"
-"$ADB" shell monkey -p "$PKG" 1 >/dev/null
+"$ADB" shell am start -n "$PKG/$CLASS_PREFIX.MainActivity" >/dev/null
 wait_for_runtime
 stage_test_cli
 

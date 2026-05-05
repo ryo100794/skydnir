@@ -26,13 +26,17 @@ Therefore the product cannot rely on adding system swap, changing zram size, or
 changing VM policy. Any swap-like behavior must be scoped to processes launched
 and mediated by pdocker.
 
-The SDK28 compat APK now carries a repeatable native probe:
-`pdocker-direct --pdocker-memory-pager-probe`. On 2026-05-05 it confirmed that
+The SDK28 compat APK now carries repeatable native checks:
+`pdocker-direct --pdocker-memory-pager-probe` and
+`pdocker-direct --pdocker-memory-pager-poc`. On 2026-05-05 they confirmed that
 the ptrace fallback primitives are visible from the APK process:
 `mmap(PROT_NONE)`, `mprotect`, `madvise`, child ptrace stop,
 `process_vm_writev`, intentional `SIGSEGV` stop, and `PTRACE_GETSIGINFO`.
 `userfaultfd` remains blocked (`EPERM` from the syscall and `EACCES` for
 `/dev/userfaultfd`), so it is a future optional path rather than the default.
+The PoC also proves the core recovery loop: fault a reserved `PROT_NONE` page,
+stop on `SIGSEGV`, make that same tracee page writable, write page bytes, restore
+the fault registers, and resume the original instruction successfully.
 
 ## Important Boundary
 
@@ -91,6 +95,11 @@ Container opt-in:
 
 - Compose label or env: `PDOCKER_MEMORY_PAGER=managed`.
 - Optional limit: `PDOCKER_MEMORY_PAGER_MAX_BYTES`.
+- Docker-compatible Compose memory keys such as `mem_limit`,
+  `memswap_limit`, and `deploy.resources.limits.memory` define the requested
+  container budget in Engine metadata. They do not enable the pdocker pager by
+  themselves; the pager remains an explicit pdocker opt-in so ordinary Compose
+  files keep Docker-compatible meaning.
 - Optional backing directory under app-private storage:
   `files/pdocker/memory/<container-id>/`.
 
@@ -202,6 +211,54 @@ The memory pager is useful for:
 
 It is not expected to make token generation faster by itself.
 
+Dockerfile build pressure is handled separately. General build tools such as
+`cc1plus` allocate ordinary process heap and anonymous mappings that pdocker
+does not own ahead of time, so the managed pager cannot safely reclaim those
+regions transparently. Build-time memory control must stay outside the
+managed-region pager contract unless a process explicitly opts in.
+
+## GPU Bridge Virtual Memory Contract
+
+llama.cpp reads GGUF model files with mmap by default. The pdocker llama
+template does not pass `--no-mmap`, and the recorded `llama-bench` artifacts show
+`use_mmap: true`. That model-file mapping should stay owned by llama.cpp and the
+kernel. pdocker must not copy or page the whole 5 GB model just to make the GPU
+bridge work.
+
+The GPU-specific virtual memory work is a separate contract inside
+`pdocker-vulkan-icd.so` and the APK-side GPU executor:
+
+1. Keep model files file-backed and mmap-friendly.
+2. Treat Vulkan `VkDeviceMemory` allocations in the ICD as managed bridge
+   memory, not as anonymous container heap.
+3. For large host-visible bridge allocations, reserve the memfd mapping as a
+   guarded virtual range and install an in-process `SIGSEGV` handler owned by the
+   ICD. This is cheaper and safer than ptracing every bridge memory fault because
+   the ICD is already loaded in the faulting process.
+4. On the first page access, `mprotect` only that page or span and mark it
+   resident. On first write, mark the page dirty.
+5. Extend the dispatch protocol after `VULKAN_DISPATCH_V2` with dirty-span
+   metadata so the executor can update cached Vulkan buffers from only the pages
+   that changed.
+6. Pin all pages referenced by an in-flight GPU command until the executor
+   returns. Eviction is allowed only after the command fence is complete.
+
+This contract is not a general swap feature. It is a bridge transport
+optimization and OOM guard for large Vulkan/OpenCL staging buffers. It should be
+enabled independently from `PDOCKER_MEMORY_PAGER=managed`, for example with
+`PDOCKER_GPU_VIRTUAL_MEMORY=guarded`, so ordinary container memory and GPU
+transport memory can be tested and disabled separately.
+
+The current llama GPU evidence makes this the next useful slice:
+
+- The 8B GGUF is mmap-backed on the CPU side.
+- The offloaded Vulkan model buffer is about 486.87 MiB.
+- `--n-gpu-layers 1` serves, but only the output layer is offloaded and the GPU
+  path is slower than CPU.
+- To reach useful speedup, `--n-gpu-layers 2+` must offload repeating
+  transformer layers without whole-buffer bridge copies or duplicate
+  OOM-sized allocations.
+
 ## Implementation Plan
 
 Do not implement the managed pager path until the SDK28 compat probe gate
@@ -250,6 +307,48 @@ The probe artifact should record target SDK flavor, device SDK, SELinux mode,
 errno values, and whether the process ran under `run-as` or normal APK launch.
 The compat flavor currently uses target SDK 28, but the device may still run a
 new Android release, so both values must be captured.
+
+The first PoC now uses generic aarch64 syscall injection instead of a
+cooperative trampoline: it temporarily patches the stopped tracee with
+`svc; brk`, runs `mprotect` in the tracee, restores the original instructions
+and fault registers, and resumes the faulting instruction. This removes the
+main tracee-control feasibility wall; the remaining work is turning the PoC
+into a managed-region implementation.
+
+## Remaining Production Risks
+
+The PoC removes the biggest feasibility doubt, but these issues can still block
+or narrow the feature:
+
+- General tracee control: generic aarch64 syscall injection works in the PoC.
+  Production code still needs guardrails around instruction patching, BTI/PAC
+  compatibility, signal races, and fallback behavior when the stopped PC is not
+  safe to patch.
+- Threads: another thread may touch or mutate the same managed page while the
+  tracer is resolving a fault. The first production mode should be single-thread
+  or stop-the-process-group until locking is designed.
+- Signal semantics: real programs may install SIGSEGV handlers. pdocker must
+  only suppress faults for registered managed ranges and must deliver all other
+  SIGSEGV events unchanged.
+- Allocator coverage: wrapping only large anonymous `mmap` calls will miss
+  malloc arenas and custom allocators. Broader hooks increase risk and should be
+  measured before enabling them.
+- Page size and tagged pointers: devices may use 4 KiB or 16 KiB pages, and
+  arm64 tagged pointers/MTE can affect address comparison. All fault addresses
+  must be untagged and page-aligned before metadata lookup.
+- Performance: each missing page currently costs ptrace stops, permission
+  changes, backing-file I/O, and process memory writes. This is an OOM survival
+  path first, not a speed path.
+- Storage pressure: backing files live in app-private storage. The pager must
+  expose used bytes, fail cleanly when storage is low, and delete backing files
+  when containers are removed.
+- Android lifecycle: the APK may be killed or restarted while backing files and
+  tracees exist. Recovery needs a manifest, cleanup, and clear UI diagnostics.
+- GPU/shared memory: Vulkan/OpenCL buffers and command rings must stay outside
+  the pager until they have a dedicated ownership contract.
+- Device policy variation: SOG15 SDK36 target-SDK28 compat works for the ptrace
+  path, but other Android builds may differ. The probe must remain a startup
+  gate before enabling the feature.
 
 ## Open Questions
 

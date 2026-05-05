@@ -1,0 +1,38 @@
+ok: test design standard documents the required quality gates
+ok: feature design has 48 scenarios, 22 fast runnable, 15 device
+ok: feature scenarios represent 27 required design axes
+ok: advanced method scenarios track 10 required methods
+ok: blackbox design has 10 positive/negative requirements
+ok: abnormal event design has 10 structured cases
+ok: refactor-resilience design has 6 external-contract cases
+ok: input validation design has 11 API/file/range cases
+ok: stress design has 6 random/monkey/stress/variance scenarios
+ok: fast and scenario runners enforce the test design gates
+verify-test-design-criteria: FAIL: test design criteria minimums must be a non-empty object
+ok: negative self-test fails as expected: empty minimums
+verify-test-design-criteria: FAIL: test design criteria minimums missing key(s): literal_check_count_to_code_token_multiplier
+ok: negative self-test fails as expected: missing literal token minimum
+verify-test-design-criteria: FAIL: test design criteria required_fast_commands must be a non-empty list
+ok: negative self-test fails as expected: empty required fast commands
+verify-test-design-criteria: FAIL: required design axes are not represented in feature scenarios: definitely-missing-axis
+ok: negative self-test fails as expected: missing required design axis
+verify-test-design-criteria: FAIL: verify-fast.sh must include python3 scripts/definitely-missing-test-gate.py
+ok: negative self-test fails as expected: missing fast runner wiring
+verify-test-design-criteria: FAIL: verify-fast.sh must include python3 scripts/verify-test-design-criteria.py
+ok: negative self-test fails as expected: commented-out runner command
+verify-test-design-criteria: FAIL: mutation.testing.planned planned-gap must include evidence_target
+ok: negative self-test fails as expected: advanced planned-gap without evidence target
+verify-test-design-criteria: FAIL: BB-ENGINE-001 must include a negative failure oracle
+ok: negative self-test fails as expected: blackbox requirement without negative oracle
+verify-test-design-criteria: FAIL: input validation ledger missing categories: value-ranges
+ok: negative self-test fails as expected: input validation missing value ranges
+verify-test-design-criteria: FAIL: abnormal.input.malformed-json abnormal event case must include failure_oracle
+ok: negative self-test fails as expected: abnormal event without failure oracle
+verify-test-design-criteria: FAIL: refactor.engine-api.golden-shape refactor-resilience case must include observable_contract
+ok: negative self-test fails as expected: refactor-resilience without observable contract
+verify-test-design-criteria: FAIL: monkey.ui.seeded-device must record a seed
+ok: negative self-test fails as expected: monkey scenario without seed
+ok: test design check density is 43154/48 = 899.04x by feature-step proxy
+ok: test design literal token ratio is 43154/257036 = 0.168x (semantic + C0 + C1 + C2 check items)
+ok: wrote test design artifact: docs/test/test-design-criteria-latest.json
+verify-test-design-criteria: FAIL: literal_check_count_to_code_token_multiplier below minimum: 0.16789087909864767 < 2.0

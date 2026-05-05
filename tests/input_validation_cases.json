@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "categories": [
+    {
+      "id": "api-arguments",
+      "description": "Engine API requests must reject malformed request bodies and invalid required arguments without surfacing a server error.",
+      "cases": [
+        {
+          "id": "api.malformed-json",
+          "surface": "engine-api",
+          "input": "POST /networks/create with a truncated JSON object",
+          "expected": "HTTP 400 with an invalid JSON message"
+        },
+        {
+          "id": "api.non-object-json",
+          "surface": "engine-api",
+          "input": "POST /networks/create with a JSON array body",
+          "expected": "HTTP 400 because JSON request bodies must be objects"
+        },
+        {
+          "id": "api.missing-required-query",
+          "surface": "engine-api",
+          "input": "GET /images/get without names query arguments",
+          "expected": "HTTP 400 instead of exporting an empty image set"
+        },
+        {
+          "id": "api.invalid-range-query",
+          "surface": "engine-api",
+          "input": "GET /system/diagnostics?limit=not-int",
+          "expected": "HTTP 200 with a clamped default limit, not a traceback"
+        }
+      ]
+    },
+    {
+      "id": "input-file-grammar",
+      "description": "Bundled input files must stay on documented syntax and reject pdocker-only or malformed grammar.",
+      "cases": [
+        {
+          "id": "dockerfile.unknown-instruction",
+          "surface": "dockerfile",
+          "input": "A Dockerfile containing WAT echo nope",
+          "expected": "The standard Dockerfile verifier rejects WAT"
+        },
+        {
+          "id": "dockerfile.pdocker-instruction",
+          "surface": "dockerfile",
+          "input": "A Dockerfile containing PDOCKER_RUN echo nope",
+          "expected": "The standard Dockerfile verifier rejects pdocker-specific syntax"
+        },
+        {
+          "id": "scenario-ledger.required-areas",
+          "surface": "test-ledger",
+          "input": "A feature scenario ledger missing a required area",
+          "expected": "The scenario ledger verifier fails before tests are considered complete"
+        }
+      ]
+    },
+    {
+      "id": "value-ranges",
+      "description": "Numeric and boundary-sensitive inputs must reject impossible values and record edge coverage.",
+      "cases": [
+        {
+          "id": "storage.negative-bytes",
+          "surface": "storage",
+          "input": "A storage snapshot with negative SharedLayerBytes",
+          "expected": "The storage verifier rejects the snapshot"
+        },
+        {
+          "id": "storage.free-exceeds-total",
+          "surface": "storage",
+          "input": "A storage snapshot with FreeBytes greater than TotalBytes",
+          "expected": "The storage verifier rejects the snapshot"
+        },
+        {
+          "id": "storage.double-counted-total",
+          "surface": "storage",
+          "input": "A storage snapshot whose TotalBytes adds image views to unique bytes",
+          "expected": "The storage verifier rejects the snapshot as double counted"
+        },
+        {
+          "id": "direct-syscall.boundary-matrix",
+          "surface": "direct-runtime",
+          "input": "The syscall coverage manifest",
+          "expected": "PATH_MAX, sockaddr_un.sun_path, exec argv/scratch, memory thresholds, uid/gid sentinels, and wait/signal status are declared"
+        }
+      ]
+    }
+  ]
+}

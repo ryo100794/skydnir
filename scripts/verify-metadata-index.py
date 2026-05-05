@@ -174,6 +174,9 @@ REQUIRED_DOC_PHRASES = (
     "rebuild from filesystem truth",
     "metadata.snapshot.sqlite",
     "overlay_paths",
+    "FAT32/exFAT",
+    "DocumentProvider",
+    "conflict state",
 )
 
 

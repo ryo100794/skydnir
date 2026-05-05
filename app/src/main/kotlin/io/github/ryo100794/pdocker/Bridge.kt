@@ -177,7 +177,8 @@ class Bridge(
             .put("AttachStdout", true)
             .put("AttachStderr", true)
             .put("Tty", true)
-            .put("Cmd", listOf("/bin/sh"))
+            .put("Env", listOf("ENV=", "BASH_ENV="))
+            .put("Cmd", listOf("/bin/sh", "-i"))
         val response = engineRequest(
             "POST",
             "/containers/${DockerEngineClient.encodePath(containerId)}/exec",

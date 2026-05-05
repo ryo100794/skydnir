@@ -11,6 +11,7 @@ import android.net.LocalSocketAddress
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.FileObserver
 import android.os.Handler
 import android.os.Looper
 import android.os.Environment
@@ -45,7 +46,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
-    private enum class Tab { Overview, Library, Compose, Dockerfiles, Images, Containers, Sessions }
+    private enum class Tab { Overview, Library, Compose, Dockerfiles, Images, Containers, Sessions, Debug }
     private enum class ToolKind { Terminal, Editor, Split }
 
     private data class ToolTab(
@@ -119,10 +120,15 @@ class MainActivity : AppCompatActivity() {
         val header: TextView,
         val progress: TextView,
         val services: LinearLayout,
-        val terminal: TerminalLogPane,
+        val terminal: JobLogPane,
     )
 
-    private class TerminalLogPane(val view: WebView) {
+    private interface JobLogPane {
+        val view: View
+        fun write(text: String)
+    }
+
+    private class TerminalLogPane(override val view: WebView) : JobLogPane {
         private val pending = StringBuilder()
         private var ready = false
         private var flushScheduled = false
@@ -132,7 +138,7 @@ class MainActivity : AppCompatActivity() {
             scheduleFlush(0L)
         }
 
-        fun write(text: String) {
+        override fun write(text: String) {
             if (text.isEmpty()) return
             pending.append(text)
             if (!ready) return
@@ -158,6 +164,63 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private inner class LightweightJobLogPane : JobLogPane {
+        private val lines = ArrayDeque<String>()
+        private var current = StringBuilder()
+        private var renderScheduled = false
+        private val textView = TextView(this@MainActivity).apply {
+            textSize = 8f
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setTextColor(0xFFE5E7EB.toInt())
+            setBackgroundColor(0xFF0F172A.toInt())
+            setPadding(14, 12, 14, 12)
+        }
+        private val scroll = ScrollView(this@MainActivity).apply {
+            isFillViewport = true
+            setBackgroundColor(0xFF0F172A.toInt())
+            addView(textView)
+        }
+        override val view: View = scroll
+
+        override fun write(text: String) {
+            if (text.isEmpty()) return
+            text.forEach { ch ->
+                when (ch) {
+                    '\r' -> current = StringBuilder()
+                    '\n' -> commitCurrent()
+                    else -> current.append(ch)
+                }
+            }
+            if (current.length > 4096) current = StringBuilder(current.takeLast(4096))
+            scheduleRender()
+        }
+
+        private fun commitCurrent() {
+            val line = cleanTerminalLine(current.toString())
+            if (line.isNotBlank()) {
+                lines.addLast(line)
+                while (lines.size > MAX_JOB_LINES) lines.removeFirst()
+            }
+            current = StringBuilder()
+        }
+
+        private fun scheduleRender() {
+            if (renderScheduled) return
+            renderScheduled = true
+            scroll.postDelayed({
+                renderScheduled = false
+                val tail = buildString {
+                    lines.forEach { append(it).append('\n') }
+                    val live = cleanTerminalLine(current.toString())
+                    if (live.isNotBlank()) append(live)
+                }
+                textView.text = tail
+                scroll.fullScroll(View.FOCUS_DOWN)
+            }, 100L)
+        }
+    }
+
     private data class ComposeService(
         val name: String,
         var image: String = "",
@@ -166,9 +229,13 @@ class MainActivity : AppCompatActivity() {
         var workingDir: String = "",
         var command: List<String> = emptyList(),
         val environment: MutableMap<String, String> = mutableMapOf(),
+        val labels: MutableMap<String, String> = mutableMapOf(),
         val ports: MutableList<String> = mutableListOf(),
         val volumes: MutableList<String> = mutableListOf(),
         val dependsOn: MutableList<String> = mutableListOf(),
+        var memLimit: String = "",
+        var memSwapLimit: String = "",
+        var deployMemoryLimit: String = "",
         var gpus: String = "",
         var hasHealthcheck: Boolean = false,
         val serviceLinks: MutableList<ComposeServiceLink> = mutableListOf(),
@@ -212,6 +279,20 @@ class MainActivity : AppCompatActivity() {
         val url: String,
     )
 
+    private enum class DocumentsWriteAccess(val envValue: String) {
+        DirectPathWritable("direct-path-writable"),
+        SafMediated("saf-mediated"),
+    }
+
+    private data class PersistedDocumentsTreeMetadata(
+        val treeUri: String,
+        val displayName: String,
+        val selectedHostPath: String,
+        val directHostPath: String,
+        val activeHostPath: String,
+        val writeAccess: DocumentsWriteAccess,
+    )
+
     companion object {
         private const val REQUEST_POST_NOTIFICATIONS = 100
         private const val REQUEST_DOCUMENTS_TREE = 101
@@ -220,6 +301,13 @@ class MainActivity : AppCompatActivity() {
         private const val MAX_JOB_HISTORY = 20
         private const val MAX_JOB_LINES = 200
         private const val MAX_JOB_LOG_VIEW_BYTES = 256 * 1024
+        private const val MAX_TEXT_TOOL_VIEW_BYTES = 128 * 1024
+        private const val MAX_UI_WALK_ENTRIES = 512
+        private const val MAX_PROJECT_DASHBOARD_PROJECTS = 8
+        private const val DOCUMENTS_SYNC_DEBOUNCE_MS = 1_500L
+        private const val DOCUMENTS_SYNC_MIN_INTERVAL_MS = 3_000L
+        private const val MAX_DOCUMENTS_MIRROR_OBSERVERS = 256
+        private const val MAX_DOCUMENTS_SYNC_SCAN_ENTRIES = 512
         private const val PDOCKER_SERVICE_URL_LABEL_PREFIX = "io.github.ryo100794.pdocker.service-url."
         private const val PDOCKER_PROJECT_ID_LABEL = "io.github.ryo100794.pdocker.project-id"
         private const val PDOCKER_PROJECT_DIR_LABEL = "io.github.ryo100794.pdocker.project-dir"
@@ -228,6 +316,8 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_SMOKE_START = "io.github.ryo100794.pdocker.action.SMOKE_START"
         private const val ACTION_SMOKE_GPU_BENCH = "io.github.ryo100794.pdocker.action.SMOKE_GPU_BENCH"
         private const val ACTION_SMOKE_COMPOSE_UP = "io.github.ryo100794.pdocker.action.SMOKE_COMPOSE_UP"
+        private const val ACTION_SMOKE_DOCUMENTS_SYNC_TO_TREE = "io.github.ryo100794.pdocker.action.SMOKE_DOCUMENTS_SYNC_TO_TREE"
+        private const val ACTION_SMOKE_DOCUMENTS_SYNC_FROM_TREE = "io.github.ryo100794.pdocker.action.SMOKE_DOCUMENTS_SYNC_FROM_TREE"
         private const val PREFS_NAME = "pdocker-settings"
         private const val PREF_DOCUMENTS_TREE_URI = "documents.treeUri"
         private const val PREF_DOCUMENTS_HOST_PATH = "documents.hostPath"
@@ -239,7 +329,7 @@ class MainActivity : AppCompatActivity() {
     private val logIo: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "pdocker-job-log-writer").apply { isDaemon = true }
     }
-    private val tabs = listOf(Tab.Overview, Tab.Library, Tab.Compose, Tab.Dockerfiles, Tab.Images, Tab.Containers, Tab.Sessions)
+    private val tabs = listOf(Tab.Overview, Tab.Library, Tab.Compose, Tab.Dockerfiles, Tab.Images, Tab.Containers, Tab.Sessions, Tab.Debug)
     private val pollTask = object : Runnable {
         override fun run() {
             refreshStatus()
@@ -254,6 +344,12 @@ class MainActivity : AppCompatActivity() {
         override fun run() {
             tickRunningJobs()
             ui.postDelayed(this, 1000)
+        }
+    }
+    private val documentsMirrorScanTask = object : Runnable {
+        override fun run() {
+            scanDocumentsExportMirrorForChanges()
+            ui.postDelayed(this, DOCUMENTS_SYNC_MIN_INTERVAL_MS)
         }
     }
 
@@ -297,12 +393,23 @@ class MainActivity : AppCompatActivity() {
     private var hostEnvironment: JSONObject? = null
     private var hostEnvironmentRefreshing = false
     private var lastHostEnvironmentAt = 0L
+    private var documentsProjectRootProbePath: String? = null
+    private var documentsProjectRootProbeWritable: Boolean = false
+    private val documentsSyncLock = Any()
+    private val documentsMirrorObservers = mutableMapOf<String, FileObserver>()
+    private val pendingDocumentsSyncPaths = linkedSetOf<String>()
+    private val documentsMirrorScanState = mutableMapOf<String, String>()
+    private var documentsSyncScheduled = false
+    private var documentsSyncRunning = false
+    private var lastDocumentsSyncAt = 0L
 
     private val pdockerHome: File by lazy { File(filesDir, "pdocker") }
     private val imageRoot: File by lazy { File(pdockerHome, "images") }
     private val layerRoot: File by lazy { File(pdockerHome, "layers") }
     private val containerRoot: File by lazy { File(pdockerHome, "containers") }
-    private val projectRoot: File by lazy { File(pdockerHome, "projects") }
+    private val legacyProjectRoot: File by lazy { File(pdockerHome, "projects") }
+    private val projectRoot: File
+        get() = if (documentsProjectsRootWritable()) documentsProjectsRoot() else legacyProjectRoot
     private val engine: DockerEngineClient by lazy { DockerEngineClient(File(pdockerHome, "pdockerd.sock")) }
     private val diagnosticsEnabled: Boolean
         get() = BuildConfig.DEBUG ||
@@ -311,7 +418,11 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_NOSENSOR
+        migrateLegacyProjectsToDocuments()
         seedDefaultProject()
+        migrateInstalledProjects()
+        syncDocumentsVolumeEnv()
+        startDocumentsMirrorSync()
         loadDockerJobs()
 
         val root = LinearLayout(this).apply {
@@ -423,7 +534,9 @@ class MainActivity : AppCompatActivity() {
             .putString(PREF_DOCUMENTS_HOST_PATH, hostPath)
             .putString(PREF_DOCUMENTS_DISPLAY_NAME, displayName)
             .apply()
+        documentsProjectRootProbePath = null
         syncDocumentsVolumeEnv()
+        startDocumentsMirrorSync()
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             ActivityCompat.requestPermissions(
                 this,
@@ -434,22 +547,31 @@ class MainActivity : AppCompatActivity() {
                 REQUEST_EXTERNAL_STORAGE,
             )
         }
-        status.text = getString(R.string.status_documents_volume_set_fmt, displayName)
+        status.text = getString(
+            R.string.status_documents_volume_set_fmt,
+            displayName,
+            documentsWriteAccessLabel(documentsTreeMetadata().writeAccess),
+        )
         renderContent()
     }
 
     override fun onResume() {
         super.onResume()
+        migrateInstalledProjects()
+        startDocumentsMirrorSync()
         ensureDaemonStarted()
         renderContent()
         ui.post(pollTask)
         ui.post(jobTickerTask)
+        ui.post(documentsMirrorScanTask)
     }
 
     override fun onPause() {
         super.onPause()
         ui.removeCallbacks(pollTask)
         ui.removeCallbacks(jobTickerTask)
+        ui.removeCallbacks(documentsMirrorScanTask)
+        flushPendingDocumentsSync()
         flushDockerJobsSave()
     }
 
@@ -457,7 +579,10 @@ class MainActivity : AppCompatActivity() {
         toolTabs.forEach { it.bridge?.close() }
         toolTabs.clear()
         liveJobViews.clear()
+        stopDocumentsMirrorSync()
+        ui.removeCallbacks(pollTask)
         ui.removeCallbacks(jobTickerTask)
+        ui.removeCallbacks(documentsMirrorScanTask)
         logIo.shutdown()
         super.onDestroy()
     }
@@ -480,7 +605,13 @@ class MainActivity : AppCompatActivity() {
             .replace('T', ' ')
             .removeSuffix("Z")
         val buildTime = rawBuildTime.substringBeforeLast('.', rawBuildTime)
-        return getString(R.string.app_build_info_fmt, versionName, versionCode, buildTime)
+        return getString(
+            R.string.app_build_info_fmt,
+            versionName,
+            versionCode,
+            buildTime,
+            BuildConfig.BUILD_GIT_COMMIT,
+        )
     }
 
     private fun splitterView(): View =
@@ -546,6 +677,7 @@ class MainActivity : AppCompatActivity() {
             Tab.Images -> renderImages()
             Tab.Containers -> renderContainers()
             Tab.Sessions -> renderSessions()
+            Tab.Debug -> renderDebugResources()
         }
     }
 
@@ -557,6 +689,7 @@ class MainActivity : AppCompatActivity() {
         Tab.Images -> R.string.tab_images
         Tab.Containers -> R.string.tab_containers
         Tab.Sessions -> R.string.tab_sessions
+        Tab.Debug -> R.string.tab_debug
     })
 
     private fun renderOverview() {
@@ -567,6 +700,16 @@ class MainActivity : AppCompatActivity() {
         }
         addAction(getString(R.string.action_set_documents_volume), documentsVolumeDetail()) {
             requestDocumentsVolumeFolder()
+        }
+        addAction(getString(R.string.action_documents_sync_to_tree), getString(R.string.detail_documents_sync_to_tree)) {
+            runDocumentsMediatorAction(getString(R.string.action_documents_sync_to_tree)) {
+                safDocumentsMediator().syncToTree()
+            }
+        }
+        addAction(getString(R.string.action_documents_sync_from_tree), getString(R.string.detail_documents_sync_from_tree)) {
+            runDocumentsMediatorAction(getString(R.string.action_documents_sync_from_tree)) {
+                safDocumentsMediator().syncFromTree()
+            }
         }
 
         addSection(getString(R.string.section_inventory))
@@ -910,6 +1053,9 @@ class MainActivity : AppCompatActivity() {
     private fun renderDiagnostics() {
         addSection(getString(R.string.section_diagnostics))
         renderHostEnvironment()
+        addAction(getString(R.string.action_debug_resources), getString(R.string.detail_debug_resources)) {
+            openDebugResources(filesDir, getString(R.string.debug_resource_app_files), writable = true)
+        }
         addAction(getString(R.string.action_keep_resident), getString(R.string.detail_keep_resident)) {
             requestBatteryOptimizationBypass()
         }
@@ -918,6 +1064,16 @@ class MainActivity : AppCompatActivity() {
         }
         addAction(getString(R.string.action_set_documents_volume), documentsVolumeDetail()) {
             requestDocumentsVolumeFolder()
+        }
+        addAction(getString(R.string.action_documents_sync_to_tree), getString(R.string.detail_documents_sync_to_tree)) {
+            runDocumentsMediatorAction(getString(R.string.action_documents_sync_to_tree)) {
+                safDocumentsMediator().syncToTree()
+            }
+        }
+        addAction(getString(R.string.action_documents_sync_from_tree), getString(R.string.detail_documents_sync_from_tree)) {
+            runDocumentsMediatorAction(getString(R.string.action_documents_sync_from_tree)) {
+                safDocumentsMediator().syncFromTree()
+            }
         }
         addAction(getString(R.string.action_prune_build_cache), getString(R.string.detail_prune_build_cache)) {
             runEngineAction(getString(R.string.action_prune_build_cache), getString(R.string.section_diagnostics)) {
@@ -956,6 +1112,190 @@ class MainActivity : AppCompatActivity() {
             openTerminal(getString(R.string.terminal_docker_build), "cd ${shellQuote(projectRoot.absolutePath)} && sh")
         }
     }
+
+    private data class DebugResourceRoot(
+        val label: String,
+        val root: File,
+        val writable: Boolean,
+    )
+
+    private fun renderDebugResources() {
+        addSection(getString(R.string.section_debug_resources))
+        addMessage(getString(R.string.message_debug_resources))
+        addAction(getString(R.string.action_debug_memory), getString(R.string.detail_debug_memory)) {
+            openTextToolAsync(getString(R.string.section_debug_resources), getString(R.string.action_debug_memory)) {
+                debugMemorySnapshot()
+            }
+        }
+        addAction(getString(R.string.action_debug_processes), getString(R.string.detail_debug_processes)) {
+            openTextToolAsync(getString(R.string.section_debug_resources), getString(R.string.action_debug_processes)) {
+                debugProcessSnapshot()
+            }
+        }
+        addAction(getString(R.string.action_debug_handles), getString(R.string.detail_debug_handles)) {
+            openTextToolAsync(getString(R.string.section_debug_resources), getString(R.string.action_debug_handles)) {
+                debugHandleSnapshot()
+            }
+        }
+        debugResourceRoots().forEach { item ->
+            val detail = listOf(
+                item.root.absolutePath,
+                debugResourceSummary(item.root),
+            ).joinToString("\n")
+            addAction(item.label, detail) {
+                openDebugResources(item.root, item.label, item.writable)
+            }
+        }
+    }
+
+    private fun debugResourceRoots(): List<DebugResourceRoot> {
+        val roots = mutableListOf(
+            DebugResourceRoot(getString(R.string.debug_resource_app_files), filesDir, writable = true),
+            DebugResourceRoot(getString(R.string.debug_resource_pdocker_home), pdockerHome, writable = true),
+            DebugResourceRoot(getString(R.string.debug_resource_projects), projectRoot, writable = true),
+            DebugResourceRoot(getString(R.string.debug_resource_containers), containerRoot, writable = true),
+            DebugResourceRoot(getString(R.string.debug_resource_images), imageRoot, writable = true),
+            DebugResourceRoot(getString(R.string.debug_resource_layers), layerRoot, writable = true),
+            DebugResourceRoot(getString(R.string.debug_resource_runtime), File(filesDir, "pdocker-runtime"), writable = true),
+            DebugResourceRoot(getString(R.string.debug_resource_cache), cacheDir, writable = true),
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            roots += DebugResourceRoot(getString(R.string.debug_resource_code_cache), codeCacheDir, writable = true)
+            roots += DebugResourceRoot(getString(R.string.debug_resource_no_backup), noBackupFilesDir, writable = true)
+        }
+        applicationInfo.nativeLibraryDir
+            ?.takeIf { it.isNotBlank() }
+            ?.let { roots += DebugResourceRoot(getString(R.string.debug_resource_native_libs), File(it), writable = false) }
+        return roots.distinctBy { runCatching { it.root.canonicalPath }.getOrDefault(it.root.absolutePath) }
+            .filter { it.root.exists() }
+    }
+
+    private fun debugResourceSummary(root: File): String =
+        if (root.isDirectory) {
+            getString(R.string.debug_resource_dir_summary_fmt, root.list()?.size ?: 0)
+        } else {
+            getString(R.string.debug_resource_file_summary_fmt, formatBytes(root.length()))
+        }
+
+    private fun openDebugResources(root: File, label: String, writable: Boolean) {
+        startActivity(Intent(this, ImageFilesActivity::class.java).apply {
+            putExtra(ImageFilesActivity.EXTRA_ROOT_PATH, root.absolutePath)
+            putExtra(ImageFilesActivity.EXTRA_ROOT_LABEL, label)
+            putExtra(ImageFilesActivity.EXTRA_ROOT_WRITABLE, writable)
+        })
+    }
+
+    private data class DebugProc(
+        val pid: Int,
+        val name: String,
+        val state: String,
+        val ppid: String,
+        val threads: String,
+        val vmRss: String,
+        val fdCount: Int,
+        val cmdline: String,
+    )
+
+    private fun debugProcesses(): List<DebugProc> {
+        val appUid = applicationInfo.uid.toString()
+        return File("/proc").listFiles().orEmpty()
+            .filter { it.name.all(Char::isDigit) }
+            .mapNotNull { dir ->
+                val status = readProcStatus(dir) ?: return@mapNotNull null
+                val uid = status["Uid"]?.split(Regex("\\s+"))?.firstOrNull().orEmpty()
+                val cmdline = procCmdline(dir)
+                val name = status["Name"].orEmpty()
+                val interesting = uid == appUid ||
+                    cmdline.contains(packageName) ||
+                    cmdline.contains("pdocker") ||
+                    name.contains("pdocker", ignoreCase = true)
+                if (!interesting) return@mapNotNull null
+                DebugProc(
+                    pid = dir.name.toIntOrNull() ?: return@mapNotNull null,
+                    name = name.ifBlank { "-" },
+                    state = status["State"].orEmpty().ifBlank { "-" },
+                    ppid = status["PPid"].orEmpty().ifBlank { "-" },
+                    threads = status["Threads"].orEmpty().ifBlank { "-" },
+                    vmRss = status["VmRSS"].orEmpty().ifBlank { "-" },
+                    fdCount = File(dir, "fd").list()?.size ?: -1,
+                    cmdline = cmdline.ifBlank { name },
+                )
+            }
+            .sortedBy { it.pid }
+    }
+
+    private fun debugMemorySnapshot(): String = buildString {
+        appendLine("pdocker memory snapshot")
+        appendLine("package=$packageName uid=${applicationInfo.uid}")
+        appendLine("time=${System.currentTimeMillis()}")
+        appendLine()
+        appendLine("== /proc/meminfo ==")
+        appendLine(readSmallProcFile(File("/proc/meminfo"), 80).ifBlank { "unavailable" })
+        appendLine("== pdocker processes ==")
+        debugProcesses().forEach { proc ->
+            appendLine("${proc.pid} ${proc.name} rss=${proc.vmRss} threads=${proc.threads} fd=${proc.fdCount} ${proc.cmdline}")
+        }
+    }
+
+    private fun debugProcessSnapshot(): String = buildString {
+        appendLine("pdocker process snapshot")
+        appendLine("package=$packageName uid=${applicationInfo.uid}")
+        appendLine()
+        appendLine("PID     PPID    STATE        THR  FD    RSS        NAME / CMDLINE")
+        debugProcesses().forEach { proc ->
+            appendLine(
+                "%-7d %-7s %-12s %-4s %-5d %-10s %s / %s".format(
+                    proc.pid,
+                    proc.ppid,
+                    proc.state.take(12),
+                    proc.threads,
+                    proc.fdCount,
+                    proc.vmRss,
+                    proc.name,
+                    proc.cmdline,
+                )
+            )
+        }
+    }
+
+    private fun debugHandleSnapshot(): String = buildString {
+        appendLine("pdocker handle snapshot")
+        appendLine("package=$packageName uid=${applicationInfo.uid}")
+        debugProcesses().forEach { proc ->
+            appendLine()
+            appendLine("== pid ${proc.pid} ${proc.name} ==")
+            val fdDir = File("/proc/${proc.pid}/fd")
+            val fds = fdDir.listFiles().orEmpty().sortedBy { it.name.toIntOrNull() ?: Int.MAX_VALUE }
+            if (fds.isEmpty()) {
+                appendLine("(no readable fd entries)")
+            } else {
+                fds.take(256).forEach { fd ->
+                    val target = runCatching { Os.readlink(fd.absolutePath) }.getOrDefault("unreadable")
+                    appendLine("${fd.name.padStart(4)} -> $target")
+                }
+                if (fds.size > 256) appendLine("... ${fds.size - 256} more fd entries omitted")
+            }
+        }
+    }
+
+    private fun readProcStatus(dir: File): Map<String, String>? =
+        runCatching {
+            File(dir, "status").readLines().mapNotNull { line ->
+                val key = line.substringBefore(':', "").trim()
+                if (key.isBlank()) null else key to line.substringAfter(':', "").trim()
+            }.toMap()
+        }.getOrNull()
+
+    private fun procCmdline(dir: File): String =
+        runCatching {
+            File(dir, "cmdline").readBytes()
+                .toString(Charsets.UTF_8)
+                .replace('\u0000', ' ')
+                .trim()
+        }.getOrDefault("")
+
+    private fun readSmallProcFile(file: File, maxLines: Int): String =
+        runCatching { file.readLines().take(maxLines).joinToString("\n") }.getOrDefault("")
 
     private fun renderStorageMetrics() {
         refreshStorageMetricsAsync()
@@ -1051,6 +1391,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun reconcileDaemonOperationJobs(ops: List<DaemonOperation>) {
+        if (ops.isEmpty()) return
+        var changed = false
+        ops.forEach { op ->
+            val job = daemonOperationJob(op) ?: return@forEach
+            if (job.exitCode != null) return@forEach
+            val progress = op.detail.ifBlank { op.status }
+            if (progress.isNotBlank() && job.progress != progress) {
+                job.progress = progress
+                changed = true
+            }
+            val line = "[pdocker] reconnected daemon ${op.kind} ${op.status}: $progress"
+            if (job.output.lastOrNull() != line) {
+                job.output += line
+                while (job.output.size > MAX_JOB_LINES) job.output.removeAt(0)
+                appendPersistentJobLog(job.id, terminalRecordText(line))
+                changed = true
+            }
+        }
+        if (changed) {
+            saveDockerJobs()
+            updateLiveJobViews()
+        }
+    }
+
     private fun refreshDaemonOperationsAsync() {
         if (daemonOperationsRefreshing) return
         daemonOperationsRefreshing = true
@@ -1073,6 +1438,7 @@ class MainActivity : AppCompatActivity() {
             ui.post {
                 val changed = ops != daemonOperations
                 daemonOperations = ops
+                reconcileDaemonOperationJobs(ops)
                 daemonOperationsRefreshing = false
                 if (changed && currentTab == Tab.Overview) renderContent()
             }
@@ -1192,6 +1558,7 @@ class MainActivity : AppCompatActivity() {
                 if (mediaCodec?.optJSONObject("Library")?.optBoolean("Available", false) == true) "yes" else "no",
             ),
             helperStatus,
+            documentsStorageStatusLine(),
         ).joinToString("\n")
     }
 
@@ -1283,9 +1650,10 @@ class MainActivity : AppCompatActivity() {
     ) {
         startDaemon()
         status.text = getString(R.string.status_starting)
-        val key = "engine-job:$group:$title:$command"
+        val jobId = "job-" + System.currentTimeMillis().toString(36)
+        val key = "engine-job:$jobId:$group:$title"
         val job = DockerJob(
-            id = "job-" + System.currentTimeMillis().toString(36),
+            id = jobId,
             title = title,
             detail = group,
             command = command,
@@ -1300,11 +1668,13 @@ class MainActivity : AppCompatActivity() {
         renderContent()
         openLiveJobLog(job, switchTo = true)
         thread(isDaemon = true, name = "engine-action") {
+            val retainOutput = !command.startsWith("engine compose up:") &&
+                !command.startsWith("engine docker build:")
             val output = StringBuilder()
             val result = runCatching {
                 if (!waitForEngine()) error(getString(R.string.status_socket_absent))
                 engine.block { line ->
-                    output.appendLine(line)
+                    if (retainOutput) output.appendLine(line)
                     appendEngineJobOutput(job.id, line)
                 }
             }
@@ -1322,6 +1692,7 @@ class MainActivity : AppCompatActivity() {
                 finishEngineJob(job.id, exitCode, finishOutput)
                 val finished = dockerJobs.firstOrNull { it.id == job.id }
                 if (finished != null) handleEngineJobFinished(finished)
+                refreshContainerSnapshotAsync(force = true)
                 refreshStorageMetricsAsync(force = true)
                 renderContent()
                 refreshStatus()
@@ -1363,16 +1734,12 @@ class MainActivity : AppCompatActivity() {
                     val line = "Service ${service.name} Building"
                     emit(line)
                     out.appendLine(line)
-                    val buildOutput = StringBuilder()
                     val built = runCatching {
                         buildImageStreaming(contextDir, image) { buildLine ->
                             emit(buildLine)
-                            buildOutput.appendLine(buildLine)
                         }
                     }
-                    if (built.isSuccess) {
-                        out.append(buildOutput)
-                    } else {
+                    if (built.isFailure) {
                         val message = built.exceptionOrNull()?.message.orEmpty()
                         if (!isRuntimeBackendBlocked(message)) throw built.exceptionOrNull() ?: IllegalStateException(message)
                         runtimeBlocked = true
@@ -1465,6 +1832,8 @@ class MainActivity : AppCompatActivity() {
         var inServices = false
         var current: ComposeService? = null
         var blockKey: String? = null
+        var deployBlockKey: String? = null
+        var deployResourceKey: String? = null
         lines.forEach { raw ->
             val line = raw.substringBefore('#').trimEnd()
             if (line.isBlank()) return@forEach
@@ -1474,6 +1843,8 @@ class MainActivity : AppCompatActivity() {
                 inServices = trimmed == "services:"
                 current = null
                 blockKey = null
+                deployBlockKey = null
+                deployResourceKey = null
                 return@forEach
             }
             if (!inServices) return@forEach
@@ -1483,6 +1854,8 @@ class MainActivity : AppCompatActivity() {
                     serviceLinks = serviceLinks.toMutableList(),
                 ).also { services += it }
                 blockKey = null
+                deployBlockKey = null
+                deployResourceKey = null
                 return@forEach
             }
             val svc = current ?: return@forEach
@@ -1490,14 +1863,21 @@ class MainActivity : AppCompatActivity() {
                 val key = trimmed.substringBefore(':')
                 val value = trimmed.substringAfter(':', "").trim()
                 blockKey = if (value.isBlank()) key else null
+                if (key != "deploy") {
+                    deployBlockKey = null
+                    deployResourceKey = null
+                }
                 when (key) {
                     "image" -> svc.image = composeValue(value, composeEnv)
                     "container_name" -> svc.containerName = composeValue(value, composeEnv)
                     "working_dir" -> svc.workingDir = composeValue(value, composeEnv)
                     "command" -> svc.command = composeCommand(value, composeEnv)
                     "gpus" -> svc.gpus = composeValue(value, composeEnv)
+                    "mem_limit" -> svc.memLimit = composeValue(value, composeEnv)
+                    "memswap_limit" -> svc.memSwapLimit = composeValue(value, composeEnv)
                     "build" -> if (value.isNotBlank()) svc.buildContext = composeValue(value, composeEnv)
                     "depends_on" -> if (value.isNotBlank()) svc.dependsOn += composeStringList(value, composeEnv)
+                    "labels" -> if (value.isNotBlank()) svc.labels.putAll(composeInlineMapOrList(value, composeEnv))
                     "healthcheck" -> svc.hasHealthcheck = true
                 }
                 return@forEach
@@ -1510,11 +1890,28 @@ class MainActivity : AppCompatActivity() {
                         if (key == "context") svc.buildContext = composeValue(value, composeEnv)
                     }
                     "environment" -> parseComposeMapOrList(trimmed, composeEnv)?.let { (k, v) -> svc.environment[k] = v }
+                    "labels" -> parseComposeMapOrList(trimmed, composeEnv)?.let { (k, v) -> svc.labels[k] = v }
                     "ports" -> parseComposeListValue(trimmed, composeEnv)?.let { svc.ports += it }
                     "volumes" -> parseComposeListValue(trimmed, composeEnv)?.let { svc.volumes += it }
                     "depends_on" -> {
                         parseComposeListValue(trimmed, composeEnv)?.let { svc.dependsOn += it }
                         parseComposeMapOrList(trimmed, composeEnv)?.first?.let { svc.dependsOn += it }
+                    }
+                    "deploy" -> {
+                        val key = trimmed.substringBefore(':')
+                        val value = trimmed.substringAfter(':', "").trim()
+                        when {
+                            indent == 6 -> {
+                                deployBlockKey = if (key == "resources" && value.isBlank()) "resources" else null
+                                deployResourceKey = null
+                            }
+                            indent == 8 && deployBlockKey == "resources" -> {
+                                deployResourceKey = if (key == "limits" && value.isBlank()) "limits" else null
+                            }
+                            indent >= 10 && deployBlockKey == "resources" && deployResourceKey == "limits" && key == "memory" -> {
+                                svc.deployMemoryLimit = composeValue(value, composeEnv)
+                            }
+                        }
                     }
                 }
             }
@@ -1593,6 +1990,9 @@ class MainActivity : AppCompatActivity() {
         val hostConfig = JSONObject()
             .put("Binds", binds)
             .put("PortBindings", portBindings)
+        val memoryLimitBytes = composeMemoryLimitBytes()
+        memoryLimitBytes?.let { hostConfig.put("Memory", it) }
+        parseMemoryBytes(memSwapLimit)?.let { hostConfig.put("MemorySwap", it) }
         if (gpus.isNotBlank() && gpus != "null") {
             hostConfig.put(
                 "DeviceRequests",
@@ -1611,7 +2011,16 @@ class MainActivity : AppCompatActivity() {
                 ),
             )
         }
-        val labels = JSONObject()
+        val configLabels = JSONObject()
+        labels.forEach { (key, value) -> configLabels.put(key, value) }
+        val pagerMode = composeMemoryPagerMode()
+        if (pagerMode.lowercase() == "managed") {
+            configLabels.put("io.pdocker.memory-pager", "managed")
+            memoryLimitBytes?.let { configLabels.put("io.pdocker.memory-pager.limit-bytes", it.toString()) }
+            parseMemoryBytes(environment["PDOCKER_MEMORY_PAGER_MAX_BYTES"].orEmpty())
+                ?.let { configLabels.put("io.pdocker.memory-pager.max-bytes", it.toString()) }
+        }
+        configLabels
             .put(PDOCKER_PROJECT_ID_LABEL, projectId)
             .put(PDOCKER_PROJECT_DIR_LABEL, projectDir.absolutePath)
             .put(PDOCKER_PROJECT_NAME_LABEL, projectDir.name)
@@ -1621,9 +2030,9 @@ class MainActivity : AppCompatActivity() {
             .put("com.docker.compose.oneoff", "False")
         serviceLinks.forEachIndexed { index, link ->
             if (link.port != null) {
-                labels.put("$PDOCKER_SERVICE_URL_LABEL_PREFIX${link.port}", link.label)
+                configLabels.put("$PDOCKER_SERVICE_URL_LABEL_PREFIX${link.port}", link.label)
             } else if (!link.url.isNullOrBlank()) {
-                labels.put("${PDOCKER_SERVICE_URL_LABEL_PREFIX}url.$index", "${link.label}=${link.url}")
+                configLabels.put("${PDOCKER_SERVICE_URL_LABEL_PREFIX}url.$index", "${link.label}=${link.url}")
             }
         }
         return JSONObject()
@@ -1632,8 +2041,57 @@ class MainActivity : AppCompatActivity() {
             .put("WorkingDir", workingDir)
             .put("Env", JSONArray(environment.map { (k, v) -> "$k=$v" }))
             .put("ExposedPorts", exposedPorts)
-            .put("Labels", labels)
+            .put("Labels", configLabels)
             .put("HostConfig", hostConfig)
+    }
+
+    private fun ComposeService.composeMemoryLimitBytes(): Long? =
+        parseMemoryBytes(memLimit.ifBlank { deployMemoryLimit })
+
+    private fun ComposeService.composeMemoryPagerMode(): String =
+        labels["io.pdocker.memory-pager"]
+            ?: labels["pdocker.memory-pager"]
+            ?: environment["PDOCKER_MEMORY_PAGER"]
+            ?: ""
+
+    private fun parseMemoryBytes(value: String): Long? {
+        val cleaned = value.trim().trim('"', '\'')
+        if (cleaned.isBlank()) return null
+        val match = Regex("""^([0-9]+(?:\.[0-9]+)?)([kmgt]?b?)?$""", RegexOption.IGNORE_CASE)
+            .matchEntire(cleaned)
+            ?: return null
+        val amount = match.groupValues[1].toDoubleOrNull() ?: return null
+        val multiplier = when (match.groupValues.getOrNull(2).orEmpty().lowercase()) {
+            "", "b" -> 1.0
+            "k", "kb" -> 1024.0
+            "m", "mb" -> 1024.0 * 1024.0
+            "g", "gb" -> 1024.0 * 1024.0 * 1024.0
+            "t", "tb" -> 1024.0 * 1024.0 * 1024.0 * 1024.0
+            else -> return null
+        }
+        val bytes = amount * multiplier
+        if (!bytes.isFinite() || bytes <= 0.0 || bytes > Long.MAX_VALUE.toDouble()) return null
+        return bytes.toLong()
+    }
+
+    private fun composeInlineMapOrList(value: String, env: Map<String, String>): Map<String, String> {
+        val cleaned = composeValue(value, env)
+        if (cleaned.isBlank()) return emptyMap()
+        if (cleaned.startsWith("[") && cleaned.endsWith("]")) {
+            return runCatching {
+                val arr = JSONArray(cleaned)
+                (0 until arr.length()).mapNotNull { index ->
+                    parseComposeMapOrList("- ${arr.optString(index)}", env)
+                }.toMap()
+            }.getOrDefault(emptyMap())
+        }
+        if (cleaned.startsWith("{") && cleaned.endsWith("}")) {
+            return runCatching {
+                val obj = JSONObject(cleaned)
+                obj.keys().asSequence().associateWith { key -> obj.optString(key) }
+            }.getOrDefault(emptyMap())
+        }
+        return parseComposeMapOrList(cleaned, env)?.let { mapOf(it) }.orEmpty()
     }
 
     private fun parseComposeMapOrList(line: String, env: Map<String, String>): Pair<String, String>? {
@@ -1690,6 +2148,32 @@ class MainActivity : AppCompatActivity() {
         }
         if ("PDOCKER_DOCUMENTS_HOST" !in env) env["PDOCKER_DOCUMENTS_HOST"] = documentsHostPath()
         if ("PDOCKER_DOCUMENTS_MOUNT" !in env) env["PDOCKER_DOCUMENTS_MOUNT"] = PDOCKER_DOCUMENTS_MOUNT
+        if ("PDOCKER_DOCUMENTS_ROOT" !in env) env["PDOCKER_DOCUMENTS_ROOT"] = documentsHostPath()
+        val metadata = documentsTreeMetadata()
+        if ("PDOCKER_DOCUMENTS_ACCESS" !in env) env["PDOCKER_DOCUMENTS_ACCESS"] = metadata.writeAccess.envValue
+        if ("PDOCKER_DOCUMENTS_MEDIATOR" !in env) {
+            env["PDOCKER_DOCUMENTS_MEDIATOR"] = if (metadata.writeAccess == DocumentsWriteAccess.SafMediated) "android-saf" else "direct-path"
+        }
+        if ("PDOCKER_DOCUMENTS_DIRECT_HOST" !in env) env["PDOCKER_DOCUMENTS_DIRECT_HOST"] = metadata.directHostPath
+        if ("PDOCKER_DOCUMENTS_MEDIATED_HOST" !in env) {
+            env["PDOCKER_DOCUMENTS_MEDIATED_HOST"] = if (metadata.writeAccess == DocumentsWriteAccess.SafMediated) metadata.activeHostPath else ""
+        }
+        if ("PDOCKER_DOCUMENTS_SAF_MIRROR_HOST" !in env) {
+            env["PDOCKER_DOCUMENTS_SAF_MIRROR_HOST"] = if (metadata.writeAccess == DocumentsWriteAccess.SafMediated) metadata.activeHostPath else ""
+        }
+        if ("PDOCKER_DOCUMENTS_SAF_SIDECAR_HOST" !in env) {
+            env["PDOCKER_DOCUMENTS_SAF_SIDECAR_HOST"] = if (metadata.writeAccess == DocumentsWriteAccess.SafMediated) safDocumentsSidecarPath() else ""
+        }
+        if ("PDOCKER_PROJECTS_HOST" !in env) env["PDOCKER_PROJECTS_HOST"] = projectRoot.absolutePath
+        if ("PDOCKER_VOLUME_ROOT" !in env) env["PDOCKER_VOLUME_ROOT"] = documentsVolumeRootPath()
+        if ("PDOCKER_PROJECT_VOLUME_HOST" !in env) env["PDOCKER_PROJECT_VOLUME_HOST"] = projectVolumeHostPath(projectDir.name)
+        if ("PDOCKER_SHARED_DOCUMENTS_HOST" !in env) env["PDOCKER_SHARED_DOCUMENTS_HOST"] = sharedDocumentsHostPath()
+        if ("PDOCKER_SHARED_DOCUMENTS_MOUNT" !in env) env["PDOCKER_SHARED_DOCUMENTS_MOUNT"] = "/shared"
+        if ("PDOCKER_FAST_WORKSPACE_HOST" !in env) env["PDOCKER_FAST_WORKSPACE_HOST"] = fastWorkspaceHostPath(projectDir.name)
+        if ("PDOCKER_DEV_STATE_HOST" !in env) env["PDOCKER_DEV_STATE_HOST"] = fastStateHostPath(projectDir.name, "dev")
+        if ("PDOCKER_MODEL_HOST" !in env) env["PDOCKER_MODEL_HOST"] = modelHostPath(projectDir.name)
+        if ("PDOCKER_APP_HOME_HOST" !in env) env["PDOCKER_APP_HOME_HOST"] = pdockerHome.absolutePath
+        if ("PDOCKER_PROJECT_NAME" !in env) env["PDOCKER_PROJECT_NAME"] = projectDir.name
         return env
     }
 
@@ -1768,16 +2252,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun openTextTool(group: String, title: String, text: String) {
         val key = "engine:$group:$title"
+        val viewText = truncateTextTool(text)
         val existing = toolTabs.indexOfFirst { it.key == key }
         if (existing >= 0) {
             val tab = toolTabs[existing]
-            ((tab.view as? ScrollView)?.getChildAt(0) as? TextView)?.text = text
+            ((tab.view as? ScrollView)?.getChildAt(0) as? TextView)?.text = viewText
             switchTool(existing)
             return
         }
         val view = ScrollView(this).apply {
             addView(TextView(this@MainActivity).apply {
-                this.text = text
+                this.text = viewText
                 textSize = 12f
                 typeface = Typeface.MONOSPACE
                 setTextIsSelectable(true)
@@ -1786,6 +2271,23 @@ class MainActivity : AppCompatActivity() {
         }
         toolTabs += ToolTab(group, title, ToolKind.Editor, view, key = key)
         switchTool(toolTabs.lastIndex)
+    }
+
+    private fun openTextToolAsync(group: String, title: String, producer: () -> String) {
+        status.text = title
+        thread(isDaemon = true, name = "pdocker-text-tool") {
+            val text = runCatching { producer() }
+                .getOrElse { getString(R.string.engine_operation_failed_fmt, it.message.orEmpty()) }
+            ui.post { openTextTool(group, title, text) }
+        }
+    }
+
+    private fun truncateTextTool(text: String): String {
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        if (bytes.size <= MAX_TEXT_TOOL_VIEW_BYTES) return text
+        val start = bytes.size - MAX_TEXT_TOOL_VIEW_BYTES
+        return "[pdocker] text truncated to last ${MAX_TEXT_TOOL_VIEW_BYTES / 1024} KiB\n" +
+            bytes.copyOfRange(start, bytes.size).toString(Charsets.UTF_8)
     }
 
     private fun handleAutomationIntent(intent: Intent?) {
@@ -1799,6 +2301,16 @@ class MainActivity : AppCompatActivity() {
                 val project = intent.getStringExtra("project").orEmpty().ifBlank { "default" }
                 val dir = File(projectRoot, project)
                 ui.post { runComposeUp(dir, getString(R.string.terminal_compose_up_fmt, project)) }
+            }
+            ACTION_SMOKE_DOCUMENTS_SYNC_TO_TREE -> {
+                runDocumentsMediatorAction(getString(R.string.action_documents_sync_to_tree)) {
+                    safDocumentsMediator().syncToTree()
+                }
+            }
+            ACTION_SMOKE_DOCUMENTS_SYNC_FROM_TREE -> {
+                runDocumentsMediatorAction(getString(R.string.action_documents_sync_from_tree)) {
+                    safDocumentsMediator().syncFromTree()
+                }
             }
         }
     }
@@ -1818,22 +2330,335 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun documentsVolumeDetail(): String =
-        getString(
-            R.string.detail_documents_volume_fmt,
-            documentsDisplayName(),
-            documentsHostPath().ifBlank { getString(R.string.documents_volume_saf_only) },
-            PDOCKER_DOCUMENTS_MOUNT,
-        )
+        documentsTreeMetadata().let { metadata ->
+            getString(
+                R.string.detail_documents_volume_fmt,
+                metadata.displayName,
+                metadata.activeHostPath.ifBlank { getString(R.string.documents_volume_saf_only) },
+                PDOCKER_DOCUMENTS_MOUNT,
+                if (metadata.writeAccess == DocumentsWriteAccess.DirectPathWritable) {
+                    documentsProjectsRoot().absolutePath
+                } else {
+                    legacyProjectRoot.absolutePath
+                },
+                documentsWriteAccessLabel(metadata.writeAccess),
+            )
+        }
 
     private fun documentsDisplayName(): String =
-        prefs().getString(PREF_DOCUMENTS_DISPLAY_NAME, null)
-            ?.takeIf { it.isNotBlank() }
-            ?: getString(R.string.documents_volume_default_name)
+        documentsTreeMetadata().displayName
 
     private fun documentsHostPath(): String =
+        documentsTreeMetadata().activeHostPath
+
+    private fun selectedDocumentsHostPath(): String =
         prefs().getString(PREF_DOCUMENTS_HOST_PATH, null)
             ?.takeIf { it.isNotBlank() }
             ?: defaultDocumentsHostPath()
+
+    private fun documentsWorkspaceRoot(): File =
+        File(selectedDocumentsHostPath(), "pdocker")
+
+    private fun documentsProjectsRoot(): File =
+        File(documentsWorkspaceRoot(), "projects")
+
+    private fun documentsProjectsRootWritable(): Boolean =
+        documentsTreeMetadata().writeAccess == DocumentsWriteAccess.DirectPathWritable
+
+    private fun selectedDocumentsProjectsRootWritable(selectedHostPath: String): Boolean =
+        documentsDirectPathWritableCandidate(prefs().getString(PREF_DOCUMENTS_TREE_URI, "").orEmpty(), selectedHostPath) &&
+            probeDocumentsProjectsRootWritable(selectedHostPath)
+
+    private fun probeDocumentsProjectsRootWritable(selectedHostPath: String): Boolean =
+        File(File(selectedHostPath, "pdocker"), "projects").absolutePath.let { path ->
+            if (documentsProjectRootProbePath == path) return documentsProjectRootProbeWritable
+            val writable = canWriteDirectoryByPath(File(path))
+            documentsProjectRootProbePath = path
+            documentsProjectRootProbeWritable = writable
+            writable
+        }
+
+    private fun canWriteDirectoryByPath(dir: File): Boolean {
+        val probe = File(dir, ".pdocker-write-probe")
+        return runCatching {
+            dir.mkdirs()
+            probe.writeText("ok\n")
+            probe.delete()
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun documentsVolumeRootPath(): String =
+        File(File(documentsHostPath(), "pdocker"), "volumes").absolutePath
+
+    private fun sharedDocumentsHostPath(): String =
+        File(File(documentsHostPath(), "pdocker"), "shared").absolutePath
+
+    private fun documentsSharedHostPath(projectName: String): String =
+        File(projectVolumeHostPath(projectName), "shared").absolutePath
+
+    private fun projectVolumeHostPath(projectName: String): String =
+        File(documentsVolumeRootPath(), projectName.ifBlank { "default" }).absolutePath
+
+    private fun fastWorkspaceHostPath(projectName: String): String =
+        File(File(pdockerHome, "workspaces"), projectName.ifBlank { "default" }).absolutePath
+
+    private fun fastStateHostPath(projectName: String, serviceName: String): String =
+        File(File(File(pdockerHome, "state"), projectName.ifBlank { "default" }), serviceName.ifBlank { "default" }).absolutePath
+
+    private fun modelHostPath(projectName: String): String =
+        File(File(pdockerHome, "models"), projectName.ifBlank { "default" }).absolutePath
+
+    private fun safMediatedDocumentsHostPath(): String =
+        File(pdockerHome, "documents-saf-mediated/mirror").absolutePath
+
+    private fun safDocumentsSidecarPath(): String =
+        File(pdockerHome, "documents-saf-mediated/sidecar").absolutePath
+
+    private fun safDocumentsMediator(): SafDocumentsMediator =
+        SafDocumentsMediator(
+            context = this,
+            treeUriText = prefs().getString(PREF_DOCUMENTS_TREE_URI, "").orEmpty(),
+            mirrorRoot = File(safMediatedDocumentsHostPath()),
+            sidecarRoot = File(safDocumentsSidecarPath()),
+        )
+
+    private fun documentsMediatorStatusJson(): JSONObject {
+        val metadata = documentsTreeMetadata()
+        val grants = safDocumentsMediator().persistedGrantState()
+        return safDocumentsMediator().statusJson()
+            .put("Mode", if (metadata.writeAccess == DocumentsWriteAccess.DirectPathWritable) "direct-path-writable" else "saf-mediated-mirror")
+            .put("Access", metadata.writeAccess.envValue)
+            .put("PersistedReadGrant", grants.read)
+            .put("PersistedWriteGrant", grants.write)
+            .put("PersistedGrantAvailable", grants.available)
+            .put("DirectHostPath", metadata.directHostPath)
+            .put("ActiveHostPath", metadata.activeHostPath)
+            .put("SelectedHostPath", metadata.selectedHostPath)
+            .put("EngineStatusPath", "/system/documents/status")
+            .put("EngineSyncToTreePath", "/system/documents/sync-to-tree")
+            .put("EngineSyncFromTreePath", "/system/documents/sync-from-tree")
+    }
+
+    private fun runDocumentsMediatorAction(title: String, action: () -> JSONObject) {
+        openTextToolAsync(getString(R.string.section_diagnostics), title) {
+            JSONObject()
+                .put("Before", documentsMediatorStatusJson())
+                .put("Result", action())
+                .put("After", documentsMediatorStatusJson())
+                .toString(2) + "\n"
+        }
+    }
+
+    private fun startDocumentsMirrorSync() {
+        if (documentsTreeMetadata().writeAccess != DocumentsWriteAccess.SafMediated) {
+            stopDocumentsMirrorSync()
+            return
+        }
+        val grants = safDocumentsMediator().persistedGrantState()
+        if (!grants.available) return
+        val root = File(safMediatedDocumentsHostPath())
+        root.mkdirs()
+        watchDocumentsMirrorDirectory(root)
+        root.walkTopDown()
+            .filter { it.isDirectory }
+            .take(MAX_DOCUMENTS_MIRROR_OBSERVERS)
+            .forEach { watchDocumentsMirrorDirectory(it) }
+    }
+
+    private fun stopDocumentsMirrorSync() {
+        synchronized(documentsSyncLock) {
+            documentsMirrorObservers.values.forEach { observer ->
+                runCatching { observer.stopWatching() }
+            }
+            documentsMirrorObservers.clear()
+            pendingDocumentsSyncPaths.clear()
+            documentsSyncScheduled = false
+            documentsSyncRunning = false
+        }
+    }
+
+    private fun watchDocumentsMirrorDirectory(dir: File) {
+        if (!dir.isDirectory) return
+        val key = dir.canonicalPath
+        synchronized(documentsSyncLock) {
+            if (documentsMirrorObservers.containsKey(key) || documentsMirrorObservers.size >= MAX_DOCUMENTS_MIRROR_OBSERVERS) {
+                return
+            }
+            val mask = FileObserver.CREATE or FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO or FileObserver.MODIFY
+            @Suppress("DEPRECATION")
+            val observer = object : FileObserver(dir.absolutePath, mask) {
+                override fun onEvent(event: Int, path: String?) {
+                    if (path.isNullOrBlank()) return
+                    val changed = File(dir, path)
+                    val directory = changed.isDirectory
+                    if (directory) watchDocumentsMirrorDirectory(changed)
+                    val relative = runCatching {
+                        changed.relativeTo(File(safMediatedDocumentsHostPath())).invariantSeparatorsPath
+                    }.getOrNull().orEmpty()
+                    if (relative.isNotBlank()) {
+                        queueDocumentsSync(relative)
+                        if (directory) {
+                            ui.postDelayed({ queueDocumentsSync(relative) }, DOCUMENTS_SYNC_DEBOUNCE_MS * 2)
+                        }
+                    }
+                }
+            }
+            observer.startWatching()
+            documentsMirrorObservers[key] = observer
+        }
+    }
+
+    private fun queueDocumentsSync(relativePath: String) {
+        synchronized(documentsSyncLock) {
+            pendingDocumentsSyncPaths += relativePath
+            if (documentsSyncScheduled || documentsSyncRunning) return
+            documentsSyncScheduled = true
+        }
+        ui.postDelayed({ flushPendingDocumentsSync() }, DOCUMENTS_SYNC_DEBOUNCE_MS)
+    }
+
+    private fun scanDocumentsExportMirrorForChanges() {
+        if (documentsTreeMetadata().writeAccess != DocumentsWriteAccess.SafMediated) return
+        val grants = safDocumentsMediator().persistedGrantState()
+        if (!grants.available) return
+        val exports = File(File(safMediatedDocumentsHostPath()), "pdocker-exports")
+        if (!exports.exists()) return
+        val root = File(safMediatedDocumentsHostPath())
+        var scanned = 0
+        exports.walkTopDown().forEach { file ->
+            if (scanned >= MAX_DOCUMENTS_SYNC_SCAN_ENTRIES) return@forEach
+            if (!file.isFile) return@forEach
+            scanned += 1
+            val relative = runCatching { file.relativeTo(root).invariantSeparatorsPath }.getOrNull().orEmpty()
+            if (relative.isBlank()) return@forEach
+            val fingerprint = "${file.length()}:${file.lastModified()}"
+            val previous = synchronized(documentsSyncLock) { documentsMirrorScanState[relative] }
+            if (previous != fingerprint) {
+                synchronized(documentsSyncLock) { documentsMirrorScanState[relative] = fingerprint }
+                queueDocumentsSync(relative)
+            }
+        }
+    }
+
+    private fun flushPendingDocumentsSync() {
+        val paths = synchronized(documentsSyncLock) {
+            if (documentsSyncRunning) return
+            documentsSyncScheduled = false
+            if (pendingDocumentsSyncPaths.isEmpty()) return
+            documentsSyncRunning = true
+            val now = System.currentTimeMillis()
+            val wait = DOCUMENTS_SYNC_MIN_INTERVAL_MS - (now - lastDocumentsSyncAt)
+            if (wait > 0L) {
+                documentsSyncScheduled = true
+                documentsSyncRunning = false
+                ui.postDelayed({ flushPendingDocumentsSync() }, wait)
+                return
+            }
+            pendingDocumentsSyncPaths.toList().also { pendingDocumentsSyncPaths.clear() }
+        }
+        thread(isDaemon = true, name = "pdocker-documents-buffered-sync") {
+            var files = 0
+            var bytes = 0L
+            var errors = 0
+            var evicted = 0
+            paths.forEach { path ->
+                val report = runCatching { safDocumentsMediator().syncPathToTree(path, evictMirrorPayload = true) }
+                    .getOrElse {
+                        errors += 1
+                        return@forEach
+                    }
+                files += report.optInt("Files", 0)
+                bytes += report.optLong("Bytes", 0L)
+                evicted += report.optInt("EvictedMirrorFiles", 0)
+                errors += report.optJSONArray("Errors")?.length() ?: 0
+            }
+            synchronized(documentsSyncLock) {
+                lastDocumentsSyncAt = System.currentTimeMillis()
+                documentsSyncRunning = false
+                if (pendingDocumentsSyncPaths.isNotEmpty() && !documentsSyncScheduled) {
+                    documentsSyncScheduled = true
+                    ui.postDelayed({ flushPendingDocumentsSync() }, DOCUMENTS_SYNC_DEBOUNCE_MS)
+                }
+            }
+            if (files > 0 || errors > 0) {
+                ui.post {
+                    status.text = "Documents SAF sync: files=$files bytes=$bytes evicted=$evicted errors=$errors"
+                }
+            }
+        }
+    }
+
+    private fun documentsTreeMetadata(): PersistedDocumentsTreeMetadata {
+        val uri = prefs().getString(PREF_DOCUMENTS_TREE_URI, "").orEmpty()
+        val selectedHostPath = selectedDocumentsHostPath()
+        val directHostPath = selectedHostPath
+            .takeIf { it.isNotBlank() && documentsDirectPathWritableCandidate(uri, it) && probeDocumentsProjectsRootWritable(it) }
+            .orEmpty()
+        val writeAccess = if (directHostPath.isNotBlank()) {
+            DocumentsWriteAccess.DirectPathWritable
+        } else {
+            DocumentsWriteAccess.SafMediated
+        }
+        val activeHostPath = directHostPath.ifBlank { safMediatedDocumentsHostPath() }
+        val displayName = prefs().getString(PREF_DOCUMENTS_DISPLAY_NAME, null)
+            ?.takeIf { it.isNotBlank() }
+            ?: getString(R.string.documents_volume_default_name)
+        return PersistedDocumentsTreeMetadata(
+            treeUri = uri,
+            displayName = displayName,
+            selectedHostPath = selectedHostPath,
+            directHostPath = directHostPath,
+            activeHostPath = activeHostPath,
+            writeAccess = writeAccess,
+        )
+    }
+
+    private fun documentsDirectPathWritableCandidate(uriText: String, selectedHostPath: String): Boolean {
+        if (selectedHostPath.isBlank()) return false
+        // Fresh installs have no SAF grant yet. Do not infer direct access to
+        // public Documents from the default display path; Android 13+ rejects
+        // that write and can crash startup before the user can choose storage.
+        if (uriText.isBlank()) return false
+        return !documentsTreeRequiresSafMediation(uriText)
+    }
+
+    private fun documentsTreeRequiresSafMediation(uriText: String): Boolean {
+        if (uriText.isBlank()) return false
+        val uri = runCatching { Uri.parse(uriText) }.getOrNull() ?: return true
+        if (uri.authority != "com.android.externalstorage.documents") return true
+        val treeId = runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull().orEmpty()
+        val volume = treeId.substringBefore(':', "")
+        return volume !in setOf("primary", "home")
+    }
+
+    private fun documentsWriteAccessLabel(access: DocumentsWriteAccess): String =
+        getString(when (access) {
+            DocumentsWriteAccess.DirectPathWritable -> R.string.documents_access_direct_path_writable
+            DocumentsWriteAccess.SafMediated -> R.string.documents_access_saf_mediated
+        })
+
+    private fun documentsGrantStatusLabel(): String {
+        val grants = safDocumentsMediator().persistedGrantState()
+        return when {
+            grants.read && grants.write -> "read/write"
+            grants.read -> "read-only"
+            grants.write -> "write-only"
+            else -> "missing"
+        }
+    }
+
+    private fun documentsStorageStatusLine(): String {
+        val metadata = documentsTreeMetadata()
+        return getString(
+            R.string.host_environment_documents_fmt,
+            documentsWriteAccessLabel(metadata.writeAccess),
+            metadata.activeHostPath,
+            metadata.selectedHostPath.ifBlank { "-" },
+            metadata.treeUri.ifBlank { "-" },
+            documentsGrantStatusLabel(),
+        )
+    }
 
     private fun defaultDocumentsHostPath(): String {
         val docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
@@ -1863,6 +2688,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun syncDocumentsVolumeEnv() {
         projectRoot.mkdirs()
+        if (documentsTreeMetadata().writeAccess == DocumentsWriteAccess.SafMediated) {
+            safDocumentsMediator().initializeContract()
+            startDocumentsMirrorSync()
+        }
+        File(documentsVolumeRootPath()).mkdirs()
+        File(sharedDocumentsHostPath()).mkdirs()
         writeDocumentsEnv(File(projectRoot, ".pdocker-common.env"))
         projectDirs().forEach { writeDocumentsEnv(File(it, ".env")) }
     }
@@ -1874,15 +2705,55 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun writeDocumentsEnv(file: File) {
-        val uri = prefs().getString(PREF_DOCUMENTS_TREE_URI, "").orEmpty()
+        val metadata = documentsTreeMetadata()
+        val projectName = file.parentFile
+            ?.takeIf { file.name == ".env" && it.parentFile?.canonicalPath == projectRoot.canonicalPath }
+            ?.name
+            ?.ifBlank { "default" }
         val updates = linkedMapOf(
+            "PDOCKER_DOCUMENTS_ROOT" to documentsHostPath(),
+            "PDOCKER_PROJECTS_HOST" to projectRoot.absolutePath,
+            "PDOCKER_VOLUME_ROOT" to documentsVolumeRootPath(),
             "PDOCKER_DOCUMENTS_HOST" to documentsHostPath(),
             "PDOCKER_DOCUMENTS_MOUNT" to PDOCKER_DOCUMENTS_MOUNT,
-            "PDOCKER_DOCUMENTS_MODE" to "rw",
-            "PDOCKER_DOCUMENTS_TREE_URI" to uri,
+            "PDOCKER_SHARED_DOCUMENTS_HOST" to sharedDocumentsHostPath(),
+            "PDOCKER_SHARED_DOCUMENTS_MOUNT" to "/shared",
+            "PDOCKER_DOCUMENTS_MODE" to metadata.writeAccess.envValue,
+            "PDOCKER_DOCUMENTS_ACCESS" to metadata.writeAccess.envValue,
+            "PDOCKER_DOCUMENTS_TREE_URI" to metadata.treeUri,
+            "PDOCKER_DOCUMENTS_SELECTED_HOST" to metadata.selectedHostPath,
+            "PDOCKER_DOCUMENTS_DIRECT_HOST" to metadata.directHostPath,
+            "PDOCKER_DOCUMENTS_MEDIATED_HOST" to if (metadata.writeAccess == DocumentsWriteAccess.SafMediated) metadata.activeHostPath else "",
+            "PDOCKER_DOCUMENTS_MEDIATOR" to if (metadata.writeAccess == DocumentsWriteAccess.SafMediated) "android-saf" else "direct-path",
+            "PDOCKER_DOCUMENTS_SAF_MIRROR_HOST" to if (metadata.writeAccess == DocumentsWriteAccess.SafMediated) metadata.activeHostPath else "",
+            "PDOCKER_DOCUMENTS_SAF_SIDECAR_HOST" to if (metadata.writeAccess == DocumentsWriteAccess.SafMediated) safDocumentsSidecarPath() else "",
+            "PDOCKER_APP_HOME_HOST" to pdockerHome.absolutePath,
         )
+        if (projectName != null) {
+            updates["PDOCKER_PROJECT_NAME"] = projectName
+            updates["PDOCKER_PROJECT_VOLUME_HOST"] = projectVolumeHostPath(projectName)
+            updates["PDOCKER_FAST_WORKSPACE_HOST"] = fastWorkspaceHostPath(projectName)
+            updates["PDOCKER_DEV_STATE_HOST"] = fastStateHostPath(projectName, "dev")
+            updates["PDOCKER_MODEL_HOST"] = modelHostPath(projectName)
+            File(projectVolumeHostPath(projectName)).mkdirs()
+            File(documentsSharedHostPath(projectName)).mkdirs()
+            File(sharedDocumentsHostPath()).mkdirs()
+            File(fastWorkspaceHostPath(projectName)).mkdirs()
+            File(fastStateHostPath(projectName, "dev")).mkdirs()
+            File(modelHostPath(projectName)).mkdirs()
+        }
         val existing = if (file.isFile) file.readLines().toMutableList() else mutableListOf()
+        val preserveUserOverride = setOf(
+            "PDOCKER_DOCUMENTS_HOST",
+            "PDOCKER_DOCUMENTS_MOUNT",
+            "PDOCKER_SHARED_DOCUMENTS_HOST",
+            "PDOCKER_SHARED_DOCUMENTS_MOUNT",
+            "PDOCKER_FAST_WORKSPACE_HOST",
+            "PDOCKER_DEV_STATE_HOST",
+            "PDOCKER_MODEL_HOST",
+        )
         updates.forEach { (key, value) ->
+            if (key in preserveUserOverride && existing.any { it.trimStart().startsWith("$key=") }) return@forEach
             val line = "$key=${envFileQuote(value)}"
             val index = existing.indexOfFirst { it.trimStart().startsWith("$key=") }
             if (index >= 0) existing[index] = line else existing += line
@@ -1897,6 +2768,84 @@ class MainActivity : AppCompatActivity() {
         } else {
             value
         }
+
+    private fun migrateLegacyProjectsToDocuments() {
+        val src = legacyProjectRoot
+        val dst = projectRoot
+        if (!src.isDirectory) return
+        val srcPath = runCatching { src.canonicalPath }.getOrDefault(src.absolutePath)
+        val dstPath = runCatching { dst.canonicalPath }.getOrDefault(dst.absolutePath)
+        if (srcPath == dstPath) return
+        val srcProjects = src.listFiles()?.filter { it.isDirectory }.orEmpty()
+        if (srcProjects.isEmpty()) return
+        dst.mkdirs()
+        srcProjects.forEach { project ->
+            val target = File(dst, project.name)
+            runCatching { copyProjectDefinitionIfAbsent(project, target) }
+        }
+        syncDocumentsVolumeEnv()
+    }
+
+    private fun copyProjectDefinitionIfAbsent(src: File, dst: File) {
+        copyDirectoryIfAbsent(
+            src = src,
+            dst = dst,
+            relative = "",
+            skipDirs = setOf(
+                ".git",
+                ".gradle",
+                "build",
+                "node_modules",
+                "workspace",
+                "models",
+                "profiles",
+                "state",
+                "vscode",
+                "continue",
+                "documents",
+            ),
+            maxFileBytes = 512 * 1024,
+        )
+        val note = File(dst, "LEGACY_PROJECT_MIGRATION.md")
+        if (!note.exists()) {
+            note.writeText(
+                """
+                |# Legacy Project Migration
+                |
+                |pdocker copied lightweight project definition files from the former
+                |app-private project directory into the selected Android Documents
+                |workspace root.
+                |
+                |Large or frequently-written folders such as `workspace`, `models`,
+                |`profiles`, editor state, and caches were not copied during app
+                |startup. Keep hot data in app-private fast storage and copy selected
+                |artifacts to `/documents` when they need to be shared.
+                |""".trimMargin() + "\n",
+            )
+        }
+    }
+
+    private fun copyDirectoryIfAbsent(
+        src: File,
+        dst: File,
+        relative: String,
+        skipDirs: Set<String>,
+        maxFileBytes: Long,
+    ) {
+        if (src.isDirectory) {
+            if (relative.isNotBlank() && src.name in skipDirs) return
+            dst.mkdirs()
+            src.listFiles()?.forEach { child ->
+                val childRelative = if (relative.isBlank()) child.name else "$relative/${child.name}"
+                copyDirectoryIfAbsent(child, File(dst, child.name), childRelative, skipDirs, maxFileBytes)
+            }
+            return
+        }
+        if (src.length() > maxFileBytes) return
+        if (dst.exists()) return
+        dst.parentFile?.mkdirs()
+        src.copyTo(dst, overwrite = false)
+    }
 
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
@@ -2063,7 +3012,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun editorView(file: File): View {
-        return CodeEditorView(this, file, MAX_INLINE_EDIT_BYTES, ::defaultEditorContent)
+        return CodeEditorView(this, file, MAX_INLINE_EDIT_BYTES) { name ->
+            defaultEditorContent(file, name)
+        }
     }
 
     private fun terminalSessionCommand(title: String, group: String, command: String): String {
@@ -2172,12 +3123,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun defaultEditorContent(name: String): String =
+    private fun defaultEditorContent(file: File, name: String): String =
         when (name) {
             "compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml" ->
                 "services:\n  app:\n    image: ubuntu:22.04\n    command: [\"/bin/bash\", \"-lc\", \"echo hello from compose\"]\n"
             "Dockerfile" ->
-                "FROM ubuntu:22.04\nCMD [\"/bin/bash\", \"-lc\", \"echo hello from Dockerfile\"]\n"
+                if (file.parentFile?.name == "default") {
+                    assets.open("default-project/Dockerfile").bufferedReader().use { it.readText() }
+                } else {
+                    "FROM ubuntu:22.04\nCMD [\"/bin/bash\", \"-lc\", \"echo hello from Dockerfile\"]\n"
+                }
             else -> ""
         }
 
@@ -2601,11 +3556,44 @@ class MainActivity : AppCompatActivity() {
     private fun handleEngineJobFinished(job: DockerJob) {
         updateLiveJobView(job)
         if (job.exitCode != 0 || !job.command.startsWith("engine compose up:")) return
+        scheduleDocumentsSyncToTree(job)
         val urls = liveJobServiceLinks(job)
-        if (urls.isEmpty()) return
-        appendEngineJobOutput(job.id, urls.joinToString("\n") { (label, url) -> "Open $label $url" })
-        val autoOpen = liveJobAutoOpenService(job) ?: return
-        openServiceWhenReady(job.id, autoOpen.first, autoOpen.second)
+        if (urls.isNotEmpty()) {
+            appendEngineJobOutput(job.id, urls.joinToString("\n") { (label, url) -> "Open $label $url" })
+            val autoOpen = liveJobAutoOpenService(job)
+            if (autoOpen != null) openServiceWhenReady(job.id, autoOpen.first, autoOpen.second)
+        }
+    }
+
+    private fun scheduleDocumentsSyncToTree(job: DockerJob) {
+        val metadata = documentsTreeMetadata()
+        if (metadata.writeAccess != DocumentsWriteAccess.SafMediated) return
+        val grants = safDocumentsMediator().persistedGrantState()
+        if (!grants.available) {
+            appendEngineJobOutput(job.id, "Documents SAF sync skipped: persisted read/write grant is missing")
+            return
+        }
+        thread(isDaemon = true, name = "pdocker-documents-sync") {
+            Thread.sleep(1_200)
+            val report = runCatching { safDocumentsMediator().syncToTree(evictMirrorPayload = true) }
+                .getOrElse {
+                    JSONObject()
+                        .put("Success", false)
+                        .put("Error", it.message ?: it.toString())
+                }
+            val success = report.optBoolean("Success", false)
+            val files = report.optInt("Files", 0)
+            val bytes = report.optLong("Bytes", 0L)
+            val evicted = report.optInt("EvictedMirrorFiles", 0)
+            val errors = report.optJSONArray("Errors")?.length() ?: 0
+            val summary = if (success) {
+                "Documents SAF sync complete: files=$files bytes=$bytes evicted=$evicted"
+            } else {
+                "Documents SAF sync failed: files=$files bytes=$bytes evicted=$evicted errors=$errors ${report.optString("Error")}".trim()
+            }
+            appendEngineJobOutput(job.id, summary)
+            refreshStorageMetricsAsync(force = true)
+        }
     }
 
     private fun liveJobAutoOpenService(job: DockerJob): Pair<String, String>? {
@@ -2774,7 +3762,10 @@ class MainActivity : AppCompatActivity() {
                 }.toMutableList(),
             )
             if (job.exitCode == null) {
-                markInterruptedJob(job)
+                val line = "[pdocker] UI was restarted; reconnecting to daemon operation"
+                if (job.output.lastOrNull() != line) job.output += line
+                job.status = getString(R.string.job_running)
+                job.progress = line
                 migrated = true
             }
             dockerJobs += job
@@ -2939,12 +3930,12 @@ class MainActivity : AppCompatActivity() {
             .orEmpty()
 
     private fun composeFiles(): List<File> =
-        projectRoot.walkSafe()
+        projectRoot.walkSafe(MAX_UI_WALK_ENTRIES)
             .filter { it.isFile && it.name in setOf("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml") }
             .sortedBy { it.absolutePath }
 
     private fun dockerfiles(): List<File> =
-        projectRoot.walkSafe()
+        projectRoot.walkSafe(MAX_UI_WALK_ENTRIES)
             .filter { it.isFile && it.name == "Dockerfile" }
             .sortedBy { it.absolutePath }
 
@@ -3024,8 +4015,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun projectSummaries(): List<ProjectSummary> =
-        projectDirs().map { dir ->
-            val files = dir.walkSafe().filter { it.isFile }
+        projectDirs().take(MAX_PROJECT_DASHBOARD_PROJECTS).map { dir ->
+            val files = dir.walkSafe(MAX_UI_WALK_ENTRIES).filter { it.isFile }
             val compose = files
                 .filter { it.name in setOf("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml") }
                 .sortedBy { it.absolutePath }
@@ -3346,9 +4337,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun projectModelSummary(project: File): String {
         val modelDir = File(project, "models")
-        val models = modelDir.walkSafe()
+        val models = modelDir.walkSafe(128)
             .filter { it.isFile && it.name.endsWith(".gguf", ignoreCase = true) }
-        val partials = modelDir.walkSafe()
+        val partials = modelDir.walkSafe(128)
             .filter { it.isFile && it.name.endsWith(".gguf.part", ignoreCase = true) }
         return when {
             models.isNotEmpty() -> "${models.size} GGUF / ${formatBytes(models.sumOf { it.length() })}"
@@ -3392,7 +4383,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderProjectFileShortcuts() {
-        val files = projectRoot.walkSafe()
+        val files = projectRoot.walkSafe(MAX_UI_WALK_ENTRIES)
             .filter { it.isFile && it.length() <= MAX_INLINE_EDIT_BYTES }
             .sortedByDescending { it.lastModified() }
             .take(8)
@@ -3473,8 +4464,18 @@ class MainActivity : AppCompatActivity() {
         return report
     }
 
-    private fun File.walkSafe(): List<File> =
-        if (!exists()) emptyList() else walkTopDown().onEnter { it.name !in setOf(".git", "node_modules") }.toList()
+    private fun File.walkSafe(maxEntries: Int = MAX_UI_WALK_ENTRIES): List<File> {
+        if (!exists() || maxEntries <= 0) return emptyList()
+        val result = ArrayList<File>(minOf(maxEntries, 128))
+        val skip = setOf(".git", "node_modules", ".gradle", "build")
+        runCatching {
+            for (file in walkTopDown().onEnter { it.name !in skip }) {
+                result += file
+                if (result.size >= maxEntries) break
+            }
+        }
+        return result
+    }
 
     private fun readState(dir: File): JSONObject? =
         runCatching { JSONObject(File(dir, "state.json").readText()) }.getOrNull()
@@ -3661,7 +4662,57 @@ class MainActivity : AppCompatActivity() {
         stamp.writeText("5\n")
     }
 
+    private fun migrateInstalledProjects() {
+        projectDirs().forEach { project ->
+            migrateProjectPorts(project)
+            ensureProjectDocumentsEnv(project)
+            migrateLlamaCppGpuWorkspace(project)
+        }
+    }
+
+    private fun migrateLlamaCppGpuWorkspace(project: File) {
+        if (project.name != "llama-cpp-gpu") return
+        val dockerfile = File(project, "Dockerfile")
+        val compose = File(project, "compose.yaml")
+        val dockerfileText = if (dockerfile.isFile) runCatching { dockerfile.readText() }.getOrDefault("") else ""
+        val composeText = if (compose.isFile) runCatching { compose.readText() }.getOrDefault("") else ""
+        val stalePdockerShaderTuning =
+            "LLAMA_CPP_VULKAN_SHADER_PROFILE" in dockerfileText ||
+                "pdocker-bridge-safe-glslc" in dockerfileText ||
+                "LLAMA_CPP_VULKAN_SHADER_PROFILE" in composeText
+        val staleCheckout =
+            "git checkout \"\$LLAMA_CPP_REF\"" in dockerfileText &&
+                "git checkout --detach FETCH_HEAD" !in dockerfileText
+        if (!stalePdockerShaderTuning && !staleCheckout) return
+        val backupDir = File(project, ".pdocker-template-backups/llama-cpp-gpu-${System.currentTimeMillis()}")
+        backupDir.mkdirs()
+        listOf(
+            "Dockerfile",
+            "compose.yaml",
+            "README.md",
+            "scripts/pdocker-gpu-profile.sh",
+            "scripts/start-llama-server.sh",
+            ".dockerignore",
+        ).forEach { relative ->
+            val dest = File(project, relative)
+            if (dest.exists()) dest.copyTo(File(backupDir, relative).also { it.parentFile?.mkdirs() }, overwrite = true)
+            copyAssetFile("project-library/llama-cpp-gpu/$relative", dest)
+            if (relative.startsWith("scripts/")) dest.setExecutable(true, false)
+        }
+        File(project, ".pdocker-template-id").writeText("llama-cpp-gpu\n")
+        File(project, ".pdocker-template-version").writeText("5\n")
+        ensureProjectDocumentsEnv(project)
+    }
+
+    private fun copyAssetFile(assetPath: String, dest: File) {
+        dest.parentFile?.mkdirs()
+        assets.open(assetPath).use { input ->
+            dest.outputStream().use { output -> input.copyTo(output) }
+        }
+    }
+
     private fun migrateDefaultDevWorkspace(project: File) {
+        repairDefaultDevWorkspaceDockerfile(project)
         val dockerfile = File(project, "Dockerfile")
         if (dockerfile.isFile) {
             var text = dockerfile.readText()
@@ -3690,6 +4741,24 @@ class MainActivity : AppCompatActivity() {
                         "       done",
                 )
             }
+            if (!text.contains("CODE_SERVER_IMAGE_EXTENSIONS_DIR")) {
+                text = text.replace(
+                    "CODE_SERVER_EXTENSIONS_DIR=/workspace/.vscode-server/extensions",
+                    "CODE_SERVER_EXTENSIONS_DIR=/workspace/.vscode-server/extensions \\\n    CODE_SERVER_IMAGE_EXTENSIONS_DIR=/opt/pdocker/code-server/extensions",
+                )
+            }
+            text = text.replace(
+                "RUN mkdir -p /workspace \"\$CODE_SERVER_USER_DATA_DIR/User\" \"\$CODE_SERVER_EXTENSIONS_DIR\" \\",
+                "RUN mkdir -p /workspace \"\$CODE_SERVER_USER_DATA_DIR/User\" \"\$CODE_SERVER_EXTENSIONS_DIR\" \"\$CODE_SERVER_IMAGE_EXTENSIONS_DIR\" \\",
+            )
+            text = text.replace(
+                "code-server --extensions-dir \"\$CODE_SERVER_EXTENSIONS_DIR\" --install-extension \"\$ext\";",
+                "code-server --extensions-dir \"\$CODE_SERVER_IMAGE_EXTENSIONS_DIR\" --install-extension \"\$ext\";",
+            )
+            text = text.replace(
+                "code-server --extensions-dir \"\$CODE_SERVER_EXTENSIONS_DIR\" --install-extension \"\$ext\" || true;",
+                "code-server --extensions-dir \"\$CODE_SERVER_IMAGE_EXTENSIONS_DIR\" --install-extension \"\$ext\" || true;",
+            )
             text = text.replace("openai.chatgpt", "OpenAI.chatgpt")
             dockerfile.writeText(text)
         }
@@ -3710,6 +4779,28 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             compose.writeText(text)
+        }
+
+        val dockerignore = File(project, ".dockerignore")
+        val dockerignoreText = if (dockerignore.isFile) runCatching { dockerignore.readText() }.getOrDefault("") else ""
+        val requiredDockerignore = listOf("workspace/", "documents/", "logs/", "profiles/", "models/")
+        if (requiredDockerignore.any { it !in dockerignoreText }) {
+            dockerignore.parentFile?.mkdirs()
+            val merged = (dockerignoreText.lineSequence().map { it.trimEnd() } + requiredDockerignore.asSequence())
+                .filter { it.isNotBlank() }
+                .distinct()
+                .joinToString("\n")
+            dockerignore.writeText("$merged\n")
+        }
+
+        val startScript = File(project, "scripts/start-code-server.sh")
+        val startScriptText = if (startScript.isFile) runCatching { startScript.readText() }.getOrDefault("") else ""
+        if (!startScriptText.contains("install_extension_if_missing")) {
+            startScript.parentFile?.mkdirs()
+            assets.open("default-project/scripts/start-code-server.sh").use { input ->
+                startScript.outputStream().use { output -> input.copyTo(output) }
+            }
+            startScript.setExecutable(true, false)
         }
 
         val extensions = File(project, "workspace/.vscode/extensions.json")
@@ -3776,6 +4867,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun repairDefaultDevWorkspaceDockerfile(project: File) {
+        val dockerfile = File(project, "Dockerfile")
+        val compose = File(project, "compose.yaml")
+        if (!dockerfile.isFile || !compose.isFile) return
+        val dockerfileText = runCatching { dockerfile.readText() }.getOrDefault("")
+        val composeText = runCatching { compose.readText() }.getOrDefault("")
+        val composeNeedsCodeServer = "/usr/local/bin/start-code-server" in composeText
+        val dockerfileProvidesCodeServer =
+            "COPY scripts/start-code-server.sh /usr/local/bin/start-code-server" in dockerfileText ||
+                "start-code-server" in dockerfileText && "code-server.dev/install.sh" in dockerfileText
+        val knownPlaceholder =
+            dockerfileText.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.toList() ==
+                listOf("FROM ubuntu:22.04", "CMD [\"/bin/bash\", \"-lc\", \"echo hello from Dockerfile\"]")
+        if (!composeNeedsCodeServer || dockerfileProvidesCodeServer && !knownPlaceholder) return
+        val backup = File(project, "Dockerfile.pdocker-broken-backup")
+        if (!backup.exists()) dockerfile.copyTo(backup, overwrite = false)
+        assets.open("default-project/Dockerfile").use { input ->
+            dockerfile.outputStream().use { output -> input.copyTo(output) }
+        }
+    }
+
     private fun migrateProjectPorts(project: File) {
         val replacements = mapOf(
             "0.0.0.0:8080" to "0.0.0.0:18080",
@@ -3784,16 +4896,53 @@ class MainActivity : AppCompatActivity() {
             "0.0.0.0:8081" to "0.0.0.0:18081",
             "8081:8081" to "18081:18081",
             "LLAMA_ARG_PORT:-8081" to "LLAMA_ARG_PORT:-18081",
+            "- ./workspace:/workspace" to "- \${PDOCKER_FAST_WORKSPACE_HOST:-./workspace}:/workspace",
+            "- ./models:/models" to "- \${PDOCKER_MODEL_HOST:-./models}:/models",
+            "- ./continue:/workspace/.continue" to "- \${PDOCKER_DEV_STATE_HOST:-./state/dev}/continue:/workspace/.continue",
+            "- ./vscode:/workspace/.vscode-server/data/User" to "- \${PDOCKER_DEV_STATE_HOST:-./state/dev}/vscode:/workspace/.vscode-server/data/User",
         )
-        project.walkSafe()
+        project.walkSafe(maxEntries = 2048)
             .filter { it.isFile && it.length() <= 512 * 1024 }
             .forEach { file ->
                 val original = runCatching { file.readText() }.getOrNull() ?: return@forEach
                 val migrated = replacements.entries.fold(original) { text, (from, to) ->
                     text.replace(from, to)
                 }.let { text -> migrateComposeHeaderServiceLinks(file, text) }
+                    .let { text -> migrateComposeDocuments(file, text) }
                 if (migrated != original) file.writeText(migrated)
             }
+    }
+
+    private fun migrateComposeDocuments(file: File, text: String): String {
+        if (file.name !in setOf("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")) {
+            return text
+        }
+        var out = text
+        if ("PDOCKER_DOCUMENTS_MOUNT:" !in out && "\n    environment:\n" in out) {
+            out = out.replace(
+                "\n    environment:\n",
+                "\n    environment:\n" +
+                    "      PDOCKER_DOCUMENTS_MOUNT: \"\${PDOCKER_DOCUMENTS_MOUNT:-/documents}\"\n" +
+                    "      PDOCKER_SHARED_DOCUMENTS_MOUNT: \"\${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}\"\n" +
+                    "      PDOCKER_EXPORT_DIR: \"\${PDOCKER_EXPORT_DIR:-/documents/pdocker-exports}\"\n" +
+                    "      PDOCKER_FAST_WORKDIR: \"\${PDOCKER_FAST_WORKDIR:-/workspace}\"\n",
+            )
+        }
+        if ("PDOCKER_DOCUMENTS_HOST" !in out && "\n    volumes:\n" in out) {
+            out = out.replace(
+                "\n    volumes:\n",
+                "\n    volumes:\n" +
+                    "      - \${PDOCKER_DOCUMENTS_HOST:-./documents}:\${PDOCKER_DOCUMENTS_MOUNT:-/documents}\n" +
+                    "      - \${PDOCKER_SHARED_DOCUMENTS_HOST:-./shared-documents}:\${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}\n",
+            )
+        } else if ("PDOCKER_SHARED_DOCUMENTS_HOST" !in out && "\n    volumes:\n" in out) {
+            out = out.replace(
+                "\n    volumes:\n",
+                "\n    volumes:\n" +
+                    "      - \${PDOCKER_SHARED_DOCUMENTS_HOST:-./shared-documents}:\${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}\n",
+            )
+        }
+        return out
     }
 
     private fun migrateComposeHeaderServiceLinks(file: File, text: String): String {

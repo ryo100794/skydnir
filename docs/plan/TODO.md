@@ -80,6 +80,51 @@ or closes.
   merged image/rootfs view bytes with explicit overlap notes so UI totals do
   not double-count hardlinked lower data.
 
+### Current Open Risk Ledger 2026-05-05
+
+Keep these risks visible across context compaction until each has an
+implementation change plus a focused verification artifact.
+
+- [next] SAF/Documents boundary: a user-selected Android Documents directory is
+  an explicit `/documents` exchange mount only. Hot runtime paths, model files,
+  caches, layer data, and project internals stay app-private unless the Compose
+  file declares a volume or bind that intentionally exposes them. Phase 1 now
+  creates the SAF mediator contract, app-private mirror/sidecar roots, explicit
+  UI sync actions, and `/system/documents/status|sync-to-tree|sync-from-tree`
+  daemon metadata routes. Sync reports must expose `Success`, `SourceFiles`,
+  `SourceBytes`, `Files`, `Directories`, `Bytes`, and `Errors` consistently in
+  both directions. Phase 2 is still not implemented: delete propagation, rename
+  detection, conflict detection/quarantine/rescan UX, and full Unix metadata
+  emulation must remain explicit design work rather than implied behavior.
+- [next] SD-card/FAT32/exFAT exchange metadata: external Documents storage may
+  hold raw payload bytes, but Unix metadata must be app-private sidecar state
+  with rebuild/check evidence, conflict handling, and clear emulation limits for
+  symlinks, uid/gid, modes, xattrs, hardlinks, special files, and executable
+  semantics. SAF `DocumentProvider` mediation is required unless direct POSIX
+  writability is proven for the selected path.
+- [next] Storage metrics accounting: the shared layer pool is counted once for
+  total storage. Image apparent sizes, container apparent rootfs sizes, and
+  merged views intentionally overlap lower-layer bytes, so UI summaries and
+  tests must not add those apparent values together as unique usage.
+- [next] Service health truth source: health must be derived from Engine
+  container state, current Engine container ID, real listener evidence, and
+  matching logs. Project cards, Compose metadata, requested ports, old names,
+  and completed jobs are not sufficient to mark a service healthy.
+- [next] Interactive terminal regression: the latest `-it` breakage is likely
+  the PTY fallback/pipe path launching a noninteractive shell, producing
+  `/usr/bin/[: extra argument b]`. Keep the fix focused on PTY allocation,
+  argv preservation, and interactive shell mode rather than papering over the
+  symptom in scripts.
+- [next] Runtime freeze risk: one Engine stop returned HTTP 204 while
+  `pdocker-direct`/child processes and the GPU executor stayed alive. Stop,
+  cleanup, and UI state must prove process-tree and executor teardown, not just
+  API acknowledgement.
+- [next] llama GPU layer evidence: the old `--gpu-layers 1` /
+  `--n-gpu-layers 1` probe offloaded only the output layer. The llama template
+  and compare script now default to at least `--n-gpu-layers 2`; next device
+  evidence must show `offloading N repeating layers` before treating the result
+  as meaningful transformer-layer acceleration.
+
 ### Runtime / Compose-Up
 
 - [done] Remove upstream Docker CLI/Compose from APK payload. Product UI must
@@ -197,12 +242,22 @@ or closes.
   trapped syscall.
 - [next] Run optional PRoot/proot-like comparison only when an existing command
   is supplied; do not download or bundle external PRoot/fakechroot.
-- [next] Prototype APK-scoped memory pager. System swap/zram tuning is blocked
+- [doing] Prototype APK-scoped memory pager. System swap/zram tuning is blocked
   on production devices (`adb root` unavailable, `swapon` not permitted), so the
-  viable path is opt-in managed regions under pdocker control. Design recorded
-  in `docs/design/APK_MEMORY_PAGER.md`: first probe userfaultfd availability,
-  then prototype ptrace `SIGSEGV` interception for `PROT_NONE` managed pages,
-  then measure synthetic fault latency before any llama/container opt-in.
+  viable path is opt-in managed regions under pdocker control. The SDK28 compat
+  APK now proves the ptrace fallback PoC: reserved `PROT_NONE` page, SIGSEGV
+  stop, generic aarch64 `svc; brk` syscall injection for tracee `mprotect`,
+  page write, register restore, and original-instruction resume. Compose memory
+  keys (`mem_limit`, `memswap_limit`, `deploy.resources.limits.memory`) now feed
+  Engine metadata, while `PDOCKER_MEMORY_PAGER=managed` or
+  `io.pdocker.memory-pager=managed` remains the explicit pager opt-in. Next
+  slice: add managed-region tables, backing files, dirty tracking, thread/signal
+  guardrails, and synthetic fault-latency benchmarks before any llama/container
+  opt-in.
+- [next] Revisit Dockerfile build memory pressure without changing upstream
+  Dockerfiles. The managed-region pager remains explicit and opt-in; ordinary
+  toolchain heap allocations such as `cc1plus` are not yet under pdocker memory
+  ownership.
 - [doing] Profile remaining hot trapped syscalls after `newfstatat/openat` and
   decide which can be safely handled with fewer ptrace stops. Current tuning
   adds seccomp errno returns for probe syscalls and uses a blocking
@@ -215,6 +270,14 @@ or closes.
   with `newfstatat` and `openat` still the top trapped syscalls. After removing
   default per-stop `/proc/<pid>/status` validation, the same lightweight run on
   2026-05-03 reported about 0.141s / 1,069 stops.
+- [doing] Decouple daemon lifetime from UI crashes and background ANR paths.
+  `PdockerdService` runs in the dedicated `:pdockerd` process, and the boot/debug
+  receivers now run there too so daemon-only test starts do not wake the UI
+  process. Heavy service startup work (runtime prepare, executor launch, Python
+  init) is off the lifecycle main thread. SOG15 debug install on 2026-05-05
+  verified receiver-only daemon start, socket ping, no pdocker ANR/FATAL during
+  the observation window, and no default UI process after receiver startup.
+  Next check: container process reconciliation across UI process death.
 - [done] Optimize Python layer diff/snapshot by comparing against a compact
   prior-layer path index and re-hardlinking committed snapshot files. Tiny
   Android `RUN` layer snapshots dropped from about 3.0s to about 1.5-1.9s.
@@ -286,6 +349,18 @@ or closes.
   model.
 - [next] Replace `/proc/self/exe` rootfs temporary symlink mediation with direct
   readlink emulation that does not mutate image state.
+- [next] Direct syscall Phase 2 contract work:
+  - finish attach/PTY/signals semantics beyond the current tiny start/logs and
+    raw signaled-root status paths;
+  - replace remaining permissive compatibility answers with syscall-specific
+    Linux errno parity tests;
+  - add a RUN changed-path manifest from traced filesystem mutations so layer
+    snapshots do not require a full post-RUN rootfs walk;
+  - harden bind, project volume, and named volume path rewrite as one contract
+    across filesystem syscalls and AF_UNIX socket paths;
+  - replace `/proc/self/exe` rootfs temporary symlink mediation with direct
+    readlink emulation that reports the guest executable without mutating image
+    state.
 - [next] Remove normal stderr diagnostics from direct runtime logs once default
   workspace start is stable.
 
@@ -438,8 +513,10 @@ Real implementation needed:
 5. Keep merged-usr symlinks (`/bin`, `/sbin`, `/lib`, `/lib64`) as image data.
    Do not flatten them into directories and do not paper over a broken rootfs
    by redirecting hard-coded paths to `/usr/...`.
-6. Add bind mount/path rewrite support for project volumes and named volumes.
-7. Add Engine-level TTY plumbing for `docker run -t` and `docker exec -it`.
+6. Complete bind/project/named-volume path rewrite parity across filesystem
+   syscalls and AF_UNIX socket paths.
+7. Add Engine-level attach and TTY plumbing for `docker run -t` and
+   `docker exec -it`, including resize and signal forwarding.
 8. Add process supervision that survives UI navigation and reports honest exit
    codes.
 9. Reduce direct-runtime overhead for apt/npm-heavy Dockerfiles. Current
@@ -688,7 +765,16 @@ Reusable scenario:
   in CPU mode, records an HTTP benchmark, restarts it in forced Vulkan mode,
   records either a GPU HTTP benchmark or a structured model-load failure, writes
   `docs/test/llama-gpu-compare-latest.json`, copies it to
-  `files/pdocker/bench`, and restores the CPU server.
+  `files/pdocker/bench`, and leaves the last measured mode running by default.
+  CPU fallback restore is available with `--restore`; the next run always
+  recreates the mode it needs before measuring.
+- Direct Engine API containers created by the comparison scenario must carry
+  the same pdocker project/compose labels used by UI-launched compose services,
+  so `docker ps`, container cards, project cards, and service URL shortcuts all
+  reconcile against the same state object.
+- During tight GPU bridge tuning, pass `--gpu-only` to reuse the latest recorded
+  CPU baseline, or `--cpu-tps N` to pin a known baseline. Full CPU/GPU
+  comparison remains the milestone gate.
 
 Tasks:
 
@@ -716,11 +802,27 @@ Tasks:
 6. **[active] Add persistent GPU command-ring transport.**
    Replace per-dispatch socket commands with shared ring descriptors, reusable
    buffer handles, fences, and error records under `/run/pdocker-gpu`. Latest
-   8B Qwen3 Q4_K_M result after `VULKAN_DISPATCH_V2`: `served=true`,
-   CPU 0.1559 tok/s, GPU 0.1230 tok/s, speedup 0.789x,
-   `target_met=false`; front blocker is bridge upload/copy overhead, so the
-   next action is persistent registered buffers plus a larger `n_predict`
-   rerun.
+   8B Qwen3 Q4_K_M resident-cache probe: `served=true`, CPU 0.4153 tok/s,
+   GPU 0.3668 tok/s, speedup 0.883x, `target_met=false`. The executor-side
+   resident cache now retains one 510,504,960-byte generic-dispatch binding,
+   but the dominant cost has moved to `vkCmdCopyBuffer` transfer-only traffic.
+   Next action: record copy-buffer operations in `pdocker-vulkan-icd.so`
+   command buffers, execute them during `vkQueueSubmit`, then add reusable
+   bridge buffer handles for repeated large copy sources. Current slice:
+   `PDOCKER_VULKAN_ALIAS_COPIES=1` is opt-in for the llama compare flow and
+   lets dispatch binding 0 read from the original copied source fd/offset when
+   a copy alias fully covers the descriptor range. The executor also caches
+   repeated Vulkan compute pipelines by SPIR-V hash and specialization; the
+   latest GPU-only probe improved to 0.939x CPU but is still transfer-bound.
+   Hidden optimization slice: the APK-side executor now keeps a mutable Vulkan
+   buffer cache for repeated writable fd/offset/size bindings. It still reloads
+   from and writes back to the container fd for correctness, but avoids repeated
+   `vkCreateBuffer`/`vkAllocateMemory`/`vkMapMemory` churn on hot activation and
+   staging buffers. Next, connect the APK memory-pager PoC to GPU transport as
+   a virtual buffer table: reserve large logical buffer ranges, materialize
+   touched pages or spans lazily, track dirty ranges, and pin bridge-visible
+   pages while a command is in flight so huge model buffers do not require
+   whole-buffer copies or duplicate OOM-sized allocations.
 7. **[next] Establish small-model GPU green path.**
    Use the same unmodified llama.cpp container with a small GGUF model to prove
    model load, first token, and `llama-bench -ngl 1` before returning to 8B.
@@ -736,8 +838,9 @@ Tasks:
     do not appear in `docker ps`; container cards are reconciled only from
     Engine API `/containers/json?all=1`. The llama GPU compare operation must
     surface CPU/GPU tokens/s, speedup, `target_met`, GPU layer count, current
-    blocker, and artifact paths while cleanup removes ADB forwarding, marks
-    failed operations on nonzero exit, and restores CPU mode by default.
+    blocker, and artifact paths while cleanup removes ADB forwarding and marks
+    failed operations on nonzero exit. CPU restore is opt-in because the next
+    compare run recreates the required mode before measurement.
 
 11. **[doing] Rework project/container identity.**
     Stop using project-name prefixes as the primary relationship key. Compose
@@ -842,13 +945,13 @@ Next implementation slice:
 - Lower minimal Vulkan compute calls from `pdocker-vulkan-icd.so` into the
   bridge before enabling llama.cpp GPU layers; llama.cpp itself must remain
   unmodified.
-- Implement the next llama Vulkan bridge blockers found on 2026-05-04:
-  split or otherwise support 4 GiB+ model buffers, handle pinned host-buffer
-  paths without crashing, and reduce bridge upload/copy overhead now that real
-  llama.cpp SPIR-V dispatch serves HTTP. Current forced-GPU status after
-  `VULKAN_DISPATCH_V2`: Qwen3 8B Q4_K_M serves with `--n-gpu-layers 1`, but
-  GPU throughput is still below CPU because transfer-heavy bridge dispatches
-  dominate.
+- Implement the next llama Vulkan bridge blockers found on 2026-05-04 and
+  refined by the 2026-05-05 resident-cache probe: split or otherwise support
+  4 GiB+ model buffers, handle pinned host-buffer paths without crashing, and
+  reduce bridge upload/copy overhead now that real llama.cpp SPIR-V dispatch
+  serves HTTP. Current forced-GPU status after `VULKAN_DISPATCH_V2`: Qwen3 8B
+  Q4_K_M serves with `--n-gpu-layers 1`, but GPU throughput is still below CPU
+  because copy-buffer staging and transfer-heavy bridge dispatches dominate.
 - Keep CPU fallback healthy while GPU work is incomplete. CPU mode must hide
   Vulkan devices with `GGML_VK_VISIBLE_DEVICES=""` so llama.cpp does not enter
   Vulkan buffer scheduling with `--n-gpu-layers 0`.
@@ -946,9 +1049,9 @@ Heavy tests, run before major runtime changes:
 - llama GPU completion gate: `bash scripts/android-llama-gpu-compare.sh` must
   write `docs/test/llama-gpu-compare-latest.json`, copy it to
   `files/pdocker/bench`, report `target_met`, current blocker, GPU layer count,
-  and restore CPU mode after the experiment. Do not claim GPU completion until
-  the same unmodified llama.cpp image/model beats the CPU baseline by the
-  target ratio.
+  and leave the last measured mode running unless `--restore` is explicitly
+  requested. Do not claim GPU completion until the same unmodified llama.cpp
+  image/model beats the CPU baseline by the target ratio.
 - Runtime performance bench:
   `bash scripts/android-runtime-bench.sh` for short direct syscall stats, and
   `bash scripts/android-runtime-bench.sh --apt-update` for the slow apt wall

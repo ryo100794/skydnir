@@ -44,9 +44,6 @@ class PdockerdService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        if (!Python.isStarted()) {
-            Python.start(AndroidPlatform(this))
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -130,15 +127,19 @@ class PdockerdService : Service() {
     }
 
     private fun startPdockerd() {
-        val runtime = PdockerdRuntime.prepare(this)
-        startGpuExecutor(runtime)
-        startMediaExecutor(runtime)
-        val home = File(filesDir, "pdocker").apply { mkdirs() }
-        val sock = File(home, "pdockerd.sock")
         stopFlag = false
 
         pdockerThread = Thread({
             try {
+                val appContext = applicationContext
+                val runtime = PdockerdRuntime.prepare(appContext)
+                startGpuExecutor(runtime)
+                startMediaExecutor(runtime)
+                val home = File(filesDir, "pdocker").apply { mkdirs() }
+                val sock = File(home, "pdockerd.sock")
+                if (!Python.isStarted()) {
+                    Python.start(AndroidPlatform(appContext))
+                }
                 val py = Python.getInstance()
                 val mod = py.getModule("pdockerd_bridge")
                 mod.callAttr(

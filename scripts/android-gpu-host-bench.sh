@@ -7,6 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
 PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+CLASS_PREFIX="${PDOCKER_CLASS_PREFIX:-io.github.ryo100794.pdocker}"
 RUNS="${PDOCKER_GPU_HOST_RUNS:-5}"
 OUT_JSON="${PDOCKER_GPU_HOST_OUT:-$ROOT/docs/test/gpu-host-native-latest.json}"
 OUT_MD="${PDOCKER_GPU_HOST_MD:-$ROOT/docs/test/gpu-host-native-latest.md}"
@@ -63,7 +64,7 @@ run_as() {
 }
 
 mkdir -p "$(dirname "$OUT_JSON")" "$(dirname "$OUT_MD")"
-"$ADB" shell monkey -p "$PKG" 1 >/dev/null
+"$ADB" shell am start -n "$PKG/$CLASS_PREFIX.MainActivity" >/dev/null
 
 bench_cmd='cd files && ./pdocker-runtime/gpu/pdocker-gpu-executor'
 run_as "$bench_cmd --bench-cpu-matmul256 $RUNS" >"$TMP/cpu_matmul.jsonl"

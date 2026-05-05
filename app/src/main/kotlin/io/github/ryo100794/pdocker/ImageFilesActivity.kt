@@ -58,6 +58,7 @@ class ImageFilesActivity : AppCompatActivity() {
     private var currentMergedLower: File? = null
     private var currentMergedUpper: File? = null
     private var currentMergedRel = ""
+    private var standaloneRoot = false
     private var availableRoots: List<BrowserRoot> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,7 +119,21 @@ class ImageFilesActivity : AppCompatActivity() {
             ?.takeIf { it.isNotBlank() && it.indexOf(File.separatorChar) < 0 }
         val selectedContainer = intent.getStringExtra(EXTRA_CONTAINER_ID)
             ?.takeIf { it.isNotBlank() && it.indexOf(File.separatorChar) < 0 }
+        val selectedRoot = intent.getStringExtra(EXTRA_ROOT_PATH)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { File(it) }
+        val selectedRootLabel = intent.getStringExtra(EXTRA_ROOT_LABEL)
+            ?.takeIf { it.isNotBlank() }
+            ?: getString(R.string.title_debug_resource_files)
+        val selectedRootWritable = intent.getBooleanExtra(EXTRA_ROOT_WRITABLE, false)
         when {
+            selectedRoot != null -> {
+                standaloneRoot = true
+                availableRoots = listOfNotNull(debugBrowserRoot(selectedRoot, selectedRootLabel, selectedRootWritable))
+                if (availableRoots.isNotEmpty()) {
+                    selectRoot(availableRoots.first())
+                }
+            }
             selectedImage != null -> {
                 val image = File(imageRoot, selectedImage)
                 selectRoot(image.name, File(image, "rootfs"))
@@ -366,6 +381,10 @@ class ImageFilesActivity : AppCompatActivity() {
         }
         val rootfs = root.canonicalFile
         if (dir == null || dir.canonicalFile == rootfs) {
+            if (standaloneRoot) {
+                finish()
+                return
+            }
             if (currentMergedLower != null && currentMergedRel.isNotBlank()) {
                 currentMergedRel = currentMergedRel.substringBeforeLast('/', "")
                 render()
@@ -558,6 +577,24 @@ class ImageFilesActivity : AppCompatActivity() {
         }
     }
 
+    private fun debugBrowserRoot(root: File, label: String, writable: Boolean): BrowserRoot? {
+        val canonical = runCatching { root.canonicalFile }.getOrNull() ?: return null
+        if (!canonical.isDirectory) return null
+        if (!isAllowedDebugRoot(canonical)) return null
+        return BrowserRoot(label, canonical, writable = writable && canonical.canWrite())
+    }
+
+    private fun isAllowedDebugRoot(root: File): Boolean {
+        val allowed = listOfNotNull(
+            filesDir,
+            cacheDir,
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) codeCacheDir else null,
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) noBackupFilesDir else null,
+            applicationInfo.nativeLibraryDir?.takeIf { it.isNotBlank() }?.let { File(it) },
+        ).mapNotNull { runCatching { it.canonicalFile }.getOrNull() }
+        return allowed.any { base -> root == base || root.isInside(base) }
+    }
+
     private fun mergedEntries(lowerRoot: File, upperRoot: File, rel: String): List<MergedEntry> {
         val lowerDir = File(lowerRoot, rel)
         val upperDir = File(upperRoot, rel)
@@ -600,5 +637,8 @@ class ImageFilesActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_IMAGE_NAME = "io.github.ryo100794.pdocker.extra.IMAGE_NAME"
         const val EXTRA_CONTAINER_ID = "io.github.ryo100794.pdocker.extra.CONTAINER_ID"
+        const val EXTRA_ROOT_PATH = "io.github.ryo100794.pdocker.extra.ROOT_PATH"
+        const val EXTRA_ROOT_LABEL = "io.github.ryo100794.pdocker.extra.ROOT_LABEL"
+        const val EXTRA_ROOT_WRITABLE = "io.github.ryo100794.pdocker.extra.ROOT_WRITABLE"
     }
 }

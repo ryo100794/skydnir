@@ -1,6 +1,6 @@
 # F-Droid and Reproducible-Build Readiness Plan
 
-Snapshot date: 2026-05-04.
+Snapshot date: 2026-05-05.
 
 This document is a readiness plan for CI and F-Droid-style release builds. It
 does not claim that pdocker-android is ready for F-Droid submission. Treat it as
@@ -246,6 +246,12 @@ notes:
   signing property files, or generated signature material are committed.
 - Runtime-download wording that distinguishes app-shipped code from
   user-directed container/image/package downloads.
+- Storage metrics release evidence from
+  `python3 scripts/verify-storage-metrics.py` and, for device-tested RCs, a
+  captured snapshot or note that uses the accounting language from
+  `docs/test/STORAGE_METRICS.md`: shared layer pool counted once, image/rootfs
+  apparent views overlap lower data, and container upperdir bytes are private
+  writable storage.
 - Known blockers, unsupported Docker compatibility scope, and any required
   user data reset or upgrade notes.
 

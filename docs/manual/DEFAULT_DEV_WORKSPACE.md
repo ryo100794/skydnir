@@ -67,10 +67,34 @@ default-project/
   open that declared service after compose up reports a healthy listener.
 - `compose.yaml` requests `gpus: all`, which maps to pdocker's experimental
   Vulkan passthrough / CUDA-compatible API negotiation.
-- The template mounts the APK-configured shared Documents folder at
-  `/documents`. The app writes `PDOCKER_DOCUMENTS_HOST` and
-  `PDOCKER_DOCUMENTS_MOUNT` into project `.env` files; if no folder has been
-  selected yet, Compose falls back to `./documents`.
+- The selected Android Documents folder is the default pdocker workspace root
+  only when Android exposes it as a direct app-writable path. The app records
+  the persisted SAF tree URI separately and classifies storage as
+  `direct-path-writable` or `saf-mediated`; removable SD-card trees that only
+  allow URI writes are not advertised to containers as writable POSIX paths.
+- In `saf-mediated` mode, pdocker keeps project definitions and the `/documents`
+  exchange surface in an app-private mirror, persists the SAF tree URI, and uses
+  a lightweight Android mediator for DocumentProvider directory creation,
+  listing, existence checks, and payload reads/writes. The mirror path is what
+  Compose binds into containers; the selected SAF tree remains a mediated
+  exchange endpoint rather than a fake `/storage/...` bind. Files written under
+  `/documents/pdocker-exports/` are buffered through the mirror and then evicted
+  from app-private payload storage after the mediator successfully writes them
+  to the selected Documents tree; the app keeps sidecar metadata for Unix-like
+  mode, timestamp, MIME type, and payload state.
+- Removable SD-card Documents trees may be FAT32 or exFAT. pdocker treats them
+  as raw file-payload exchange storage plus app-private metadata for
+  Docker-like mode/uid/gid, symlink, and xattr evidence where that evidence can
+  be represented. Metadata can be rebuilt or checked from the SAF tree, but
+  conflicts with edits from Android file managers must be surfaced instead of
+  resolved silently.
+- The template mounts the selected Documents folder at `/documents` and the
+  cross-project shared folder at `/shared`. Override `PDOCKER_DOCUMENTS_HOST`
+  or `PDOCKER_SHARED_DOCUMENTS_HOST` when two projects intentionally need the
+  same folder.
+- Hot editor state, build caches, databases, and high-frequency logs should use
+  app-private fast storage such as `/workspace`; copy selected artifacts to
+  `/documents` when they need to be shared.
 - `OPENAI_API_KEY`, `GITHUB_TOKEN`, and `CODE_SERVER_PASSWORD` are passed
   through from the environment when provided.
 - If `CODE_SERVER_PASSWORD` is empty, code-server starts with `--auth none` for

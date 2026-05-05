@@ -1,0 +1,208 @@
+{
+  "schema": 1,
+  "surfaces": [
+    "engine-api",
+    "dockerfile",
+    "compose",
+    "terminal",
+    "filesystem",
+    "storage",
+    "documents",
+    "gpu",
+    "release",
+    "ui",
+    "validation"
+  ],
+  "requirements": [
+    {
+      "id": "BB-ENGINE-001",
+      "area": "compat-engine-api",
+      "status": "runnable",
+      "user_story": "A Docker-compatible client can discover the daemon, negotiate API version, and receive Docker-shaped JSON without knowing how pdocker is implemented.",
+      "observable_surface": ["engine-api"],
+      "positive": {
+        "given": "The daemon is reachable over its Unix socket.",
+        "when": "A client calls /_ping, /version, /info, /containers/json, /images/json, /networks, /volumes, and /events.",
+        "then": "Supported endpoints return successful Docker-compatible responses with API version metadata.",
+        "evidence": ["python3 scripts/compat-audit.py"]
+      },
+      "negative": {
+        "given": "A client asks for unsupported or malformed API behavior.",
+        "when": "The request cannot be satisfied by the advertised compatibility surface.",
+        "then": "The API fails clearly instead of returning fake success or silently ignoring the mismatch.",
+        "failure_oracle": "HTTP status, JSON error message, or compatibility audit failure marks the request as failed."
+      }
+    },
+    {
+      "id": "BB-DOCKERFILE-001",
+      "area": "build-dockerfile",
+      "status": "runnable",
+      "user_story": "A normal Dockerfile should remain portable to Docker, and pdocker-specific Dockerfile syntax must not be introduced.",
+      "observable_surface": ["dockerfile", "compose"],
+      "positive": {
+        "given": "Bundled project templates include Dockerfiles.",
+        "when": "The templates are checked as Dockerfiles.",
+        "then": "Only standard Dockerfile instructions are accepted.",
+        "evidence": ["python3 scripts/verify-dockerfile-standard.py"]
+      },
+      "negative": {
+        "given": "A Dockerfile contains a pdocker-only instruction or unknown instruction.",
+        "when": "The Dockerfile standard-surface check evaluates it.",
+        "then": "The check fails and reports the offending instruction.",
+        "failure_oracle": "A synthetic PDOCKER_RUN instruction is rejected by the blackbox negative self-test."
+      }
+    },
+    {
+      "id": "BB-STORAGE-001",
+      "area": "storage-metrics",
+      "status": "runnable",
+      "user_story": "A user can trust storage totals because shared layers are counted once and impossible negative sizes are rejected.",
+      "observable_surface": ["engine-api", "storage", "ui"],
+      "positive": {
+        "given": "The daemon reports storage, image, and container size snapshots.",
+        "when": "Storage metrics are validated.",
+        "then": "Numbers are nonnegative and shared/image/container buckets do not double count layer bytes.",
+        "evidence": ["python3 scripts/verify-storage-metrics.py"]
+      },
+      "negative": {
+        "given": "A snapshot contains negative bytes or totals that double count image views.",
+        "when": "The storage validator checks the snapshot.",
+        "then": "The snapshot fails validation.",
+        "failure_oracle": "The blackbox negative self-test feeds a corrupt fixture and requires validation errors."
+      }
+    },
+    {
+      "id": "BB-TERMINAL-001",
+      "area": "tty-exec",
+      "status": "runnable-with-device",
+      "user_story": "A user opening an interactive container terminal gets a real PTY-like session, while log-only panes stay read-only and do not summon the keyboard.",
+      "observable_surface": ["terminal", "ui"],
+      "positive": {
+        "given": "A container is available for exec.",
+        "when": "The user opens the interactive terminal route.",
+        "then": "The session accepts input, preserves arguments, and reports exit status without mixing prior logs into the shell.",
+        "evidence": ["bash scripts/android-device-smoke.sh --quick --no-install"]
+      },
+      "negative": {
+        "given": "A readonly build or daemon log pane is focused.",
+        "when": "The user selects or scrolls text.",
+        "then": "The soft keyboard does not appear and the pane never accepts terminal input.",
+        "failure_oracle": "UI contract checks fail if readonly terminals are not marked readonly or keyboard suppression is removed."
+      }
+    },
+    {
+      "id": "BB-DOCUMENTS-001",
+      "area": "documents-saf-mediator",
+      "status": "runnable-with-device",
+      "user_story": "A user-selected Documents folder is an explicit exchange mount, not an unsafe executable rootfs or hot writable container home.",
+      "observable_surface": ["documents", "filesystem", "ui"],
+      "positive": {
+        "given": "The user has granted a Documents tree.",
+        "when": "A container or test writes an export payload through the mediated Documents route.",
+        "then": "The payload appears in the selected tree with sidecar metadata, and the app mirror payload can be evicted.",
+        "evidence": ["bash scripts/android-documents-mediator-smoke.sh"]
+      },
+      "negative": {
+        "given": "No SAF grant exists or the tree refuses writes.",
+        "when": "The app attempts to sync mediated exports.",
+        "then": "The operation fails visibly and does not pretend the public folder is a POSIX bind mount.",
+        "failure_oracle": "UI action checks fail if missing grants are treated as direct writable paths or write errors are swallowed."
+      }
+    },
+    {
+      "id": "BB-GPU-001",
+      "area": "gpu-bridge",
+      "status": "runnable",
+      "user_story": "A container-visible GPU API bridge should either run supported compute work correctly or fail unsupported kernels explicitly.",
+      "observable_surface": ["gpu", "engine-api"],
+      "positive": {
+        "given": "The GPU executor and bridge libraries are available.",
+        "when": "The bridge smoke test dispatches the supported vector workload.",
+        "then": "The output matches the CPU reference within tolerance.",
+        "evidence": ["bash scripts/smoke-vulkan-icd-bridge.sh"]
+      },
+      "negative": {
+        "given": "A container program requests unsupported GPU behavior.",
+        "when": "The bridge cannot lower or dispatch that request safely.",
+        "then": "The request fails with diagnostics rather than silently executing a wrong CPU or fake GPU result.",
+        "failure_oracle": "Project-library and UI checks fail if unsupported kernels are accepted without an explicit failure path."
+      }
+    },
+    {
+      "id": "BB-RELEASE-001",
+      "area": "release-readiness",
+      "status": "runnable",
+      "user_story": "A release candidate must not contain test-only Docker CLI payloads, PRoot payloads, signing secrets, or misleading release metadata.",
+      "observable_surface": ["release"],
+      "positive": {
+        "given": "A debug or release artifact has been built.",
+        "when": "Release readiness checks inspect payloads and repository metadata.",
+        "then": "Allowed payloads are present, forbidden payloads are absent, and secrets are not tracked.",
+        "evidence": ["python3 scripts/verify-release-readiness.py", "python3 scripts/compat-audit.py"]
+      },
+      "negative": {
+        "given": "A forbidden payload, signing material, or active F-Droid metadata is tracked.",
+        "when": "Release readiness runs.",
+        "then": "The check fails before publication.",
+        "failure_oracle": "Release verifier failure blocks the scenario runner."
+      }
+    },
+    {
+      "id": "BB-INPUT-001",
+      "area": "input-validation",
+      "status": "runnable",
+      "user_story": "A user or client that sends malformed requests, invalid project files, or impossible numeric values receives clear rejection instead of a crash or misleading success.",
+      "observable_surface": ["engine-api", "dockerfile", "storage", "validation"],
+      "positive": {
+        "given": "The validation fixtures and bundled templates are available.",
+        "when": "The input validation gate checks API arguments, file grammar, and value ranges.",
+        "then": "Valid ledgers and templates pass, and supported loose inputs such as a nonnumeric diagnostics limit are clamped without a server error.",
+        "evidence": ["python3 scripts/verify-input-validation.py"]
+      },
+      "negative": {
+        "given": "Malformed JSON, non-object API bodies, pdocker-only Dockerfile syntax, negative byte counts, or impossible totals are supplied.",
+        "when": "The input validation gate evaluates those inputs.",
+        "then": "The invalid input is rejected with an explicit failure instead of being accepted or hidden.",
+        "failure_oracle": "The validation verifier runs fail-expected cases and fails if any invalid input is accepted."
+      }
+    },
+    {
+      "id": "BB-STRESS-001",
+      "area": "random-stress-regression",
+      "status": "runnable",
+      "user_story": "A build can be checked with reproducible random, monkey, stress, and benchmark procedures whose results are tied to the build set and can expose drift over repeated runs.",
+      "observable_surface": ["engine-api", "ui", "validation"],
+      "positive": {
+        "given": "The stress regression ledger defines seeds, lanes, artifact fields, and variance policy.",
+        "when": "The fast stress regression verifier runs.",
+        "then": "A seeded random API sequence repeats with the same fingerprint and stable response summary, while heavy monkey/stress scenarios remain scheduled with artifact paths.",
+        "evidence": ["python3 scripts/verify-stress-regression.py"]
+      },
+      "negative": {
+        "given": "A random test lacks a seed, an artifact lacks build-set fields, or repeated results drift outside the stable summary.",
+        "when": "The stress regression verifier evaluates the process.",
+        "then": "The process is rejected before the build is treated as reproducibly tested.",
+        "failure_oracle": "The verifier fails on missing seed/artifact fields or repeated summary drift."
+      }
+    },
+    {
+      "id": "BB-TESTDESIGN-001",
+      "area": "test-design-governance",
+      "status": "runnable",
+      "user_story": "A contributor can know the minimum test standard for a change, and the repository rejects changes that remove required test design coverage.",
+      "observable_surface": ["validation", "release"],
+      "positive": {
+        "given": "The test design criteria and scenario ledgers are present.",
+        "when": "The test design verifier runs during fast verification.",
+        "then": "The repository records the 2x literal token gate, required axes, runner wiring, and artifact rules; the gate fails until the current shortfall is closed.",
+        "evidence": ["python3 scripts/verify-test-design-criteria.py"]
+      },
+      "negative": {
+        "given": "A required design axis, documentation link, runner command, or minimum check count is removed.",
+        "when": "The test design verifier evaluates the repository.",
+        "then": "The verification fails and blocks the build from being treated as adequately tested.",
+        "failure_oracle": "The design verifier fails if required docs, axes, runner wiring, or minimums are missing."
+      }
+    }
+  ]
+}

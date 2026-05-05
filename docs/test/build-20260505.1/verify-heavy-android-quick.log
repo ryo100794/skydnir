@@ -1,0 +1,29 @@
+[pdocker smoke] device: 10.8.135.134:37669
+[pdocker smoke] installing /root/tl/pdocker-android/app/build/outputs/apk/compat/debug/app-compat-debug.apk
+[pdocker smoke] staging test-only Docker CLI/Compose outside APK
+[pdocker smoke] docker version
+Client:
+ Version:           29.4.0
+ API version:       1.43 (downgraded from 1.54)
+ Go version:        go1.26.1
+ Git commit:        9d7ad9f
+ Built:             Tue Apr  7 08:34:25 2026
+ OS/Arch:           linux/arm64
+ Context:           default
+
+Server: pdockerd
+ Engine:
+  Version:          0.1.0
+  API version:      1.43 (minimum version 1.12)
+  Go version:       none
+  Git commit:       pdocker
+  Built:            Fri Apr 17 00:00:00 2026
+  OS/Arch:          linux/arm64
+  Experimental:     false
+[pdocker smoke] direct executor probe
+[pdocker smoke] compat direct process probe
+[pdocker smoke] compat memory pager syscall probe
+[pdocker smoke] compat memory pager poc
+[pdocker smoke] quick mode passed
+
+verify-heavy (android-quick): PASS

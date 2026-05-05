@@ -22,8 +22,8 @@ Current TODO counters:
 | State | Count |
 |---|---:|
 | done | 51 |
-| doing | 6 |
-| next | 25 |
+| doing | 8 |
+| next | 33 |
 | blocked | 0 |
 
 ## Timeline
@@ -34,7 +34,6 @@ Keep the UI compose path truthful and visible while closing regressions that blo
 
 - [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from device discovery and...
 - Active port mapping: published ports now have an Engine-visible `PdockerNetwork.PortMappingStatus` scaffold for planned/inactive/active/ conflict states while the runtime remains...
-- Profile remaining hot trapped syscalls after `newfstatat/openat` and decide which can be safely handled with fewer ptrace stops. Current tuning adds seccomp errno returns for probe syscalls...
 
 ### Next: 2026-05-09 to 2026-05-15
 
@@ -44,7 +43,7 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 - [#7](https://github.com/ryo100794/pdocker-android/issues/7) Android storage metrics verification: add device smoke/manual coverage that layer, image-view, container-private, total, and...
 - [#8](https://github.com/ryo100794/pdocker-android/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built...
 - [#9](https://github.com/ryo100794/pdocker-android/issues/9) First public release candidate gate: define and satisfy the minimum GitHub Release criteria for a build that is honest...
-- Add a UI/device health card that checks the real listener for the service port, verifies the owning Engine container ID and health state, and links to container logs rather than relying on...
+- SAF/Documents boundary: a user-selected Android Documents directory is an explicit `/documents` exchange mount only. Hot runtime paths, model files, caches, layer data, and project...
 
 ### Then: 2026-05-16 to 2026-05-26
 

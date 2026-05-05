@@ -1,6 +1,6 @@
 {
   "schema": "pdocker.llama.gpu.compare.v1",
-  "timestamp_utc": "2026-05-04T23:22:37Z",
+  "timestamp_utc": "2026-05-05T05:58:02Z",
   "policy": {
     "llama_cpp_modified": false,
     "gpu_entry": "standard Vulkan loader through pdocker-vulkan-icd.so",
@@ -8,28 +8,31 @@
   },
   "settings": {
     "gpu_layers": 1,
-    "gpu_ctx": 512
+    "gpu_ctx": 512,
+    "predict": 4,
+    "repeat": 1,
+    "trace_alloc": false,
+    "cpu_reused": true
   },
   "cpu": {
-    "tokens_per_second": 0.15589188710558963,
+    "tokens_per_second": 0.36100235915041706,
     "summary": {
-      "predicted_tokens_per_second_mean": 0.15589188710558963,
-      "predicted_tokens_per_second_min": 0.15589188710558963,
-      "predicted_tokens_per_second_max": 0.15589188710558963,
-      "wall_seconds_mean": 32.155656290007755
+      "predicted_tokens_per_second_mean": 0.36100235915041706,
+      "predicted_tokens_per_second_min": 0.36100235915041706,
+      "predicted_tokens_per_second_max": 0.36100235915041706
     }
   },
   "gpu": {
-    "tokens_per_second": 0.12296333900307042,
+    "tokens_per_second": 0.1577190108857267,
     "summary": {
-      "predicted_tokens_per_second_mean": 0.12296333900307042,
-      "predicted_tokens_per_second_min": 0.12296333900307042,
-      "predicted_tokens_per_second_max": 0.12296333900307042,
-      "wall_seconds_mean": 40.42642404703656
+      "predicted_tokens_per_second_mean": 0.1577190108857267,
+      "predicted_tokens_per_second_min": 0.1577190108857267,
+      "predicted_tokens_per_second_max": 0.1577190108857267,
+      "wall_seconds_mean": 33.738364362041466
     },
     "served": true,
-    "state_excerpt": "{\"Id\": \"dc703cc0b0514ea4a2e5a2ee58106686\", \"Created\": \"2026-05-04T23:21:09.000000000Z\", \"Path\": \"/usr/local/bin/start-llama-server\", \"Args\": [], \"State\": {\"Status\": \"running\", \"Running\": true, \"Paused\": false, \"Restarting\": false, \"OOMKilled\": false, \"Dead\": false, \"Pid\": 22979, \"PidStartTime\": \"38961494\", \"ExitCode\": 0, \"PdockerRawReturnCode\": 0, \"PdockerSignal\": 0, \"Error\": \"\", \"StartedAt\": \"2026-05-04T23:21:10.000000000Z\", \"FinishedAt\": \"0001-01-01T00:00:00Z\", \"Health\": {\"Status\": \"starting\", \"FailingStreak\": 1, \"Log\": [{\"Start\": \"2026-05-04T23:21:12.000000000Z\", \"End\": \"2026-05-04T23:21:13.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-04T23:21:43.000000000Z\", \"End\": \"2026-05-04T23:21:44.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-04T23:22:14.000000000Z\", \"End\": \"2026-05-04T23:22:19.000000000Z\", \"ExitCode\": 1, \"Output\": \"healthcheck timed out after 5.0s\"}]}}, \"Image\": \"sha256:603172edfc7c617f962ff4050734ec1e39d4308ed1b14591f42aacbfe3535c8d\", \"ResolvConfPath\": \"\", \"HostnamePath\": \"\", \"HostsPath\": \"\", \"LogPath\": \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/logs/dc703cc0b0514ea4a2e5a2ee58106686.log\", \"Name\": \"/pdocker-llama-cpp\", \"RestartCount\": 0, \"Driver\": \"pdocker-direct\", \"Platform\": \"linux\", \"MountLabel\": \"\", \"ProcessLabel\": \"\", \"AppArmorProfile\": \"\", \"ExecIDs\": null, \"HostConfig\": {\"Binds\": [\"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/projects/llama-cpp-gpu/models:/models\", \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/projects/llama-cpp-gpu/workspace:/workspace\", \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/projects/llama-cpp-gpu/profiles:/profiles\"], \"PortBindings\": {\"18081/tcp\": [{\"HostIp\": \"127.0.0.1\", \"HostPort\": \"18081\"}]}, \"DeviceRequests\": [{\"Driver\": \"\", \"Count\": -1, \"DeviceIDs\": null, \"Capabilities\": [[\"gpu\"]], \"Options\": {}}]}, \"GraphDriver\": {\"N",
-    "log_excerpt": "offset=16384 range=512 effective=512\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16896 range=4 effective=4\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"upload_ms\":2.5640,\"dispatch_ms\":6.4862,\"download_ms\":0.0386,\"valid\":true}\npdocker-vulkan-icd: copy-buffer src_size=319553536 src_mem=319553536 src_off=0 dst_size=35141664 dst_mem=35141664 dst_off=51008 bytes=16384 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: copy-buffer src_size=35141664 src_mem=35141664 src_off=67392 dst_size=319553536 dst_mem=319553536 dst_off=0 bytes=16384 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: copy-buffer src_size=510504960 src_mem=510504960 src_off=0 dst_size=319553536 dst_mem=319553536 dst_off=16384 bytes=512 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: fill-buffer dst_size=1024 dst_mem=1024 off=0 bytes=1024 available=1024\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16384 range=512 effective=512\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16896 range=4 effective=4\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"upload_ms\":1.2471,\"dispatch_ms\":0.8647,\"download_ms\":0.0455,\"valid\":true}\npdocker-vulkan-icd: copy-buffer src_size=319553536 src_mem=319553536 src_off=0 dst_size=35141664 dst_mem=35141664 dst_off=51008 bytes=16384 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: copy-buffer src_size=35141664 src_mem=35141664 src_off=67392 dst_size=319553536 dst_mem=319553536 dst_off=0 bytes=16384 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: copy-buffer src_size=510504960 src_mem=510504960 src_off=0 dst_size=319553536 dst_mem=319553536 dst_off=16384 bytes=512 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: fill-buffer dst_size=1024 dst_mem=1024 off=0 bytes=1024 available=1024\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16384 range=512 effective=512\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16896 range=4 effective=4\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"upload_ms\":1.0086,\"dispatch_ms\":6.9034,\"download_ms\":0.0425,\"valid\":true}\npdocker-vulkan-icd: copy-buffer src_size=319553536 src_mem=319553536 src_off=0 dst_size=35141664 dst_mem=35141664 dst_off=51008 bytes=16384 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: copy-buffer src_size=35141664 src_mem=35141664 src_off=67392 dst_size=319553536 dst_mem=319553536 dst_off=0 bytes=16384 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: copy-buffer src_size=510504960 src_mem=510504960 src_off=0 dst_size=319553536 dst_mem=319553536 dst_off=16384 bytes=512 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: fill-buffer dst_size=1024 dst_mem=1024 off=0 bytes=1024 available=1024\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16384 range=512 effective=512\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16896 range=4 effective=4\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"upload_ms\":0.4024,\"dispatch_ms\":6.5736,\"download_ms\":0.0233,\"valid\":true}\npdocker-vulkan-icd: copy-buffer src_size=319553536 src_mem=319553536 src_off=0 dst_size=35141664 dst_mem=35141664 dst_off=51008 bytes=16384 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: copy-buffer src_size=35141664 src_mem=35141664 src_off=67392 dst_size=319553536 dst_mem=319553536 dst_off=0 bytes=16384 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: copy-buffer src_size=510504960 src_mem=510504960 src_off=0 dst_size=319553536 dst_mem=319553536 dst_off=16384 bytes=512 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: fill-buffer dst_size=1024 dst_mem=1024 off=0 bytes=1024 available=1024\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16384 range=512 effective=512\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16896 range=4 effective=4\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"upload_ms\":0.3198,\"dispatch_ms\":6.4864,\"download_ms\":0.0461,\"valid\":true}\npdocker-vulkan-icd: copy-buffer src_size=319553536 src_mem=319553536 src_off=0 dst_size=35141664 dst_mem=35141664 dst_off=51008 bytes=16384 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: copy-buffer src_size=35141664 src_mem=35141664 src_off=34112 dst_size=319553536 dst_mem=319553536 dst_off=0 bytes=16384 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\npdocker-vulkan-icd: copy-buffer src_size=35141664 src_mem=35141664 src_off=17728 dst_size=319553536 dst_mem=319553536 dst_off=16384 bytes=16384 ok=1\npdocker-vulkan-icd: fill-buffer dst_size=1024 dst_mem=1024 off=0 bytes=1024 available=1024\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16384 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=510521344 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=510521344 offset=16384 range=510504960 effective=510504960\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=16384 range=607744 effective=607744\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=16384 range=607744 effective=607744\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=16384 range=607744 effective=607744\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":26784,\"entry\":\"main\",\"specializations\":3,\"bindings\":5,\"dispatch\":[1187,1,64],\"backend_cached\":true,\"upload_ms\":3052.8858,\"dispatch_ms\":38.8282,\"download_ms\":273.5700,\"valid\":true}\npdocker-vulkan-icd: copy-buffer src_size=319553536 src_mem=319553536 src_off=16384 dst_size=2431008 dst_mem=2431008 dst_off=0 bytes=607744 ok=1\npdocker-vulkan-icd: queue-submit transfer-only command buffer\nslot print_timing: id  3 | task 0 | \nprompt eval time =    7832.57 ms /     6 tokens ( 1305.43 ms per token,     0.77 tokens per second)\n       eval time =   32530.02 ms /     4 tokens ( 8132.51 ms per token,     0.12 tokens per second)\n      total time =   40362.59 ms /    10 tokens\nslot      release: id  3 | task 0 | stop processing: n_tokens = 9, truncated = 0\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: POST /completion 127.0.0.1 200\n",
+    "state_excerpt": "{\"Id\": \"d6d8e18ec4df4e9585e9bf6a327d1950\", \"Created\": \"2026-05-05T05:56:34.000000000Z\", \"Path\": \"/usr/local/bin/start-llama-server\", \"Args\": [], \"State\": {\"Status\": \"running\", \"Running\": true, \"Paused\": false, \"Restarting\": false, \"OOMKilled\": false, \"Dead\": false, \"Pid\": 26435, \"ExitCode\": 0, \"PdockerRawReturnCode\": 0, \"PdockerSignal\": 0, \"Error\": \"\", \"StartedAt\": \"2026-05-05T05:56:37.000000000Z\", \"FinishedAt\": \"0001-01-01T00:00:00Z\", \"Health\": {\"Status\": \"healthy\", \"FailingStreak\": 0, \"Log\": [{\"Start\": \"2026-05-05T05:56:39.000000000Z\", \"End\": \"2026-05-05T05:56:39.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-05T05:57:09.000000000Z\", \"End\": \"2026-05-05T05:57:11.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-05T05:57:41.000000000Z\", \"End\": \"2026-05-05T05:57:44.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}]}, \"PdockerKnownPids\": [{\"Pid\": 26435, \"StartTime\": \"41334147\"}, {\"Pid\": 26446, \"StartTime\": \"41334184\"}, {\"Pid\": 26507, \"StartTime\": \"41334209\"}], \"PidStartTime\": \"41334147\", \"PdockerLauncherPid\": 26435, \"PdockerLauncherPidStartTime\": \"41334147\"}, \"Image\": \"sha256:603172edfc7c617f962ff4050734ec1e39d4308ed1b14591f42aacbfe3535c8d\", \"ResolvConfPath\": \"\", \"HostnamePath\": \"\", \"HostsPath\": \"\", \"LogPath\": \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/logs/d6d8e18ec4df4e9585e9bf6a327d1950.log\", \"Name\": \"/pdocker-llama-cpp\", \"RestartCount\": 0, \"Driver\": \"pdocker-direct\", \"Platform\": \"linux\", \"MountLabel\": \"\", \"ProcessLabel\": \"\", \"AppArmorProfile\": \"\", \"ExecIDs\": null, \"HostConfig\": {\"Binds\": [\"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/projects/llama-cpp-gpu/models:/models\", \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/projects/llama-cpp-gpu/workspace:/workspace\", \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/projects/llama-cpp-gpu/profiles:/profiles\"], \"PortBindings\": {\"18081/",
+    "log_excerpt": "ad_from_file_impl: using device Vulkan0 (pdocker Vulkan bridge (queue)) (unknown id) - 8192 MiB free\nllama_model_loader: loaded meta data with 28 key-value pairs and 399 tensors from /models/model.gguf (version GGUF V3 (latest))\nllama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nllama_model_loader: - kv   0:                       general.architecture str              = qwen3\nllama_model_loader: - kv   1:                               general.type str              = model\nllama_model_loader: - kv   2:                               general.name str              = Qwen3 8B Awq Compatible Instruct\nllama_model_loader: - kv   3:                           general.finetune str              = awq-compatible-Instruct\nllama_model_loader: - kv   4:                           general.basename str              = Qwen3\nllama_model_loader: - kv   5:                         general.size_label str              = 8B\nllama_model_loader: - kv   6:                          qwen3.block_count u32              = 36\nllama_model_loader: - kv   7:                       qwen3.context_length u32              = 40960\nllama_model_loader: - kv   8:                     qwen3.embedding_length u32              = 4096\nllama_model_loader: - kv   9:                  qwen3.feed_forward_length u32              = 12288\nllama_model_loader: - kv  10:                 qwen3.attention.head_count u32              = 32\nllama_model_loader: - kv  11:              qwen3.attention.head_count_kv u32              = 8\nllama_model_loader: - kv  12:                       qwen3.rope.freq_base f32              = 1000000.000000\nllama_model_loader: - kv  13:     qwen3.attention.layer_norm_rms_epsilon f32              = 0.000001\nllama_model_loader: - kv  14:                 qwen3.attention.key_length u32              = 128\nllama_model_loader: - kv  15:               qwen3.attention.value_length u32              = 128\nllama_model_loader: - kv  16:                       tokenizer.ggml.model str              = gpt2\nllama_model_loader: - kv  17:                         tokenizer.ggml.pre str              = qwen2\nllama_model_loader: - kv  18:                      tokenizer.ggml.tokens arr[str,151936]  = [\"!\", \"\\\"\", \"#\", \"$\", \"%\", \"&\", \"'\", ...\nllama_model_loader: - kv  19:                  tokenizer.ggml.token_type arr[i32,151936]  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ...\nllama_model_loader: - kv  20:                      tokenizer.ggml.merges arr[str,151387]  = [\"Ġ Ġ\", \"ĠĠ ĠĠ\", \"i n\", \"Ġ t\",...\nllama_model_loader: - kv  21:                tokenizer.ggml.eos_token_id u32              = 151645\nllama_model_loader: - kv  22:            tokenizer.ggml.padding_token_id u32              = 151643\nllama_model_loader: - kv  23:                tokenizer.ggml.bos_token_id u32              = 151643\nllama_model_loader: - kv  24:               tokenizer.ggml.add_bos_token bool             = false\nllama_model_loader: - kv  25:                    tokenizer.chat_template str              = {%- if tools %}\\n    {{- '<|im_start|>...\nllama_model_loader: - kv  26:               general.quantization_version u32              = 2\nllama_model_loader: - kv  27:                          general.file_type u32              = 15\nllama_model_loader: - type  f32:  145 tensors\nllama_model_loader: - type q4_K:  217 tensors\nllama_model_loader: - type q6_K:   37 tensors\nprint_info: file format = GGUF V3 (latest)\nprint_info: file type   = Q4_K - Medium\nprint_info: file size   = 4.68 GiB (4.90 BPW) \nload: 0 unused tokens\nload: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden\nload: printing all EOG tokens:\nload:   - 128247 ('</s>')\nload:   - 151643 ('<|endoftext|>')\nload:   - 151645 ('<|im_end|>')\nload:   - 151662 ('<|fim_pad|>')\nload:   - 151663 ('<|repo_name|>')\nload:   - 151664 ('<|file_sep|>')\nload: special tokens cache size = 27\nload: token to piece cache size = 0.9311 MB\nprint_info: arch                  = qwen3\nprint_info: vocab_only            = 0\nprint_info: no_alloc              = 0\nprint_info: n_ctx_train           = 40960\nprint_info: n_embd                = 4096\nprint_info: n_embd_inp            = 4096\nprint_info: n_layer               = 36\nprint_info: n_head                = 32\nprint_info: n_head_kv             = 8\nprint_info: n_rot                 = 128\nprint_info: n_swa                 = 0\nprint_info: is_swa_any            = 0\nprint_info: n_embd_head_k         = 128\nprint_info: n_embd_head_v         = 128\nprint_info: n_gqa                 = 4\nprint_info: n_embd_k_gqa          = 1024\nprint_info: n_embd_v_gqa          = 1024\nprint_info: f_norm_eps            = 0.0e+00\nprint_info: f_norm_rms_eps        = 1.0e-06\nprint_info: f_clamp_kqv           = 0.0e+00\nprint_info: f_max_alibi_bias      = 0.0e+00\nprint_info: f_logit_scale         = 0.0e+00\nprint_info: f_attn_scale          = 0.0e+00\nprint_info: n_ff                  = 12288\nprint_info: n_expert              = 0\nprint_info: n_expert_used         = 0\nprint_info: n_expert_groups       = 0\nprint_info: n_group_used          = 0\nprint_info: causal attn           = 1\nprint_info: pooling type          = -1\nprint_info: rope type             = 2\nprint_info: rope scaling          = linear\nprint_info: freq_base_train       = 1000000.0\nprint_info: freq_scale_train      = 1\nprint_info: n_ctx_orig_yarn       = 40960\nprint_info: rope_yarn_log_mul     = 0.0000\nprint_info: rope_finetuned        = unknown\nprint_info: model type            = 8B\nprint_info: model params          = 8.19 B\nprint_info: general.name          = Qwen3 8B Awq Compatible Instruct\nprint_info: vocab type            = BPE\nprint_info: n_vocab               = 151936\nprint_info: n_merges              = 151387\nprint_info: BOS token             = 151643 '<|endoftext|>'\nprint_info: EOS token             = 151645 '<|im_end|>'\nprint_info: EOT token             = 151645 '<|im_end|>'\nprint_info: PAD token             = 151643 '<|endoftext|>'\nprint_info: LF token              = 198 'Ċ'\nprint_info: FIM PRE token         = 151659 '<|fim_prefix|>'\nprint_info: FIM SUF token         = 151661 '<|fim_suffix|>'\nprint_info: FIM MID token         = 151660 '<|fim_middle|>'\nprint_info: FIM PAD token         = 151662 '<|fim_pad|>'\nprint_info: FIM REP token         = 151663 '<|repo_name|>'\nprint_info: FIM SEP token         = 151664 '<|file_sep|>'\nprint_info: EOG token             = 128247 '</s>'\nprint_info: EOG token             = 151643 '<|endoftext|>'\nprint_info: EOG token             = 151645 '<|im_end|>'\nprint_info: EOG token             = 151662 '<|fim_pad|>'\nprint_info: EOG token             = 151663 '<|repo_name|>'\nprint_info: EOG token             = 151664 '<|file_sep|>'\nprint_info: max token length      = 256\nload_tensors: loading model tensors, this can take a while... (mmap = true, direct_io = false)\nload_tensors: offloading output layer to GPU\nload_tensors: offloading 0 repeating layers to GPU\nload_tensors: offloaded 1/37 layers to GPU\nload_tensors:   CPU_Mapped model buffer size =  4302.32 MiB\nload_tensors:      Vulkan0 model buffer size =   486.87 MiB\n.....................................................................................\ncommon_init_result: added </s> logit bias = -inf\ncommon_init_result: added <|endoftext|> logit bias = -inf\ncommon_init_result: added <|im_end|> logit bias = -inf\ncommon_init_result: added <|fim_pad|> logit bias = -inf\ncommon_init_result: added <|repo_name|> logit bias = -inf\ncommon_init_result: added <|file_sep|> logit bias = -inf\nllama_context: constructing llama_context\nllama_context: n_seq_max     = 4\nllama_context: n_ctx         = 512\nllama_context: n_ctx_seq     = 512\nllama_context: n_batch       = 512\nllama_context: n_ubatch      = 512\nllama_context: causal_attn   = 1\nllama_context: flash_attn    = auto\nllama_context: kv_unified    = true\nllama_context: freq_base     = 1000000.0\nllama_context: freq_scale    = 1\nllama_context: n_ctx_seq (512) < n_ctx_train (40960) -- the full capacity of the model will not be utilized\nllama_context: Vulkan_Host  output buffer size =     2.32 MiB\nllama_kv_cache:        CPU KV buffer size =    72.00 MiB\nllama_kv_cache: size =   72.00 MiB (   512 cells,  36 layers,  4/1 seqs), K (f16):   36.00 MiB, V (f16):   36.00 MiB\nllama_kv_cache: attn_rot_k = 0, n_embd_head_k_all = 128\nllama_kv_cache: attn_rot_v = 0, n_embd_head_k_all = 128\nsched_reserve: reserving ...\nsched_reserve: Flash Attention was auto, set to enabled\nsched_reserve: resolving fused Gated Delta Net support:\nsched_reserve: fused Gated Delta Net (autoregressive) enabled\nsched_reserve: fused Gated Delta Net (chunked) enabled\nsched_reserve:    Vulkan0 compute buffer size =   304.75 MiB\nsched_reserve:        CPU compute buffer size =    56.00 MiB\nsched_reserve: Vulkan_Host compute buffer size =    33.51 MiB\nsched_reserve: graph nodes  = 1267\nsched_reserve: graph splits = 542 (with bs=512), 146 (with bs=1)\nsched_reserve: reserve took 6.80 ms, sched copies = 1\ncommon_init_from_params: warming up the model with an empty run - please wait ... (--no-warmup to disable)\nsrv  log_server_r: done request: GET / 127.0.0.1 503\nsrv    load_model: initializing slots, n_slots = 4\nno implementations specified for speculative decoding\nslot   load_model: id  0 | task -1 | new slot, n_ctx = 512\nno implementations specified for speculative decoding\nslot   load_model: id  1 | task -1 | new slot, n_ctx = 512\nno implementations specified for speculative decoding\nslot   load_model: id  2 | task -1 | new slot, n_ctx = 512\nno implementations specified for speculative decoding\nslot   load_model: id  3 | task -1 | new slot, n_ctx = 512\nsrv    load_model: prompt cache is enabled, size limit: 8192 MiB\nsrv    load_model: use `--cache-ram 0` to disable the prompt cache\nsrv    load_model: for more info see https://github.com/ggml-org/llama.cpp/pull/16391\nsrv          init: init: idle slots will be saved to prompt cache and cleared upon starting a new task\ninit: chat template, example_format: '<|im_start|>system\nYou are a helpful assistant<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\nHi there<|im_end|>\n<|im_start|>user\nHow are you?<|im_end|>\n<|im_start|>assistant\n'\nsrv          init: init: chat template, thinking = 1\nmain: model loaded\nmain: server is listening on http://0.0.0.0:18081\nmain: starting the main loop...\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: GET / 127.0.0.1 200\nslot get_availabl: id  3 | task -1 | selected slot by LRU, t_last = -1\nsrv  get_availabl: updating prompt cache\nsrv          load:  - looking for better prompt, base f_keep = -1.000, sim = 0.000\nsrv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 512 tokens, 8589934592 est)\nsrv  get_availabl: prompt cache update took 0.05 ms\nslot launch_slot_: id  3 | task -1 | sampler chain: logits -> ?penalties -> ?dry -> ?top-n-sigma -> top-k -> ?typical -> top-p -> min-p -> ?xtc -> temp-ext -> dist \nslot launch_slot_: id  3 | task 0 | processing task, is_child = 0\nslot update_slots: id  3 | task 0 | new prompt, n_ctx_slot = 512, n_keep = 0, task.n_tokens = 6\nslot update_slots: id  3 | task 0 | n_tokens = 0, memory_seq_rm [0, end)\nslot init_sampler: id  3 | task 0 | init sampler, took 0.99 ms, tokens: text = 6, total = 6\nslot update_slots: id  3 | task 0 | prompt processing done, n_tokens = 6, batch.n_tokens = 6\nsrv  log_server_r: done request: GET / 127.0.0.1 200\nsrv  log_server_r: done request: GET / 127.0.0.1 200\nslot print_timing: id  3 | task 0 | \nprompt eval time =    8322.21 ms /     6 tokens ( 1387.03 ms per token,     0.72 tokens per second)\n       eval time =   25361.56 ms /     4 tokens ( 6340.39 ms per token,     0.16 tokens per second)\n      total time =   33683.77 ms /    10 tokens\nslot      release: id  3 | task 0 | stop processing: n_tokens = 9, truncated = 0\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: POST /completion 127.0.0.1 200\nsrv  log_server_r: done request: GET / 127.0.0.1 200\n",
     "evidence": {
       "vulkan_device_seen": true,
       "offload_seen": true,
@@ -39,10 +42,15 @@
       "assert_blocker": false,
       "buffer_range_assert_blocker": false,
       "gpu_model_buffer_seen": true,
-      "generic_dispatch_response_seen": true,
-      "generic_spirv_dispatch_attempted": true,
-      "generic_spirv_dispatch_seen": true,
+      "gpu_repeating_layers": 0,
+      "gpu_offloaded_layers": 1,
+      "gpu_total_layers": 37,
+      "gpu_output_only_offload": true,
+      "generic_dispatch_response_seen": false,
+      "generic_spirv_dispatch_attempted": false,
+      "generic_spirv_dispatch_seen": false,
       "generic_spirv_dispatch_failed": false,
+      "pipeline_feature_blocker": false,
       "executor_spirv_trace_seen": false,
       "executor_feature_trace_seen": false,
       "android_vulkan_dispatch_blocker": false,
@@ -51,27 +59,18 @@
       "queue_submit_blocker": false,
       "spirv_dispatch_blocker": false
     },
-    "allocation_trace_bytes": [
-      2431008,
-      510521344,
-      16384,
-      510504960,
-      2431008,
-      319553536,
-      35141664,
-      1024
-    ],
+    "allocation_trace_bytes": [],
     "bridge_dispatch_profile": {
-      "samples": 258,
-      "upload_ms_mean": 40.38057441860465,
-      "dispatch_ms_mean": 4.368833720930233,
-      "download_ms_mean": 4.567829069767442,
-      "copy_buffer_ops_in_log": 16,
-      "copy_buffer_bytes_in_log": 790016
+      "samples": 0,
+      "upload_ms_mean": 0.0,
+      "dispatch_ms_mean": 0.0,
+      "download_ms_mean": 0.0,
+      "copy_buffer_ops_in_log": 0,
+      "copy_buffer_bytes_in_log": 0
     },
     "diagnostics": {
-      "blocker_class": "bridge_dispatch_performance",
-      "blocker_detail": "served through generic SPIR-V, but bridge upload/copy overhead keeps GPU below CPU throughput",
+      "blocker_class": "insufficient_gpu_offload_depth",
+      "blocker_detail": "llama.cpp served, but only the output layer was offloaded; repeating transformer layers stayed on CPU",
       "failure_axes": {
         "advertised_limits": {
           "state": "not_front_blocker",
@@ -82,7 +81,7 @@
           "reason": "large model/buffer allocations are at or above the 512MiB bridge clamp; future failures should distinguish splitting/chunk transport from shader lowering"
         },
         "generic_spirv_dispatch": {
-          "state": "passed",
+          "state": "not_reached",
           "reason": "generic SPIR-V dispatch was not the failing axis in this run"
         }
       },
@@ -100,146 +99,58 @@
       },
       "chunking_pressure": {
         "configured_bridge_max_buffer_bytes": 536870912,
-        "largest_allocation_bytes": 510521344,
-        "largest_created_buffer_bytes": 510521344,
-        "allocation_near_clamp": true,
+        "largest_allocation_bytes": 0,
+        "largest_created_buffer_bytes": 0,
+        "allocation_near_clamp": false,
         "model_cpu_mapped_bytes": 4511309496,
         "model_cpu_mapped_exceeds_bridge_clamp": true,
         "vulkan_model_buffer_mib": 486.87,
-        "descriptor_range_max_bytes": 510504960
+        "descriptor_range_max_bytes": 0
       },
       "generic_spirv_dispatch": {
-        "attempted": true,
-        "valid_android_vulkan_events": [
-          {
-            "executor": "pdocker-gpu-executor",
-            "api": "pdocker-gpu-command-v1",
-            "abi_version": "0.1",
-            "backend_impl": "android_vulkan",
-            "kernel": "generic_spirv",
-            "shader_bytes": 11604,
-            "entry": "main",
-            "specializations": 0,
-            "bindings": 5,
-            "dispatch": [
-              32,
-              1,
-              1
-            ],
-            "backend_cached": true,
-            "upload_ms": 1.0086,
-            "dispatch_ms": 6.9034,
-            "download_ms": 0.0425,
-            "valid": true
-          },
-          {
-            "executor": "pdocker-gpu-executor",
-            "api": "pdocker-gpu-command-v1",
-            "abi_version": "0.1",
-            "backend_impl": "android_vulkan",
-            "kernel": "generic_spirv",
-            "shader_bytes": 11604,
-            "entry": "main",
-            "specializations": 0,
-            "bindings": 5,
-            "dispatch": [
-              32,
-              1,
-              1
-            ],
-            "backend_cached": true,
-            "upload_ms": 0.4024,
-            "dispatch_ms": 6.5736,
-            "download_ms": 0.0233,
-            "valid": true
-          },
-          {
-            "executor": "pdocker-gpu-executor",
-            "api": "pdocker-gpu-command-v1",
-            "abi_version": "0.1",
-            "backend_impl": "android_vulkan",
-            "kernel": "generic_spirv",
-            "shader_bytes": 11604,
-            "entry": "main",
-            "specializations": 0,
-            "bindings": 5,
-            "dispatch": [
-              32,
-              1,
-              1
-            ],
-            "backend_cached": true,
-            "upload_ms": 0.3198,
-            "dispatch_ms": 6.4864,
-            "download_ms": 0.0461,
-            "valid": true
-          },
-          {
-            "executor": "pdocker-gpu-executor",
-            "api": "pdocker-gpu-command-v1",
-            "abi_version": "0.1",
-            "backend_impl": "android_vulkan",
-            "kernel": "generic_spirv",
-            "shader_bytes": 26784,
-            "entry": "main",
-            "specializations": 3,
-            "bindings": 5,
-            "dispatch": [
-              1187,
-              1,
-              64
-            ],
-            "backend_cached": true,
-            "upload_ms": 3052.8858,
-            "dispatch_ms": 38.8282,
-            "download_ms": 273.57,
-            "valid": true
-          }
-        ],
+        "attempted": false,
+        "valid_android_vulkan_events": [],
         "failed_events": [],
         "fallback_events": [],
         "llama_throw": ""
       },
-      "executor_backends": [
-        "android_vulkan"
-      ],
+      "executor_backends": [],
       "executor_errors": [],
       "spirv_hashes": []
     }
   },
   "comparison": {
-    "speedup": 0.7887731766296738,
-    "target_tokens_per_second": 1.5589188710558963,
+    "speedup": 0.43689191188917054,
+    "target_tokens_per_second": 3.6100235915041705,
+    "target_met": false
+  },
+  "bridge_overhead_phase": {
+    "phase": "not_yet_served",
+    "served": true,
+    "gpu_layers": 1,
+    "cpu_tokens_per_second": 0.36100235915041706,
+    "gpu_tokens_per_second": 0.1577190108857267,
+    "speedup": 0.43689191188917054,
+    "target_speedup": 10.0,
+    "target_tokens_per_second": 3.6100235915041705,
     "target_met": false,
-    "target_speedup": 10.0
+    "blocker": "llama.cpp served, but only the output layer was offloaded; repeating transformer layers stayed on CPU",
+    "next_action": "increase n-gpu-layers until repeating transformer layers are offloaded",
+    "bridge_dispatch_profile": {
+      "samples": 0,
+      "upload_ms_mean": 0.0,
+      "dispatch_ms_mean": 0.0,
+      "download_ms_mean": 0.0,
+      "copy_buffer_ops_in_log": 0,
+      "copy_buffer_bytes_in_log": 0
+    }
   },
   "operation": {
     "kind": "llama-gpu-compare",
     "ui_surface": "Overview daemon operation/progress card",
     "container_surface": "pdocker-llama-cpp remains the container shown by Engine container listing",
-    "cleanup": "remove adb port forward, mark failed operation on nonzero exit, restore CPU server unless --no-restore is passed"
+    "cleanup": "remove adb port forward and mark failed operation on nonzero exit; CPU restore is opt-in with --restore because the next run recreates the required mode"
   },
-  "next_blocker": "served through generic SPIR-V, but bridge upload/copy overhead keeps GPU below CPU throughput",
-  "bridge_overhead_phase": {
-    "phase": "served_but_transfer_bound",
-    "served": true,
-    "gpu_layers": 1,
-    "cpu_tokens_per_second": 0.15589188710558963,
-    "gpu_tokens_per_second": 0.12296333900307042,
-    "speedup": 0.7887731766296738,
-    "target_speedup": 10.0,
-    "target_tokens_per_second": 1.5589188710558963,
-    "target_met": false,
-    "blocker": "served through generic SPIR-V, but bridge upload/copy overhead keeps GPU below CPU throughput",
-    "next_action": "reduce bridge upload/copy overhead with persistent registered buffers; rerun with larger n_predict",
-    "bridge_dispatch_profile": {
-      "samples": 258,
-      "upload_ms_mean": 40.38057441860465,
-      "dispatch_ms_mean": 4.368833720930233,
-      "download_ms_mean": 4.567829069767442,
-      "copy_buffer_ops_in_log": 16,
-      "copy_buffer_bytes_in_log": 790016
-    }
-  },
-  "next_action": "reduce bridge upload/copy overhead with persistent registered buffers; rerun with larger n_predict"
+  "next_blocker": "llama.cpp served, but only the output layer was offloaded; repeating transformer layers stayed on CPU",
+  "next_action": "increase n-gpu-layers until repeating transformer layers are offloaded"
 }

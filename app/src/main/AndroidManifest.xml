@@ -68,11 +68,13 @@
         <service
             android:name=".PdockerdService"
             android:exported="false"
+            android:process=":pdockerd"
             android:foregroundServiceType="dataSync" />
 
         <receiver
             android:name=".PdockerdBootReceiver"
-            android:exported="false">
+            android:exported="false"
+            android:process=":pdockerd">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
@@ -81,7 +83,8 @@
 
         <receiver
             android:name=".PdockerdDebugReceiver"
-            android:exported="${pdockerDebugReceiverExported}">
+            android:exported="${pdockerDebugReceiverExported}"
+            android:process=":pdockerd">
             <intent-filter>
                 <action android:name="io.github.ryo100794.pdocker.action.SMOKE_START" />
                 <action android:name="io.github.ryo100794.pdocker.action.SMOKE_GPU_BENCH" />

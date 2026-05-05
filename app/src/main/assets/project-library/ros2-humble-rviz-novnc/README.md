@@ -6,9 +6,11 @@ The compose header comment `# pdocker.service-url: 18082=noVNC RViz` labels
 the local browser shortcut. Open noVNC at port `18082`; direct VNC clients can
 connect to host port `15900`.
 
-The compose template mounts a shared Documents directory at `/documents` by
-default. Override the host path or container path with
-`PDOCKER_DOCUMENTS_HOST` and `PDOCKER_DOCUMENTS_MOUNT`.
+The compose template mounts the selected Android Documents folder at
+`/documents` by default. Use it only for explicit import/export or data
+exchange. Override `PDOCKER_DOCUMENTS_HOST` or `PDOCKER_DOCUMENTS_MOUNT` to
+share a folder or move the mount path, or use `PDOCKER_SHARED_DOCUMENTS_HOST`
+for the cross-project `/shared` mount.
 
 Build note: the Dockerfile downloads the `novnc` Debian package from the
 configured Ubuntu apt repository and extracts its static files without running

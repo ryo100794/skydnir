@@ -80,6 +80,21 @@ class DirectSyscallScenarioManifestTest(unittest.TestCase):
                 self.assertNotIn("adb shell", command, case_id)
                 self.assertNotEqual(command.strip(), "", case_id)
 
+    def test_manifest_has_generic_container_probe(self):
+        self.assert_case_covers(
+            "container.direct.runtime-probe",
+            [
+                "scripts/container-direct-probe.sh",
+                "without adb",
+                "flash_attn",
+                "large allocation guard",
+            ],
+        )
+        self.assertEqual(
+            runner.case_status(self.cases["container.direct.runtime-probe"]),
+            runner.STATUS_RUNNABLE,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

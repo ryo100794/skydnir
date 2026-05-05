@@ -1,4 +1,3 @@
-import java.time.Instant
 import java.util.Properties
 
 plugins {
@@ -13,6 +12,17 @@ val syncPdockerdAsset by tasks.registering(Copy::class) {
     rename { "pdockerd" }
 }
 
+val pdockerVersionProps = Properties().apply {
+    rootProject.file("version.properties").inputStream().use(::load)
+}
+
+fun pdockerVersionValue(name: String): String =
+    pdockerVersionProps.getProperty(name)
+        ?: error("version.properties is missing required key '$name'")
+
+fun buildConfigString(value: String): String =
+    "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
     namespace = "io.github.ryo100794.pdocker"
     compileSdk = 34
@@ -22,9 +32,11 @@ android {
         applicationId = "io.github.ryo100794.pdocker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 23
-        versionName = "0.5.2"
-        buildConfigField("String", "BUILD_TIME_UTC", "\"${Instant.now()}\"")
+        versionCode = pdockerVersionValue("versionCode").toInt()
+        versionName = pdockerVersionValue("versionName")
+        buildConfigField("String", "BUILD_TIME_UTC", buildConfigString(pdockerVersionValue("buildTimeUtc")))
+        buildConfigField("String", "BUILD_GIT_COMMIT", buildConfigString(pdockerVersionValue("buildCommit")))
+        buildConfigField("String", "BUILD_NUMBER", buildConfigString(pdockerVersionValue("buildNumber")))
         manifestPlaceholders["pdockerDebugReceiverExported"] = "false"
 
         ndk {

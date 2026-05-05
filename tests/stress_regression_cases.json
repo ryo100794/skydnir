@@ -1,0 +1,82 @@
+{
+  "schema": 1,
+  "seed_policy": {
+    "default_seed": 20260505,
+    "rule": "Randomized tests must use an explicit seed, record that seed, and generate a reproducible case fingerprint."
+  },
+  "artifact_policy": {
+    "directory": "docs/test",
+    "required_fields": [
+      "schema",
+      "kind",
+      "git_commit",
+      "build_flavor",
+      "timestamp_utc",
+      "seed",
+      "command",
+      "case_fingerprint",
+      "summary"
+    ],
+    "rule": "Every monkey, stress, benchmark, or repeated-variance run must produce a machine-readable artifact tied to the build set."
+  },
+  "variance_policy": {
+    "rule": "Repeated runs must compare stable summaries and fail, warn, or record a blocker when status vectors, health states, or benchmark envelopes drift beyond the scenario tolerance.",
+    "default_repeats": 2
+  },
+  "scenarios": [
+    {
+      "id": "random.api.seeded-fast",
+      "category": "random",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-stress-regression.py",
+      "seed": 20260505,
+      "artifact": "optional via --write-artifact",
+      "checks": "Seeded Engine API fuzz sequence, deterministic case fingerprint, repeated status-vector comparison, and malformed input rejection."
+    },
+    {
+      "id": "monkey.ui.seeded-device",
+      "category": "monkey",
+      "lane": "android-full",
+      "command": "bash scripts/android-device-smoke.sh --no-install && adb shell monkey -p ${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat} -s 20260505 --pct-rotation 0 --throttle 80 300",
+      "seed": 20260505,
+      "artifact": "docs/test/android-monkey-latest.json",
+      "checks": "Seeded UI event stream without rotation events, no ANR/crash dialog, daemon still reachable, and final Engine API health snapshot."
+    },
+    {
+      "id": "stress.direct-runtime-heavy",
+      "category": "stress",
+      "lane": "heavy-container",
+      "command": "bash scripts/container-direct-probe.sh --memory-guard",
+      "seed": null,
+      "artifact": "docs/test/direct-runtime-stress-latest.json",
+      "checks": "Repeated direct runtime exec, path rewriting, memory guard, argv preservation, and process cleanup under a prepared rootfs."
+    },
+    {
+      "id": "stress.android-runtime-bench",
+      "category": "stress",
+      "lane": "android-full",
+      "command": "bash scripts/android-runtime-bench.sh",
+      "seed": null,
+      "artifact": "docs/test/android-runtime-bench-latest.json",
+      "checks": "Runtime syscall overhead, process startup, filesystem-heavy workload timing, and stable artifact capture."
+    },
+    {
+      "id": "variance.llama-gpu-compare",
+      "category": "variance",
+      "lane": "android-llama",
+      "command": "bash scripts/android-llama-gpu-compare.sh --gpu-only --repeat 2",
+      "seed": null,
+      "artifact": "docs/test/llama-gpu-compare-latest.json",
+      "checks": "Repeated llama GPU comparison, bridge overhead summary, blocker classification, and benchmark drift evidence."
+    },
+    {
+      "id": "variance.gpu-bridge-repeat",
+      "category": "variance",
+      "lane": "android-gpu",
+      "command": "bash scripts/android-gpu-compare-bench.sh",
+      "seed": null,
+      "artifact": "docs/test/gpu-host-container-comparison-latest.md",
+      "checks": "Host/container GPU bridge comparison, repeatable benchmark artifact, and performance regression tracking."
+    }
+  ]
+}

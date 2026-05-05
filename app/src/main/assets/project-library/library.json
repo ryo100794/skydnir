@@ -14,6 +14,18 @@
       "features": ["pdocker-management", "project-creation", "project-maintenance", "build-compose", "engine-socket-helpers", "code-server", "continue", "codex", "claude-code", "vscode-extensions", "vulkan"]
     },
     {
+      "id": "direct-runtime-probe",
+      "name": "pdocker Direct Runtime Probe",
+      "category": "runtime-test",
+      "description": "Small reusable test container for pdocker-direct argv, shell, proc, and large allocation guard checks without rebuilding large app images.",
+      "assetPath": "project-library/direct-runtime-probe",
+      "projectDir": "direct-runtime-probe",
+      "compose": "compose.yaml",
+      "dockerfile": "Dockerfile",
+      "gpu": "none",
+      "features": ["pdocker-direct", "runtime-test", "argv-preservation", "memory-guard", "container-probe"]
+    },
+    {
       "id": "llama-cpp-gpu",
       "name": "llama.cpp GPU workspace",
       "category": "ai-runtime",

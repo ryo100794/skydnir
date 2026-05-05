@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,6 +62,11 @@ typedef struct PdockerVkFence PdockerVkFence;
 #define PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES 16
 #define PDOCKER_VK_MAX_SPECIALIZATION_BYTES 256
 #define PDOCKER_VK_REQUIREMENT_ALIGNMENT 16ull
+#define PDOCKER_VK_MAX_COPY_OPS 64
+#define PDOCKER_VK_MAX_COPY_ALIASES 128
+#define PDOCKER_VK_ALIAS_MIN_SOURCE_BYTES (64ull * 1024ull * 1024ull)
+#define PDOCKER_VK_MAX_GUARDED_MEMORIES 256
+#define PDOCKER_VK_GUARDED_DEFAULT_MIN_BYTES (64ull * 1024ull * 1024ull)
 
 struct PdockerVkMemory {
     size_t size;
@@ -68,7 +74,20 @@ struct PdockerVkMemory {
     VkMemoryPropertyFlags property_flags;
     int fd;
     void *map;
+    bool guarded;
+    size_t page_size;
+    size_t page_count;
+    unsigned char *resident_pages;
+    unsigned char *dirty_pages;
 };
+
+typedef struct {
+    bool valid;
+    PdockerVkMemory *src_memory;
+    VkDeviceSize src_offset;
+    VkDeviceSize dst_offset;
+    VkDeviceSize size;
+} PdockerVkCopyAlias;
 
 struct PdockerVkBuffer {
     size_t size;
@@ -76,6 +95,8 @@ struct PdockerVkBuffer {
     VkDeviceSize requirements_alignment;
     PdockerVkMemory *memory;
     VkDeviceSize memory_offset;
+    PdockerVkCopyAlias aliases[PDOCKER_VK_MAX_COPY_ALIASES];
+    uint32_t alias_count;
 };
 
 struct PdockerVkDescriptorBinding {
@@ -120,9 +141,17 @@ struct PdockerVkFence {
 };
 
 typedef struct {
+    PdockerVkBuffer *src;
+    PdockerVkBuffer *dst;
+    VkBufferCopy region;
+} PdockerVkCopyOp;
+
+typedef struct {
     VK_LOADER_DATA loader;
     PdockerVkPipeline *pipeline;
     PdockerVkDescriptorSet *set;
+    PdockerVkCopyOp copy_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t copy_op_count;
     uint32_t dispatch_x;
     uint32_t dispatch_y;
     uint32_t dispatch_z;
@@ -137,6 +166,10 @@ typedef struct {
 
 static PdockerVkPhysicalDevice g_device;
 static PdockerVkQueue g_queue;
+static unsigned g_shader_dump_counter;
+static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
+static struct sigaction g_previous_sigsegv;
+static bool g_guarded_sigsegv_installed;
 
 static bool env_enabled(const char *name) {
     const char *value = getenv(name);
@@ -158,6 +191,23 @@ static bool env_truthy_default(const char *name, bool default_value) {
     return true;
 }
 
+static void maybe_dump_spirv(const VkShaderModuleCreateInfo *info) {
+    const char *dir = getenv("PDOCKER_VULKAN_DUMP_SPIRV_DIR");
+    if (!dir || !dir[0] || !info || !info->pCode || info->codeSize == 0) return;
+    char path[512];
+    uint32_t first = info->codeSize >= sizeof(uint32_t) ? info->pCode[0] : 0;
+    int n = snprintf(path, sizeof(path), "%s/pdocker-spirv-%06u-%zu-%08x.spv",
+                     dir, ++g_shader_dump_counter, info->codeSize, first);
+    if (n < 0 || (size_t)n >= sizeof(path)) return;
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    fwrite(info->pCode, 1, info->codeSize, f);
+    fclose(f);
+    if (getenv("PDOCKER_VULKAN_ICD_TRACE_ALLOC")) {
+        fprintf(stderr, "pdocker-vulkan-icd: dumped SPIR-V %s\n", path);
+    }
+}
+
 static VkBool32 advertised_shader_int64(void) {
     /*
      * llama.cpp/ggml can select different shader variants from advertised
@@ -168,7 +218,24 @@ static VkBool32 advertised_shader_int64(void) {
 }
 
 static VkBool32 advertised_storage16(void) {
-    return env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE") ? VK_FALSE : VK_TRUE;
+    /*
+     * llama.cpp currently expects 16-bit storage to load useful Vulkan paths on
+     * this device. Keep it enabled by default, but allow tuning runs to clamp it
+     * off when investigating Android executor capability mismatches.
+     */
+    if (env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE")) return VK_FALSE;
+    return env_truthy_default("PDOCKER_VULKAN_ENABLE_16BIT_STORAGE", true) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_storage8(void) {
+    /*
+     * ggml Vulkan emits int8/8-bit-storage compute kernels for quantized
+     * weights. Advertise the SSBO path by default so the unmodified loader can
+     * choose the native path, but keep a hard opt-out for devices whose
+     * Android Vulkan driver rejects it.
+     */
+    if (env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) return VK_FALSE;
+    return env_truthy_default("PDOCKER_VULKAN_ENABLE_8BIT_STORAGE", true) ? VK_TRUE : VK_FALSE;
 }
 
 static VkDeviceSize pdocker_vulkan_heap_size(void) {
@@ -180,7 +247,28 @@ static VkDeviceSize pdocker_vulkan_heap_size(void) {
             return (VkDeviceSize)value;
         }
     }
-    return (VkDeviceSize)(8ull * 1024ull * 1024ull * 1024ull);
+    unsigned long long mem_available = 0;
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (f) {
+        char line[160];
+        while (fgets(line, sizeof(line), f)) {
+            unsigned long long kb = 0;
+            if (sscanf(line, "MemAvailable: %llu kB", &kb) == 1) {
+                mem_available = kb * 1024ull;
+                break;
+            }
+        }
+        fclose(f);
+    }
+    const VkDeviceSize min_heap = (VkDeviceSize)(512ull * 1024ull * 1024ull);
+    const VkDeviceSize max_heap = (VkDeviceSize)(2ull * 1024ull * 1024ull * 1024ull);
+    if (mem_available >= 1024ull * 1024ull * 1024ull) {
+        VkDeviceSize dynamic_heap = (VkDeviceSize)(mem_available / 4ull);
+        if (dynamic_heap < min_heap) dynamic_heap = min_heap;
+        if (dynamic_heap > max_heap) dynamic_heap = max_heap;
+        return dynamic_heap;
+    }
+    return min_heap;
 }
 
 static VkDeviceSize align_device_size(VkDeviceSize value, VkDeviceSize alignment) {
@@ -207,13 +295,110 @@ static VkDeviceSize pdocker_vulkan_max_buffer_size(void) {
 static VkDeviceSize pdocker_vulkan_host_heap_size(void) {
     VkDeviceSize heap = pdocker_vulkan_heap_size();
     VkDeviceSize host_heap = heap / 2;
-    const VkDeviceSize min_heap = (VkDeviceSize)(512ull * 1024ull * 1024ull);
+    const VkDeviceSize min_heap = (VkDeviceSize)(256ull * 1024ull * 1024ull);
     if (host_heap < min_heap) host_heap = min_heap;
+    if (host_heap > heap) host_heap = heap;
     return host_heap;
 }
 
 static bool trace_allocations(void) {
     return getenv("PDOCKER_VULKAN_ICD_TRACE_ALLOC") != NULL;
+}
+
+static bool copy_alias_enabled(void) {
+    return env_truthy_default("PDOCKER_VULKAN_ALIAS_COPIES", false);
+}
+
+static size_t guarded_page_size(void) {
+    long page = sysconf(_SC_PAGESIZE);
+    return page > 0 ? (size_t)page : 4096u;
+}
+
+static size_t guarded_memory_threshold(void) {
+    const char *env = getenv("PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES");
+    if (env && env[0]) {
+        char *end = NULL;
+        unsigned long long value = strtoull(env, &end, 10);
+        if (end && *end == '\0' && value > 0) return (size_t)value;
+    }
+    return PDOCKER_VK_GUARDED_DEFAULT_MIN_BYTES;
+}
+
+static bool guarded_memory_enabled(size_t size, VkMemoryPropertyFlags flags) {
+    (void)flags;
+    const char *mode = getenv("PDOCKER_GPU_VIRTUAL_MEMORY");
+    if (!mode || strcmp(mode, "guarded") != 0) return false;
+    return size >= guarded_memory_threshold();
+}
+
+static void chain_previous_sigsegv(int sig, siginfo_t *info, void *context) {
+    if (g_previous_sigsegv.sa_flags & SA_SIGINFO) {
+        if (g_previous_sigsegv.sa_sigaction) {
+            g_previous_sigsegv.sa_sigaction(sig, info, context);
+            return;
+        }
+    } else if (g_previous_sigsegv.sa_handler == SIG_IGN) {
+        return;
+    } else if (g_previous_sigsegv.sa_handler &&
+               g_previous_sigsegv.sa_handler != SIG_DFL) {
+        g_previous_sigsegv.sa_handler(sig);
+        return;
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void guarded_sigsegv_handler(int sig, siginfo_t *info, void *context) {
+    uintptr_t fault = (uintptr_t)(info ? info->si_addr : NULL);
+    for (size_t i = 0; i < PDOCKER_VK_MAX_GUARDED_MEMORIES; ++i) {
+        PdockerVkMemory *memory = g_guarded_memories[i];
+        if (!memory || !memory->guarded || !memory->map || !memory->page_size) continue;
+        uintptr_t start = (uintptr_t)memory->map;
+        uintptr_t end = start + memory->size;
+        if (fault < start || fault >= end) continue;
+        size_t page = (fault - start) / memory->page_size;
+        uintptr_t page_addr = start + page * memory->page_size;
+        if (mprotect((void *)page_addr, memory->page_size, PROT_READ | PROT_WRITE) == 0) {
+            if (page < memory->page_count) {
+                memory->resident_pages[page] = 1;
+                memory->dirty_pages[page] = 1;
+            }
+            return;
+        }
+        break;
+    }
+    chain_previous_sigsegv(sig, info, context);
+}
+
+static bool install_guarded_sigsegv_handler(void) {
+    if (g_guarded_sigsegv_installed) return true;
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_sigaction = guarded_sigsegv_handler;
+    action.sa_flags = SA_SIGINFO | SA_NODEFER;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGSEGV, &action, &g_previous_sigsegv) != 0) return false;
+    g_guarded_sigsegv_installed = true;
+    return true;
+}
+
+static bool register_guarded_memory(PdockerVkMemory *memory) {
+    if (!memory) return false;
+    if (!install_guarded_sigsegv_handler()) return false;
+    for (size_t i = 0; i < PDOCKER_VK_MAX_GUARDED_MEMORIES; ++i) {
+        if (!g_guarded_memories[i]) {
+            g_guarded_memories[i] = memory;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void unregister_guarded_memory(PdockerVkMemory *memory) {
+    if (!memory) return;
+    for (size_t i = 0; i < PDOCKER_VK_MAX_GUARDED_MEMORIES; ++i) {
+        if (g_guarded_memories[i] == memory) g_guarded_memories[i] = NULL;
+    }
 }
 
 static void trace_pnext_chain(const char *prefix, const void *pNext) {
@@ -345,6 +530,11 @@ static void hex_encode(const uint8_t *src, size_t src_size, char *dst, size_t ds
 
 static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding);
 static VkSubgroupFeatureFlags advertised_subgroup_operations(void);
+static bool resolve_copy_alias(PdockerVkBuffer *buffer,
+                               VkDeviceSize offset,
+                               VkDeviceSize size,
+                               PdockerVkMemory **src_memory,
+                               VkDeviceSize *src_offset);
 
 static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
     if (!cmd || !cmd->pipeline || !cmd->pipeline->shader || !cmd->set) return -EINVAL;
@@ -363,9 +553,25 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
         size_t bytes = descriptor_binding_size(binding);
         if (bytes == 0) continue;
         bindings[binding_count] = i;
-        offsets[binding_count] = binding->buffer->memory_offset + binding->offset;
+        PdockerVkMemory *dispatch_memory = binding->buffer->memory;
+        VkDeviceSize dispatch_offset = binding->buffer->memory_offset + binding->offset;
+        bool alias_hit = false;
+        if (i == 0 && copy_alias_enabled()) {
+            alias_hit = resolve_copy_alias(binding->buffer, binding->offset, bytes,
+                                           &dispatch_memory, &dispatch_offset);
+        }
+        offsets[binding_count] = dispatch_offset;
         sizes[binding_count] = bytes;
-        fds[1 + binding_count] = binding->buffer->memory->fd;
+        fds[1 + binding_count] = dispatch_memory->fd;
+        if (alias_hit && trace_allocations()) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: descriptor alias binding=%u offset=%llu range=%zu source_mem=%zu source_off=%llu\n",
+                    i,
+                    (unsigned long long)binding->offset,
+                    bytes,
+                    dispatch_memory ? dispatch_memory->size : 0,
+                    (unsigned long long)dispatch_offset);
+        }
         binding_count++;
     }
     if (binding_count == 0) return -EINVAL;
@@ -482,6 +688,101 @@ static void *buffer_ptr(PdockerVkBuffer *buffer, VkDeviceSize offset, VkDeviceSi
     return (char *)buffer->memory->map + buffer->memory_offset + offset;
 }
 
+static bool ranges_overlap(VkDeviceSize a_offset, VkDeviceSize a_size,
+                           VkDeviceSize b_offset, VkDeviceSize b_size) {
+    if (a_size == 0 || b_size == 0) return false;
+    return a_offset < b_offset + b_size && b_offset < a_offset + a_size;
+}
+
+static bool resolve_copy_alias(PdockerVkBuffer *buffer,
+                               VkDeviceSize offset,
+                               VkDeviceSize size,
+                               PdockerVkMemory **src_memory,
+                               VkDeviceSize *src_offset) {
+    if (!buffer || !src_memory || !src_offset) return false;
+    for (uint32_t i = 0; i < buffer->alias_count; ++i) {
+        PdockerVkCopyAlias *alias = &buffer->aliases[i];
+        if (!alias->valid || !alias->src_memory) continue;
+        if (offset < alias->dst_offset) continue;
+        VkDeviceSize delta = offset - alias->dst_offset;
+        if (delta > alias->size || size > alias->size - delta) continue;
+        *src_memory = alias->src_memory;
+        *src_offset = alias->src_offset + delta;
+        return true;
+    }
+    return false;
+}
+
+static void invalidate_copy_aliases(PdockerVkBuffer *buffer,
+                                    VkDeviceSize offset,
+                                    VkDeviceSize size) {
+    if (!buffer) return;
+    uint32_t out = 0;
+    for (uint32_t i = 0; i < buffer->alias_count; ++i) {
+        PdockerVkCopyAlias alias = buffer->aliases[i];
+        if (!alias.valid || ranges_overlap(offset, size, alias.dst_offset, alias.size)) {
+            continue;
+        }
+        buffer->aliases[out++] = alias;
+    }
+    buffer->alias_count = out;
+}
+
+static void add_copy_alias(PdockerVkBuffer *dst,
+                           VkDeviceSize dst_offset,
+                           VkDeviceSize size,
+                           PdockerVkMemory *src_memory,
+                           VkDeviceSize src_offset) {
+    if (!dst || !src_memory || size == 0) return;
+    invalidate_copy_aliases(dst, dst_offset, size);
+    if (dst->alias_count >= PDOCKER_VK_MAX_COPY_ALIASES) {
+        memmove(&dst->aliases[0], &dst->aliases[1],
+                sizeof(dst->aliases[0]) * (PDOCKER_VK_MAX_COPY_ALIASES - 1));
+        dst->alias_count = PDOCKER_VK_MAX_COPY_ALIASES - 1;
+    }
+    PdockerVkCopyAlias *alias = &dst->aliases[dst->alias_count++];
+    alias->valid = true;
+    alias->src_memory = src_memory;
+    alias->src_offset = src_offset;
+    alias->dst_offset = dst_offset;
+    alias->size = size;
+}
+
+static bool copy_alias_candidate(PdockerVkMemory *src_memory) {
+    return copy_alias_enabled() && src_memory &&
+           src_memory->size >= PDOCKER_VK_ALIAS_MIN_SOURCE_BYTES;
+}
+
+static void execute_recorded_copy_ops(PdockerVkCommandBuffer *cmd) {
+    if (!cmd) return;
+    for (uint32_t i = 0; i < cmd->copy_op_count; ++i) {
+        PdockerVkCopyOp *op = &cmd->copy_ops[i];
+        void *dst_ptr = buffer_ptr(op->dst, op->region.dstOffset, op->region.size);
+        void *src_ptr = buffer_ptr(op->src, op->region.srcOffset, op->region.size);
+        if (!src_ptr || !dst_ptr) continue;
+        PdockerVkMemory *alias_memory = op->src->memory;
+        VkDeviceSize alias_offset = op->src->memory_offset + op->region.srcOffset;
+        (void)resolve_copy_alias(op->src, op->region.srcOffset, op->region.size,
+                                 &alias_memory, &alias_offset);
+        if (copy_alias_candidate(alias_memory)) {
+            add_copy_alias(op->dst, op->region.dstOffset, op->region.size,
+                           alias_memory, alias_offset);
+            if (trace_allocations()) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: copy-alias dst_size=%zu dst_off=%llu src_mem=%zu src_off=%llu bytes=%llu\n",
+                        op->dst->size,
+                        (unsigned long long)op->region.dstOffset,
+                        alias_memory ? alias_memory->size : 0,
+                        (unsigned long long)alias_offset,
+                        (unsigned long long)op->region.size);
+            }
+            continue;
+        }
+        invalidate_copy_aliases(op->dst, op->region.dstOffset, op->region.size);
+        memmove(dst_ptr, src_ptr, (size_t)op->region.size);
+    }
+}
+
 static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding) {
     if (!binding || !binding->buffer) return 0;
     size_t available = buffer_available(binding->buffer, binding->offset);
@@ -547,12 +848,13 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
     pProperties->limits.timestampComputeAndGraphics = VK_FALSE;
     if (trace_allocations()) {
         fprintf(stderr,
-                "pdocker-vulkan-icd: advertised limits maxBuffer=%llu maxStorageRange=%u subgroupOps=0x%x shaderInt64=%u storage16=%u\n",
+                "pdocker-vulkan-icd: advertised limits maxBuffer=%llu maxStorageRange=%u subgroupOps=0x%x shaderInt64=%u storage16=%u storage8=%u\n",
                 (unsigned long long)max_buffer,
                 (unsigned)pProperties->limits.maxStorageBufferRange,
                 (unsigned)advertised_subgroup_operations(),
                 (unsigned)advertised_shader_int64(),
-                (unsigned)advertised_storage16());
+                (unsigned)advertised_storage16(),
+                (unsigned)advertised_storage8());
     }
 }
 
@@ -663,16 +965,27 @@ static void fill_pnext_features(void *pNext) {
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES: {
                 VkPhysicalDeviceVulkan12Features *p = (VkPhysicalDeviceVulkan12Features *)cur;
+                VkBool32 storage8 = advertised_storage8();
+                p->storageBuffer8BitAccess = storage8;
+                p->uniformAndStorageBuffer8BitAccess = VK_FALSE;
+                p->storagePushConstant8 = VK_FALSE;
                 p->shaderFloat16 = VK_FALSE;
-                p->shaderInt8 = VK_FALSE;
+                p->shaderInt8 = storage8;
                 p->bufferDeviceAddress = VK_FALSE;
                 p->vulkanMemoryModel = VK_FALSE;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
+                VkPhysicalDevice8BitStorageFeatures *p = (VkPhysicalDevice8BitStorageFeatures *)cur;
+                p->storageBuffer8BitAccess = advertised_storage8();
+                p->uniformAndStorageBuffer8BitAccess = VK_FALSE;
+                p->storagePushConstant8 = VK_FALSE;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES: {
                 VkPhysicalDeviceShaderFloat16Int8Features *p = (VkPhysicalDeviceShaderFloat16Int8Features *)cur;
                 p->shaderFloat16 = VK_FALSE;
-                p->shaderInt8 = VK_FALSE;
+                p->shaderInt8 = advertised_storage8();
                 break;
             }
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
@@ -733,11 +1046,23 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES: {
                 const VkPhysicalDeviceVulkan12Features *p = (const VkPhysicalDeviceVulkan12Features *)cur;
                 fprintf(stderr,
-                        "pdocker-vulkan-icd: create-device vk12_features={float16:%u,int8:%u,bufferDeviceAddress:%u,vulkanMemoryModel:%u}\n",
+                        "pdocker-vulkan-icd: create-device vk12_features={storage8:%u,ubo_ssbo8:%u,push8:%u,float16:%u,int8:%u,bufferDeviceAddress:%u,vulkanMemoryModel:%u}\n",
+                        p->storageBuffer8BitAccess,
+                        p->uniformAndStorageBuffer8BitAccess,
+                        p->storagePushConstant8,
                         p->shaderFloat16,
                         p->shaderInt8,
                         p->bufferDeviceAddress,
                         p->vulkanMemoryModel);
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
+                const VkPhysicalDevice8BitStorageFeatures *p = (const VkPhysicalDevice8BitStorageFeatures *)cur;
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: create-device storage8_features={storage8:%u,ubo_ssbo8:%u,push8:%u}\n",
+                        p->storageBuffer8BitAccess,
+                        p->uniformAndStorageBuffer8BitAccess,
+                        p->storagePushConstant8);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES: {
@@ -1107,16 +1432,57 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
                 memory->memory_type_index,
                 (unsigned)memory->property_flags);
     }
+    const bool guarded = guarded_memory_enabled(memory->size, memory->property_flags);
+    if (guarded) {
+        memory->page_size = guarded_page_size();
+        memory->page_count = (memory->size + memory->page_size - 1) / memory->page_size;
+        memory->resident_pages = calloc(memory->page_count, 1);
+        memory->dirty_pages = calloc(memory->page_count, 1);
+        if (!memory->resident_pages || !memory->dirty_pages) {
+            free(memory->resident_pages);
+            free(memory->dirty_pages);
+            free(memory);
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
+    }
     memory->fd = create_shared_fd(memory->size);
     if (memory->fd < 0) {
+        free(memory->resident_pages);
+        free(memory->dirty_pages);
         free(memory);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
-    memory->map = mmap(NULL, memory->size, PROT_READ | PROT_WRITE, MAP_SHARED, memory->fd, 0);
+    memory->map = mmap(
+        NULL,
+        memory->size,
+        guarded ? PROT_NONE : (PROT_READ | PROT_WRITE),
+        MAP_SHARED,
+        memory->fd,
+        0);
     if (memory->map == MAP_FAILED) {
         close(memory->fd);
+        free(memory->resident_pages);
+        free(memory->dirty_pages);
         free(memory);
         return VK_ERROR_MEMORY_MAP_FAILED;
+    }
+    if (guarded) {
+        if (!register_guarded_memory(memory)) {
+            munmap(memory->map, memory->size);
+            close(memory->fd);
+            free(memory->resident_pages);
+            free(memory->dirty_pages);
+            free(memory);
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
+        memory->guarded = true;
+        if (trace_allocations()) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: guarded-memory allocation=%zu page_size=%zu pages=%zu\n",
+                    memory->size,
+                    memory->page_size,
+                    memory->page_count);
+        }
     }
     *pMemory = (VkDeviceMemory)memory;
     return VK_SUCCESS;
@@ -1130,8 +1496,11 @@ VKAPI_ATTR void VKAPI_CALL vkFreeMemory(
     (void)pAllocator;
     PdockerVkMemory *m = (PdockerVkMemory *)memory;
     if (!m) return;
+    unregister_guarded_memory(m);
     if (m->map && m->map != MAP_FAILED) munmap(m->map, m->size);
     if (m->fd >= 0) close(m->fd);
+    free(m->resident_pages);
+    free(m->dirty_pages);
     free(m);
 }
 
@@ -1498,6 +1867,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
     shader->first_word = (pCreateInfo->pCode && pCreateInfo->codeSize >= sizeof(uint32_t))
         ? pCreateInfo->pCode[0]
         : 0;
+    maybe_dump_spirv(pCreateInfo);
     shader->code_fd = create_shared_fd(shader->code_size);
     if (shader->code_fd < 0) {
         free(shader);
@@ -1644,6 +2014,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
     cmd->pipeline = NULL;
     cmd->set = NULL;
+    cmd->copy_op_count = 0;
     cmd->dispatch_x = 0;
     cmd->dispatch_y = 0;
     cmd->dispatch_z = 0;
@@ -1754,14 +2125,22 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer(
         VkBuffer dstBuffer,
         uint32_t regionCount,
         const VkBufferCopy *pRegions) {
-    (void)commandBuffer;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     PdockerVkBuffer *src = (PdockerVkBuffer *)srcBuffer;
     PdockerVkBuffer *dst = (PdockerVkBuffer *)dstBuffer;
-    if (!src || !dst || !src->memory || !dst->memory || !pRegions) return;
+    if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
     for (uint32_t i = 0; i < regionCount; ++i) {
         const VkBufferCopy *r = &pRegions[i];
         void *dst_ptr = buffer_ptr(dst, r->dstOffset, r->size);
         void *src_ptr = buffer_ptr(src, r->srcOffset, r->size);
+        bool appended = false;
+        if (cmd->copy_op_count < PDOCKER_VK_MAX_COPY_OPS) {
+            PdockerVkCopyOp *op = &cmd->copy_ops[cmd->copy_op_count++];
+            op->src = src;
+            op->dst = dst;
+            op->region = *r;
+            appended = true;
+        }
         if (trace_allocations()) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: copy-buffer src_size=%zu src_mem=%zu src_off=%llu dst_size=%zu dst_mem=%zu dst_off=%llu bytes=%llu ok=%u\n",
@@ -1772,12 +2151,13 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer(
                     dst->memory->size,
                     (unsigned long long)r->dstOffset,
                     (unsigned long long)r->size,
-                    (src_ptr && dst_ptr) ? 1u : 0u);
+                    (src_ptr && dst_ptr && appended) ? 1u : 0u);
         }
-        if (!src_ptr || !dst_ptr) {
-            continue;
+        if (!appended && trace_allocations()) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: copy-buffer command buffer full max=%u\n",
+                    PDOCKER_VK_MAX_COPY_OPS);
         }
-        memmove(dst_ptr, src_ptr, (size_t)r->size);
     }
 }
 
@@ -1804,6 +2184,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(
     }
     uint32_t *p = (uint32_t *)buffer_ptr(dst, dstOffset, bytes);
     if (!p) return;
+    invalidate_copy_aliases(dst, dstOffset, bytes);
     for (size_t i = 0; i < bytes / sizeof(uint32_t); ++i) p[i] = data;
 }
 
@@ -1827,6 +2208,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdUpdateBuffer(
                 dst_ptr ? 1u : 0u);
     }
     if (!dst_ptr) return;
+    invalidate_copy_aliases(dst, dstOffset, dataSize);
     memcpy(dst_ptr, pData, (size_t)dataSize);
 }
 
@@ -1841,20 +2223,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; ++j) {
             PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)pSubmits[i].pCommandBuffers[j];
             if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
+            execute_recorded_copy_ops(cmd);
             if (!cmd->has_dispatch) {
                 if (trace_allocations()) {
                     fprintf(stderr, "pdocker-vulkan-icd: queue-submit transfer-only command buffer\n");
                 }
                 continue;
-            }
-            if (!cmd || !cmd->set || !cmd->set->storage_buffers[0].buffer ||
-                !cmd->set->storage_buffers[1].buffer || !cmd->set->storage_buffers[2].buffer) {
-                if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-                    fprintf(stderr,
-                            "pdocker-vulkan-icd: dispatch missing storage buffers set=%p\n",
-                            (void *)cmd->set);
-                }
-                return VK_ERROR_FEATURE_NOT_PRESENT;
             }
             if (cmd->pipeline && cmd->pipeline->shader && cmd->pipeline->shader->code_size > sizeof(uint32_t)) {
                 int generic_rc = send_generic_vulkan_dispatch(cmd);
@@ -1871,6 +2245,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                             cmd->dispatch_y,
                             cmd->dispatch_z,
                             cmd->push_constant_size);
+                }
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+            }
+            if (!cmd || !cmd->set || !cmd->set->storage_buffers[0].buffer ||
+                !cmd->set->storage_buffers[1].buffer || !cmd->set->storage_buffers[2].buffer) {
+                if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: vector-add dispatch missing storage buffers set=%p\n",
+                            (void *)cmd->set);
                 }
                 return VK_ERROR_FEATURE_NOT_PRESENT;
             }

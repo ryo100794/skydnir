@@ -73,7 +73,7 @@ These are not product goals for the default unrooted Android app:
 |---|---|---|---|
 | BuildKit | Legacy builder first, standard Dockerfile syntax only. | Keep `/build` compatible enough for Docker CLI legacy builder. Support common `FROM`, `ARG`, `ENV`, `WORKDIR`, `COPY`, `ADD`, `RUN`, `CMD`, `ENTRYPOINT`, `EXPOSE`, `LABEL`, `USER`, `VOLUME`, `.dockerignore`. Preserve image history/config better over time. | Do not implement BuildKit daemon, buildx drivers, cache mounts, secrets, SSH mounts, custom `# syntax=` frontends, or remote builders in the near term. Reject or clearly fail features that require BuildKit. |
 | Network | Host-network-like userspace model with explicit metadata. | Record Compose networks, service aliases, synthetic IPs, exposed/published ports, and warnings. Inject `/etc/hosts` service aliases. Add container-aware port proxy or syscall-mediated bind/connect rewrite for practical `host:container` port mapping. | No bridge IP isolation, veth, iptables/nftables, embedded DNS server, `macvlan`, `ipvlan`, or true network namespace. Never mark a port healthy unless the real container process listens. |
-| Volumes | Host-directory-backed named volumes and best-effort binds. | Map named volumes under `filesDir/pdocker/volumes`. Keep bind mount metadata and mediate paths in direct runtime. Make UI show volume host path and container path. Project-library templates mount the APK-configured Documents folder at `/documents` through `.env` variables. Support archive/copy against volume-backed paths. | No kernel mount propagation, tmpfs, block devices, privileged device mounts, SELinux relabel flags, or exact read-only bind enforcement until path mediation can enforce it. |
+| Volumes | Host-directory-backed named volumes and best-effort binds. | Map engine-owned named volumes under app-private storage. Treat the selected Android Documents folder as the user workspace root for project definitions under `pdocker/projects` when it is writable by normal app-UID paths, and as the explicit import/export target through `/documents`. Persist SAF tree URI metadata and expose whether the selected storage is `direct-path-writable` or `saf-mediated`; in mediated mode use an app-private mirror plus sidecar metadata and Android `DocumentProvider` calls for create/list/exists/read/write instead of pretending a URI-backed SD-card tree is a writable POSIX path. Keep hot container homes, workspaces, model caches, databases, and high-frequency logs in app-private storage unless the Compose file explicitly maps them elsewhere. Keep bind mount metadata and mediate paths in direct runtime. Make UI show volume host path and container path. Support archive/copy against volume-backed paths. | No kernel mount propagation, tmpfs, block devices, privileged device mounts, SELinux relabel flags, exact read-only bind enforcement, or removable-SD SAF paths as direct Linux bind mounts; SAF access is a mediated exchange contract, not a direct executable rootfs or hot upperdir. |
 | cgroups/resources | Report unsupported honestly; optionally approximate stats. | Parse common resource flags so Compose/CLI does not crash. Store requested limits in metadata. Return predictable warnings. Approximate CPU/memory stats from `/proc` where possible. | No hard enforcement for `--memory`, `--cpus`, pids limit, blkio, cpuset, cgroup namespaces, OOMScoreAdj parity, or Docker Desktop-style resource isolation. |
 | overlayfs/storage | pdocker-owned snapshotter with overlay-like semantics. | Keep content-addressed layers and per-container writable state. Implement whiteouts, copy-up, rename/unlink/chmod/chown/xattr/link semantics in pdockerd/direct runtime. Make `docker cp` and image browsing use merged lower/upper views. | Do not promise exact overlayfs inode identity, d_type, hardlink counts, all xattrs, opaque directory behavior, or mount-level semantics until tested. Avoid patched external overlay runtimes. |
 | signals/process supervision | Docker-like lifecycle for common cases. | Track process groups, exit codes, waits, logs, stop timeout, and cleanup. Map `docker stop` to configured signal then kill after timeout. Keep `PTRACE_O_EXITKILL` and tracer signal handling. | No cgroup-wide kill guarantees, PID namespace semantics, init process reaping parity, `--pid=host`, or full `STOPSIGNAL` edge-case parity at first. |
@@ -122,6 +122,11 @@ Current scaffold:
 - `PdockerNetwork.PortMappingStatus` derives visible port state from Docker
   `PortBindings`, container running state, runtime/proxy evidence, and peer
   host-port claims.
+- Status terms are deliberately narrow: `planned` means configured while the
+  container is not running, `inactive` means the container is running but no
+  runtime listener/proxy proof exists, `active` means pdockerd has recorded
+  runtime listener/proxy evidence for that mapping, and `conflict` means the
+  requested host port is already claimed by another container or listener.
 - A mapping is reported as `active` only when pdockerd runtime/proxy code has
   recorded active evidence. A running container with only requested Docker port
   metadata remains `inactive`.
@@ -143,6 +148,15 @@ This is good enough for developer workspaces, model caches, package caches, and
 source trees. It is not the same as kernel mounts. The UI should make the
 backing location inspectable so data is not mysterious.
 
+Selected SD-card/Documents storage may be FAT32 or exFAT and may only be
+available through SAF `DocumentProvider` calls. pdocker can use such storage as
+an exchange payload area, but Unix metadata must live in app-private sidecar
+metadata: emulated mode/uid/gid, symlink targets, xattr digests, hash/mtime
+evidence, and conflict state. That sidecar must be rebuildable and checkable
+from URI/document enumeration. This does not make removable media a direct
+Docker rootfs or hot bind target; executable paths and high-churn state stay in
+app-private storage unless direct POSIX writability is proven for that path.
+
 Decision point:
 
 - Enforce read-only binds in the syscall mediator, or initially treat `:ro` as
@@ -156,7 +170,14 @@ Recommended near-term stance: **metadata and warnings, not enforcement**.
 Implement:
 
 - Accept common resource fields from Engine API and Compose.
-- Store them in inspect output.
+- Store them in inspect output. The in-app Compose orchestrator accepts
+  `mem_limit`, `memswap_limit`, and `deploy.resources.limits.memory` and maps
+  them to Docker Engine-style `HostConfig.Memory` and `HostConfig.MemorySwap`.
+- Keep pdocker memory paging separate from Docker cgroup compatibility:
+  `PDOCKER_MEMORY_PAGER=managed` or `io.pdocker.memory-pager=managed` may use
+  the requested memory budget as a pager policy input, but standard Compose
+  memory keys alone must not silently opt a container into pdocker-specific
+  fault handling.
 - Warn that Android app sandbox cannot enforce Docker cgroups.
 - Provide best-effort stats from `/proc` and Android process APIs.
 

@@ -30,6 +30,14 @@ static int g_trace_verbose = 0;
 static int g_trace_linkat = 0;
 static int g_trace_paths = 0;
 static int g_trace_exec = 0;
+static int g_trace_memory = 0;
+static int g_trace_memory_verbose = 0;
+static unsigned long long g_trace_memory_threshold = 64ULL * 1024ULL * 1024ULL;
+static int g_memory_guard = 0;
+static unsigned long long g_memory_guard_min_request = 64ULL * 1024ULL * 1024ULL;
+static unsigned long long g_memory_guard_min_available = 512ULL * 1024ULL * 1024ULL;
+static unsigned long long g_memory_guard_min_swap = 256ULL * 1024ULL * 1024ULL;
+static int g_memory_stats_printed = 0;
 static int g_sync_usec = 0;
 static int g_stats = 0;
 static int g_selective_trace = 0;
@@ -41,8 +49,35 @@ static volatile sig_atomic_t g_trace_child_pgid = -1;
 static unsigned long long g_syscall_counts[512];
 static unsigned long long g_stop_count = 0;
 static struct timespec g_stats_start;
+
+typedef struct {
+    unsigned long long calls;
+    unsigned long long failures;
+    unsigned long long bytes;
+    unsigned long long large_calls;
+    unsigned long long largest;
+} MemorySyscallStats;
+
+typedef struct {
+    unsigned long long denied;
+    unsigned long long last_denied_bytes;
+    unsigned long long last_available;
+    unsigned long long last_swap_free;
+    MemorySyscallStats mmap_;
+    MemorySyscallStats mremap;
+    MemorySyscallStats brk;
+    MemorySyscallStats munmap_;
+    MemorySyscallStats mprotect_;
+    MemorySyscallStats madvise_;
+} MemoryTraceStats;
+
+static MemoryTraceStats g_memory_stats;
 static int write_tracee_data(pid_t pid, unsigned long long addr, const void *value, size_t len);
 static const char *syscall_name(long nr);
+static int get_regs(pid_t pid, struct user_pt_regs *regs);
+static int set_regs(pid_t pid, struct user_pt_regs *regs);
+static int read_tracee_u32(pid_t pid, unsigned long long addr, uint32_t *out);
+static int write_tracee_u32(pid_t pid, unsigned long long addr, unsigned long long value);
 static ssize_t pdocker_process_vm_writev(pid_t pid,
                                          const struct iovec *local_iov,
                                          unsigned long liovcnt,
@@ -51,6 +86,9 @@ static ssize_t pdocker_process_vm_writev(pid_t pid,
                                          unsigned long flags);
 
 #define MAX_BIND_MAPS 96
+#define EXEC_REWRITE_MAX_ARGC 511
+#define EXEC_REWRITE_STACK_SAFETY 16384ULL
+#define EXEC_REWRITE_MAX_SCRATCH (2ULL * 1024ULL * 1024ULL)
 
 typedef struct {
     char host[PATH_MAX];
@@ -88,6 +126,19 @@ static int env_flag_enabled(const char *name) {
     return v && v[0] && strcmp(v, "0") != 0 && strcasecmp(v, "false") != 0;
 }
 
+static unsigned long long env_u64_or_default(const char *name, unsigned long long fallback) {
+    const char *v = getenv(name);
+    if (!v || !v[0]) return fallback;
+    char *end = NULL;
+    errno = 0;
+    unsigned long long parsed = strtoull(v, &end, 0);
+    if (errno != 0 || end == v) return fallback;
+    if (end && (*end == 'k' || *end == 'K')) parsed *= 1024ULL;
+    else if (end && (*end == 'm' || *end == 'M')) parsed *= 1024ULL * 1024ULL;
+    else if (end && (*end == 'g' || *end == 'G')) parsed *= 1024ULL * 1024ULL * 1024ULL;
+    return parsed;
+}
+
 static int pager_probe_ok(const char *name, int ok, int err) {
     if (ok) {
         printf("pager-probe:%s=ok\n", name);
@@ -95,6 +146,174 @@ static int pager_probe_ok(const char *name, int ok, int err) {
     }
     printf("pager-probe:%s=fail errno=%d\n", name, err);
     return 1;
+}
+
+static int pager_poc_ok(const char *name, int ok, int err) {
+    if (ok) {
+        printf("pager-poc:%s=ok\n", name);
+        return 0;
+    }
+    printf("pager-poc:%s=fail errno=%d\n", name, err);
+    return 1;
+}
+
+static int inject_tracee_syscall(pid_t pid, struct user_pt_regs *fault_regs,
+                                 long nr,
+                                 unsigned long long arg0,
+                                 unsigned long long arg1,
+                                 unsigned long long arg2,
+                                 unsigned long long *result) {
+    const uint32_t insn_svc0 = 0xd4000001U;
+    const uint32_t insn_brk0 = 0xd4200000U;
+    unsigned long long pc = fault_regs->pc;
+    uint32_t saved0 = 0;
+    uint32_t saved1 = 0;
+    if (read_tracee_u32(pid, pc, &saved0) != 0) return -1;
+    if (read_tracee_u32(pid, pc + 4, &saved1) != 0) return -1;
+    if (write_tracee_u32(pid, pc, insn_svc0) != 0) return -1;
+    if (write_tracee_u32(pid, pc + 4, insn_brk0) != 0) {
+        write_tracee_u32(pid, pc, saved0);
+        return -1;
+    }
+
+    struct user_pt_regs regs = *fault_regs;
+    regs.regs[0] = arg0;
+    regs.regs[1] = arg1;
+    regs.regs[2] = arg2;
+    regs.regs[8] = (unsigned long long)nr;
+    if (set_regs(pid, &regs) != 0) {
+        write_tracee_u32(pid, pc, saved0);
+        write_tracee_u32(pid, pc + 4, saved1);
+        return -1;
+    }
+
+    if (ptrace(PTRACE_CONT, pid, NULL, NULL) != 0) {
+        write_tracee_u32(pid, pc, saved0);
+        write_tracee_u32(pid, pc + 4, saved1);
+        return -1;
+    }
+    int status = 0;
+    int waited = waitpid(pid, &status, 0);
+    int ok = waited == pid && WIFSTOPPED(status) && WSTOPSIG(status) == SIGTRAP;
+    struct user_pt_regs after;
+    memset(&after, 0, sizeof(after));
+    if (ok && get_regs(pid, &after) == 0 && result) {
+        *result = after.regs[0];
+    } else {
+        ok = 0;
+    }
+
+    int restore0 = write_tracee_u32(pid, pc, saved0);
+    int restore1 = write_tracee_u32(pid, pc + 4, saved1);
+    return ok && restore0 == 0 && restore1 == 0 ? 0 : -1;
+}
+
+static int run_memory_pager_poc(void) {
+    int failures = 0;
+    long page_size = sysconf(_SC_PAGESIZE);
+    if (page_size <= 0) page_size = 4096;
+
+    int pipefd[2];
+    if (pipe(pipefd) != 0) {
+        failures += pager_poc_ok("pipe", 0, errno);
+        return 1;
+    }
+
+    pid_t child = fork();
+    if (child == 0) {
+        close(pipefd[0]);
+        volatile char *fault_page = mmap(NULL, (size_t)page_size, PROT_NONE,
+                                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (fault_page == MAP_FAILED) _exit(80);
+        dprintf(pipefd[1], "%p\n", (void *)fault_page);
+        close(pipefd[1]);
+        if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) != 0) _exit(81);
+        raise(SIGSTOP);
+        fault_page[0] = 0x37;
+        _exit(fault_page[0] == 0x37 ? 0 : 82);
+    }
+
+    close(pipefd[1]);
+    unsigned long long fault_addr = 0;
+    FILE *pipe_read = fdopen(pipefd[0], "r");
+    if (pipe_read) {
+        if (fscanf(pipe_read, "%llx", &fault_addr) != 1) fault_addr = 0;
+        fclose(pipe_read);
+    } else {
+        close(pipefd[0]);
+    }
+    failures += pager_poc_ok("child_fault_page_reported", fault_addr != 0, EINVAL);
+
+    int status = 0;
+    int waited = waitpid(child, &status, 0);
+    failures += pager_poc_ok("initial_ptrace_stop",
+                             waited == child && WIFSTOPPED(status) && WSTOPSIG(status) == SIGSTOP,
+                             waited < 0 ? errno : EINVAL);
+    if (failures) {
+        kill(child, SIGKILL);
+        waitpid(child, NULL, 0);
+        printf("pager-poc:result=fail\n");
+        return 1;
+    }
+
+    ptrace(PTRACE_CONT, child, NULL, NULL);
+    waited = waitpid(child, &status, 0);
+    failures += pager_poc_ok("fault_sigsegv_stop",
+                             waited == child && WIFSTOPPED(status) && WSTOPSIG(status) == SIGSEGV,
+                             waited < 0 ? errno : EINVAL);
+
+    siginfo_t info;
+    memset(&info, 0, sizeof(info));
+    if (!failures) {
+        int rc = ptrace(PTRACE_GETSIGINFO, child, NULL, &info);
+        failures += pager_poc_ok("fault_siginfo",
+                                 rc == 0 && (uintptr_t)info.si_addr == (uintptr_t)fault_addr,
+                                 errno);
+    }
+
+    struct user_pt_regs fault_regs;
+    memset(&fault_regs, 0, sizeof(fault_regs));
+    if (!failures) {
+        failures += pager_poc_ok("get_fault_regs", get_regs(child, &fault_regs) == 0, errno);
+    }
+
+    unsigned long long page_base = fault_addr & ~((unsigned long long)page_size - 1ULL);
+    if (!failures) {
+        unsigned long long result = 0;
+        int rc = inject_tracee_syscall(child, &fault_regs, __NR_mprotect,
+                                       page_base, (unsigned long long)page_size,
+                                       PROT_READ | PROT_WRITE, &result);
+        failures += pager_poc_ok("inject_mprotect_syscall", rc == 0 && result == 0,
+                                 rc == 0 ? (int)(-result) : errno);
+    }
+
+    if (!failures) {
+        unsigned char seed = 0x23;
+        struct iovec local = {.iov_base = &seed, .iov_len = sizeof(seed)};
+        struct iovec remote = {.iov_base = (void *)(uintptr_t)fault_addr, .iov_len = sizeof(seed)};
+        ssize_t written = pdocker_process_vm_writev(child, &local, 1, &remote, 1, 0);
+        failures += pager_poc_ok("write_backed_page",
+                                 written == (ssize_t)sizeof(seed), errno);
+    }
+
+    if (!failures) {
+        failures += pager_poc_ok("restore_fault_regs", set_regs(child, &fault_regs) == 0, errno);
+    }
+
+    if (!failures) {
+        ptrace(PTRACE_CONT, child, NULL, NULL);
+        waited = waitpid(child, &status, 0);
+        failures += pager_poc_ok("resumed_fault_instruction",
+                                 waited == child && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+                                 waited < 0 ? errno : EINVAL);
+    }
+
+    if (failures) {
+        kill(child, SIGKILL);
+        waitpid(child, NULL, 0);
+    }
+    printf("pager-poc:result=%s\n", failures ? "fail" : "ok");
+    return failures ? 1 : 0;
 }
 
 static int run_memory_pager_probe(void) {
@@ -233,6 +452,88 @@ static void print_syscall_stats(const char *reason, int rc) {
     }
 }
 
+static int syscall_failed_result(unsigned long long result) {
+    return result >= (unsigned long long)-4095LL;
+}
+
+static int is_memory_trace_syscall(long nr) {
+    return nr == 214 ||  /* brk */
+           nr == 215 ||  /* munmap */
+           nr == 216 ||  /* mremap */
+           nr == 222 ||  /* mmap */
+           nr == 226 ||  /* mprotect */
+           nr == 233;    /* madvise */
+}
+
+static void update_memory_stat(MemorySyscallStats *stats, unsigned long long bytes, int failed) {
+    stats->calls++;
+    if (failed) {
+        stats->failures++;
+        return;
+    }
+    stats->bytes += bytes;
+    if (bytes >= g_trace_memory_threshold) stats->large_calls++;
+    if (bytes > stats->largest) stats->largest = bytes;
+}
+
+static void print_one_memory_stat(const char *name, const MemorySyscallStats *stats) {
+    if (!stats->calls) return;
+    fprintf(stderr,
+            "pdocker-direct-memory: %s calls=%llu failures=%llu bytes=%llu large=%llu largest=%llu\n",
+            name, stats->calls, stats->failures, stats->bytes,
+            stats->large_calls, stats->largest);
+}
+
+static void print_memory_stats(const char *reason, int rc) {
+    if (!g_trace_memory || g_memory_stats_printed) return;
+    g_memory_stats_printed = 1;
+    fprintf(stderr,
+            "pdocker-direct-memory: reason=%s rc=%d threshold=%llu guard=%d guard_min_request=%llu denied=%llu last_denied=%llu last_available=%llu last_swap_free=%llu\n",
+            reason, rc, g_trace_memory_threshold, g_memory_guard,
+            g_memory_guard_min_request,
+            g_memory_stats.denied, g_memory_stats.last_denied_bytes,
+            g_memory_stats.last_available, g_memory_stats.last_swap_free);
+    print_one_memory_stat("mmap", &g_memory_stats.mmap_);
+    print_one_memory_stat("mremap", &g_memory_stats.mremap);
+    print_one_memory_stat("brk", &g_memory_stats.brk);
+    print_one_memory_stat("munmap", &g_memory_stats.munmap_);
+    print_one_memory_stat("mprotect", &g_memory_stats.mprotect_);
+    print_one_memory_stat("madvise", &g_memory_stats.madvise_);
+}
+
+static int read_meminfo_bytes(unsigned long long *available, unsigned long long *swap_free) {
+    FILE *fp = fopen("/proc/meminfo", "re");
+    if (!fp) return -1;
+    char line[192];
+    unsigned long long mem_available_kb = 0;
+    unsigned long long mem_free_kb = 0;
+    unsigned long long swap_free_kb = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        sscanf(line, "MemAvailable: %llu kB", &mem_available_kb);
+        sscanf(line, "MemFree: %llu kB", &mem_free_kb);
+        sscanf(line, "SwapFree: %llu kB", &swap_free_kb);
+    }
+    fclose(fp);
+    if (available) *available = (mem_available_kb ? mem_available_kb : mem_free_kb) * 1024ULL;
+    if (swap_free) *swap_free = swap_free_kb * 1024ULL;
+    return 0;
+}
+
+static int memory_guard_would_deny(unsigned long long requested_bytes,
+                                   unsigned long long *available,
+                                   unsigned long long *swap_free) {
+    if (!g_memory_guard || requested_bytes < g_memory_guard_min_request) return 0;
+    unsigned long long avail = 0;
+    unsigned long long swap = 0;
+    if (read_meminfo_bytes(&avail, &swap) != 0) return 0;
+    if (available) *available = avail;
+    if (swap_free) *swap_free = swap;
+    if (avail < g_memory_guard_min_available) return 1;
+    if (swap < g_memory_guard_min_swap) return 1;
+    if (requested_bytes > 0 && avail < requested_bytes + g_memory_guard_min_available) return 1;
+    return 0;
+}
+
 static ssize_t pdocker_process_vm_readv(pid_t pid,
                                         const struct iovec *local_iov,
                                         unsigned long liovcnt,
@@ -257,6 +558,7 @@ static void usage(FILE *stream) {
     fprintf(stream,
             "usage: pdocker-direct --pdocker-direct-probe\n"
             "       pdocker-direct --pdocker-memory-pager-probe\n"
+            "       pdocker-direct --pdocker-memory-pager-poc\n"
             "       pdocker-direct run --mode MODE --rootfs PATH --workdir PATH [--env KEY=VAL] [--bind SPEC] -- ARGV...\n");
 }
 
@@ -468,6 +770,7 @@ static const char *syscall_name(long nr) {
         case 203: return "connect";
         case 214: return "brk";
         case 215: return "munmap";
+        case 216: return "mremap";
         case 220: return "clone";
         case 221: return "execve";
         case 222: return "mmap";
@@ -588,7 +891,7 @@ static int syscall_completed_in_userland(long nr) {
 } while (0)
 
 static int install_selective_seccomp_trace_filter(void) {
-    struct sock_filter filter[160];
+    struct sock_filter filter[192];
     size_t n = 0;
 
     ADD_STMT(BPF_LD | BPF_W | BPF_ABS, (uint32_t)offsetof(struct seccomp_data, arch));
@@ -648,7 +951,8 @@ static int install_selective_seccomp_trace_filter(void) {
     ADD_TRACE_SYSCALL(175);  /* geteuid */
     ADD_TRACE_SYSCALL(176);  /* getgid */
     ADD_TRACE_SYSCALL(177);  /* getegid */
-    ADD_TRACE_SYSCALL(203);  /* connect: rewrite AF_UNIX socket bind paths. */
+    ADD_TRACE_SYSCALL(200);  /* bind: rewrite AF_UNIX socket paths. */
+    ADD_TRACE_SYSCALL(203);  /* connect: rewrite AF_UNIX socket paths. */
     ADD_TRACE_SYSCALL(221);  /* execve */
     ADD_ERRNO_SYSCALL(293, ENOSYS);  /* rseq */
     ADD_ERRNO_SYSCALL(235, ENOSYS);  /* mbind */
@@ -662,6 +966,15 @@ static int install_selective_seccomp_trace_filter(void) {
     ADD_ERRNO_SYSCALL(435, ENOSYS);  /* clone3 */
     ADD_ERRNO_SYSCALL(436, ENOSYS);  /* close_range */
     ADD_ERRNO_SYSCALL(450, ENOSYS);  /* set_mempolicy_home_node */
+
+    if (g_trace_memory || g_memory_guard) {
+        ADD_TRACE_SYSCALL(214);  /* brk */
+        ADD_TRACE_SYSCALL(215);  /* munmap */
+        ADD_TRACE_SYSCALL(216);  /* mremap */
+        ADD_TRACE_SYSCALL(222);  /* mmap */
+        ADD_TRACE_SYSCALL(226);  /* mprotect */
+        ADD_TRACE_SYSCALL(233);  /* madvise */
+    }
 
     ADD_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
 
@@ -699,6 +1012,7 @@ typedef struct TraceeState {
     unsigned long long egid;
     unsigned long long sgid;
     unsigned long long last_args[6];
+    unsigned long long last_brk;
     char exec_guest_path[PATH_MAX];
     char guest_cwd[PATH_MAX];
     char pending_guest_cwd[PATH_MAX];
@@ -742,10 +1056,10 @@ static int is_minus_one_arg(unsigned long long value) {
     return value == 0xffffffffffffffffULL;
 }
 
-static void write_tracee_u32(pid_t pid, unsigned long long addr, unsigned long long value) {
-    if (!addr) return;
+static int write_tracee_u32(pid_t pid, unsigned long long addr, unsigned long long value) {
+    if (!addr) return -1;
     uint32_t v = (uint32_t)value;
-    if (write_tracee_data(pid, addr, &v, sizeof(v)) == 0) return;
+    if (write_tracee_data(pid, addr, &v, sizeof(v)) == 0) return 0;
     unsigned long long aligned = addr & ~(unsigned long long)(sizeof(long) - 1);
     unsigned long shift = (unsigned long)(addr - aligned) * 8u;
     errno = 0;
@@ -753,14 +1067,16 @@ static void write_tracee_u32(pid_t pid, unsigned long long addr, unsigned long l
     if (word == -1 && errno) {
         TRACE_LOG("pdocker-direct-trace: pid=%d write u32 peek failed addr=%llx: %s\n",
                   (int)pid, addr, strerror(errno));
-        return;
+        return -1;
     }
     unsigned long mask = 0xffffffffUL << shift;
     unsigned long patched = ((unsigned long)word & ~mask) | (((unsigned long)v << shift) & mask);
     if (ptrace(PTRACE_POKEDATA, pid, (void *)(uintptr_t)aligned, (void *)patched) != 0) {
         TRACE_LOG("pdocker-direct-trace: pid=%d write u32 poke failed addr=%llx: %s\n",
                   (int)pid, addr, strerror(errno));
+        return -1;
     }
+    return 0;
 }
 
 static unsigned long long prepare_emulated_result(pid_t pid, TraceeState *state, long nr) {
@@ -1805,9 +2121,9 @@ static int rewrite_execve_arg(pid_t pid, struct user_pt_regs *regs, TraceeState 
     }
 
     unsigned long long old_argv = regs->regs[1];
-    unsigned long long old_arg_ptrs[512];
+    unsigned long long old_arg_ptrs[EXEC_REWRITE_MAX_ARGC + 1];
     int old_argc = 0;
-    for (; old_argc < 511; ++old_argc) {
+    for (; old_argc < EXEC_REWRITE_MAX_ARGC; ++old_argc) {
         struct iovec local = {.iov_base = &old_arg_ptrs[old_argc], .iov_len = sizeof(unsigned long long)};
         struct iovec remote = {
             .iov_base = (void *)(uintptr_t)(old_argv + (unsigned long long)old_argc * sizeof(unsigned long long)),
@@ -1817,6 +2133,11 @@ static int rewrite_execve_arg(pid_t pid, struct user_pt_regs *regs, TraceeState 
             break;
         }
         if (old_arg_ptrs[old_argc] == 0) break;
+    }
+    if (old_argc == EXEC_REWRITE_MAX_ARGC) {
+        fprintf(stderr, "pdocker-direct-trace: pid=%d execve argv too long to rewrite safely argc>=%d path=%s\n",
+                (int)pid, EXEC_REWRITE_MAX_ARGC, original);
+        return 0;
     }
 
     if (basename_is(target, "groupadd") &&
@@ -1837,51 +2158,119 @@ static int rewrite_execve_arg(pid_t pid, struct user_pt_regs *regs, TraceeState 
     const char *argv0_value = old_argv0[0] ? old_argv0 : original_guest;
     if (is_script && program_argv0[0]) argv0_value = program_argv0;
 
-    unsigned long long scratch = (regs->sp - 32768u) & ~15ULL;
+    char (*copied_arg_values)[PATH_MAX] = NULL;
+    int copied_argc = 0;
+    if (old_argc > 1) {
+        copied_arg_values = calloc((size_t)(old_argc - 1), sizeof(*copied_arg_values));
+        if (!copied_arg_values) return 0;
+        for (int i = 1; i < old_argc && copied_argc < EXEC_REWRITE_MAX_ARGC; ++i) {
+            if (read_tracee_string(pid, old_arg_ptrs[i],
+                                   copied_arg_values[copied_argc], PATH_MAX) < 0) {
+                free(copied_arg_values);
+                return 0;
+            }
+            copied_argc++;
+        }
+    }
+
+    unsigned long long string_bytes =
+        (unsigned long long)strlen(loader) + 1ULL +
+        (unsigned long long)strlen("--library-path") + 1ULL +
+        (unsigned long long)strlen(libpath) + 1ULL +
+        (unsigned long long)strlen("--argv0") + 1ULL +
+        (unsigned long long)strlen(argv0_value) + 1ULL +
+        (unsigned long long)strlen(is_script ? program : target) + 1ULL;
+    if (is_script) {
+        string_bytes += (unsigned long long)strlen(original_guest) + 1ULL;
+    }
+    if (has_script_interp_arg) {
+        string_bytes += (unsigned long long)strlen(script_interp_arg) + 1ULL;
+    }
+    for (int i = 0; i < copied_argc; ++i) {
+        string_bytes += (unsigned long long)strlen(copied_arg_values[i]) + 1ULL;
+    }
+    unsigned long long argv_entries =
+        6ULL + (has_script_interp_arg ? 1ULL : 0ULL) + (is_script ? 1ULL : 0ULL) +
+        (unsigned long long)copied_argc + 1ULL;
+    unsigned long long payload_bytes =
+        ((string_bytes + 15ULL) & ~15ULL) + argv_entries * (unsigned long long)sizeof(unsigned long long);
+    unsigned long long scratch_span = (payload_bytes + EXEC_REWRITE_STACK_SAFETY + 15ULL) & ~15ULL;
+    if (scratch_span > EXEC_REWRITE_MAX_SCRATCH || scratch_span >= regs->sp) {
+        fprintf(stderr,
+                "pdocker-direct-trace: pid=%d execve argv rewrite scratch too large bytes=%llu argc=%d path=%s\n",
+                (int)pid, scratch_span, old_argc, original);
+        free(copied_arg_values);
+        return 0;
+    }
+    unsigned long long scratch = (regs->sp - scratch_span) & ~15ULL;
     unsigned long long cursor = scratch;
     unsigned long long loader_addr = cursor;
-    if (write_tracee_string(pid, loader_addr, loader) != 0) return 0;
+    if (write_tracee_string(pid, loader_addr, loader) != 0) {
+        free(copied_arg_values);
+        return 0;
+    }
     cursor += strlen(loader) + 1;
     unsigned long long library_path_flag_addr = cursor;
-    if (write_tracee_string(pid, library_path_flag_addr, "--library-path") != 0) return 0;
+    if (write_tracee_string(pid, library_path_flag_addr, "--library-path") != 0) {
+        free(copied_arg_values);
+        return 0;
+    }
     cursor += strlen("--library-path") + 1;
     unsigned long long libpath_addr = cursor;
-    if (write_tracee_string(pid, libpath_addr, libpath) != 0) return 0;
+    if (write_tracee_string(pid, libpath_addr, libpath) != 0) {
+        free(copied_arg_values);
+        return 0;
+    }
     cursor += strlen(libpath) + 1;
     unsigned long long argv0_flag_addr = cursor;
-    if (write_tracee_string(pid, argv0_flag_addr, "--argv0") != 0) return 0;
+    if (write_tracee_string(pid, argv0_flag_addr, "--argv0") != 0) {
+        free(copied_arg_values);
+        return 0;
+    }
     cursor += strlen("--argv0") + 1;
     unsigned long long argv0_addr = cursor;
-    if (write_tracee_string(pid, argv0_addr, argv0_value) != 0) return 0;
+    if (write_tracee_string(pid, argv0_addr, argv0_value) != 0) {
+        free(copied_arg_values);
+        return 0;
+    }
     cursor += strlen(argv0_value) + 1;
     unsigned long long target_addr = cursor;
-    if (write_tracee_string(pid, target_addr, is_script ? program : target) != 0) return 0;
+    if (write_tracee_string(pid, target_addr, is_script ? program : target) != 0) {
+        free(copied_arg_values);
+        return 0;
+    }
     cursor += strlen(is_script ? program : target) + 1;
     unsigned long long script_addr = 0;
     if (is_script) {
         script_addr = cursor;
-        if (write_tracee_string(pid, script_addr, original_guest) != 0) return 0;
+        if (write_tracee_string(pid, script_addr, original_guest) != 0) {
+            free(copied_arg_values);
+            return 0;
+        }
         cursor += strlen(original_guest) + 1;
     }
     unsigned long long script_interp_arg_addr = 0;
     if (has_script_interp_arg) {
         script_interp_arg_addr = cursor;
-        if (write_tracee_string(pid, script_interp_arg_addr, script_interp_arg) != 0) return 0;
+        if (write_tracee_string(pid, script_interp_arg_addr, script_interp_arg) != 0) {
+            free(copied_arg_values);
+            return 0;
+        }
         cursor += strlen(script_interp_arg) + 1;
     }
-    unsigned long long copied_arg_ptrs[512];
-    int copied_argc = 0;
-    for (int i = 1; i < old_argc && copied_argc < 511; ++i) {
-        char arg[PATH_MAX];
-        if (read_tracee_string(pid, old_arg_ptrs[i], arg, sizeof(arg)) < 0) return 0;
-        copied_arg_ptrs[copied_argc] = cursor;
-        if (write_tracee_string(pid, cursor, arg) != 0) return 0;
-        cursor += strlen(arg) + 1;
-        copied_argc++;
+    unsigned long long copied_arg_ptrs[EXEC_REWRITE_MAX_ARGC];
+    for (int i = 0; i < copied_argc; ++i) {
+        copied_arg_ptrs[i] = cursor;
+        if (write_tracee_string(pid, cursor, copied_arg_values[i]) != 0) {
+            free(copied_arg_values);
+            return 0;
+        }
+        cursor += strlen(copied_arg_values[i]) + 1;
     }
+    free(copied_arg_values);
     cursor = (cursor + 15u) & ~15ULL;
 
-    unsigned long long new_argv[520];
+    unsigned long long new_argv[EXEC_REWRITE_MAX_ARGC + 10];
     int n = 0;
     new_argv[n++] = loader_addr;
     new_argv[n++] = library_path_flag_addr;
@@ -1891,7 +2280,7 @@ static int rewrite_execve_arg(pid_t pid, struct user_pt_regs *regs, TraceeState 
     new_argv[n++] = target_addr;
     if (has_script_interp_arg) new_argv[n++] = script_interp_arg_addr;
     if (is_script) new_argv[n++] = script_addr;
-    for (int i = 0; i < copied_argc && n < 519; ++i) {
+    for (int i = 0; i < copied_argc && n < (int)(sizeof(new_argv) / sizeof(new_argv[0]) - 1); ++i) {
         new_argv[n++] = copied_arg_ptrs[i];
     }
     new_argv[n++] = 0;
@@ -1952,6 +2341,7 @@ static int rewrite_syscall_paths(pid_t pid, struct user_pt_regs *regs, TraceeSta
             return rewrite_path_arg(pid, regs, 0, rootfs, syscall_name(nr));
         case 49:  /* chdir(pathname) */
             return rewrite_chdir_arg(pid, regs, state, rootfs);
+        case 200: /* bind(sockfd, addr, addrlen) */
         case 203: /* connect(sockfd, addr, addrlen) */
             return rewrite_unix_sockaddr_arg(pid, regs, rootfs, syscall_name(nr));
         case 221: /* execve(pathname, argv, envp) */
@@ -1963,6 +2353,103 @@ static int rewrite_syscall_paths(pid_t pid, struct user_pt_regs *regs, TraceeSta
     }
 }
 
+static unsigned long long memory_request_bytes(long nr, const unsigned long long args[6],
+                                               const TraceeState *state) {
+    switch (nr) {
+        case 222: /* mmap(addr, length, prot, flags, fd, offset) */
+            return args[1];
+        case 216: /* mremap(old_address, old_size, new_size, flags, new_address) */
+            return args[2];
+        case 214: /* brk(addr) */
+            if (args[0] == 0 || !state || state->last_brk == 0 || args[0] <= state->last_brk) {
+                return 0;
+            }
+            return args[0] - state->last_brk;
+        default:
+            return 0;
+    }
+}
+
+static int maybe_guard_memory_syscall(pid_t pid, struct user_pt_regs *regs,
+                                      TraceeState *state, int *completed_in_userland) {
+    if (!g_memory_guard || !is_memory_trace_syscall(state->last_nr)) return 0;
+    unsigned long long requested = memory_request_bytes(state->last_nr, state->last_args, state);
+    if (!requested) return 0;
+    unsigned long long available = 0;
+    unsigned long long swap_free = 0;
+    if (!memory_guard_would_deny(requested, &available, &swap_free)) return 0;
+
+    g_memory_stats.denied++;
+    g_memory_stats.last_denied_bytes = requested;
+    g_memory_stats.last_available = available;
+    g_memory_stats.last_swap_free = swap_free;
+    if (state->last_nr == 214 && state->last_brk != 0) {
+        state->emulated_result = state->last_brk;
+    } else {
+        state->emulated_result = (unsigned long long)-ENOMEM;
+    }
+    fprintf(stderr,
+            "pdocker-direct-memory: deny pid=%d nr=%ld(%s) requested=%llu available=%llu swap_free=%llu min_available=%llu min_swap=%llu\n",
+            (int)pid, state->last_nr, syscall_name(state->last_nr), requested,
+            available, swap_free, g_memory_guard_min_available,
+            g_memory_guard_min_swap);
+    if (complete_emulated_syscall(pid, regs, state->emulated_result) == 0) {
+        if (completed_in_userland) *completed_in_userland = 1;
+        state->emulated_nr = state->last_nr;
+        return 1;
+    }
+    fprintf(stderr, "pdocker-direct-memory: pid=%d setregs deny failed: %s\n",
+            (int)pid, strerror(errno));
+    return 0;
+}
+
+static void record_memory_syscall_exit(TraceeState *state, unsigned long long result) {
+    if (!g_trace_memory || !state || !is_memory_trace_syscall(state->last_nr)) return;
+    int failed = syscall_failed_result(result);
+    unsigned long long bytes = 0;
+    switch (state->last_nr) {
+        case 222:
+            bytes = state->last_args[1];
+            update_memory_stat(&g_memory_stats.mmap_, bytes, failed);
+            break;
+        case 216:
+            bytes = state->last_args[2];
+            update_memory_stat(&g_memory_stats.mremap, bytes, failed);
+            break;
+        case 214:
+            if (!failed && result != 0) {
+                if (state->last_brk != 0 && result > state->last_brk) {
+                    bytes = result - state->last_brk;
+                }
+                state->last_brk = result;
+            }
+            update_memory_stat(&g_memory_stats.brk, bytes, failed);
+            break;
+        case 215:
+            bytes = state->last_args[1];
+            update_memory_stat(&g_memory_stats.munmap_, bytes, failed);
+            break;
+        case 226:
+            bytes = state->last_args[1];
+            update_memory_stat(&g_memory_stats.mprotect_, bytes, failed);
+            break;
+        case 233:
+            bytes = state->last_args[1];
+            update_memory_stat(&g_memory_stats.madvise_, bytes, failed);
+            break;
+        default:
+            break;
+    }
+    if (g_trace_memory_verbose ||
+        (!failed && bytes >= g_trace_memory_threshold) ||
+        (failed && (state->last_nr == 222 || state->last_nr == 216 || state->last_nr == 214))) {
+        fprintf(stderr,
+                "pdocker-direct-memory: pid=%d nr=%ld(%s) result=%lld bytes=%llu failed=%d addr=%llx\n",
+                (int)state->pid, state->last_nr, syscall_name(state->last_nr),
+                (long long)result, bytes, failed, state->last_args[0]);
+    }
+}
+
 static int handle_syscall_entry(pid_t pid, struct user_pt_regs *regs, TraceeState *state,
                                 const char *rootfs, const char *loader, const char *libpath,
                                 int events, int *completed_in_userland) {
@@ -1971,7 +2458,9 @@ static int handle_syscall_entry(pid_t pid, struct user_pt_regs *regs, TraceeStat
     record_syscall_stat(state->last_nr);
     for (int i = 0; i < 6; ++i) state->last_args[i] = regs->regs[i];
     int forced_emulation = 0;
-    if (state->last_nr == 17 &&
+    if (maybe_guard_memory_syscall(pid, regs, state, completed_in_userland)) {
+        forced_emulation = 1;
+    } else if (state->last_nr == 17 &&
         emulate_getcwd(pid, regs, state, rootfs, &state->emulated_result)) {
         forced_emulation = 1;
         if (complete_emulated_syscall(pid, regs, state->emulated_result) == 0) {
@@ -2100,7 +2589,7 @@ static int handle_syscall_entry(pid_t pid, struct user_pt_regs *regs, TraceeStat
 }
 
 static int trace_and_exec(char *const exec_argv[], const char *rootfs, const char *libpath) {
-#define TRACE_RETURN(rc_) do { g_trace_child_pgid = -1; return (rc_); } while (0)
+#define TRACE_RETURN(rc_) do { print_memory_stats("trace-return", (rc_)); g_trace_child_pgid = -1; return (rc_); } while (0)
     pid_t child = fork();
     if (child < 0) {
         perror("pdocker-direct-executor: fork tracer");
@@ -2290,6 +2779,8 @@ static int trace_and_exec(char *const exec_argv[], const char *rootfs, const cha
                     snprintf(state->guest_cwd, sizeof(state->guest_cwd), "%s",
                              state->pending_guest_cwd);
                     state->pending_guest_cwd[0] = '\0';
+                } else if (state->in_syscall && is_memory_trace_syscall(state->last_nr)) {
+                    record_memory_syscall_exit(state, regs.regs[0]);
                 }
                     state->in_syscall = completed_in_userland ? 1 : !state->in_syscall;
             }
@@ -2457,6 +2948,9 @@ static int trace_and_exec(char *const exec_argv[], const char *rootfs, const cha
             }
             if (state->in_syscall && state->emulated_nr >= 0) {
                 if (continue_tracee_to_syscall_exit(got, 0) != 0) break;
+            } else if (g_trace_memory && is_memory_trace_syscall(state->last_nr)) {
+                state->in_syscall = 1;
+                if (continue_tracee_to_syscall_exit(got, 0) != 0) break;
             } else if (state->last_nr == 49 && state->pending_guest_cwd[0]) {
                 state->in_syscall = 1;
                 if (continue_tracee_to_syscall_exit(got, 0) != 0) break;
@@ -2537,6 +3031,24 @@ static int run_command(int argc, char **argv) {
     g_trace_linkat = env_flag_enabled("PDOCKER_DIRECT_TRACE_LINKAT");
     g_trace_paths = env_flag_enabled("PDOCKER_DIRECT_TRACE_PATHS") || trace_syscall_logs;
     g_trace_exec = env_flag_enabled("PDOCKER_DIRECT_TRACE_EXEC");
+    g_trace_memory = env_flag_enabled("PDOCKER_DIRECT_TRACE_MEMORY");
+    g_trace_memory_verbose = env_flag_enabled("PDOCKER_DIRECT_TRACE_MEMORY_VERBOSE");
+    g_trace_memory_threshold = env_u64_or_default(
+            "PDOCKER_DIRECT_TRACE_MEMORY_THRESHOLD",
+            64ULL * 1024ULL * 1024ULL);
+    g_memory_guard = env_flag_enabled("PDOCKER_DIRECT_MEMORY_GUARD");
+    g_memory_guard_min_request = env_u64_or_default(
+            "PDOCKER_DIRECT_MEMORY_GUARD_MIN_REQUEST",
+            64ULL * 1024ULL * 1024ULL);
+    g_memory_guard_min_available = env_u64_or_default(
+            "PDOCKER_DIRECT_MEMORY_GUARD_MIN_AVAILABLE",
+            512ULL * 1024ULL * 1024ULL);
+    g_memory_guard_min_swap = env_u64_or_default(
+            "PDOCKER_DIRECT_MEMORY_GUARD_MIN_SWAP",
+            256ULL * 1024ULL * 1024ULL);
+    if (g_memory_guard) g_trace_memory = 1;
+    memset(&g_memory_stats, 0, sizeof(g_memory_stats));
+    g_memory_stats_printed = 0;
     g_stats = env_flag_enabled("PDOCKER_DIRECT_STATS");
     g_rootfd_rewrite = env_flag_enabled("PDOCKER_DIRECT_ROOTFD_REWRITE");
     g_validate_tracees = env_flag_enabled("PDOCKER_DIRECT_VALIDATE_TRACEES");
@@ -2838,6 +3350,10 @@ int main(int argc, char **argv) {
 
     if (argc == 2 && strcmp(argv[1], "--pdocker-memory-pager-probe") == 0) {
         return run_memory_pager_probe();
+    }
+
+    if (argc == 2 && strcmp(argv[1], "--pdocker-memory-pager-poc") == 0) {
+        return run_memory_pager_poc();
     }
 
     if (argc >= 2 && strcmp(argv[1], "run") == 0) {

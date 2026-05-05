@@ -122,6 +122,10 @@ Minimum tables:
 - `jobs`: UUID jobs linked to owning project/object where applicable.
 - `overlay_paths`: path-level lower/upper/whiteout/opaque metadata for merged
   views, archive APIs, and rebuild checks.
+- Future SAF/SD-card exchange rows should follow the same rule: raw payload
+  files may live in a user-selected Documents tree, but emulated Unix metadata
+  for FAT32/exFAT-backed files belongs in app-private, rebuildable index or
+  sidecar records rather than in the payload directory itself.
 
 Indexes should optimize project-scoped queries, object lookup by real ID,
 overlay path lookup by `(container_id, guest_path)`, and reverse source-path
@@ -143,6 +147,15 @@ Payload bytes remain in lower roots, upper dirs, and volumes. The DB only helps
 answer "where would this path resolve?" and "does the index still describe the
 filesystem?" If upper metadata is lost, stale, or impossible to verify, pdocker
 must rescan lower/upper trees and regenerate these rows.
+
+SAF/SD-card exchange metadata has the same trust model. A sidecar may record
+the URI/document identity, display name, size, mtime, content hash evidence,
+emulated mode/uid/gid, symlink target, xattr digest, and conflict state for a
+payload stored on FAT32/exFAT media. Startup checks must compare that metadata
+with `DocumentProvider` enumeration and rescan, quarantine, or report conflicts
+when files were edited, renamed, or deleted outside pdocker. These rows support
+archive/copy/import/export semantics only; they do not make removable storage a
+direct executable rootfs or high-frequency container upperdir.
 
 ## Replica And Snapshot Rules
 

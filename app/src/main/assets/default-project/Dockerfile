@@ -10,7 +10,8 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     SHELL=/bin/bash \
     CODE_SERVER_USER_DATA_DIR=/workspace/.vscode-server/data \
-    CODE_SERVER_EXTENSIONS_DIR=/workspace/.vscode-server/extensions
+    CODE_SERVER_EXTENSIONS_DIR=/workspace/.vscode-server/extensions \
+    CODE_SERVER_IMAGE_EXTENSIONS_DIR=/opt/pdocker/code-server/extensions
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash \
@@ -57,12 +58,12 @@ RUN if [ "$CODE_SERVER_VERSION" = "latest" ]; then \
 
 RUN npm install -g "$CODEX_NPM_PACKAGE" "$CLAUDE_CODE_NPM_PACKAGE"
 
-RUN mkdir -p /workspace "$CODE_SERVER_USER_DATA_DIR/User" "$CODE_SERVER_EXTENSIONS_DIR" \
+RUN mkdir -p /workspace "$CODE_SERVER_USER_DATA_DIR/User" "$CODE_SERVER_EXTENSIONS_DIR" "$CODE_SERVER_IMAGE_EXTENSIONS_DIR" \
     && for ext in Continue.continue OpenAI.chatgpt Anthropic.claude-code; do \
-         code-server --extensions-dir "$CODE_SERVER_EXTENSIONS_DIR" --install-extension "$ext"; \
+         code-server --extensions-dir "$CODE_SERVER_IMAGE_EXTENSIONS_DIR" --install-extension "$ext"; \
        done \
     && for ext in redhat.vscode-yaml ms-azuretools.vscode-docker; do \
-         code-server --extensions-dir "$CODE_SERVER_EXTENSIONS_DIR" --install-extension "$ext" || true; \
+         code-server --extensions-dir "$CODE_SERVER_IMAGE_EXTENSIONS_DIR" --install-extension "$ext" || true; \
        done
 
 COPY scripts/start-code-server.sh /usr/local/bin/start-code-server

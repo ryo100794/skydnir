@@ -1099,6 +1099,65 @@ def test_gpu_shim_contract() -> None:
         ok("GPU shim contract injects device-independent container ABI")
 
 
+def test_dockerfile_run_process_group_isolation() -> None:
+    # Dockerfile RUN process-group isolation: long native builds may spawn
+    # tracers, compilers, linkers, and shell wrappers. Keep that process tree
+    # in its own session so child-side signals cannot terminate pdockerd.
+    text = PDOCKERD.read_text(errors="replace")
+    marker = (
+        "proc = subprocess.Popen(\n"
+        "                build_run_argv(rootfs, build_run_command(args),"
+    )
+    at = text.find(marker)
+    if at < 0:
+        fail("Dockerfile RUN subprocess launch not found")
+    snippet = text[at : at + 700]
+    if "preexec_fn=build_child_preexec" not in snippet:
+        fail("Dockerfile RUN subprocess must use build_child_preexec")
+    if "def build_child_preexec()" not in text or "oom_score_adj" not in text or "os.setsid()" not in text:
+        fail("build_child_preexec must isolate sessions and bias LMK away from pdockerd")
+    ok("Dockerfile RUN process-group isolation keeps build children away from pdockerd")
+
+
+def test_android_build_profile_injected_outside_dockerfile() -> None:
+    text = PDOCKERD.read_text(errors="replace")
+    required = [
+        "usr/local/pdocker-build-bin",
+        "PDOCKER_BUILD_PROFILE",
+        "PDOCKER_BUILD_VULKAN_SHADER_PROFILE",
+        "CMAKE_BUILD_PARALLEL_LEVEL",
+        "MAKEFLAGS",
+        "NINJA_STATUS",
+        "exec /usr/bin/glslc",
+        "feature-tests/coopmat.comp",
+        "usr/local/pdocker-build-bin/glslc",
+    ]
+    missing = [needle for needle in required if needle not in text]
+    if missing:
+        fail(f"Android build profile missing markers: {missing}")
+    dockerfile = (REPO_ROOT / "app/src/main/assets/project-library/llama-cpp-gpu/Dockerfile").read_text(errors="replace")
+    if "pdocker-bridge-safe-glslc" in dockerfile or "LLAMA_CPP_VULKAN_SHADER_PROFILE" in dockerfile:
+        fail("llama Dockerfile must not carry pdocker-specific shader wrapper tuning")
+    ok("Android build profile is injected by pdockerd without Dockerfile edits")
+
+
+def test_vulkan_icd_memory_advertising_is_not_fixed_8gib() -> None:
+    text = (REPO_ROOT / "docker-proot-setup/src/gpu/pdocker_vulkan_icd.c").read_text(errors="replace")
+    required = [
+        'fopen("/proc/meminfo", "r")',
+        "MemAvailable:",
+        "max_heap = (VkDeviceSize)(2ull * 1024ull * 1024ull * 1024ull)",
+        "min_heap = (VkDeviceSize)(512ull * 1024ull * 1024ull)",
+        "PDOCKER_VULKAN_HEAP_BYTES",
+    ]
+    missing = [needle for needle in required if needle not in text]
+    if missing:
+        fail(f"Vulkan ICD memory advertising guard missing markers: {missing}")
+    if "return (VkDeviceSize)(8ull * 1024ull * 1024ull * 1024ull)" in text:
+        fail("Vulkan ICD must not default to a fixed 8GiB advertised heap")
+    ok("Vulkan ICD defaults to device-memory-aware advertised limits")
+
+
 def main() -> int:
     test_direct_backend_contract()
     test_direct_executor_probe_contract()
@@ -1122,6 +1181,9 @@ def main() -> int:
     test_media_bridge_scaffold_contract()
     test_android_media_static_contract()
     test_gpu_shim_contract()
+    test_dockerfile_run_process_group_isolation()
+    test_android_build_profile_injected_outside_dockerfile()
+    test_vulkan_icd_memory_advertising_is_not_fixed_8gib()
     return 0
 
 

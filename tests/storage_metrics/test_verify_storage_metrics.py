@@ -115,6 +115,28 @@ class StorageMetricsCaptureTest(unittest.TestCase):
 
         self.assertIn("FAIL: system_df.TotalBytes appears to double count ImageViewBytes", errors)
 
+    def test_fixture_validation_requires_container_upper_semantics_note(self):
+        snapshot = json.loads(json.dumps(verify_storage_metrics.FIXTURE))
+        snapshot["system_df"]["PdockerStorage"].pop("ContainerUpper")
+
+        errors = verify_storage_metrics.validate(snapshot)
+
+        self.assertIn(
+            "FAIL: PdockerStorage notes must describe container upper/private storage",
+            errors,
+        )
+
+    def test_fixture_validation_catches_rootfs_view_smaller_than_upperdir(self):
+        snapshot = json.loads(json.dumps(verify_storage_metrics.FIXTURE))
+        snapshot["system_df"]["RootfsViewBytes"] = snapshot["system_df"]["ContainerUpperBytes"] - 1
+
+        errors = verify_storage_metrics.validate(snapshot)
+
+        self.assertIn(
+            "FAIL: system_df.RootfsViewBytes must be at least ContainerUpperBytes",
+            errors,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

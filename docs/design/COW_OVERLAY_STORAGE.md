@@ -166,16 +166,60 @@ SAF plan:
 - Treat Android Storage Access Framework locations as user-granted external
   storage endpoints, not native Linux bind mounts.
 - Keep persistable URI grants and display names in metadata.
-- Project-library templates mount a common Documents volume at `/documents`
-  through `PDOCKER_DOCUMENTS_HOST` and `PDOCKER_DOCUMENTS_MOUNT`. The Android
-  app owns this setting, writes it into each project `.env`, and stores the SAF
-  URI grant for later mediated access.
+- Project-library templates treat the selected Android Documents folder as the
+  workspace root for user-owned project definitions and explicit exchange data.
+  Projects live under `pdocker/projects`; containers see the selected folder at
+  `/documents` only when an app intentionally writes there. Hot working
+  directories, model caches, databases, and high-frequency logs stay in
+  app-private storage by default.
+- If the selected folder is a removable SD-card tree that rejects normal
+  app-UID path writes, pdocker falls back to the app-private project mirror.
+  Full SD-backed project storage then requires the planned SAF mediator rather
+  than pretending the Linux path is writable.
+- Removable SD media may be FAT32 or exFAT. Those filesystems can carry raw
+  file payload bytes well, but they do not preserve Unix ownership, mode bits,
+  symlinks, hardlink identity, device nodes, or xattrs with Docker fidelity.
+  The supported design is a hybrid exchange store: payload files may live in
+  the selected SAF/Documents tree, while app-private metadata records emulate
+  the representable Unix fields for archive/copy/import/export flows.
+- This hybrid store is for container data exchange, not executable hot paths.
+  Runtime rootfs, container uppers, `/workspace`, package caches, model caches,
+  databases, and high-frequency logs stay in app-private storage unless a user
+  explicitly accepts the compatibility and performance limits of an external
+  bind/exchange path.
+- SAF paths are mediated through Android `DocumentProvider` operations. pdocker
+  must not issue direct POSIX writes, renames, or chmod/chown/xattr-style
+  mutations against removable storage unless a current probe proves the exact
+  path is normal app-UID writable and not merely URI-granted.
+- App-private sidecar metadata needs rebuild and check rules just like the main
+  project index: store source URI/document IDs, display names, size/mtime/hash
+  evidence, emulated mode/uid/gid/xattr digests, symlink targets where
+  representable, and conflict state. On startup or grant changes, verify the
+  sidecar against `DocumentProvider` enumeration and either rescan, quarantine,
+  or ask the user to choose the winner for changed/deleted/renamed entries.
+- The Android app owns `PDOCKER_DOCUMENTS_HOST`,
+  `PDOCKER_SHARED_DOCUMENTS_HOST`, and the SAF URI grant, writes them into each
+  project `.env`, and keeps app-private fast storage for hot paths that should
+  not constantly write to SD-card/Documents storage.
 - Prefer import/export, sync, or mirrored app-owned working copies for runtime
   paths that need POSIX-style open/stat/rename semantics.
-- Only expose SAF-backed paths directly to container operations once a mediator
-  can map URI access to the expected file operations and failure modes.
+- SAF-mediated mode exposes an app-private mirror path to Compose and keeps the
+  selected tree behind Android `DocumentProvider` calls. The current mediator
+  contract covers lightweight directory creation, listing, existence checks, and
+  payload reads/writes with app-private sidecar metadata. Export payloads under
+  `pdocker-exports/` are treated as SAF-owned after a successful mediator write:
+  the app-private mirror file is evicted and only the sidecar metadata remains
+  in app storage. It is suitable for exchange/import/export surfaces, not
+  executable rootfs paths, hot upperdirs, package caches, databases, or
+  high-frequency logs.
+- Conflict handling must be explicit. When the same logical guest path is
+  changed through both container exchange metadata and Android/Documents apps,
+  pdocker should preserve both payloads or quarantine the entry rather than
+  silently overwriting one side.
 - Never claim Docker mount propagation, device mounts, tmpfs, SELinux relabel,
-  or exact `:ro` bind parity for SAF paths.
+  executable-bit enforcement, uid/gid authority, complete symlink behavior, all
+  xattrs, special files, hardlink identity, or exact `:ro` bind parity for SAF
+  paths.
 
 ## Performance And Tuning
 

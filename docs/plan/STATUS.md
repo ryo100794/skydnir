@@ -147,6 +147,30 @@ Near-term verification queue generated on 2026-05-04:
   total, and free-space values after build, prune, rebuild, and edit/copy-up
   flows.
 
+Current open-risk anchors as of 2026-05-05:
+
+- Android Documents access is an explicit `/documents` exchange mount only when
+  the user selects it through SAF. Hot paths such as runtime state, model files,
+  caches, layers, and project internals remain app-private unless a Compose
+  volume or bind says otherwise.
+- Storage reporting must count the shared layer pool once. Image/container
+  apparent sizes and merged rootfs views overlap lower-layer bytes, so they are
+  inspection values rather than additive unique-usage totals.
+- Service health must come from Engine container state, the current Engine
+  container ID, a real listener check, and matching logs. Project cards,
+  Compose metadata, requested ports, stale names, and completed jobs cannot
+  establish healthy status on their own.
+- The interactive terminal regression is most likely the PTY fallback/pipe path
+  running a noninteractive shell; the observed symptom is
+  `/usr/bin/[: extra argument b]`. Fixes should preserve PTY allocation and
+  argv semantics instead of changing template scripts to hide the failure.
+- A freeze risk remains because one Engine stop returned HTTP 204 while
+  `pdocker-direct`/child processes and the GPU executor stayed alive. Runtime
+  stop is not complete until process-tree and executor teardown are proven.
+- The llama GPU probe with `--gpu-layers 1`/`--n-gpu-layers 1` offloaded only
+  the output layer. The next meaningful GPU tests need `--gpu-layers >=2` and
+  artifact/log evidence such as `offloading N repeating layers`.
+
 ### 4. Android-specific workarounds (how we got here)
 
 | problem | fix |

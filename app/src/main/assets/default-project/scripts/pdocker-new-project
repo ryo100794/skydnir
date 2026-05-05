@@ -69,9 +69,15 @@ services:
     build: .
     image: local/pdocker-blank:latest
     command: ["/bin/bash", "-lc", "echo hello from compose && sleep infinity"]
+    environment:
+      PDOCKER_DOCUMENTS_MOUNT: "${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
+      PDOCKER_SHARED_DOCUMENTS_MOUNT: "${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
+      PDOCKER_EXPORT_DIR: "${PDOCKER_EXPORT_DIR:-/documents/pdocker-exports}"
+      PDOCKER_FAST_WORKDIR: "${PDOCKER_FAST_WORKDIR:-/workspace}"
     volumes:
-      - ./workspace:/workspace
+      - ${PDOCKER_FAST_WORKSPACE_HOST:-./workspace}:/workspace
       - ${PDOCKER_DOCUMENTS_HOST:-./documents}:${PDOCKER_DOCUMENTS_MOUNT:-/documents}
+      - ${PDOCKER_SHARED_DOCUMENTS_HOST:-./shared-documents}:${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}
 COMPOSE
   mkdir -p "$dest/documents"
   cat > "$dest/documents/README.md" <<'README'
@@ -80,6 +86,16 @@ COMPOSE
 This placeholder is used when the pdocker Android app has not configured a
 host Documents folder. Containers see the shared folder at `/documents` by
 default.
+
+The selected Android Documents folder is mounted at `/documents` by default.
+Use it for explicit exports, benchmark artifacts, models you choose to share,
+and handoff files. Containers from other projects may intentionally share a
+folder by overriding `PDOCKER_DOCUMENTS_HOST` or by using the shared mount at
+`/shared`.
+
+Keep hot build caches, databases, and high-frequency logs in `/workspace` or
+another app-private volume, then copy selected results to `/documents` when
+needed.
 README
 elif [[ "$template" = /* && -d "$template" ]]; then
   copy_template "$template"

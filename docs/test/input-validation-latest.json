@@ -1,0 +1,133 @@
+{
+  "command": "python3 scripts/verify-input-validation.py --write-artifact docs/test/input-validation-latest.json",
+  "evidence": [
+    {
+      "area": "input-validation-ledger",
+      "case_count": 11,
+      "category_count": 3,
+      "label": "tests/input_validation_cases.json",
+      "result": "pass"
+    },
+    {
+      "area": "input-file-grammar",
+      "grammar_count": 7,
+      "label": "BNF-like input grammar ledger",
+      "planned_gap_grammar_count": 1,
+      "planned_gap_ids": [
+        "compose-file-full-grammar"
+      ],
+      "result": "pass-with-planned-gap",
+      "runnable_grammar_count": 6
+    },
+    {
+      "actual_status": 400,
+      "area": "api-arguments",
+      "expected_status": 400,
+      "label": "malformed JSON request body",
+      "result": "pass"
+    },
+    {
+      "actual_status": 400,
+      "area": "api-arguments",
+      "expected_status": 400,
+      "label": "non-object JSON request body",
+      "result": "pass"
+    },
+    {
+      "actual_status": 400,
+      "area": "api-arguments",
+      "expected_status": 400,
+      "label": "missing required image names",
+      "result": "pass"
+    },
+    {
+      "actual_status": 200,
+      "area": "api-arguments",
+      "expected_status": 200,
+      "label": "invalid diagnostics limit clamps",
+      "result": "pass"
+    },
+    {
+      "area": "input-file-grammar",
+      "expected_rejection": "WAT",
+      "label": "unknown Dockerfile instruction",
+      "rejected": [
+        "WAT"
+      ],
+      "result": "pass"
+    },
+    {
+      "area": "input-file-grammar",
+      "expected_rejection": "PDOCKER_RUN",
+      "label": "pdocker-specific Dockerfile instruction",
+      "rejected": [
+        "PDOCKER_RUN"
+      ],
+      "result": "pass"
+    },
+    {
+      "area": "input-file-grammar",
+      "label": "feature scenario required areas",
+      "required_area_count": 43,
+      "result": "pass",
+      "scenario_area_count": 43
+    },
+    {
+      "area": "value-ranges",
+      "error_count": 2,
+      "expected_failure": true,
+      "label": "negative storage byte count",
+      "result": "pass"
+    },
+    {
+      "area": "value-ranges",
+      "error_count": 1,
+      "expected_failure": true,
+      "label": "free bytes greater than total bytes",
+      "result": "pass"
+    },
+    {
+      "area": "value-ranges",
+      "error_count": 2,
+      "expected_failure": true,
+      "label": "double-counted image view bytes",
+      "result": "pass"
+    },
+    {
+      "area": "value-ranges",
+      "label": "direct syscall boundary matrix",
+      "present_boundary_count": 8,
+      "required_boundary_ids": [
+        "boundary.exec-argc-and-scratch-limit",
+        "boundary.getcwd-erange",
+        "boundary.memory-guard-threshold",
+        "boundary.path-max-and-enametoolong",
+        "boundary.sockaddr-min-and-sun-path-limit",
+        "boundary.uid-gid-minus-one",
+        "boundary.wait-exit-signal-code"
+      ],
+      "result": "pass"
+    }
+  ],
+  "git_commit": "c194f2b3cd82",
+  "kind": "input-validation",
+  "ledgers": [
+    "tests/input_validation_cases.json",
+    "tests/input_grammar_coverage.json"
+  ],
+  "schema": 1,
+  "summary": {
+    "bnf_full_coverage": false,
+    "bnf_like_coverage_recorded": true,
+    "case_count": 11,
+    "category_count": 3,
+    "grammar_count": 7,
+    "planned_gap_grammar_count": 1,
+    "planned_gap_ids": [
+      "compose-file-full-grammar"
+    ],
+    "runnable_grammar_count": 6,
+    "syntax_and_range_validation_recorded": true
+  },
+  "timestamp_utc": "2026-05-05T23:39:51Z"
+}

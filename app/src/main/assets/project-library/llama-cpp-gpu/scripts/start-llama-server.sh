@@ -59,7 +59,7 @@ if [[ ! -f "$model" ]]; then
   mkdir -p "$status_dir"
   cat >&2 <<EOF
 Missing model: $model
-Place a GGUF model at ./models/model.gguf or set LLAMA_ARG_MODEL.
+Place a GGUF model at /models/model.gguf or set LLAMA_ARG_MODEL.
 Optionally set LLAMA_MODEL_URL to download a GGUF at startup.
 Current GPU profile:
 $(cat "$profile" 2>/dev/null || true)

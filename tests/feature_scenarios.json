@@ -1,0 +1,782 @@
+{
+  "schema": 1,
+  "lanes": {
+    "fast-local": "Host-only checks for every build or small patch.",
+    "heavy-backend": "Longer backend compatibility and runtime regressions.",
+    "heavy-container": "Container/rootfs probes that need a prepared rootfs.",
+    "android-quick": "Short Android device smoke tests.",
+    "android-full": "Longer Android device smoke tests.",
+    "android-documents": "Android SAF Documents mediator tests.",
+    "android-gpu": "Android GPU executor and bridge measurements.",
+    "android-llama": "llama.cpp container and benchmark measurements.",
+    "release": "Publication, payload, and secret-readiness checks."
+  },
+  "required_areas": [
+    "abnormal-event-evidence",
+    "archive-api",
+    "backend-runtime-contract",
+    "build-dockerfile",
+    "compat-engine-api",
+    "compose-orchestrator",
+    "cow-overlay-storage",
+    "direct-runtime-syscalls",
+    "direct-runtime-container",
+    "documents-saf-mediator",
+    "gpu-bridge",
+    "image-and-layer-storage",
+    "input-validation",
+    "llama-runtime",
+    "media-bridge",
+    "memory-pager",
+    "network-metadata",
+    "project-library",
+    "random-stress-regression",
+    "requirements-blackbox",
+    "release-readiness",
+    "refactor-resilience",
+    "storage-metrics",
+    "terminal-editor-ui",
+    "test-design-governance",
+    "tty-exec",
+    "vscode-workspace",
+    "mutation-testing",
+    "property-based-testing",
+    "differential-testing",
+    "stateful-model-testing",
+    "concurrency-race-testing",
+    "crash-recovery-testing",
+    "fault-injection",
+    "golden-compatibility-corpus",
+    "security-adversarial-testing",
+    "performance-regression-gates",
+    "runtime-single-container",
+    "service-health-listener-proof",
+    "runtime-npm-compat",
+    "documents-saf-phase2",
+    "network-port-forwarding",
+    "runtime-process-teardown"
+  ],
+  "scenarios": [
+    {
+      "id": "refactor.resilience.external-contracts",
+      "area": "refactor-resilience",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-refactor-resilience.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/REFACTOR_RESILIENCE.md",
+        "tests/refactor_resilience_cases.json"
+      ],
+      "checks": "External contract stability, bug fossilization guard, Engine API golden shape, Compose/Dockerfile fixtures, abnormal replay, planned archive/state/artifact gaps."
+    },
+    {
+      "id": "abnormal.events.evidence-ledger",
+      "area": "abnormal-event-evidence",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-abnormal-events.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/SCENARIOS.md",
+        "tests/abnormal_event_cases.json"
+      ],
+      "checks": "Abnormal event schema, required failure categories, reproduction commands, evidence sources, planned gaps, and release-auditable artifact shape."
+    },
+    {
+      "id": "compat.engine-api.static-audit",
+      "area": "compat-engine-api",
+      "lane": "fast-local",
+      "command": "python3 scripts/compat-audit.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/COMPATIBILITY.md",
+        "docs/test/compat-audit-latest.md"
+      ],
+      "checks": "Engine API route inventory, Docker-compatible endpoints, static protocol surface, and backend quick hooks."
+    },
+    {
+      "id": "backend.runtime-contract",
+      "area": "backend-runtime-contract",
+      "lane": "fast-local",
+      "command": "python3 docker-proot-setup/scripts/verify_runtime_contract.py",
+      "status": "runnable",
+      "docs": [
+        "docs/design/RUNTIME_STRATEGY.md"
+      ],
+      "checks": "Runtime state, pid reconciliation, process lifecycle contracts, and backend invariants."
+    },
+    {
+      "id": "direct.syscall.contracts",
+      "area": "direct-runtime-syscalls",
+      "lane": "fast-local",
+      "command": "python3 scripts/run_direct_syscall_scenarios.py --lane local",
+      "status": "runnable",
+      "docs": [
+        "docs/test/DIRECT_SYSCALL_COVERAGE.md",
+        "tests/direct_syscall_coverage.json"
+      ],
+      "checks": "Direct syscall hook inventory, scenario manifest integrity, path variants, boundary values, branch decisions, local cases, and Android dry-run plan."
+    },
+    {
+      "id": "direct.container.probe",
+      "area": "direct-runtime-container",
+      "lane": "heavy-container",
+      "command": "bash scripts/container-direct-probe.sh --memory-guard",
+      "status": "runnable-with-env",
+      "env": [
+        "ROOTFS"
+      ],
+      "docs": [
+        "docs/test/DIRECT_SYSCALL_COVERAGE.md"
+      ],
+      "checks": "Container-root shell basics, long argv preservation, proc view, and large allocation guard behavior."
+    },
+    {
+      "id": "build.dockerfile.standard",
+      "area": "build-dockerfile",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-dockerfile-standard.py",
+      "status": "runnable",
+      "docs": [
+        "docs/design/DOCKER_COMPAT_SCOPE.md"
+      ],
+      "checks": "Standard Dockerfile compatibility stance, unsupported BuildKit feature handling, and template syntax contracts."
+    },
+    {
+      "id": "compose.orchestrator.ui-route",
+      "area": "compose-orchestrator",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-ui-actions.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/COMPATIBILITY.md"
+      ],
+      "checks": "Engine-native compose up path, build log streaming, container labels, service URLs, job state, and retry/stop actions."
+    },
+    {
+      "id": "terminal.editor.ui-contracts",
+      "area": "terminal-editor-ui",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify_terminal_editor_contracts.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/COMPATIBILITY.md"
+      ],
+      "checks": "Terminal PTY UI, selection/copy, keyboard suppression, readonly log terminals, editor line numbers, whitespace, and pinch zoom."
+    },
+    {
+      "id": "tty.exec.engine-it",
+      "area": "tty-exec",
+      "lane": "android-quick",
+      "command": "bash scripts/android-device-smoke.sh --quick --no-install",
+      "status": "runnable-with-device",
+      "docs": [
+        "docs/test/ANDROID_SELFDEBUG.md"
+      ],
+      "checks": "Engine exec -it path, PTY fallback, bracket argv regression, and Android smoke wiring."
+    },
+    {
+      "id": "project.library.templates",
+      "area": "project-library",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-project-library.py",
+      "status": "runnable",
+      "docs": [
+        "docs/manual/DEFAULT_DEV_WORKSPACE.md"
+      ],
+      "checks": "Bundled dev workspace, direct runtime probe, llama, ROS2, Blender templates, shared Documents volumes, healthchecks, and launch metadata."
+    },
+    {
+      "id": "vscode.workspace.default",
+      "area": "vscode-workspace",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-project-library.py",
+      "status": "runnable",
+      "docs": [
+        "docs/manual/DEFAULT_DEV_WORKSPACE.md"
+      ],
+      "checks": "code-server, Continue, Codex, Claude Code hooks, pdocker management helpers, paths, and default workspace repair/migration."
+    },
+    {
+      "id": "documents.saf.mediator.device",
+      "area": "documents-saf-mediator",
+      "lane": "android-documents",
+      "command": "bash scripts/android-documents-mediator-smoke.sh",
+      "status": "runnable-with-device",
+      "docs": [
+        "docs/manual/DEFAULT_DEV_WORKSPACE.md",
+        "docs/design/COW_OVERLAY_STORAGE.md"
+      ],
+      "checks": "SAF mediator writes nested exports, evicts app-private mirror payloads after success, and preserves Unix-like sidecar metadata."
+    },
+    {
+      "id": "storage.metrics.accounting",
+      "area": "storage-metrics",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-storage-metrics.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/STORAGE_METRICS.md"
+      ],
+      "checks": "Unique/shared layer accounting, image/container/cache buckets, and fixture/capture contract."
+    },
+    {
+      "id": "image.layer.storage.prune",
+      "area": "image-and-layer-storage",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-ui-actions.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/STORAGE_METRICS.md"
+      ],
+      "checks": "Layer cache reuse, prune behavior, active build protection, and storage refresh wiring."
+    },
+    {
+      "id": "cow.overlay.local",
+      "area": "cow-overlay-storage",
+      "lane": "fast-local",
+      "command": "bash docker-proot-setup/src/overlay/test_cow.sh",
+      "status": "runnable",
+      "docs": [
+        "docs/design/COW_OVERLAY_STORAGE.md"
+      ],
+      "checks": "COW copy-up, path metadata, fd lifecycle, xattr hooks, and overlay-like path operations."
+    },
+    {
+      "id": "archive.api.compatibility",
+      "area": "archive-api",
+      "lane": "fast-local",
+      "command": "python3 scripts/compat-audit.py",
+      "status": "planned-gap",
+      "docs": [
+        "docs/design/DOCKER_COMPAT_SCOPE.md",
+        "docs/test/COMPATIBILITY.md"
+      ],
+      "checks": "GET/PUT/HEAD container archive API routes, tar/stat header compatibility, path traversal defense, and merged lower/upper behavior."
+    },
+    {
+      "id": "network.metadata.hostlike",
+      "area": "network-metadata",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-ui-actions.py",
+      "status": "runnable",
+      "docs": [
+        "docs/design/DOCKER_COMPAT_SCOPE.md"
+      ],
+      "checks": "Host-like network metadata, port mapping truth states, service aliases, warnings, and UI/docker ps consistency."
+    },
+    {
+      "id": "gpu.bridge.smoke",
+      "area": "gpu-bridge",
+      "lane": "fast-local",
+      "command": "bash scripts/smoke-vulkan-icd-bridge.sh",
+      "status": "runnable",
+      "docs": [
+        "docs/design/GPU_COMPAT.md"
+      ],
+      "checks": "Vulkan ICD bridge dispatch, executor socket handshake, conservative feature advertisement, and bridge smoke path."
+    },
+    {
+      "id": "gpu.host.native.bench",
+      "area": "gpu-bridge",
+      "lane": "android-gpu",
+      "command": "bash scripts/android-gpu-host-bench.sh",
+      "status": "runnable-with-device",
+      "docs": [
+        "docs/test/gpu-host-native-latest.md"
+      ],
+      "checks": "Host CPU/GPU baseline, Vulkan/GLES executor measurements, and device-independent GPU executor evidence."
+    },
+    {
+      "id": "gpu.host-container.compare",
+      "area": "gpu-bridge",
+      "lane": "android-gpu",
+      "command": "bash scripts/android-gpu-compare-bench.sh",
+      "status": "runnable-with-device",
+      "docs": [
+        "docs/test/gpu-host-container-comparison-latest.md"
+      ],
+      "checks": "Host/container bridge overhead, repeated GPU bridge measurements, and comparison artifact update."
+    },
+    {
+      "id": "llama.cpu.bench",
+      "area": "llama-runtime",
+      "lane": "android-llama",
+      "command": "bash scripts/android-llama-bench.sh",
+      "status": "runnable-with-device",
+      "docs": [
+        "docs/test/LLAMA_BENCHMARKS.md"
+      ],
+      "checks": "llama.cpp CPU fallback benchmark, repeatability, health endpoint, and JSON benchmark artifact."
+    },
+    {
+      "id": "llama.gpu.compare",
+      "area": "llama-runtime",
+      "lane": "android-llama",
+      "command": "bash scripts/android-llama-gpu-compare.sh --gpu-only",
+      "status": "runnable-with-device",
+      "docs": [
+        "docs/test/LLAMA_BENCHMARKS.md",
+        "docs/test/llama-gpu-compare-latest.json"
+      ],
+      "checks": "Container llama.cpp GPU path without modifying llama.cpp, CPU baseline reuse, target speedup, blocker classification, and UI operation reporting."
+    },
+    {
+      "id": "media.bridge.contract",
+      "area": "media-bridge",
+      "lane": "fast-local",
+      "command": "python3 -m unittest tests.test_media_bridge_contract",
+      "status": "runnable",
+      "docs": [
+        "docs/design/MEDIA_BRIDGE.md"
+      ],
+      "checks": "Audio/video API proxy boundary, descriptor capability contract, and no raw /dev passthrough claim."
+    },
+    {
+      "id": "memory.pager.design-probe",
+      "area": "memory-pager",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-memory-pager-design.py",
+      "status": "runnable",
+      "docs": [
+        "docs/design/APK_MEMORY_PAGER.md",
+        "docs/test/APK_MEMORY_PAGER_PROBE.md"
+      ],
+      "checks": "SDK28-compatible virtual memory pager design, mmap/mprotect/signal assumptions, and documented device PoC boundaries."
+    },
+    {
+      "id": "metadata.index.rebuild",
+      "area": "image-and-layer-storage",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-metadata-index.py",
+      "status": "runnable",
+      "docs": [
+        "docs/design/PROJECT_METADATA_INDEX.md"
+      ],
+      "checks": "Project/container/image identity, metadata rebuild strategy, corruption recovery, and Git/project relationship rules."
+    },
+    {
+      "id": "requirements.blackbox.negative-oracles",
+      "area": "requirements-blackbox",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-blackbox-requirements.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/SCENARIOS.md",
+        "tests/blackbox_requirements.json"
+      ],
+      "checks": "Requirement-level blackbox scenarios, observable surfaces, positive/negative oracles, and self-tests checking fail-expected cases actually fail."
+    },
+    {
+      "id": "input.validation.api-file-range",
+      "area": "input-validation",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-input-validation.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/SCENARIOS.md",
+        "tests/input_validation_cases.json",
+        "tests/input_grammar_coverage.json"
+      ],
+      "checks": "API argument validation, malformed JSON rejection, BNF-like input grammar coverage, explicit Compose full-grammar planned gap, numeric range checks, and boundary coverage obligations."
+    },
+    {
+      "id": "random.stress.regression-process",
+      "area": "random-stress-regression",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-stress-regression.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/SCENARIOS.md",
+        "tests/stress_regression_cases.json"
+      ],
+      "checks": "Seeded random API fuzzing, monkey/stress scenario ledger, build-set artifact schema, and repeat variance detection."
+    },
+    {
+      "id": "test.design.criteria",
+      "area": "test-design-governance",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-test-design-criteria.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/TEST_DESIGN_STANDARD.md",
+        "tests/test_design_criteria.json"
+      ],
+      "checks": "Currently failing 2x literal token gate, required test design axes, fast runner wiring, per-change test design policy, and build-set artifact rules."
+    },
+    {
+      "id": "mutation.testing.planned",
+      "area": "mutation-testing",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-test-design-criteria.py",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/TEST_DESIGN_STANDARD.md"
+      ],
+      "checks": "Mutation testing planned gap: condition inversion, error-path deletion, boundary mutation, path rewrite mutation, and storage accounting mutation must be killed by existing tests before release claim.",
+      "evidence_target": "docs/test/mutation-testing-latest.json",
+      "reason": "Mutation engine and mutation corpus are not implemented yet.",
+      "acceptance_scope": [
+        "condition inversion",
+        "error-path deletion",
+        "boundary mutation",
+        "path rewrite mutation",
+        "storage accounting mutation"
+      ],
+      "exit_criteria": [
+        "All listed mutation operators have runnable cases",
+        "Mutation survivors are recorded as issues or planned gaps",
+        "Mutation artifact is tied to git commit and build flavor"
+      ]
+    },
+    {
+      "id": "property.based.testing.planned",
+      "area": "property-based-testing",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-stress-regression.py",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/TEST_DESIGN_STANDARD.md",
+        "tests/stress_regression_cases.json"
+      ],
+      "checks": "Property-based testing planned gap: generated API JSON, Dockerfile syntax, Compose environment expansion, path rewrite invariants, and storage accounting invariants.",
+      "evidence_target": "docs/test/property-based-latest.json",
+      "reason": "Generated input strategies are not implemented yet.",
+      "acceptance_scope": [
+        "API JSON generators",
+        "Dockerfile syntax generators",
+        "Compose environment expansion generators",
+        "path rewrite invariants",
+        "storage accounting invariants"
+      ],
+      "exit_criteria": [
+        "Generators are seed-fixed",
+        "Shrunk failing examples are recorded",
+        "Properties run in fast or heavy lanes with artifacts"
+      ]
+    },
+    {
+      "id": "differential.testing.planned",
+      "area": "differential-testing",
+      "lane": "heavy-backend",
+      "command": "python3 scripts/compat-audit.py --backend-regression quick",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/TEST_DESIGN_STANDARD.md",
+        "docs/test/COMPATIBILITY.md"
+      ],
+      "checks": "Differential testing planned gap: compare Docker-compatible API shapes, Dockerfile parsing, Compose env expansion, tar/archive behavior, and command output against upstream Docker fixtures.",
+      "evidence_target": "docs/test/differential-compat-latest.json",
+      "reason": "Upstream Docker fixture runner is not implemented yet.",
+      "acceptance_scope": [
+        "Engine API shape comparison",
+        "Dockerfile parsing comparison",
+        "Compose expansion comparison",
+        "tar/archive comparison",
+        "command output comparison"
+      ],
+      "exit_criteria": [
+        "Golden upstream outputs are versioned",
+        "Differences are classified as compatible, pdocker-specific, or bug",
+        "Regression command is documented"
+      ]
+    },
+    {
+      "id": "stateful.model.testing.planned",
+      "area": "stateful-model-testing",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-metadata-index.py",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/TEST_DESIGN_STANDARD.md",
+        "docs/design/PROJECT_METADATA_INDEX.md"
+      ],
+      "checks": "Stateful model testing planned gap: image, container, layer, project, job, daemon operation, card, and docker ps state transitions must preserve model invariants.",
+      "evidence_target": "docs/test/stateful-model-latest.json",
+      "reason": "State machine model runner is not implemented yet.",
+      "acceptance_scope": [
+        "image transitions",
+        "container transitions",
+        "layer transitions",
+        "project transitions",
+        "job and daemon operation transitions",
+        "UI card and docker ps consistency"
+      ],
+      "exit_criteria": [
+        "Model invariants are executable",
+        "Generated operation sequences are reproducible",
+        "Mismatches produce minimal traces"
+      ]
+    },
+    {
+      "id": "concurrency.race.testing.planned",
+      "area": "concurrency-race-testing",
+      "lane": "android-full",
+      "command": "bash scripts/android-device-smoke.sh --no-install",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/TEST_DESIGN_STANDARD.md",
+        "docs/test/ANDROID_SELFDEBUG.md"
+      ],
+      "checks": "Concurrency/race testing planned gap: compose up while stop, retry, log follow, UI restart, daemon reconnect, Documents sync, and docker ps refresh happen concurrently.",
+      "evidence_target": "docs/test/concurrency-race-latest.json",
+      "reason": "Concurrent operation harness is not implemented yet.",
+      "acceptance_scope": [
+        "compose up with stop",
+        "retry during log follow",
+        "UI restart during daemon reconnect",
+        "Documents sync during docker ps refresh",
+        "parallel container lifecycle actions"
+      ],
+      "exit_criteria": [
+        "Race schedule is seed-fixed",
+        "No ANR or stale card state",
+        "Final engine snapshot matches UI summary"
+      ]
+    },
+    {
+      "id": "crash.recovery.testing.planned",
+      "area": "crash-recovery-testing",
+      "lane": "android-full",
+      "command": "bash scripts/android-device-smoke.sh --no-install",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/TEST_DESIGN_STANDARD.md",
+        "docs/test/ANDROID_SELFDEBUG.md"
+      ],
+      "checks": "Crash/recovery testing planned gap: daemon kill, UI kill, process residue, interrupted build, interrupted pull, interrupted Documents sync, and stale job replay must recover with truthful state.",
+      "evidence_target": "docs/test/crash-recovery-latest.json",
+      "reason": "Crash injection and recovery harness is not implemented yet.",
+      "acceptance_scope": [
+        "daemon kill",
+        "UI kill",
+        "process residue",
+        "interrupted build",
+        "interrupted pull",
+        "interrupted Documents sync",
+        "stale job replay"
+      ],
+      "exit_criteria": [
+        "Recovery leaves truthful engine state",
+        "Logs survive or record loss reason",
+        "No orphan process leaks remain"
+      ]
+    },
+    {
+      "id": "fault.injection.testing.planned",
+      "area": "fault-injection",
+      "lane": "heavy-container",
+      "command": "bash scripts/container-direct-probe.sh --memory-guard",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/TEST_DESIGN_STANDARD.md",
+        "docs/test/DIRECT_SYSCALL_COVERAGE.md"
+      ],
+      "checks": "Fault injection planned gap: ENOSPC, EACCES, OOM-near allocation, socket timeout, partial write, corrupt metadata, broken layer, and unavailable GPU/media executor failures.",
+      "evidence_target": "docs/test/fault-injection-latest.json",
+      "reason": "Fault injection adapters are not implemented yet.",
+      "acceptance_scope": [
+        "ENOSPC",
+        "EACCES",
+        "OOM-near allocation",
+        "socket timeout",
+        "partial write",
+        "corrupt metadata",
+        "broken layer",
+        "unavailable GPU/media executor"
+      ],
+      "exit_criteria": [
+        "Each fault has expected error class",
+        "No fault returns fake success",
+        "Recovery or cleanup evidence is recorded"
+      ]
+    },
+    {
+      "id": "golden.compatibility.corpus.planned",
+      "area": "golden-compatibility-corpus",
+      "lane": "fast-local",
+      "command": "python3 scripts/compat-audit.py",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/TEST_DESIGN_STANDARD.md",
+        "docs/test/COMPATIBILITY.md"
+      ],
+      "checks": "Golden compatibility corpus planned gap: fixed Dockerfiles, compose files, Engine API requests/responses, tar archives, docker ps outputs, and known external project templates.",
+      "evidence_target": "docs/test/golden-compatibility-corpus-latest.json",
+      "reason": "Golden corpus runner and fixture set are not implemented yet.",
+      "acceptance_scope": [
+        "Dockerfiles",
+        "Compose files",
+        "Engine API requests and responses",
+        "tar archives",
+        "docker ps outputs",
+        "external project templates"
+      ],
+      "exit_criteria": [
+        "Fixtures are versioned",
+        "Expected outputs are stable",
+        "Intentional pdocker differences are documented"
+      ]
+    },
+    {
+      "id": "security.adversarial.testing.planned",
+      "area": "security-adversarial-testing",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-input-validation.py",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/TEST_DESIGN_STANDARD.md",
+        "tests/input_validation_cases.json"
+      ],
+      "checks": "Security/adversarial testing planned gap: path traversal, symlink escape, tar bomb, zip slip, malicious Dockerfile, huge JSON, long argv, unsafe archive paths, and SAF mediator escape attempts.",
+      "evidence_target": "docs/test/security-adversarial-latest.json",
+      "reason": "Adversarial payload corpus is not implemented yet.",
+      "acceptance_scope": [
+        "path traversal",
+        "symlink escape",
+        "tar bomb",
+        "zip slip",
+        "malicious Dockerfile",
+        "huge JSON",
+        "long argv",
+        "unsafe archive paths",
+        "SAF mediator escape attempts"
+      ],
+      "exit_criteria": [
+        "Each payload has a failure oracle",
+        "No payload escapes declared roots",
+        "Large input limits are documented"
+      ]
+    },
+    {
+      "id": "performance.regression.gates.planned",
+      "area": "performance-regression-gates",
+      "lane": "android-gpu",
+      "command": "bash scripts/android-runtime-bench.sh && bash scripts/android-gpu-compare-bench.sh",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/TEST_DESIGN_STANDARD.md",
+        "docs/test/LLAMA_BENCHMARKS.md"
+      ],
+      "checks": "Performance regression gates planned gap: ptrace, COW, build, apt, GPU bridge, llama, UI log rendering, and storage scans must track p50/p95/p99, variance, and previous-artifact deltas.",
+      "evidence_target": "docs/test/performance-regression-latest.json",
+      "reason": "Thresholded performance regression gate is not implemented yet.",
+      "acceptance_scope": [
+        "ptrace",
+        "COW",
+        "build",
+        "apt",
+        "GPU bridge",
+        "llama",
+        "UI log rendering",
+        "storage scans"
+      ],
+      "metrics": [
+        "p50",
+        "p95",
+        "p99",
+        "variance",
+        "previous artifact delta"
+      ],
+      "exit_criteria": [
+        "Baseline artifact is versioned",
+        "Thresholds are explicit",
+        "Regression result is pass, fail, or recorded blocker"
+      ]
+    },
+    {
+      "id": "runtime.single-container.echo-hi",
+      "area": "runtime-single-container",
+      "lane": "android-quick",
+      "command": "bash scripts/android-device-smoke.sh --quick --no-install",
+      "status": "planned-gap",
+      "docs": [
+        "docs/plan/TODO.md",
+        "docs/test/ANDROID_SELFDEBUG.md"
+      ],
+      "checks": "Android docker run equivalent for ubuntu:22.04 echo hi, real process execution, stdout capture, exit code truth, and no host-shell fallback."
+    },
+    {
+      "id": "service.health.listener-container-proof",
+      "area": "service-health-listener-proof",
+      "lane": "android-full",
+      "command": "bash scripts/android-device-smoke.sh --no-install",
+      "status": "planned-gap",
+      "docs": [
+        "docs/plan/TODO.md",
+        "docs/test/COMPATIBILITY.md"
+      ],
+      "checks": "Real listener proof for 18080/18081, current Engine container ID, matching container logs, service health state, and UI/docker ps/card consistency."
+    },
+    {
+      "id": "runtime.npm-self-update-rename-reify",
+      "area": "runtime-npm-compat",
+      "lane": "heavy-container",
+      "command": "bash scripts/container-direct-probe.sh --memory-guard",
+      "status": "planned-gap",
+      "docs": [
+        "docs/plan/TODO.md",
+        "docs/test/DIRECT_SYSCALL_COVERAGE.md"
+      ],
+      "checks": "npm install -g npm@latest compatibility, rename/reify path behavior, symlink replacement, long argv preservation, and errno parity."
+    },
+    {
+      "id": "documents.saf.phase2-conflict-delete-rename",
+      "area": "documents-saf-phase2",
+      "lane": "android-documents",
+      "command": "bash scripts/android-documents-mediator-smoke.sh",
+      "status": "planned-gap",
+      "docs": [
+        "docs/plan/TODO.md",
+        "docs/design/COW_OVERLAY_STORAGE.md"
+      ],
+      "checks": "SAF Phase 2 delete propagation, rename detection, conflict quarantine, rescan UX, and Unix metadata emulation limits."
+    },
+    {
+      "id": "network.port-forwarding.active-listener",
+      "area": "network-port-forwarding",
+      "lane": "android-full",
+      "command": "bash scripts/android-device-smoke.sh --no-install",
+      "status": "planned-gap",
+      "docs": [
+        "docs/plan/TODO.md",
+        "docs/design/DOCKER_COMPAT_SCOPE.md"
+      ],
+      "checks": "Actual port forwarding/proxy, active listener evidence, requested versus active mapping, conflict handling, and future syscall-hook port rewrite integration."
+    },
+    {
+      "id": "runtime.stop-process-tree-teardown",
+      "area": "runtime-process-teardown",
+      "lane": "android-full",
+      "command": "bash scripts/android-device-smoke.sh --no-install",
+      "status": "planned-gap",
+      "docs": [
+        "docs/plan/TODO.md",
+        "docs/test/ANDROID_SELFDEBUG.md"
+      ],
+      "checks": "Stop/kill process tree teardown, duplicate-name cleanup, Engine ID and label truth, lifecycle logs, stale pid rejection, and no orphan residue."
+    },
+    {
+      "id": "release.readiness",
+      "area": "release-readiness",
+      "lane": "release",
+      "command": "python3 scripts/verify-release-readiness.py",
+      "status": "runnable",
+      "docs": [
+        "docs/build/FDROID_RELEASE_PROCESS.md",
+        "docs/test/SECRET_AUDIT.md"
+      ],
+      "checks": "Signing material exclusion, secret scan, payload inventory, F-Droid readiness language, and publication safety."
+    },
+    {
+      "id": "android.device.full-smoke",
+      "area": "compose-orchestrator",
+      "lane": "android-full",
+      "command": "bash scripts/android-device-smoke.sh --no-install",
+      "status": "runnable-with-device",
+      "docs": [
+        "docs/test/ANDROID_SELFDEBUG.md"
+      ],
+      "checks": "Installed APK device smoke, daemon lifecycle, Engine API actions, compose route, terminal/exec path, and no orphan cleanup regressions."
+    }
+  ]
+}

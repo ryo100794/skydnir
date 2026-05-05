@@ -1,0 +1,119 @@
+{
+  "schema": 1,
+  "notation": "bnf-like",
+  "coverage_policy": {
+    "rule": "Every input grammar must declare productions, positive cases, negative cases, value ranges when applicable, and an evidence command. Full grammars that are not implemented must be explicit planned gaps.",
+    "artifact": "docs/test/input-validation-latest.json"
+  },
+  "grammars": [
+    {
+      "id": "engine-api-json-body",
+      "surface": "engine-api",
+      "status": "runnable",
+      "bnf": [
+        "<request-body> ::= <empty> | <json-object>",
+        "<json-object> ::= '{' <members>? '}'",
+        "<members> ::= <string> ':' <json-value> (',' <string> ':' <json-value>)*",
+        "<invalid-body> ::= <malformed-json> | <json-array> | <json-scalar>"
+      ],
+      "positive_cases": ["empty request body", "JSON object request body", "bounded diagnostics query"],
+      "negative_cases": ["malformed JSON request body", "non-object JSON request body", "missing required image names"],
+      "value_ranges": ["Content-Length >= 0", "diagnostics limit clamps to 1..100"],
+      "evidence_command": "python3 scripts/verify-input-validation.py"
+    },
+    {
+      "id": "dockerfile-standard-instruction-surface",
+      "surface": "dockerfile",
+      "status": "runnable",
+      "bnf": [
+        "<dockerfile> ::= (<comment> | <blank> | <instruction>)*",
+        "<instruction> ::= <standard-instruction> <arguments>?",
+        "<standard-instruction> ::= ADD | ARG | CMD | COPY | ENTRYPOINT | ENV | EXPOSE | FROM | HEALTHCHECK | LABEL | MAINTAINER | ONBUILD | RUN | SHELL | STOPSIGNAL | USER | VOLUME | WORKDIR",
+        "<line-continuation> ::= '\\\\' <newline> <instruction-tail>",
+        "<invalid-instruction> ::= <unknown-instruction> | <pdocker-specific-instruction>"
+      ],
+      "positive_cases": ["bundled Dockerfiles use only standard instructions", "line continuations are joined before instruction validation"],
+      "negative_cases": ["unknown instruction WAT", "pdocker-specific instruction PDOCKER_RUN"],
+      "value_ranges": ["instruction keyword length > 0", "logical line must tokenize"],
+      "evidence_command": "python3 scripts/verify-dockerfile-standard.py"
+    },
+    {
+      "id": "feature-scenario-ledger-json",
+      "surface": "test-ledger",
+      "status": "runnable",
+      "bnf": [
+        "<feature-ledger> ::= '{' schema lanes required_areas scenarios '}'",
+        "<scenario> ::= '{' id area lane command status docs checks <optional-fields>* '}'",
+        "<docs> ::= '[' <existing-path>+ ']'",
+        "<status> ::= runnable | runnable-with-device | runnable-with-env | planned-gap",
+        "<invalid-ledger> ::= <missing-required-area> | <missing-doc> | <unknown-lane> | <duplicate-id>"
+      ],
+      "positive_cases": ["all required areas have scenarios", "scenario docs exist", "commands reference existing scripts"],
+      "negative_cases": ["missing required area", "missing docs list", "unknown lane", "duplicate scenario id"],
+      "value_ranges": ["fast runnable scenarios >= minimum", "device scenarios >= minimum", "planned gaps >= 1"],
+      "evidence_command": "python3 scripts/verify-feature-scenarios.py"
+    },
+    {
+      "id": "blackbox-requirements-json",
+      "surface": "test-ledger",
+      "status": "runnable",
+      "bnf": [
+        "<blackbox-ledger> ::= '{' schema surfaces requirements '}'",
+        "<requirement> ::= '{' id area status user_story observable_surface positive negative '}'",
+        "<positive> ::= '{' given when then evidence '}'",
+        "<negative> ::= '{' given when then failure_oracle '}'",
+        "<invalid-requirement> ::= <missing-negative> | <weak-oracle> | <implementation-token-leak>"
+      ],
+      "positive_cases": ["positive evidence exists", "negative failure oracle exists", "observable surfaces are declared"],
+      "negative_cases": ["missing negative scenario", "weak negative oracle", "implementation token leak"],
+      "value_ranges": ["requirements >= minimum", "device-visible requirements >= minimum"],
+      "evidence_command": "python3 scripts/verify-blackbox-requirements.py"
+    },
+    {
+      "id": "storage-metrics-json",
+      "surface": "storage",
+      "status": "runnable",
+      "bnf": [
+        "<storage-snapshot> ::= '{' system_df images containers '}'",
+        "<system_df> ::= '{' SharedLayerBytes ImageViewBytes ContainerUpperBytes UniqueBytes TotalBytes FreeBytes <optional-size-fields>* '}'",
+        "<size> ::= <nonnegative-number>",
+        "<invalid-size> ::= <negative-number> | <free-greater-than-total> | <double-counted-total>"
+      ],
+      "positive_cases": ["built-in fixture validates", "shared layers are counted once", "image view bytes are non-additive"],
+      "negative_cases": ["negative byte count", "FreeBytes greater than TotalBytes", "TotalBytes double counts ImageViewBytes"],
+      "value_ranges": ["all size fields >= 0", "FreeBytes <= TotalBytes", "SizeRootFs >= SizeRw"],
+      "evidence_command": "python3 scripts/verify-storage-metrics.py"
+    },
+    {
+      "id": "direct-syscall-boundary-ledger-json",
+      "surface": "direct-runtime",
+      "status": "runnable",
+      "bnf": [
+        "<direct-syscall-ledger> ::= '{' schema required_areas path_variant_matrix boundary_value_matrix branch_decision_matrix coverage heavy_cases known_gaps '}'",
+        "<boundary-entry> ::= '{' id applies_to cases contract '}'",
+        "<branch-entry> ::= '{' id applies_to decisions cases contract '}'",
+        "<invalid-ledger> ::= <missing-boundary> | <missing-branch> | <inactive-hook-without-coverage>"
+      ],
+      "positive_cases": ["path variant matrix exists", "boundary matrix exists", "branch matrix exists", "known gaps are explicit"],
+      "negative_cases": ["missing PATH_MAX boundary", "missing exec argv boundary", "missing branch decision matrix"],
+      "value_ranges": ["PATH_MAX", "sockaddr_un.sun_path", "getcwd ERANGE", "memory guard threshold", "uid/gid -1 sentinels"],
+      "evidence_command": "python3 scripts/verify_direct_syscall_contracts.py"
+    },
+    {
+      "id": "compose-file-full-grammar",
+      "surface": "compose",
+      "status": "planned-gap",
+      "bnf": [
+        "<compose-file> ::= <yaml-document>",
+        "<services> ::= 'services:' <service-map>",
+        "<service> ::= image | build | command | environment | ports | volumes | healthcheck | depends_on | labels | deploy",
+        "<invalid-compose> ::= <unknown-type> | <invalid-port> | <invalid-volume> | <invalid-env-expansion>"
+      ],
+      "positive_cases": ["bundled templates parse enough for project UI", "project env expansion is statically guarded"],
+      "negative_cases": ["invalid port syntax", "invalid volume syntax", "unsupported type shape"],
+      "value_ranges": ["host port 1..65535", "container port 1..65535", "memory values parse units"],
+      "evidence_command": "python3 scripts/verify-project-library.py",
+      "gap_reason": "Full Compose YAML grammar and differential validation against upstream Compose are not implemented yet."
+    }
+  ]
+}

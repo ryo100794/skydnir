@@ -1,0 +1,195 @@
+
+==> python3 -m py_compile scripts/compat-audit.py scripts/verify-abnormal-events.py scripts/verify-build-profile.py scripts/verify-blackbox-requirements.py scripts/verify-dockerfile-standard.py scripts/verify-feature-scenarios.py scripts/verify-input-grammar-coverage.py scripts/verify-input-validation.py scripts/verify-stress-regression.py scripts/verify-test-design-criteria.py scripts/verify_direct_syscall_contracts.py scripts/verify-memory-pager-design.py scripts/verify-metadata-index.py scripts/run_direct_syscall_scenarios.py scripts/verify-project-library.py scripts/verify-refactor-resilience.py scripts/verify-storage-metrics.py scripts/verify-ui-actions.py scripts/verify_terminal_editor_contracts.py scripts/update-showcase.py docker-proot-setup/scripts/verify_runtime_contract.py
+
+==> python3 docker-proot-setup/scripts/verify_runtime_contract.py
+[pdockerd] "GET /containers/stale-name/logs HTTP/1.1" 200 -
+[pdockerd] "GET /containers/1111111111111111111111111111111111111111111111111111111111111111/logs HTTP/1.1" 200 -
+[pdockerd] "DELETE /containers/stale-name?force=1 HTTP/1.1" 204 -
+[pdockerd] "GET /system/df HTTP/1.1" 200 -
+[pdockerd] "GET /system/media HTTP/1.1" 200 -
+ok: runtime backend kind selects direct
+ok: runtime driver name is pdocker-direct
+ok: runtime info id is PDOCKER:DIRECT
+ok: runtime unavailable message is clear
+ok: direct backend reports process execution gap
+ok: runtime_preflight accepts direct backend
+ok: build_run_argv rejects direct execution without helper
+ok: direct executor probe alone does not enable process execution
+ok: direct executor process capability enables structured helper argv
+ok: direct backend rejects fake service start honestly
+ok: container start reconciles verified live pid without double-starting
+ok: container start rejects reused pid identity
+ok: no-proot request creates direct backend instance
+ok: duplicate container names resolve newest-first, keep log truth, and clean by name
+ok: network metadata records stable IDs, aliases, ports, IPs, and host-only warnings
+ok: port mapping status distinguishes planned, inactive, active, and conflict
+ok: Dockerfile parser rejects non-standard instructions
+ok: direct Dockerfile RUN fails instead of recording fake layers
+ok: existing tagged image can seed Dockerfile RUN cache
+ok: unchanged existing image skips full Dockerfile rebuild
+ok: Dockerfile RUN cache keys and layer validation work
+ok: storage summary separates shared layers, image views, and container upper bytes
+ok: daemon active operations are listed independently of UI jobs
+ok: stale daemon operations are pruned from UI-visible state
+ok: host environment contract exposes bounded runtime diagnostics
+ok: media bridge scaffold exposes socket contract without capture
+ok: Android media manifest and bridge scaffold are statically guarded
+ok: GPU shim contract injects device-independent container ABI
+ok: Dockerfile RUN process-group isolation keeps build children away from pdockerd
+ok: Android build profile is injected by pdockerd without Dockerfile edits
+ok: Vulkan ICD defaults to device-memory-aware advertised limits
+
+==> python3 scripts/verify_direct_syscall_contracts.py
+ok: direct syscall hook inventory has 69 active syscall hooks covered by 10 entries
+ok: direct syscall contract scaffold defines 14 heavy/local cases
+
+==> python3 scripts/verify-memory-pager-design.py
+ok: records that system swap is unavailable to non-root apk
+ok: states normal page faults are not globally catchable
+ok: documents sigsegv pager origin without external code
+ok: defines userfaultfd path but not as default
+ok: defines ptrace sigsegv fallback
+ok: explains how fault address becomes backed
+ok: keeps managed pager opt-in
+ok: requires sdk28 compat probe gate before runtime feature
+ok: probe gate covers android-blockable syscalls
+ok: direct executor exposes apk memory pager probe
+ok: direct executor exposes apk memory pager poc
+ok: device smoke checks compat memory pager probe
+ok: device smoke checks compat memory pager poc
+ok: latest apk memory pager probe result is recorded
+ok: latest apk memory pager poc result is recorded
+ok: poc records generic syscall injection
+ok: production risk register is explicit
+ok: excludes unsafe mappings
+ok: keeps llama gpu performance priority separate
+ok: defines gpu bridge virtual memory as a separate contract
+ok: gpu bridge contract keeps gguf mmap file-backed
+ok: gpu bridge contract tracks dirty spans before v3 dispatch
+
+==> python3 scripts/verify-metadata-index.py
+verify-metadata-index: PASS
+ok: schema applies
+ok: fixture inserts with real IDs
+ok: project rename preserves project_id
+ok: foreign keys and integrity pass
+ok: relative guest paths are rejected
+ok: design doc carries index, identity, rebuild, replica, and overlay contracts
+
+==> python3 -m unittest discover -s tests/metadata_index -p test_*.py
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.617s
+
+OK
+
+==> python3 scripts/run_direct_syscall_scenarios.py --lane local
+lane local: static direct-executor syscall inventory
+      exec: /usr/bin/python3 scripts/verify_direct_syscall_contracts.py
+ok: direct syscall hook inventory has 69 active syscall hooks covered by 10 entries
+ok: direct syscall contract scaffold defines 14 heavy/local cases
+lane local: isolated scenario manifest contracts
+      exec: /usr/bin/python3 -m unittest discover -s tests/direct_syscall -p test_*.py
+.................
+----------------------------------------------------------------------
+Ran 17 tests in 0.032s
+
+OK
+lane local: fast-local scenario list
+      exec: /usr/bin/python3 scripts/run_direct_syscall_scenarios.py --tier fast-local --list --verbose
+run  fast-local    host.local.libcow
+      command: make -C docker-proot-setup/src/overlay && bash docker-proot-setup/src/overlay/test_cow.sh
+      checks: Hardlink copy-up protects lower files across writes, metadata, fd operations, and optional xattrs.
+lane local: generic container scenario dry-run
+      exec: /usr/bin/python3 scripts/run_direct_syscall_scenarios.py --tier heavy-container --execute --dry-run
+run  heavy-container container.direct.runtime-probe
+      exec: ROOTFS="${ROOTFS:?set ROOTFS to the container rootfs path}" scripts/container-direct-probe.sh --memory-guard
+      dry-run: command not executed
+lane local: Android scenario dry-run
+      exec: /usr/bin/python3 scripts/run_direct_syscall_scenarios.py --tier heavy-android --execute --dry-run
+run  heavy-android android.direct.path-open-stat-access-cwd
+      exec: PDOCKER_PACKAGE="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}"; ROOTFS="${ROOTFS:?set ROOTFS to the app-visible rootfs path}"; adb shell "run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir /work -- /bin/sh -lc \"pwd; test -r /etc/passwd; stat /etc/passwd; python3 - <<PY\nimport os\ntry: os.getcwd()\nexcept OSError as e: print(e.errno)\nPY\"'"
+      dry-run: command not executed
+run  heavy-android android.direct.path-metadata
+      exec: PDOCKER_PACKAGE="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}"; ROOTFS="${ROOTFS:?set ROOTFS to the app-visible rootfs path}"; adb shell "run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \"set -eu; p=/tmp/pdocker-direct-meta; rm -f \\\$p; : > \\\$p; chmod 600 \\\$p; touch -m \\\$p; chown 0:0 \\\$p 2>/dev/null || true; python3 - <<PY\nimport os\np=\\\"/tmp/pdocker-direct-meta-py\\\"\nopen(p,\\\"w\\\").close()\nos.chmod(p,0o640)\nos.utime(p,(123456789,123456790))\ntry: os.setxattr(p,b\\\"user.pdocker\\\",b\\\"ok\\\")\nexcept (AttributeError,OSError) as e: print(\\\"xattr_skip\\\", getattr(e,\\\"errno\\\",None))\nelse: assert os.getxattr(p,b\\\"user.pdocker\\\") == b\\\"ok\\\"\nassert oct(os.stat(p).st_mode & 0o777) == \\\"0o640\\\"\nprint(\\\"metadata_ok\\\")\nPY\"'"
+      dry-run: command not executed
+run  heavy-android android.direct.path-mutation
+      exec: PDOCKER_PACKAGE="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}"; ROOTFS="${ROOTFS:?set ROOTFS to the app-visible rootfs path}"; adb shell "run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \"set -eu; d=/tmp/pdocker-direct-mut; rm -rf \\\$d; mkdir -p \\\$d/a; : > \\\$d/a/file; mv \\\$d/a/file \\\$d/renamed; test -f \\\$d/renamed; rm \\\$d/renamed; rmdir \\\$d/a; python3 - <<PY\nimport ctypes, errno, os\nlibc=ctypes.CDLL(None, use_errno=True)\nAT_FDCWD=-100; SYS_openat2=437; SYS_name_to_handle_at=264\nclass OpenHow(ctypes.Structure):\n    _fields_=[(\\\"flags\\\",ctypes.c_ulonglong),(\\\"mode\\\",ctypes.c_ulonglong),(\\\"resolve\\\",ctypes.c_ulonglong)]\nhow=OpenHow(0,0,0)\nrc=libc.syscall(SYS_openat2, AT_FDCWD, b\\\"/tmp/pdocker-direct-mut\\\", ctypes.byref(how), ctypes.sizeof(how))\nif rc >= 0: os.close(rc)\nelse: assert ctypes.get_errno() in (errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP, errno.EACCES, errno.ENOENT)\nrc=libc.syscall(SYS_name_to_handle_at, AT_FDCWD, b\\\"/tmp/pdocker-direct-mut\\\", 0, 0, 0)\nassert rc == -1\nassert ctypes.get_errno() in (errno.EFAULT, errno.ENOSYS, errno.EOPNOTSUPP, errno.EPERM, errno.ENOENT)\nprint(\\\"mutation_ok\\\")\nPY\"'"
+      dry-run: command not executed
+run  heavy-android android.direct.proc-exe-and-links
+      exec: PDOCKER_PACKAGE="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}"; ROOTFS="${ROOTFS:?set ROOTFS to the app-visible rootfs path}"; adb shell "run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \"set -eu; exe=\\\$(readlink /proc/self/exe); test \\\"\\\$exe\\\" = /bin/sh; d=/tmp/pdocker-direct-links; rm -rf \\\$d; mkdir -p \\\$d; echo ok > \\\$d/src; ln \\\$d/src \\\$d/hard; ln -s src \\\$d/sym; test \\\"\\\$(cat \\\$d/hard)\\\" = ok; test \\\"\\\$(readlink \\\$d/sym)\\\" = src; echo proc_links_ok\"'"
+      dry-run: command not executed
+run  heavy-android android.direct.exec-argv-rootfs
+      exec: PDOCKER_PACKAGE="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}"; ROOTFS="${ROOTFS:?set ROOTFS to the app-visible rootfs path}"; adb shell "run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_EXEC=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / --env PATH=/tmp:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin -- /bin/sh -lc \"set -eu; cat > /tmp/pdocker-argv-probe <<SH\n#!/bin/sh\necho script_ok\nSH\nchmod +x /tmp/pdocker-argv-probe; /bin/echo absolute_ok | grep absolute_ok; pdocker-argv-probe alpha beta | grep script_ok; /tmp/pdocker-argv-probe gamma delta | grep script_ok\"'"
+      dry-run: command not executed
+plan heavy-android android.direct.unix-socket-connect
+      skip: scenario is still an implementation plan
+run  heavy-android android.direct.pid-and-credentials
+      exec: PDOCKER_PACKAGE="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}"; ROOTFS="${ROOTFS:?set ROOTFS to the app-visible rootfs path}"; adb shell "run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \"python3 - <<PY\nimport os, sys\nassert os.getuid() == 0 and os.geteuid() == 0\nos.setuid(123)\nassert os.getuid() == 123 and os.geteuid() == 123\nif hasattr(os, \\\"getresuid\\\"): assert os.getresuid() == (123,123,123)\npid=os.fork()\nif pid == 0:\n    assert os.getuid() == 123\n    os._exit(0)\n_, status = os.waitpid(pid, 0)\nassert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0\nprint(\\\"pid_credentials_ok\\\")\nPY\"'"
+      dry-run: command not executed
+run  heavy-android android.direct.startup-fallbacks
+      exec: PDOCKER_PACKAGE="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}"; ROOTFS="${ROOTFS:?set ROOTFS to the app-visible rootfs path}"; adb shell "run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \"python3 - <<PY\nimport ctypes, errno\nlibc=ctypes.CDLL(None, use_errno=True)\ndef call(n,*args):\n    ctypes.set_errno(0); rc=libc.syscall(n,*args); return rc, ctypes.get_errno()\nfor nr in (425,426,427,435,436):\n    rc,err=call(nr,0,0,0,0,0,0)\n    assert rc == -1 and err == errno.ENOSYS, (nr,rc,err)\nfor nr in (99,293):\n    rc,err=call(nr,0,0,0,0,0,0)\n    assert rc in (0,-1), (nr,rc,err)\nprint(\\\"startup_fallbacks_ok\\\")\nPY\"'"
+      dry-run: command not executed
+run  heavy-android android.direct.numa-fallback
+      exec: PDOCKER_PACKAGE="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}"; ROOTFS="${ROOTFS:?set ROOTFS to the app-visible rootfs path}"; adb shell "run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \"python3 - <<PY\nimport ctypes, errno\nlibc=ctypes.CDLL(None, use_errno=True)\nfor nr in (235,236,237,238,239,450):\n    ctypes.set_errno(0)\n    rc=libc.syscall(nr,0,0,0,0,0,0)\n    assert rc == -1 and ctypes.get_errno() == errno.ENOSYS, (nr,rc,ctypes.get_errno())\nprint(\\\"numa_enosys_ok\\\")\nPY\"'"
+      dry-run: command not executed
+run  heavy-android android.direct.memory-guard
+      exec: PDOCKER_PACKAGE="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}"; ROOTFS="${ROOTFS:?set ROOTFS to the app-visible rootfs path}"; adb shell "run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_MEMORY=1 PDOCKER_DIRECT_MEMORY_GUARD=1 PDOCKER_DIRECT_TRACE_MEMORY_THRESHOLD=1M PDOCKER_DIRECT_MEMORY_GUARD_MIN_AVAILABLE=64G pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \"python3 - <<PY\nimport mmap, sys\ntry:\n    mmap.mmap(-1, 2 * 1024 * 1024)\nexcept OSError as e:\n    print(\\\"memory_guard_errno\\\", e.errno)\n    sys.exit(0)\nraise SystemExit(3)\nPY\"'"
+      dry-run: command not executed
+run  heavy-android android.direct.path-boundary-matrix
+      exec: PDOCKER_PACKAGE="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}"; ROOTFS="${ROOTFS:?set ROOTFS to the app-visible rootfs path}"; adb shell "run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 PDOCKER_DIRECT_TRACE_PATHS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \"set -eu; mkdir -p /tmp/pdocker-boundary/a /tmp/pdocker-boundary/b; : > /tmp/pdocker-boundary/a/file; stat /tmp/pdocker-boundary/./a/../a/file >/dev/null; stat /proc/self/exe >/dev/null; python3 - <<PY\nimport ctypes, errno, os, socket\nlibc=ctypes.CDLL(None, use_errno=True)\nAT_FDCWD=-100\nSYS_getcwd=17\nbuf=ctypes.create_string_buffer(1)\nctypes.set_errno(0)\nrc=libc.syscall(SYS_getcwd, ctypes.addressof(buf), 1)\nassert rc == -1 and ctypes.get_errno() == errno.ERANGE, (rc, ctypes.get_errno())\n# Exercise short AF_UNIX paths and nscd skip path without requiring nscd to exist.\ns=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\ntry:\n    s.connect('/var/run/nscd/socket')\nexcept OSError as e:\n    assert e.errno in (errno.ENOENT, errno.ECONNREFUSED, errno.ENAMETOOLONG)\nfinally:\n    s.close()\nprint('boundary_matrix_ok')\nPY\"'"
+      dry-run: command not executed
+plan heavy-android android.direct.tty-pty-exec
+      skip: scenario is still an implementation plan
+
+==> cmp -s docker-proot-setup/bin/pdockerd app/src/main/assets/pdockerd/pdockerd
+
+==> python3 scripts/verify-build-profile.py
+verify-build-profile: PASS
+
+==> python3 scripts/verify-abnormal-events.py
+ok: abnormal event ledger records 10 cases, 7 fast runnable, 1 device, 2 planned
+ok: abnormal event cases have structured reproduction and evidence records
+
+==> python3 scripts/verify-refactor-resilience.py
+ok: refactor-resilience ledger records 6 cases across 6 axes
+ok: refactor-resilience external-contract test design is recorded
+
+==> python3 scripts/verify-test-design-criteria.py
+ok: test design standard documents the required quality gates
+ok: feature design has 48 scenarios, 22 fast runnable, 15 device
+ok: feature scenarios represent 27 required design axes
+ok: advanced method scenarios track 10 required methods
+ok: blackbox design has 10 positive/negative requirements
+ok: abnormal event design has 10 structured cases
+ok: refactor-resilience design has 6 external-contract cases
+ok: input validation design has 11 API/file/range cases
+ok: stress design has 6 random/monkey/stress/variance scenarios
+ok: fast and scenario runners enforce the test design gates
+verify-test-design-criteria: FAIL: test design criteria minimums must be a non-empty object
+ok: negative self-test fails as expected: empty minimums
+verify-test-design-criteria: FAIL: test design criteria minimums missing key(s): literal_check_count_to_code_token_multiplier
+ok: negative self-test fails as expected: missing literal token minimum
+verify-test-design-criteria: FAIL: test design criteria required_fast_commands must be a non-empty list
+ok: negative self-test fails as expected: empty required fast commands
+verify-test-design-criteria: FAIL: required design axes are not represented in feature scenarios: definitely-missing-axis
+ok: negative self-test fails as expected: missing required design axis
+verify-test-design-criteria: FAIL: verify-fast.sh must include python3 scripts/definitely-missing-test-gate.py
+ok: negative self-test fails as expected: missing fast runner wiring
+verify-test-design-criteria: FAIL: verify-fast.sh must include python3 scripts/verify-test-design-criteria.py
+ok: negative self-test fails as expected: commented-out runner command
+verify-test-design-criteria: FAIL: mutation.testing.planned planned-gap must include evidence_target
+ok: negative self-test fails as expected: advanced planned-gap without evidence target
+verify-test-design-criteria: FAIL: BB-ENGINE-001 must include a negative failure oracle
+ok: negative self-test fails as expected: blackbox requirement without negative oracle
+verify-test-design-criteria: FAIL: input validation ledger missing categories: value-ranges
+ok: negative self-test fails as expected: input validation missing value ranges
+verify-test-design-criteria: FAIL: abnormal.input.malformed-json abnormal event case must include failure_oracle
+ok: negative self-test fails as expected: abnormal event without failure oracle
+verify-test-design-criteria: FAIL: refactor.engine-api.golden-shape refactor-resilience case must include observable_contract
+ok: negative self-test fails as expected: refactor-resilience without observable contract
+verify-test-design-criteria: FAIL: monkey.ui.seeded-device must record a seed
+ok: negative self-test fails as expected: monkey scenario without seed
+ok: test design check density is 43154/48 = 899.04x by feature-step proxy
+ok: test design literal token ratio is 43154/257036 = 0.168x (semantic + C0 + C1 + C2 check items)
+verify-test-design-criteria: FAIL: literal_check_count_to_code_token_multiplier below minimum: 0.16789087909864767 < 2.0

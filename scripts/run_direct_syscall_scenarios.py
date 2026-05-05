@@ -164,6 +164,17 @@ def lane_commands(lane: str) -> list[tuple[str, list[str]]]:
             ),
         ),
         (
+            "generic container scenario dry-run",
+            repo_command(
+                "python3",
+                "scripts/run_direct_syscall_scenarios.py",
+                "--tier",
+                "heavy-container",
+                "--execute",
+                "--dry-run",
+            ),
+        ),
+        (
             "Android scenario dry-run",
             repo_command(
                 "python3",
@@ -218,7 +229,7 @@ def run_case(case: dict[str, Any], dry_run: bool) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=MANIFEST)
-    parser.add_argument("--tier", choices=["fast-local", "heavy-android"])
+    parser.add_argument("--tier", choices=["fast-local", "heavy-container", "heavy-android"])
     parser.add_argument("--case", dest="case_id")
     parser.add_argument("--status", choices=[STATUS_RUNNABLE, STATUS_PLANNED], help="filter by execution status")
     parser.add_argument("--list", action="store_true", help="list selected scenarios")

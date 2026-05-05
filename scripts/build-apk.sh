@@ -39,6 +39,12 @@ case "$PDOCKER_ANDROID_FLAVOR" in
         ;;
 esac
 
+if [[ "$PDOCKER_ANDROID_BUILD_TYPE" == "release" ]]; then
+    UNSIGNED_APK="${APK%.apk}-unsigned.apk"
+else
+    UNSIGNED_APK=""
+fi
+
 if [[ "$PDOCKER_SKIP_NATIVE_BUILD" == "0" ]]; then
     # Build Android/Bionic helper libs natively with Termux aarch64 clang.
     # Bypasses the x86_64-only NDK toolchain (which would need box64 emulation
@@ -64,6 +70,10 @@ if [[ -f "$APK" ]]; then
     echo
     echo "APK: $APK"
     ls -lh "$APK"
+elif [[ -n "$UNSIGNED_APK" && -f "$UNSIGNED_APK" ]]; then
+    echo
+    echo "APK: $UNSIGNED_APK"
+    ls -lh "$UNSIGNED_APK"
 else
     echo "APK missing — build failed" >&2
     exit 1

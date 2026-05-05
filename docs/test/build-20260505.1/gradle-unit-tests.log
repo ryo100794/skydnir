@@ -1,0 +1,81 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.7/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :app
+WARNING: The option setting 'android.aapt2FromMavenOverride=/root/android-aapt2-agp/aapt2' is experimental.
+Warning: Python version 3.11 may have fewer packages available. If you experience problems, try switching to version 3.8.
+
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :app:syncPdockerdAsset UP-TO-DATE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preCompatDebugBuild UP-TO-DATE
+> Task :app:generateCompatDebugBuildConfig UP-TO-DATE
+> Task :app:checkCompatDebugAarMetadata UP-TO-DATE
+> Task :app:generateCompatDebugResValues UP-TO-DATE
+> Task :app:mapCompatDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateCompatDebugResources UP-TO-DATE
+> Task :app:mergeCompatDebugResources UP-TO-DATE
+> Task :app:packageCompatDebugResources UP-TO-DATE
+> Task :app:parseCompatDebugLocalResources UP-TO-DATE
+> Task :app:createCompatDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksCompatDebug UP-TO-DATE
+> Task :app:processCompatDebugMainManifest UP-TO-DATE
+> Task :app:processCompatDebugManifest UP-TO-DATE
+> Task :app:processCompatDebugManifestForPackage UP-TO-DATE
+> Task :app:processCompatDebugResources UP-TO-DATE
+> Task :app:compileCompatDebugKotlin UP-TO-DATE
+> Task :app:extractCompatDebugPythonBuildPackages UP-TO-DATE
+> Task :app:generateCompatDebugPythonRequirements UP-TO-DATE
+> Task :app:mergeCompatDebugPythonSources UP-TO-DATE
+> Task :app:generateCompatDebugPythonProxies UP-TO-DATE
+> Task :app:javaPreCompileCompatDebug UP-TO-DATE
+> Task :app:compileCompatDebugJavaWithJavac UP-TO-DATE
+> Task :app:preCompatDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileCompatDebugUnitTest FROM-CACHE
+> Task :app:processCompatDebugJavaRes UP-TO-DATE
+> Task :app:preModernDebugBuild UP-TO-DATE
+> Task :app:generateModernDebugBuildConfig UP-TO-DATE
+> Task :app:checkModernDebugAarMetadata UP-TO-DATE
+> Task :app:generateModernDebugResValues UP-TO-DATE
+> Task :app:mapModernDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateModernDebugResources UP-TO-DATE
+> Task :app:bundleCompatDebugClassesToCompileJar
+> Task :app:bundleCompatDebugClassesToRuntimeJar
+> Task :app:mergeModernDebugResources UP-TO-DATE
+> Task :app:compileCompatDebugUnitTestKotlin NO-SOURCE
+> Task :app:compileCompatDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processCompatDebugUnitTestJavaRes NO-SOURCE
+> Task :app:testCompatDebugUnitTest NO-SOURCE
+> Task :app:packageModernDebugResources UP-TO-DATE
+> Task :app:parseModernDebugLocalResources UP-TO-DATE
+> Task :app:createModernDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksModernDebug UP-TO-DATE
+> Task :app:processModernDebugMainManifest UP-TO-DATE
+> Task :app:processModernDebugManifest UP-TO-DATE
+> Task :app:processModernDebugManifestForPackage UP-TO-DATE
+> Task :app:processModernDebugResources UP-TO-DATE
+> Task :app:compileModernDebugKotlin UP-TO-DATE
+> Task :app:extractModernDebugPythonBuildPackages UP-TO-DATE
+> Task :app:generateModernDebugPythonRequirements UP-TO-DATE
+> Task :app:mergeModernDebugPythonSources UP-TO-DATE
+> Task :app:generateModernDebugPythonProxies UP-TO-DATE
+> Task :app:javaPreCompileModernDebug UP-TO-DATE
+> Task :app:compileModernDebugJavaWithJavac UP-TO-DATE
+> Task :app:preModernDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileModernDebugUnitTest FROM-CACHE
+> Task :app:processModernDebugJavaRes UP-TO-DATE
+> Task :app:bundleModernDebugClassesToCompileJar
+> Task :app:bundleModernDebugClassesToRuntimeJar
+> Task :app:compileModernDebugUnitTestKotlin NO-SOURCE
+> Task :app:compileModernDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processModernDebugUnitTestJavaRes NO-SOURCE
+> Task :app:testModernDebugUnitTest NO-SOURCE
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.7/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 1m 21s
+52 actionable tasks: 5 executed, 2 from cache, 45 up-to-date

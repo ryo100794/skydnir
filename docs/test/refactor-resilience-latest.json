@@ -1,0 +1,103 @@
+{
+  "cases": [
+    {
+      "axis": "engine-api-golden",
+      "command": "python3 scripts/compat-audit.py",
+      "contract_class": "intended",
+      "evidence_artifact": "docs/test/compat-audit-latest.md",
+      "evidence_required_fast": true,
+      "id": "refactor.engine-api.golden-shape",
+      "invariant": "Response status classes, required keys, and compatibility warnings remain Docker-compatible or explicitly documented.",
+      "lane": "fast-local",
+      "observable_contract": "Docker-shaped /_ping, /version, /info, images, containers, networks, volumes, and events responses remain stable across backend refactors.",
+      "refactor_risk": "Route splitting, daemon state reshaping, or metadata-store replacement can silently change response shapes.",
+      "status": "runnable"
+    },
+    {
+      "axis": "compose-dockerfile-fixtures",
+      "command": "python3 scripts/verify-project-library.py && python3 scripts/verify-dockerfile-standard.py",
+      "contract_class": "intended",
+      "evidence_artifact": "tests/feature_scenarios.json",
+      "evidence_required_fast": true,
+      "id": "refactor.compose-dockerfile.fixtures",
+      "invariant": "No pdocker-only Dockerfile instructions, missing project files, broken library entries, or invalid declared project routes.",
+      "lane": "fast-local",
+      "observable_contract": "Bundled Compose and Dockerfile templates remain portable, standard-syntax project definitions after project-library or build-pipeline refactors.",
+      "refactor_risk": "Library layout changes can hide missing files or introduce non-Docker syntax while UI menus still render.",
+      "status": "runnable"
+    },
+    {
+      "axis": "abnormal-replay",
+      "command": "python3 scripts/verify-abnormal-events.py --write-artifact docs/test/abnormal-events-latest.json",
+      "contract_class": "intended",
+      "evidence_artifact": "docs/test/abnormal-events-latest.json",
+      "evidence_required_fast": true,
+      "id": "refactor.abnormal.replay-ledger",
+      "invariant": "Runnable abnormal cases have existing evidence artifacts and planned gaps remain explicit.",
+      "lane": "fast-local",
+      "observable_contract": "Expected abnormal paths keep stable triggers, expected signals, failure oracles, reproduction commands, and artifact hashes.",
+      "refactor_risk": "Error handling refactors can turn deterministic failures into unstructured console text or fake success.",
+      "status": "runnable"
+    },
+    {
+      "axis": "state-machine-contract",
+      "command": "python3 scripts/verify-refactor-resilience.py",
+      "contract_class": "known-bug-blocker",
+      "evidence_artifact": "docs/test/state-machine-contract-latest.json",
+      "evidence_required_fast": false,
+      "gap_reason": "A canonical state-machine model and golden transition corpus are not implemented yet.",
+      "id": "refactor.state-machine.container-job-card",
+      "invariant": "A container cannot be Up in cards and Exited in docker ps for the same container id; job completion and process state must converge.",
+      "lane": "fast-local",
+      "observable_contract": "Image, container, job, daemon operation, UI card, and docker ps state transitions remain equivalent across internal state-store refactors.",
+      "refactor_risk": "Project-name keyed state, duplicate caches, or UI summaries can drift from canonical container ids.",
+      "status": "planned-gap"
+    },
+    {
+      "axis": "archive-round-trip",
+      "command": "python3 scripts/verify-refactor-resilience.py",
+      "contract_class": "documented-limitation",
+      "evidence_artifact": "docs/test/archive-round-trip-latest.json",
+      "evidence_required_fast": false,
+      "gap_reason": "Archive API executable corpus is still tracked as a compatibility planned gap.",
+      "id": "refactor.archive.round-trip",
+      "invariant": "Tar round-trip produces the same externally visible file tree and metadata within the declared pdocker compatibility scope.",
+      "lane": "heavy-backend",
+      "observable_contract": "Archive copy-in/copy-out preserves tar headers, file modes, symlinks, whiteouts, and merged lower/upper views across storage refactors.",
+      "refactor_risk": "COW or metadata-index refactors can pass simple file tests while breaking Docker archive interoperability.",
+      "status": "planned-gap"
+    },
+    {
+      "axis": "artifact-diff",
+      "command": "python3 scripts/verify-refactor-resilience.py",
+      "contract_class": "documented-limitation",
+      "evidence_artifact": "docs/test/artifact-diff-latest.json",
+      "evidence_required_fast": false,
+      "gap_reason": "Accepted-baseline storage and drift-classification rules are not implemented yet.",
+      "id": "refactor.artifact.diff-baseline",
+      "invariant": "Schema, key presence, status vectors, failure classes, and benchmark envelopes cannot drift without an explicit recorded reason.",
+      "lane": "fast-local",
+      "observable_contract": "Refactors compare current JSON artifacts against a previous accepted baseline and classify allowed drift versus blockers.",
+      "refactor_risk": "Large refactors can regenerate valid artifacts with changed meaning while individual verifiers still pass.",
+      "status": "planned-gap"
+    }
+  ],
+  "command": "python3 scripts/verify-refactor-resilience.py --write-artifact docs/test/refactor-resilience-latest.json",
+  "git_commit": "c194f2b3cd82",
+  "kind": "refactor-resilience",
+  "schema": 1,
+  "summary": {
+    "axes": [
+      "abnormal-replay",
+      "archive-round-trip",
+      "artifact-diff",
+      "compose-dockerfile-fixtures",
+      "engine-api-golden",
+      "state-machine-contract"
+    ],
+    "case_count": 6,
+    "planned_gap_count": 3,
+    "runnable_count": 3
+  },
+  "timestamp_utc": "2026-05-05T23:39:46Z"
+}

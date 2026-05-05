@@ -21,6 +21,7 @@ projects="${PDOCKER_PROJECTS_DIR:-/pdocker/projects}"
 home="${PDOCKER_HOME:-/pdocker/host}"
 engine="${PDOCKER_ENGINE_SOCKET:-$home/pdockerd.sock}"
 documents="${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
+shared_documents="${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
 
 show_path "workspace" "$workspace"
 show_path "current project" "$project"
@@ -28,13 +29,15 @@ show_path "project library" "$projects"
 show_path "pdocker home" "$home"
 show_path "engine socket" "$engine"
 show_path "documents" "$documents"
+show_path "shared documents" "$shared_documents"
 show_path "docker socket" "/var/run/docker.sock"
 
 echo
 echo "Android app paths:"
 echo "  filesDir/pdocker"
-echo "  filesDir/pdocker/projects"
-echo "  filesDir/pdocker/projects/default"
+echo "  Documents/pdocker/projects"
+echo "  Documents/pdocker/volumes"
+echo "  Documents/pdocker/shared"
 echo "  filesDir/pdocker/pdockerd.sock"
 
 echo

@@ -1,0 +1,180 @@
+PASS static api: ping - /_ping
+PASS static api: version - path == "/version"
+PASS static api: info - path == "/info"
+PASS static api: image list/create/save/load/history/inspect/delete - /images/(json|create|get|load|.+?/(history|json)|.+)
+PASS static api: container lifecycle/inspect/logs/wait/archive/exec/stats/rename - /containers/.+?(start|json|logs|wait|archive|exec|stats|rename)
+PASS static api: exec start/json - /exec/.+?/(start|json)
+PASS static api: network list/create/connect/disconnect/inspect/delete - /networks
+PASS static api: volume list/create/prune/inspect/delete - /volumes
+PASS static api: build - path == "/build"
+PASS static api: build dockerignore - apply_dockerignore
+PASS static api: events - path == "/events"
+PASS static api: system host diagnostics - path == "/system/host"
+PASS protocol token: application/vnd.docker.raw-stream 
+PASS protocol token: X-Docker-Container-Path-Stat 
+PASS protocol token: Api-Version 
+PASS protocol token: application/x-tar 
+PASS protocol token: PdockerWarnings 
+PASS protocol token: timeNano 
+PASS protocol token: record_event 
+PASS protocol token: not active yet 
+FAIL protocol: daemon start 
+PASS apk flavor: compat process-exec validation - default process-exec validation flavor; modern APK artifacts are ignored unless PDOCKER_ANDROID_FLAVOR=modern
+PASS apk: debug artifact - /root/tl/pdocker-android/app/build/outputs/apk/compat/debug/app-compat-debug.apk
+PASS apk payload: lib/arm64-v8a/libcrane.so 
+PASS apk payload: lib/arm64-v8a/libcow.so 
+PASS apk payload: lib/arm64-v8a/libpdockerpty.so 
+PASS apk payload: lib/arm64-v8a/libpdockerdirect.so 
+PASS apk payload: lib/arm64-v8a/libpdockergpuexecutor.so 
+PASS apk payload: lib/arm64-v8a/libpdockermediaexecutor.so 
+PASS apk payload: lib/arm64-v8a/libpdockergpushim.so 
+PASS apk payload: assets/pdockerd/pdockerd 
+PASS apk payload: assets/project-library/library.json 
+PASS apk payload: assets/project-library/llama-cpp-gpu/compose.yaml 
+PASS apk payload: assets/project-library/llama-cpp-gpu/documents/README.md 
+PASS apk payload: assets/project-library/llama-cpp-gpu/scripts/pdocker-gpu-profile.sh 
+PASS apk payload: assets/project-library/ros2-humble-rviz-novnc/compose.yaml 
+PASS apk payload: assets/project-library/ros2-humble-rviz-novnc/documents/README.md 
+PASS apk payload: assets/project-library/blender-xvnc-novnc/compose.yaml 
+PASS apk payload: assets/project-library/blender-xvnc-novnc/documents/README.md 
+PASS apk payload: assets/default-project/compose.yaml 
+PASS apk payload: assets/default-project/documents/README.md 
+PASS apk payload: assets/xterm/xterm.js 
+PASS apk payload: assets/oss-licenses/THIRD_PARTY_NOTICES.md 
+SKIP apk optional direct payload: lib/arm64-v8a/libpdocker-rootfs-shim.so 
+SKIP apk optional direct payload: lib/arm64-v8a/libpdocker-ld-linux-aarch64.so 
+PASS no-proot apk payload omits: lib/arm64-v8a/libproot.so 
+PASS no-proot apk payload omits: lib/arm64-v8a/libproot-loader.so 
+PASS no-proot apk payload omits: lib/arm64-v8a/libtalloc.so 
+PASS apk payload omits upstream Docker CLI component: lib/arm64-v8a/libdocker.so 
+PASS apk payload omits upstream Docker CLI component: lib/arm64-v8a/libdocker-compose.so 
+PASS no-proot runtime selector 
+PASS license token: Apache-2.0 
+PASS license token: go-containerregistry 
+PASS license token: xterm.js 
+PASS license token: MIT 
+PASS license token: Chaquopy 
+PASS license token: AndroidX 
+PASS license token: Kotlin 
+PASS project library templates - ok: llama gpu 10x comparison scenario is recorded
+ok: required templates listed
+ok: all compose templates include shared Documents volume
+ok: dev-workspace includes code-server, Continue, Codex, Claude Code, and GPU request
+ok: dev-workspace exposes pdocker management helpers, paths, guarded Engine wrappers, and tasks
+ok: llama-cpp-gpu template has compose, Dockerfile, GPU profile, and server entrypoint
+ok: ros2-humble-rviz-novnc template has Compose, Dockerfile, RViz, Xvnc/noVNC, logs, and healthcheck
+ok: blender-xvnc-novnc template has Compose, Dockerfile, Blender, Xvnc/noVNC, logs, healthcheck, llvmpipe defaults, and future Zink/Vulkan switches
+
+PASS native UI action wiring - o container files
+ok: image/container files copy into editable projects
+ok: container files expose writable overlay editing
+ok: container files expose merged lower upper view
+ok: editor tabs are keyed by canonical file path
+ok: same-name editors get parent-qualified titles
+ok: project files are surfaced as editor shortcuts
+ok: project dashboard summarizes compose/dockerfile/files
+ok: project dashboard opens primary files and actions
+ok: project dashboard tracks services jobs containers
+ok: project dashboard exposes compose-declared service URLs
+ok: project dashboard probes service health
+ok: project dashboard surfaces compose dependencies
+ok: project dashboard surfaces compose healthchecks
+ok: project dashboard surfaces llama model and gpu diagnostics
+ok: overview avoids duplicate daemon-linked job cards
+ok: default dev workspace migrates codex and claude code plugins
+ok: default dev workspace repairs placeholder dockerfile
+ok: default dockerfile editor fallback uses bundled workspace asset
+ok: default dev workspace installs hidden volume extensions at runtime
+ok: default dev workspace exposes codex task
+ok: interactive terminal font remains 12pt
+ok: terminal shortcut key palette is present
+ok: terminal supports pinch zoom
+ok: terminal touch scroll remains available
+ok: terminal shows touch selection markers
+ok: terminal select-all is wired
+ok: terminal selection menu touch does not steal button clicks
+ok: terminal copy uses android clipboard bridge
+ok: terminal selection handles drag independently
+ok: terminal selection accounts for scrollback viewport
+ok: terminal selection suppresses soft keyboard
+ok: readonly terminal selection actions keep ime suppressed
+ok: code editor exposes whitespace
+ok: code editor keeps indent/outdent actions
+ok: code editor supports search and replace
+ok: code editor supports pinch zoom
+ok: code editor syncs line numbers while scrolling
+ok: code editor supports forgiving horizontal drag scroll
+ok: localized terminal title formats exist
+
+PASS gpu compatibility design - cuVK/Vulkan benchmark scope recorded
+FAIL backend full regression: verify_all.sh --full - 
+=== 1. environment prerequisites ===
+  ok crane present
+  ok gcc present
+  ok python3 present
+  ok tar present
+  ok docker CLI present
+  ok crane present
+  ok crane is statically linked (Android-ready, no NDK rebuild needed)
+  ok bundled proot absent
+  ok legacy proot-runtime absent
+  FAIL runtime backend selector failed: Traceback (most recent call last):
+  File "<stdin>", line 13, in <module>
+  File "/root/tl/pdocker-android/docker-proot-setup/bin/pdockerd", line 3090, in build_run_argv
+    return RUNTIME_BACKEND.build_argv(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        rootfs, argv, inner_env, workdir=workdir, binds=binds,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        cow_bind=cow_bind, mode=mode,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/root/tl/pdocker-android/docker-proot-setup/bin/pdockerd", line 292, in build_argv
+    raise RuntimeError(fault)
+RuntimeError: pdocker runtime error: the no-PRoot/direct Android execution backend can materialize images, browse files, and expose Docker metadata, but it cannot execute container processes yet. docker run, docker exec, compose services, and published ports require the direct executor implementation; pdocker will not start a fake listener in its place.
+
+=== 2. libcow.so build + unit test ===
+  ok libcow.so build
+  ok no fortify _chk symbols (musl-friendly)
+  ok test_cow.sh ALL TESTS PASSED
+  ok libcow-musl.so present
+  ok libcow-musl.so exports 'open' hook
+  ok libcow-musl.so correctly omits open64 (musl-pure)
+
+=== 3. pdocker pull ubuntu:22.04 ===
+  ok pdocker pull ubuntu:22.04
+  ok image bash present
+  ok image symlinks preserved (libtinfo.so.6)
+
+=== 4. pdocker run --rm ubuntu:22.04 echo hi ===
+
+libcow.c: In function ‘openat’:
+libcow.c:403:17: warning: ‘nonnull’ argument ‘path’ compared to NULL [-Wnonnull-compare]
+  403 |     if (fd >= 0 && path && (path[0] == '/' || dirfd == AT_FDCWD)) {
+      |                 ^~
+libcow.c:399:8: warning: ‘nonnull’ argument ‘path’ compared to NULL [-Wnonnull-compare]
+  399 |     if (path && (path[0] == '/' || dirfd == AT_FDCWD)) {
+      |        ^
+libcow.c: In function ‘openat64’:
+libcow.c:422:17: warning: ‘nonnull’ argument ‘path’ compared to NULL [-Wnonnull-compare]
+  422 |     if (fd >= 0 && path && (path[0] == '/' || dirfd == AT_FDCWD)) {
+      |                 ^~
+libcow.c:417:8: warning: ‘nonnull’ argument ‘path’ compared to NULL [-Wnonnull-compare]
+  417 |     if (path && (path[0] == '/' || dirfd == AT_FDCWD)) {
+      |        ^
+libcow.c: In function ‘fchmodat’:
+libcow.c:513:8: warning: ‘nonnull’ argument ‘path’ compared to NULL [-Wnonnull-compare]
+  513 |     if (path && (path[0] == '/' || dirfd == AT_FDCWD)) {
+      |        ^
+libcow.c: In function ‘fchownat’:
+libcow.c:530:8: warning: ‘nonnull’ argument ‘path’ compared to NULL [-Wnonnull-compare]
+  530 |     if (path && (path[0] == '/' || dirfd == AT_FDCWD) &&
+      |        ^
+libcow.c: In function ‘remember_open’:
+libcow.c:128:38: warning: ‘%s’ directive output may be truncated writing up to 4093 bytes into a region of size between 2 and 4095 [-Wformat-truncation=]
+  128 |     snprintf(abs_, sizeof(abs_), "%s/%s", cwd, path);
+      |                                      ^~
+libcow.c:128:5: note: ‘snprintf’ output between 2 and 8188 bytes into a destination of size 4096
+  128 |     snprintf(abs_, sizeof(abs_), "%s/%s", cwd, path);
+      |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+

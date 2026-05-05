@@ -17,6 +17,42 @@ COW_TEST = ROOT / "docker-proot-setup" / "src" / "overlay" / "test_cow.sh"
 RUNTIME_CONTRACT = ROOT / "docker-proot-setup" / "scripts" / "verify_runtime_contract.py"
 COVERAGE = ROOT / "tests" / "direct_syscall_coverage.json"
 
+REQUIRED_PATH_VARIANTS = {
+    "path.absolute-rootfs-rewrite",
+    "path.relative-dirfd-preserve",
+    "path.rootfs-already-host-path",
+    "path.proc-dev-sys-no-rewrite",
+    "path.parent-segment-scratch-fallback",
+    "path.bind-resolution",
+    "path.dual-path-operations",
+    "path.af-unix-socket",
+    "path.exec-script-and-long-argv",
+    "path.rootfs-fd-lifecycle",
+}
+
+REQUIRED_BOUNDARY_VALUES = {
+    "boundary.read-tracee-string-null-and-cap",
+    "boundary.path-max-and-enametoolong",
+    "boundary.getcwd-erange",
+    "boundary.sockaddr-min-and-sun-path-limit",
+    "boundary.exec-argc-and-scratch-limit",
+    "boundary.memory-guard-threshold",
+    "boundary.uid-gid-minus-one",
+    "boundary.wait-exit-signal-code",
+}
+
+REQUIRED_BRANCH_DECISIONS = {
+    "branch.should-rewrite-path",
+    "branch.resolve-guest-host-path",
+    "branch.rewrite-at-path-arg",
+    "branch.rewrite-unix-sockaddr",
+    "branch.rewrite-execve-arg",
+    "branch.memory-guard",
+    "branch.credentials-minus-one",
+    "branch.getcwd-emulation",
+    "branch.tracee-lifecycle",
+}
+
 
 def fail(message: str) -> None:
     print(f"FAIL: {message}")
@@ -169,6 +205,53 @@ def validate_manifest_links(manifest: dict[str, object]) -> None:
             fail(f"heavy case {case.get('id')} must include command and checks")
 
 
+def validate_matrix(
+    manifest: dict[str, object],
+    matrix_name: str,
+    required_ids: set[str],
+    heavy_ids: set[str],
+) -> None:
+    raw = manifest.get(matrix_name)
+    if not isinstance(raw, list) or not raw:
+        fail(f"manifest must define non-empty {matrix_name}")
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            fail(f"{matrix_name} entries must be objects")
+        entry_id = str(entry.get("id") or "")
+        applies_to = entry.get("applies_to") or ([entry.get("function")] if entry.get("function") else None)
+        cases = entry.get("cases")
+        contract = str(entry.get("contract") or "")
+        if not entry_id or not isinstance(applies_to, list) or not applies_to:
+            fail(f"{matrix_name} entry must include id and applies_to: {entry!r}")
+        if not isinstance(cases, list) or not cases:
+            fail(f"{matrix_name} entry {entry_id} must reference at least one case")
+        if len(contract) < 24:
+            fail(f"{matrix_name} entry {entry_id} must include a meaningful contract")
+        missing_cases = sorted(str(case) for case in cases if str(case) not in heavy_ids)
+        if missing_cases:
+            fail(f"{matrix_name} entry {entry_id} references missing case(s): {', '.join(missing_cases)}")
+        seen.add(entry_id)
+    missing = sorted(required_ids - seen)
+    if missing:
+        fail(f"{matrix_name} missing required entries: {', '.join(missing)}")
+
+
+def validate_path_and_boundary_matrices(manifest: dict[str, object]) -> None:
+    heavy_ids = {str(case.get("id")) for case in manifest.get("heavy_cases", []) if isinstance(case, dict)}
+    validate_matrix(manifest, "path_variant_matrix", REQUIRED_PATH_VARIANTS, heavy_ids)
+    validate_matrix(manifest, "boundary_value_matrix", REQUIRED_BOUNDARY_VALUES, heavy_ids)
+    validate_matrix(manifest, "branch_decision_matrix", REQUIRED_BRANCH_DECISIONS, heavy_ids)
+    for entry in manifest.get("branch_decision_matrix", []):
+        if not isinstance(entry, dict):
+            continue
+        branches = entry.get("branches")
+        if not isinstance(branches, list) or len(branches) < 2:
+            fail(f"branch_decision_matrix entry {entry.get('id')} must include at least two branches")
+        if not entry.get("function"):
+            fail(f"branch_decision_matrix entry {entry.get('id')} must name the function")
+
+
 def validate_required_areas(manifest: dict[str, object]) -> None:
     required = set(str(item) for item in manifest.get("required_areas", []))
     seen: set[str] = set()
@@ -188,6 +271,13 @@ def require_contains(label: str, source: str, needles: list[str]) -> None:
         fail(f"{label} missing required marker(s): {missing}")
 
 
+def require_order(label: str, source: str, first: str, second: str) -> None:
+    first_at = source.find(first)
+    second_at = source.find(second)
+    if first_at < 0 or second_at < 0 or first_at >= second_at:
+        fail(f"{label} must keep {first!r} before {second!r}")
+
+
 def validate_static_contract_markers(source: str) -> None:
     pty = read(PTY)
     libcow = read(LIBCOW)
@@ -205,6 +295,18 @@ def validate_static_contract_markers(source: str) -> None:
         ],
     )
     require_contains(
+        "direct path boundary primitives",
+        source,
+        [
+            "if (!rootfs || !rootfs[0] || !path || path[0] != '/') return 0;",
+            "return -ENAMETOOLONG;",
+            "path_has_parent_segment",
+            "original[1] != '/'",
+            "should_skip_unix_socket_rewrite",
+            "strlen(rewritten) >= sizeof(addr.sun_path)",
+        ],
+    )
+    require_contains(
         "direct exec argv/rootfs rewrite",
         source,
         [
@@ -216,11 +318,64 @@ def validate_static_contract_markers(source: str) -> None:
         ],
     )
     require_contains(
-        "direct AF_UNIX connect rewrite",
+        "direct exec snapshots argv before tracee scratch writes",
+        source,
+        [
+            "copied_arg_values = calloc",
+            "read_tracee_string(pid, old_arg_ptrs[i],",
+            "write_tracee_string(pid, loader_addr, loader)",
+            "write_tracee_string(pid, cursor, copied_arg_values[i])",
+        ],
+    )
+    require_contains(
+        "direct exec handles long link argv without fixed 32k scratch",
+        source,
+        [
+            "EXEC_REWRITE_STACK_SAFETY",
+            "EXEC_REWRITE_MAX_SCRATCH",
+            "string_bytes",
+            "payload_bytes",
+            "scratch_span",
+            "regs->sp - scratch_span",
+            "execve argv rewrite scratch too large",
+        ],
+    )
+    require_contains(
+        "direct boundary value guards",
+        source,
+        [
+            "if (!addr || cap == 0) return -1;",
+            "buf[cap - 1] = '\\0';",
+            "EXEC_REWRITE_MAX_ARGC",
+            "EXEC_REWRITE_MAX_SCRATCH",
+            "memory_guard_would_deny",
+            "is_minus_one_arg",
+            "root_rc = 128 + sig;",
+        ],
+    )
+    require_contains(
+        "pdockerd isolates Dockerfile RUN process groups",
+        runtime_contract,
+        [
+            "Dockerfile RUN process-group isolation",
+            "preexec_fn=build_child_preexec",
+            "oom_score_adj",
+        ],
+    )
+    require_order(
+        "direct exec argv snapshot ordering",
+        source,
+        "copied_arg_values = calloc",
+        "write_tracee_string(pid, loader_addr, loader)",
+    )
+    require_contains(
+        "direct AF_UNIX bind/connect rewrite",
         source,
         [
             "rewrite_unix_sockaddr_arg",
             "addr.sun_family != AF_UNIX",
+            "case 200: /* bind(sockfd, addr, addrlen) */",
+            "ADD_TRACE_SYSCALL(200)",
             "regs->regs[2] = (unsigned long long)(offsetof(struct sockaddr_un, sun_path) + strlen(rewritten) + 1)",
         ],
     )
@@ -275,17 +430,17 @@ def validate_static_contract_markers(source: str) -> None:
 
 
 def validate_known_gaps(manifest: dict[str, object], source: str) -> None:
+    if "case 203: /* connect(sockfd, addr, addrlen) */" not in source:
+        fail("connect rewrite hook is missing")
+    if "case 200: /* bind(sockfd, addr, addrlen) */" not in source:
+        fail("bind rewrite hook is missing")
     gaps = manifest.get("known_gaps", [])
     bind_gap = [
         gap for gap in gaps
         if isinstance(gap, dict) and gap.get("id") == "direct.socket.unix-bind-rewrite"
     ]
-    if not bind_gap:
-        fail("manifest must record active/planned status for AF_UNIX bind rewrite")
-    if "case 203: /* connect(sockfd, addr, addrlen) */" not in source:
-        fail("connect rewrite hook is missing")
-    if re.search(r"case\s+200:\s*/\*\s*bind", source):
-        fail("bind rewrite hook is now active; move the bind known_gap into coverage")
+    if bind_gap:
+        fail("AF_UNIX bind rewrite is active; remove the stale known_gap")
 
 
 def main() -> None:
@@ -304,12 +459,13 @@ def main() -> None:
         fail("syscall hooks missing coverage entries: " + "; ".join(missing))
 
     extra = sorted(coverage_names - {str(entry["name"]) for entry in hooks.values()})
-    allowed_extra = {"bind"}
+    allowed_extra: set[str] = set()
     unexpected = [name for name in extra if name not in allowed_extra]
     if unexpected:
         fail("coverage names not found in active hook inventory: " + ", ".join(unexpected))
 
     validate_manifest_links(manifest)
+    validate_path_and_boundary_matrices(manifest)
     validate_required_areas(manifest)
     validate_static_contract_markers(source)
     validate_known_gaps(manifest, source)

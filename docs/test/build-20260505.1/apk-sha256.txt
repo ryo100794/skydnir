@@ -1,0 +1,4 @@
+179dada2cb78d26237b1cb9ccfecd75af8e2732519c46388efa1c52144400703  app/build/outputs/apk/compat/debug/app-compat-debug.apk
+1e1df6cd59011ea573938c988725209ce21bfa181c0036dd7f434bdd0f5dcf65  app/build/outputs/apk/modern/debug/app-modern-debug.apk
+c69f3248fd38134f110924212c972ef132a997a7ccdd48eeb2117e326f961e1d  app/build/outputs/apk/compat/release/app-compat-release-unsigned.apk
+349552d4602cdfc39e13aa5a7089dfb6468c8fc69495834cc30396035f735cd2  app/build/outputs/apk/modern/release/app-modern-release-unsigned.apk

@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
 PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+CLASS_PREFIX="io.github.ryo100794.pdocker"
+ACTION_PREFIX="io.github.ryo100794.pdocker"
 CONTAINER="${PDOCKER_LLAMA_CONTAINER:-pdocker-llama-cpp}"
 IMAGE="${PDOCKER_LLAMA_IMAGE:-pdocker/llama-cpp-gpu:latest}"
 PROJECT="${PDOCKER_LLAMA_PROJECT:-files/pdocker/projects/llama-cpp-gpu}"
@@ -11,27 +13,46 @@ LOCAL_PORT="${PDOCKER_LLAMA_LOCAL_PORT:-28081}"
 REMOTE_PORT="${PDOCKER_LLAMA_REMOTE_PORT:-18081}"
 CPU_CTX="${PDOCKER_LLAMA_CPU_CTX:-2048}"
 GPU_CTX="${PDOCKER_LLAMA_GPU_CTX:-512}"
-GPU_LAYERS="${PDOCKER_LLAMA_GPU_LAYERS:-1}"
+GPU_LAYERS="${PDOCKER_LLAMA_GPU_LAYERS:-2}"
 PREDICT="${PDOCKER_LLAMA_BENCH_PREDICT:-4}"
 REPEAT="${PDOCKER_LLAMA_BENCH_REPEAT:-1}"
 OUT="${PDOCKER_LLAMA_COMPARE_OUT:-$ROOT/docs/test/llama-gpu-compare-latest.json}"
-RESTORE_CPU=1
+MODEL_PATH="${PDOCKER_LLAMA_MODEL_PATH:-/models/model.gguf}"
+MODEL_URL="${PDOCKER_LLAMA_MODEL_URL:-}"
+RESTORE_CPU=0
+RUN_CPU=1
+CPU_TPS_OVERRIDE="${PDOCKER_LLAMA_CPU_TPS:-}"
+TRACE_ALLOC="${PDOCKER_LLAMA_TRACE_ALLOC:-0}"
 OP_ID="llama-gpu-compare-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+CURRENT_CONTAINER_ID=""
 
 usage() {
   cat <<EOF
-Usage: $0 [--out PATH] [--gpu-layers N] [--gpu-ctx N] [--cpu-ctx N] [--predict N] [--repeat N] [--no-restore]
+Usage: $0 [--out PATH] [--gpu-layers N] [--gpu-ctx N] [--cpu-ctx N] [--predict N] [--repeat N] [--model-path PATH] [--model-url URL] [--gpu-only] [--cpu-tps N] [--trace-alloc] [--restore] [--no-restore]
 
 Runs a repeatable Android llama.cpp CPU/GPU comparison scenario without
 modifying llama.cpp:
   1. start the project-library llama container in CPU mode and benchmark HTTP;
   2. start the same image in forced Vulkan mode and capture model-load/serve status;
   3. write a JSON report with CPU speed, GPU load evidence, and the 10x gap;
-  4. restore the CPU server unless --no-restore is passed.
+  4. leave the last measured container running by default; pass --restore when
+     a CPU fallback server should be started after the measurement.
 
 This script drives pdockerd through the Docker-compatible Engine HTTP API over
 the app Unix socket. It does not require staging the upstream Docker CLI into
 the APK runtime.
+
+Use --gpu-only during tight GPU bridge tuning loops. It reuses --cpu-tps when
+provided, otherwise the CPU value from the existing output JSON. Full CPU/GPU
+comparison should still be run at milestone points.
+
+Use --model-url with --model-path to run the same compare flow against a small
+GGUF model without replacing the default /models/model.gguf 8B path, for
+example --model-path /models/small.gguf --model-url https://.../small.gguf.
+
+Allocation/copy tracing is disabled by default for performance measurements
+because the ICD trace stream can dominate short llama runs. Use --trace-alloc
+only when diagnosing buffer accounting or chunking failures.
 EOF
 }
 
@@ -43,12 +64,23 @@ while [[ $# -gt 0 ]]; do
     --cpu-ctx) CPU_CTX="$2"; shift ;;
     --predict) PREDICT="$2"; shift ;;
     --repeat) REPEAT="$2"; shift ;;
+    --model-path) MODEL_PATH="$2"; shift ;;
+    --model-url) MODEL_URL="$2"; shift ;;
+    --gpu-only) RUN_CPU=0 ;;
+    --cpu-tps) CPU_TPS_OVERRIDE="$2"; shift ;;
+    --trace-alloc) TRACE_ALLOC=1 ;;
+    --restore) RESTORE_CPU=1 ;;
     --no-restore) RESTORE_CPU=0 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
   shift
 done
+
+if ! [[ "$PREDICT" =~ ^[0-9]+$ ]] || (( PREDICT < 2 )); then
+  echo "--predict must be an integer >= 2; llama.cpp reports 0ms eval timing for one-token runs" >&2
+  exit 2
+fi
 
 mkdir -p "$(dirname "$OUT")"
 TMP="$(mktemp -d)"
@@ -70,6 +102,12 @@ remote_quote() {
 
 run_as() {
   "$ADB" shell "run-as $PKG sh -c $(remote_quote "$1")"
+}
+
+start_daemon_for_test() {
+  "$ADB" shell am broadcast \
+    -n "$PKG/$CLASS_PREFIX.PdockerdDebugReceiver" \
+    -a "$ACTION_PREFIX.action.SMOKE_START" >/dev/null 2>&1 || true
 }
 
 operation_notify() {
@@ -98,9 +136,13 @@ PY
 
 wait_for_engine() {
   local i
+  start_daemon_for_test
   for i in $(seq 1 45); do
-    if run_as 'test -S files/pdocker/pdockerd.sock' >/dev/null 2>&1; then
+    if run_as 'cd files && test -S pdocker/pdockerd.sock && { printf "GET /_ping HTTP/1.1\r\nHost: pdocker\r\nConnection: close\r\n\r\n"; } | toybox nc -U pdocker/pdockerd.sock | grep -q OK' >/dev/null 2>&1; then
       return 0
+    fi
+    if (( i % 5 == 0 )); then
+      start_daemon_for_test
     fi
     sleep 1
   done
@@ -136,14 +178,29 @@ engine_request() {
   local len=0
   if [[ $# -ge 3 ]]; then
     len="$(printf "%s" "$body" | wc -c | tr -d ' ')"
-    run_as "cd files && { printf '%s %s HTTP/1.1\r\nHost: pdocker\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n' $(remote_quote "$method") $(remote_quote "$path") $(remote_quote "$len"); printf %s $(remote_quote "$body"); } | toybox nc -U pdocker/pdockerd.sock"
+    run_as "cd files && { printf '%s %s HTTP/1.1\r\nHost: pdocker\r\nContent-Type: application/json\r\nContent-Length: %s\r\nConnection: close\r\n\r\n' $(remote_quote "$method") $(remote_quote "$path") $(remote_quote "$len"); printf %s $(remote_quote "$body"); } | toybox nc -U -W 10 pdocker/pdockerd.sock"
   else
-    run_as "cd files && { printf '%s %s HTTP/1.1\r\nHost: pdocker\r\nConnection: close\r\n\r\n' $(remote_quote "$method") $(remote_quote "$path"); } | toybox nc -U pdocker/pdockerd.sock"
+    run_as "cd files && { printf '%s %s HTTP/1.1\r\nHost: pdocker\r\nConnection: close\r\n\r\n' $(remote_quote "$method") $(remote_quote "$path"); } | toybox nc -U -W 10 pdocker/pdockerd.sock"
   fi
 }
 
 engine_body() {
   engine_request "$@" | http_body
+}
+
+parse_engine_id() {
+  python3 -c 'import json,sys
+body = sys.stdin.read()
+try:
+    data = json.loads(body)
+except Exception as exc:
+    print(f"Engine response was not JSON: {exc}: {body[:500]}", file=sys.stderr)
+    raise SystemExit(1)
+ident = data.get("Id")
+if not ident:
+    print(f"Engine response did not include Id: {json.dumps(data, ensure_ascii=False)[:500]}", file=sys.stderr)
+    raise SystemExit(1)
+print(ident)'
 }
 
 decode_engine_logs() {
@@ -171,29 +228,34 @@ container_payload() {
   local mode="$1"
   local ctx="$2"
   local gpu_layers="${3:-}"
-  python3 - "$IMAGE" "$DEVICE_PROJECT" "$mode" "$ctx" "$gpu_layers" "$REMOTE_PORT" <<'PY'
+  python3 - "$IMAGE" "$DEVICE_PROJECT" "$mode" "$ctx" "$gpu_layers" "$REMOTE_PORT" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" <<'PY'
 import json
 import sys
 
-image, project, mode, ctx, gpu_layers, port = sys.argv[1:7]
+image, project, mode, ctx, gpu_layers, port, trace_alloc, model_path, model_url = sys.argv[1:10]
 env = [
     "PDOCKER_GPU=auto",
     "PDOCKER_GPU_AUTO=1",
     f"PDOCKER_GPU_MODE={mode}",
-    "LLAMA_ARG_MODEL=/models/model.gguf",
+    f"LLAMA_ARG_MODEL={model_path}",
     f"LLAMA_ARG_CTX={ctx}",
     f"LLAMA_ARG_PORT={port}",
     "LLAMA_LOG_FILE=/workspace/logs/llama-server.log",
 ]
+if model_url:
+    env.append(f"LLAMA_MODEL_URL={model_url}")
 if mode == "vulkan-raw":
     env.extend([
-        "PDOCKER_VULKAN_ICD_TRACE_ALLOC=1",
         "PDOCKER_VULKAN_MAX_BUFFER_BYTES=536870912",
+        "PDOCKER_VULKAN_ALIAS_COPIES=1",
+        "PDOCKER_VULKAN_DUMP_SPIRV_DIR=/workspace/logs",
         "GGML_VK_FORCE_MAX_BUFFER_SIZE=536870912",
         "GGML_VK_FORCE_MAX_ALLOCATION_SIZE=536870912",
         "GGML_VK_SUBALLOCATION_BLOCK_SIZE=536870912",
         f"LLAMA_ARG_N_GPU_LAYERS={gpu_layers}",
     ])
+    if trace_alloc == "1":
+        env.append("PDOCKER_VULKAN_ICD_TRACE_ALLOC=1")
 port_key = f"{port}/tcp"
 payload = {
     "Image": image,
@@ -202,6 +264,14 @@ payload = {
     "Labels": {
         "io.pdocker.project": "llama-cpp-gpu",
         "io.pdocker.role": "llama-gpu-compare",
+        "io.github.ryo100794.pdocker.project-id": project,
+        "io.github.ryo100794.pdocker.project-dir": project,
+        "io.github.ryo100794.pdocker.project-name": "llama-cpp-gpu",
+        "io.github.ryo100794.pdocker.compose-service": "llama-cpp",
+        "com.docker.compose.project": "llama-cpp-gpu",
+        "com.docker.compose.service": "llama-cpp",
+        "com.docker.compose.oneoff": "False",
+        "io.github.ryo100794.pdocker.service-url.18081": "llama.cpp",
     },
     "HostConfig": {
         "Binds": [
@@ -232,7 +302,7 @@ wait_server() {
   "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
   "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
   for _ in $(seq 1 "$seconds"); do
-    if curl -fsS --max-time 2 "http://127.0.0.1:$LOCAL_PORT/v1/models" >/dev/null 2>&1; then
+    if curl -fsS --max-time 2 "http://127.0.0.1:$LOCAL_PORT/v1/models" >/dev/null 2>&1 && container_running; then
       return 0
     fi
     sleep 1
@@ -240,27 +310,61 @@ wait_server() {
   return 1
 }
 
+container_ref() {
+  printf "%s" "${CURRENT_CONTAINER_ID:-$CONTAINER}"
+}
+
 container_logs() {
-  engine_request GET "/containers/$(urlencode "$CONTAINER")/logs?stdout=1&stderr=1&tail=320" | decode_engine_logs || true
+  local ref
+  ref="$(container_ref)"
+  engine_request GET "/containers/$(urlencode "$ref")/logs?stdout=1&stderr=1&tail=320" | decode_engine_logs || true
 }
 
 container_state() {
-  engine_body GET "/containers/$(urlencode "$CONTAINER")/json" || true
+  local ref
+  ref="$(container_ref)"
+  engine_body GET "/containers/$(urlencode "$ref")/json" || true
+}
+
+container_running() {
+  local ref state_json
+  ref="$(container_ref)"
+  [[ -n "$ref" ]] || return 1
+  state_json="$(engine_body GET "/containers/$(urlencode "$ref")/json" 2>/dev/null || true)"
+  [[ -n "$state_json" ]] || return 1
+  python3 - "$state_json" "$CURRENT_CONTAINER_ID" <<'PY'
+import json
+import sys
+
+try:
+    data = json.loads(sys.argv[1])
+except Exception:
+    raise SystemExit(1)
+expected = sys.argv[2].strip()
+if expected and data.get("Id") != expected:
+    raise SystemExit(1)
+state = data.get("State") or {}
+raise SystemExit(0 if state.get("Running") is True else 1)
+PY
 }
 
 remove_container() {
   engine_request DELETE "/containers/$(urlencode "$CONTAINER")?force=true" >/dev/null || true
+  CURRENT_CONTAINER_ID=""
 }
 
 start_container_mode() {
   local mode="$1"
   local ctx="$2"
   local gpu_layers="${3:-}"
-  local payload cid
+  local payload create_body cid
+  wait_for_engine
   remove_container
   payload="$(container_payload "$mode" "$ctx" "$gpu_layers")"
-  cid="$(engine_body POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload" | python3 -c 'import json,sys; print(json.load(sys.stdin)["Id"])')"
+  create_body="$(engine_body POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload")"
+  cid="$(printf "%s" "$create_body" | parse_engine_id)"
   engine_request POST "/containers/$cid/start" "" >/dev/null
+  CURRENT_CONTAINER_ID="$cid"
   printf "%s\n" "$cid"
 }
 
@@ -284,25 +388,56 @@ bench_http() {
     "$ROOT/scripts/android-llama-bench.sh"
 }
 
-echo "[pdocker llama compare] start CPU baseline"
-CURRENT_STAGE="CPU baseline"
-operation_notify "running" "CPU baseline: starting"
 wait_for_engine
 DEVICE_PROJECT="$(run_as "cd $(remote_quote "$PROJECT") && pwd" | tr -d '\r')"
-start_cpu >/dev/null
-if ! wait_server 90; then
-  operation_notify "failed" "CPU server did not become reachable" 1
-  echo "CPU server did not become reachable" >&2
-  container_state >&2
-  container_logs >&2
-  exit 1
-fi
 CPU_JSON="$TMP/cpu.json"
-bench_http "cpu-baseline" "$CPU_JSON" >/dev/null
+if [[ "$RUN_CPU" -eq 1 ]]; then
+  echo "[pdocker llama compare] start CPU baseline"
+  CURRENT_STAGE="CPU baseline"
+  operation_notify "running" "CPU baseline: starting"
+  start_cpu >/dev/null
+  if ! wait_server 90; then
+    operation_notify "failed" "CPU server did not become reachable" 1
+    echo "CPU server did not become reachable" >&2
+    container_state >&2
+    container_logs >&2
+    exit 1
+  fi
+  bench_http "cpu-baseline" "$CPU_JSON" >/dev/null
+else
+  echo "[pdocker llama compare] reuse CPU baseline"
+  CURRENT_STAGE="reuse CPU baseline"
+  operation_notify "running" "Reusing CPU baseline; forced Vulkan model load starting"
+  python3 - "$OUT" "$CPU_TPS_OVERRIDE" >"$CPU_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+out_path = Path(sys.argv[1])
+override = sys.argv[2].strip()
+cpu_tps = float(override) if override else 0.0
+summary = {}
+if not cpu_tps and out_path.is_file():
+    previous = json.loads(out_path.read_text(encoding="utf-8"))
+    cpu = previous.get("cpu", {})
+    cpu_tps = float(cpu.get("tokens_per_second") or 0.0)
+    summary = dict(cpu.get("summary", {}))
+if not cpu_tps:
+    raise SystemExit("no reusable CPU baseline; run without --gpu-only or pass --cpu-tps")
+summary.setdefault("predicted_tokens_per_second_mean", cpu_tps)
+summary.setdefault("predicted_tokens_per_second_min", cpu_tps)
+summary.setdefault("predicted_tokens_per_second_max", cpu_tps)
+print(json.dumps({
+    "summary": summary,
+    "reused_cpu_baseline": True,
+    "source": "override" if override else str(out_path),
+}, separators=(",", ":")))
+PY
+fi
 
 echo "[pdocker llama compare] start forced Vulkan run"
 CURRENT_STAGE="forced Vulkan"
-operation_notify "running" "CPU baseline complete; forced Vulkan model load starting"
+operation_notify "running" "Forced Vulkan model load starting"
 start_gpu >/dev/null
 GPU_LOG="$TMP/gpu.log"
 GPU_STATE="$TMP/gpu-state.txt"
@@ -318,14 +453,14 @@ fi
 container_state > "$GPU_STATE"
 container_logs > "$GPU_LOG"
 
-python3 - "$CPU_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" <<'PY'
+python3 - "$CPU_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" <<'PY'
 import json
 import re
 import sys
 import time
 from pathlib import Path
 
-cpu_path, gpu_path, gpu_log_path, gpu_state_path, out_path, gpu_served_s, gpu_layers, gpu_ctx = sys.argv[1:9]
+cpu_path, gpu_path, gpu_log_path, gpu_state_path, out_path, gpu_served_s, gpu_layers, gpu_ctx, predict, repeat, trace_alloc, model_path, model_url = sys.argv[1:14]
 cpu = json.load(open(cpu_path, encoding="utf-8"))
 gpu = {}
 if Path(gpu_path).is_file() and Path(gpu_path).stat().st_size:
@@ -401,6 +536,7 @@ def parse_spirv_traces(text):
         r"pdocker-gpu-executor: SPIR-V trace valid=([0-9]+) truncated=([0-9]+) "
         r"hash=(0x[0-9a-fA-F]+) magic=(0x[0-9a-fA-F]+) version=(0x[0-9a-fA-F]+) "
         r"bound=([0-9]+) local_size=([0-9]+),([0-9]+),([0-9]+) "
+        r"(?:local_size_id=([0-9]+),([0-9]+),([0-9]+) )?"
         r"dispatch=([0-9]+),([0-9]+),([0-9]+) push=([0-9]+) bindings=([0-9]+) caps=([^\n]+)"
     )
     for m in pattern.finditer(text):
@@ -412,10 +548,11 @@ def parse_spirv_traces(text):
             "version": m.group(5),
             "bound": int(m.group(6)),
             "local_size": [int(m.group(7)), int(m.group(8)), int(m.group(9))],
-            "dispatch": [int(m.group(10)), int(m.group(11)), int(m.group(12))],
-            "push_bytes": int(m.group(13)),
-            "bindings": int(m.group(14)),
-            "capabilities": [cap.strip() for cap in m.group(15).split(",") if cap.strip() and cap.strip() != "none"],
+            "local_size_id": [int(m.group(10) or 0), int(m.group(11) or 0), int(m.group(12) or 0)],
+            "dispatch": [int(m.group(13)), int(m.group(14)), int(m.group(15))],
+            "push_bytes": int(m.group(16)),
+            "bindings": int(m.group(17)),
+            "capabilities": [cap.strip() for cap in m.group(18).split(",") if cap.strip() and cap.strip() != "none"],
         })
     return traces
 
@@ -433,6 +570,10 @@ generic_spirv_attempted = (
 executor_submit_generic_dispatch_error = json_string_field_seen("error", "submit-generic-dispatch")
 generic_spirv_dispatch_failed = "generic SPIR-V dispatch failed" in log
 queue_submit_blocker = "vk::Queue::submit: ErrorFeatureNotPresent" in log
+pipeline_feature_blocker = any(
+    e.get("error") == "create-generic-compute-pipeline" and int(e.get("vk_result") or 0) == -13
+    for e in executor_events
+)
 android_vulkan_dispatch_blocker = (
     json_string_field_seen("backend_impl", "android_vulkan")
     and executor_submit_generic_dispatch_error
@@ -445,6 +586,14 @@ generic_spirv_dispatch_blocker = (
         or queue_submit_blocker
     )
 )
+repeating_layer_matches = [int(m.group(1)) for m in re.finditer(r"offloading ([0-9]+) repeating layers to GPU", log)]
+offloaded_layer_matches = [
+    (int(m.group(1)), int(m.group(2)))
+    for m in re.finditer(r"offloaded ([0-9]+)/([0-9]+) layers to GPU", log)
+]
+gpu_repeating_layers = repeating_layer_matches[-1] if repeating_layer_matches else 0
+gpu_offloaded_layers = offloaded_layer_matches[-1][0] if offloaded_layer_matches else 0
+gpu_total_layers = offloaded_layer_matches[-1][1] if offloaded_layer_matches else 0
 evidence = {
     "vulkan_device_seen": "Vulkan0 (pdocker Vulkan bridge" in log or "Vulkan0 model buffer size" in log,
     "offload_seen": "offloading" in log,
@@ -454,10 +603,15 @@ evidence = {
     "assert_blocker": "GGML_ASSERT" in log,
     "buffer_range_assert_blocker": "ggml_backend_buffer_get_alloc_size" in log,
     "gpu_model_buffer_seen": "Vulkan0 model buffer size" in log,
+    "gpu_repeating_layers": gpu_repeating_layers,
+    "gpu_offloaded_layers": gpu_offloaded_layers,
+    "gpu_total_layers": gpu_total_layers,
+    "gpu_output_only_offload": bool(gpu_offloaded_layers and gpu_repeating_layers == 0),
     "generic_dispatch_response_seen": "generic dispatch response:" in log,
     "generic_spirv_dispatch_attempted": generic_spirv_attempted,
     "generic_spirv_dispatch_seen": json_string_field_seen("kernel", "generic_spirv") and json_bool_field_seen("valid", True),
     "generic_spirv_dispatch_failed": generic_spirv_dispatch_failed,
+    "pipeline_feature_blocker": pipeline_feature_blocker,
     "executor_spirv_trace_seen": "pdocker-gpu-executor: SPIR-V trace" in log,
     "executor_feature_trace_seen": "pdocker-gpu-executor: Android Vulkan features" in log,
     "android_vulkan_dispatch_blocker": android_vulkan_dispatch_blocker,
@@ -479,12 +633,21 @@ if evidence["buffer_range_assert_blocker"]:
 elif evidence["buffer_allocation_blocker"] or evidence["assert_blocker"]:
     blocker_class = "vulkan_buffer_allocation"
     blocker_detail = "Vulkan buffer allocation/assertion failed before dispatch"
+elif pipeline_feature_blocker:
+    blocker_class = "vulkan_pipeline_feature"
+    blocker_detail = "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT"
 elif generic_spirv_dispatch_blocker:
     blocker_class = "vulkan_generic_spirv_dispatch"
     blocker_detail = "generic SPIR-V dispatch reached submit-generic-dispatch / queue submit failure"
+elif queue_submit_blocker:
+    blocker_class = "vulkan_queue_submit_feature"
+    blocker_detail = "llama.cpp submitted a Vulkan workload, but vkQueueSubmit failed with ErrorFeatureNotPresent before the executor trace boundary"
 elif evidence["generic_spirv_dispatch_seen"] and bool(int(gpu_served_s)):
     blocker_class = "bridge_dispatch_performance"
     blocker_detail = "generic SPIR-V dispatch served; benchmark throughput is the remaining gap"
+elif evidence["gpu_output_only_offload"] and bool(int(gpu_served_s)):
+    blocker_class = "insufficient_gpu_offload_depth"
+    blocker_detail = "llama.cpp served, but only the output layer was offloaded; repeating transformer layers stayed on CPU"
 else:
     blocker_class = "vulkan_device_discovery"
     blocker_detail = "Vulkan offload evidence was not sufficient to classify a later blocker"
@@ -574,8 +737,8 @@ failure_axes = {
         ),
     },
     "generic_spirv_dispatch": {
-        "state": "front_blocker" if generic_spirv_dispatch_blocker else "passed" if generic_spirv_dispatch["valid_android_vulkan_events"] else "not_reached",
-        "reason": blocker_detail if generic_spirv_dispatch_blocker else "generic SPIR-V dispatch was not the failing axis in this run",
+        "state": "front_blocker" if generic_spirv_dispatch_blocker or pipeline_feature_blocker else "passed" if generic_spirv_dispatch["valid_android_vulkan_events"] else "not_reached",
+        "reason": blocker_detail if generic_spirv_dispatch_blocker or pipeline_feature_blocker else "generic SPIR-V dispatch was not the failing axis in this run",
     },
 }
 dispatch_upload_ms = [float(m.group(1)) for m in re.finditer(r'"upload_ms":([0-9.]+)', log)]
@@ -601,12 +764,16 @@ next_action = (
     else
     "split 4GiB+ Vulkan buffers / pinned host-buffer path"
     if evidence["buffer_allocation_blocker"] or evidence["assert_blocker"]
+    else "map failed SPIR-V capabilities to Android Vulkan feature bits, then clamp or translate the advertised feature set"
+    if blocker_class == "vulkan_pipeline_feature"
     else "lower generic SPIR-V dispatch into the Android Vulkan executor or clamp advertised capabilities"
-    if blocker_class == "vulkan_generic_spirv_dispatch"
+    if blocker_class in {"vulkan_generic_spirv_dispatch", "vulkan_queue_submit_feature"}
     else "inspect traced Android Vulkan feature/SPIR-V mismatch"
     if evidence["android_vulkan_dispatch_blocker"] and evidence["executor_spirv_trace_seen"]
     else "lower llama.cpp SPIR-V dispatch into the Android GPU executor"
     if evidence["spirv_dispatch_blocker"] or evidence["queue_submit_blocker"]
+    else "increase n-gpu-layers until repeating transformer layers are offloaded"
+    if blocker_class == "insufficient_gpu_offload_depth"
     else "reduce bridge upload/copy overhead with persistent registered buffers; rerun with larger n_predict"
     if evidence["generic_spirv_dispatch_seen"] and bool(int(gpu_served_s))
     else "make Vulkan device discovery reliable"
@@ -624,6 +791,12 @@ result = {
     "settings": {
         "gpu_layers": int(gpu_layers),
         "gpu_ctx": int(gpu_ctx),
+        "predict": int(predict),
+        "repeat": int(repeat),
+        "trace_alloc": bool(int(trace_alloc)),
+        "cpu_reused": bool(cpu.get("reused_cpu_baseline")),
+        "model_path": model_path,
+        "model_url_set": bool(model_url),
     },
     "cpu": {
         "tokens_per_second": cpu_tps,
@@ -673,7 +846,7 @@ result = {
         "kind": "llama-gpu-compare",
         "ui_surface": "Overview daemon operation/progress card",
         "container_surface": "pdocker-llama-cpp remains the container shown by Engine container listing",
-        "cleanup": "remove adb port forward, mark failed operation on nonzero exit, restore CPU server unless --no-restore is passed",
+        "cleanup": "remove adb port forward and mark failed operation on nonzero exit; CPU restore is opt-in with --restore because the next run recreates the required mode",
     },
     "next_blocker": blocker_detail,
     "next_action": next_action,
@@ -709,15 +882,19 @@ if [[ "$RESTORE_CPU" -eq 1 ]]; then
   echo "[pdocker llama compare] restore CPU server"
   CURRENT_STAGE="restore CPU server"
   operation_notify "running" "Restoring CPU llama server"
-  start_cpu >/dev/null
-  wait_server 90 >/dev/null || true
+  if start_cpu >/dev/null; then
+    wait_server 90 >/dev/null || true
+  else
+    operation_notify "failed" "$SUMMARY; CPU restore failed; compare artifact preserved" 1
+    echo "[pdocker llama compare] CPU restore failed; compare artifact preserved" >&2
+  fi
 fi
 
 CURRENT_STAGE="complete"
 if [[ "$RESTORE_CPU" -eq 1 ]]; then
   operation_notify "done" "$SUMMARY; CPU server restored" 1
 else
-  operation_notify "done" "$SUMMARY; CPU server left in last compare mode (--no-restore)" 1
+  operation_notify "done" "$SUMMARY; last compare mode left running; next run recreates its required container" 1
 fi
 echo "[pdocker llama compare] local: $OUT"
 echo "[pdocker llama compare] device: files/pdocker/bench/$DEVICE_NAME"

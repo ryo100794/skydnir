@@ -77,6 +77,11 @@ reported payload first or use the default `build-all.sh` flow.
 
 ## APK Builds
 
+Build metadata is fixed in the repository root `version.properties`. Update
+that file intentionally when cutting a managed build so local APK rebuilds do
+not silently change `versionCode`, `versionName`, build time, build number, or
+the recorded source baseline.
+
 Build only the default configured APK package step:
 
 ```sh
@@ -150,6 +155,7 @@ Compat release output:
 
 ```text
 app/build/outputs/apk/compat/release/app-compat-release.apk
+app/build/outputs/apk/compat/release/app-compat-release-unsigned.apk
 ```
 
 ## Install Over Wi-Fi ADB

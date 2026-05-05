@@ -122,6 +122,9 @@ def run_daemon(
     # Phones have tight app-data budgets. Keep successful rebuilds from
     # accumulating old, unreferenced filesystem layers when a tag is replaced.
     os.environ.setdefault("PDOCKER_AUTO_PRUNE_UNREFERENCED_LAYERS", "1")
+    # Interrupted Dockerfile builds leave internal build_* rootfs directories.
+    # pdockerd skips roots that are still referenced by a running build process.
+    os.environ.setdefault("PDOCKER_AUTO_PRUNE_BUILD_ARTIFACTS", "1")
 
     if runtime_backend:
         os.environ["PDOCKER_RUNTIME_BACKEND"] = runtime_backend

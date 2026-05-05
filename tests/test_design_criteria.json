@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "minimums": {
+    "literal_check_count_to_code_token_multiplier": 2.0,
+    "feature_scenarios": 25,
+    "fast_runnable_scenarios": 15,
+    "device_scenarios": 5,
+    "blackbox_requirements": 8,
+    "abnormal_event_cases": 8,
+    "refactor_resilience_cases": 6,
+    "input_validation_cases": 10,
+    "stress_regression_scenarios": 6,
+    "direct_syscall_coverage_entries": 10,
+    "direct_syscall_boundary_entries": 8,
+    "direct_syscall_branch_entries": 8,
+    "static_assertion_checks": 300,
+    "c0_statement_items": 1,
+    "c1_branch_outcome_items": 1,
+    "c2_condition_outcome_items": 1,
+    "implementation_code_tokens": 1
+  },
+  "implementation_token_scope": [
+    "app/src/main/kotlin",
+    "app/src/main/cpp",
+    "app/src/main/python",
+    "docker-proot-setup/bin/pdockerd",
+    "docker-proot-setup/src"
+  ],
+  "required_design_axes": [
+    "feature-ledger",
+    "blackbox-positive-negative",
+    "abnormal-event-evidence",
+    "refactor-resilience",
+    "input-api-arguments",
+    "input-file-grammar",
+    "input-value-ranges",
+    "mutation-testing",
+    "property-based-testing",
+    "differential-testing",
+    "stateful-model-testing",
+    "concurrency-race-testing",
+    "crash-recovery-testing",
+    "fault-injection",
+    "golden-compatibility-corpus",
+    "security-adversarial-testing",
+    "performance-regression-gates",
+    "syscall-path-variants",
+    "syscall-boundaries",
+    "syscall-branches",
+    "seeded-random",
+    "monkey",
+    "stress",
+    "variance",
+    "build-set-artifacts",
+    "device-lanes",
+    "release-readiness"
+  ],
+  "required_fast_commands": [
+    "python3 scripts/verify-test-design-criteria.py",
+    "python3 scripts/verify-feature-scenarios.py",
+    "python3 scripts/verify-abnormal-events.py",
+    "python3 scripts/verify-refactor-resilience.py",
+    "python3 scripts/verify-input-grammar-coverage.py",
+    "python3 scripts/verify-input-validation.py",
+    "python3 scripts/verify-stress-regression.py",
+    "python3 scripts/verify-blackbox-requirements.py"
+  ],
+  "required_docs": [
+    "docs/test/TEST_DESIGN_STANDARD.md",
+    "docs/test/SCENARIOS.md",
+    "docs/test/COMPATIBILITY.md",
+    "docs/test/DIRECT_SYSCALL_COVERAGE.md"
+  ],
+  "policy": {
+    "new_feature": "Every new feature must add or update one feature scenario, one observable acceptance check, and one negative or boundary-oriented check unless explicitly recorded as a planned gap.",
+    "literal_token_rule": "The selected check item count must be at least 2.0 times the implementation-code token count. Check items include semantic checks plus C0 statement items, C1 branch outcome items, and C2 condition outcome items.",
+    "random": "Randomized tests must be seed-fixed by default and record the seed and case fingerprint.",
+    "artifacts": "Long-running, device, benchmark, monkey, variance, and abnormal-event runs must emit machine-readable artifacts tied to git commit, build flavor, command, seed when applicable, and summary.",
+    "advanced_methods": "Mutation, property-based, differential, stateful model, concurrency/race, crash/recovery, fault injection, golden corpus, security/adversarial, performance regression, and refactor-resilience methods must be represented in the feature scenario ledger. Unimplemented methods must be explicit planned gaps rather than invisible omissions."
+  }
+}

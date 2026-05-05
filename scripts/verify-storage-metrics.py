@@ -22,6 +22,7 @@ FIXTURE: dict[str, Any] = {
         "PdockerStorage": {
             "SharedLayerPool": "Layer bytes are counted once across all image views.",
             "Overlap": "Image virtual sizes overlap the shared layer pool and must not be added to UniqueBytes.",
+            "ContainerUpper": "ContainerUpperBytes is private writable upperdir data for containers.",
         },
     },
     "images": [
@@ -55,6 +56,7 @@ SUMMARY_KEYS = (
     "UniqueBytes",
     "TotalBytes",
     "FreeBytes",
+    "RootfsViewBytes",
     "VolumeBytes",
     "BuildCacheBytes",
 )
@@ -115,11 +117,13 @@ def check_summary(snapshot: dict[str, Any], errors: list[str]) -> None:
             fail(errors, f"system_df.{key} is required")
 
     notes = require_mapping(summary.get("PdockerStorage", {}), "system_df.PdockerStorage")
-    note_text = " ".join(str(value) for value in notes.values()).lower()
+    note_text = " ".join(f"{key} {value}" for key, value in notes.items()).lower()
     if "shared" not in note_text or "layer" not in note_text:
         fail(errors, "PdockerStorage notes must describe the shared layer pool")
     if "must not be added" not in note_text and "do not add" not in note_text:
         fail(errors, "PdockerStorage notes must say image views are not additive")
+    if "upper" not in note_text and "private" not in note_text:
+        fail(errors, "PdockerStorage notes must describe container upper/private storage")
 
     required_unique_components = ("SharedLayerBytes", "ContainerUpperBytes")
     optional_unique_components = ("VolumeBytes", "BuildCacheBytes")
@@ -145,6 +149,10 @@ def check_summary(snapshot: dict[str, Any], errors: list[str]) -> None:
     if all(key in summary and is_number(summary[key]) for key in ("TotalBytes", "FreeBytes")):
         if summary["FreeBytes"] > summary["TotalBytes"]:
             fail(errors, "system_df.FreeBytes must not exceed TotalBytes")
+
+    if all(key in summary and is_number(summary[key]) for key in ("RootfsViewBytes", "ContainerUpperBytes")):
+        if summary["RootfsViewBytes"] < summary["ContainerUpperBytes"]:
+            fail(errors, "system_df.RootfsViewBytes must be at least ContainerUpperBytes")
 
 
 def check_images(snapshot: dict[str, Any], errors: list[str]) -> None:

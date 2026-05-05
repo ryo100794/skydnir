@@ -232,6 +232,7 @@
   let selectionDrag = null;
   let touchScroll = null;
   let allSelected = false;
+  const touchScrollThreshold = 6;
 
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const distance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -245,6 +246,7 @@
     const screen = termHost.querySelector('.xterm-screen canvas') || termHost.querySelector('.xterm-screen') || termHost;
     return screen.getBoundingClientRect();
   };
+  const viewportEl = () => termHost.querySelector('.xterm-viewport');
   const cellFromTouch = (touch) => {
     const rect = screenRect();
     const cellWidth = rect.width / Math.max(term.cols, 1);
@@ -526,6 +528,8 @@
   termHost.addEventListener('touchstart', (event) => {
     if (event.touches.length === 2) {
       clearTimeout(longPressTimer);
+      touchScroll = null;
+      selectionDrag = null;
       pinch = {
         distance: distance(event.touches[0], event.touches[1]),
         fontSize
@@ -538,22 +542,27 @@
     if (readOnly) suppressImeForSelection();
     const touch = event.touches[0];
     const cell = cellFromTouch(touch);
-    touchScroll = { x: touch.clientX, y: touch.clientY };
     const handleEl = event.target.closest ? event.target.closest('.selection-handle') : null;
     if (handleEl === startHandle || handleEl === endHandle) {
+      touchScroll = null;
       selectionDrag = roleForVisualHandle(handleEl === startHandle ? 'start' : 'end');
       suppressImeForSelection();
       event.preventDefault();
       return;
     }
-    if (!readOnly && (selectionActive || mods.select)) {
-      selectionDrag = nearestSelectionHandle(cell);
-      updateSelection(cell, selectionDrag);
-      event.preventDefault();
-      return;
-    }
+    touchScroll = {
+      x: touch.clientX,
+      y: touch.clientY,
+      lastY: touch.clientY,
+      active: false
+    };
     clearTimeout(longPressTimer);
-    longPressTimer = setTimeout(() => startSelection(cell), 460);
+    longPressTimer = setTimeout(() => {
+      if (touchScroll && !touchScroll.active) {
+        touchScroll = null;
+        startSelection(cell);
+      }
+    }, 460);
   }, { passive: false });
 
   termHost.addEventListener('touchmove', (event) => {
@@ -570,16 +579,26 @@
     }
     if (event.touches.length === 1 && touchScroll) {
       const touch = event.touches[0];
-      const rect = screenRect();
-      const cellHeight = rect.height / Math.max(term.rows, 1);
       const moved = Math.hypot(touch.clientX - touchScroll.x, touch.clientY - touchScroll.y);
-      if (moved > 8) clearTimeout(longPressTimer);
-      const lines = Math.trunc((touch.clientY - touchScroll.y) / Math.max(cellHeight, 1));
-      if (lines !== 0) {
-        term.scrollLines(-lines);
-        touchScroll.y += lines * cellHeight;
+      if (moved > touchScrollThreshold) {
+        clearTimeout(longPressTimer);
+        touchScroll.active = true;
+      }
+      if (touchScroll.active) {
+        const deltaY = touch.clientY - touchScroll.lastY;
+        const viewport = viewportEl();
+        if (viewport) {
+          viewport.scrollTop -= deltaY;
+        } else {
+          const rect = screenRect();
+          const cellHeight = rect.height / Math.max(term.rows, 1);
+          const lines = Math.trunc(deltaY / Math.max(cellHeight, 1));
+          if (lines !== 0) term.scrollLines(-lines);
+        }
+        touchScroll.lastY = touch.clientY;
         refreshSelectionMarkers();
         event.preventDefault();
+        return;
       }
     }
   }, { passive: false });
@@ -599,15 +618,10 @@
     selectionDrag = null;
   }, { passive: false });
 
-  const nearestSelectionHandle = (cell) => {
-    const ordered = orderedSelection();
-    if (!ordered) return 'end';
-    const index = (c) => c.y * term.cols + c.x;
-    const visual = Math.abs(index(cell) - index(ordered.start)) <= Math.abs(index(cell) - index(ordered.end))
-      ? 'start'
-      : 'end';
-    return roleForVisualHandle(visual);
-  };
+  const viewport = viewportEl();
+  if (viewport) {
+    viewport.addEventListener('scroll', refreshSelectionMarkers, { passive: true });
+  }
 
   termHost.addEventListener('contextmenu', (event) => {
     event.preventDefault();

@@ -67,15 +67,25 @@ python3 scripts/verify-storage-metrics.py --capture-device --dry-run
 ## Accounting Contract
 
 - `SharedLayerBytes`, `ContainerUpperBytes`, `UniqueBytes`, free space, totals,
-  image sizes, and container sizes must be numeric and nonnegative.
-- `SharedLayerBytes` is the deduplicated layer pool. A layer used by multiple
-  images is counted once in that pool.
-- `ImageViewBytes` and image `VirtualSize` values are views over the layer pool.
-  They are useful for per-image display, but they overlap shared layers and
-  must not be added to `UniqueBytes`.
+  image sizes, and container sizes must be numeric and nonnegative. Optional
+  view counters such as `RootfsViewBytes` must also be numeric and
+  nonnegative when present.
+- `SharedLayerBytes` is the deduplicated layer pool. A layer used by two images
+  is stored once and counted once in that pool, even though both image rows may
+  report apparent size that includes the same layer.
+- `ImageViewBytes` and image `VirtualSize` values are apparent merged views over
+  lower layer data. They are useful for per-image display, but they overlap
+  each other and overlap the shared layer pool, so they must not be added to
+  `UniqueBytes`, `SharedLayerBytes`, or device totals.
+- `ContainerUpperBytes` is private writable upperdir data owned by containers.
+  It is the same concept Docker exposes as writable container size (`SizeRw`):
+  files copied up, created, edited, or deleted in a running container live here.
+- `RootfsViewBytes`, when present, is an apparent merged rootfs view. It can be
+  larger than `ContainerUpperBytes` because it includes lower image data, and it
+  must not be used as a unique storage bucket.
 - `UniqueBytes` is the sum of unique on-disk components: shared layer pool plus
-  container upper/private bytes, and any explicit future unique buckets such as
-  volumes or build cache.
+  container private upperdir bytes, and any explicit future unique buckets such
+  as volumes or build cache.
 - Per-image `SharedSize + UniqueSize` must equal `VirtualSize` for the pdocker
   image metric rows.
 - Container `SizeRw` is private upper storage. When `SizeRootFs` is present, it
@@ -98,14 +108,15 @@ container copy-up/edit behavior, prune behavior, or Android storage refresh.
    `system_df`, `images`, and `containers` sections before exiting.
 4. Build an image from a Dockerfile that reuses an existing base layer. Refresh
    metrics by running the capture command again. Confirm layer pool bytes remain
-   deduplicated while the new image reports only its own unique layer delta as
-   image-unique storage.
+   deduplicated while the new image row can still show an apparent
+   `VirtualSize` that includes already-counted lower data.
 5. Rebuild the same Dockerfile without changes. Refresh metrics and confirm the
    shared layer pool is not counted twice and `UniqueBytes` does not grow from
    reused layers.
 6. Create a container, edit or copy a file inside it so copy-up/private storage
-   is created, then capture `/containers/json?all=1&size=1`. Confirm `SizeRw`
-   increases, remains nonnegative, and is reflected in `ContainerUpperBytes`.
+   is created in the container upperdir, then capture
+   `/containers/json?all=1&size=1`. Confirm `SizeRw` increases, remains
+   nonnegative, and is reflected in `ContainerUpperBytes`.
 7. Run image/container prune for unused objects. Refresh metrics and confirm
    removed unique layers or upper directories reduce the relevant unique bucket,
    while layers still referenced by remaining images stay in the shared pool.

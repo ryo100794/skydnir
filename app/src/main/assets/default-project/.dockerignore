@@ -1,0 +1,11 @@
+workspace/
+documents/
+logs/
+profiles/
+models/
+.git/
+.gradle/
+build/
+*.apk
+*.log
+*.tmp

@@ -1,0 +1,110 @@
+{
+  "schema": 1,
+  "policy": {
+    "rule": "Refactor-resilience tests must protect externally observable contracts, not internal function names or implementation layout.",
+    "bug_fossilization_guard": "Golden expectations must classify each behavior as intended, documented-limitation, or known-bug-blocker. A known bug must not become a runnable passing invariant.",
+    "artifact": "docs/test/refactor-resilience-latest.json",
+    "required_axes": [
+      "engine-api-golden",
+      "compose-dockerfile-fixtures",
+      "archive-round-trip",
+      "state-machine-contract",
+      "abnormal-replay",
+      "artifact-diff"
+    ]
+  },
+  "artifact_policy": {
+    "required_fields": [
+      "schema",
+      "kind",
+      "git_commit",
+      "timestamp_utc",
+      "command",
+      "summary",
+      "cases"
+    ]
+  },
+  "cases": [
+    {
+      "id": "refactor.engine-api.golden-shape",
+      "axis": "engine-api-golden",
+      "status": "runnable",
+      "lane": "fast-local",
+      "command": "python3 scripts/compat-audit.py",
+      "contract_class": "intended",
+      "observable_contract": "Docker-shaped /_ping, /version, /info, images, containers, networks, volumes, and events responses remain stable across backend refactors.",
+      "invariant": "Response status classes, required keys, and compatibility warnings remain Docker-compatible or explicitly documented.",
+      "refactor_risk": "Route splitting, daemon state reshaping, or metadata-store replacement can silently change response shapes.",
+      "evidence_artifact": "docs/test/compat-audit-latest.md",
+      "evidence_required_fast": true
+    },
+    {
+      "id": "refactor.compose-dockerfile.fixtures",
+      "axis": "compose-dockerfile-fixtures",
+      "status": "runnable",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-project-library.py && python3 scripts/verify-dockerfile-standard.py",
+      "contract_class": "intended",
+      "observable_contract": "Bundled Compose and Dockerfile templates remain portable, standard-syntax project definitions after project-library or build-pipeline refactors.",
+      "invariant": "No pdocker-only Dockerfile instructions, missing project files, broken library entries, or invalid declared project routes.",
+      "refactor_risk": "Library layout changes can hide missing files or introduce non-Docker syntax while UI menus still render.",
+      "evidence_artifact": "tests/feature_scenarios.json",
+      "evidence_required_fast": true
+    },
+    {
+      "id": "refactor.abnormal.replay-ledger",
+      "axis": "abnormal-replay",
+      "status": "runnable",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-abnormal-events.py --write-artifact docs/test/abnormal-events-latest.json",
+      "contract_class": "intended",
+      "observable_contract": "Expected abnormal paths keep stable triggers, expected signals, failure oracles, reproduction commands, and artifact hashes.",
+      "invariant": "Runnable abnormal cases have existing evidence artifacts and planned gaps remain explicit.",
+      "refactor_risk": "Error handling refactors can turn deterministic failures into unstructured console text or fake success.",
+      "evidence_artifact": "docs/test/abnormal-events-latest.json",
+      "evidence_required_fast": true
+    },
+    {
+      "id": "refactor.state-machine.container-job-card",
+      "axis": "state-machine-contract",
+      "status": "planned-gap",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-refactor-resilience.py",
+      "contract_class": "known-bug-blocker",
+      "observable_contract": "Image, container, job, daemon operation, UI card, and docker ps state transitions remain equivalent across internal state-store refactors.",
+      "invariant": "A container cannot be Up in cards and Exited in docker ps for the same container id; job completion and process state must converge.",
+      "refactor_risk": "Project-name keyed state, duplicate caches, or UI summaries can drift from canonical container ids.",
+      "evidence_artifact": "docs/test/state-machine-contract-latest.json",
+      "evidence_required_fast": false,
+      "gap_reason": "A canonical state-machine model and golden transition corpus are not implemented yet."
+    },
+    {
+      "id": "refactor.archive.round-trip",
+      "axis": "archive-round-trip",
+      "status": "planned-gap",
+      "lane": "heavy-backend",
+      "command": "python3 scripts/verify-refactor-resilience.py",
+      "contract_class": "documented-limitation",
+      "observable_contract": "Archive copy-in/copy-out preserves tar headers, file modes, symlinks, whiteouts, and merged lower/upper views across storage refactors.",
+      "invariant": "Tar round-trip produces the same externally visible file tree and metadata within the declared pdocker compatibility scope.",
+      "refactor_risk": "COW or metadata-index refactors can pass simple file tests while breaking Docker archive interoperability.",
+      "evidence_artifact": "docs/test/archive-round-trip-latest.json",
+      "evidence_required_fast": false,
+      "gap_reason": "Archive API executable corpus is still tracked as a compatibility planned gap."
+    },
+    {
+      "id": "refactor.artifact.diff-baseline",
+      "axis": "artifact-diff",
+      "status": "planned-gap",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-refactor-resilience.py",
+      "contract_class": "documented-limitation",
+      "observable_contract": "Refactors compare current JSON artifacts against a previous accepted baseline and classify allowed drift versus blockers.",
+      "invariant": "Schema, key presence, status vectors, failure classes, and benchmark envelopes cannot drift without an explicit recorded reason.",
+      "refactor_risk": "Large refactors can regenerate valid artifacts with changed meaning while individual verifiers still pass.",
+      "evidence_artifact": "docs/test/artifact-diff-latest.json",
+      "evidence_required_fast": false,
+      "gap_reason": "Accepted-baseline storage and drift-classification rules are not implemented yet."
+    }
+  ]
+}

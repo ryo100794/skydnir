@@ -1,0 +1,53 @@
+{
+  "build_flavor": "compat",
+  "case_fingerprint": "1b240f0e089820889615b0c6fd1a3a0b745fb85df6d9a2177c3bf1de4f2cdb39",
+  "command": "python3 scripts/verify-stress-regression.py --seed 20260505 --count 18 --repeats 2",
+  "git_commit": "c194f2b3cd82",
+  "kind": "stress-regression-fast",
+  "schema": 1,
+  "seed": 20260505,
+  "summary": {
+    "case_count": 18,
+    "message_classes": [
+      "invalid JSON request body",
+      "no image names specified",
+      "",
+      "",
+      "JSON request body must be an object",
+      "",
+      "OK",
+      "",
+      "",
+      "OK",
+      "invalid JSON request body",
+      "OK",
+      "no image names specified",
+      "",
+      "",
+      "",
+      "no image names specified",
+      "invalid JSON request body"
+    ],
+    "status_vector": [
+      400,
+      400,
+      200,
+      200,
+      400,
+      201,
+      200,
+      200,
+      200,
+      200,
+      400,
+      200,
+      400,
+      200,
+      200,
+      200,
+      400,
+      400
+    ]
+  },
+  "timestamp_utc": "2026-05-05T23:40:01Z"
+}

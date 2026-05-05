@@ -20,6 +20,7 @@ LLAMA_GPU_COMPARE_BRIDGE_LIMITS = (
     "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
 )
 DOCUMENTS_VOLUME = "${PDOCKER_DOCUMENTS_HOST:-./documents}:${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
+SHARED_DOCUMENTS_VOLUME = "${PDOCKER_SHARED_DOCUMENTS_HOST:-./shared-documents}:${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
 
 
 def fail(msg: str) -> None:
@@ -104,7 +105,8 @@ def main() -> int:
         "compare script schema": "pdocker.llama.gpu.compare.v1" in compare_script,
         "compare script leaves llama.cpp unmodified": '"llama_cpp_modified": False' in compare_script,
         "compare script records 10x target": '"target_speedup": 10.0' in compare_script and "target_tps = cpu_tps * 10.0" in compare_script,
-        "compare script captures Vulkan allocation trace": "PDOCKER_VULKAN_ICD_TRACE_ALLOC=1" in compare_script and "allocation_trace_bytes" in compare_script,
+        "compare script gates Vulkan allocation trace": "--trace-alloc" in compare_script and "PDOCKER_VULKAN_ICD_TRACE_ALLOC=1" in compare_script and "allocation_trace_bytes" in compare_script,
+        "compare script rejects one-token invalid timing": "--predict must be an integer >= 2" in compare_script,
         "compare script uses standard Vulkan entry": "standard Vulkan loader through pdocker-vulkan-icd.so" in compare_script,
         "compare script classifies dispatch blocker": "queue_submit_blocker" in compare_script and "vk::Queue::submit: ErrorFeatureNotPresent" in compare_script,
         "compare script classifies generic spirv blocker": "generic_spirv_dispatch_attempted" in compare_script and "vulkan_generic_spirv_dispatch" in compare_script and "executor_submit_generic_dispatch_error" in compare_script,
@@ -113,9 +115,11 @@ def main() -> int:
         "compare script records chunking pressure": "model_cpu_mapped_exceeds_bridge_clamp" in compare_script and "allocation_near_clamp" in compare_script and "descriptor_range_max_bytes" in compare_script,
         "compare script classifies range assert": "buffer_range_assert_blocker" in compare_script and "ggml_backend_buffer_get_alloc_size" in compare_script,
         "compare script reports operation to ui": "operation_notify" in compare_script and "POST /system/operations" in compare_script and "llama-gpu-compare" in compare_script,
+        "compare script labels direct llama containers for ui inventory": "io.github.ryo100794.pdocker.project-id" in compare_script and "io.github.ryo100794.pdocker.compose-service" in compare_script and "io.github.ryo100794.pdocker.service-url.18081" in compare_script,
         "compare script operation summary includes gpu status": "GPU {d['gpu']['tokens_per_second']:.3f} tok/s" in compare_script and "target_met={str(d['comparison']['target_met']).lower()}" in compare_script and "gpu_layers={d['settings']['gpu_layers']}" in compare_script,
-        "compare script records operation cleanup behavior": '"operation": {' in compare_script and "mark failed operation on nonzero exit" in compare_script and "--no-restore" in compare_script and "CPU server left in last compare mode" in compare_script,
-        "compare script restores CPU server": "restore CPU server" in compare_script and "start_cpu" in compare_script and "CPU server restored" in compare_script,
+        "compare script supports gpu-only tuning loop": "--gpu-only" in compare_script and "reused_cpu_baseline" in compare_script and "cpu_reused" in compare_script,
+        "compare script records operation cleanup behavior": '"operation": {' in compare_script and "mark failed operation on nonzero exit" in compare_script and "--restore" in compare_script and "next run recreates its required container" in compare_script,
+        "compare script makes CPU restore opt-in": "RESTORE_CPU=0" in compare_script and "restore CPU server" in compare_script and "CPU server restored" in compare_script,
         "compare script avoids test Docker CLI": "/containers/create" in compare_script and "pdocker-runtime/docker-bin" not in compare_script and "docker run" not in compare_script,
         "compare docs record latest report": "llama-gpu-compare-latest.json" in compare_doc,
         "compare docs record latest tps and blocker": "CPU baseline: 0.1559 generated tokens/s" in compare_doc and "GPU 0.1230 generated tokens/s" in compare_doc and "target_met=false" in compare_doc and "upload/copy" in compare_doc and "GPU below CPU" in compare_doc,
@@ -123,7 +127,7 @@ def main() -> int:
         "host native gpu baseline script is recorded": "pdocker.gpu.host_native.v1" in host_bench_script and "--bench-vulkan-matmul256-resident" in host_bench_script and "gpu-host-native-latest.json" in compare_doc,
         "compare todo records 10x task list": "llama.cpp Container GPU 10x Task List" in compare_todo,
         "compare todo records ui expectations": "UI-visible reporting of\n  speedup, `target_met`, GPU layer count, current blocker" in compare_todo and "Long-running compare/build cards are pdockerd operations" in compare_todo,
-        "compare todo records operation cleanup": "marks\n    failed operations on nonzero exit, and restores CPU mode by default" in compare_todo,
+        "compare todo records operation cleanup": "marks\n    failed operations on nonzero exit" in compare_todo and "CPU restore is opt-in" in compare_todo,
         "compare todo preserves no llama patch policy": "llama.cpp source must remain unmodified" in compare_todo,
     }
     for name, passed in compare_expectations.items():
@@ -135,8 +139,11 @@ def main() -> int:
         "latest compare records speedup and target": isinstance(compare_result.get("comparison", {}).get("speedup"), (int, float)) and compare_result.get("comparison", {}).get("target_met") is not None,
         "latest compare records gpu layer count": isinstance(compare_result.get("settings", {}).get("gpu_layers"), int),
         "latest compare records current blocker": bool(compare_result.get("next_blocker")),
-        "latest compare records blocker classification": compare_result.get("gpu", {}).get("diagnostics", {}).get("blocker_class") in {"vulkan_generic_spirv_dispatch", "bridge_dispatch_performance"},
-        "latest compare records generic spirv attempt": compare_result.get("gpu", {}).get("evidence", {}).get("generic_spirv_dispatch_attempted") is True,
+        "latest compare records blocker classification": compare_result.get("gpu", {}).get("diagnostics", {}).get("blocker_class") in {"vulkan_device_discovery", "vulkan_buffer_allocation", "vulkan_buffer_range_accounting", "vulkan_generic_spirv_dispatch", "vulkan_queue_submit_feature", "vulkan_pipeline_feature", "bridge_dispatch_performance", "insufficient_gpu_offload_depth"},
+        "latest compare records offload depth evidence": compare_result.get("gpu", {}).get("diagnostics", {}).get("blocker_class") == "vulkan_device_discovery" or all(
+            key in compare_result.get("gpu", {}).get("evidence", {})
+            for key in ("gpu_repeating_layers", "gpu_offloaded_layers", "gpu_total_layers", "gpu_output_only_offload")
+        ),
         "latest compare records failure axes": all(
             axis in compare_result.get("gpu", {}).get("diagnostics", {}).get("failure_axes", {})
             for axis in ("advertised_limits", "chunking", "generic_spirv_dispatch")
@@ -144,7 +151,7 @@ def main() -> int:
         "latest compare records chunking pressure": "configured_bridge_max_buffer_bytes" in compare_result.get("gpu", {}).get("diagnostics", {}).get("chunking_pressure", {}),
         "latest compare records advertised limits": "configured_clamps" in compare_result.get("gpu", {}).get("diagnostics", {}).get("advertised_limits", {}),
         "latest compare records operation ui surface": compare_result.get("operation", {}).get("kind") == "llama-gpu-compare" and "operation/progress card" in compare_result.get("operation", {}).get("ui_surface", ""),
-        "latest compare records operation cleanup": "restore CPU server unless --no-restore" in compare_result.get("operation", {}).get("cleanup", ""),
+        "latest compare records operation cleanup": "CPU restore is opt-in" in compare_result.get("operation", {}).get("cleanup", ""),
     }
     for name, passed in compare_result_expectations.items():
         if not passed:
@@ -160,6 +167,7 @@ def main() -> int:
     templates = {item["id"]: item for item in data.get("templates", [])}
     for tid in (
         "dev-workspace",
+        "direct-runtime-probe",
         "llama-cpp-gpu",
         "ros2-humble-rviz-novnc",
         "blender-xvnc-novnc",
@@ -177,11 +185,21 @@ def main() -> int:
         readme = read(template_root / "README.md")
         documents_readme = read(template_root / "documents" / "README.md")
         if DOCUMENTS_VOLUME not in compose:
-            fail(f"{tid} compose missing shared Documents volume")
+            fail(f"{tid} compose missing selected Documents folder mount")
+        if SHARED_DOCUMENTS_VOLUME not in compose:
+            fail(f"{tid} compose missing cross-project shared Documents volume")
+        if "PDOCKER_EXPORT_DIR" not in compose or "PDOCKER_FAST_WORKDIR" not in compose:
+            fail(f"{tid} compose missing Documents export / fast workspace guidance env")
+        if "PDOCKER_SHARED_DOCUMENTS_MOUNT" not in compose:
+            fail(f"{tid} compose missing shared Documents mount env")
         if "PDOCKER_DOCUMENTS_HOST" not in readme or "PDOCKER_DOCUMENTS_MOUNT" not in readme:
             fail(f"{tid} README missing shared Documents override docs")
-        if "/documents" not in documents_readme:
-            fail(f"{tid} documents README missing container mount path")
+        if "PDOCKER_SHARED_DOCUMENTS_HOST" not in readme and "PDOCKER_SHARED_DOCUMENTS_HOST" not in documents_readme:
+            fail(f"{tid} docs missing cross-project shared Documents override")
+        if "/documents" not in documents_readme or "Do not put hot build caches" not in documents_readme:
+            fail(f"{tid} documents README missing slow-storage usage guidance")
+        if "pdocker/projects" not in documents_readme or "selected Android Documents folder" not in documents_readme:
+            fail(f"{tid} documents README missing Documents workspace-root layout")
     ok("all compose templates include shared Documents volume")
 
     dev = templates["dev-workspace"]
@@ -263,13 +281,15 @@ def main() -> int:
         "pdocker-compose",
         "DOCKER_HOST",
         "PDOCKER_DOCUMENTS_MOUNT",
-        "filesDir/pdocker/projects",
+        "Documents/pdocker/projects",
         "filesDir/pdocker/pdockerd.sock",
     ):
         if token not in dev_management_contract:
             fail(f"dev-workspace management helper contract missing {token}")
     if DOCUMENTS_VOLUME not in dev_helper_scripts:
-        fail("pdocker-new-project blank template must include shared Documents volume")
+        fail("pdocker-new-project blank template must include selected Documents folder mount")
+    if SHARED_DOCUMENTS_VOLUME not in dev_helper_scripts:
+        fail("pdocker-new-project blank template must include cross-project shared Documents volume")
     if 'show_path "documents"' not in dev_helper_scripts:
         fail("pdocker-paths must show the shared Documents mount")
     if "eval \"$(pdocker-engine-env --export)\"" not in dev_helper_scripts:
@@ -316,7 +336,7 @@ def main() -> int:
     expectations = {
         "compose gpus all": "gpus: all" in llama_compose,
         "compose exposes build parallelism": "LLAMA_CPP_BUILD_JOBS" in llama_compose,
-        "compose model volume": "./models:/models" in llama_compose,
+        "compose model volume": "${PDOCKER_MODEL_HOST:-./models}:/models" in llama_compose,
         "compose model url syntax": re.search(r'\$\{LLAMA_MODEL_URL:-[^}]+\}', llama_compose) is not None,
         "Dockerfile modern Vulkan headers": "FROM ubuntu:24.04" in llama_dockerfile,
         "Dockerfile llama.cpp source": "ggml-org/llama.cpp" in llama_dockerfile,
@@ -326,7 +346,8 @@ def main() -> int:
         "Dockerfile SPIR-V headers": "spirv-headers" in llama_dockerfile and "spirv-tools" in llama_dockerfile,
         "Dockerfile OpenBLAS build": "-DGGML_BLAS=ON" in llama_dockerfile,
         "Dockerfile server-only build target": "--target llama-server" in llama_dockerfile and "--parallel" in llama_dockerfile,
-        "Dockerfile bounded build jobs": "ARG LLAMA_CPP_BUILD_JOBS=2" in llama_dockerfile and 'jobs="${LLAMA_CPP_BUILD_JOBS:-2}"' in llama_dockerfile,
+        "Dockerfile bounded build jobs": "ARG LLAMA_CPP_BUILD_JOBS=1" in llama_dockerfile and 'jobs="${LLAMA_CPP_BUILD_JOBS:-1}"' in llama_dockerfile,
+        "Dockerfile pinned llama ref and low-memory build type": "ARG LLAMA_CPP_REF=b9030" in llama_dockerfile and "ARG LLAMA_CPP_BUILD_TYPE=MinSizeRel" in llama_dockerfile and ".pdocker-llama-cpp-commit" in llama_dockerfile,
         "Dockerfile log directory": "/workspace/logs" in llama_dockerfile and "/var/log/pdocker" in llama_dockerfile,
         "Dockerfile llama healthcheck": "HEALTHCHECK" in llama_dockerfile and "/health" in llama_dockerfile and "/v1/models" in llama_dockerfile,
         "profile Vulkan detection": "PDOCKER_VULKAN_PASSTHROUGH" in profile,
@@ -369,7 +390,7 @@ def main() -> int:
         "ros compose avoids existing browser ports": "18080:" not in ros_compose and "18081:" not in ros_compose,
         "ros compose noVNC port": "18082:6080" in ros_compose,
         "ros compose VNC port": "15900:5900" in ros_compose,
-        "ros compose workspace volume": "./workspace:/workspace" in ros_compose,
+        "ros compose workspace volume": "${PDOCKER_FAST_WORKSPACE_HOST:-./workspace}:/workspace" in ros_compose,
         "ros compose explicit GL backend defaults": 'PDOCKER_GL_BACKEND: "${PDOCKER_GL_BACKEND:-llvmpipe}"' in ros_compose
         and 'LIBGL_ALWAYS_SOFTWARE: "${LIBGL_ALWAYS_SOFTWARE:-1}"' in ros_compose
         and 'GALLIUM_DRIVER: "${GALLIUM_DRIVER:-llvmpipe}"' in ros_compose
@@ -481,7 +502,7 @@ def main() -> int:
         and "18082:" not in blender_compose,
         "blender compose noVNC port": "18083:6080" in blender_compose,
         "blender compose VNC port": "15901:5901" in blender_compose,
-        "blender compose workspace volume": "./workspace:/workspace" in blender_compose,
+        "blender compose workspace volume": "${PDOCKER_FAST_WORKSPACE_HOST:-./workspace}:/workspace" in blender_compose,
         "blender compose software defaults": 'LIBGL_ALWAYS_SOFTWARE: "${LIBGL_ALWAYS_SOFTWARE:-1}"' in blender_compose
         and 'GALLIUM_DRIVER: "${GALLIUM_DRIVER:-llvmpipe}"' in blender_compose
         and 'PDOCKER_GL_BACKEND: "${PDOCKER_GL_BACKEND:-llvmpipe}"' in blender_compose

@@ -4,8 +4,9 @@ services:
     build:
       context: .
       args:
-        LLAMA_CPP_REF: "${LLAMA_CPP_REF:-master}"
-        LLAMA_CPP_BUILD_JOBS: "${LLAMA_CPP_BUILD_JOBS:-}"
+        LLAMA_CPP_REF: "${LLAMA_CPP_REF:-b9030}"
+        LLAMA_CPP_BUILD_JOBS: "${LLAMA_CPP_BUILD_JOBS:-1}"
+        LLAMA_CPP_BUILD_TYPE: "${LLAMA_CPP_BUILD_TYPE:-MinSizeRel}"
     image: pdocker/llama-cpp-gpu:latest
     container_name: pdocker-llama-cpp
     gpus: all
@@ -13,21 +14,26 @@ services:
     environment:
       PDOCKER_GPU: "auto"
       PDOCKER_GPU_AUTO: "1"
-      PDOCKER_GPU_MODE: "${PDOCKER_GPU_MODE:-auto}"
+      PDOCKER_GPU_MODE: "${PDOCKER_GPU_MODE:-vulkan-raw}"
       LLAMA_ARG_MODEL: "${LLAMA_ARG_MODEL:-/models/model.gguf}"
       LLAMA_ARG_CTX: "${LLAMA_ARG_CTX:-4096}"
       LLAMA_ARG_PORT: "${LLAMA_ARG_PORT:-18081}"
       LLAMA_ARG_THREADS: "${LLAMA_ARG_THREADS:-}"
-      LLAMA_ARG_N_GPU_LAYERS: "${LLAMA_ARG_N_GPU_LAYERS:-}"
+      LLAMA_ARG_N_GPU_LAYERS: "${LLAMA_ARG_N_GPU_LAYERS:-2}"
       LLAMA_GPU_PROFILE_REFRESH: "${LLAMA_GPU_PROFILE_REFRESH:-auto}"
       LLAMA_EXTRA_ARGS: "${LLAMA_EXTRA_ARGS:-}"
       LLAMA_LOG_FILE: "${LLAMA_LOG_FILE:-/workspace/logs/llama-server.log}"
       LLAMA_MODEL_URL: "${LLAMA_MODEL_URL:-https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf}"
+      PDOCKER_DOCUMENTS_MOUNT: "${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
+      PDOCKER_SHARED_DOCUMENTS_MOUNT: "${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
+      PDOCKER_EXPORT_DIR: "${PDOCKER_EXPORT_DIR:-/documents/pdocker-exports}"
+      PDOCKER_FAST_WORKDIR: "${PDOCKER_FAST_WORKDIR:-/workspace}"
     command: ["/usr/local/bin/start-llama-server"]
     ports:
       - "18081:18081"
     volumes:
-      - ./models:/models
-      - ./workspace:/workspace
+      - ${PDOCKER_MODEL_HOST:-./models}:/models
+      - ${PDOCKER_FAST_WORKSPACE_HOST:-./workspace}:/workspace
       - ./profiles:/profiles
       - ${PDOCKER_DOCUMENTS_HOST:-./documents}:${PDOCKER_DOCUMENTS_MOUNT:-/documents}
+      - ${PDOCKER_SHARED_DOCUMENTS_HOST:-./shared-documents}:${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}
