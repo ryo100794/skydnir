@@ -1691,15 +1691,19 @@ static int should_rewrite_path(const char *rootfs, const char *path) {
 static int resolve_guest_host_path(const char *rootfs, const char *guest,
                                    char *out, size_t out_len, int *is_bind) {
     if (is_bind) *is_bind = 0;
-    if (strcmp(guest, "/proc/stat") == 0 ||
-        strcmp(guest, "/proc/uptime") == 0 ||
-        strcmp(guest, "/proc/loadavg") == 0) {
-        const char *name = strrchr(guest, '/');
-        name = name ? name + 1 : guest;
-        if (snprintf(out, out_len, "%s/.pdocker-proc/%s", rootfs, name) >= (int)out_len) {
+    if (strcmp(guest, "/proc") == 0 ||
+        strncmp(guest, "/proc/", 6) == 0) {
+        if (strncmp(guest, "/proc/self/fd", 13) == 0 ||
+            strcmp(guest, "/proc/self/exe") == 0 ||
+            strcmp(guest, "/proc/thread-self/exe") == 0) {
+            return 0;
+        }
+        const char *suffix = guest + strlen("/proc");
+        if (snprintf(out, out_len, "%s/.pdocker-proc%s", rootfs, suffix) >= (int)out_len) {
             return -ENAMETOOLONG;
         }
-        return 1;
+        if (access(out, F_OK) == 0) return 1;
+        return 0;
     }
     if (strcmp(guest, "/dev/tty") == 0 && isatty(STDIN_FILENO)) {
         if (snprintf(out, out_len, "/proc/self/fd/0") >= (int)out_len) {

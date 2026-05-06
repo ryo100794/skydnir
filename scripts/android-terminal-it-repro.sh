@@ -36,8 +36,8 @@ out=\$({
   printf %s "\$start"
   sleep 1
   if [ "\$mode" = "top" ]; then
-    printf '%b' 'top\r'
-    sleep 3
+    printf '%b' 'top -d 1\r'
+    sleep 5
     printf 'q'
     sleep 1
     printf '%b' '\recho pdocker-after-top\rexit\r'

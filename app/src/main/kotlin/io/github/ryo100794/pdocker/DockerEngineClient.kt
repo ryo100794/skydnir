@@ -90,7 +90,8 @@ class DockerEngineClient(private val socket: File) {
         val tar = createTar(contextDir)
         val path = "/build?t=${encodeQuery(tag)}&dockerfile=${encodeQuery(dockerfile)}"
         val text = requestJsonStream("POST", path, tar, "application/x-tar", timeoutMs = 900_000, onLine = onLine)
-        require(!text.lines().any { it.startsWith("ERROR:") || it == "build failed" }) { text }
+        require(!containsBuildFailure(text)) { text }
+        require(containsBuildSuccess(text, tag)) { "build did not complete successfully\n$text" }
         return text
     }
 
@@ -213,6 +214,7 @@ class DockerEngineClient(private val socket: File) {
                 val stream = obj.optString("stream")
                 if (stream.isNotEmpty()) return@runCatching stream
                 val error = obj.optString("error")
+                    .ifBlank { obj.optJSONObject("errorDetail")?.optString("message").orEmpty() }
                 if (error.isNotEmpty()) return@runCatching "ERROR: $error\n"
                 val status = obj.optString("status")
                 val id = obj.optString("id")
@@ -246,6 +248,31 @@ class DockerEngineClient(private val socket: File) {
                 }
             }
         }
+
+        fun containsBuildFailure(text: String): Boolean =
+            text.lineSequence().any { line ->
+                val cleaned = cleanBuildStreamLine(line)
+                cleaned.equals("build failed", ignoreCase = true) ||
+                    cleaned.startsWith("ERROR:", ignoreCase = true) ||
+                    cleaned.contains("ERROR: build failed", ignoreCase = true)
+            }
+
+        fun containsBuildSuccess(text: String, tag: String): Boolean {
+            var built = false
+            var tagged = tag.isBlank()
+            text.lineSequence().forEach { line ->
+                val cleaned = cleanBuildStreamLine(line)
+                if (cleaned.startsWith("Successfully built ", ignoreCase = true)) built = true
+                if (tag.isNotBlank() && cleaned.equals("Successfully tagged $tag", ignoreCase = true)) tagged = true
+            }
+            return built && tagged
+        }
+
+        private fun cleanBuildStreamLine(line: String): String =
+            line
+                .replace(Regex("""\u001B\[[0-9;?]*[ -/]*[@-~]"""), "")
+                .replace("\r", "")
+                .trim()
 
         private fun ByteArray.indexOf(needle: ByteArray): Int {
             if (needle.isEmpty() || size < needle.size) return -1

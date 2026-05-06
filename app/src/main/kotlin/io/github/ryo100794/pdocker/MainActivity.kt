@@ -1051,7 +1051,13 @@ class MainActivity : AppCompatActivity() {
         containerSnapshotRefreshing = true
         thread(isDaemon = true, name = "pdocker-container-snapshot") {
             val arr = runCatching { engine.getArray("/containers/json?all=1") }.getOrNull()
-            val list = if (arr == null) emptyList() else (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+            val list = if (arr == null) {
+                emptyList()
+            } else {
+                (0 until arr.length())
+                    .mapNotNull { arr.optJSONObject(it) }
+                    .sortedWith(containerSnapshotComparator())
+            }
             val fingerprint = list.joinToString("\n") { obj ->
                 listOf(
                     obj.optString("Id"),
@@ -1786,27 +1792,14 @@ class MainActivity : AppCompatActivity() {
             val out = StringBuilder()
             services.forEach { service ->
                 var image = service.image.ifBlank { "local/${dir.name}-${service.name}:latest" }
-                var runtimeBlocked = false
                 val context = service.buildContext
                 if (!context.isNullOrBlank()) {
                     val contextDir = File(dir, context).canonicalFile
                     val line = "Service ${service.name} Building"
                     emit(line)
                     out.appendLine(line)
-                    val built = runCatching {
-                        buildImageStreaming(contextDir, image) { buildLine ->
-                            emit(buildLine)
-                        }
-                    }
-                    if (built.isFailure) {
-                        val message = built.exceptionOrNull()?.message.orEmpty()
-                        if (!isRuntimeBackendBlocked(message)) throw built.exceptionOrNull() ?: IllegalStateException(message)
-                        runtimeBlocked = true
-                        val fallbackImage = dockerfileBaseImage(contextDir) ?: "ubuntu:22.04"
-                        image = fallbackImage
-                        val blocked = "Service ${service.name} Build blocked by current container runtime; using materialized base image $fallbackImage for inspection"
-                        emit(blocked)
-                        out.appendLine(blocked)
+                    buildImageStreaming(contextDir, image) { buildLine ->
+                        emit(buildLine)
                     }
                 }
                 val containerName = service.containerName.ifBlank { "${dir.name}-${service.name}-1" }
@@ -1816,12 +1809,6 @@ class MainActivity : AppCompatActivity() {
                 emit("Container $containerName Creating")
                 out.appendLine("Container $containerName Creating")
                 val id = createContainer(containerName, service.toContainerConfig(image, dir, projectIdFor(dir)))
-                if (runtimeBlocked) {
-                    val prepared = "Container $containerName Prepared for inspection (container runtime unavailable)"
-                    emit(prepared)
-                    out.appendLine(prepared)
-                    return@forEach
-                }
                 emit("Container $containerName Starting")
                 out.appendLine("Container $containerName Starting")
                 val started = runCatching { post("/containers/${DockerEngineClient.encodePath(id)}/start") }
@@ -1868,15 +1855,6 @@ class MainActivity : AppCompatActivity() {
             "runtime preflight failed before running",
             "run skipped because the android execution backend is unavailable",
         ).any { it in lower }
-    }
-
-    private fun dockerfileBaseImage(contextDir: File): String? {
-        val dockerfile = File(contextDir, "Dockerfile")
-        if (!dockerfile.isFile) return null
-        return dockerfile.readLines()
-            .map { it.trim() }
-            .mapNotNull { Regex("""(?i)^FROM\s+([^\s]+)""").find(it)?.groupValues?.getOrNull(1) }
-            .firstOrNull()
     }
 
     private fun parseComposeServices(dir: File): List<ComposeService> {
@@ -2282,8 +2260,10 @@ class MainActivity : AppCompatActivity() {
         val header = columns.joinToString(separator) { (title, width) -> cell(title, width) } + separator + "NAMES"
         if (containers.length() == 0) return "$header\n"
         val lines = mutableListOf(header)
-        for (i in 0 until containers.length()) {
-            val obj = containers.optJSONObject(i) ?: continue
+        val rows = (0 until containers.length())
+            .mapNotNull { containers.optJSONObject(it) }
+            .sortedWith(containerSnapshotComparator())
+        rows.forEach { obj ->
             val names = obj.optJSONArray("Names")
             val name = names?.optString(0).orEmpty().trim('/').ifBlank { obj.optString("Id").take(12) }
             lines += listOf(
@@ -2296,6 +2276,11 @@ class MainActivity : AppCompatActivity() {
         }
         return lines.joinToString("\n")
     }
+
+    private fun containerSnapshotComparator(): Comparator<JSONObject> =
+        compareByDescending<JSONObject> { it.optLong("Created", 0L) }
+            .thenBy { it.optJSONArray("Names")?.optString(0).orEmpty().trim('/') }
+            .thenBy { it.optString("Id") }
 
     private fun formatPortsForPs(ports: JSONArray?): String {
         if (ports == null || ports.length() == 0) return ""
@@ -4212,7 +4197,11 @@ class MainActivity : AppCompatActivity() {
     private fun containerDirs(): List<File> =
         containerRoot.listFiles()
             ?.filter { it.isDirectory }
-            ?.sortedByDescending { it.lastModified() }
+            ?.sortedWith(
+                compareByDescending<File> { readState(it)?.optString("Created").orEmpty() }
+                    .thenBy { readState(it)?.optString("Name").orEmpty().trim('/').ifBlank { it.name } }
+                    .thenBy { it.name }
+            )
             .orEmpty()
 
     private fun composeFiles(): List<File> =

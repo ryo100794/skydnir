@@ -32,8 +32,7 @@ def require(name: str, cond: bool) -> None:
 def main() -> int:
     source = {k: v.read_text() for k, v in FILES.items()}
 
-    require("compose runtime-blocker fallback message is present", "Build blocked by current container runtime" in source["main"])
-    require("compose fallback container state is explicit", "Prepared for inspection (container runtime unavailable)" in source["main"])
+    require("compose does not fabricate inspection containers after build failure", "Build blocked by current container runtime" not in source["main"] and "Prepared for inspection" not in source["main"])
     require("host shell moved into diagnostics", "action_host_shell" in source["main"] and "renderDiagnostics" in source["main"])
 
     require("terminal selection menu has all action buttons", 'data-selection-action="all"' in source["terminal"] and 'data-selection-action="copy"' in source["terminal"] and 'data-selection-action="clear"' in source["terminal"])
@@ -45,7 +44,7 @@ def main() -> int:
     require("terminal body drag does not resize selection", "nearestSelectionHandle" not in source["terminal"] and "selectionDrag = roleForVisualHandle" in source["terminal"])
     require("terminal key toggles remain visible", 'data-toggle="select"' in source["terminal"] and 'data-toggle="ctrl"' in source["terminal"] and 'data-toggle="alt"' in source["terminal"])
     require("modifier toggle state propagates", "btn.classList.toggle('active', !!mods" in source["terminal"])
-    require("ime fallback suppresses duplicate terminal data", "suppressTerminalDataOnce" in source["terminal"] and "consumeSuppressedTerminalData(data)" in source["terminal"] and "suppressTerminalDataOnce(event.data)" in source["terminal"] and "suppressTerminalDataOnce(event.key)" in source["terminal"])
+    require("ime fallback suppresses duplicate terminal data", "suppressTerminalDataOnce" in source["terminal"] and "consumeSuppressedTerminalData(data)" in source["terminal"] and "consumeSuppressedTerminalData(event.data)" in source["terminal"] and "consumeSuppressedTerminalData(ta.value)" in source["terminal"] and "suppressTerminalDataOnce(event.data)" in source["terminal"] and "suppressTerminalDataOnce(event.key)" in source["terminal"])
     require("terminal selection suppresses ime", "suppressImeForSelection" in source["terminal"] and "selectionSuppressesIme()" in source["terminal"] and "inputmode', 'none'" in source["terminal"])
     require("readonly selection actions keep ime suppressed", "runSelectionAction" in source["terminal"] and "if (readOnly) suppressImeForSelection()" in source["terminal"] and "if (readOnly || selectionSuppressesIme()) suppressImeForSelection()" in source["terminal"])
     require("terminal starts bridge-owned initial command", "fun startInitial()" in source["bridge"] and "PdockerBridge.startInitial()" in source["terminal"] and "PdockerBridge.start(PdockerBridge.initialCommand())" not in source["terminal"])

@@ -13,6 +13,7 @@ import androidx.appcompat.app.AppCompatActivity
 import java.io.File
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -35,8 +36,10 @@ class Bridge(
 ) {
     private var fd: Int = -1
     private var engineSocket: LocalSocket? = null
+    private var engineExecId: String? = null
     private var reader: Thread? = null
     private val alive = AtomicBoolean(false)
+    private val lastTerminalSize = AtomicReference<Pair<Int, Int>?>(null)
 
     @JavascriptInterface
     fun start(cmdline: String) {
@@ -122,6 +125,13 @@ class Bridge(
 
     @JavascriptInterface
     fun resize(rows: Int, cols: Int) {
+        if (rows > 0 && cols > 0) {
+            lastTerminalSize.set(rows to cols)
+        }
+        engineExecId?.let { execId ->
+            resizeEngineExecAsync(execId, rows, cols)
+            return
+        }
         if (!alive.get() || fd < 0) return
         PtyNative.resize(fd, rows, cols)
     }
@@ -143,6 +153,7 @@ class Bridge(
         alive.set(false)
         if (fd >= 0) PtyNative.close(fd)
         fd = -1
+        engineExecId = null
         runCatching { engineSocket?.close() }
         engineSocket = null
         reader?.interrupt()
@@ -159,7 +170,11 @@ class Bridge(
             runCatching {
                 sendTerminalText("[pdocker] Engine exec -it: $containerId\n")
                 val execId = createEngineExec(containerId)
+                engineExecId = execId
                 recordEngineExecEvent("created", execId = execId)
+                lastTerminalSize.get()?.let { (rows, cols) ->
+                    resizeEngineExecSync(execId, rows, cols)
+                }
                 val socket = startEngineExecStream(execId)
                 engineSocket = socket
                 recordEngineExecEvent("stream-started", execId = execId)
@@ -176,8 +191,28 @@ class Bridge(
                 sendTerminalText("\n[pdocker] Engine exec failed: ${it.message.orEmpty()}\n")
             }
             recordEngineExecEvent("reader-ended")
+            engineExecId = null
             alive.set(false)
         }, "engine-exec-reader").also { it.start() }
+    }
+
+    private fun resizeEngineExecAsync(execId: String, rows: Int, cols: Int) {
+        if (rows <= 0 || cols <= 0) return
+        Thread({
+            resizeEngineExecSync(execId, rows, cols)
+        }, "engine-exec-resize").start()
+    }
+
+    private fun resizeEngineExecSync(execId: String, rows: Int, cols: Int) {
+        if (rows <= 0 || cols <= 0) return
+        runCatching {
+            engineRequest(
+                "POST",
+                "/exec/${DockerEngineClient.encodePath(execId)}/resize?h=$rows&w=$cols",
+            )
+        }.onFailure {
+            recordEngineExecEvent("resize-failed", execId = execId, error = it.message.orEmpty())
+        }
     }
 
     private fun createEngineExec(containerId: String): String {

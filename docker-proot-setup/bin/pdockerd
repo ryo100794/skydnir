@@ -3275,6 +3275,51 @@ def ensure_synthetic_proc_files(rootfs):
             f.write(f"{uptime:.2f} {idle:.2f}\n")
         with open(os.path.join(proc_dir, "loadavg"), "w") as f:
             f.write("0.00 0.00 0.00 1/1 1\n")
+        mem_total_kb = max(262144, int(os.environ.get("PDOCKER_SYNTHETIC_MEM_TOTAL_KB", "1048576")))
+        mem_free_kb = max(131072, mem_total_kb // 2)
+        with open(os.path.join(proc_dir, "meminfo"), "w") as f:
+            f.write(
+                f"MemTotal:       {mem_total_kb:8d} kB\n"
+                f"MemFree:        {mem_free_kb:8d} kB\n"
+                f"MemAvailable:  {mem_free_kb:8d} kB\n"
+                "Buffers:               0 kB\n"
+                "Cached:                0 kB\n"
+                "SwapCached:            0 kB\n"
+                "Active:                0 kB\n"
+                "Inactive:              0 kB\n"
+                "SwapTotal:             0 kB\n"
+                "SwapFree:              0 kB\n"
+            )
+        task_dir = os.path.join(proc_dir, "1")
+        os.makedirs(task_dir, exist_ok=True)
+        with open(os.path.join(task_dir, "stat"), "w") as f:
+            f.write(
+                "1 (pdocker-init) S 0 1 1 0 -1 4194560 0 0 0 0 "
+                "1 1 0 0 20 0 1 0 1 4096 1 18446744073709551615 "
+                "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+            )
+        with open(os.path.join(task_dir, "statm"), "w") as f:
+            f.write("1 1 1 0 0 0 0\n")
+        with open(os.path.join(task_dir, "status"), "w") as f:
+            f.write(
+                "Name:\tpdocker-init\n"
+                "State:\tS (sleeping)\n"
+                "Tgid:\t1\n"
+                "Pid:\t1\n"
+                "PPid:\t0\n"
+                "Uid:\t0\t0\t0\t0\n"
+                "Gid:\t0\t0\t0\t0\n"
+                "Threads:\t1\n"
+            )
+        with open(os.path.join(task_dir, "cmdline"), "wb") as f:
+            f.write(b"pdocker-init\x00")
+        self_link = os.path.join(proc_dir, "self")
+        try:
+            if os.path.islink(self_link) or os.path.exists(self_link):
+                os.unlink(self_link)
+            os.symlink("1", self_link)
+        except OSError:
+            pass
     except OSError:
         pass
 
@@ -4881,6 +4926,11 @@ def list_containers(all_=False, filters=None, size=False):
         if not _container_matches_filters(summary, filters or {}):
             continue
         containers.append(summary)
+    containers.sort(key=lambda item: (
+        -int(item.get("Created", 0) or 0),
+        (item.get("Names") or [""])[0].lstrip("/") if item.get("Names") else "",
+        item.get("Id", ""),
+    ))
     return containers
 
 
@@ -5519,6 +5569,9 @@ class ForkPtyProcess:
         except ProcessLookupError:
             pass
 
+    def resize(self, rows, cols):
+        _resize_pty_fd(self.stdout.fileno(), rows, cols, self.pid)
+
 
 class OpenPtyProcess:
     """Popen-like wrapper for a child attached to an explicit Unix98 PTY."""
@@ -5546,6 +5599,24 @@ class OpenPtyProcess:
 
     def kill(self):
         self._proc.kill()
+
+    def resize(self, rows, cols):
+        _resize_pty_fd(self.stdout.fileno(), rows, cols, self.pid)
+
+
+def _resize_pty_fd(fd, rows, cols, pid=None):
+    if rows <= 0 or cols <= 0:
+        return
+    import fcntl
+    import struct
+    import termios
+    ws = struct.pack("HHHH", int(rows), int(cols), 0, 0)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, ws)
+    if pid:
+        try:
+            os.kill(pid, signal.SIGWINCH)
+        except ProcessLookupError:
+            pass
 
 
 def open_unix98_pty():
@@ -6986,6 +7057,8 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 "running": False,
                 "exit_code": None,
                 "proc": None,
+                "rows": None,
+                "cols": None,
             }
             self._send_json(201, {"Id": exec_id})
             return
@@ -7034,6 +7107,11 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(404, {"message": "container missing"})
                 return
             ses["proc"] = proc
+            if tty and ses.get("rows") and ses.get("cols") and hasattr(proc, "resize"):
+                try:
+                    proc.resize(int(ses["rows"]), int(ses["cols"]))
+                except (OSError, ValueError) as exc:
+                    log(f"exec resize before hijack failed: {exc}")
             if detach:
                 self._send_stream_started("application/vnd.docker.raw-stream")
                 ses["running"] = False
@@ -7047,6 +7125,36 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             ses["exit_code"] = proc.wait()
             ses["running"] = False
             ses["proc"] = None
+            return
+
+        # /exec/{id}/resize?h={rows}&w={cols}
+        m = re.match(r"^/exec/(.+?)/resize$", path)
+        if m and method == "POST":
+            exec_id = m.group(1)
+            ses = exec_sessions.get(exec_id)
+            if not ses:
+                self._send_json(404, {"message": "no such exec"})
+                return
+            try:
+                rows = int(query.get("h", ["0"])[0])
+                cols = int(query.get("w", ["0"])[0])
+            except ValueError:
+                self._send_json(400, {"message": "invalid terminal size"})
+                return
+            if rows <= 0 or cols <= 0:
+                self._send_json(400, {"message": "invalid terminal size"})
+                return
+            ses["rows"] = rows
+            ses["cols"] = cols
+            proc = ses.get("proc")
+            if proc is not None and hasattr(proc, "resize"):
+                try:
+                    proc.resize(rows, cols)
+                except OSError as exc:
+                    self._send_json(500, {"message": str(exc)})
+                    return
+            self.send_response(201)
+            self.end_headers()
             return
 
         # /exec/{id}/json

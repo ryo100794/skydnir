@@ -483,6 +483,9 @@
   if (!readOnly) {
     term.onData((data) => {
       if (consumeSuppressedTerminalData(data)) return;
+      if ((mods.ctrl || mods.alt || mods.esc) && data && data.length === 1) {
+        suppressTerminalDataOnce(data);
+      }
       sendInput(data);
     });
   }
@@ -586,6 +589,11 @@
     ta.dataset.pdockerFallback = '1';
     ta.addEventListener('beforeinput', (event) => {
       if (readOnly || selectionSuppressesIme()) return;
+      if (event.data && consumeSuppressedTerminalData(event.data)) {
+        claimImeEvent(event);
+        ta.value = '';
+        return;
+      }
       if (event.inputType === 'insertLineBreak') {
         claimImeEvent(event);
         suppressTerminalDataOnce('\r');
@@ -617,6 +625,10 @@
       }
     }, true);
     ta.addEventListener('input', () => {
+      if (ta.value && consumeSuppressedTerminalData(ta.value)) {
+        ta.value = '';
+        return;
+      }
       if (!mods.ctrl && !mods.alt && !mods.esc) return;
       ta.value = '';
       clearTransientModifiers();
