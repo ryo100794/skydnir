@@ -9,6 +9,11 @@ APK boundary. It is not Docker compatibility. It is an Android survival layer
 for memory-heavy containers such as llama.cpp when the device does not allow
 ADB/root swap tuning.
 
+Operational low-memory policy, Android LMK/down classification, and the
+user-facing Large Workload Mode are tracked in
+[`RUNTIME_OOM_SURVIVAL.md`](RUNTIME_OOM_SURVIVAL.md). This page stays focused on
+the pager mechanism itself.
+
 ## Device Constraints Observed
 
 On the SOG15 test device:
@@ -261,10 +266,11 @@ The current llama GPU evidence makes this the next useful slice:
 
 ## Implementation Plan
 
-Do not implement the managed pager path until the SDK28 compat probe gate
-below has been recorded on a real device. The product may keep file-backed
-memory and streaming improvements without this gate, but the SIGSEGV pager
-must not become a runtime feature on hope alone.
+The SDK28 compat probe gate has recorded the basic syscall availability needed
+for the experimental pager PoC. The product may keep file-backed memory and
+streaming improvements unconditionally, but the SIGSEGV/userfault-style pager
+must remain opt-in until managed-region isolation, latency benchmarks, and
+production guardrails are complete.
 
 1. Add a probe command that records userfaultfd availability, zram/swap
    visibility, `swapon` permission, and SDK28 compat syscall behavior into a

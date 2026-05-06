@@ -89,6 +89,7 @@ static ssize_t pdocker_process_vm_writev(pid_t pid,
 #define EXEC_REWRITE_MAX_ARGC 511
 #define EXEC_REWRITE_STACK_SAFETY 16384ULL
 #define EXEC_REWRITE_MAX_SCRATCH (2ULL * 1024ULL * 1024ULL)
+#define EXEC_REWRITE_MAX_ARG_BYTES (EXEC_REWRITE_MAX_SCRATCH - EXEC_REWRITE_STACK_SAFETY)
 
 typedef struct {
     char host[PATH_MAX];
@@ -1290,6 +1291,84 @@ static ssize_t read_tracee_string(pid_t pid, unsigned long long addr, char *buf,
     return (ssize_t)(cap - 1);
 }
 
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} ExecArgArena;
+
+static void free_exec_arg_arena(ExecArgArena *arena) {
+    if (!arena) return;
+    free(arena->data);
+    arena->data = NULL;
+    arena->len = 0;
+    arena->cap = 0;
+}
+
+static int reserve_exec_arg_arena(ExecArgArena *arena, size_t need) {
+    if (need > (size_t)EXEC_REWRITE_MAX_ARG_BYTES) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    if (arena->cap >= need) return 0;
+    size_t next = arena->cap ? arena->cap : 8192;
+    while (next < need) {
+        if (next > (size_t)EXEC_REWRITE_MAX_ARG_BYTES / 2) {
+            next = (size_t)EXEC_REWRITE_MAX_ARG_BYTES;
+            break;
+        }
+        next *= 2;
+    }
+    if (next < need) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    char *grown = realloc(arena->data, next);
+    if (!grown) return -1;
+    arena->data = grown;
+    arena->cap = next;
+    return 0;
+}
+
+static int read_tracee_string_to_arena(pid_t pid, unsigned long long addr,
+                                       ExecArgArena *arena, size_t *offset_out) {
+    if (!addr || !arena || !offset_out) return -1;
+    *offset_out = arena->len;
+    size_t local_len = 0;
+    while (local_len < (size_t)EXEC_REWRITE_MAX_ARG_BYTES) {
+        char chunk[512];
+        if (arena->len + 1 >= (size_t)EXEC_REWRITE_MAX_ARG_BYTES) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        size_t want = sizeof(chunk);
+        size_t remaining = (size_t)EXEC_REWRITE_MAX_ARG_BYTES - arena->len - 1;
+        if (want > remaining) want = remaining;
+        if (want == 0) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        if (reserve_exec_arg_arena(arena, arena->len + want + 1) != 0) {
+            return -1;
+        }
+        struct iovec local = {.iov_base = chunk, .iov_len = want};
+        struct iovec remote = {.iov_base = (void *)(uintptr_t)(addr + local_len), .iov_len = want};
+        ssize_t n = pdocker_process_vm_readv(pid, &local, 1, &remote, 1, 0);
+        if (n <= 0) return -1;
+        memcpy(arena->data + arena->len, chunk, (size_t)n);
+        for (ssize_t i = 0; i < n; ++i) {
+            if (chunk[i] == '\0') {
+                arena->len += (size_t)i + 1;
+                return 0;
+            }
+        }
+        arena->len += (size_t)n;
+        local_len += (size_t)n;
+    }
+    errno = ENAMETOOLONG;
+    return -1;
+}
+
 static int write_tracee_string(pid_t pid, unsigned long long addr, const char *value) {
     size_t len = strlen(value) + 1;
     struct iovec local = {.iov_base = (void *)value, .iov_len = len};
@@ -2158,15 +2237,17 @@ static int rewrite_execve_arg(pid_t pid, struct user_pt_regs *regs, TraceeState 
     const char *argv0_value = old_argv0[0] ? old_argv0 : original_guest;
     if (is_script && program_argv0[0]) argv0_value = program_argv0;
 
-    char (*copied_arg_values)[PATH_MAX] = NULL;
+    ExecArgArena copied_arg_arena = {0};
+    size_t copied_arg_offsets[EXEC_REWRITE_MAX_ARGC];
     int copied_argc = 0;
     if (old_argc > 1) {
-        copied_arg_values = calloc((size_t)(old_argc - 1), sizeof(*copied_arg_values));
-        if (!copied_arg_values) return 0;
         for (int i = 1; i < old_argc && copied_argc < EXEC_REWRITE_MAX_ARGC; ++i) {
-            if (read_tracee_string(pid, old_arg_ptrs[i],
-                                   copied_arg_values[copied_argc], PATH_MAX) < 0) {
-                free(copied_arg_values);
+            if (read_tracee_string_to_arena(
+                        pid,
+                        old_arg_ptrs[i],
+                        &copied_arg_arena,
+                        &copied_arg_offsets[copied_argc]) != 0) {
+                free_exec_arg_arena(&copied_arg_arena);
                 return 0;
             }
             copied_argc++;
@@ -2187,7 +2268,8 @@ static int rewrite_execve_arg(pid_t pid, struct user_pt_regs *regs, TraceeState 
         string_bytes += (unsigned long long)strlen(script_interp_arg) + 1ULL;
     }
     for (int i = 0; i < copied_argc; ++i) {
-        string_bytes += (unsigned long long)strlen(copied_arg_values[i]) + 1ULL;
+        const char *arg = copied_arg_arena.data + copied_arg_offsets[i];
+        string_bytes += (unsigned long long)strlen(arg) + 1ULL;
     }
     unsigned long long argv_entries =
         6ULL + (has_script_interp_arg ? 1ULL : 0ULL) + (is_script ? 1ULL : 0ULL) +
@@ -2199,44 +2281,44 @@ static int rewrite_execve_arg(pid_t pid, struct user_pt_regs *regs, TraceeState 
         fprintf(stderr,
                 "pdocker-direct-trace: pid=%d execve argv rewrite scratch too large bytes=%llu argc=%d path=%s\n",
                 (int)pid, scratch_span, old_argc, original);
-        free(copied_arg_values);
+        free_exec_arg_arena(&copied_arg_arena);
         return 0;
     }
     unsigned long long scratch = (regs->sp - scratch_span) & ~15ULL;
     unsigned long long cursor = scratch;
     unsigned long long loader_addr = cursor;
     if (write_tracee_string(pid, loader_addr, loader) != 0) {
-        free(copied_arg_values);
+        free_exec_arg_arena(&copied_arg_arena);
         return 0;
     }
     cursor += strlen(loader) + 1;
     unsigned long long library_path_flag_addr = cursor;
     if (write_tracee_string(pid, library_path_flag_addr, "--library-path") != 0) {
-        free(copied_arg_values);
+        free_exec_arg_arena(&copied_arg_arena);
         return 0;
     }
     cursor += strlen("--library-path") + 1;
     unsigned long long libpath_addr = cursor;
     if (write_tracee_string(pid, libpath_addr, libpath) != 0) {
-        free(copied_arg_values);
+        free_exec_arg_arena(&copied_arg_arena);
         return 0;
     }
     cursor += strlen(libpath) + 1;
     unsigned long long argv0_flag_addr = cursor;
     if (write_tracee_string(pid, argv0_flag_addr, "--argv0") != 0) {
-        free(copied_arg_values);
+        free_exec_arg_arena(&copied_arg_arena);
         return 0;
     }
     cursor += strlen("--argv0") + 1;
     unsigned long long argv0_addr = cursor;
     if (write_tracee_string(pid, argv0_addr, argv0_value) != 0) {
-        free(copied_arg_values);
+        free_exec_arg_arena(&copied_arg_arena);
         return 0;
     }
     cursor += strlen(argv0_value) + 1;
     unsigned long long target_addr = cursor;
     if (write_tracee_string(pid, target_addr, is_script ? program : target) != 0) {
-        free(copied_arg_values);
+        free_exec_arg_arena(&copied_arg_arena);
         return 0;
     }
     cursor += strlen(is_script ? program : target) + 1;
@@ -2244,7 +2326,7 @@ static int rewrite_execve_arg(pid_t pid, struct user_pt_regs *regs, TraceeState 
     if (is_script) {
         script_addr = cursor;
         if (write_tracee_string(pid, script_addr, original_guest) != 0) {
-            free(copied_arg_values);
+            free_exec_arg_arena(&copied_arg_arena);
             return 0;
         }
         cursor += strlen(original_guest) + 1;
@@ -2253,21 +2335,22 @@ static int rewrite_execve_arg(pid_t pid, struct user_pt_regs *regs, TraceeState 
     if (has_script_interp_arg) {
         script_interp_arg_addr = cursor;
         if (write_tracee_string(pid, script_interp_arg_addr, script_interp_arg) != 0) {
-            free(copied_arg_values);
+            free_exec_arg_arena(&copied_arg_arena);
             return 0;
         }
         cursor += strlen(script_interp_arg) + 1;
     }
     unsigned long long copied_arg_ptrs[EXEC_REWRITE_MAX_ARGC];
     for (int i = 0; i < copied_argc; ++i) {
+        const char *arg = copied_arg_arena.data + copied_arg_offsets[i];
         copied_arg_ptrs[i] = cursor;
-        if (write_tracee_string(pid, cursor, copied_arg_values[i]) != 0) {
-            free(copied_arg_values);
+        if (write_tracee_string(pid, cursor, arg) != 0) {
+            free_exec_arg_arena(&copied_arg_arena);
             return 0;
         }
-        cursor += strlen(copied_arg_values[i]) + 1;
+        cursor += strlen(arg) + 1;
     }
-    free(copied_arg_values);
+    free_exec_arg_arena(&copied_arg_arena);
     cursor = (cursor + 15u) & ~15ULL;
 
     unsigned long long new_argv[EXEC_REWRITE_MAX_ARGC + 10];

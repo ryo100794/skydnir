@@ -4,6 +4,19 @@ title: "Device test: "
 labels:
   - device-test
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Current reference build: 20260505.1 at dd3ce31. The reference APK full
+        smoke passed on device; host backend regression and literal
+        test-density blockers remain open.
+  - type: input
+    id: version
+    attributes:
+      label: Build or commit
+      placeholder: "20260505.1 / dd3ce31 / local build"
+    validations:
+      required: true
   - type: input
     id: device
     attributes:
@@ -31,7 +44,7 @@ body:
     id: smoke
     attributes:
       label: Smoke results
-      description: Include install, app launch, pdockerd start, image pull, build, compose up, logs, and docker ps/container card observations.
+      description: Include install, app launch, pdockerd start, image pull/build, Compose up/down, logs, docker exec, Engine API exec -it, and docker ps/container card observations.
       render: text
     validations:
       required: true

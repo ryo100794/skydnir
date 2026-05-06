@@ -23,6 +23,23 @@ APK: Engine API behavior, Compose/Dockerfile UI, image/container files,
 persistent logs, terminals, editor tabs, VS Code Server, llama.cpp, and
 Android-specific GPU/media bridge work.
 
+The public boundary is deliberate: the product APK does not bundle upstream
+Docker CLI/Compose, PRoot, proot-loader, or talloc. Compose, Dockerfile builds,
+direct execution, and GPU support should be described with their current test
+evidence and known blockers.
+
+## Current Evidence
+
+- Fixed build record:
+  [docs/test/build-20260505.1/README.md](../test/build-20260505.1/README.md)
+- Latest compatibility matrix:
+  [docs/test/COMPATIBILITY.md](../test/COMPATIBILITY.md)
+- Latest generated audit:
+  [docs/test/compat-audit-latest.md](../test/compat-audit-latest.md)
+- GPU bridge records:
+  [docs/test/gpu-host-native-latest.md](../test/gpu-host-native-latest.md),
+  [docs/test/gpu-host-container-comparison-latest.md](../test/gpu-host-container-comparison-latest.md)
+
 ## Template Library
 
 - `dev-workspace`: pdocker Management Workspace + code-server + Codex

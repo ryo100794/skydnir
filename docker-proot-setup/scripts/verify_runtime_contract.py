@@ -816,6 +816,40 @@ def test_active_operations_contract() -> None:
         ok("daemon active operations are listed independently of UI jobs")
 
 
+def test_exclusive_build_operations_contract() -> None:
+    with tempfile.TemporaryDirectory(prefix="pdocker-test-") as home:
+        mod = load_pdockerd_with_env("exclusive_build_ops", "no-proot", Path(home))
+        op_id, existing = mod.start_exclusive_operation(
+            "build",
+            "build local/test:latest",
+            "receiving context",
+            exclusive_key="build:local/test:latest",
+        )
+        if not op_id or existing:
+            fail("first exclusive build operation should start")
+        duplicate_id, duplicate = mod.start_exclusive_operation(
+            "build",
+            "build local/test:latest",
+            "receiving context",
+            exclusive_key="build:local/test:latest",
+        )
+        if duplicate_id or not duplicate or duplicate.get("Id") != op_id:
+            fail(f"duplicate exclusive build should report existing operation: {duplicate_id!r} {duplicate!r}")
+        listed = mod.list_active_operations()
+        if listed and "_ExclusiveKey" in listed[0]:
+            fail("operation internals must not leak into the Engine/UI operation list")
+        mod.finish_operation(op_id, "failed", "cancelled")
+        next_id, next_existing = mod.start_exclusive_operation(
+            "build",
+            "build local/test:latest",
+            "receiving context",
+            exclusive_key="build:local/test:latest",
+        )
+        if not next_id or next_existing:
+            fail("exclusive build key should be reusable after the previous operation finishes")
+        ok("daemon rejects duplicate running builds for the same tagged image")
+
+
 def test_active_operations_prune_stale_idle_entries() -> None:
     with tempfile.TemporaryDirectory(prefix="pdocker-test-") as home:
         mod = load_pdockerd_with_env("active_ops_stale", "no-proot", Path(home))
@@ -1122,23 +1156,21 @@ def test_dockerfile_run_process_group_isolation() -> None:
 def test_android_build_profile_injected_outside_dockerfile() -> None:
     text = PDOCKERD.read_text(errors="replace")
     required = [
-        "usr/local/pdocker-build-bin",
         "PDOCKER_BUILD_PROFILE",
-        "PDOCKER_BUILD_VULKAN_SHADER_PROFILE",
         "CMAKE_BUILD_PARALLEL_LEVEL",
         "MAKEFLAGS",
         "NINJA_STATUS",
-        "exec /usr/bin/glslc",
-        "feature-tests/coopmat.comp",
-        "usr/local/pdocker-build-bin/glslc",
+        'os.environ.get("PDOCKER_BUILD_TOOLS", "0") == "1"',
     ]
     missing = [needle for needle in required if needle not in text]
     if missing:
         fail(f"Android build profile missing markers: {missing}")
+    if 'os.environ.get("PDOCKER_BUILD_TOOLS", "1")' in text:
+        fail("Android build tool wrappers must be opt-in, not default")
     dockerfile = (REPO_ROOT / "app/src/main/assets/project-library/llama-cpp-gpu/Dockerfile").read_text(errors="replace")
     if "pdocker-bridge-safe-glslc" in dockerfile or "LLAMA_CPP_VULKAN_SHADER_PROFILE" in dockerfile:
         fail("llama Dockerfile must not carry pdocker-specific shader wrapper tuning")
-    ok("Android build profile is injected by pdockerd without Dockerfile edits")
+    ok("Android build profile is injected without default build-tool rewriting")
 
 
 def test_vulkan_icd_memory_advertising_is_not_fixed_8gib() -> None:
@@ -1176,6 +1208,7 @@ def main() -> int:
     test_build_cache_contract()
     test_storage_summary_distinguishes_layer_and_upper_bytes()
     test_active_operations_contract()
+    test_exclusive_build_operations_contract()
     test_active_operations_prune_stale_idle_entries()
     test_host_environment_contract()
     test_media_bridge_scaffold_contract()

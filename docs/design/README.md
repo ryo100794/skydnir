@@ -19,6 +19,7 @@ tradeoffs, accepted behavior, and non-goals.
 | [`GPU_COMPAT.md`](GPU_COMPAT.md) | Android GPU, Vulkan, cuVK, and benchmark design direction |
 | [`MEDIA_BRIDGE.md`](MEDIA_BRIDGE.md) | Android Camera2/AudioRecord/AudioTrack media bridge contract |
 | [`APK_MEMORY_PAGER.md`](APK_MEMORY_PAGER.md) | APK-scoped swap-like memory pager feasibility and page-fault strategy |
+| [`RUNTIME_OOM_SURVIVAL.md`](RUNTIME_OOM_SURVIVAL.md) | Runtime OOM survival, large-workload mode, and post-kill evidence strategy |
 | [`../../docker-proot-setup/docs/GPU_COMPAT.md`](../../docker-proot-setup/docs/GPU_COMPAT.md) | Backend GPU request/env contract |
 | [`../../docker-proot-setup/docs/NETWORK_COMPAT.md`](../../docker-proot-setup/docs/NETWORK_COMPAT.md) | Backend network metadata and port rewrite plan |
 
@@ -38,6 +39,9 @@ tradeoffs, accepted behavior, and non-goals.
 - Treat [`APK_MEMORY_PAGER.md`](APK_MEMORY_PAGER.md) as the feasibility boundary
   for swap-like behavior inside the APK. It is a pdocker extension, not Docker
   compatibility.
+- Treat [`RUNTIME_OOM_SURVIVAL.md`](RUNTIME_OOM_SURVIVAL.md) as the operational
+  policy for low-memory runtime behavior, including early ENOMEM, Large
+  Workload Mode, and restart-time evidence.
 
 ## Maintenance
 

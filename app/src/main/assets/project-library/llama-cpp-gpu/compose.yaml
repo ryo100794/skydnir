@@ -6,7 +6,7 @@ services:
       args:
         LLAMA_CPP_REF: "${LLAMA_CPP_REF:-b9030}"
         LLAMA_CPP_BUILD_JOBS: "${LLAMA_CPP_BUILD_JOBS:-1}"
-        LLAMA_CPP_BUILD_TYPE: "${LLAMA_CPP_BUILD_TYPE:-MinSizeRel}"
+        LLAMA_CPP_BUILD_TYPE: "${LLAMA_CPP_BUILD_TYPE:-Release}"
     image: pdocker/llama-cpp-gpu:latest
     container_name: pdocker-llama-cpp
     gpus: all

@@ -9,12 +9,17 @@ body:
       value: |
         Thanks for testing pdocker-android. Please remove tokens, passwords,
         API keys, cookies, and private paths from logs before posting.
+
+        Current baseline: build 20260505.1 is committed at dd3ce31. The APK
+        device full smoke passed; host backend regression and literal
+        test-density blockers are still open unless a newer record says
+        otherwise.
   - type: input
     id: version
     attributes:
       label: Version or commit
       description: APK version, release tag, or commit SHA.
-      placeholder: "v0.5.2 / b7d81fa / local build"
+      placeholder: "20260505.1 / dd3ce31 / local build"
     validations:
       required: true
   - type: dropdown
@@ -78,4 +83,6 @@ body:
         - label: I removed secrets from logs and screenshots.
           required: true
         - label: I checked the current STATUS/TODO/COMPATIBILITY docs.
+          required: false
+        - label: I noted whether this reproduces on build 20260505.1 or a newer commit.
           required: false

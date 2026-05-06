@@ -1,7 +1,6 @@
 package io.github.ryo100794.pdocker
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.os.Build
 import android.util.Log

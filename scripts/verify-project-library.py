@@ -347,7 +347,7 @@ def main() -> int:
         "Dockerfile OpenBLAS build": "-DGGML_BLAS=ON" in llama_dockerfile,
         "Dockerfile server-only build target": "--target llama-server" in llama_dockerfile and "--parallel" in llama_dockerfile,
         "Dockerfile bounded build jobs": "ARG LLAMA_CPP_BUILD_JOBS=1" in llama_dockerfile and 'jobs="${LLAMA_CPP_BUILD_JOBS:-1}"' in llama_dockerfile,
-        "Dockerfile pinned llama ref and low-memory build type": "ARG LLAMA_CPP_REF=b9030" in llama_dockerfile and "ARG LLAMA_CPP_BUILD_TYPE=MinSizeRel" in llama_dockerfile and ".pdocker-llama-cpp-commit" in llama_dockerfile,
+        "Dockerfile pinned llama ref and standard Release build type": "ARG LLAMA_CPP_REF=b9030" in llama_dockerfile and "ARG LLAMA_CPP_BUILD_TYPE=Release" in llama_dockerfile and "CMAKE_CXX_FLAGS_MINSIZEREL" not in llama_dockerfile and ".pdocker-llama-cpp-commit" in llama_dockerfile,
         "Dockerfile log directory": "/workspace/logs" in llama_dockerfile and "/var/log/pdocker" in llama_dockerfile,
         "Dockerfile llama healthcheck": "HEALTHCHECK" in llama_dockerfile and "/health" in llama_dockerfile and "/v1/models" in llama_dockerfile,
         "profile Vulkan detection": "PDOCKER_VULKAN_PASSTHROUGH" in profile,

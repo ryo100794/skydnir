@@ -1,0 +1,83 @@
+==> skipping Android native build (PDOCKER_SKIP_NATIVE_BUILD=1)
+==> skipping external proot build (pdocker-direct compat runtime)
+staged crane -> /root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libcrane.so
+skipped external proot/talloc/proot-loader/docker-cli/docker-compose payloads
+staged libcow (glibc) -> /root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libcow.so
+copy-native.sh: done
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.7/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :app
+WARNING: The option setting 'android.aapt2FromMavenOverride=/root/android-aapt2-agp/aapt2' is experimental.
+Warning: Python version 3.11 may have fewer packages available. If you experience problems, try switching to version 3.8.
+
+> Task :app:syncPdockerdAsset UP-TO-DATE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preCompatDebugBuild UP-TO-DATE
+> Task :app:mergeCompatDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :app:generateCompatDebugBuildConfig UP-TO-DATE
+> Task :app:checkCompatDebugAarMetadata UP-TO-DATE
+> Task :app:generateCompatDebugResValues UP-TO-DATE
+> Task :app:mapCompatDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateCompatDebugResources UP-TO-DATE
+> Task :app:mergeCompatDebugResources UP-TO-DATE
+> Task :app:packageCompatDebugResources UP-TO-DATE
+> Task :app:parseCompatDebugLocalResources UP-TO-DATE
+> Task :app:createCompatDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksCompatDebug UP-TO-DATE
+> Task :app:processCompatDebugMainManifest UP-TO-DATE
+> Task :app:processCompatDebugManifest UP-TO-DATE
+> Task :app:processCompatDebugManifestForPackage UP-TO-DATE
+> Task :app:processCompatDebugResources UP-TO-DATE
+> Task :app:extractCompatDebugPythonBuildPackages UP-TO-DATE
+> Task :app:generateCompatDebugPythonRequirements UP-TO-DATE
+> Task :app:mergeCompatDebugPythonSources UP-TO-DATE
+> Task :app:generateCompatDebugPythonProxies UP-TO-DATE
+> Task :app:javaPreCompileCompatDebug UP-TO-DATE
+> Task :app:mergeCompatDebugShaders UP-TO-DATE
+> Task :app:compileCompatDebugShaders NO-SOURCE
+> Task :app:generateCompatDebugAssets UP-TO-DATE
+> Task :app:generateCompatDebugPythonMiscAssets UP-TO-DATE
+> Task :app:generateCompatDebugPythonRequirementsAssets UP-TO-DATE
+> Task :app:generateCompatDebugPythonSourceAssets UP-TO-DATE
+> Task :app:generateCompatDebugPythonBuildAssets UP-TO-DATE
+> Task :app:mergeCompatDebugAssets
+> Task :app:desugarCompatDebugFileDependencies UP-TO-DATE
+> Task :app:checkCompatDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeCompatDebugStartupProfile UP-TO-DATE
+> Task :app:compressCompatDebugAssets
+> Task :app:mergeExtDexCompatDebug UP-TO-DATE
+> Task :app:mergeLibDexCompatDebug UP-TO-DATE
+> Task :app:generateCompatDebugPythonJniLibs UP-TO-DATE
+> Task :app:mergeCompatDebugJniLibFolders UP-TO-DATE
+> Task :app:mergeCompatDebugNativeLibs UP-TO-DATE
+> Task :app:stripCompatDebugDebugSymbols UP-TO-DATE
+> Task :app:validateSigningCompatDebug UP-TO-DATE
+> Task :app:writeCompatDebugAppMetadata UP-TO-DATE
+> Task :app:writeCompatDebugSigningConfigVersions UP-TO-DATE
+> Task :app:compileCompatDebugKotlin
+w: file:///root/tl/pdocker-android/app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:2369:9 'startActivityForResult(Intent, Int): Unit' is deprecated. Deprecated in Java
+w: file:///root/tl/pdocker-android/app/src/main/kotlin/io/github/ryo100794/pdocker/PdockerdService.kt:123:14 'addAction(Int, CharSequence!, PendingIntent!): Notification.Builder!' is deprecated. Deprecated in Java
+
+> Task :app:compileCompatDebugJavaWithJavac UP-TO-DATE
+> Task :app:dexBuilderCompatDebug
+> Task :app:mergeCompatDebugGlobalSynthetics UP-TO-DATE
+> Task :app:processCompatDebugJavaRes UP-TO-DATE
+> Task :app:mergeCompatDebugJavaResource UP-TO-DATE
+> Task :app:mergeProjectDexCompatDebug
+> Task :app:packageCompatDebug
+> Task :app:createCompatDebugApkListingFileRedirect UP-TO-DATE
+> Task :app:assembleCompatDebug
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.7/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 1m 34s
+49 actionable tasks: 7 executed, 42 up-to-date
+
+APK: /root/tl/pdocker-android/app/build/outputs/apk/compat/debug/app-compat-debug.apk
+-rw-r--r--. 1 root root 22M May  6 00:37 /root/tl/pdocker-android/app/build/outputs/apk/compat/debug/app-compat-debug.apk

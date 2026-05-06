@@ -459,9 +459,9 @@
     {
       "id": "android.direct.exec-argv-rootfs",
       "tier": "heavy-android",
-      "command": "PDOCKER_PACKAGE=\"${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}\"; ROOTFS=\"${ROOTFS:?set ROOTFS to the app-visible rootfs path}\"; adb shell \"run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_EXEC=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / --env PATH=/tmp:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin -- /bin/sh -lc \\\"set -eu; cat > /tmp/pdocker-argv-probe <<SH\\n#!/bin/sh\\necho script_ok\\nSH\\nchmod +x /tmp/pdocker-argv-probe; /bin/echo absolute_ok | grep absolute_ok; pdocker-argv-probe alpha beta | grep script_ok; /tmp/pdocker-argv-probe gamma delta | grep script_ok\\\"'\"",
+      "command": "PDOCKER_PACKAGE=\"${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}\"; ROOTFS=\"${ROOTFS:?set ROOTFS to the app-visible rootfs path}\"; adb shell \"run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_EXEC=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / --env PATH=/tmp:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin -- /bin/sh -lc \\\"set -eu; cat > /tmp/pdocker-argv-probe <<SH\\n#!/bin/sh\\necho script_ok\\nSH\\nchmod +x /tmp/pdocker-argv-probe; /bin/echo absolute_ok | grep absolute_ok; pdocker-argv-probe alpha beta | grep script_ok; /tmp/pdocker-argv-probe gamma delta | grep script_ok; long=; i=0; while [ \\\\\\$i -lt 320 ]; do long=\\\\\\\"\\\\\\$long flash_attn.comp.cpp.o\\\\\\\"; i=\\\\\\$((i+1)); done; test \\\\\\${#long} -gt 4096; /bin/sh -lc '\\\\\\\"'case \\\\\\\"\\\\\\$1\\\\\\\" in *flash_attn.comp.cpp.o*flash_attn.comp.cpp.o*) echo pdocker-long-argv-ok ;; *) echo bad-long-argv; exit 7 ;; esac'\\\\\\\"' sh \\\\\\\"\\\\\\$long\\\\\\\" | grep pdocker-long-argv-ok\\\"'\"",
       "runnable": true,
-      "checks": "argv[0], interpreter arguments, and process output match guest expectations; no rootfs binary is execve'd directly from app data."
+      "checks": "argv[0], interpreter arguments, bracket paths, and long linker-style argv strings over PATH_MAX match guest expectations; no rootfs binary is execve'd directly from app data."
     },
     {
       "id": "android.direct.unix-socket-connect",

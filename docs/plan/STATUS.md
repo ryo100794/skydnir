@@ -1,11 +1,25 @@
 # pdocker-android: implementation status
 
-Snapshot at v0.5.2. This document covers (1) what pdockerd actually
+Snapshot at v0.5.3 / build 20260505.1. This document covers (1) what pdockerd actually
 implements today, (2) what works on the Android APK end-to-end, and
 (3) the known gaps vs upstream Docker Engine.
 
 For the active unfinished-work list, especially temporary accommodations that
 must become real implementations later, see [`TODO.md`](TODO.md).
+
+## Latest fixed build
+
+Build `20260505.1` is the current fixed Android build record for announcement
+copy and is committed at `dd3ce31`. Evidence is stored under
+[`../test/build-20260505.1/`](../test/build-20260505.1/), with release-note
+summary in [`RELEASE_NOTES_20260505.1.md`](RELEASE_NOTES_20260505.1.md) and
+project-news copy in
+[`../showcase/NEWS_TIMELINE.md`](../showcase/NEWS_TIMELINE.md). Compat/modern
+APK outputs built, Android quick smoke passed, and Android full smoke passed
+Dockerfile build, Compose up/down, `docker exec`, and Engine API `exec -it`.
+The public blockers remain the literal test-density failure and the host
+backend direct-executor lane mismatch. Unsigned release artifacts and warning
+cleanup are release-process notes, with signing material kept outside Git.
 
 ## At a glance
 

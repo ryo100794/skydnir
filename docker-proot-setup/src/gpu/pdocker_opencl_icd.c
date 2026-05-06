@@ -176,6 +176,10 @@ static cl_int copy_string_info(const char *value, size_t dst_size, void *dst, si
     return copy_info(value, strlen(value) + 1, dst_size, dst, size_ret);
 }
 
+static bool buffer_range_valid(cl_mem buffer, size_t offset, size_t cb) {
+    return buffer && offset <= buffer->size && cb <= buffer->size - offset;
+}
+
 static int create_shared_fd(size_t bytes) {
 #ifdef __NR_memfd_create
     int memfd = (int)syscall(__NR_memfd_create, "pdocker-opencl-buffer", MFD_CLOEXEC);
@@ -534,7 +538,7 @@ cl_int clEnqueueWriteBuffer(cl_command_queue command_queue, cl_mem buffer, cl_bo
     (void)num_events_in_wait_list;
     (void)event_wait_list;
     if (event) *event = NULL;
-    if (!buffer || !ptr || offset + cb > buffer->size) return CL_INVALID_VALUE;
+    if (!buffer_range_valid(buffer, offset, cb) || !ptr) return CL_INVALID_VALUE;
     memcpy((char *)buffer->map + offset, ptr, cb);
     return CL_SUCCESS;
 }
@@ -545,7 +549,7 @@ cl_int clEnqueueReadBuffer(cl_command_queue command_queue, cl_mem buffer, cl_boo
     (void)num_events_in_wait_list;
     (void)event_wait_list;
     if (event) *event = NULL;
-    if (!buffer || !ptr || offset + cb > buffer->size) return CL_INVALID_VALUE;
+    if (!buffer_range_valid(buffer, offset, cb) || !ptr) return CL_INVALID_VALUE;
     memcpy(ptr, (char *)buffer->map + offset, cb);
     return CL_SUCCESS;
 }
@@ -555,7 +559,8 @@ cl_int clEnqueueCopyBuffer(cl_command_queue command_queue, cl_mem src_buffer, cl
     (void)num_events_in_wait_list;
     (void)event_wait_list;
     if (event) *event = NULL;
-    if (!src_buffer || !dst_buffer || src_offset + cb > src_buffer->size || dst_offset + cb > dst_buffer->size) return CL_INVALID_VALUE;
+    if (!buffer_range_valid(src_buffer, src_offset, cb) ||
+        !buffer_range_valid(dst_buffer, dst_offset, cb)) return CL_INVALID_VALUE;
     memmove((char *)dst_buffer->map + dst_offset, (const char *)src_buffer->map + src_offset, cb);
     return CL_SUCCESS;
 }
@@ -565,7 +570,7 @@ cl_int clEnqueueFillBuffer(cl_command_queue command_queue, cl_mem buffer, const 
     (void)num_events_in_wait_list;
     (void)event_wait_list;
     if (event) *event = NULL;
-    if (!buffer || !pattern || pattern_size == 0 || offset + cb > buffer->size) return CL_INVALID_VALUE;
+    if (!buffer_range_valid(buffer, offset, cb) || !pattern || pattern_size == 0) return CL_INVALID_VALUE;
     unsigned char *dst = (unsigned char *)buffer->map + offset;
     for (size_t i = 0; i < cb; ++i) dst[i] = ((const unsigned char *)pattern)[i % pattern_size];
     return CL_SUCCESS;
@@ -578,7 +583,7 @@ void *clEnqueueMapBuffer(cl_command_queue command_queue, cl_mem buffer, cl_bool 
     (void)num_events_in_wait_list;
     (void)event_wait_list;
     if (event) *event = NULL;
-    if (!buffer || offset + cb > buffer->size) {
+    if (!buffer_range_valid(buffer, offset, cb)) {
         set_error(errcode_ret, CL_INVALID_VALUE);
         return NULL;
     }

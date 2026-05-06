@@ -4,6 +4,15 @@
 
 - 
 
+## Fixed Build Evidence
+
+- Build number:
+- Commit:
+- Build record:
+- APK payload check: no bundled upstream Docker CLI/Compose, PRoot,
+  proot-loader, or talloc.
+- Device full smoke:
+
 ## Compatibility
 
 - Engine API:
@@ -24,7 +33,10 @@
 
 ## Known Limits
 
-- 
+- Host backend regression:
+- Literal test-density gate:
+- GPU bridge / llama.cpp layer offload:
+- Android platform limits:
 
 ## Security And Signing
 
@@ -40,3 +52,4 @@
 - `docs/plan/TODO.md`
 - `docs/test/COMPATIBILITY.md`
 - `docs/test/SECRET_AUDIT.md`
+- `docs/test/build-20260505.1/README.md` or newer fixed build record

@@ -4,6 +4,13 @@ title: "Compatibility: "
 labels:
   - compatibility
 body:
+  - type: markdown
+    attributes:
+      value: |
+        pdocker-android targets Docker-shaped behavior where Android allows it.
+        The product APK does not bundle upstream Docker CLI/Compose, PRoot,
+        proot-loader, or talloc. Please separate product behavior from
+        test-staged compatibility tools.
   - type: dropdown
     id: area
     attributes:
@@ -43,6 +50,13 @@ body:
       label: Minimal reproducer
       description: Dockerfile, compose.yaml, Engine API request, or command.
       render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "20260505.1 / dd3ce31 / local build"
     validations:
       required: true
   - type: input

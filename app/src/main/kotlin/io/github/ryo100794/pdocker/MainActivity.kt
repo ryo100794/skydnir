@@ -1,7 +1,10 @@
 package io.github.ryo100794.pdocker
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -13,6 +16,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.FileObserver
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
 import android.os.Environment
 import android.os.PowerManager
@@ -402,6 +406,16 @@ class MainActivity : AppCompatActivity() {
     private var documentsSyncScheduled = false
     private var documentsSyncRunning = false
     private var lastDocumentsSyncAt = 0L
+    private var pdockerdServiceBound = false
+    private val pdockerdServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            pdockerdServiceBound = true
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            pdockerdServiceBound = false
+        }
+    }
 
     private val pdockerHome: File by lazy { File(filesDir, "pdocker") }
     private val imageRoot: File by lazy { File(pdockerHome, "images") }
@@ -514,6 +528,11 @@ class MainActivity : AppCompatActivity() {
         handleAutomationIntent(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        bindPdockerdService()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleAutomationIntent(intent)
@@ -583,6 +602,7 @@ class MainActivity : AppCompatActivity() {
         ui.removeCallbacks(pollTask)
         ui.removeCallbacks(jobTickerTask)
         ui.removeCallbacks(documentsMirrorScanTask)
+        unbindPdockerdService()
         logIo.shutdown()
         super.onDestroy()
     }
@@ -1597,7 +1617,27 @@ class MainActivity : AppCompatActivity() {
         } else {
             startService(intent)
         }
+        bindPdockerdService()
         status.text = getString(R.string.status_starting)
+    }
+
+    private fun bindPdockerdService() {
+        if (pdockerdServiceBound) return
+        val intent = Intent(this, PdockerdService::class.java)
+            .setAction(PdockerdService.ACTION_START)
+        pdockerdServiceBound = runCatching {
+            bindService(
+                intent,
+                pdockerdServiceConnection,
+                Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT,
+            )
+        }.getOrDefault(false)
+    }
+
+    private fun unbindPdockerdService() {
+        if (!pdockerdServiceBound) return
+        runCatching { unbindService(pdockerdServiceConnection) }
+        pdockerdServiceBound = false
     }
 
     private fun ensureDaemonStarted() {
@@ -2344,9 +2384,6 @@ class MainActivity : AppCompatActivity() {
                 documentsWriteAccessLabel(metadata.writeAccess),
             )
         }
-
-    private fun documentsDisplayName(): String =
-        documentsTreeMetadata().displayName
 
     private fun documentsHostPath(): String =
         documentsTreeMetadata().activeHostPath
@@ -3727,15 +3764,6 @@ class MainActivity : AppCompatActivity() {
         saveDockerJobs()
     }
 
-    private fun markInterruptedJob(job: DockerJob) {
-        job.exitCode = -130
-        job.status = getString(R.string.job_interrupted)
-        job.endedAt = System.currentTimeMillis()
-        job.progress = getString(R.string.job_interrupted)
-        job.output += "[pdocker] job terminal was not restored after app restart; open logs or retry"
-        while (job.output.size > MAX_JOB_LINES) job.output.removeAt(0)
-    }
-
     private fun loadDockerJobs() {
         val file = File(pdockerHome, "jobs.json")
         val arr = runCatching { JSONArray(file.readText()) }.getOrNull() ?: return
@@ -4290,10 +4318,6 @@ class MainActivity : AppCompatActivity() {
         return ComposePortBinding(hostPort, containerPort)
     }
 
-    private fun composeHostPort(port: String): Int? {
-        return composePortBinding(port)?.hostPort
-    }
-
     private fun isHttpServiceUrl(url: String): Boolean =
         url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true)
 
@@ -4679,7 +4703,10 @@ class MainActivity : AppCompatActivity() {
         val stalePdockerShaderTuning =
             "LLAMA_CPP_VULKAN_SHADER_PROFILE" in dockerfileText ||
                 "pdocker-bridge-safe-glslc" in dockerfileText ||
-                "LLAMA_CPP_VULKAN_SHADER_PROFILE" in composeText
+                "LLAMA_CPP_VULKAN_SHADER_PROFILE" in composeText ||
+                "ARG LLAMA_CPP_BUILD_TYPE=MinSizeRel" in dockerfileText ||
+                "CMAKE_CXX_FLAGS_MINSIZEREL" in dockerfileText ||
+                "LLAMA_CPP_BUILD_TYPE:-MinSizeRel" in composeText
         val staleCheckout =
             "git checkout \"\$LLAMA_CPP_REF\"" in dockerfileText &&
                 "git checkout --detach FETCH_HEAD" !in dockerfileText

@@ -3,7 +3,7 @@ FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 ARG LLAMA_CPP_REF=b9030
 ARG LLAMA_CPP_BUILD_JOBS=1
-ARG LLAMA_CPP_BUILD_TYPE=MinSizeRel
+ARG LLAMA_CPP_BUILD_TYPE=Release
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -40,8 +40,6 @@ RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /opt/llama.cpp \
     && git rev-parse HEAD > /opt/llama.cpp/.pdocker-llama-cpp-commit \
     && cmake -B build -G Ninja \
       -DCMAKE_BUILD_TYPE="$LLAMA_CPP_BUILD_TYPE" \
-      -DCMAKE_CXX_FLAGS_MINSIZEREL="-Os -g0 -DNDEBUG" \
-      -DCMAKE_C_FLAGS_MINSIZEREL="-Os -g0 -DNDEBUG" \
       -DLLAMA_BUILD_TESTS=OFF \
       -DLLAMA_BUILD_EXAMPLES=OFF \
       -DLLAMA_BUILD_WEBUI=OFF \

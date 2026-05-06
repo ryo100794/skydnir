@@ -321,18 +321,23 @@ def validate_static_contract_markers(source: str) -> None:
         "direct exec snapshots argv before tracee scratch writes",
         source,
         [
-            "copied_arg_values = calloc",
-            "read_tracee_string(pid, old_arg_ptrs[i],",
+            "ExecArgArena copied_arg_arena",
+            "read_tracee_string_to_arena(",
+            "copied_arg_offsets",
+            "free_exec_arg_arena(&copied_arg_arena)",
             "write_tracee_string(pid, loader_addr, loader)",
-            "write_tracee_string(pid, cursor, copied_arg_values[i])",
+            "write_tracee_string(pid, cursor, arg)",
         ],
     )
+    if "char (*copied_arg_values)[PATH_MAX]" in source:
+        fail("exec argv rewrite must not store argv payloads in PATH_MAX fixed buffers")
     require_contains(
         "direct exec handles long link argv without fixed 32k scratch",
         source,
         [
             "EXEC_REWRITE_STACK_SAFETY",
             "EXEC_REWRITE_MAX_SCRATCH",
+            "EXEC_REWRITE_MAX_ARG_BYTES",
             "string_bytes",
             "payload_bytes",
             "scratch_span",
@@ -365,7 +370,7 @@ def validate_static_contract_markers(source: str) -> None:
     require_order(
         "direct exec argv snapshot ordering",
         source,
-        "copied_arg_values = calloc",
+        "read_tracee_string_to_arena(",
         "write_tracee_string(pid, loader_addr, loader)",
     )
     require_contains(

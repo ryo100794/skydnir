@@ -13,3 +13,23 @@ from the repository's canonical documentation.
 
 The source of truth remains the repository itself: `README.md`, `docs/plan/`,
 `docs/test/`, `docs/design/`, and the project-library templates.
+
+## Public Framing Rules
+
+- Lead with the Android-native goal: Docker-compatible workflows packaged as a
+  normal APK, using `pdockerd`, native UI controls, and the no-PRoot direct
+  executor path where Android allows it.
+- Keep payload boundaries visible: the product APK does not bundle upstream
+  Docker CLI/Compose, PRoot, proot-loader, or talloc.
+- Describe Compose and Dockerfile support as implemented for the current
+  supported subset, backed by Android smoke evidence, not as full Docker or
+  BuildKit parity.
+- Present GPU as bridge research. Vulkan/OpenCL probes and llama.cpp workflow
+  artifacts are real, but current llama.cpp GPU offload remains experimental
+  with blockers documented in the dashboard and test records.
+- Treat the VS Code/Codex/Continue workspace and llama.cpp workspace as real
+  project-library entries, while making listener health and GPU mode evidence
+  part of any demo.
+- Anchor release claims to
+  [`../test/build-20260505.1/README.md`](../test/build-20260505.1/README.md)
+  until a newer fixed build record exists.

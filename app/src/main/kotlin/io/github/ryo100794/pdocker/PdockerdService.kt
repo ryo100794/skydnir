@@ -14,6 +14,7 @@ import android.hardware.camera2.CameraManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
+import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
@@ -33,6 +34,9 @@ import java.io.File
  */
 class PdockerdService : Service() {
 
+    inner class LocalBinder : Binder()
+
+    private val binder = LocalBinder()
     private var pdockerThread: Thread? = null
     private var gpuExecutorProcess: Process? = null
     private var mediaExecutorProcess: Process? = null
@@ -40,11 +44,7 @@ class PdockerdService : Service() {
     @Volatile private var stopFlag = false
     @Volatile private var userStopped = false
 
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    override fun onCreate() {
-        super.onCreate()
-    }
+    override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {

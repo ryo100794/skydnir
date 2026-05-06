@@ -54,7 +54,8 @@
     "runtime-npm-compat",
     "documents-saf-phase2",
     "network-port-forwarding",
-    "runtime-process-teardown"
+    "runtime-process-teardown",
+    "runtime-oom-survival"
   ],
   "scenarios": [
     {
@@ -754,6 +755,19 @@
         "docs/test/ANDROID_SELFDEBUG.md"
       ],
       "checks": "Stop/kill process tree teardown, duplicate-name cleanup, Engine ID and label truth, lifecycle logs, stale pid rejection, and no orphan residue."
+    },
+    {
+      "id": "runtime.oom-survival-large-workload",
+      "area": "runtime-oom-survival",
+      "lane": "android-full",
+      "command": "bash scripts/android-container-direct-probe.sh --memory-guard",
+      "status": "planned-gap",
+      "docs": [
+        "docs/design/RUNTIME_OOM_SURVIVAL.md",
+        "docs/design/APK_MEMORY_PAGER.md",
+        "docs/test/APK_MEMORY_PAGER_PROBE.md"
+      ],
+      "checks": "Runtime memory telemetry ring, early ENOMEM guard event, LMK-suspected restart classification, Large Workload Mode metadata, and opt-in managed/bridge memory paths."
     },
     {
       "id": "release.readiness",

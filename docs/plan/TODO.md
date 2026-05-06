@@ -23,9 +23,10 @@ or closes.
   container/APK bridge, serves the forced-GPU HTTP probe, and now exposes
   bridge upload/copy overhead as the front performance blocker.
 - [next] [#5](https://github.com/ryo100794/pdocker-android/issues/5)
-  Terminal `-it` argv safety: fix direct executor `execve` argv rewrite
-  so `/bin/sh`, scripts, and `/usr/bin/[` preserve arguments inside the
-  container rootfs; add a focused smoke before relying on UI interactive exec.
+  Terminal `-it` interactive path: direct executor long argv/bracket argv
+  preservation is covered by regression tests; the remaining user-visible
+  breakage is PTY allocation/fallback and interactive shell mode in the UI
+  Engine exec route.
 - [next] [#6](https://github.com/ryo100794/pdocker-android/issues/6)
   Real listener service health: probe the actual device listener for
   default workspace `18080` and llama `18081`, correlate it with Engine
@@ -258,6 +259,15 @@ implementation change plus a focused verification artifact.
   Dockerfiles. The managed-region pager remains explicit and opt-in; ordinary
   toolchain heap allocations such as `cc1plus` are not yet under pdocker memory
   ownership.
+- [next] Implement Runtime OOM Survival and Large Workload Mode. The default
+  path should keep using large-allocation guardrails to return `ENOMEM` before
+  Android LMK kills the app, while the opt-in large-workload path should make
+  oversized jobs run by combining file-backed mmap/streaming, managed anonymous
+  regions, and GPU bridge guarded memory. Required pieces are pdockerd-owned
+  memory telemetry rings, structured OOM/LMK evidence, UI/debug-pane memory
+  status, synthetic guard-denial tests, controlled restart classification, and
+  explicit labels/env such as `io.pdocker.large-workload=enabled` without
+  changing ordinary Dockerfile/Compose semantics.
 - [doing] Profile remaining hot trapped syscalls after `newfstatat/openat` and
   decide which can be safely handled with fewer ptrace stops. Current tuning
   adds seccomp errno returns for probe syscalls and uses a blocking

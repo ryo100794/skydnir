@@ -15,7 +15,22 @@ pdocker-android is a Docker-compatible Android workbench packaged as a native
 APK. It combines `pdockerd`, Compose/Dockerfile controls, image/container file
 browsing, persistent logs, editor tabs, and `-it`-style terminals inside the
 app UI. The current research front is real Android direct execution plus
-Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
+Vulkan/OpenCL GPU bridging for llama.cpp-class workloads. The product APK does
+not ship upstream Docker CLI/Compose, PRoot, proot-loader, or talloc; those
+boundaries are part of the public story, not fine print.
+
+## Verification Pulse
+
+Latest fixed build evidence:
+[`docs/test/build-20260505.1`](../test/build-20260505.1/README.md).
+
+| Route | Result | Public reading |
+|---|---|---|
+| APK builds | PASS | Compat/modern debug APKs and unsigned compat/modern release APKs were produced for build `20260505.1`. |
+| Android full smoke | PASS | Device Dockerfile build, Compose up/down, `docker exec`, and Engine API `exec -it` passed. |
+| Android quick smoke | PASS | Install, `docker version`, direct probe, and memory-pager probes passed. |
+| Fast/scenario/design gates | FAIL | Current failure is the enforced literal test-density threshold. Do not call the full gate green. |
+| Host backend quick/full | FAIL | Host regression expects a staged `pdocker-direct` helper; Android APK direct execution is the release-blocking lane for this build. |
 
 ## Live Counters
 
@@ -69,6 +84,9 @@ UI/docs work, so the public timeline is intentionally a little conservative.
 - Target met: `false`; speedup: `0.43689191188917054`
 - Current blocker: llama.cpp served, but only the output layer was offloaded; repeating transformer layers stayed on CPU
 - llama.cpp modified: `false`
+- Bridge evidence: host-native and host/container Vulkan probes are recorded
+  under `docs/test/`, but this is still pdocker GPU bridge research rather
+  than Docker GPU parity.
 
 ## Demo Route
 

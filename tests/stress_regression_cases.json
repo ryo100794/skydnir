@@ -61,6 +61,15 @@
       "checks": "Runtime syscall overhead, process startup, filesystem-heavy workload timing, and stable artifact capture."
     },
     {
+      "id": "stress.runtime-oom-survival",
+      "category": "stress",
+      "lane": "android-full",
+      "command": "bash scripts/android-container-direct-probe.sh --memory-guard --large-mb 512",
+      "seed": null,
+      "artifact": "docs/test/runtime-oom-survival-latest.json",
+      "checks": "Planned Android-full survival replay: large allocation denial should return ENOMEM before LMK, record memory telemetry, keep daemon reachable, and preserve enough evidence for restart-time classification. Current fast evidence covers the direct memory-guard contract and telemetry schema separately."
+    },
+    {
       "id": "variance.llama-gpu-compare",
       "category": "variance",
       "lane": "android-llama",

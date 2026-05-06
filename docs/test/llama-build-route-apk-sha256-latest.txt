@@ -1,0 +1,1 @@
+216e8df3f7105d1e808c28a099bffb0c97c362d3ac58ecd615c2789c99af1f3f  app/build/outputs/apk/compat/debug/app-compat-debug.apk

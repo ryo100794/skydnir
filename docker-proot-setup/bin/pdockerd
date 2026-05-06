@@ -25,10 +25,12 @@ Then:
 
 import argparse
 import fnmatch
+import gc
 import hashlib
 import json
 import os
 import re
+import resource
 import shlex
 import shutil
 import signal
@@ -44,7 +46,6 @@ import traceback
 import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler
-from io import BytesIO
 
 
 class BadRequest(Exception):
@@ -61,6 +62,7 @@ META_DIR = os.path.join(PDOCKER_HOME, "meta")
 BUILD_CACHE_DIR = os.path.join(META_DIR, "build-cache")
 LOGS_DIR = os.path.join(PDOCKER_HOME, "logs")
 DIAGNOSTICS_DIR = os.path.join(LOGS_DIR, "diagnostics")
+PYTHON_MEMORY_DIAGNOSTICS_PATH = os.path.join(DIAGNOSTICS_DIR, "python-memory.jsonl")
 VOLUMES_DIR = os.path.join(PDOCKER_HOME, "volumes")
 NETWORKS_DIR = os.path.join(PDOCKER_HOME, "networks")
 # Staging for crane blob downloads, layer tars, image save/load etc. On
@@ -112,7 +114,7 @@ def _prepare_rootfs_runtime_files(rootfs):
         os.makedirs(apt_conf, exist_ok=True)
         with open(os.path.join(apt_conf, "00pdocker-direct-sandbox"), "w") as f:
             f.write('APT::Sandbox::User "root";\n')
-    if os.environ.get("PDOCKER_BUILD_TOOLS", "1") != "0":
+    if os.environ.get("PDOCKER_BUILD_TOOLS", "0") == "1":
         build_bin = os.path.join(rootfs, "usr", "local", "pdocker-build-bin")
         os.makedirs(build_bin, exist_ok=True)
         glslc = os.path.join(build_bin, "glslc")
@@ -897,6 +899,38 @@ def start_operation(kind, title, detail=""):
     return op_id
 
 
+def start_exclusive_operation(kind, title, detail="", exclusive_key=None):
+    """Start an operation unless another running operation owns the same key.
+
+    This guards expensive Android builds from accidental double-starts by the
+    UI, adb smoke actions, or reconnect retries. Untagged builds remain
+    independent because they do not have a stable image name to deduplicate.
+    """
+    now = time.time()
+    with active_operations_lock:
+        if exclusive_key:
+            for op in active_operations.values():
+                if op.get("_ExclusiveKey") == exclusive_key and op.get("Status") == "running":
+                    return None, {
+                        k: v for k, v in op.items()
+                        if not k.startswith("_")
+                    }
+        op_id = uuid.uuid4().hex
+        op = {
+            "Id": op_id,
+            "Kind": kind,
+            "Title": title,
+            "Detail": detail,
+            "Status": "running",
+            "StartedAt": now,
+            "UpdatedAt": now,
+        }
+        if exclusive_key:
+            op["_ExclusiveKey"] = exclusive_key
+        active_operations[op_id] = op
+    return op_id, None
+
+
 def update_operation(op_id, detail=None, status=None):
     if not op_id:
         return
@@ -962,6 +996,15 @@ def _read_key_value_file(path):
     except OSError:
         pass
     return data
+
+
+def _status_kb(value):
+    if not value:
+        return 0
+    try:
+        return int(str(value).split()[0])
+    except (ValueError, IndexError):
+        return 0
 
 
 def _proc_status(pid):
@@ -1053,6 +1096,56 @@ def record_diagnostic_sample(path, phase, root_pid=None, extra=None):
         log(f"diagnostic sample write failed: {exc}")
 
 
+def _self_python_memory_snapshot():
+    status = _proc_status(os.getpid()) or {}
+    ru = resource.getrusage(resource.RUSAGE_SELF)
+    return {
+        "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "monotonic": time.monotonic(),
+        "gc_count": list(gc.get_count()),
+        "gc_threshold": list(gc.get_threshold()),
+        "vmrss_kb": _status_kb(status.get("VmRSS")),
+        "rss_anon_kb": _status_kb(status.get("RssAnon")),
+        "vmswap_kb": _status_kb(status.get("VmSwap")),
+        "threads": int(status.get("Threads") or 0),
+        "ru_maxrss_kb": int(getattr(ru, "ru_maxrss", 0) or 0),
+    }
+
+
+def record_python_memory_event(method, path, before, after, extra=None):
+    if os.environ.get("PDOCKER_PYTHON_MEMORY_DIAGNOSTICS", "1") == "0":
+        return
+    try:
+        elapsed = float(after.get("monotonic", 0.0) - before.get("monotonic", 0.0))
+        delta = int((after.get("vmrss_kb") or 0) - (before.get("vmrss_kb") or 0))
+        temp_bytes = int((extra or {}).get("temp_body_bytes") or 0)
+        response_bytes = int((extra or {}).get("response_bytes") or 0)
+        important = (
+            path == "/build"
+            or path == "/images/load"
+            or path == "/images/get"
+            or path.endswith("/archive")
+            or method in ("PUT", "DELETE")
+        )
+        min_elapsed = float(os.environ.get("PDOCKER_PYTHON_MEMORY_MIN_SECONDS", "0.5"))
+        min_delta = int(os.environ.get("PDOCKER_PYTHON_MEMORY_MIN_DELTA_KB", "1024"))
+        if not important and not temp_bytes and not response_bytes and elapsed < min_elapsed and abs(delta) < min_delta:
+            return
+        event = {
+            "time": after.get("time"),
+            "method": method,
+            "path": path,
+            "elapsed": elapsed,
+            "rss_delta_kb": delta,
+            "before": before,
+            "after": after,
+            "extra": extra or {},
+        }
+        _write_jsonl(PYTHON_MEMORY_DIAGNOSTICS_PATH, event)
+    except Exception as exc:
+        log(f"python memory diagnostic write failed: {exc}")
+
+
 def list_diagnostics(limit=20):
     items = []
     try:
@@ -1077,6 +1170,21 @@ def list_diagnostics(limit=20):
     return items[:limit]
 
 
+def list_python_memory_events(limit=50):
+    try:
+        with open(PYTHON_MEMORY_DIAGNOSTICS_PATH) as f:
+            lines = f.readlines()
+    except OSError:
+        return []
+    out = []
+    for line in lines[-limit:]:
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
 def prune_stale_operations(now=None):
     now = time.time() if now is None else now
     stale = []
@@ -1093,7 +1201,10 @@ def list_active_operations():
     with active_operations_lock:
         prune_stale_operations()
         return sorted(
-            (dict(op) for op in active_operations.values()),
+            (
+                {k: v for k, v in op.items() if not k.startswith("_")}
+                for op in active_operations.values()
+            ),
             key=lambda op: op.get("StartedAt", 0),
             reverse=True,
         )
@@ -1884,6 +1995,15 @@ def _delete_layer_index_path(index, rel_path):
             index.pop(key, None)
 
 
+def _path_is_skipped(p_rel, skip_paths):
+    if p_rel in skip_paths:
+        return True
+    for sp in skip_paths:
+        if p_rel.startswith(sp + os.sep):
+            return True
+    return False
+
+
 def _build_layer_index(diff_ids, skip_paths=None, profile=None):
     """Build the merged prior-layer path map without materializing a rootfs.
 
@@ -1896,14 +2016,6 @@ def _build_layer_index(diff_ids, skip_paths=None, profile=None):
     start = time.perf_counter()
     skip_paths = set(skip_paths or [])
     index = {}
-
-    def _skipped(p_rel):
-        if p_rel in skip_paths:
-            return True
-        for sp in skip_paths:
-            if p_rel.startswith(sp + os.sep):
-                return True
-        return False
 
     for did in diff_ids or []:
         tree = _layer_tree(did.split(":", 1)[-1])
@@ -1931,7 +2043,7 @@ def _build_layer_index(diff_ids, skip_paths=None, profile=None):
                 if name.startswith(WHITEOUT_PREFIX):
                     continue
                 p_rel = rel_prefix + name
-                if _skipped(p_rel):
+                if _path_is_skipped(p_rel, skip_paths):
                     continue
                 index[p_rel] = os.path.join(root, name)
     _profile_add(profile, "prev_index", time.perf_counter() - start)
@@ -1965,18 +2077,9 @@ def _snapshot_tree_as_layer(src_tree, prev_diff_ids=None, skip_paths=None,
         else (_build_layer_index(prev_diff_ids, skip_paths, profile) if prev_diff_ids else {})
     )
 
-    def _skipped(p_rel):
-        if p_rel in skip_paths:
-            return True
-        # Skip any descendant of a skipped dir
-        for sp in skip_paths:
-            if p_rel.startswith(sp + os.sep):
-                return True
-        return False
-
     def _add_changed_path(out, seen_paths, p_rel):
         p_rel = os.path.normpath(p_rel.strip("/"))
-        if not p_rel or p_rel == "." or _skipped(p_rel) or p_rel in seen_paths:
+        if not p_rel or p_rel == "." or _path_is_skipped(p_rel, skip_paths) or p_rel in seen_paths:
             return
         sp = os.path.join(src_tree, p_rel)
         if not os.path.lexists(sp):
@@ -1984,12 +2087,12 @@ def _snapshot_tree_as_layer(src_tree, prev_diff_ids=None, skip_paths=None,
         if os.path.isdir(sp) and not os.path.islink(sp):
             for root, dirs, files in os.walk(sp, followlinks=False):
                 rel = os.path.relpath(root, src_tree)
-                if rel != "." and not _skipped(rel) and rel not in seen_paths:
+                if rel != "." and not _path_is_skipped(rel, skip_paths) and rel not in seen_paths:
                     seen_paths.add(rel)
                     out.append(rel)
                 for name in list(dirs) + list(files):
                     child = os.path.join(rel, name) if rel != "." else name
-                    if not _skipped(child) and child not in seen_paths:
+                    if not _path_is_skipped(child, skip_paths) and child not in seen_paths:
                         seen_paths.add(child)
                         out.append(child)
         else:
@@ -2018,7 +2121,7 @@ def _snapshot_tree_as_layer(src_tree, prev_diff_ids=None, skip_paths=None,
             rel = os.path.relpath(root, src_tree)
             for name in list(dirs) + list(files):
                 p_rel = name if rel == "." else os.path.join(rel, name)
-                if _skipped(p_rel):
+                if _path_is_skipped(p_rel, skip_paths):
                     continue
                 sp = os.path.join(src_tree, p_rel)
                 bp = prev_index.get(p_rel)
@@ -2046,11 +2149,11 @@ def _snapshot_tree_as_layer(src_tree, prev_diff_ids=None, skip_paths=None,
     if changed_paths is not None:
         for p_rel in deleted_paths or []:
             p_rel = os.path.normpath(p_rel.strip("/"))
-            if p_rel and p_rel != "." and not _skipped(p_rel):
+            if p_rel and p_rel != "." and not _path_is_skipped(p_rel, skip_paths):
                 whiteouts.append(p_rel)
     else:
         for p_rel in prev_index:
-            if _skipped(p_rel):
+            if _path_is_skipped(p_rel, skip_paths):
                 continue
             if p_rel not in seen and not os.path.lexists(os.path.join(src_tree, p_rel)):
                 whiteouts.append(p_rel)
@@ -3068,7 +3171,7 @@ def build_run_argv(rootfs, argv, env, workdir="/", binds=None, cow_bind=None, mo
         default_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         path = run_env.get("PATH") or default_path
         build_bin = "/usr/local/pdocker-build-bin"
-        if build_bin not in path.split(":"):
+        if os.environ.get("PDOCKER_BUILD_TOOLS", "0") == "1" and build_bin not in path.split(":"):
             run_env["PATH"] = f"{build_bin}:{path}"
         run_env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", os.environ.get("PDOCKER_BUILD_PARALLEL", "1"))
         run_env.setdefault("MAKEFLAGS", os.environ.get("PDOCKER_BUILD_MAKEFLAGS", "-j1"))
@@ -5402,6 +5505,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, code, data):
         body = json.dumps(data).encode()
+        self._response_bytes = getattr(self, "_response_bytes", 0) + len(body)
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Api-Version", self.API_VERSION)
@@ -5576,7 +5680,10 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
             chunks = []
             while True:
-                line = self.rfile.readline().strip()
+                line = self.rfile.readline()
+                if line == b"":
+                    raise ConnectionError("unexpected EOF while reading chunked body")
+                line = line.strip()
                 if not line:
                     continue
                 try:
@@ -5588,11 +5695,72 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                     break
                 chunks.append(self.rfile.read(size))
                 self.rfile.readline()  # CRLF after chunk
-            return b"".join(chunks)
+            body = b"".join(chunks)
+            self._request_body_bytes = getattr(self, "_request_body_bytes", 0) + len(body)
+            return body
         length = int(self.headers.get("Content-Length") or 0)
         if length:
-            return self.rfile.read(length)
+            body = self.rfile.read(length)
+            self._request_body_bytes = getattr(self, "_request_body_bytes", 0) + len(body)
+            return body
         return b""
+
+    def _read_body_to_temp(self, prefix="pdbody_"):
+        """Stream the request body to a temp file and return its path.
+
+        Docker build contexts can be large. Keeping them as one bytes object
+        creates avoidable heap pressure and can leave RSS high after GC, so the
+        build path uses this file-backed reader instead of _read_body().
+        """
+        import tempfile
+        fd, path = tempfile.mkstemp(prefix=prefix, suffix=".tar", dir=PDOCKER_TMP)
+        try:
+            with os.fdopen(fd, "wb") as out:
+                total = 0
+                if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
+                    while True:
+                        line = self.rfile.readline()
+                        if line == b"":
+                            raise ConnectionError("unexpected EOF while reading chunked body")
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            size = int(line.split(b";")[0], 16)
+                        except ValueError:
+                            break
+                        if size == 0:
+                            self.rfile.readline()
+                            break
+                        remaining = size
+                        while remaining:
+                            chunk = self.rfile.read(min(remaining, 1024 * 1024))
+                            if not chunk:
+                                raise ConnectionError("unexpected EOF while reading chunked body")
+                            out.write(chunk)
+                            total += len(chunk)
+                            remaining -= len(chunk)
+                        self.rfile.readline()
+                else:
+                    remaining = int(self.headers.get("Content-Length") or 0)
+                    while remaining:
+                        chunk = self.rfile.read(min(remaining, 1024 * 1024))
+                        if not chunk:
+                            raise ConnectionError("unexpected EOF while reading request body")
+                        out.write(chunk)
+                        total += len(chunk)
+                        remaining -= len(chunk)
+            self._request_body_bytes = getattr(self, "_request_body_bytes", 0) + total
+            self._request_temp_body_bytes = getattr(self, "_request_temp_body_bytes", 0) + total
+            self._request_temp_files = getattr(self, "_request_temp_files", [])
+            self._request_temp_files.append(path)
+            return path
+        except Exception:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            raise
 
     def _read_json(self):
         b = self._read_body()
@@ -5623,10 +5791,31 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    def _route_with_memory_trace(self, method, path, query):
+        # Normalize here too, so memory diagnostics group /v1.xx/build with
+        # /build even if _route strips the version prefix later.
+        m = re.match(r"^/v\d+\.\d+(/.*)$", path)
+        trace_path = m.group(1) if m else path
+        before = _self_python_memory_snapshot()
+        self._request_body_bytes = 0
+        self._request_temp_body_bytes = 0
+        self._request_temp_files = []
+        self._response_bytes = 0
+        try:
+            return self._route(method, path, query)
+        finally:
+            after = _self_python_memory_snapshot()
+            record_python_memory_event(method, trace_path, before, after, {
+                "request_body_bytes": getattr(self, "_request_body_bytes", 0),
+                "temp_body_bytes": getattr(self, "_request_temp_body_bytes", 0),
+                "temp_file_count": len(getattr(self, "_request_temp_files", [])),
+                "response_bytes": getattr(self, "_response_bytes", 0),
+            })
+
     def do_GET(self):
         try:
             path, query = self._parse_path()
-            self._route("GET", path, query)
+            self._route_with_memory_trace("GET", path, query)
         except BadRequest as e:
             self._send_json(400, {"message": str(e)})
         except Exception as e:
@@ -5636,7 +5825,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             path, query = self._parse_path()
-            self._route("POST", path, query)
+            self._route_with_memory_trace("POST", path, query)
         except BadRequest as e:
             self._send_json(400, {"message": str(e)})
         except Exception as e:
@@ -5647,7 +5836,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         try:
             path, query = self._parse_path()
-            self._route("DELETE", path, query)
+            self._route_with_memory_trace("DELETE", path, query)
         except BadRequest as e:
             self._send_json(400, {"message": str(e)})
         except Exception as e:
@@ -5657,7 +5846,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
     def do_PUT(self):
         try:
             path, query = self._parse_path()
-            self._route("PUT", path, query)
+            self._route_with_memory_trace("PUT", path, query)
         except BadRequest as e:
             self._send_json(400, {"message": str(e)})
         except Exception as e:
@@ -5667,7 +5856,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         try:
             path, query = self._parse_path()
-            self._route("HEAD", path, query)
+            self._route_with_memory_trace("HEAD", path, query)
         except Exception as e:
             if isinstance(e, (BrokenPipeError, ConnectionResetError)):
                 return
@@ -5799,6 +5988,14 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, list_diagnostics(limit=max(1, min(limit, 100))))
             return
 
+        if path == "/system/python-memory" and method == "GET":
+            try:
+                limit = int(query.get("limit", ["50"])[0])
+            except (TypeError, ValueError):
+                limit = 50
+            self._send_json(200, list_python_memory_events(limit=max(1, min(limit, 500))))
+            return
+
         if path == "/system/operations" and method == "POST":
             payload = self._read_json()
             op_id = payload.get("Id") or payload.get("id") or ""
@@ -5864,30 +6061,44 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"message": "no image names specified"})
                 return
             try:
-                # Buffer the full OCI tar; pdockerd speaks HTTP/1.0 by
+                # Spool the OCI tar to disk first. pdockerd speaks HTTP/1.0 by
                 # default, and chunked Transfer-Encoding isn't valid under
-                # HTTP/1.0 — docker CLI would write the raw chunk framing
-                # into the output file. Send with Content-Length instead.
-                import io as _io
-                buf = _io.BytesIO()
-                save_images(names, buf)
-                data = buf.getvalue()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/x-tar")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-                self.wfile.flush()
+                # HTTP/1.0, but holding a docker-save tar in BytesIO can be
+                # huge. A temp file gives us Content-Length without heap growth.
+                import tempfile
+                fd, save_path = tempfile.mkstemp(prefix="pdsavebody_", suffix=".tar", dir=PDOCKER_TMP)
+                try:
+                    with os.fdopen(fd, "wb") as out:
+                        save_images(names, out)
+                    size = os.path.getsize(save_path)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/x-tar")
+                    self.send_header("Content-Length", str(size))
+                    self.end_headers()
+                    with open(save_path, "rb") as inp:
+                        while True:
+                            chunk = inp.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            self._response_bytes = getattr(self, "_response_bytes", 0) + len(chunk)
+                            self.wfile.write(chunk)
+                    self.wfile.flush()
+                finally:
+                    try:
+                        os.remove(save_path)
+                    except OSError:
+                        pass
             except Exception as e:
                 log(f"save error: {e}")
             return
 
         # POST /images/load — docker load
         if path == "/images/load" and method == "POST":
+            body_path = None
             try:
-                body = self._read_body()
-                import io as _io
-                loaded = load_images(_io.BytesIO(body))
+                body_path = self._read_body_to_temp(prefix="pdloadbody_")
+                with open(body_path, "rb") as body_stream:
+                    loaded = load_images(body_stream)
                 self._send_stream_started()
                 for ref in loaded:
                     record_event("image", "load", image_id(ref), {"name": ref})
@@ -5896,6 +6107,12 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 self.wfile.flush()
             except Exception as e:
                 self._send_json(400, {"message": str(e)})
+            finally:
+                if body_path:
+                    try:
+                        os.remove(body_path)
+                    except OSError:
+                        pass
             return
 
         if path == "/images/prune" and method == "POST":
@@ -6348,13 +6565,20 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                         400, {"message": f"target is not a directory: {ctr_path}"}
                     )
                     return
-                body = self._read_body()
+                body_path = None
                 try:
-                    with tarfile.open(fileobj=BytesIO(body), mode="r|*") as tf:
+                    body_path = self._read_body_to_temp(prefix="pdarchiveput_")
+                    with tarfile.open(body_path, mode="r|*") as tf:
                         tf.extractall(host_target, filter="data")
                 except Exception as e:
                     self._send_json(500, {"message": f"extract failed: {e}"})
                     return
+                finally:
+                    if body_path:
+                        try:
+                            os.remove(body_path)
+                        except OSError:
+                            pass
                 self.send_response(200)
                 self.end_headers()
                 return
@@ -6869,13 +7093,27 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         tag = query.get("t", [""])[0]
         dockerfile_name = query.get("dockerfile", ["Dockerfile"])[0]
         buildargs = json.loads(query.get("buildargs", ["{}"])[0])
-        op_id = start_operation(
+        exclusive_key = f"build:{tag}" if tag else None
+        op_id, existing_op = start_exclusive_operation(
             "build",
             f"build {tag or '<none>'}",
             f"receiving {dockerfile_name}",
+            exclusive_key=exclusive_key,
         )
 
         self._send_stream_started()
+        if existing_op:
+            msg = (
+                f"build already running for {tag}: "
+                f"{existing_op.get('Detail') or existing_op.get('Title')}"
+            )
+            try:
+                payload = {"errorDetail": {"message": msg}, "error": msg}
+                self.wfile.write(json.dumps(payload).encode() + b"\r\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            return
 
         def emit(msg, newline=True):
             try:
@@ -6898,12 +7136,14 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
 
+        context_tar_path = None
         try:
-            # Read context tar (may be chunked transfer)
-            context_tar = self._read_body()
+            # Read context tar (may be chunked transfer) without holding the
+            # whole archive in Python heap.
+            context_tar_path = self._read_body_to_temp(prefix="pdbuildctx_")
             import tempfile
             with tempfile.TemporaryDirectory() as ctx_dir:
-                with tarfile.open(fileobj=BytesIO(context_tar)) as tf:
+                with tarfile.open(context_tar_path, mode="r:*") as tf:
                     tf.extractall(ctx_dir, filter="data")
                 apply_dockerignore(ctx_dir, emit)
                 dockerfile_path = os.path.join(ctx_dir, dockerfile_name)
@@ -6930,6 +7170,12 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             emit_error(str(e))
             finish_operation(op_id, "failed", str(e))
             log(traceback.format_exc())
+        finally:
+            if context_tar_path:
+                try:
+                    os.remove(context_tar_path)
+                except OSError:
+                    pass
 
 
 def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit, operation_id=None):

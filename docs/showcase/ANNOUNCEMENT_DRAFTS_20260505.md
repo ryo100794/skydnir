@@ -1,0 +1,133 @@
+# Announcement Drafts 2026-05-05
+
+Short external-facing copy for README highlights, social posts, release notes,
+and project news. Keep these notes tied to the verification bundle at
+`docs/test/build-20260505.1/` and avoid expanding them into implementation
+claims.
+
+## Audiences
+
+- Android developers who want a self-contained mobile workbench.
+- Container and Docker compatibility testers interested in Android platform
+  limits.
+- Runtime, systems, and GPU-compute developers evaluating direct Android
+  execution and bridge experiments.
+- Early adopters who can read known-limits notes and report device-specific
+  results.
+
+## One-Paragraph Pitch
+
+pdocker-android is an experimental Docker-compatible workspace packaged as a
+native Android APK. It is aimed at developers and systems testers who want to
+explore Compose-style projects, image/container inspection, logs, terminals,
+and project templates from inside Android's app sandbox while keeping the
+platform limits visible. The current public story should be honest: this is a
+measured compatibility effort for Android, not upstream Docker parity and not a
+promise that every Docker workflow works on every device.
+
+## Technical Differentiators
+
+- Native Android APK positioning instead of a Termux-first or host-shell-first
+  workflow.
+- Docker-compatible user experience for a documented subset of Engine,
+  Compose, Dockerfile, image, container, log, file, and terminal workflows.
+- Repository-owned compatibility docs and repeatable verification artifacts
+  used as the source of truth for external claims.
+- Project-template framing for practical workspaces such as development,
+  code-server-style access, and llama.cpp-class experiments.
+- Explicit Android constraint language around namespaces, cgroups, overlayfs,
+  bridge networking, privileged devices, and BuildKit parity.
+
+## Experimental Areas
+
+- Direct Android execution and syscall/path mediation remain active research
+  areas and should be described as experiments.
+- Vulkan/OpenCL and llama.cpp GPU bridge work should be described as bridge
+  experiments, not general Docker GPU parity.
+- Device behavior can vary by Android version, vendor policy, ABI, storage, and
+  battery restrictions.
+- Release signing, reproducible release process, and F-Droid readiness are not
+  complete until the checklist below is satisfied.
+
+## README Copy
+
+Short description:
+
+> Experimental Docker-compatible Android APK for Compose-style workspaces,
+> image/container inspection, logs, terminals, and compatibility testing inside
+> Android's app sandbox.
+
+Hero bullets:
+
+- Native Android APK focused on Docker-compatible workflows.
+- Compose/Dockerfile project controls, image/container views, logs, editor, and
+  terminal surfaces in one mobile workbench.
+- Compatibility claims are tied to repository docs and build evidence, not
+  assumed upstream Docker parity.
+- Direct execution and GPU bridge work are experimental and documented with
+  known limits.
+
+## Social Copy
+
+Short post:
+
+> pdocker-android is an experimental Docker-compatible workspace for Android:
+> Compose-style projects, image/container views, logs, terminals, and device
+> compatibility notes in a native APK. Current positioning is intentionally
+> honest: Android sandbox limits are documented, and release readiness is tied
+> to recorded build/test evidence.
+
+Technical post:
+
+> I am preparing pdocker-android as a public Android container-compatibility
+> experiment. The useful story is not "Docker magically runs everywhere"; it is
+> a native APK workbench that explores a documented subset of Docker-like
+> workflows under Android's sandbox, with direct execution and GPU bridge work
+> clearly marked experimental.
+
+Tester call:
+
+> Looking for careful Android testers for pdocker-android. Helpful reports
+> include device model, Android version, ABI, APK flavor, install route, project
+> workflow tried, logs, and whether behavior matches the known-limits docs.
+
+## News Copy
+
+pdocker-android now has a build-specific verification bundle for
+`20260505.1`, giving the project a clearer basis for public release discussion.
+The Android device smoke path has recorded passing evidence, while quality
+gates and host-backend checks still have known failures that should stay visible
+in release notes. The next public update should present this as an experimental
+compatibility snapshot, not as a stable general-purpose Docker replacement.
+
+## Release-Readiness Checklist
+
+Tie any public release announcement to `docs/test/build-20260505.1/README.md`.
+
+- [ ] Confirm the APK hashes in `docs/test/build-20260505.1/apk-sha256.txt`
+  match the exact artifacts being shared.
+- [ ] Keep `verify-heavy-android-full.log` as the current release-blocking
+  Android smoke evidence for build `20260505.1`.
+- [ ] Explain that `verify-fast.log`, `verify-scenarios.log`, and
+  `verify-test-design-criteria.log` currently fail at the documented literal
+  test-density quality gate.
+- [ ] Explain that `verify-heavy-backend-quick.log` and
+  `verify-heavy-backend-full.log` currently fail on the host-backend direct
+  executor expectation, not on the APK-bundled device route.
+- [ ] State that release APKs are unsigned unless an external signing process
+  has been completed and documented.
+- [ ] Link known limits from README, release notes, and any social/news post.
+- [ ] Avoid claiming upstream Docker, GPU, namespace, cgroup, overlayfs, bridge
+  networking, privileged-device, or BuildKit parity.
+- [ ] Collect at least one fresh device-test report before widening the
+  announcement beyond early testers.
+
+## Positioning Guardrails
+
+- Say "Docker-compatible" or "Docker-like workflow subset"; avoid "Docker for
+  Android" as a standalone claim.
+- Say "experimental APK" and "compatibility snapshot" for build `20260505.1`.
+- Say "GPU bridge experiments"; avoid implying NVIDIA Docker, CUDA parity, or
+  general GPU acceleration.
+- Keep public claims traceable to `docs/test/`, `docs/design/`, and
+  `docs/plan/`.

@@ -3139,19 +3139,6 @@ static int recv_command_with_fds(int cfd, char *cmd, size_t cmd_size, int *passe
     return (int)n;
 }
 
-static int recv_command_with_optional_fd(int cfd, char *cmd, size_t cmd_size, int *passed_fd) {
-    int fds[1] = { -1 };
-    size_t count = 0;
-    int rc = recv_command_with_fds(cfd, cmd, cmd_size, fds, 1, &count);
-    *passed_fd = count > 0 ? fds[0] : -1;
-    return rc;
-}
-
-static int run_vector_command_with_context(void) {
-    int rc = run_vector_add();
-    return rc;
-}
-
 static int serve_socket(const char *path) {
     if (!path || !path[0]) {
         fprintf(stderr, "pdocker-gpu-executor: missing socket path\n");
@@ -3218,7 +3205,7 @@ static int serve_socket(const char *path) {
             } else if (strcmp(cmd, "NOOP") == 0) {
                 print_noop();
             } else if (strcmp(cmd, "VECTOR_ADD") == 0) {
-                (void)run_vector_command_with_context();
+                (void)run_vector_add();
             } else if (strncmp(cmd, "VECTOR_ADD_FD ", 14) == 0) {
                 size_t n = (size_t)strtoull(cmd + 14, NULL, 10);
                 (void)run_vector_add_fd(passed_fds[0], n, GPU_API_AUTO);

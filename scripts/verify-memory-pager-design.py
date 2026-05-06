@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs/design/APK_MEMORY_PAGER.md"
+OOM_DOC = ROOT / "docs/design/RUNTIME_OOM_SURVIVAL.md"
 PROBE_DOC = ROOT / "docs/test/APK_MEMORY_PAGER_PROBE.md"
 DIRECT_EXEC = ROOT / "app/src/main/cpp/pdocker_direct_exec.c"
 ANDROID_SMOKE = ROOT / "scripts/android-device-smoke.sh"
@@ -25,10 +26,12 @@ def require(name: str, condition: bool) -> None:
 
 def main() -> int:
     text = DOC.read_text()
+    oom = OOM_DOC.read_text()
     probe = PROBE_DOC.read_text()
     direct = DIRECT_EXEC.read_text()
     smoke = ANDROID_SMOKE.read_text()
     flat = " ".join(text.split())
+    oom_flat = " ".join(oom.split())
     probe_flat = " ".join(probe.split())
     require("records that system swap is unavailable to non-root apk", "swapon" in text and "Operation not permitted" in flat and "adb root" in text)
     require("states normal page faults are not globally catchable", "Normal Linux page faults" in flat and "not delivered to user space" in flat)
@@ -37,7 +40,7 @@ def main() -> int:
     require("defines ptrace sigsegv fallback", "ptrace SIGSEGV Pager" in text and "PTRACE_GETSIGINFO" in text and "suppress delivery of `SIGSEGV`" in text)
     require("explains how fault address becomes backed", "virtual address must already belong to a reserved managed VMA" in flat and "mmap(PROT_NONE)" in text and "same virtual address" in text)
     require("keeps managed pager opt-in", "PDOCKER_MEMORY_PAGER=managed" in text and "opt-in" in text)
-    require("requires sdk28 compat probe gate before runtime feature", "SDK28 Compat Probe Gate" in text and "must not become a runtime feature on hope alone" in flat and "target SDK 28" in text)
+    require("requires sdk28 compat probe gate before runtime feature", "SDK28 Compat Probe Gate" in text and "probe gate has recorded" in flat and "must remain opt-in" in flat and "target SDK 28" in text)
     require("probe gate covers android-blockable syscalls", "PTRACE_GETSIGINFO" in text and "process_vm_writev" in text and "mprotect(PROT_READ|PROT_WRITE)" in text)
     require("direct executor exposes apk memory pager probe", "--pdocker-memory-pager-probe" in direct and "pager-probe:ptrace_path" in direct)
     require("direct executor exposes apk memory pager poc", "--pdocker-memory-pager-poc" in direct and "resumed_fault_instruction" in direct)
@@ -52,6 +55,10 @@ def main() -> int:
     require("defines gpu bridge virtual memory as a separate contract", "GPU Bridge Virtual Memory Contract" in text and "PDOCKER_GPU_VIRTUAL_MEMORY=guarded" in text and "VULKAN_DISPATCH_V2" in text)
     require("gpu bridge contract keeps gguf mmap file-backed", "llama.cpp reads GGUF model files with mmap by default" in text and "must not copy or page the whole 5 GB model" in text)
     require("gpu bridge contract tracks dirty spans before v3 dispatch", "dirty-span metadata" in flat and "Pin all pages referenced by an in-flight GPU command" in text)
+    require("runtime oom survival records android no-prekill reality", "Android LMK" in oom and "no reliable" in oom_flat and "last-second cleanup" in oom)
+    require("runtime oom survival defines large workload mode", "Large Workload Mode" in oom and "io.pdocker.large-workload=enabled" in oom and "managed-anonymous" in oom)
+    require("runtime oom survival keeps fail-safe and run-large paths separate", "default memory guard" in oom_flat and "not the same" in oom_flat and "make it run even when it is too big" in oom_flat)
+    require("runtime oom survival requires persisted telemetry evidence", "Memory Telemetry Ring" in oom and "last large allocation request" in oom and "owned by pdockerd" in oom)
     return 0
 
 

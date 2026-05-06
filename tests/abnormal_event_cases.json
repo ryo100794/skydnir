@@ -108,8 +108,24 @@
       "expected_exit_code": null,
       "evidence_source": "docs/test/direct-runtime-stress-latest.json",
       "reproduction_command": "bash scripts/container-direct-probe.sh --memory-guard",
+      "gap_reason": "The direct memory-guard contract is covered by fast static/unit tests; a runnable container probe still needs a prepared rootfs artifact before this abnormal replay can be mandatory.",
       "retention": "Keep long-run artifacts outside the fast lane and attach them to the build set.",
       "gap_reason": "The heavy container memory-guard probe is designed but not safe for every host-only fast run."
+    },
+    {
+      "id": "abnormal.runtime.oom-or-lmk-down",
+      "category": "runtime",
+      "severity": "blocker",
+      "surface": "direct-runtime",
+      "status": "planned-gap",
+      "trigger": "Android kills a running build, container, or daemon process during low-memory pressure",
+      "expected_signal": "pdocker records the last memory telemetry sample, classifies the operation as interrupted-or-lmk-suspected, and avoids stale Up/running UI state",
+      "failure_oracle": "The OOM survival replay must fail if the operation disappears without evidence, leaves stale running state, or loses the container/operation identity.",
+      "expected_exit_code": null,
+      "evidence_source": "docs/test/runtime-oom-survival-latest.json",
+      "reproduction_command": "bash scripts/android-container-direct-probe.sh --memory-guard --large-mb 512",
+      "retention": "Keep device artifacts for release-candidate test sets and attach the operation memory ring.",
+      "gap_reason": "The telemetry ring and LMK replay classifier are designed but not implemented as an executable device test yet."
     },
     {
       "id": "abnormal.ui.readonly-terminal-keyboard",

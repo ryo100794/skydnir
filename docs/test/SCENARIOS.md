@@ -14,6 +14,7 @@ python3 scripts/verify-input-grammar-coverage.py
 python3 scripts/verify-input-validation.py
 python3 scripts/verify-stress-regression.py
 python3 scripts/verify-blackbox-requirements.py
+python3 scripts/verify-refactor-resilience.py
 ```
 
 Run the combined automated flow with:
@@ -73,6 +74,7 @@ evidence exists:
 | llama runtime | `llama.cpu.bench`, `llama.gpu.compare` |
 | Media bridge | `media.bridge.contract` |
 | Memory pager | `memory.pager.design-probe` |
+| Runtime OOM survival | `runtime.oom-survival-large-workload` |
 | Network metadata | `network.metadata.hostlike` |
 | Project library | `project.library.templates` |
 | Random/stress regression | `random.stress.regression-process` |
@@ -224,6 +226,9 @@ test process:
 - Every monkey, stress, benchmark, or variance run must produce a
   machine-readable artifact tied to the build set: git commit, build flavor,
   timestamp, command, seed when applicable, case fingerprint, and summary.
+- Runtime OOM survival stress must distinguish safe early `ENOMEM`, opt-in
+  Large Workload Mode behavior, and Android LMK/down classification instead of
+  treating all exits as the same failure.
 - Repeated runs compare stable summaries. A drift in status vectors, health
   states, or benchmark envelopes must fail, warn, or create a recorded blocker
   instead of being lost in console output.

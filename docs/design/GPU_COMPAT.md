@@ -130,6 +130,9 @@ backend choices such as GLES compute, Vulkan, OpenCL, NNAPI, or vendor-specific
 driver details belong below that ABI and must be absorbed by the APK-owned
 executor layer. Container code should not branch on phone model or vendor GPU
 library paths.
+The container-side and APK-side copies of `pdocker_gpu_abi.h` intentionally
+carry the same `PDOCKER_GPU_*` defines; `tests/test_gpu_abi_contract.py` guards
+that contract until the ABI header is moved to a single generated source.
 The first scaffold now has two binaries:
 
 - `pdocker-gpu-shim`: Linux/glibc container-facing probe, injected as

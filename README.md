@@ -5,13 +5,14 @@
 pdocker-android turns an Android device into a portable container workspace:
 pull images, inspect root filesystems, edit Dockerfiles and Compose projects,
 watch build logs, open `-it`-style terminals, browse container files, and run
-development templates such as VS Code Server and llama.cpp from a normal app UI.
+developer templates such as VS Code Server and llama.cpp from a normal app UI.
 
 This is not "Docker Desktop for Android" and it does not pretend Android gives
-apps Linux host privileges. Instead, pdocker builds a practical Docker-like
+apps Linux host privileges. Instead, pdocker builds a practical Docker-shaped
 surface inside the app sandbox: a Docker Engine-compatible daemon, native
-Compose/Dockerfile controls, a direct Android executor, userspace storage, and
-explicit Android extensions for GPU, media, networking, and self-debugging.
+Compose/Dockerfile controls, a no-PRoot Android direct executor, userspace
+storage, and explicit Android extensions for GPU, media, networking, and
+self-debugging.
 
 If you are interested in mobile development workstations, container runtime
 internals, Android sandbox limits, or running real developer environments from
@@ -34,6 +35,31 @@ a phone or tablet, this repository is the experiment.
   Blender/noVNC experiments.
 - **Measure the hard parts**: GPU bridge, syscall mediation, storage reuse,
   runtime overhead, and Docker API parity are tracked with repeatable tests.
+
+## Current Evidence Snapshot
+
+The current fixed verification record is
+[`docs/test/build-20260505.1/README.md`](docs/test/build-20260505.1/README.md):
+
+- Build `20260505.1` is committed at `dd3ce31` (`Record fixed build
+  20260505.1 verification`).
+- Build `20260505.1` records compat and modern debug APK builds plus unsigned
+  release APK builds as `PASS`.
+- The Android full smoke route passed device Dockerfile build, Compose
+  up/down, `docker exec`, and Engine API `exec -it`.
+- The Android quick route passed install, `docker version`, direct runtime
+  probe, and memory-pager probes.
+- `verify-fast`, scenario, and test-design gates currently fail on the
+  intentional literal test-density threshold, not on APK packaging.
+- Host backend quick/full regressions currently fail because the host route
+  expects a staged `pdocker-direct` helper; the Android APK direct route is the
+  release-blocking evidence for this build.
+
+The generated compatibility audit records `69` PASS and `0` FAIL entries, and
+APK payload checks confirm the product APK omits upstream Docker CLI/Compose,
+PRoot, proot-loader, and talloc. The open blockers for calling a broader
+release green are the host backend regression lane and the literal
+test-density gate.
 
 ## Why It Is Different
 
@@ -58,10 +84,10 @@ pdocker treats that as the design challenge rather than hiding it.
 | APK shell | Native Android UI, foreground daemon, boot/package-replaced restart, notification resident mode |
 | Engine API | Docker Engine API-compatible metadata, image, container, build, logs, and lifecycle endpoints |
 | Compose up | In-app orchestrator path, persistent job UI, streaming logs, build progress, retry/stop actions; no product Docker CLI dependency |
-| Direct execution | SDK28 compat executor under active development; syscall mediation and performance profiling are tracked |
+| Direct execution | SDK28 compat executor under active development; no PRoot in the default APK; syscall mediation and performance profiling are tracked |
 | Filesystems | Image rootfs browser, container lower/upper merged view, editable writable layers, build prune |
 | TTY/editor UX | xterm.js terminal tabs, compact readonly log terminals, Japanese-friendly input, selection/copy controls, in-app editor |
-| GPU/media | Vulkan/OpenCL bridge experiments, llama.cpp GPU comparison workflow, Camera2/AudioRecord/AudioTrack media proxy scaffold |
+| GPU/media | Vulkan/OpenCL bridge experiments, llama.cpp GPU comparison workflow, Camera2/AudioRecord/AudioTrack media proxy scaffold; not Docker GPU parity |
 | Networking | Host-port style metadata and browser actions; bridge/IP parity is intentionally scoped as limited |
 | Licensing | External payloads are audited; PRoot/talloc/proot-loader are not part of the default product APK |
 
@@ -87,11 +113,13 @@ The most useful current workflows are:
 
 The most important current limits are also explicit:
 
-- Android direct execution is still being hardened for broader image coverage.
+- Android direct execution is still being hardened for broader image coverage;
+  current claims are device-tested snapshots, not universal Android guarantees.
 - Docker bridge networking is represented as metadata plus host-port behavior,
   not a real Linux bridge namespace.
 - GPU acceleration is under active bridge work; llama.cpp reaches Vulkan
-  offload paths, but generic SPIR-V dispatch is still the current blocker.
+  offload paths and host/container bridge probes have artifacts, but current
+  llama.cpp runs still report incomplete layer offload.
 - Media devices are exposed through an Android API proxy contract, not raw
   `/dev/video*` or `/dev/snd/*` passthrough.
 
@@ -123,7 +151,7 @@ userspace components:
 | overlayfs snapshotter | content-addressed layer pool plus per-container upper data |
 | runc namespaces/cgroups | Android direct userspace executor and syscall mediation |
 | BuildKit | legacy-compatible builder path in pdockerd |
-| Docker CLI UX | native app actions, persistent job cards, and test-staged CLI only |
+| Docker CLI UX | native app actions, persistent job cards, and test-staged CLI only; upstream Docker CLI/Compose are not APK payloads |
 
 The runtime strategy and Android feasibility notes live in
 [`docs/design/RUNTIME_STRATEGY.md`](docs/design/RUNTIME_STRATEGY.md) and

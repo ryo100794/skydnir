@@ -66,13 +66,13 @@ pdocker Vulkan ICD beyond output-layer-only offload. Raise
 
 The image build pins `LLAMA_CPP_REF` to `b9030` and records the resolved commit
 inside `/opt/llama.cpp/.pdocker-llama-cpp-commit`. It defaults CMake to
-`MinSizeRel` and one build job. This is slower than a desktop-style `Release`
-build, but avoids Android LMK/OOM failures while the direct executor and Vulkan
-bridge are still being tuned. Raise `LLAMA_CPP_BUILD_JOBS` or set
-`LLAMA_CPP_BUILD_TYPE=Release` only when the device has enough free memory and
-swap for shader or Vulkan backend compilation. pdocker may apply an Android
-build-executor profile outside the Dockerfile to keep upstream Dockerfiles
-unchanged while reducing peak memory pressure on device.
+`Release` and one build job. The single job is intentionally slow, but it keeps
+the build inside the generic pdocker execution path without llama.cpp source
+patches or shader-compiler wrappers. Raise `LLAMA_CPP_BUILD_JOBS` only when the
+device has enough free memory and swap for shader or Vulkan backend
+compilation. pdocker may apply generic Android build-executor memory telemetry
+and guardrails outside the Dockerfile, but it must not rewrite the build tools
+by default.
 
 The GPU profile action writes:
 

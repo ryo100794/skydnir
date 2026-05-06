@@ -1,6 +1,6 @@
 # GitHub Promotion Kit
 
-Snapshot date: 2026-05-04.
+Snapshot date: 2026-05-05.
 
 ## Purpose
 
@@ -34,6 +34,31 @@ Engine-compatible daemon, Compose/Dockerfile workspace UI, image/container file
 browser, persistent build logs, and interactive terminal/editor tools inside a
 normal APK.
 
+## Current Showcase Facts
+
+Use these facts for the README, GitHub repository description, pinned issues,
+release notes, and demo captions until a newer verification record replaces
+[`../test/build-20260505.1/README.md`](../test/build-20260505.1/README.md):
+
+- Build `20260505.1` has PASS records for compat/modern debug APKs and
+  unsigned compat/modern release APKs. The verification commit is `dd3ce31`.
+- Android full smoke passed device Dockerfile build, Compose up/down,
+  `docker exec`, and Engine API `exec -it`.
+- Android quick smoke passed install, `docker version`, direct runtime probe,
+  and memory-pager probes.
+- `verify-fast`, scenario, and test-design logs currently fail at the
+  intentional literal test-density gate.
+- Host backend quick/full logs currently fail because the repository host path
+  expects a staged `pdocker-direct` helper; do not describe that lane as green.
+- The literal test-density gate is still open; describe it as an explicit
+  quality/process blocker, not as an APK smoke failure.
+- The compatibility audit records 69 PASS / 0 FAIL static and packaging checks,
+  including APK payload checks that omit upstream Docker CLI/Compose, PRoot,
+  proot-loader, and talloc.
+- GPU bridge evidence includes host-native and host/container Vulkan probe
+  artifacts, but the llama.cpp showcase must still call out the current blocker:
+  llama.cpp served while only the output layer was offloaded.
+
 ## One-Minute Pitch
 
 Docker was built for Linux hosts with namespaces, cgroups, overlayfs, and
@@ -58,6 +83,9 @@ highlight, or demo caption:
 - The app provides a native Compose/Dockerfile workspace UI, pdockerd Engine
   API compatibility for the supported subset, image/container browsing,
   persistent jobs/logs, editor tabs, and PTY-backed terminal sessions.
+- The product APK does not bundle upstream Docker CLI or Docker Compose; those
+  tools are compatibility-test aids only when staged separately.
+- The default product APK does not use PRoot, proot-loader, or talloc.
 - Project templates target practical developer workflows such as VS Code
   Server, Continue, Codex, Claude Code, and llama.cpp workspaces.
 - The direct Android executor and syscall/path mediation are active in-tree
@@ -138,7 +166,8 @@ Keep release notes scannable by grouping changes into these categories:
 - **User workflow**: UI, Compose controls, Dockerfile editing, file browser,
   terminals, service URLs, storage controls.
 - **Docker compatibility**: Engine endpoints, Docker CLI behavior, Compose
-  behavior, archive/copy behavior, inspect metadata, warnings.
+  behavior when test tools are staged separately, archive/copy behavior,
+  inspect metadata, warnings.
 - **Runtime/executor**: direct execution, TTY attach, signals, process cleanup,
   path mediation, Android SDK route.
 - **Templates**: VS Code Server, Continue, Codex, Claude Code, llama.cpp, and
@@ -199,6 +228,14 @@ no namespaces, no cgroups, no overlayfs, no bridge network. pdocker-android
 turns that constraint into an APK with Compose controls, image/container file
 browsing, persistent logs, editor tabs, terminals, and VS Code Server
 templates.
+
+### Evidence post
+
+Latest fixed record: pdocker-android build 20260505.1 passes APK build outputs
+and the Android full smoke route for Dockerfile build, Compose up/down,
+`docker exec`, and Engine API `exec -it`. The honest caveat: fast/design gates
+still fail on the current literal test-density threshold, and host backend
+regression needs its `pdocker-direct` helper lane split or staged.
 
 ### Tester call
 

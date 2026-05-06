@@ -123,7 +123,7 @@ def main() -> int:
     require("existing compose files migrate documents mounts", "migrateComposeDocuments" in main_src and "PDOCKER_SHARED_DOCUMENTS_HOST" in main_src and "PDOCKER_MODEL_HOST:-./models" in main_src)
     require("installed project compose files migrate on startup", "migrateInstalledProjects()" in main_src and "override fun onResume()" in main_src and "projectDirs().forEach" in main_src and "migrateProjectPorts(project)" in main_src)
     require("llama template migration removes stale shader wrapper tuning", "migrateLlamaCppGpuWorkspace(project)" in main_src and "LLAMA_CPP_VULKAN_SHADER_PROFILE" in main_src and "pdocker-bridge-safe-glslc" in main_src and "git checkout --detach FETCH_HEAD" in main_src and ".pdocker-template-backups/llama-cpp-gpu-" in main_src)
-    require("device llama template verifier catches app-data update drift", "LLAMA_CPP_VULKAN_SHADER_PROFILE" in device_llama_template_src and "git checkout --detach FETCH_HEAD" in device_llama_template_src and "LLAMA_CPP_BUILD_JOBS:-1" in device_llama_template_src)
+    require("device llama template verifier catches app-data update drift", "LLAMA_CPP_VULKAN_SHADER_PROFILE" in device_llama_template_src and "git checkout --detach FETCH_HEAD" in device_llama_template_src and "LLAMA_CPP_BUILD_JOBS:-1" in device_llama_template_src and "LLAMA_CPP_BUILD_TYPE:-Release" in device_llama_template_src)
     require("documents volume requests legacy storage permission when useful", "READ_EXTERNAL_STORAGE" in manifest_src and "WRITE_EXTERNAL_STORAGE" in manifest_src and "REQUEST_EXTERNAL_STORAGE" in main_src)
     require("compose parser expands project env for documents volume", "composeEnvironment(dir)" in main_src and "File(projectDir, \".env\")" in main_src and "File(projectRoot, \".pdocker-common.env\")" in main_src and "composeValue(value, composeEnv)" in main_src)
     require("legacy docker-compose normalizer remains test-only", "normalizeDockerCommand" in main_src and "docker-compose" in main_src and "docker compose" in main_src)
@@ -182,6 +182,10 @@ def main() -> int:
     require("engine stream keeps terminal control characters", "decoded.split('\\n')" in engine_src and "decoded.replace(\"\\r\", \"\")" not in engine_src)
     require("engine progress clears terminal line", '"\\r\\u001B[2K$progressLine\\r"' in engine_src)
     require("dockerfile RUN streams output before process exit", "subprocess.Popen" in pdockerd_src and "read1" in pdockerd_src and "emit(chunk.decode" in pdockerd_src)
+    require("docker build context streams to temp file", "_read_body_to_temp" in pdockerd_src and "pdbuildctx_" in pdockerd_src and "tarfile.open(context_tar_path" in pdockerd_src and "BytesIO(context_tar)" not in pdockerd_src)
+    require("large engine request bodies stream to temp files", "pdloadbody_" in pdockerd_src and "open(body_path, \"rb\")" in pdockerd_src and "pdarchiveput_" in pdockerd_src and "tarfile.open(body_path" in pdockerd_src and "BytesIO(body)" not in pdockerd_src)
+    require("docker save response spools to temp file", "pdsavebody_" in pdockerd_src and "save_images(names, out)" in pdockerd_src and "os.path.getsize(save_path)" in pdockerd_src and "inp.read(1024 * 1024)" in pdockerd_src and "buf.getvalue()" not in pdockerd_src)
+    require("pdockerd records python memory telemetry", "PYTHON_MEMORY_DIAGNOSTICS_PATH" in pdockerd_src and "_route_with_memory_trace" in pdockerd_src and "_self_python_memory_snapshot" in pdockerd_src and "gc.get_count()" in pdockerd_src and "PDOCKER_PYTHON_MEMORY_MIN_DELTA_KB" in pdockerd_src and "/system/python-memory" in pdockerd_src)
     require("build prune deletes unreferenced layers", "prune_unreferenced_layers" in pdockerd_src and "referenced_layer_ids" in pdockerd_src and '"LayersDeleted"' in pdockerd_src)
     require("android rebuilds prune stale layers automatically", "PDOCKER_AUTO_PRUNE_UNREFERENCED_LAYERS" in pdockerd_bridge_src and "prune-unreferenced-layers" in pdockerd_src)
     require("build rootfs prune skips active builds and runs on daemon startup", "PDOCKER_AUTO_PRUNE_BUILD_ARTIFACTS" in pdockerd_bridge_src and "def _path_referenced_by_process" in pdockerd_src and "build prune skipped active" in pdockerd_src and "auto-pruned stale build artifacts" in pdockerd_src)
@@ -197,7 +201,7 @@ def main() -> int:
     require("engine exec pipe fallback maps terminal enter", "_pdocker_pipe_tty_fallback" in pdockerd_src and 'replace(b"\\r", b"\\n")' in pdockerd_src)
     require("direct executor getcwd reads tracee cwd", '"/proc/%d/cwd"' in direct_src and "readlink(proc_cwd" in direct_src)
     require("direct executor resolves initial argv from rootfs path", "resolve_guest_program(rootfs, cmd0, target" in direct_src and 'getenv("PATH")' not in direct_src)
-    require("direct executor preserves shell and bracket argv rewrite", "guest_exec_path" in direct_src and "copied_arg_ptrs" in direct_src and "old_argv0" in direct_src and "pdocker-bracket-ok" in android_smoke_src and '/usr/bin/[ \\"x\\" = \\"x\\" ]' in android_smoke_src)
+    require("direct executor preserves shell bracket and long argv rewrite", "guest_exec_path" in direct_src and "copied_arg_ptrs" in direct_src and "old_argv0" in direct_src and "ExecArgArena copied_arg_arena" in direct_src and "read_tracee_string_to_arena" in direct_src and "char (*copied_arg_values)[PATH_MAX]" not in direct_src and "pdocker-bracket-ok" in android_smoke_src and "pdocker-long-argv-ok" in android_smoke_src and "flash_attn.comp.cpp.o" in android_smoke_src and '/usr/bin/[ \\"x\\" = \\"x\\" ]' in android_smoke_src)
     require("engine api jobs are persisted", "runEngineJob" in main_src and "appendEngineJobOutput" in main_src and "finishEngineJob" in main_src)
     require("engine api jobs open fresh result tabs", 'val key = "engine-job:$jobId:$group:$title"' in main_src and 'val jobId = "job-" + System.currentTimeMillis().toString(36)' in main_src)
     require("engine api jobs refresh container truth after completion", "refreshContainerSnapshotAsync(force = true)" in main_src.split("private fun runEngineJob", 1)[1].split("private fun summarizeEngineFailure", 1)[0])
@@ -206,9 +210,13 @@ def main() -> int:
     require("main activity restarts missing daemon", "ensureDaemonStarted" in main_src and "lastDaemonStartAttemptAt" in main_src and "pdockerd.sock" in main_src)
     service_src = (ROOT / "app/src/main/kotlin/io/github/ryo100794/pdocker/PdockerdService.kt").read_text()
     require("pdockerd service strongly restarts unless user stopped", "START_STICKY" in service_src and "onTaskRemoved" in service_src and "setExactAndAllowWhileIdle" in service_src and "holdStartWakeLock" in service_src and "if (!stopFlag && !userStopped)" in service_src)
+    require("ui binds pdockerd as important during foreground builds", "LocalBinder : Binder" in service_src and "override fun onBind(intent: Intent?): IBinder = binder" in service_src and "ServiceConnection" in main_src and "BIND_IMPORTANT" in main_src and "bindPdockerdService()" in main_src)
     require("pdockerd service is isolated from ui crashes", 'android:process=":pdockerd"' in manifest_src)
     require("background daemon receivers avoid waking ui process", 'android:name=".PdockerdBootReceiver"' in manifest_src and 'android:name=".PdockerdDebugReceiver"' in manifest_src and manifest_src.count('android:process=":pdockerd"') >= 3)
-    service_on_create = service_src.split("override fun onCreate()", 1)[1].split("override fun onStartCommand", 1)[0]
+    if "override fun onCreate()" in service_src:
+        service_on_create = service_src.split("override fun onCreate()", 1)[1].split("override fun onStartCommand", 1)[0]
+    else:
+        service_on_create = ""
     service_start = service_src.split("private fun startPdockerd()", 1)[1].split("private fun startGpuExecutor", 1)[0]
     require("pdockerd service keeps heavy startup off lifecycle main thread", "Python.start" not in service_on_create and "PdockerdRuntime.prepare" not in service_on_create and "Thread({" in service_start and "PdockerdRuntime.prepare(appContext)" in service_start and "Python.start(AndroidPlatform(appContext))" in service_start)
     require("debug broadcast probes are bounded", "waitFor(10, TimeUnit.SECONDS)" in debug_receiver_src and "destroyForcibly()" in debug_receiver_src and "firstRootfs" in debug_receiver_src and "visited < 512" in debug_receiver_src)
@@ -219,7 +227,7 @@ def main() -> int:
     require("docker jobs expose retry actions", "action_retry_job_fmt" in main_src and "retryDockerJob(job)" in main_src)
     require("engine job retry stays on engine api route", "private fun retryDockerJob" in main_src and "runComposeUp(dir, job.title)" in main_src and "runImageBuild(dir, job.title)" in main_src)
     require("docker jobs expose stop and log actions", "stopDockerJob(job.id)" in main_src and "openJobLog(job)" in main_src)
-    require("docker jobs recover after missing terminal", "markInterruptedJob" in main_src and "else openJobLog(job)" in main_src and "job_status_interrupted_fmt" in string_src)
+    require("docker jobs recover after missing terminal", "UI was restarted; reconnecting to daemon operation" in main_src and "else openJobLog(job)" in main_src and "job_status_interrupted_fmt" in string_src and "markInterruptedJob" not in main_src)
     require("overview surfaces deduplicated storage metrics", "renderStorageMetrics" in main_src and "StorageMetrics" in main_src and "diskUsage(pdockerHome)" in main_src and "containerPrivateBytes" in main_src and "Os.lstat" in main_src and "storage_total_fmt" in string_src)
     require("overview surfaces daemon active operations", "renderDaemonOperations" in main_src and "/system/operations" in main_src and "DaemonOperation" in main_src and "section_daemon_operations" in string_src)
     require("daemon operations can open job logs", "daemonOperationJob" in main_src and "openJobLog(job)" in main_src and "action_open_job_log_fmt" in main_src)
@@ -317,7 +325,7 @@ def main() -> int:
     require("project dashboard summarizes compose/dockerfile/files", "renderProjectDashboard" in main_src and "private data class ProjectSummary" in main_src and "section_project_dashboard" in string_src)
     require("project dashboard opens primary files and actions", "openProjectPrimaryFile" in main_src and "action_open_project_compose_fmt" in string_src and "action_open_project_dockerfile_fmt" in string_src)
     require("project dashboard tracks services jobs containers", "projectContainerStatusSummary" in main_src and "projectJobSummary" in main_src and "parseComposeServices" in main_src)
-    require("project dashboard exposes compose-declared service URLs", "projectServiceUrls" in main_src and "composeServiceUrls" in main_src and "composeHostPort" in main_src and "project_dashboard_urls_fmt" in string_src)
+    require("project dashboard exposes compose-declared service URLs", "projectServiceUrls" in main_src and "composeServiceUrls" in main_src and "composePortBinding" in main_src and "project_dashboard_urls_fmt" in string_src)
     require("project dashboard probes service health", "projectServiceHealthSummary" in main_src and "scheduleServiceHealthProbe" in main_src and "HttpURLConnection" in main_src and "project_dashboard_service_health_fmt" in string_src)
     require("project dashboard surfaces compose dependencies", "dependsOn" in main_src and "projectDependencySummary" in main_src and "project_dashboard_dependencies_fmt" in string_src)
     require("project dashboard surfaces compose healthchecks", "hasHealthcheck" in main_src and "projectHealthSummary" in main_src and "project_dashboard_health_fmt" in string_src)
