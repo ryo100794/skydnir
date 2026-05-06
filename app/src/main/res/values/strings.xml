@@ -195,8 +195,15 @@
     <string name="message_no_pulled_images">No pulled images yet.</string>
     <string name="detail_image_rootfs">Image rootfs</string>
     <string name="section_image_references">Image references</string>
-    <string name="image_reference_legend">green=[image/base] orange=[cache/shared layer] blue=[compose/container reference]</string>
+    <string name="image_reference_legend_image">image/base</string>
+    <string name="image_reference_legend_cache">cache/shared layer</string>
+    <string name="image_reference_legend_reference">compose/container reference</string>
     <string name="image_storage_detail_fmt">view %1$s / unique image %2$s / shared cache %3$s</string>
+    <string name="image_reference_image_detail_fmt">view %1$s / unique image %2$s / %3$d layers</string>
+    <string name="image_reference_cache_node">Shared layer cache</string>
+    <string name="image_reference_cache_detail_fmt">shared %1$s / total layer bytes %2$s / %3$d layers</string>
+    <string name="image_reference_compose_detail">compose service uses this image</string>
+    <string name="image_reference_container_detail">container was created from this image</string>
     <string name="summary_rootfs_fmt">%1$d top-level entries</string>
 
     <string name="section_containers">Containers</string>

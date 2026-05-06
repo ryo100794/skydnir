@@ -9,6 +9,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.net.Uri
@@ -119,9 +120,23 @@ class MainActivity : AppCompatActivity() {
         val totalLayerBytes: Long,
     )
 
-    private data class ColoredLine(
-        val text: String,
+    private enum class ImageGraphKind(
+        val label: String,
         val color: Int,
+    ) {
+        Image("image", 0xff66bb6a.toInt()),
+        Cache("cache", 0xffffb74d.toInt()),
+        Compose("compose", 0xff42a5f5.toInt()),
+        Container("container", 0xff42a5f5.toInt()),
+    }
+
+    private data class ImageReferenceGraphRow(
+        val depth: Int,
+        val ancestorLast: List<Boolean>,
+        val isLast: Boolean,
+        val title: String,
+        val detail: String,
+        val kind: ImageGraphKind,
     )
 
     private data class DockerJob(
@@ -4250,7 +4265,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun addColoredTextBlock(title: String, lines: List<ColoredLine>) {
+    private fun addImageReferenceGraph(title: String, rows: List<ImageReferenceGraphRow>) {
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(18, 18, 18, 18)
@@ -4261,19 +4276,121 @@ class MainActivity : AppCompatActivity() {
                 setSingleLine(true)
                 ellipsize = TextUtils.TruncateAt.END
             })
-            lines.forEach { line ->
-                addView(TextView(this@MainActivity).apply {
-                    text = line.text
-                    textSize = 11f
-                    typeface = Typeface.MONOSPACE
-                    setTextColor(line.color)
-                    setSingleLine(false)
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 8, 0, 12)
+                addImageGraphLegend(this, ImageGraphKind.Image, getString(R.string.image_reference_legend_image))
+                addImageGraphLegend(this, ImageGraphKind.Cache, getString(R.string.image_reference_legend_cache))
+                addImageGraphLegend(this, ImageGraphKind.Compose, getString(R.string.image_reference_legend_reference))
+            })
+            addView(HorizontalScrollView(this@MainActivity).apply {
+                isFillViewport = false
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    rows.forEach { row -> addImageGraphRow(this, row) }
                 })
-            }
+            })
             content.addView(this)
             addDivider()
         }
     }
+
+    private fun addImageGraphLegend(parent: LinearLayout, kind: ImageGraphKind, text: String) {
+        parent.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, dp(14), 0)
+            addView(View(this@MainActivity).apply {
+                background = solidRoundDrawable(kind.color)
+            }, LinearLayout.LayoutParams(dp(10), dp(10)))
+            addView(TextView(this@MainActivity).apply {
+                this.text = text
+                textSize = 11f
+                alpha = 0.78f
+                setPadding(dp(4), 0, 0, 0)
+            })
+        })
+    }
+
+    private fun addImageGraphRow(parent: LinearLayout, row: ImageReferenceGraphRow) {
+        parent.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(36)
+            setPadding(0, 2, 0, 2)
+            row.ancestorLast.forEach { ancestorIsLast ->
+                addImageGraphGuideCell(this, active = !ancestorIsLast)
+            }
+            addImageGraphBranchCell(this, isLast = row.isLast)
+            addView(TextView(this@MainActivity).apply {
+                text = row.kind.label
+                textSize = 10f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(row.kind.color)
+                setPadding(dp(7), dp(3), dp(7), dp(3))
+                background = tintedRoundDrawable(row.kind.color)
+            })
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(8), 0, 0, 0)
+                addView(TextView(this@MainActivity).apply {
+                    text = row.title
+                    textSize = 13f
+                    typeface = if (row.kind == ImageGraphKind.Image) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                    setSingleLine(true)
+                    ellipsize = TextUtils.TruncateAt.END
+                })
+                if (row.detail.isNotBlank()) {
+                    addView(TextView(this@MainActivity).apply {
+                        text = row.detail
+                        textSize = 11f
+                        alpha = 0.72f
+                        setSingleLine(true)
+                        ellipsize = TextUtils.TruncateAt.MIDDLE
+                    })
+                }
+            }, LinearLayout.LayoutParams(dp(360), LinearLayout.LayoutParams.WRAP_CONTENT))
+        })
+    }
+
+    private fun addImageGraphGuideCell(parent: LinearLayout, active: Boolean) {
+        parent.addView(FrameLayout(this).apply {
+            if (active) {
+                addView(View(this@MainActivity).apply {
+                    setBackgroundColor(0x66888888)
+                }, FrameLayout.LayoutParams(dp(2), FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER_HORIZONTAL))
+            }
+        }, LinearLayout.LayoutParams(dp(18), dp(36)))
+    }
+
+    private fun addImageGraphBranchCell(parent: LinearLayout, isLast: Boolean) {
+        parent.addView(FrameLayout(this).apply {
+            addView(View(this@MainActivity).apply {
+                setBackgroundColor(0x66888888)
+            }, FrameLayout.LayoutParams(dp(2), if (isLast) dp(18) else FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER_HORIZONTAL or Gravity.TOP))
+            addView(View(this@MainActivity).apply {
+                setBackgroundColor(0x66888888)
+            }, FrameLayout.LayoutParams(dp(18), dp(2), Gravity.CENTER_VERTICAL or Gravity.RIGHT))
+        }, LinearLayout.LayoutParams(dp(24), dp(36)))
+    }
+
+    private fun tintedRoundDrawable(color: Int): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(6).toFloat()
+            setColor((color and 0x00ffffff) or 0x22000000)
+            setStroke(dp(1), color)
+        }
+
+    private fun solidRoundDrawable(color: Int): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(3).toFloat()
+            setColor(color)
+        }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt().coerceAtLeast(1)
 
     private fun addMessage(text: String) {
         content.addView(TextView(this).apply {
@@ -4339,7 +4456,7 @@ class MainActivity : AppCompatActivity() {
                 ref = ref,
                 displayRef = displayImageRef(ref),
                 diffIds = diffIds,
-                viewBytes = diskUsage(File(image, "rootfs")).bytes,
+                viewBytes = uniqueLayerBytes + sharedLayerBytes,
                 uniqueLayerBytes = uniqueLayerBytes,
                 sharedLayerBytes = sharedLayerBytes,
                 totalLayerBytes = uniqueLayerBytes + sharedLayerBytes,
@@ -4370,19 +4487,19 @@ class MainActivity : AppCompatActivity() {
         val roots = images
             .filter { it.ref !in parentByRef }
             .sortedWith(compareBy<ImageReferenceInfo> { it.displayRef }.thenBy { it.ref })
-        val lines = mutableListOf<ColoredLine>()
-        lines += ColoredLine(getString(R.string.image_reference_legend), 0xff888888.toInt())
+        val rows = mutableListOf<ImageReferenceGraphRow>()
         roots.forEachIndexed { index, image ->
-            appendImageReferenceTreeLines(
+            appendImageReferenceGraphRows(
                 image = image,
                 childrenByRef = childrenByRef,
-                prefix = "",
+                depth = 0,
+                ancestorLast = emptyList(),
                 isLast = index == roots.lastIndex,
-                lines = lines,
+                rows = rows,
             )
         }
         addSection(getString(R.string.section_image_references))
-        addColoredTextBlock(getString(R.string.section_image_references), lines.take(96))
+        addImageReferenceGraph(getString(R.string.section_image_references), rows.take(128))
     }
 
     private fun imageParentMap(images: List<ImageReferenceInfo>): Map<String, String> {
@@ -4401,54 +4518,83 @@ class MainActivity : AppCompatActivity() {
         return parents
     }
 
-    private fun appendImageReferenceTreeLines(
+    private fun appendImageReferenceGraphRows(
         image: ImageReferenceInfo,
         childrenByRef: Map<String, List<ImageReferenceInfo>>,
-        prefix: String,
+        depth: Int,
+        ancestorLast: List<Boolean>,
         isLast: Boolean,
-        lines: MutableList<ColoredLine>,
+        rows: MutableList<ImageReferenceGraphRow>,
     ) {
-        val branch = if (prefix.isEmpty()) "" else if (isLast) "`- " else "|- "
-        val marker = if (image.uniqueLayerBytes > 0L) "[image]" else "[base]"
-        lines += ColoredLine(
-            prefix + branch + marker + " " + image.displayRef +
-                "  view=${formatBytes(image.viewBytes)} unique=${formatBytes(image.uniqueLayerBytes)}",
-            0xff66bb6a.toInt(),
-        )
-        val detailPrefix = prefix + if (prefix.isEmpty()) {
-            "   "
-        } else if (isLast) {
-            "   "
-        } else {
-            "|  "
-        }
-        lines += ColoredLine(
-            detailPrefix +
-                "[cache] shared=${formatBytes(image.sharedLayerBytes)} total-layers=${formatBytes(image.totalLayerBytes)} layers=${image.diffIds.size}",
-            0xffffb74d.toInt(),
-        )
-        imageProjectRefs(image.ref).forEach { ref ->
-            lines += ColoredLine(
-                detailPrefix + "[compose] $ref",
-                0xff42a5f5.toInt(),
-            )
-        }
-        imageContainerRefs(image.ref).forEach { ref ->
-            lines += ColoredLine(
-                detailPrefix + "[container] $ref",
-                0xff42a5f5.toInt(),
-            )
-        }
         val children = childrenByRef[image.ref].orEmpty()
             .sortedWith(compareBy<ImageReferenceInfo> { it.displayRef }.thenBy { it.ref })
-        val nextPrefix = prefix + if (prefix.isEmpty()) "" else if (isLast) "   " else "|  "
+        val projectRefs = imageProjectRefs(image.ref)
+        val containerRefs = imageContainerRefs(image.ref)
+        val attached = mutableListOf<ImageReferenceGraphRow>().apply {
+            add(
+                ImageReferenceGraphRow(
+                    depth = depth + 1,
+                    ancestorLast = ancestorLast + isLast,
+                    isLast = projectRefs.isEmpty() &&
+                        containerRefs.isEmpty() &&
+                        children.isEmpty(),
+                    title = getString(R.string.image_reference_cache_node),
+                    detail = getString(
+                        R.string.image_reference_cache_detail_fmt,
+                        formatBytes(image.sharedLayerBytes),
+                        formatBytes(image.totalLayerBytes),
+                        image.diffIds.size,
+                    ),
+                    kind = ImageGraphKind.Cache,
+                )
+            )
+            projectRefs.forEachIndexed { index, ref ->
+                add(
+                    ImageReferenceGraphRow(
+                        depth = depth + 1,
+                        ancestorLast = ancestorLast + isLast,
+                        isLast = index == projectRefs.lastIndex && containerRefs.isEmpty() && children.isEmpty(),
+                        title = ref,
+                        detail = getString(R.string.image_reference_compose_detail),
+                        kind = ImageGraphKind.Compose,
+                    )
+                )
+            }
+            containerRefs.forEachIndexed { index, ref ->
+                add(
+                    ImageReferenceGraphRow(
+                        depth = depth + 1,
+                        ancestorLast = ancestorLast + isLast,
+                        isLast = index == containerRefs.lastIndex && children.isEmpty(),
+                        title = ref,
+                        detail = getString(R.string.image_reference_container_detail),
+                        kind = ImageGraphKind.Container,
+                    )
+                )
+            }
+        }
+        rows += ImageReferenceGraphRow(
+            depth = depth,
+            ancestorLast = ancestorLast,
+            isLast = isLast,
+            title = image.displayRef,
+            detail = getString(
+                R.string.image_reference_image_detail_fmt,
+                formatBytes(image.viewBytes),
+                formatBytes(image.uniqueLayerBytes),
+                image.diffIds.size,
+            ),
+            kind = ImageGraphKind.Image,
+        )
+        rows += attached
         children.forEachIndexed { index, child ->
-            appendImageReferenceTreeLines(
+            appendImageReferenceGraphRows(
                 image = child,
                 childrenByRef = childrenByRef,
-                prefix = nextPrefix,
+                depth = depth + 1,
+                ancestorLast = ancestorLast + isLast,
                 isLast = index == children.lastIndex,
-                lines = lines,
+                rows = rows,
             )
         }
     }
