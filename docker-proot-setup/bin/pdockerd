@@ -5430,11 +5430,31 @@ def spawn_in_container(cid, cmd, env=None, workdir=None, tty=False,
         raise RuntimeError(fault)
     argv = build_run_argv(rootfs, list(cmd), e, workdir=wd, binds=binds, cow_bind=cow, mode="exec")
     if tty:
+        import fcntl
         import pty
+        import termios
         try:
             master, slave = pty.openpty()
+
+            try:
+                attrs = termios.tcgetattr(slave)
+                attrs[0] |= termios.ICRNL | termios.IXON
+                attrs[1] |= termios.OPOST | termios.ONLCR
+                attrs[2] |= termios.CREAD
+                attrs[3] |= termios.ECHO | termios.ECHOE | termios.ECHOK | termios.ICANON | termios.ISIG
+                termios.tcsetattr(slave, termios.TCSANOW, attrs)
+            except termios.error:
+                pass
+
+            def exec_tty_preexec():
+                os.setsid()
+                try:
+                    fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+                except OSError:
+                    pass
+
             proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave,
-                                    close_fds=True)
+                                    close_fds=True, preexec_fn=exec_tty_preexec)
             os.close(slave)
             proc.stdout = os.fdopen(master, "rb", buffering=0)
             proc.stderr = None
@@ -5622,6 +5642,24 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         stream_type: 1=stdout, 2=stderr. In TTY mode the framing is
         omitted (docker CLI reads raw bytes).
         """
+        def tty_output(chunk):
+            if not tty:
+                return chunk
+            # A real cooked PTY maps bare LF to CRLF through ONLCR. The Android
+            # direct executor can bypass that line discipline, so emulate only
+            # the missing newline carriage return without touching existing CR.
+            prev_cr = bool(getattr(proc, "_pdocker_tty_prev_cr", False))
+            out = bytearray()
+            for b in chunk:
+                if b == 0x0a and not prev_cr:
+                    out.append(0x0d)
+                    out.append(0x0a)
+                else:
+                    out.append(b)
+                prev_cr = (b == 0x0d)
+            proc._pdocker_tty_prev_cr = prev_cr
+            return bytes(out)
+
         import select
         fds = []
         if proc.stdout: fds.append((1, proc.stdout))
@@ -5657,7 +5695,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                         pass
                 try:
                     if tty:
-                        self.wfile.write(chunk)
+                        self.wfile.write(tty_output(chunk))
                     else:
                         hdr = bytes([st, 0, 0, 0]) + len(chunk).to_bytes(4, "big")
                         self.wfile.write(hdr + chunk)
@@ -5674,7 +5712,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                     if rest:
                         try:
                             if tty:
-                                self.wfile.write(rest)
+                                self.wfile.write(tty_output(rest))
                             else:
                                 hdr = bytes([st, 0, 0, 0]) + len(rest).to_bytes(4, "big")
                                 self.wfile.write(hdr + rest)

@@ -197,6 +197,8 @@ def main() -> int:
     require("container runtime tracks reparented workload pid set", "PdockerLauncherPid" in pdockerd_src and "PdockerKnownPids" in pdockerd_src and "_start_container_process_tracker" in pdockerd_src and "_refresh_container_process_snapshot" in pdockerd_src)
     require("container raw return code remains diagnosable", "PdockerRawReturnCode" in pdockerd_src and "PdockerSignal" in pdockerd_src and "PdockerLastPid" in pdockerd_src and "_record_container_return_code" in pdockerd_src)
     require("engine exec allocates tty pty", "pty.openpty" in pdockerd_src and "proc.stdout = os.fdopen(master" in pdockerd_src and "proc.stdin = os.fdopen(os.dup(master)" in pdockerd_src)
+    require("engine exec pty owns controlling terminal and sane enter mode", "TIOCSCTTY" in pdockerd_src and "exec_tty_preexec" in pdockerd_src and "termios.ICRNL" in pdockerd_src and "termios.ICANON" in pdockerd_src)
+    require("engine exec tty output emulates cooked pty CRLF", "def tty_output(chunk)" in pdockerd_src and "_pdocker_tty_prev_cr" in pdockerd_src and "out.append(0x0d)" in pdockerd_src and "did not preserve terminal CRLF line control" in main_src)
     require("engine exec it falls back when pty is unavailable", "pty unavailable for exec" in pdockerd_src and "falling back to pipes" in pdockerd_src and "stderr=subprocess.STDOUT" in pdockerd_src)
     require("engine exec pipe fallback maps terminal enter", "_pdocker_pipe_tty_fallback" in pdockerd_src and 'replace(b"\\r", b"\\n")' in pdockerd_src)
     require("engine exec stdin pump uses buffered hijack stream", 'getattr(self.rfile, "read1", None)' in pdockerd_src and "self.connection.recv(4096)" not in pdockerd_src)
@@ -308,7 +310,7 @@ def main() -> int:
     require("android device smoke script exists", "docker compose up --detach --build" in android_smoke_src and "run-as" in android_smoke_src and "docker version" in android_smoke_src)
     require("android device smoke covers engine exec path", "docker exec \\\"\\$CID\\\" sh -lc" in android_smoke_src and "pdocker-exec-ok" in android_smoke_src and "'/vendor/xbin'" in android_smoke_src and "sleep 300" in android_smoke_src)
     require("android device smoke covers engine api it stream", "engine_exec_it_smoke" in android_smoke_src and "/containers/$container_ref/exec" in android_smoke_src and "/exec/%s/start" in android_smoke_src and "pdocker-it-ok" in android_smoke_src)
-    require("android device smoke covers ui bridge it self-test", "ACTION_SMOKE_UI_IT_SELFTEST" in main_src and "runUiItSelfTest" in main_src and "ui-it-selftest-latest.json" in main_src and "ui_engine_exec_it_selftest" in android_smoke_src and "SMOKE_UI_IT_SELFTEST" in android_smoke_src and "pdocker-ui-it-ok" in main_src and "pdocker-ui-it-bracket-ok" in main_src)
+    require("android device smoke covers ui bridge it self-test", "ACTION_SMOKE_UI_IT_SELFTEST" in main_src and "runUiItSelfTest" in main_src and "ui-it-selftest-latest.json" in main_src and "ui_engine_exec_it_selftest" in android_smoke_src and "SMOKE_UI_IT_SELFTEST" in android_smoke_src and "pdocker-ui-it-ok" in main_src and "pdocker-ui-it-bracket-ok" in main_src and "\\r/usr/bin/[" in main_src)
     require("android device smoke avoids orphan cleanup side effects", "--remove-orphans" not in android_smoke_src)
     require("android device smoke does not force-stop by default", "PDOCKER_SMOKE_FORCE_STOP" in android_smoke_src and '== "1"' in android_smoke_src and "force-stopping app; running containers will stop" in android_smoke_src)
 

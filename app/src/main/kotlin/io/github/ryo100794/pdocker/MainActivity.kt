@@ -2437,7 +2437,7 @@ class MainActivity : AppCompatActivity() {
                     output.toString().contains("can't access tty")
             }) { "UI exec -it did not reach an interactive shell prompt" }
 
-            val script = "echo pdocker-ui-it-ok\n/usr/bin/[ \"x\" = \"x\" ] && echo pdocker-ui-it-bracket-ok\npwd\nexit\n"
+            val script = "echo pdocker-ui-it-ok\r/usr/bin/[ \"x\" = \"x\" ] && echo pdocker-ui-it-bracket-ok\rpwd\rexit\r"
             val inputB64 = Base64.encodeToString(script.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
             ui.post { bridge?.input(inputB64) }
             val passed = waitUntil(12_000) {
@@ -2448,6 +2448,9 @@ class MainActivity : AppCompatActivity() {
             val bracketNoise = Regex("(/usr/bin/)?\\[: extra argument").containsMatchIn(text)
             check(passed) { "UI exec -it did not echo expected markers" }
             check(!bracketNoise) { "UI exec -it produced bracket argv noise" }
+            check(text.contains("\r\n# pdocker-ui-it-ok") || text.contains("\r\npdocker-ui-it-ok")) {
+                "UI exec -it did not preserve terminal CRLF line control"
+            }
             result
                 .put("Success", true)
                 .put("DurationMs", System.currentTimeMillis() - startedAt)
