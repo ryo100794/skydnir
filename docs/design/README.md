@@ -21,6 +21,7 @@ tradeoffs, accepted behavior, and non-goals.
 | [`MEDIA_BRIDGE.md`](MEDIA_BRIDGE.md) | Android Camera2/AudioRecord/AudioTrack media bridge contract |
 | [`APK_MEMORY_PAGER.md`](APK_MEMORY_PAGER.md) | APK-scoped swap-like memory pager feasibility and page-fault strategy |
 | [`RUNTIME_OOM_SURVIVAL.md`](RUNTIME_OOM_SURVIVAL.md) | Runtime OOM survival, large-workload mode, and post-kill evidence strategy |
+| [`TERMINAL_STREAM_ARCHITECTURE.md`](TERMINAL_STREAM_ARCHITECTURE.md) | Generic terminal surface, Docker Engine exec/attach stream boundary, and TTY profile split |
 | [`../../docker-proot-setup/docs/GPU_COMPAT.md`](../../docker-proot-setup/docs/GPU_COMPAT.md) | Backend GPU request/env contract |
 | [`../../docker-proot-setup/docs/NETWORK_COMPAT.md`](../../docker-proot-setup/docs/NETWORK_COMPAT.md) | Backend network metadata and port rewrite plan |
 
@@ -45,6 +46,9 @@ tradeoffs, accepted behavior, and non-goals.
 - Treat [`RUNTIME_OOM_SURVIVAL.md`](RUNTIME_OOM_SURVIVAL.md) as the operational
   policy for low-memory runtime behavior, including early ENOMEM, Large
   Workload Mode, and restart-time evidence.
+- Treat [`TERMINAL_STREAM_ARCHITECTURE.md`](TERMINAL_STREAM_ARCHITECTURE.md) as
+  the boundary between the generic terminal UI and Docker-compatible Engine
+  exec/attach/session transports.
 
 ## Maintenance
 

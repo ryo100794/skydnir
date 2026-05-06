@@ -23,10 +23,10 @@ or closes.
   container/APK bridge, serves the forced-GPU HTTP probe, and now exposes
   bridge upload/copy overhead as the front performance blocker.
 - [next] [#5](https://github.com/ryo100794/pdocker-android/issues/5)
-  Terminal `-it` interactive path: direct executor long argv/bracket argv
-  preservation is covered by regression tests; the remaining user-visible
-  breakage is PTY allocation/fallback and interactive shell mode in the UI
-  Engine exec route.
+  Terminal `-it` interactive path: refactor the terminal stack according to
+  `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`. The UI must remain a generic
+  terminal surface, while Docker exec/attach, local diagnostic PTY, daemon log,
+  and job log streams become explicit session types with shared tests.
 - [next] [#6](https://github.com/ryo100794/pdocker-android/issues/6)
   Real listener service health: probe the actual device listener for
   default workspace `18080` and llama `18081`, correlate it with Engine
@@ -116,11 +116,11 @@ implementation change plus a focused verification artifact.
   container state, current Engine container ID, real listener evidence, and
   matching logs. Project cards, Compose metadata, requested ports, old names,
   and completed jobs are not sufficient to mark a service healthy.
-- [next] Interactive terminal regression: the latest `-it` breakage is likely
-  the PTY fallback/pipe path launching a noninteractive shell, producing
-  `/usr/bin/[: extra argument b]`. Keep the fix focused on PTY allocation,
-  argv preservation, and interactive shell mode rather than papering over the
-  symptom in scripts.
+- [next] Interactive terminal regression: do not paper over symptoms in the UI
+  or scripts. Split terminal surface, session transport, Docker Engine exec API,
+  local diagnostic PTY, and log panes per
+  `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`, then gate fixes with real
+  device Engine exec evidence plus generic terminal input tests.
 - [next] Runtime freeze risk: one Engine stop returned HTTP 204 while
   `pdocker-direct`/child processes and the GPU executor stayed alive. Stop,
   cleanup, and UI state must prove process-tree and executor teardown, not just
