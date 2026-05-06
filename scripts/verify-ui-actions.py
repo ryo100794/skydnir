@@ -293,6 +293,8 @@ def main() -> int:
     require("container cards expose lifecycle actions", "action_container_start_fmt" in string_src and "/start" in main_src and "/stop" in main_src and "logs(target" in main_src)
     require("container lifecycle avoids docker cli shell", "DockerEngineClient" in main_src and "runContainerAction" in main_src)
     require("image pull uses engine api", "pullImage(\"ubuntu:22.04\")" in main_src and "/images/create?fromImage=" in engine_src)
+    require("images tab can delete bad tagged images", "deleteImage(imageRef)" in main_src and 'request("DELETE", "/images/${encodePath(image)}"' in engine_src and "confirmDeleteImage" in main_src and "action_delete_image_fmt" in string_src)
+    require("images tab can clean build cache after image delete", "runPruneBuildCache" in main_src and "pruneBuildCache()" in engine_src and "cleanCache" in main_src and "action_clean_image_cache_fmt" in string_src)
     require("dockerfile builds use streaming engine api", "runImageBuild" in main_src and "buildImageStreaming(dir" in main_src and "requestJsonStream" in engine_src and "/build?t=" in engine_src)
     require("compose up streams build output into ui jobs", "buildImageStreaming(contextDir, image)" in main_src and "emit(buildLine)" in main_src and "openLiveJobLog(job" in main_src)
     require("compose up blocks start after any build stream failure", "containsBuildFailure(text)" in engine_src and "containsBuildSuccess(text, tag)" in engine_src and "build did not complete successfully" in engine_src and 'optJSONObject("errorDetail")' in engine_src and "ERROR: build failed" in engine_src and "buildImageStreaming(contextDir, image)" in main_src and "Build blocked by current container runtime" not in main_src)

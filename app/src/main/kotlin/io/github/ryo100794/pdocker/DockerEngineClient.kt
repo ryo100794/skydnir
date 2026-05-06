@@ -154,6 +154,17 @@ class DockerEngineClient(private val socket: File) {
         return decodeRawStream(resp.body)
     }
 
+    fun deleteImage(image: String): String {
+        val resp = request("DELETE", "/images/${encodePath(image)}", timeoutMs = 120_000)
+        require(resp.status in 200..299) { resp.text.ifBlank { "HTTP ${resp.status}" } }
+        return resp.text
+    }
+
+    fun pruneBuildCache(): String {
+        val resp = post("/build/prune")
+        return resp.text
+    }
+
     companion object {
         fun encodePath(value: String): String =
             URLEncoder.encode(value, "UTF-8").replace("+", "%20")

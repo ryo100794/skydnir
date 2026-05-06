@@ -36,6 +36,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -866,14 +867,25 @@ class MainActivity : AppCompatActivity() {
         addAction(getString(R.string.action_browse_image_files), getString(R.string.detail_browse_image_files)) {
             openImageFiles()
         }
+        addAction(getString(R.string.action_prune_build_cache), getString(R.string.detail_prune_build_cache)) {
+            runPruneBuildCache()
+        }
         val images = imageDirs()
         if (images.isEmpty()) {
             addMessage(getString(R.string.message_no_pulled_images))
             return
         }
         images.forEach { image ->
-            addWidget(image.name, getString(R.string.detail_image_rootfs), summarizeRootfs(File(image, "rootfs"))) {
+            val ref = imageRef(image)
+            val displayRef = displayImageRef(ref)
+            addWidget(displayRef, getString(R.string.detail_image_rootfs), imageDetail(image, ref)) {
                 openImageFiles(image)
+            }
+            addAction(getString(R.string.action_delete_image_fmt, displayRef), getString(R.string.detail_delete_image)) {
+                confirmDeleteImage(ref, cleanCache = false)
+            }
+            addAction(getString(R.string.action_clean_image_cache_fmt, displayRef), getString(R.string.detail_clean_image_cache)) {
+                confirmDeleteImage(ref, cleanCache = true)
             }
         }
     }
@@ -1782,6 +1794,52 @@ class MainActivity : AppCompatActivity() {
         runEngineJob(title, workspaceGroup(), "engine docker build: ${dir.absolutePath}") { emit ->
             emit("Service ${dir.name} Building")
             buildImageStreaming(dir, "local/${dir.name}:latest") { line -> emit(line) }
+        }
+    }
+
+    private fun runPruneBuildCache() {
+        runEngineAction(getString(R.string.action_prune_build_cache), getString(R.string.section_images)) {
+            pruneBuildCache()
+        }
+    }
+
+    private fun confirmDeleteImage(imageRef: String, cleanCache: Boolean) {
+        val title = if (cleanCache) {
+            getString(R.string.action_clean_image_cache_fmt, displayImageRef(imageRef))
+        } else {
+            getString(R.string.action_delete_image_fmt, displayImageRef(imageRef))
+        }
+        val message = if (cleanCache) {
+            getString(R.string.confirm_clean_image_cache_fmt, imageRef)
+        } else {
+            getString(R.string.confirm_delete_image_fmt, imageRef)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                runDeleteImage(imageRef, cleanCache)
+            }
+            .show()
+    }
+
+    private fun runDeleteImage(imageRef: String, cleanCache: Boolean) {
+        val title = if (cleanCache) {
+            getString(R.string.action_clean_image_cache_fmt, displayImageRef(imageRef))
+        } else {
+            getString(R.string.action_delete_image_fmt, displayImageRef(imageRef))
+        }
+        runEngineJob(title, getString(R.string.section_images), "engine image delete: $imageRef") { emit ->
+            emit("Image ${displayImageRef(imageRef)} Removing")
+            val deleteResult = deleteImage(imageRef)
+            emit(deleteResult.ifBlank { "Image ${displayImageRef(imageRef)} removed" })
+            if (cleanCache) {
+                emit("Build cache Pruning")
+                emit(pruneBuildCache())
+            }
+            refreshStorageMetricsAsync(force = true)
+            "Image ${displayImageRef(imageRef)} removed"
         }
     }
 
@@ -4193,6 +4251,23 @@ class MainActivity : AppCompatActivity() {
             ?.filter { File(it, "rootfs").isDirectory }
             ?.sortedBy { it.name }
             .orEmpty()
+
+    private fun imageRef(imageDir: File): String =
+        runCatching { File(imageDir, "image_ref").readText().trim() }
+            .getOrDefault("")
+            .ifBlank { imageDir.name }
+
+    private fun displayImageRef(ref: String): String =
+        ref.removePrefix("docker.io/library/").removePrefix("docker.io/")
+
+    private fun imageDetail(imageDir: File, ref: String): String {
+        val rootfs = File(imageDir, "rootfs")
+        return listOf(
+            summarizeRootfs(rootfs),
+            ref,
+            imageDir.name,
+        ).joinToString("\n")
+    }
 
     private fun containerDirs(): List<File> =
         containerRoot.listFiles()

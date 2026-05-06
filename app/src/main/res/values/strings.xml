@@ -186,6 +186,12 @@
     <string name="detail_pull_image">Open docker pull shell</string>
     <string name="action_browse_image_files">Browse image files</string>
     <string name="detail_browse_image_files">Inspect pulled rootfs trees</string>
+    <string name="action_delete_image_fmt">Delete image %1$s</string>
+    <string name="detail_delete_image">Remove this tagged image from pdocker storage</string>
+    <string name="action_clean_image_cache_fmt">Clean image/cache %1$s</string>
+    <string name="detail_clean_image_cache">Delete this image, interrupted build rootfs, and unreferenced layers</string>
+    <string name="confirm_delete_image_fmt">Delete image %1$s? Containers using a copied rootfs are not removed, but the tag will be rebuilt on the next Compose/build run.</string>
+    <string name="confirm_clean_image_cache_fmt">Delete image %1$s and prune build cache/unreferenced layers? Use this when a failed build left a bad tagged image or stale cache.</string>
     <string name="message_no_pulled_images">No pulled images yet.</string>
     <string name="detail_image_rootfs">Image rootfs</string>
     <string name="summary_rootfs_fmt">%1$d top-level entries</string>

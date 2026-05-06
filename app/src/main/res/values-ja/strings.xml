@@ -186,6 +186,12 @@
     <string name="detail_pull_image">docker pull 用シェルを開く</string>
     <string name="action_browse_image_files">イメージ内ファイルを参照</string>
     <string name="detail_browse_image_files">pull 済み rootfs ツリーを確認</string>
+    <string name="action_delete_image_fmt">イメージ %1$s を削除</string>
+    <string name="detail_delete_image">このタグ付きイメージを pdocker ストレージから削除</string>
+    <string name="action_clean_image_cache_fmt">イメージ/キャッシュ %1$s を掃除</string>
+    <string name="detail_clean_image_cache">このイメージ、中断ビルド rootfs、未参照レイヤを削除</string>
+    <string name="confirm_delete_image_fmt">イメージ %1$s を削除しますか？コピー済み rootfs を使うコンテナは削除しませんが、次回の Compose/build でタグは再ビルドされます。</string>
+    <string name="confirm_clean_image_cache_fmt">イメージ %1$s を削除し、ビルドキャッシュと未参照レイヤも prune しますか？失敗ビルドで壊れたタグや古いキャッシュが残ったときに使います。</string>
     <string name="message_no_pulled_images">pull 済みイメージはまだありません。</string>
     <string name="detail_image_rootfs">イメージ rootfs</string>
     <string name="summary_rootfs_fmt">トップレベル %1$d 件</string>
