@@ -74,7 +74,7 @@
       "id": "path.exec-script-and-long-argv",
       "applies_to": ["rewrite_execve_arg", "parse_shebang"],
       "cases": ["android.direct.exec-argv-rootfs", "container.direct.runtime-probe"],
-      "contract": "Script shebangs, interpreter arguments, bracket argv, and long linker argv lists are preserved when routed through the bundled loader."
+      "contract": "Script shebangs, interpreter arguments, bracket argv, standard CMake BLAS option argv, and long linker argv lists with many separate flash_attn object arguments are preserved when routed through the bundled loader."
     },
     {
       "id": "path.rootfs-fd-lifecycle",
@@ -112,7 +112,7 @@
       "id": "boundary.exec-argc-and-scratch-limit",
       "applies_to": ["rewrite_execve_arg"],
       "cases": ["android.direct.exec-argv-rootfs", "container.direct.runtime-probe"],
-      "contract": "EXEC_REWRITE_MAX_ARGC and EXEC_REWRITE_MAX_SCRATCH prevent stack corruption while preserving normal long linker commands."
+      "contract": "EXEC_REWRITE_MAX_ARGC and EXEC_REWRITE_MAX_SCRATCH prevent stack corruption while preserving normal long linker commands with many separate object path arguments."
     },
     {
       "id": "boundary.memory-guard-threshold",
@@ -207,7 +207,7 @@
         "success -> loader argv rebuilt"
       ],
       "cases": ["android.direct.exec-argv-rootfs", "container.direct.runtime-probe"],
-      "contract": "Exec routing is tested as a branch matrix because this path owns bracket argv, long linker argv, scripts, and loader recursion safety."
+      "contract": "Exec routing is tested as a branch matrix because this path owns bracket argv, standard CMake option argv, many-argument linker argv, scripts, and loader recursion safety."
     },
     {
       "id": "branch.memory-guard",
@@ -519,7 +519,7 @@
       "tier": "heavy-container",
       "command": "ROOTFS=\"${ROOTFS:?set ROOTFS to the container rootfs path}\" scripts/container-direct-probe.sh --memory-guard",
       "runnable": true,
-      "checks": "Generic container test route runs without adb or APK install, checks argv preservation including flash_attn object names, verifies /usr/bin/[ bracket execution, checks /proc/self/exe guest path behavior, and exercises the large allocation guard."
+      "checks": "Generic container test route runs without adb or APK install, checks argv preservation including many separate flash_attn object names and standard CMake-like flags, verifies /usr/bin/[ bracket execution, checks /proc/self/exe guest path behavior, and exercises the large allocation guard."
     },
     {
       "id": "android.direct.tty-pty-exec",

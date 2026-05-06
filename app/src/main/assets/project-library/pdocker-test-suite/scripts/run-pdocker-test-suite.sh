@@ -152,6 +152,47 @@ done
   printf 'argv preserved'
 }
 
+case_linker_argv_preservation() {
+  out="$report_dir/.linker-argv-preservation-$timestamp.out"
+  probe="$report_dir/.pdocker-linker-argv-dump-$timestamp"
+  cat > "$probe" <<'SH'
+#!/bin/sh
+i=0
+for arg in "$@"; do
+  i=$((i + 1))
+  printf 'arg%03d=%s\n' "$i" "$arg"
+done
+printf 'argc=%s\n' "$i"
+SH
+  chmod 755 "$probe"
+  set -- cmake -B build -G Ninja -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS
+  for obj in \
+    flash_attn.comp.cpp.o \
+    flash_attn_cm1.comp.cpp.o \
+    flash_attn_cm2.comp.cpp.o \
+    flash_attn_mask_opt.comp.cpp.o \
+    flash_attn_split_k_reduce.comp.cpp.o
+  do
+    set -- "$@" "ggml/src/ggml-vulkan/CMakeFiles/ggml-vulkan.dir/$obj"
+  done
+  i=0
+  while [ "$i" -lt 96 ]; do
+    set -- "$@" "ggml/src/ggml-vulkan/CMakeFiles/ggml-vulkan.dir/generated_flash_attn_$i.comp.cpp.o"
+    i=$((i + 1))
+  done
+  "$probe" "$@" > "$out"
+  grep -F "arg001=cmake" "$out" >/dev/null
+  grep -F "arg006=-DGGML_BLAS=ON" "$out" >/dev/null
+  grep -F "arg008=ggml/src/ggml-vulkan/CMakeFiles/ggml-vulkan.dir/flash_attn.comp.cpp.o" "$out" >/dev/null
+  grep -F "flash_attn_mask_opt.comp.cpp.o" "$out" >/dev/null
+  grep -F "flash_attn_split_k_reduce.comp.cpp.o" "$out" >/dev/null
+  grep -F "generated_flash_attn_95.comp.cpp.o" "$out" >/dev/null
+  ! grep -Eq '^arg[0-9]+=flash$' "$out"
+  grep -F "argc=108" "$out" >/dev/null
+  rm -f "$out" "$probe"
+  printf 'linker argv preserved count=108'
+}
+
 case_shell_bracket() {
   /usr/bin/[ -x /bin/sh ]
   printf 'bracket executable ok'
@@ -241,6 +282,7 @@ run_selected_case documents_writable documents case_documents_writable
 run_selected_case shared_mount_visible documents case_shared_mount_visible
 run_selected_case workspace_writable smoke case_workspace_writable
 run_selected_case argv_preservation direct case_argv_preservation
+run_selected_case linker_argv_preservation direct case_linker_argv_preservation
 run_selected_case shell_bracket direct case_shell_bracket
 run_selected_case proc_exe direct case_proc_exe
 run_selected_case direct_runtime_probe direct case_direct_runtime_probe

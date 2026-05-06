@@ -30,6 +30,8 @@ The default suite covers a small but repeatable smoke set:
 - Documents report write path.
 - Fast workspace write path.
 - argv preservation for long object-file-like arguments.
+- linker-style argv preservation for many separate `flash_attn*.o` object
+  arguments, matching the llama.cpp Vulkan link failure class.
 - `/usr/bin/[` execution.
 - `/proc/self/exe` visibility.
 - small file-I/O open/close loop.

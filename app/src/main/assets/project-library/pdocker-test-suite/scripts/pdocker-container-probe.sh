@@ -48,6 +48,49 @@ SH
   say "argv-preservation ok"
 }
 
+test_linker_argv_preservation() {
+  say "linker-argv-preservation start"
+  probe=/tmp/pdocker-linker-argv-dump
+  out=/tmp/pdocker-linker-argv-dump.out
+  cat > "$probe" <<'SH'
+#!/bin/sh
+i=0
+for arg in "$@"; do
+  i=$((i + 1))
+  printf 'arg%03d=%s\n' "$i" "$arg"
+done
+printf 'argc=%s\n' "$i"
+SH
+  chmod 755 "$probe"
+  set -- cmake -B build -G Ninja -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS
+  for obj in \
+    flash_attn.comp.cpp.o \
+    flash_attn_cm1.comp.cpp.o \
+    flash_attn_cm2.comp.cpp.o \
+    flash_attn_mask_opt.comp.cpp.o \
+    flash_attn_split_k_reduce.comp.cpp.o
+  do
+    set -- "$@" "ggml/src/ggml-vulkan/CMakeFiles/ggml-vulkan.dir/$obj"
+  done
+  i=0
+  while [ "$i" -lt 96 ]; do
+    set -- "$@" "ggml/src/ggml-vulkan/CMakeFiles/ggml-vulkan.dir/generated_flash_attn_$i.comp.cpp.o"
+    i=$((i + 1))
+  done
+  "$probe" "$@" > "$out"
+  grep -F "arg001=cmake" "$out" >/dev/null || fail "cmake argv was not preserved"
+  grep -F "arg006=-DGGML_BLAS=ON" "$out" >/dev/null || fail "standard BLAS option was not preserved"
+  grep -F "arg008=ggml/src/ggml-vulkan/CMakeFiles/ggml-vulkan.dir/flash_attn.comp.cpp.o" "$out" >/dev/null || fail "first flash_attn object was not preserved"
+  grep -F "flash_attn_mask_opt.comp.cpp.o" "$out" >/dev/null || fail "flash_attn_mask_opt object was lost"
+  grep -F "flash_attn_split_k_reduce.comp.cpp.o" "$out" >/dev/null || fail "flash_attn_split_k_reduce object was lost"
+  grep -F "generated_flash_attn_95.comp.cpp.o" "$out" >/dev/null || fail "long linker argv tail was lost"
+  if grep -Eq '^arg[0-9]+=flash$' "$out"; then
+    fail "linker argv was truncated to flash"
+  fi
+  grep -F "argc=108" "$out" >/dev/null || fail "linker argv count changed"
+  say "linker-argv-preservation ok"
+}
+
 test_large_allocation_guard() {
   say "large-allocation start"
   if ! command -v python3 >/dev/null 2>&1; then
@@ -95,6 +138,7 @@ test_proc_view() {
 
 test_shell_basics
 test_argv_preservation
+test_linker_argv_preservation
 test_proc_view
 test_large_allocation_guard
 say "all ok"

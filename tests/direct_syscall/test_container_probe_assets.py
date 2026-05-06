@@ -23,7 +23,13 @@ class ContainerProbeAssetsTest(unittest.TestCase):
         text = (ROOT / "app" / "src" / "main" / "assets" / "project-library" / "direct-runtime-probe" / "scripts" / "pdocker-container-probe.sh").read_text()
         for marker in [
             "test_argv_preservation",
+            "test_linker_argv_preservation",
             "flash_attn_mask_opt.comp.cpp.o",
+            "flash_attn_split_k_reduce.comp.cpp.o",
+            "generated_flash_attn_95.comp.cpp.o",
+            "-DGGML_BLAS=ON",
+            "-DGGML_BLAS_VENDOR=OpenBLAS",
+            "argc=108",
             "test_large_allocation_guard",
             "large_allocation_guard_ok",
             "/usr/bin/[",
@@ -59,11 +65,16 @@ class ContainerProbeAssetsTest(unittest.TestCase):
         self.assertIn("docker exec pdocker-test-suite run-pdocker-test-suite", start)
         self.assertIn("--scenario all|smoke|direct|io|archive|documents", runner)
         self.assertIn("run_selected_case direct_runtime_probe direct", runner)
+        self.assertIn("run_selected_case linker_argv_preservation direct", runner)
         self.assertIn("run_selected_case file_io_smoke io", runner)
         self.assertIn("run_selected_case archive_roundtrip archive", runner)
         self.assertIn("/documents/pdocker-exports", runner)
         self.assertIn('"schema": "pdocker.test-suite.v1"', runner)
         self.assertIn("test_argv_preservation", probe)
+        self.assertIn("test_linker_argv_preservation", probe)
+        self.assertIn("generated_flash_attn_95.comp.cpp.o", probe)
+        self.assertNotIn("for name in", runner)
+        self.assertNotIn("for name in", probe)
 
     def test_generic_runner_does_not_require_adb_or_apk_build(self):
         text = (ROOT / "scripts" / "container-direct-probe.sh").read_text()

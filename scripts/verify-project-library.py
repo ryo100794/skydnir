@@ -391,7 +391,7 @@ def main() -> int:
         "Dockerfile Vulkan shader compiler": "glslc" in llama_dockerfile,
         "Dockerfile SPIR-V headers": "spirv-headers" in llama_dockerfile and "spirv-tools" in llama_dockerfile,
         "Dockerfile OpenBLAS build": "-DGGML_BLAS=ON" in llama_dockerfile,
-        "Dockerfile OpenBLAS detection is explicit": "pkg-config --variable=libdir openblas" in llama_dockerfile and "-DBLAS_LIBRARIES=\"$openblas_lib\"" in llama_dockerfile and "-DBLAS_INCLUDE_DIRS=\"$openblas_inc\"" in llama_dockerfile,
+        "Dockerfile keeps upstream-style OpenBLAS detection": "-DGGML_BLAS_VENDOR=OpenBLAS" in llama_dockerfile and "-DBLAS_LIBRARIES=" not in llama_dockerfile and "pkg-config --variable=libdir openblas" not in llama_dockerfile,
         "Dockerfile server-only build target": "--target llama-server" in llama_dockerfile and "--parallel" in llama_dockerfile,
         "Dockerfile bounded build jobs": "ARG LLAMA_CPP_BUILD_JOBS=1" in llama_dockerfile and 'jobs="${LLAMA_CPP_BUILD_JOBS:-1}"' in llama_dockerfile,
         "Dockerfile pinned llama ref and standard Release build type": "ARG LLAMA_CPP_REF=b9030" in llama_dockerfile and "ARG LLAMA_CPP_BUILD_TYPE=Release" in llama_dockerfile and "CMAKE_CXX_FLAGS_MINSIZEREL" not in llama_dockerfile and ".pdocker-llama-cpp-commit" in llama_dockerfile,

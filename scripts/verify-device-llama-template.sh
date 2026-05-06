@@ -31,9 +31,6 @@ fi
 
 grep -F -q -- 'git checkout --detach FETCH_HEAD' <<<"$dockerfile_text"
 grep -F -q -- 'LLAMA_CPP_REF=b9030' <<<"$dockerfile_text"
-grep -F -q -- 'pkg-config --variable=libdir openblas' <<<"$dockerfile_text"
-grep -F -q -- '-DBLAS_LIBRARIES="$openblas_lib"' <<<"$dockerfile_text"
-grep -F -q -- '-DBLAS_INCLUDE_DIRS="$openblas_inc"' <<<"$dockerfile_text"
 grep -F -q -- 'LLAMA_CPP_BUILD_JOBS:-1' <<<"$compose_text"
 grep -F -q -- 'LLAMA_CPP_BUILD_TYPE:-Release' <<<"$compose_text"
 grep -F -q -- 'ARG LLAMA_CPP_BUILD_TYPE=Release' <<<"$dockerfile_text"
