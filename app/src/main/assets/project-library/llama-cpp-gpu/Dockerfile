@@ -38,6 +38,11 @@ RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /opt/llama.cpp \
     && if [ "$LLAMA_CPP_REF" != "master" ]; then git fetch --depth 1 origin "$LLAMA_CPP_REF" && git checkout --detach FETCH_HEAD; fi \
     && echo "pdocker llama.cpp ref=$(git rev-parse HEAD) tag=$LLAMA_CPP_REF build_type=$LLAMA_CPP_BUILD_TYPE jobs=$LLAMA_CPP_BUILD_JOBS" \
     && git rev-parse HEAD > /opt/llama.cpp/.pdocker-llama-cpp-commit \
+    && openblas_lib="$(pkg-config --variable=libdir openblas)/libopenblas.so" \
+    && openblas_inc="$(pkg-config --variable=includedir openblas)" \
+    && test -r "$openblas_lib" \
+    && test -r "$openblas_inc/cblas.h" \
+    && echo "pdocker OpenBLAS lib=$openblas_lib include=$openblas_inc version=$(pkg-config --modversion openblas)" \
     && cmake -B build -G Ninja \
       -DCMAKE_BUILD_TYPE="$LLAMA_CPP_BUILD_TYPE" \
       -DLLAMA_BUILD_TESTS=OFF \
@@ -55,6 +60,9 @@ RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /opt/llama.cpp \
       -DGGML_VULKAN_RUN_TESTS=OFF \
       -DGGML_BLAS=ON \
       -DGGML_BLAS_VENDOR=OpenBLAS \
+      -DBLA_VENDOR=OpenBLAS \
+      -DBLAS_LIBRARIES="$openblas_lib" \
+      -DBLAS_INCLUDE_DIRS="$openblas_inc" \
     && jobs="${LLAMA_CPP_BUILD_JOBS:-1}" \
     && cmake --build build --config "$LLAMA_CPP_BUILD_TYPE" --target llama-server --parallel "$jobs"
 

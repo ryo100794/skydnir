@@ -5772,7 +5772,11 @@ class MainActivity : AppCompatActivity() {
         val staleCheckout =
             "git checkout \"\$LLAMA_CPP_REF\"" in dockerfileText &&
                 "git checkout --detach FETCH_HEAD" !in dockerfileText
-        if (!stalePdockerShaderTuning && !staleCheckout) return
+        val staleOpenBlasDetection =
+            "-DGGML_BLAS=ON" in dockerfileText &&
+                ("-DBLAS_LIBRARIES=\"\$openblas_lib\"" !in dockerfileText ||
+                    "pkg-config --variable=libdir openblas" !in dockerfileText)
+        if (!stalePdockerShaderTuning && !staleCheckout && !staleOpenBlasDetection) return
         val backupDir = File(project, ".pdocker-template-backups/llama-cpp-gpu-${System.currentTimeMillis()}")
         backupDir.mkdirs()
         listOf(
@@ -5789,7 +5793,7 @@ class MainActivity : AppCompatActivity() {
             if (relative.startsWith("scripts/")) dest.setExecutable(true, false)
         }
         File(project, ".pdocker-template-id").writeText("llama-cpp-gpu\n")
-        File(project, ".pdocker-template-version").writeText("5\n")
+        File(project, ".pdocker-template-version").writeText("7\n")
         ensureProjectDocumentsEnv(project)
     }
 
