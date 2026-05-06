@@ -233,6 +233,84 @@ and Engine exec metadata.
 - Do not hide Engine API bugs by rewriting commands in the UI.
 - Do not make log panes focus the soft keyboard.
 
+## Background Rules
+
+The design follows three upstream contracts:
+
+1. Docker Engine exec is a session protocol, not a terminal widget protocol.
+   `POST /containers/{id}/exec` creates an exec instance with `AttachStdin`,
+   `AttachStdout`, `AttachStderr`, `Tty`, `Cmd`, `Env`, `User`, and `WorkingDir`
+   semantics. `POST /exec/{id}/start` then starts the session. When TTY mode is
+   enabled, Docker's stream is raw PTY data; when TTY mode is disabled, stdout
+   and stderr are multiplexed frames. Resize is a Docker exec resize endpoint,
+   not a UI-private operation.
+2. xterm.js is a terminal emulator surface. Its normal integration pattern is
+   `pty.onData(data => terminal.write(data))` and
+   `terminal.onData(data => pty.write(data))`. It also treats written raw bytes
+   as UTF-8, so the session boundary must ensure UTF-8 or perform a clearly
+   scoped transcoding step.
+3. `TERM`, locale, and line discipline belong to the session. Programs inside
+   the container use `TERM` and terminfo to decide what control sequences to
+   emit. The UI can advertise that it emulates `xterm-256color`, but the Engine
+   exec session must pass a matching `TERM` and UTF-8 locale to the process.
+
+The consequence is that terminal correctness is mostly not a matter of adding
+special cases to WebView. The correct model is:
+
+```text
+Android input method
+  -> TerminalInputAdapter
+  -> xterm.js TerminalSurface
+  -> TerminalSession.write(bytes)
+  -> Docker Engine hijack/raw PTY or local diagnostic PTY
+  -> process tty line discipline
+```
+
+Each boundary has one job. If Enter requires two presses, Ctrl-C also inserts
+`c`, or full-screen programs behave like a dumb terminal, the failure must be
+localized to one of these boundaries before adding code.
+
+## Terminal Capability Contract
+
+Each interactive session must declare the terminal it is offering to the child
+process:
+
+| Capability | Default for interactive Engine exec | Owner |
+|---|---|---|
+| `TERM` | `xterm-256color` | `EngineExecSession` |
+| `COLORTERM` | `truecolor` when the UI theme supports it | `EngineExecSession` |
+| `LANG` / `LC_CTYPE` | UTF-8 locale when the image supports it, otherwise leave image default and record the limitation | Runtime/session layer |
+| Columns/rows | xterm.js fit dimensions | `TerminalSession.resize` via Docker exec resize |
+| TTY mode | `Tty=true`, raw stream | Docker Engine API |
+| Input encoding | UTF-8 bytes from xterm.js `onData` | `TerminalInputAdapter` |
+| Output encoding | UTF-8 bytes to xterm.js `write` | `TerminalSession` |
+
+The UI must not infer that a session is VT100 or xterm by itself. It only
+emulates a terminal. The session tells the process which emulation is being
+offered.
+
+## Android Input Adapter
+
+Android WebView input methods can emit key data through more than one DOM path,
+especially around composition, Enter, and control-key shortcuts. That is an
+Android input adapter concern, not a Docker exec concern.
+
+The adapter rules are:
+
+- Prefer xterm.js `onData` as the authoritative stream.
+- Use `beforeinput`/`keydown` only to cover Android IME cases that xterm.js does
+  not surface correctly.
+- The fallback path must not send a second byte sequence if xterm.js already
+  emitted the same user action.
+- The fallback path must be tested independently from Docker Engine exec using
+  synthetic DOM events.
+- Docker-specific commands, container IDs, and Engine API endpoints must not
+  appear in the adapter.
+
+The current code still has fallback logic in `xterm/index.html`; the refactor
+target is to isolate that logic into an explicit terminal input adapter so it
+can be tested without starting a container.
+
 ## Current Status
 
 As of this snapshot, the design is not fully implemented. `Bridge.kt` still
