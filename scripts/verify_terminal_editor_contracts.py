@@ -45,6 +45,7 @@ def main() -> int:
     require("terminal body drag does not resize selection", "nearestSelectionHandle" not in source["terminal"] and "selectionDrag = roleForVisualHandle" in source["terminal"])
     require("terminal key toggles remain visible", 'data-toggle="select"' in source["terminal"] and 'data-toggle="ctrl"' in source["terminal"] and 'data-toggle="alt"' in source["terminal"])
     require("modifier toggle state propagates", "btn.classList.toggle('active', !!mods" in source["terminal"])
+    require("ime fallback suppresses duplicate terminal data", "suppressTerminalDataOnce" in source["terminal"] and "consumeSuppressedTerminalData(data)" in source["terminal"] and "suppressTerminalDataOnce(event.data)" in source["terminal"] and "suppressTerminalDataOnce(event.key)" in source["terminal"])
     require("terminal selection suppresses ime", "suppressImeForSelection" in source["terminal"] and "selectionSuppressesIme()" in source["terminal"] and "inputmode', 'none'" in source["terminal"])
     require("readonly selection actions keep ime suppressed", "runSelectionAction" in source["terminal"] and "if (readOnly) suppressImeForSelection()" in source["terminal"] and "if (readOnly || selectionSuppressesIme()) suppressImeForSelection()" in source["terminal"])
     require("terminal starts bridge-owned initial command", "fun startInitial()" in source["bridge"] and "PdockerBridge.startInitial()" in source["terminal"] and "PdockerBridge.start(PdockerBridge.initialCommand())" not in source["terminal"])

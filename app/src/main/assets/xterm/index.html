@@ -233,6 +233,7 @@
   let touchScroll = null;
   let allSelected = false;
   const touchScrollThreshold = 6;
+  const suppressedTerminalData = [];
 
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const distance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -403,6 +404,19 @@
     if (data == null) return '';
     return data.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
   };
+  const suppressTerminalDataOnce = (data) => {
+    const normalized = normalizeTerminalInput(data);
+    if (!normalized) return;
+    suppressedTerminalData.push(normalized);
+    while (suppressedTerminalData.length > 8) suppressedTerminalData.shift();
+  };
+  const consumeSuppressedTerminalData = (data) => {
+    const normalized = normalizeTerminalInput(data);
+    const index = suppressedTerminalData.indexOf(normalized);
+    if (index < 0) return false;
+    suppressedTerminalData.splice(index, 1);
+    return true;
+  };
   let modifierClearTimer = null;
   const scheduleModifierClear = () => {
     clearTimeout(modifierClearTimer);
@@ -468,6 +482,7 @@
 
   if (!readOnly) {
     term.onData((data) => {
+      if (consumeSuppressedTerminalData(data)) return;
       sendInput(data);
     });
   }
@@ -573,12 +588,14 @@
       if (readOnly || selectionSuppressesIme()) return;
       if (event.inputType === 'insertLineBreak') {
         claimImeEvent(event);
+        suppressTerminalDataOnce('\r');
         sendInput('\r', true);
         ta.value = '';
         return;
       }
       if ((mods.ctrl || mods.alt || mods.esc) && event.data) {
         claimImeEvent(event);
+        suppressTerminalDataOnce(event.data);
         sendInput(event.data, false);
         ta.value = '';
       }
@@ -587,12 +604,14 @@
       if (readOnly || selectionSuppressesIme()) return;
       if ((mods.ctrl || mods.alt || mods.esc) && event.key && event.key.length === 1) {
         claimImeEvent(event);
+        suppressTerminalDataOnce(event.key);
         sendInput(event.key, false);
         ta.value = '';
         return;
       }
       if ((mods.ctrl || mods.alt || mods.esc) && event.key === 'Enter') {
         claimImeEvent(event);
+        suppressTerminalDataOnce('\r');
         sendInput('\r', true);
         ta.value = '';
       }

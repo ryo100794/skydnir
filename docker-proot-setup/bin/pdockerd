@@ -5488,6 +5488,7 @@ class ForkPtyProcess:
         self.stderr = None
         self.stdin = os.fdopen(stdin_fd, "wb", buffering=0)
         self._pdocker_tty_like = True
+        self._pdocker_raw_pty = True
 
     def poll(self):
         if self.returncode is not None:
@@ -5531,6 +5532,7 @@ class OpenPtyProcess:
         self.stderr = None
         self.stdin = os.fdopen(stdin_fd, "wb", buffering=0)
         self._pdocker_tty_like = True
+        self._pdocker_raw_pty = True
 
     def poll(self):
         rc = self._proc.poll()
@@ -5871,6 +5873,8 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         """
         def tty_output(chunk):
             if not tty:
+                return chunk
+            if getattr(proc, "_pdocker_raw_pty", False):
                 return chunk
             # A real cooked PTY maps bare LF to CRLF through ONLCR. The Android
             # direct executor can bypass that line discipline, so emulate only

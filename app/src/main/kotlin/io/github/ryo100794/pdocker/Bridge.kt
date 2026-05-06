@@ -187,7 +187,7 @@ class Bridge(
             .put("AttachStderr", true)
             .put("Tty", true)
             .put("Env", JSONArray(listOf("TERM=xterm-256color", "COLORTERM=truecolor", "ENV=", "BASH_ENV=")))
-            .put("Cmd", JSONArray(listOf("/bin/sh", "-i")))
+            .put("Cmd", JSONArray(listOf("/bin/sh", "-lc", "if command -v /bin/bash >/dev/null 2>&1; then exec /bin/bash -i; else exec /bin/sh -i; fi")))
         val response = engineRequest(
             "POST",
             "/containers/${DockerEngineClient.encodePath(containerId)}/exec",
