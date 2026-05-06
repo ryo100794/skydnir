@@ -4693,6 +4693,41 @@ def _signal_pid_tree(pid, sig):
     return signalled
 
 
+def _signal_descendant_groups(root_pid, sig):
+    """Signal descendants of an exec launcher without killing the tracer itself."""
+    try:
+        root_pid = int(root_pid)
+    except (TypeError, ValueError):
+        return 0
+    signalled = set()
+    count = 0
+    for child in reversed(_descendant_pids(root_pid)):
+        try:
+            pgid = os.getpgid(child)
+        except ProcessLookupError:
+            continue
+        except OSError:
+            pgid = 0
+        if pgid > 0 and pgid != root_pid and pgid not in signalled:
+            try:
+                os.killpg(pgid, sig)
+                signalled.add(pgid)
+                count += 1
+                continue
+            except ProcessLookupError:
+                pass
+            except OSError:
+                pass
+        try:
+            os.kill(child, sig)
+            count += 1
+        except ProcessLookupError:
+            pass
+        except OSError:
+            pass
+    return count
+
+
 def _pid_tree_alive(pid):
     try:
         pid = int(pid)
@@ -5459,6 +5494,7 @@ def spawn_in_container(cid, cmd, env=None, workdir=None, tty=False,
             proc.stdout = os.fdopen(master, "rb", buffering=0)
             proc.stderr = None
             proc.stdin = os.fdopen(os.dup(master), "wb", buffering=0)
+            proc._pdocker_tty_like = True
             return proc
         except OSError as exc:
             # Android app sandboxes can fail pty.openpty() with
@@ -5473,6 +5509,7 @@ def spawn_in_container(cid, cmd, env=None, workdir=None, tty=False,
                 stderr=subprocess.STDOUT,
             )
             proc._pdocker_pipe_tty_fallback = True
+            proc._pdocker_tty_like = True
             return proc
     return subprocess.Popen(argv, stdin=stdin, stdout=stdout, stderr=stderr)
 
@@ -5753,6 +5790,19 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                             pass
                     if getattr(proc, "_pdocker_pipe_tty_fallback", False):
                         chunk = chunk.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                    if b"\x03" in chunk and getattr(proc, "_pdocker_tty_like", False):
+                        count = _signal_descendant_groups(proc.pid, signal.SIGINT)
+                        try:
+                            diag_dir = os.path.join(PDOCKER_HOME, "diagnostics")
+                            os.makedirs(diag_dir, exist_ok=True)
+                            with open(os.path.join(diag_dir, "hijack-stdin-latest.log"), "a") as f:
+                                f.write(f"ctrl-c signal descendants={count} root={proc.pid}\n")
+                        except OSError:
+                            pass
+                        if getattr(proc, "_pdocker_pipe_tty_fallback", False):
+                            chunk = chunk.replace(b"\x03", b"")
+                            if not chunk:
+                                continue
                     try:
                         proc.stdin.write(chunk)
                         proc.stdin.flush()

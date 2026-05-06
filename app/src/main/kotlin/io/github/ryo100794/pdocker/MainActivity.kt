@@ -2437,12 +2437,31 @@ class MainActivity : AppCompatActivity() {
                     output.toString().contains("can't access tty")
             }) { "UI exec -it did not reach an interactive shell prompt" }
 
-            val script = "echo pdocker-ui-it-ok\r/usr/bin/[ \"x\" = \"x\" ] && echo pdocker-ui-it-bracket-ok\rpwd\rexit\r"
-            val inputB64 = Base64.encodeToString(script.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-            ui.post { bridge?.input(inputB64) }
-            val passed = waitUntil(12_000) {
+            val script = "echo pdocker-ui-it-ok\n/usr/bin/[ \"x\" = \"x\" ] && echo pdocker-ui-it-bracket-ok\npwd\nsleep 15\n"
+            ui.post {
+                webView?.evaluateJavascript(
+                    "window.pdockerTestSendInput && window.pdockerTestSendInput(${JSONObject.quote(script)}, false)",
+                    null,
+                )
+            }
+            Thread.sleep(1_200)
+            ui.post {
+                webView?.evaluateJavascript(
+                    "window.pdockerTestSendInput && window.pdockerTestSendInput('\\u0003', true)",
+                    null,
+                )
+            }
+            ui.post {
+                webView?.evaluateJavascript(
+                    "window.pdockerTestSendInput && window.pdockerTestSendInput('echo pdocker-ui-it-ctrlc-ok\\nexit\\n', false)",
+                    null,
+                )
+            }
+            val passed = waitUntil(5_000) {
                 val text = output.toString()
-                text.contains("pdocker-ui-it-ok") && text.contains("pdocker-ui-it-bracket-ok")
+                text.contains("pdocker-ui-it-ok") &&
+                    text.contains("pdocker-ui-it-bracket-ok") &&
+                    text.contains("pdocker-ui-it-ctrlc-ok")
             }
             val text = output.toString()
             val bracketNoise = Regex("(/usr/bin/)?\\[: extra argument").containsMatchIn(text)

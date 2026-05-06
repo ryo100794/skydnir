@@ -399,6 +399,17 @@
     if (mods.alt || mods.esc) out = '\x1b' + out;
     return out;
   };
+  const normalizeTerminalInput = (data) => {
+    if (data == null) return '';
+    return data.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
+  };
+  const clearTransientModifiers = () => {
+    if (!mods.ctrl && !mods.alt && !mods.esc) return;
+    mods.ctrl = false;
+    mods.alt = false;
+    mods.esc = false;
+    refreshModifiers();
+  };
   const decodeKey = (value) => {
     if (value == null) return '';
     return value
@@ -423,9 +434,13 @@
   };
   const sendInput = (data, raw = false) => {
     if (readOnly) return;
-    const payload = raw ? data : applyModifiers(data);
+    const normalized = normalizeTerminalInput(data);
+    const payload = raw ? normalized : applyModifiers(normalized);
+    if (!payload) return;
     PdockerBridge.input(toB64(enc.encode(payload)));
+    if (!raw) clearTransientModifiers();
   };
+  window.pdockerTestSendInput = sendInput;
 
   if (!readOnly) {
     term.onData((data) => {
