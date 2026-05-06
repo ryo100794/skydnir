@@ -108,6 +108,22 @@ class MainActivity : AppCompatActivity() {
         val inodeKeys: Set<String>,
     )
 
+    private data class ImageReferenceInfo(
+        val dir: File,
+        val ref: String,
+        val displayRef: String,
+        val diffIds: List<String>,
+        val viewBytes: Long,
+        val uniqueLayerBytes: Long,
+        val sharedLayerBytes: Long,
+        val totalLayerBytes: Long,
+    )
+
+    private data class ColoredLine(
+        val text: String,
+        val color: Int,
+    )
+
     private data class DockerJob(
         val id: String,
         val title: String,
@@ -875,10 +891,12 @@ class MainActivity : AppCompatActivity() {
             addMessage(getString(R.string.message_no_pulled_images))
             return
         }
+        val imageInfos = imageReferenceInfos(images)
         images.forEach { image ->
             val ref = imageRef(image)
             val displayRef = displayImageRef(ref)
-            addWidget(displayRef, getString(R.string.detail_image_rootfs), imageDetail(image, ref)) {
+            val info = imageInfos.firstOrNull { it.dir == image }
+            addWidget(displayRef, getString(R.string.detail_image_rootfs), imageDetail(image, ref, info)) {
                 openImageFiles(image)
             }
             addAction(getString(R.string.action_delete_image_fmt, displayRef), getString(R.string.detail_delete_image)) {
@@ -888,6 +906,7 @@ class MainActivity : AppCompatActivity() {
                 confirmDeleteImage(ref, cleanCache = true)
             }
         }
+        renderImageReferenceTree(imageInfos)
     }
 
     private fun renderContainers() {
@@ -4231,6 +4250,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun addColoredTextBlock(title: String, lines: List<ColoredLine>) {
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(18, 18, 18, 18)
+            addView(TextView(this@MainActivity).apply {
+                text = title
+                textSize = 13f
+                alpha = 0.72f
+                setSingleLine(true)
+                ellipsize = TextUtils.TruncateAt.END
+            })
+            lines.forEach { line ->
+                addView(TextView(this@MainActivity).apply {
+                    text = line.text
+                    textSize = 11f
+                    typeface = Typeface.MONOSPACE
+                    setTextColor(line.color)
+                    setSingleLine(false)
+                })
+            }
+            content.addView(this)
+            addDivider()
+        }
+    }
+
     private fun addMessage(text: String) {
         content.addView(TextView(this).apply {
             this.text = text
@@ -4260,13 +4304,179 @@ class MainActivity : AppCompatActivity() {
     private fun displayImageRef(ref: String): String =
         ref.removePrefix("docker.io/library/").removePrefix("docker.io/")
 
-    private fun imageDetail(imageDir: File, ref: String): String {
+    private fun imageDetail(imageDir: File, ref: String, info: ImageReferenceInfo?): String {
         val rootfs = File(imageDir, "rootfs")
+        val storage = info?.let {
+            getString(
+                R.string.image_storage_detail_fmt,
+                formatBytes(it.viewBytes),
+                formatBytes(it.uniqueLayerBytes),
+                formatBytes(it.sharedLayerBytes),
+            )
+        }
         return listOf(
             summarizeRootfs(rootfs),
+            storage,
             ref,
             imageDir.name,
-        ).joinToString("\n")
+        ).filterNotNull().joinToString("\n")
+    }
+
+    private fun imageReferenceInfos(images: List<File>): List<ImageReferenceInfo> {
+        val diffIdsByDir = images.associateWith { readImageDiffIds(it) }
+        val refCount = diffIdsByDir.values.flatten().groupingBy { it }.eachCount()
+        return images.map { image ->
+            val ref = imageRef(image)
+            val diffIds = diffIdsByDir[image].orEmpty()
+            var uniqueLayerBytes = 0L
+            var sharedLayerBytes = 0L
+            diffIds.distinct().forEach { diffId ->
+                val bytes = layerSize(diffId)
+                if ((refCount[diffId] ?: 0) > 1) sharedLayerBytes += bytes else uniqueLayerBytes += bytes
+            }
+            ImageReferenceInfo(
+                dir = image,
+                ref = ref,
+                displayRef = displayImageRef(ref),
+                diffIds = diffIds,
+                viewBytes = diskUsage(File(image, "rootfs")).bytes,
+                uniqueLayerBytes = uniqueLayerBytes,
+                sharedLayerBytes = sharedLayerBytes,
+                totalLayerBytes = uniqueLayerBytes + sharedLayerBytes,
+            )
+        }.sortedBy { it.displayRef }
+    }
+
+    private fun readImageDiffIds(imageDir: File): List<String> =
+        runCatching {
+            val config = JSONObject(File(imageDir, "config.json").readText())
+            val rootfs = config.optJSONObject("rootfs") ?: return@runCatching emptyList()
+            val arr = rootfs.optJSONArray("diff_ids") ?: return@runCatching emptyList()
+            (0 until arr.length())
+                .mapNotNull { arr.optString(it).removePrefix("sha256:").takeIf { value -> value.isNotBlank() } }
+        }.getOrDefault(emptyList())
+
+    private fun layerSize(diffId: String): Long =
+        runCatching {
+            JSONObject(File(layerRoot, "${diffId.removePrefix("sha256:")}/meta.json").readText()).optLong("size", 0L)
+        }.getOrDefault(0L)
+
+    private fun renderImageReferenceTree(images: List<ImageReferenceInfo>) {
+        if (images.isEmpty()) return
+        val parentByRef = imageParentMap(images)
+        val childrenByRef = images
+            .filter { parentByRef.containsKey(it.ref) }
+            .groupBy { parentByRef.getValue(it.ref) }
+        val roots = images
+            .filter { it.ref !in parentByRef }
+            .sortedWith(compareBy<ImageReferenceInfo> { it.displayRef }.thenBy { it.ref })
+        val lines = mutableListOf<ColoredLine>()
+        lines += ColoredLine(getString(R.string.image_reference_legend), 0xff888888.toInt())
+        roots.forEachIndexed { index, image ->
+            appendImageReferenceTreeLines(
+                image = image,
+                childrenByRef = childrenByRef,
+                prefix = "",
+                isLast = index == roots.lastIndex,
+                lines = lines,
+            )
+        }
+        addSection(getString(R.string.section_image_references))
+        addColoredTextBlock(getString(R.string.section_image_references), lines.take(96))
+    }
+
+    private fun imageParentMap(images: List<ImageReferenceInfo>): Map<String, String> {
+        val parents = mutableMapOf<String, String>()
+        images.forEach { child ->
+            val parent = images
+                .filter { candidate ->
+                    candidate.ref != child.ref &&
+                        candidate.diffIds.isNotEmpty() &&
+                        child.diffIds.size > candidate.diffIds.size &&
+                        child.diffIds.take(candidate.diffIds.size) == candidate.diffIds
+                }
+                .maxByOrNull { it.diffIds.size }
+            if (parent != null) parents[child.ref] = parent.ref
+        }
+        return parents
+    }
+
+    private fun appendImageReferenceTreeLines(
+        image: ImageReferenceInfo,
+        childrenByRef: Map<String, List<ImageReferenceInfo>>,
+        prefix: String,
+        isLast: Boolean,
+        lines: MutableList<ColoredLine>,
+    ) {
+        val branch = if (prefix.isEmpty()) "" else if (isLast) "`- " else "|- "
+        val marker = if (image.uniqueLayerBytes > 0L) "[image]" else "[base]"
+        lines += ColoredLine(
+            prefix + branch + marker + " " + image.displayRef +
+                "  view=${formatBytes(image.viewBytes)} unique=${formatBytes(image.uniqueLayerBytes)}",
+            0xff66bb6a.toInt(),
+        )
+        val detailPrefix = prefix + if (prefix.isEmpty()) {
+            "   "
+        } else if (isLast) {
+            "   "
+        } else {
+            "|  "
+        }
+        lines += ColoredLine(
+            detailPrefix +
+                "[cache] shared=${formatBytes(image.sharedLayerBytes)} total-layers=${formatBytes(image.totalLayerBytes)} layers=${image.diffIds.size}",
+            0xffffb74d.toInt(),
+        )
+        imageProjectRefs(image.ref).forEach { ref ->
+            lines += ColoredLine(
+                detailPrefix + "[compose] $ref",
+                0xff42a5f5.toInt(),
+            )
+        }
+        imageContainerRefs(image.ref).forEach { ref ->
+            lines += ColoredLine(
+                detailPrefix + "[container] $ref",
+                0xff42a5f5.toInt(),
+            )
+        }
+        val children = childrenByRef[image.ref].orEmpty()
+            .sortedWith(compareBy<ImageReferenceInfo> { it.displayRef }.thenBy { it.ref })
+        val nextPrefix = prefix + if (prefix.isEmpty()) "" else if (isLast) "   " else "|  "
+        children.forEachIndexed { index, child ->
+            appendImageReferenceTreeLines(
+                image = child,
+                childrenByRef = childrenByRef,
+                prefix = nextPrefix,
+                isLast = index == children.lastIndex,
+                lines = lines,
+            )
+        }
+    }
+
+    private fun imageProjectRefs(ref: String): List<String> {
+        val display = displayImageRef(ref)
+        return projectDirs().flatMap { project ->
+            parseComposeServices(project).mapNotNull { service ->
+                val serviceImage = service.image.ifBlank { "local/${project.name}-${service.name}:latest" }
+                if (serviceImage == ref || displayImageRef(serviceImage) == display) {
+                    "${project.name}/${service.name}"
+                } else {
+                    null
+                }
+            }
+        }.distinct().sorted()
+    }
+
+    private fun imageContainerRefs(ref: String): List<String> {
+        val display = displayImageRef(ref)
+        return containerDirs().mapNotNull { dir ->
+            val state = readState(dir) ?: return@mapNotNull null
+            val image = state.optString("Image")
+            if (image != ref && displayImageRef(image) != display) return@mapNotNull null
+            val name = state.optString("Name", dir.name).trim('/').ifBlank { dir.name }
+            val status = state.optJSONObject("State")?.optString("Status").orEmpty().ifBlank { "unknown" }
+            "$name ($status)"
+        }.distinct().sorted()
     }
 
     private fun containerDirs(): List<File> =

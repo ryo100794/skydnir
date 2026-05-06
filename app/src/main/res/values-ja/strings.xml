@@ -194,6 +194,9 @@
     <string name="confirm_clean_image_cache_fmt">イメージ %1$s を削除し、ビルドキャッシュと未参照レイヤも prune しますか？失敗ビルドで壊れたタグや古いキャッシュが残ったときに使います。</string>
     <string name="message_no_pulled_images">pull 済みイメージはまだありません。</string>
     <string name="detail_image_rootfs">イメージ rootfs</string>
+    <string name="section_image_references">イメージ参照</string>
+    <string name="image_reference_legend">緑=[image/base] 橙=[cache/shared layer] 青=[compose/container reference]</string>
+    <string name="image_storage_detail_fmt">view %1$s / unique image %2$s / shared cache %3$s</string>
     <string name="summary_rootfs_fmt">トップレベル %1$d 件</string>
 
     <string name="section_containers">コンテナ</string>

@@ -194,6 +194,9 @@
     <string name="confirm_clean_image_cache_fmt">Delete image %1$s and prune build cache/unreferenced layers? Use this when a failed build left a bad tagged image or stale cache.</string>
     <string name="message_no_pulled_images">No pulled images yet.</string>
     <string name="detail_image_rootfs">Image rootfs</string>
+    <string name="section_image_references">Image references</string>
+    <string name="image_reference_legend">green=[image/base] orange=[cache/shared layer] blue=[compose/container reference]</string>
+    <string name="image_storage_detail_fmt">view %1$s / unique image %2$s / shared cache %3$s</string>
     <string name="summary_rootfs_fmt">%1$d top-level entries</string>
 
     <string name="section_containers">Containers</string>
