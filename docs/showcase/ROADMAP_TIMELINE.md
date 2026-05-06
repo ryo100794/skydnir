@@ -23,19 +23,19 @@ Current TODO counters:
 |---|---:|
 | done | 51 |
 | doing | 8 |
-| next | 33 |
+| next | 35 |
 | blocked | 0 |
 
 ## Timeline
 
-### Now: 2026-05-05 to 2026-05-08
+### Now: 2026-05-06 to 2026-05-09
 
 Keep the UI compose path truthful and visible while closing regressions that block demos.
 
 - [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from device discovery and...
 - Active port mapping: published ports now have an Engine-visible `PdockerNetwork.PortMappingStatus` scaffold for planned/inactive/active/ conflict states while the runtime remains...
 
-### Next: 2026-05-09 to 2026-05-15
+### Next: 2026-05-10 to 2026-05-16
 
 Turn the remaining high-value TODOs into repeatable device checks and public artifacts.
 
@@ -45,7 +45,7 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 - [#9](https://github.com/ryo100794/pdocker-android/issues/9) First public release candidate gate: define and satisfy the minimum GitHub Release criteria for a build that is honest...
 - SAF/Documents boundary: a user-selected Android Documents directory is an explicit `/documents` exchange mount only. Hot runtime paths, model files, caches, layer data, and project...
 
-### Then: 2026-05-16 to 2026-05-26
+### Then: 2026-05-17 to 2026-05-27
 
 Use benchmark evidence to harden compatibility and publish tester-ready releases.
 

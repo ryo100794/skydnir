@@ -15,22 +15,7 @@ pdocker-android is a Docker-compatible Android workbench packaged as a native
 APK. It combines `pdockerd`, Compose/Dockerfile controls, image/container file
 browsing, persistent logs, editor tabs, and `-it`-style terminals inside the
 app UI. The current research front is real Android direct execution plus
-Vulkan/OpenCL GPU bridging for llama.cpp-class workloads. The product APK does
-not ship upstream Docker CLI/Compose, PRoot, proot-loader, or talloc; those
-boundaries are part of the public story, not fine print.
-
-## Verification Pulse
-
-Latest fixed build evidence:
-[`docs/test/build-20260505.1`](../test/build-20260505.1/README.md).
-
-| Route | Result | Public reading |
-|---|---|---|
-| APK builds | PASS | Compat/modern debug APKs and unsigned compat/modern release APKs were produced for build `20260505.1`. |
-| Android full smoke | PASS | Device Dockerfile build, Compose up/down, `docker exec`, and Engine API `exec -it` passed. |
-| Android quick smoke | PASS | Install, `docker version`, direct probe, and memory-pager probes passed. |
-| Fast/scenario/design gates | FAIL | Current failure is the enforced literal test-density threshold. Do not call the full gate green. |
-| Host backend quick/full | FAIL | Host regression expects a staged `pdocker-direct` helper; Android APK direct execution is the release-blocking lane for this build. |
+Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 
 ## Live Counters
 
@@ -39,7 +24,7 @@ Latest fixed build evidence:
 | Project-library templates | 5 |
 | TODO done entries | 51 |
 | TODO doing entries | 8 |
-| TODO next entries | 33 |
+| TODO next entries | 35 |
 | Compatibility audit PASS | 69 |
 | Compatibility audit FAIL | 0 |
 
@@ -58,7 +43,7 @@ Latest fixed build evidence:
 | State | Item |
 |---|---|
 | doing | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from device discovery and... |
-| next | [#5](https://github.com/ryo100794/pdocker-android/issues/5) Terminal `-it` argv safety: fix direct executor `execve` argv rewrite so `/bin/sh`, scripts, and `/usr/bin/[` preserve arguments... |
+| next | [#5](https://github.com/ryo100794/pdocker-android/issues/5) Terminal `-it` interactive path: direct executor long argv/bracket argv preservation is covered by regression tests; the... |
 | next | [#6](https://github.com/ryo100794/pdocker-android/issues/6) Real listener service health: probe the actual device listener for default workspace `18080` and llama `18081`, correlate it with... |
 | next | [#6](https://github.com/ryo100794/pdocker-android/issues/6) ID/label-based container truth: reconcile project cards, logs, lifecycle actions, and duplicate-name cleanup from Engine... |
 | next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU performance workflow after Vulkan clamp: keep CPU fallback hiding Vulkan devices, force Vulkan only for measured GPU... |
@@ -84,9 +69,6 @@ UI/docs work, so the public timeline is intentionally a little conservative.
 - Target met: `false`; speedup: `0.43689191188917054`
 - Current blocker: llama.cpp served, but only the output layer was offloaded; repeating transformer layers stayed on CPU
 - llama.cpp modified: `false`
-- Bridge evidence: host-native and host/container Vulkan probes are recorded
-  under `docs/test/`, but this is still pdocker GPU bridge research rather
-  than Docker GPU parity.
 
 ## Demo Route
 
