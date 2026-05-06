@@ -103,6 +103,11 @@ implementation change plus a focused verification artifact.
   symlinks, uid/gid, modes, xattrs, hardlinks, special files, and executable
   semantics. SAF `DocumentProvider` mediation is required unless direct POSIX
   writability is proven for the selected path.
+- [next] SAF UnixFS layering: implement `saf-unixfs` as a lower filesystem
+  backend with `FilesystemBackend` and `UnixMetadataBackend` contracts.
+  Overlay, archive, runtime, and UI code must consume those abstract contracts
+  and capability flags instead of branching on SAF, SD-card, FAT32, exFAT,
+  `DocumentProvider`, tree URIs, or sidecar internals.
 - [next] Storage metrics accounting: the shared layer pool is counted once for
   total storage. Image apparent sizes, container apparent rootfs sizes, and
   merged views intentionally overlap lower-layer bytes, so UI summaries and

@@ -49,6 +49,10 @@ static int   (*real_truncate)(const char *, off_t);
 #ifdef __GLIBC__
 static int   (*real_truncate64)(const char *, off_t);
 #endif
+static int   (*real_ftruncate)(int, off_t);
+#ifdef __GLIBC__
+static int   (*real_ftruncate64)(int, off_t);
+#endif
 static FILE *(*real_fopen)  (const char *, const char *);
 #ifdef __GLIBC__
 static FILE *(*real_fopen64)(const char *, const char *);
@@ -129,6 +133,48 @@ static void remember_open(int fd, const char *path) {
     fdtab_set(fd, abs_);
 }
 
+static int resolve_at_path(int dirfd, const char *path, char *out, size_t out_len) {
+    if (!path || !out || out_len == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (path[0] == '/') {
+        if (strlen(path) >= out_len) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        strcpy(out, path);
+        return 0;
+    }
+    char base[PATH_MAX];
+    if (dirfd == AT_FDCWD) {
+        if (!getcwd(base, sizeof(base))) return -1;
+    } else {
+        const char *tracked = fdtab_get(dirfd);
+        if (tracked) {
+            if (strlen(tracked) >= sizeof(base)) {
+                errno = ENAMETOOLONG;
+                return -1;
+            }
+            strcpy(base, tracked);
+        } else {
+            char linkpath[64];
+            snprintf(linkpath, sizeof(linkpath), "/proc/self/fd/%d", dirfd);
+            ssize_t n = readlink(linkpath, base, sizeof(base) - 1);
+            if (n < 0) return -1;
+            base[n] = '\0';
+        }
+    }
+    size_t base_len = strlen(base);
+    size_t path_len = strlen(path);
+    if (base_len + 1 + path_len + 1 > out_len) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    snprintf(out, out_len, "%s/%s", base, path);
+    return 0;
+}
+
 static int cow_debug = 0;
 
 #define DBG(fmt, ...) do { \
@@ -150,6 +196,10 @@ static void libcow_init(void) {
     real_truncate  = dlsym(RTLD_NEXT, "truncate");
 #ifdef __GLIBC__
     real_truncate64= dlsym(RTLD_NEXT, "truncate64");
+#endif
+    real_ftruncate = dlsym(RTLD_NEXT, "ftruncate");
+#ifdef __GLIBC__
+    real_ftruncate64= dlsym(RTLD_NEXT, "ftruncate64");
 #endif
     real_fopen     = dlsym(RTLD_NEXT, "fopen");
 #ifdef __GLIBC__
@@ -336,6 +386,13 @@ static int break_hardlink_copy(const char *path, int copy_data) {
         }
     }
 
+    if (env_enabled("PDOCKER_COW_FAIL_BEFORE_RENAME")) {
+        int e = ENOMEM;
+        unlink(tmp);
+        errno = e;
+        return -1;
+    }
+
     if (real_rename(tmp, path) < 0) {
         int e = errno; unlink(tmp); errno = e; return -1;
     }
@@ -347,12 +404,12 @@ static int break_hardlink(const char *path) {
 }
 
 
-static void maybe_break(const char *path, int flags) {
-    if (!flags_write(flags)) return;
-    if (flags & O_TMPFILE) return;
-    if ((flags & O_CREAT) && (flags & O_EXCL)) return;
+static int maybe_break(const char *path, int flags) {
+    if (!flags_write(flags)) return 0;
+    if (flags & O_TMPFILE) return 0;
+    if ((flags & O_CREAT) && (flags & O_EXCL)) return 0;
     /* O_CREAT on an existing file still needs copy-up before open/truncate. */
-    break_hardlink_copy(path, !(flags & O_TRUNC));
+    return break_hardlink_copy(path, !(flags & O_TRUNC));
 }
 
 /* ---------- intercepted symbols ---------- */
@@ -364,7 +421,7 @@ int open(const char *path, int flags, ...) {
         mode = va_arg(ap, mode_t);
         va_end(ap);
     }
-    maybe_break(path, flags);
+    if (maybe_break(path, flags) < 0) return -1;
     int fd = real_open(path, flags, mode);
     if (fd >= 0) remember_open_for_flags(fd, path, flags);
     return fd;
@@ -378,7 +435,7 @@ int open64(const char *path, int flags, ...) {
         mode = va_arg(ap, mode_t);
         va_end(ap);
     }
-    maybe_break(path, flags);
+    if (maybe_break(path, flags) < 0) return -1;
     int fd = real_open64 ? real_open64(path, flags, mode)
                          : real_open  (path, flags, mode);
     if (fd >= 0) remember_open_for_flags(fd, path, flags);
@@ -393,15 +450,18 @@ int openat(int dirfd, const char *path, int flags, ...) {
         mode = va_arg(ap, mode_t);
         va_end(ap);
     }
-    /* Only handle absolute and cwd-relative paths directly.
-     * For other dirfd cases we skip CoW (correctness hole, but rare
-     * in typical container workloads). */
-    if (path && (path[0] == '/' || dirfd == AT_FDCWD)) {
-        maybe_break(path, flags);
+    char resolved[PATH_MAX];
+    const char *cow_path = path;
+    if (path && path[0] != '/' && dirfd != AT_FDCWD) {
+        cow_path = resolve_at_path(dirfd, path, resolved, sizeof(resolved)) == 0
+            ? resolved : NULL;
+    }
+    if (cow_path) {
+        if (maybe_break(cow_path, flags) < 0) return -1;
     }
     int fd = real_openat(dirfd, path, flags, mode);
-    if (fd >= 0 && path && (path[0] == '/' || dirfd == AT_FDCWD)) {
-        remember_open_for_flags(fd, path, flags);
+    if (fd >= 0 && cow_path) {
+        remember_open_for_flags(fd, cow_path, flags);
     }
     return fd;
 }
@@ -414,13 +474,19 @@ int openat64(int dirfd, const char *path, int flags, ...) {
         mode = va_arg(ap, mode_t);
         va_end(ap);
     }
-    if (path && (path[0] == '/' || dirfd == AT_FDCWD)) {
-        maybe_break(path, flags);
+    char resolved[PATH_MAX];
+    const char *cow_path = path;
+    if (path && path[0] != '/' && dirfd != AT_FDCWD) {
+        cow_path = resolve_at_path(dirfd, path, resolved, sizeof(resolved)) == 0
+            ? resolved : NULL;
+    }
+    if (cow_path) {
+        if (maybe_break(cow_path, flags) < 0) return -1;
     }
     int fd = real_openat64 ? real_openat64(dirfd, path, flags, mode)
                            : real_openat  (dirfd, path, flags, mode);
-    if (fd >= 0 && path && (path[0] == '/' || dirfd == AT_FDCWD)) {
-        remember_open_for_flags(fd, path, flags);
+    if (fd >= 0 && cow_path) {
+        remember_open_for_flags(fd, cow_path, flags);
     }
     return fd;
 }
@@ -430,7 +496,7 @@ int creat(const char *path, mode_t mode) {
     /* creat = O_WRONLY|O_CREAT|O_TRUNC — but the file may exist and
      * share inodes with the image, so break first. O_TRUNC discards old
      * content, so copy up metadata only. */
-    break_hardlink_copy(path, 0);
+    if (break_hardlink_copy(path, 0) < 0) return -1;
     int fd = real_creat(path, mode);
     if (fd >= 0) remember_open(fd, path);
     return fd;
@@ -438,7 +504,7 @@ int creat(const char *path, mode_t mode) {
 
 #ifdef __GLIBC__
 int creat64(const char *path, mode_t mode) {
-    break_hardlink_copy(path, 0);
+    if (break_hardlink_copy(path, 0) < 0) return -1;
     int fd = real_creat64 ? real_creat64(path, mode) : real_creat(path, mode);
     if (fd >= 0) remember_open(fd, path);
     return fd;
@@ -446,32 +512,55 @@ int creat64(const char *path, mode_t mode) {
 #endif
 
 int truncate(const char *path, off_t length) {
-    break_hardlink_copy(path, length != 0);
+    if (break_hardlink_copy(path, length != 0) < 0) return -1;
     return real_truncate(path, length);
 }
 
 #ifdef __GLIBC__
 int truncate64(const char *path, off_t length) {
-    break_hardlink_copy(path, length != 0);
+    if (break_hardlink_copy(path, length != 0) < 0) return -1;
     return real_truncate64 ? real_truncate64(path, length)
                            : real_truncate  (path, length);
 }
 #endif
 
+int ftruncate(int fd, off_t length) {
+    const char *path = fdtab_get(fd);
+    if (path) {
+        if (break_hardlink_copy(path, length != 0) < 0) return -1;
+        return real_truncate(path, length);
+    }
+    return real_ftruncate ? real_ftruncate(fd, length)
+                          : real_syscall(SYS_ftruncate, fd, length);
+}
+
+#ifdef __GLIBC__
+int ftruncate64(int fd, off_t length) {
+    const char *path = fdtab_get(fd);
+    if (path) {
+        if (break_hardlink_copy(path, length != 0) < 0) return -1;
+        return real_truncate64 ? real_truncate64(path, length)
+                               : real_truncate(path, length);
+    }
+    return real_ftruncate64 ? real_ftruncate64(fd, length)
+                            : ftruncate(fd, length);
+}
+#endif
+
 FILE *fopen(const char *path, const char *mode) {
-    if (mode_write(mode)) break_hardlink_copy(path, !mode_truncates(mode));
+    if (mode_write(mode) && break_hardlink_copy(path, !mode_truncates(mode)) < 0) return NULL;
     return real_fopen(path, mode);
 }
 
 #ifdef __GLIBC__
 FILE *fopen64(const char *path, const char *mode) {
-    if (mode_write(mode)) break_hardlink_copy(path, !mode_truncates(mode));
+    if (mode_write(mode) && break_hardlink_copy(path, !mode_truncates(mode)) < 0) return NULL;
     return real_fopen64 ? real_fopen64(path, mode) : real_fopen(path, mode);
 }
 #endif
 
 FILE *freopen(const char *path, const char *mode, FILE *stream) {
-    if (path && mode_write(mode)) break_hardlink_copy(path, !mode_truncates(mode));
+    if (path && mode_write(mode) && break_hardlink_copy(path, !mode_truncates(mode)) < 0) return NULL;
     return real_freopen(path, mode, stream);
 }
 
@@ -505,19 +594,25 @@ int renameat(int sfd, const char *src, int dfd, const char *dst) {
  */
 
 int chmod(const char *path, mode_t mode) {
-    break_hardlink(path);
+    if (break_hardlink(path) < 0) return -1;
     return real_chmod(path, mode);
 }
 
 int fchmodat(int dirfd, const char *path, mode_t mode, int flags) {
-    if (path && (path[0] == '/' || dirfd == AT_FDCWD)) {
-        break_hardlink(path);
+    char resolved[PATH_MAX];
+    const char *cow_path = path;
+    if (path && path[0] != '/' && dirfd != AT_FDCWD) {
+        cow_path = resolve_at_path(dirfd, path, resolved, sizeof(resolved)) == 0
+            ? resolved : NULL;
+    }
+    if (cow_path) {
+        if (break_hardlink(cow_path) < 0) return -1;
     }
     return real_fchmodat(dirfd, path, mode, flags);
 }
 
 int chown(const char *path, uid_t uid, gid_t gid) {
-    break_hardlink(path);
+    if (break_hardlink(path) < 0) return -1;
     return real_chown(path, uid, gid);
 }
 
@@ -527,20 +622,25 @@ int lchown(const char *path, uid_t uid, gid_t gid) {
 }
 
 int fchownat(int dirfd, const char *path, uid_t uid, gid_t gid, int flags) {
-    if (path && (path[0] == '/' || dirfd == AT_FDCWD) &&
-        !(flags & AT_SYMLINK_NOFOLLOW)) {
-        break_hardlink(path);
+    char resolved[PATH_MAX];
+    const char *cow_path = path;
+    if (path && path[0] != '/' && dirfd != AT_FDCWD) {
+        cow_path = resolve_at_path(dirfd, path, resolved, sizeof(resolved)) == 0
+            ? resolved : NULL;
+    }
+    if (cow_path && !(flags & AT_SYMLINK_NOFOLLOW)) {
+        if (break_hardlink(cow_path) < 0) return -1;
     }
     return real_fchownat(dirfd, path, uid, gid, flags);
 }
 
 int utime(const char *path, const struct utimbuf *times) {
-    break_hardlink(path);
+    if (break_hardlink(path) < 0) return -1;
     return real_utime(path, times);
 }
 
 int utimes(const char *path, const struct timeval times[2]) {
-    break_hardlink(path);
+    if (break_hardlink(path) < 0) return -1;
     return real_utimes(path, times);
 }
 
@@ -548,7 +648,13 @@ int utimensat(int dirfd, const char *path,
               const struct timespec times[2], int flags) {
     if (path && (path[0] == '/' || dirfd == AT_FDCWD) &&
         !(flags & AT_SYMLINK_NOFOLLOW)) {
-        break_hardlink(path);
+        if (break_hardlink(path) < 0) return -1;
+    } else if (path && !(flags & AT_SYMLINK_NOFOLLOW)) {
+        char resolved[PATH_MAX];
+        if (resolve_at_path(dirfd, path, resolved, sizeof(resolved)) == 0 &&
+            break_hardlink(resolved) < 0) {
+            return -1;
+        }
     }
     return real_utimensat(dirfd, path, times, flags);
 }
@@ -574,6 +680,7 @@ int fchmod(int fd, mode_t mode) {
         if (break_hardlink(path) == 0) {
             return real_chmod(path, mode);
         }
+        return -1;
     }
     return syscall(SYS_fchmod, fd, mode);
 }
@@ -584,6 +691,7 @@ int fchown(int fd, uid_t uid, gid_t gid) {
         if (break_hardlink(path) == 0) {
             return real_chown(path, uid, gid);
         }
+        return -1;
     }
     return syscall(SYS_fchown, fd, uid, gid);
 }
@@ -594,6 +702,7 @@ int futimens(int fd, const struct timespec times[2]) {
         if (break_hardlink(path) == 0) {
             return real_utimensat(AT_FDCWD, path, times, 0);
         }
+        return -1;
     }
     /* utimensat(fd, NULL, ...) is the "futimens" form in Linux */
     return real_utimensat(fd, NULL, times, 0);
@@ -637,7 +746,7 @@ int dup3(int oldfd, int newfd, int flags) {
 
 int setxattr(const char *path, const char *name, const void *value,
              size_t size, int flags) {
-    break_hardlink(path);
+    if (break_hardlink(path) < 0) return -1;
     return real_setxattr(path, name, value, size, flags);
 }
 
@@ -646,17 +755,17 @@ int lsetxattr(const char *path, const char *name, const void *value,
     /* lsetxattr targets symlink itself; symlinks in the clone are
      * independently created so hardlink break is a no-op. Still call
      * break_hardlink for safety (it checks S_ISREG and returns early). */
-    break_hardlink(path);
+    if (break_hardlink(path) < 0) return -1;
     return real_lsetxattr(path, name, value, size, flags);
 }
 
 int removexattr(const char *path, const char *name) {
-    break_hardlink(path);
+    if (break_hardlink(path) < 0) return -1;
     return real_removexattr(path, name);
 }
 
 int lremovexattr(const char *path, const char *name) {
-    break_hardlink(path);
+    if (break_hardlink(path) < 0) return -1;
     return real_lremovexattr(path, name);
 }
 
@@ -667,6 +776,7 @@ int fsetxattr(int fd, const char *name, const void *value,
         if (break_hardlink(path) == 0) {
             return real_setxattr(path, name, value, size, flags);
         }
+        return -1;
     }
     return syscall(SYS_fsetxattr, fd, name, value, size, flags);
 }
@@ -677,6 +787,7 @@ int fremovexattr(int fd, const char *name) {
         if (break_hardlink(path) == 0) {
             return real_removexattr(path, name);
         }
+        return -1;
     }
     return syscall(SYS_fremovexattr, fd, name);
 }
@@ -704,53 +815,61 @@ long syscall(long number, ...) {
     long a5 = va_arg(ap, long);
     va_end(ap);
 
+    int cow_rc = 0;
     switch (number) {
 #ifdef SYS_chmod
     case SYS_chmod:
-        break_hardlink((const char *)a0);
+        cow_rc = break_hardlink((const char *)a0);
         break;
 #endif
 #ifdef SYS_fchmodat
     case SYS_fchmodat: {
         const char *p = (const char *)a1;
-        if (p && (p[0] == '/' || (int)a0 == AT_FDCWD)) break_hardlink(p);
+        if (p && (p[0] == '/' || (int)a0 == AT_FDCWD)) cow_rc = break_hardlink(p);
         break;
     }
 #endif
 #ifdef SYS_chown
     case SYS_chown:
-        break_hardlink((const char *)a0);
+        cow_rc = break_hardlink((const char *)a0);
         break;
 #endif
 #ifdef SYS_fchownat
     case SYS_fchownat: {
         const char *p = (const char *)a1;
         if (p && (p[0] == '/' || (int)a0 == AT_FDCWD) &&
-            !((int)a4 & AT_SYMLINK_NOFOLLOW)) break_hardlink(p);
+            !((int)a4 & AT_SYMLINK_NOFOLLOW)) cow_rc = break_hardlink(p);
         break;
     }
 #endif
 #ifdef SYS_truncate
     case SYS_truncate:
-        break_hardlink_copy((const char *)a0, a1 != 0);
+        cow_rc = break_hardlink_copy((const char *)a0, a1 != 0);
         break;
+#endif
+#ifdef SYS_ftruncate
+    case SYS_ftruncate: {
+        const char *p = fdtab_get((int)a0);
+        if (p) cow_rc = break_hardlink_copy(p, a1 != 0);
+        break;
+    }
 #endif
 #ifdef SYS_utimensat
     case SYS_utimensat: {
         const char *p = (const char *)a1;
         if (p && (p[0] == '/' || (int)a0 == AT_FDCWD) &&
-            !((int)a3 & AT_SYMLINK_NOFOLLOW)) break_hardlink(p);
+            !((int)a3 & AT_SYMLINK_NOFOLLOW)) cow_rc = break_hardlink(p);
         break;
     }
 #endif
 #ifdef SYS_setxattr
     case SYS_setxattr:
-        break_hardlink((const char *)a0);
+        cow_rc = break_hardlink((const char *)a0);
         break;
 #endif
 #ifdef SYS_removexattr
     case SYS_removexattr:
-        break_hardlink((const char *)a0);
+        cow_rc = break_hardlink((const char *)a0);
         break;
 #endif
 #ifdef SYS_fchmod
@@ -759,12 +878,13 @@ long syscall(long number, ...) {
     case SYS_fsetxattr:
     case SYS_fremovexattr: {
         const char *p = fdtab_get((int)a0);
-        if (p) break_hardlink(p);
+        if (p) cow_rc = break_hardlink(p);
         break;
     }
 #endif
     default:
         break;
     }
+    if (cow_rc < 0) return -1;
     return real_syscall(number, a0, a1, a2, a3, a4, a5);
 }

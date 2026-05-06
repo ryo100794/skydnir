@@ -6,6 +6,11 @@ This document is the storage contract for pdocker's Docker/OCI rootfs,
 container writable state, archive exchange, and Android volume story. The goal
 is overlayfs-like behavior that is useful for Docker workloads without
 requiring kernel overlayfs, mount namespaces, privileged mounts, or PRoot.
+SAF/SD/FAT-backed storage is delegated to the planned
+[`saf-unixfs` backend](SAF_UNIXFS_METADATA_SIDECAR.md), which presents
+`FilesystemBackend` and `UnixMetadataBackend` contracts below this overlay
+layer so overlay, archive, container, and UI code do not need Android storage
+special cases.
 
 ## Current Truth
 
@@ -25,6 +30,75 @@ pdocker currently has two storage modes in play:
 Neither mode is kernel overlayfs. The accepted design is a pdocker-owned
 snapshotter and path-mediation layer that implements the Docker-visible subset
 of overlay semantics in userspace.
+
+## Current Guarantees And Gaps
+
+This section separates shipped behavior from the target contract so recovery
+code does not imply semantics that are not implemented yet.
+
+Current guarantees:
+
+- Existing image rootfs payloads and container upperdirs are normal app-owned
+  filesystem trees.
+- `cow_bind` metadata can point create/start paths at separate lower and upper
+  directories.
+- Basic merged browsing prefers upper entries and can hide lower entries with
+  upper whiteouts.
+- Materialized-rootfs `libcow` mode can break many hardlinks before common
+  write and metadata-mutation paths.
+- Metadata DB work is still a plan. Filesystem state remains the only durable
+  truth today.
+
+Current gaps:
+
+- There is no complete overlay repair command that can prove and fix every
+  lower/upper/whiteout inconsistency.
+- Hardlink identity is not a durable Docker-compatible contract. Android may
+  reject app-data hardlinks, and the fallback may lose inode-link topology.
+- Any hardlink or ring-tree acceleration must be treated as rebuildable cache
+  state, not as payload truth.
+- Rename, unlink, replace, chmod, chown, xattr, truncate, hardlink, symlink,
+  opaque-directory, and special-file behavior are still partial across runtime,
+  archive API, UI browsing, and metadata indexing.
+- ENOSPC, OOM, app kill, daemon kill, and partial-write recovery are not yet
+  fully implemented for every mutating storage operation.
+
+## Fail-Closed Mutation Contract
+
+Mutating storage operations must fail closed. A failure must leave the merged
+view at either the old committed state or a quarantined state that pdocker will
+not present as successful Docker-visible data.
+
+Required rules:
+
+- Copy-up, whiteout creation, rename, replace, chmod/chown/xattr, truncate,
+  archive PUT, volume copy, and metadata-index updates must write into temporary
+  paths or journaled operation directories first.
+- Payload bytes must be fsynced before publishing the upper path, whiteout, or
+  metadata row that makes them visible.
+- Directory fsync or the closest Android-supported durability barrier should
+  follow atomic rename/link publication where available.
+- Metadata rows must not be committed until the filesystem operation they
+  describe is already durable enough to survive a restart.
+- If any step returns `ENOSPC`, `ENOMEM`, `EIO`, `EACCES`, `EPERM`, or an
+  unexpected short write, pdocker must stop the operation, record a diagnostic,
+  and avoid exposing a half-applied merged view.
+- If Android kills the app, daemon, direct runtime, or helper process during a
+  mutation, startup reconciliation must classify the operation as interrupted
+  before serving the affected path as healthy.
+- User-facing APIs must not return success for a mutation unless the final
+  visible state is present in the upperdir or volume and the operation evidence
+  has been recorded.
+
+Current implementation status:
+
+- Some existing writes already use ordinary filesystem atomicity, but there is
+  no single storage-wide journal or fail-closed verifier yet.
+- Runtime OOM guard and operation-ring work is tracked separately in
+  `RUNTIME_OOM_SURVIVAL.md`; this document only defines the storage outcome
+  expected when OOM or kill interrupts a COW operation.
+- Low-free-space and kill-at-each-step tests are still required before pdocker
+  can claim this contract as implemented.
 
 ## `libcow`
 
@@ -127,6 +201,60 @@ Rebuild inputs:
 - container upperdirs and whiteout markers;
 - volume directories and metadata.
 
+Rebuildable metadata:
+
+- overlay path rows derived from lower roots, upperdirs, whiteout markers, and
+  opaque-directory markers;
+- lower source references derived from image IDs, image configs, layer digests,
+  and materialized rootfs locations;
+- upper path references derived from container state and upperdir scans;
+- selected stat metadata such as size, mode, mtime, symlink target, and
+  representable ownership/xattr digests;
+- changed-path manifests, touched-path indexes, parent-stack caches, hardlink
+  copy-up indexes, and ring-tree/path-resolution accelerators;
+- source snapshot counts, cheap fingerprints, and last-scan timestamps.
+
+Metadata that is not safely rebuildable:
+
+- payload bytes that were never committed to a lower root, upperdir, volume, or
+  SAF exchange payload;
+- exact original hardlink topology when Android rejected hardlinks or a fallback
+  copy already broke the topology;
+- xattrs, uid/gid, device nodes, and mode bits that the backing filesystem never
+  represented;
+- the user's intended resolution for a conflict unless it was recorded before
+  the failure.
+
+Unimplemented repair items:
+
+- a storage-wide repair command that rebuilds overlay metadata, validates every
+  merged path, and rewrites only after producing a user-visible report;
+- an interrupted-operation journal for copy-up, whiteout, rename, replace, and
+  archive PUT;
+- quarantine handling for ambiguous upper/lower conflicts and orphaned
+  temporary files;
+- automatic reconstruction of hardlink/ring-tree acceleration state after
+  cache corruption or partial writes;
+- deterministic pruning for dangling upperdirs, stale whiteouts, missing lower
+  roots, and DB rows whose filesystem evidence no longer exists;
+- SAF sidecar repair that can preserve both Android-edited and
+  container-edited versions without silent overwrite.
+
+Repair policy:
+
+- Rebuild metadata by scanning filesystem truth before attempting destructive
+  cleanup.
+- Prefer quarantine plus diagnostics over guessing when payload identity,
+  hardlink topology, or conflict ownership is ambiguous.
+- Never delete upperdir, volume, or SAF payload bytes solely because an index
+  row is missing.
+- Treat missing lower roots as an image integrity problem: affected containers
+  may still have upper data, but the merged rootfs is unhealthy until the image
+  is restored, repulled, or the container is exported through a degraded path.
+- Treat corrupted hardlink/ring-tree indexes as cache loss. Rebuild them from
+  lower/upper scans when possible; otherwise disable the acceleration and keep
+  serving only the slower verified path.
+
 ## Archive API Relation
 
 The archive API is the public data exchange contract for this storage layer. It
@@ -165,6 +293,11 @@ SAF plan:
 
 - Treat Android Storage Access Framework locations as user-granted external
   storage endpoints, not native Linux bind mounts.
+- Route SAF/SD/FAT payload and metadata access through the planned
+  [`saf-unixfs` backend](SAF_UNIXFS_METADATA_SIDECAR.md). Upper overlay,
+  archive, container, and UI layers should consume abstract filesystem and
+  Unix-metadata capabilities instead of checking for `DocumentProvider`,
+  FAT32, or exFAT details directly.
 - Keep persistable URI grants and display names in metadata.
 - Project-library templates treat the selected Android Documents folder as the
   workspace root for user-owned project definitions and explicit exchange data.
@@ -267,6 +400,36 @@ Minimum matrix:
 - volume-backed archive/copy;
 - rebuild of metadata DB from filesystem truth;
 - prune and dangling-reference recovery.
+
+Failure and recovery matrix:
+
+- kill during lower-to-upper copy-up before temp payload publication;
+- kill after temp payload publication but before visible rename;
+- kill after visible rename but before metadata-index commit;
+- kill during whiteout creation, opaque-directory marker creation, and rename
+  over an existing lower path;
+- `ENOSPC` during archive PUT, copy-up, rename/replace, metadata snapshot, and
+  replica checkpoint;
+- guarded `ENOMEM` from direct runtime during a mutating syscall;
+- app or daemon restart with an active operation journal and no live worker pid;
+- corrupt primary DB with valid replica;
+- corrupt primary DB and stale replica, forcing filesystem rebuild;
+- missing upperdir metadata with intact upper payloads;
+- missing lower root for a container that still has upper payloads;
+- stale or corrupt hardlink/ring-tree accelerator with intact payload trees;
+- orphaned temporary files and partially written whiteout/opaque markers;
+- SAF grant revocation, external edit conflict, and sidecar metadata mismatch.
+
+Assertions for these tests:
+
+- the API reports failure or degraded/quarantined state instead of success;
+- the merged view never exposes a partially copied file as complete;
+- rebuild recreates overlay rows and acceleration metadata from lower/upper
+  truth when enough evidence exists;
+- ambiguous payload conflicts are quarantined or preserved under distinct names;
+- low-free-space cleanup does not delete user payload bytes merely to make a
+  metadata operation pass;
+- repeated repair/rebuild runs are idempotent.
 
 Device verification should include Android API levels used by the default and
 compat APKs, SOG15-style Android 15 behavior, low-free-space cases, and SAF

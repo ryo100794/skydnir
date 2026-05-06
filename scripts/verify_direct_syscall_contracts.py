@@ -421,8 +421,15 @@ def validate_static_contract_markers(source: str) -> None:
         [
             "int open(const char *path, int flags, ...)",
             "int openat(int dirfd, const char *path, int flags, ...)",
+            "static int maybe_break(const char *path, int flags)",
+            "static int resolve_at_path(int dirfd, const char *path, char *out, size_t out_len)",
+            "PDOCKER_COW_FAIL_BEFORE_RENAME",
+            "if (maybe_break(path, flags) < 0) return -1;",
             "int chmod(const char *path, mode_t mode)",
+            "if (break_hardlink(path) < 0) return -1;",
             "int fchmod(int fd, mode_t mode)",
+            "int ftruncate(int fd, off_t length)",
+            "return -1;",
             "int setxattr(const char *path",
             "int dup2(int oldfd, int newfd)",
         ],
@@ -430,7 +437,17 @@ def validate_static_contract_markers(source: str) -> None:
     require_contains(
         "libcow local test",
         cow_test,
-        ["hardlink clone", "chmod isolated", "utimes isolated", "fchmod(fd) emulated via path"],
+        [
+            "hardlink clone",
+            "chmod isolated",
+            "utimes isolated",
+            "fchmod(fd) emulated via path",
+            "fd-relative openat(O_TRUNC) isolated",
+            "ftruncate(fd) emulated via path",
+            "write copy-up failure fails closed",
+            "truncate copy-up failure fails closed",
+            "metadata copy-up failure fails closed",
+        ],
     )
 
 

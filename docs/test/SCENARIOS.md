@@ -75,6 +75,7 @@ evidence exists:
 | Media bridge | `media.bridge.contract` |
 | Memory pager | `memory.pager.design-probe` |
 | Runtime OOM survival | `runtime.oom-survival-large-workload` |
+| SAF UnixFS backend | `saf.unixfs.layered-backend-contract` |
 | Network metadata | `network.metadata.hostlike` |
 | Project library | `project.library.templates` |
 | Random/stress regression | `random.stress.regression-process` |

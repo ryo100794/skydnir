@@ -51,6 +51,7 @@
     "performance-regression-gates",
     "runtime-single-container",
     "service-health-listener-proof",
+    "saf-unixfs-backend",
     "runtime-npm-compat",
     "documents-saf-phase2",
     "network-port-forwarding",
@@ -731,6 +732,18 @@
         "docs/design/COW_OVERLAY_STORAGE.md"
       ],
       "checks": "SAF Phase 2 delete propagation, rename detection, conflict quarantine, rescan UX, and Unix metadata emulation limits."
+    },
+    {
+      "id": "saf.unixfs.layered-backend-contract",
+      "area": "saf-unixfs-backend",
+      "lane": "android-documents",
+      "command": "bash scripts/android-documents-mediator-smoke.sh",
+      "status": "planned-gap",
+      "docs": [
+        "docs/design/SAF_UNIXFS_METADATA_SIDECAR.md",
+        "docs/design/COW_OVERLAY_STORAGE.md"
+      ],
+      "checks": "SAF/SD/FAT UnixFS backend contract, sidecar metadata, capability reporting, failure recovery, and proof that overlay/archive/runtime/UI use backend abstractions instead of Android storage internals."
     },
     {
       "id": "network.port-forwarding.active-listener",

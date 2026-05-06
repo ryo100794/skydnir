@@ -144,5 +144,81 @@ UPPER_FMODE_AFTER=$(stat -c %a "$UPPER/fchmod.txt")
     || { echo "FAIL: fchmod(fd) didn't apply to upper (got $UPPER_FMODE_AFTER)"; exit 1; }
 echo "ok: fchmod(fd) emulated via path (lower preserved)"
 
+# ---- fd-relative openat and ftruncate must not leak through hardlinks ----
+mkdir -p "$LOWER/rel" "$UPPER/rel"
+echo "rel-openat-original" > "$LOWER/rel/openat.txt"
+ln "$LOWER/rel/openat.txt" "$UPPER/rel/openat.txt"
+LD_PRELOAD="$LIB" python3 -c "
+import os
+d = os.open('$UPPER/rel', os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+fd = os.open('openat.txt', os.O_WRONLY | os.O_TRUNC, dir_fd=d)
+os.write(fd, b'rel-openat-upper\\n')
+os.close(fd)
+os.close(d)
+" 2>/dev/null
+[ "$(cat "$LOWER/rel/openat.txt")" = "rel-openat-original" ] \
+    || { echo "FAIL: fd-relative openat leaked to lower"; exit 1; }
+[ "$(cat "$UPPER/rel/openat.txt")" = "rel-openat-upper" ] \
+    || { echo "FAIL: fd-relative openat didn't update upper"; exit 1; }
+echo "ok: fd-relative openat(O_TRUNC) isolated"
+
+echo "ftruncate-original" > "$LOWER/ftruncate.txt"
+ln "$LOWER/ftruncate.txt" "$UPPER/ftruncate.txt"
+LD_PRELOAD="$LIB" python3 -c "
+import os
+fd = os.open('$UPPER/ftruncate.txt', os.O_RDWR)
+os.ftruncate(fd, 0)
+os.close(fd)
+" 2>/dev/null
+[ "$(cat "$LOWER/ftruncate.txt")" = "ftruncate-original" ] \
+    || { echo "FAIL: ftruncate(fd) leaked to lower"; exit 1; }
+[ ! -s "$UPPER/ftruncate.txt" ] \
+    || { echo "FAIL: ftruncate(fd) didn't truncate upper"; exit 1; }
+echo "ok: ftruncate(fd) emulated via path (lower preserved)"
+
+# ---- copy-up failure must fail closed ----
+# A failed copy-up must not continue into the mutating syscall. Otherwise an
+# ENOMEM/ENOSPC during copy-up could write through the still-shared hardlink and
+# corrupt the image layer. PDOCKER_COW_FAIL_BEFORE_RENAME injects that failure
+# after the temp copy is complete but before the atomic rename.
+echo "fail-closed-write" > "$LOWER/fail-write.txt"
+ln "$LOWER/fail-write.txt" "$UPPER/fail-write.txt"
+if PDOCKER_COW_FAIL_BEFORE_RENAME=1 LD_PRELOAD="$LIB" \
+    bash -c "echo mutated > '$UPPER/fail-write.txt'" 2>/dev/null; then
+    echo "FAIL: write succeeded after injected copy-up failure"; exit 1
+fi
+[ "$(cat "$LOWER/fail-write.txt")" = "fail-closed-write" ] \
+    || { echo "FAIL: injected write failure leaked to lower"; exit 1; }
+[ "$(cat "$UPPER/fail-write.txt")" = "fail-closed-write" ] \
+    || { echo "FAIL: injected write failure changed upper"; exit 1; }
+[ "$(find "$UPPER" -maxdepth 1 -name '.cow*' -print -quit)" = "" ] \
+    || { echo "FAIL: injected write failure left a .cow temp file"; exit 1; }
+echo "ok: write copy-up failure fails closed"
+
+echo "fail-closed-truncate" > "$LOWER/fail-truncate.txt"
+ln "$LOWER/fail-truncate.txt" "$UPPER/fail-truncate.txt"
+if PDOCKER_COW_FAIL_BEFORE_RENAME=1 LD_PRELOAD="$LIB" \
+    python3 -c "open('$UPPER/fail-truncate.txt', 'w').close()" 2>/dev/null; then
+    echo "FAIL: truncate succeeded after injected copy-up failure"; exit 1
+fi
+[ "$(cat "$LOWER/fail-truncate.txt")" = "fail-closed-truncate" ] \
+    || { echo "FAIL: injected truncate failure leaked to lower"; exit 1; }
+[ "$(cat "$UPPER/fail-truncate.txt")" = "fail-closed-truncate" ] \
+    || { echo "FAIL: injected truncate failure changed upper"; exit 1; }
+echo "ok: truncate copy-up failure fails closed"
+
+echo "fail-closed-chmod" > "$LOWER/fail-chmod.txt"
+chmod 644 "$LOWER/fail-chmod.txt"
+ln "$LOWER/fail-chmod.txt" "$UPPER/fail-chmod.txt"
+if PDOCKER_COW_FAIL_BEFORE_RENAME=1 LD_PRELOAD="$LIB" \
+    bash -c "chmod 600 '$UPPER/fail-chmod.txt'" 2>/dev/null; then
+    echo "FAIL: chmod succeeded after injected copy-up failure"; exit 1
+fi
+[ "$(stat -c %a "$LOWER/fail-chmod.txt")" = "644" ] \
+    || { echo "FAIL: injected chmod failure leaked to lower"; exit 1; }
+[ "$(stat -c %a "$UPPER/fail-chmod.txt")" = "644" ] \
+    || { echo "FAIL: injected chmod failure changed upper"; exit 1; }
+echo "ok: metadata copy-up failure fails closed"
+
 echo
 echo "ALL TESTS PASSED"
