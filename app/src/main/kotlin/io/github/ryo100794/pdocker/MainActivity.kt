@@ -5214,10 +5214,30 @@ class MainActivity : AppCompatActivity() {
     private fun projectJobSummary(projectName: String): String {
         val jobs = dockerJobs.filter { it.group == projectName || projectName in it.command }
         if (jobs.isEmpty()) return "-"
-        return jobs.groupingBy { it.status }.eachCount()
+        val counts = jobs.groupingBy { it.status }.eachCount()
             .entries
             .joinToString(", ") { "${it.key}:${it.value}" }
+        val latestFailure = jobs
+            .filter { (it.exitCode ?: 0) != 0 || it.status.contains("fail", ignoreCase = true) || it.status.contains("失敗") }
+            .maxByOrNull { it.endedAt ?: it.startedAt }
+            ?.let { jobFailureReason(it) }
+            .orEmpty()
+        return if (latestFailure.isBlank()) counts else "$counts - $latestFailure"
     }
+
+    private fun jobFailureReason(job: DockerJob): String =
+        job.output.asReversed()
+            .map { it.trim() }
+            .firstOrNull { line ->
+                line.contains("CMake Error", ignoreCase = true) ||
+                    line.contains("BLAS not found", ignoreCase = true) ||
+                    line.contains("ERROR:", ignoreCase = true) ||
+                    line.contains("failed", ignoreCase = true) ||
+                    line.contains("cannot", ignoreCase = true) ||
+                    line.contains("Connection reset", ignoreCase = true)
+            }
+            ?.take(180)
+            .orEmpty()
 
     private fun projectDependencySummary(services: List<ComposeService>): String {
         val edges = services.flatMap { service ->

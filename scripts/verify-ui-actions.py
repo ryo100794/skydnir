@@ -350,6 +350,7 @@ def main() -> int:
     require("project dashboard summarizes compose/dockerfile/files", "renderProjectDashboard" in main_src and "private data class ProjectSummary" in main_src and "section_project_dashboard" in string_src)
     require("project dashboard opens primary files and actions", "openProjectPrimaryFile" in main_src and "action_open_project_compose_fmt" in string_src and "action_open_project_dockerfile_fmt" in string_src)
     require("project dashboard tracks services jobs containers", "projectContainerStatusSummary" in main_src and "projectJobSummary" in main_src and "parseComposeServices" in main_src)
+    require("project dashboard surfaces latest build job failure reason", "jobFailureReason" in main_src and "BLAS not found" in main_src and "Connection reset" in main_src and "latestFailure" in main_src)
     require("project dashboard exposes compose-declared service URLs", "projectServiceUrls" in main_src and "composeServiceUrls" in main_src and "composePortBinding" in main_src and "project_dashboard_urls_fmt" in string_src)
     require("project dashboard probes service health", "projectServiceHealthSummary" in main_src and "scheduleServiceHealthProbe" in main_src and "HttpURLConnection" in main_src and "project_dashboard_service_health_fmt" in string_src)
     require("project dashboard surfaces compose dependencies", "dependsOn" in main_src and "projectDependencySummary" in main_src and "project_dashboard_dependencies_fmt" in string_src)
