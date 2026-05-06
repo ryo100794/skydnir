@@ -24,6 +24,7 @@ Then:
 """
 
 import argparse
+import errno
 import fnmatch
 import gc
 import hashlib
@@ -3214,6 +3215,7 @@ def build_run_argv(rootfs, argv, env, workdir="/", binds=None, cow_bind=None, mo
     - Android APK builds use the direct RuntimeBackend; chroot remains a Linux
       host fallback and explicit proot runners remain diagnostic only.
     """
+    ensure_synthetic_proc_files(rootfs)
     inner_env = ["HOME=/root", f"TERM={os.environ.get('TERM', 'xterm')}"]
     if not cow_bind and os.path.exists(os.path.join(rootfs, ".libcow.so")) \
        and os.environ.get("PDOCKER_NO_COW") != "1":
@@ -3246,6 +3248,35 @@ def build_run_argv(rootfs, argv, env, workdir="/", binds=None, cow_bind=None, mo
         rootfs, argv, inner_env, workdir=workdir, binds=binds,
         cow_bind=cow_bind, mode=mode,
     )
+
+
+def ensure_synthetic_proc_files(rootfs):
+    """Provide minimal proc files Android hides from untrusted apps."""
+    proc_dir = os.path.join(rootfs, ".pdocker-proc")
+    try:
+        os.makedirs(proc_dir, exist_ok=True)
+        uptime = max(1.0, time.monotonic())
+        idle = uptime * max(1, os.cpu_count() or 1)
+        btime = max(1, int(time.time() - uptime))
+        stat = (
+            f"cpu  1 0 1 {int(idle * 100)} 0 0 0 0 0 0\n"
+            f"cpu0 1 0 1 {int(uptime * 100)} 0 0 0 0 0 0\n"
+            "intr 0\n"
+            "ctxt 0\n"
+            f"btime {btime}\n"
+            "processes 1\n"
+            "procs_running 1\n"
+            "procs_blocked 0\n"
+            "softirq 0 0 0 0 0 0 0 0 0 0 0\n"
+        )
+        with open(os.path.join(proc_dir, "stat"), "w") as f:
+            f.write(stat)
+        with open(os.path.join(proc_dir, "uptime"), "w") as f:
+            f.write(f"{uptime:.2f} {idle:.2f}\n")
+        with open(os.path.join(proc_dir, "loadavg"), "w") as f:
+            f.write("0.00 0.00 0.00 1/1 1\n")
+    except OSError:
+        pass
 
 
 # ---- Image management ----
@@ -5446,6 +5477,110 @@ def build_child_preexec():
         pass
 
 
+class ForkPtyProcess:
+    """Small Popen-like wrapper for a child started with os.forkpty()."""
+
+    def __init__(self, pid, master_fd):
+        self.pid = pid
+        self.returncode = None
+        stdin_fd = os.dup(master_fd)
+        self.stdout = os.fdopen(master_fd, "rb", buffering=0)
+        self.stderr = None
+        self.stdin = os.fdopen(stdin_fd, "wb", buffering=0)
+        self._pdocker_tty_like = True
+
+    def poll(self):
+        if self.returncode is not None:
+            return self.returncode
+        try:
+            pid, status = os.waitpid(self.pid, os.WNOHANG)
+        except ChildProcessError:
+            return self.returncode
+        if pid == 0:
+            return None
+        self.returncode = _wait_status_to_returncode(status)
+        return self.returncode
+
+    def wait(self):
+        if self.returncode is not None:
+            return self.returncode
+        try:
+            _, status = os.waitpid(self.pid, 0)
+            self.returncode = _wait_status_to_returncode(status)
+        except ChildProcessError:
+            if self.returncode is None:
+                self.returncode = 255
+        return self.returncode
+
+    def kill(self):
+        try:
+            os.kill(self.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+class OpenPtyProcess:
+    """Popen-like wrapper for a child attached to an explicit Unix98 PTY."""
+
+    def __init__(self, proc, master_fd):
+        self._proc = proc
+        self.pid = proc.pid
+        self.returncode = None
+        stdin_fd = os.dup(master_fd)
+        self.stdout = os.fdopen(master_fd, "rb", buffering=0)
+        self.stderr = None
+        self.stdin = os.fdopen(stdin_fd, "wb", buffering=0)
+        self._pdocker_tty_like = True
+
+    def poll(self):
+        rc = self._proc.poll()
+        if rc is not None:
+            self.returncode = rc
+        return rc
+
+    def wait(self):
+        self.returncode = self._proc.wait()
+        return self.returncode
+
+    def kill(self):
+        self._proc.kill()
+
+
+def open_unix98_pty():
+    import ctypes
+    libc = ctypes.CDLL("libc.so", use_errno=True)
+    master = os.open("/dev/ptmx", os.O_RDWR | getattr(os, "O_NOCTTY", 0) | os.O_CLOEXEC)
+    try:
+        for name in ("grantpt", "unlockpt"):
+            fn = getattr(libc, name)
+            fn.argtypes = [ctypes.c_int]
+            fn.restype = ctypes.c_int
+            if fn(master) != 0:
+                err = ctypes.get_errno()
+                raise OSError(err, f"{name} failed: {os.strerror(err)}")
+        ptsname = libc.ptsname
+        ptsname.argtypes = [ctypes.c_int]
+        ptsname.restype = ctypes.c_char_p
+        slave_name = ptsname(master)
+        if not slave_name:
+            err = ctypes.get_errno()
+            raise OSError(err or errno.ENODEV, "ptsname failed")
+        slave_path = slave_name.decode()
+        slave = os.open(slave_path, os.O_RDWR | getattr(os, "O_NOCTTY", 0) | os.O_CLOEXEC)
+        return master, slave
+    except Exception:
+        os.close(master)
+        raise
+
+
+def _wait_status_to_returncode(status):
+    if os.WIFEXITED(status):
+        return os.WEXITSTATUS(status)
+    if os.WIFSIGNALED(status):
+        return -os.WTERMSIG(status)
+    return 255
+
+
 def spawn_in_container(cid, cmd, env=None, workdir=None, tty=False,
                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                         stdin=subprocess.DEVNULL):
@@ -5465,38 +5600,93 @@ def spawn_in_container(cid, cmd, env=None, workdir=None, tty=False,
         raise RuntimeError(fault)
     argv = build_run_argv(rootfs, list(cmd), e, workdir=wd, binds=binds, cow_bind=cow, mode="exec")
     if tty:
-        import fcntl
-        import pty
         import termios
+        import fcntl
         try:
-            master, slave = pty.openpty()
-
+            pid, master = os.forkpty()
+            if pid == 0:
+                try:
+                    os.execvpe(argv[0], argv, os.environ.copy())
+                except Exception as exc:
+                    try:
+                        os.write(2, f"pdockerd forkpty exec failed: {exc}\n".encode())
+                    except OSError:
+                        pass
+                    os._exit(127)
             try:
-                attrs = termios.tcgetattr(slave)
+                attrs = termios.tcgetattr(master)
                 attrs[0] |= termios.ICRNL | termios.IXON
                 attrs[1] |= termios.OPOST | termios.ONLCR
                 attrs[2] |= termios.CREAD
                 attrs[3] |= termios.ECHO | termios.ECHOE | termios.ECHOK | termios.ICANON | termios.ISIG
-                termios.tcsetattr(slave, termios.TCSANOW, attrs)
+                termios.tcsetattr(master, termios.TCSANOW, attrs)
             except termios.error:
                 pass
-
-            def exec_tty_preexec():
-                os.setsid()
+            return ForkPtyProcess(pid, master)
+        except (AttributeError, OSError) as forkpty_exc:
+            master = None
+            slave = None
+            try:
                 try:
-                    fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
-                except OSError:
+                    import pty
+                    master, slave = pty.openpty()
+                except Exception as stdlib_pty_exc:
+                    master, slave = open_unix98_pty()
+                try:
+                    attrs = termios.tcgetattr(slave)
+                    attrs[0] |= termios.ICRNL | termios.IXON
+                    attrs[1] |= termios.OPOST | termios.ONLCR
+                    attrs[2] |= termios.CREAD
+                    attrs[3] |= termios.ECHO | termios.ECHOE | termios.ECHOK | termios.ICANON | termios.ISIG
+                    termios.tcsetattr(slave, termios.TCSANOW, attrs)
+                except termios.error:
                     pass
 
-            proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave,
-                                    close_fds=True, preexec_fn=exec_tty_preexec)
-            os.close(slave)
-            proc.stdout = os.fdopen(master, "rb", buffering=0)
-            proc.stderr = None
-            proc.stdin = os.fdopen(os.dup(master), "wb", buffering=0)
-            proc._pdocker_tty_like = True
-            return proc
-        except OSError as exc:
+                def child_tty_setup():
+                    os.setsid()
+                    try:
+                        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+                    except OSError:
+                        pass
+
+                proc = subprocess.Popen(
+                    argv,
+                    stdin=slave,
+                    stdout=slave,
+                    stderr=slave,
+                    close_fds=True,
+                    preexec_fn=child_tty_setup,
+                )
+                os.close(slave)
+                log(f"pty exec using openpty fallback after forkpty unavailable: {forkpty_exc}")
+                return OpenPtyProcess(proc, master)
+            except Exception as exc:
+                if master is not None:
+                    try:
+                        os.close(master)
+                    except Exception:
+                        pass
+                if slave is not None:
+                    try:
+                        os.close(slave)
+                    except Exception:
+                        pass
+                # Android app sandboxes can fail pty.openpty() with
+                # "out of pty devices" even though a plain stdin/stdout pipe still
+                # works. Keep docker exec -it reachable for diagnostics; the UI
+                # self-test rejects this fallback so it cannot be mistaken for a
+                # real interactive TTY.
+                log(f"pty unavailable for exec, falling back to pipes: forkpty={forkpty_exc}; openpty={exc}")
+                proc = subprocess.Popen(
+                    argv,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                proc._pdocker_pipe_tty_fallback = True
+                proc._pdocker_tty_like = True
+                return proc
+        except Exception as exc:
             # Android app sandboxes can fail pty.openpty() with
             # "out of pty devices" even though a plain stdin/stdout pipe still
             # works. Keep docker exec -it usable; callers asked for a raw TTY
@@ -6483,6 +6673,27 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 start_container(state["Id"])
             except RuntimeError as exc:
                 self._send_json(500, {"message": str(exc)})
+                return
+            except Exception as exc:
+                tb = traceback.format_exc()
+                try:
+                    diag_dir = os.path.join(PDOCKER_HOME, "diagnostics")
+                    os.makedirs(diag_dir, exist_ok=True)
+                    with open(os.path.join(diag_dir, "hijack-exec-latest.log"), "a") as f:
+                        f.write(
+                            json.dumps({
+                                "exec_id": exec_id,
+                                "container": ses.get("container"),
+                                "cmd": ses.get("cmd"),
+                                "tty": tty,
+                                "error": str(exc),
+                                "traceback": tb,
+                                "time": time.time(),
+                            }, sort_keys=True) + "\n"
+                        )
+                except OSError:
+                    pass
+                self._send_json(500, {"message": str(exc), "traceback": tb})
                 return
             self.send_response(204)
             self.end_headers()

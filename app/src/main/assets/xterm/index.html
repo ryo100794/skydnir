@@ -438,9 +438,15 @@
     const payload = raw ? normalized : applyModifiers(normalized);
     if (!payload) return;
     PdockerBridge.input(toB64(enc.encode(payload)));
-    if (!raw) clearTransientModifiers();
+    clearTransientModifiers();
   };
   window.pdockerTestSendInput = sendInput;
+  window.pdockerTestCtrlInput = (data) => {
+    mods.ctrl = true;
+    refreshModifiers();
+    sendInput(data, false);
+    return !!mods.ctrl;
+  };
 
   if (!readOnly) {
     term.onData((data) => {

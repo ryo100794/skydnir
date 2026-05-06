@@ -2433,11 +2433,13 @@ class MainActivity : AppCompatActivity() {
             check(ready.await(5, TimeUnit.SECONDS)) { "UI bridge was not created" }
 
             check(waitUntil(5_000) {
-                output.toString().contains("# ") ||
-                    output.toString().contains("can't access tty")
+                    output.toString().contains("# ")
             }) { "UI exec -it did not reach an interactive shell prompt" }
+            check(!output.toString().contains("can't access tty")) {
+                "UI exec -it is not attached to a controlling tty"
+            }
 
-            val script = "echo pdocker-ui-it-ok\n/usr/bin/[ \"x\" = \"x\" ] && echo pdocker-ui-it-bracket-ok\npwd\nsleep 15\n"
+            val script = "p=pdocker-ui-it\necho \${p}-ok\n/usr/bin/[ \"x\" = \"x\" ] && echo \${p}-bracket-ok\npwd\n[ -t 0 ] && echo \${p}-tty-ok\ntop -b -n 1 >/dev/null && echo \${p}-top-ok\nsleep 15\n"
             ui.post {
                 webView?.evaluateJavascript(
                     "window.pdockerTestSendInput && window.pdockerTestSendInput(${JSONObject.quote(script)}, false)",
@@ -2447,13 +2449,13 @@ class MainActivity : AppCompatActivity() {
             Thread.sleep(1_200)
             ui.post {
                 webView?.evaluateJavascript(
-                    "window.pdockerTestSendInput && window.pdockerTestSendInput('\\u0003', true)",
+                    "window.pdockerTestCtrlInput && window.pdockerTestCtrlInput('c')",
                     null,
                 )
             }
             ui.post {
                 webView?.evaluateJavascript(
-                    "window.pdockerTestSendInput && window.pdockerTestSendInput('echo pdocker-ui-it-ctrlc-ok\\nexit\\n', false)",
+                    "window.pdockerTestSendInput && window.pdockerTestSendInput('echo \${p}-ctrlc-ok\\nexit\\n', false)",
                     null,
                 )
             }
@@ -2461,6 +2463,8 @@ class MainActivity : AppCompatActivity() {
                 val text = output.toString()
                 text.contains("pdocker-ui-it-ok") &&
                     text.contains("pdocker-ui-it-bracket-ok") &&
+                    text.contains("pdocker-ui-it-tty-ok") &&
+                    text.contains("pdocker-ui-it-top-ok") &&
                     text.contains("pdocker-ui-it-ctrlc-ok")
             }
             val text = output.toString()

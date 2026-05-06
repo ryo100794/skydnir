@@ -23,8 +23,13 @@
 #include <fcntl.h>
 #include <time.h>
 #include <sys/prctl.h>
+#include <termios.h>
 
 extern char **environ;
+
+#ifndef NT_ARM_SYSTEM_CALL
+#define NT_ARM_SYSTEM_CALL 0x404
+#endif
 
 static int g_trace_verbose = 0;
 static int g_trace_linkat = 0;
@@ -40,6 +45,11 @@ static unsigned long long g_memory_guard_min_swap = 256ULL * 1024ULL * 1024ULL;
 static int g_memory_stats_printed = 0;
 static int g_sync_usec = 0;
 static int g_stats = 0;
+static int g_stats_top = 12;
+static int g_path_profile = 0;
+static int g_path_cache_enabled = 1;
+static int g_path_cache_store_disabled = 0;
+static int g_path_cache_mutation_inflight = 0;
 static int g_selective_trace = 0;
 static int g_rootfd_rewrite = 0;
 static int g_validate_tracees = 0;
@@ -49,6 +59,35 @@ static volatile sig_atomic_t g_trace_child_pgid = -1;
 static unsigned long long g_syscall_counts[512];
 static unsigned long long g_stop_count = 0;
 static struct timespec g_stats_start;
+
+typedef struct TraceeState TraceeState;
+
+typedef struct {
+    unsigned long long calls;
+    unsigned long long empty_path;
+    unsigned long long relative_path;
+    unsigned long long absolute_path;
+    unsigned long long no_rewrite;
+    unsigned long long rewrote;
+    unsigned long long rootfd_rewrite;
+    unsigned long long denied;
+    unsigned long long read_ns;
+    unsigned long long relative_validate_ns;
+    unsigned long long resolve_ns;
+    unsigned long long validate_ns;
+    unsigned long long write_ns;
+    unsigned long long total_ns;
+    unsigned long long validate_calls;
+    unsigned long long validate_lexical_ns;
+    unsigned long long validate_realpath_full_ns;
+    unsigned long long validate_parent_realpath_ns;
+    unsigned long long validate_parent_loops;
+    unsigned long long validation_cache_hits;
+    unsigned long long validation_cache_misses;
+    unsigned long long realpath_cache_hits;
+    unsigned long long realpath_cache_misses;
+    unsigned long long cache_invalidations;
+} PathMicroStats;
 
 typedef struct {
     unsigned long long calls;
@@ -72,6 +111,7 @@ typedef struct {
 } MemoryTraceStats;
 
 static MemoryTraceStats g_memory_stats;
+static PathMicroStats g_path_stats;
 static int write_tracee_data(pid_t pid, unsigned long long addr, const void *value, size_t len);
 static const char *syscall_name(long nr);
 static int get_regs(pid_t pid, struct user_pt_regs *regs);
@@ -90,6 +130,9 @@ static ssize_t pdocker_process_vm_writev(pid_t pid,
 #define EXEC_REWRITE_STACK_SAFETY 16384ULL
 #define EXEC_REWRITE_MAX_SCRATCH (2ULL * 1024ULL * 1024ULL)
 #define EXEC_REWRITE_MAX_ARG_BYTES (EXEC_REWRITE_MAX_SCRATCH - EXEC_REWRITE_STACK_SAFETY)
+#define REWRITE_SYSCALL_COMPLETED 2
+#define PATH_VALIDATION_CACHE_SIZE 512
+#define PATH_REALPATH_CACHE_SIZE 256
 
 typedef struct {
     char host[PATH_MAX];
@@ -97,8 +140,24 @@ typedef struct {
     int readonly;
 } BindMap;
 
+typedef struct {
+    unsigned long long generation;
+    int follow_final;
+    int rc;
+    char host[PATH_MAX];
+} PathValidationCacheEntry;
+
+typedef struct {
+    unsigned long long generation;
+    char path[PATH_MAX];
+    char resolved[PATH_MAX];
+} PathRealpathCacheEntry;
+
 static BindMap g_bind_maps[MAX_BIND_MAPS];
 static int g_bind_map_count = 0;
+static unsigned long long g_path_cache_generation = 1;
+static PathValidationCacheEntry g_path_validation_cache[PATH_VALIDATION_CACHE_SIZE];
+static PathRealpathCacheEntry g_path_realpath_cache[PATH_REALPATH_CACHE_SIZE];
 
 #define TRACE_LOG(...) do { if (g_trace_verbose) fprintf(stderr, __VA_ARGS__); } while (0)
 
@@ -424,11 +483,55 @@ static double monotonic_seconds_since(const struct timespec *start) {
            (double)(now.tv_nsec - start->tv_nsec) / 1000000000.0;
 }
 
+static unsigned long long monotonic_now_ns(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (unsigned long long)now.tv_sec * 1000000000ULL +
+           (unsigned long long)now.tv_nsec;
+}
+
 static void record_syscall_stat(long nr) {
     if (!g_stats) return;
     if (nr >= 0 && nr < (long)(sizeof(g_syscall_counts) / sizeof(g_syscall_counts[0]))) {
         g_syscall_counts[nr]++;
     }
+}
+
+static void print_path_micro_profile(void) {
+    if (!g_path_profile || !g_path_stats.calls) return;
+    double calls = (double)g_path_stats.calls;
+    fprintf(stderr,
+            "pdocker-direct-path-profile: calls=%llu empty=%llu relative=%llu absolute=%llu no_rewrite=%llu rewrote=%llu rootfd=%llu denied=%llu total_us=%.3f avg_us=%.3f\n",
+            g_path_stats.calls, g_path_stats.empty_path, g_path_stats.relative_path,
+            g_path_stats.absolute_path, g_path_stats.no_rewrite, g_path_stats.rewrote,
+            g_path_stats.rootfd_rewrite, g_path_stats.denied,
+            (double)g_path_stats.total_ns / 1000.0,
+            ((double)g_path_stats.total_ns / calls) / 1000.0);
+    fprintf(stderr,
+            "pdocker-direct-path-profile: phase_us read=%.3f relative_validate=%.3f resolve=%.3f validate=%.3f write=%.3f\n",
+            (double)g_path_stats.read_ns / 1000.0,
+            (double)g_path_stats.relative_validate_ns / 1000.0,
+            (double)g_path_stats.resolve_ns / 1000.0,
+            (double)g_path_stats.validate_ns / 1000.0,
+            (double)g_path_stats.write_ns / 1000.0);
+    if (g_path_stats.validate_calls) {
+        fprintf(stderr,
+            "pdocker-direct-path-profile: validate calls=%llu avg_us=%.3f lexical_us=%.3f realpath_full_us=%.3f parent_realpath_us=%.3f parent_loops=%llu\n",
+            g_path_stats.validate_calls,
+            ((double)(g_path_stats.validate_lexical_ns +
+                      g_path_stats.validate_realpath_full_ns +
+                      g_path_stats.validate_parent_realpath_ns) /
+                 (double)g_path_stats.validate_calls) / 1000.0,
+                (double)g_path_stats.validate_lexical_ns / 1000.0,
+                (double)g_path_stats.validate_realpath_full_ns / 1000.0,
+            (double)g_path_stats.validate_parent_realpath_ns / 1000.0,
+            g_path_stats.validate_parent_loops);
+    }
+    fprintf(stderr,
+            "pdocker-direct-path-profile: cache validation_hits=%llu validation_misses=%llu realpath_hits=%llu realpath_misses=%llu invalidations=%llu generation=%llu\n",
+            g_path_stats.validation_cache_hits, g_path_stats.validation_cache_misses,
+            g_path_stats.realpath_cache_hits, g_path_stats.realpath_cache_misses,
+            g_path_stats.cache_invalidations, g_path_cache_generation);
 }
 
 static void print_syscall_stats(const char *reason, int rc) {
@@ -437,7 +540,13 @@ static void print_syscall_stats(const char *reason, int rc) {
     fprintf(stderr,
             "pdocker-direct-stats: reason=%s rc=%d elapsed=%.3fs stops=%llu\n",
             reason, rc, seconds, g_stop_count);
-    for (int rank = 0; rank < 12; ++rank) {
+    print_path_micro_profile();
+    int limit = g_stats_top;
+    if (limit < 1) limit = 1;
+    if (limit > (int)(sizeof(g_syscall_counts) / sizeof(g_syscall_counts[0]))) {
+        limit = (int)(sizeof(g_syscall_counts) / sizeof(g_syscall_counts[0]));
+    }
+    for (int rank = 0; rank < limit; ++rank) {
         int best = -1;
         unsigned long long best_count = 0;
         for (int i = 0; i < (int)(sizeof(g_syscall_counts) / sizeof(g_syscall_counts[0])); ++i) {
@@ -684,6 +793,107 @@ static int resolve_bind_path(const char *guest, char *out, size_t out_len) {
     return 1;
 }
 
+static int host_path_is_under_prefix(const char *prefix, const char *path) {
+    if (!prefix || !prefix[0] || !path || !path[0]) return 0;
+    size_t prefix_len = strlen(prefix);
+    return strncmp(path, prefix, prefix_len) == 0 &&
+           (path[prefix_len] == '\0' || path[prefix_len] == '/');
+}
+
+static int host_path_is_under_bind_host(const char *path) {
+    for (int i = 0; i < g_bind_map_count; ++i) {
+        if (host_path_is_under_prefix(g_bind_maps[i].host, path)) return 1;
+    }
+    return 0;
+}
+
+static int host_path_is_under_allowed_host_path(const char *rootfs, const char *path) {
+    return host_path_is_under_prefix(rootfs, path) || host_path_is_under_bind_host(path);
+}
+
+static unsigned long long path_cache_hash(const char *s, int salt) {
+    unsigned long long h = 1469598103934665603ULL ^ (unsigned long long)(unsigned int)salt;
+    if (!s) return h;
+    while (*s) {
+        h ^= (unsigned char)*s++;
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+static void invalidate_path_caches(void) {
+    g_path_cache_generation++;
+    if (g_path_cache_generation == 0) {
+        memset(g_path_validation_cache, 0, sizeof(g_path_validation_cache));
+        memset(g_path_realpath_cache, 0, sizeof(g_path_realpath_cache));
+        g_path_cache_generation = 1;
+    }
+    if (g_path_profile) g_path_stats.cache_invalidations++;
+}
+
+static void begin_path_cache_mutation(TraceeState *state) {
+    (void)state;
+    invalidate_path_caches();
+    g_path_cache_mutation_inflight++;
+    g_path_cache_store_disabled++;
+}
+
+static void finish_path_cache_mutation(TraceeState *state) {
+    (void)state;
+    if (g_path_cache_mutation_inflight > 0) g_path_cache_mutation_inflight--;
+    if (g_path_cache_store_disabled > 0) g_path_cache_store_disabled--;
+}
+
+static int path_validation_cache_get(const char *host_path, int follow_final, int *rc) {
+    if (!g_path_cache_enabled || !host_path || !host_path[0]) return 0;
+    unsigned long long h = path_cache_hash(host_path, follow_final ? 1 : 0);
+    PathValidationCacheEntry *entry = &g_path_validation_cache[h % PATH_VALIDATION_CACHE_SIZE];
+    if (entry->generation == g_path_cache_generation &&
+        entry->follow_final == follow_final &&
+        strcmp(entry->host, host_path) == 0) {
+        if (rc) *rc = entry->rc;
+        if (g_path_profile) g_path_stats.validation_cache_hits++;
+        return 1;
+    }
+    if (g_path_profile) g_path_stats.validation_cache_misses++;
+    return 0;
+}
+
+static void path_validation_cache_put(const char *host_path, int follow_final, int rc) {
+    if (!g_path_cache_enabled || g_path_cache_store_disabled ||
+        g_path_cache_mutation_inflight > 0 || !host_path || !host_path[0]) return;
+    if (rc != 0) return;
+    unsigned long long h = path_cache_hash(host_path, follow_final ? 1 : 0);
+    PathValidationCacheEntry *entry = &g_path_validation_cache[h % PATH_VALIDATION_CACHE_SIZE];
+    entry->generation = g_path_cache_generation;
+    entry->follow_final = follow_final;
+    entry->rc = rc;
+    snprintf(entry->host, sizeof(entry->host), "%s", host_path);
+}
+
+static char *cached_realpath(const char *path, char *resolved) {
+    if (!g_path_cache_enabled || !path || !path[0]) {
+        if (g_path_profile) g_path_stats.realpath_cache_misses++;
+        return realpath(path, resolved);
+    }
+    unsigned long long h = path_cache_hash(path, 17);
+    PathRealpathCacheEntry *entry = &g_path_realpath_cache[h % PATH_REALPATH_CACHE_SIZE];
+    if (entry->generation == g_path_cache_generation &&
+        strcmp(entry->path, path) == 0) {
+        snprintf(resolved, PATH_MAX, "%s", entry->resolved);
+        if (g_path_profile) g_path_stats.realpath_cache_hits++;
+        return resolved;
+    }
+    if (g_path_profile) g_path_stats.realpath_cache_misses++;
+    char *rc = realpath(path, resolved);
+    if (rc && !g_path_cache_store_disabled && g_path_cache_mutation_inflight == 0) {
+        entry->generation = g_path_cache_generation;
+        snprintf(entry->path, sizeof(entry->path), "%s", path);
+        snprintf(entry->resolved, sizeof(entry->resolved), "%s", resolved);
+    }
+    return rc;
+}
+
 static int resolve_guest_program(const char *rootfs, const char *program, char *out, size_t out_len) {
     if (!program || !program[0]) return -1;
     if (program[0] == '/') {
@@ -747,6 +957,9 @@ static const char *syscall_name(long nr) {
         case 12: return "llistxattr";
         case 14: return "removexattr";
         case 15: return "lremovexattr";
+        case 23: return "dup";
+        case 24: return "dup3";
+        case 25: return "fcntl";
         case 29: return "ioctl";
         case 33: return "mknodat";
         case 34: return "mkdirat";
@@ -758,12 +971,15 @@ static const char *syscall_name(long nr) {
         case 44: return "fstatfs";
         case 48: return "faccessat";
         case 49: return "chdir";
+        case 50: return "fchdir";
         case 53: return "fchmodat";
         case 54: return "fchownat";
         case 55: return "fchown";
         case 56: return "openat";
         case 57: return "close";
+        case 59: return "pipe2";
         case 61: return "getdents64";
+        case 62: return "lseek";
         case 63: return "read";
         case 64: return "write";
         case 78: return "readlinkat";
@@ -774,8 +990,10 @@ static const char *syscall_name(long nr) {
         case 98: return "futex";
         case 99: return "set_robust_list";
         case 117: return "ptrace";
+        case 132: return "sigaltstack";
         case 134: return "rt_sigaction";
         case 135: return "rt_sigprocmask";
+        case 139: return "rt_sigreturn";
         case 143: return "setregid";
         case 144: return "setgid";
         case 145: return "setreuid";
@@ -788,8 +1006,10 @@ static const char *syscall_name(long nr) {
         case 152: return "setfsgid";
         case 159: return "setgroups";
         case 160: return "uname";
+        case 166: return "umask";
         case 167: return "prctl";
         case 172: return "getpid";
+        case 173: return "getppid";
         case 174: return "getuid";
         case 175: return "geteuid";
         case 176: return "getgid";
@@ -805,6 +1025,7 @@ static const char *syscall_name(long nr) {
         case 220: return "clone";
         case 221: return "execve";
         case 222: return "mmap";
+        case 223: return "fadvise64";
         case 226: return "mprotect";
         case 227: return "msync";
         case 233: return "madvise";
@@ -854,6 +1075,13 @@ static int set_regs(pid_t pid, struct user_pt_regs *regs) {
     iov.iov_base = regs;
     iov.iov_len = sizeof(*regs);
     return ptrace(PTRACE_SETREGSET, pid, (void *)NT_PRSTATUS, &iov);
+}
+
+static int set_syscall_number(pid_t pid, int nr) {
+    struct iovec iov;
+    iov.iov_base = &nr;
+    iov.iov_len = sizeof(nr);
+    return ptrace(PTRACE_SETREGSET, pid, (void *)NT_ARM_SYSTEM_CALL, &iov);
 }
 
 static int syscall_emulate_success(long nr) {
@@ -1028,7 +1256,7 @@ static long syscall_remap_number(long nr) {
     return nr;
 }
 
-typedef struct TraceeState {
+struct TraceeState {
     pid_t pid;
     int active;
     int in_syscall;
@@ -1044,10 +1272,11 @@ typedef struct TraceeState {
     unsigned long long sgid;
     unsigned long long last_args[6];
     unsigned long long last_brk;
+    int pending_path_cache_invalidation;
     char exec_guest_path[PATH_MAX];
     char guest_cwd[PATH_MAX];
     char pending_guest_cwd[PATH_MAX];
-} TraceeState;
+};
 
 #define MAX_TRACEES 128
 
@@ -1182,7 +1411,13 @@ static unsigned long long prepare_emulated_result(pid_t pid, TraceeState *state,
 
 static void remove_tracee(TraceeState *tracees, pid_t pid) {
     TraceeState *state = find_tracee(tracees, pid);
-    if (state) memset(state, 0, sizeof(*state));
+    if (state) {
+        if (state->pending_path_cache_invalidation) {
+            finish_path_cache_mutation(state);
+            state->pending_path_cache_invalidation = 0;
+        }
+        memset(state, 0, sizeof(*state));
+    }
 }
 
 static int tracee_count(TraceeState *tracees) {
@@ -1435,6 +1670,7 @@ static int complete_emulated_syscall(pid_t pid, struct user_pt_regs *regs,
                                      unsigned long long result) {
     regs->regs[0] = result;
     regs->regs[8] = (unsigned long long)-1;
+    if (set_syscall_number(pid, -1) != 0) return -1;
     maybe_advance_past_svc(pid, regs);
     return set_regs(pid, regs);
 }
@@ -1455,6 +1691,22 @@ static int should_rewrite_path(const char *rootfs, const char *path) {
 static int resolve_guest_host_path(const char *rootfs, const char *guest,
                                    char *out, size_t out_len, int *is_bind) {
     if (is_bind) *is_bind = 0;
+    if (strcmp(guest, "/proc/stat") == 0 ||
+        strcmp(guest, "/proc/uptime") == 0 ||
+        strcmp(guest, "/proc/loadavg") == 0) {
+        const char *name = strrchr(guest, '/');
+        name = name ? name + 1 : guest;
+        if (snprintf(out, out_len, "%s/.pdocker-proc/%s", rootfs, name) >= (int)out_len) {
+            return -ENAMETOOLONG;
+        }
+        return 1;
+    }
+    if (strcmp(guest, "/dev/tty") == 0 && isatty(STDIN_FILENO)) {
+        if (snprintf(out, out_len, "/proc/self/fd/0") >= (int)out_len) {
+            return -ENAMETOOLONG;
+        }
+        return 1;
+    }
     if (!should_rewrite_path(rootfs, guest)) return 0;
     int bind_rc = resolve_bind_path(guest, out, out_len);
     if (bind_rc < 0) return bind_rc;
@@ -1491,6 +1743,175 @@ static int path_has_parent_segment(const char *path) {
     return 0;
 }
 
+static int path_parent(char *out, size_t out_len, const char *path) {
+    if (!out || out_len == 0 || !path || !path[0]) return -EINVAL;
+    char tmp[PATH_MAX];
+    if (snprintf(tmp, sizeof(tmp), "%s", path) >= (int)sizeof(tmp)) return -ENAMETOOLONG;
+    trim_trailing_slashes(tmp);
+    char *slash = strrchr(tmp, '/');
+    if (!slash) {
+        if (snprintf(out, out_len, ".") >= (int)out_len) return -ENAMETOOLONG;
+        return 0;
+    }
+    if (slash == tmp) {
+        slash[1] = '\0';
+    } else {
+        *slash = '\0';
+    }
+    if (snprintf(out, out_len, "%s", tmp) >= (int)out_len) return -ENAMETOOLONG;
+    return 0;
+}
+
+static int normalize_absolute_path_lexical(const char *path, char *out, size_t out_len) {
+    if (!path || path[0] != '/' || !out || out_len < 2) return -EINVAL;
+    size_t marks[PATH_MAX / 2];
+    size_t depth = 0;
+    size_t len = 1;
+    out[0] = '/';
+    out[1] = '\0';
+
+    const char *p = path;
+    while (*p) {
+        while (*p == '/') p++;
+        const char *seg = p;
+        while (*p && *p != '/') p++;
+        size_t seg_len = (size_t)(p - seg);
+        if (seg_len == 0 || (seg_len == 1 && seg[0] == '.')) continue;
+        if (seg_len == 2 && seg[0] == '.' && seg[1] == '.') {
+            if (depth > 0) {
+                len = marks[--depth];
+                out[len] = '\0';
+            }
+            continue;
+        }
+        if (depth >= sizeof(marks) / sizeof(marks[0])) return -ENAMETOOLONG;
+        marks[depth++] = len;
+        if (len > 1) {
+            if (len + 1 >= out_len) return -ENAMETOOLONG;
+            out[len++] = '/';
+        }
+        if (len + seg_len >= out_len) return -ENAMETOOLONG;
+        memcpy(out + len, seg, seg_len);
+        len += seg_len;
+        out[len] = '\0';
+    }
+    return 0;
+}
+
+static int validate_host_path_under_allowed(const char *rootfs, const char *host_path,
+                                            int follow_final) {
+    if (g_path_profile) g_path_stats.validate_calls++;
+    if (!host_path || !host_path[0]) return -ENOENT;
+    char normalized[PATH_MAX];
+    unsigned long long t0 = g_path_profile ? monotonic_now_ns() : 0;
+    int norm_rc = normalize_absolute_path_lexical(host_path, normalized, sizeof(normalized));
+    if (g_path_profile) g_path_stats.validate_lexical_ns += monotonic_now_ns() - t0;
+    if (norm_rc < 0) {
+        path_validation_cache_put(host_path, follow_final, norm_rc);
+        return norm_rc;
+    }
+    if (strcmp(normalized, "/proc/self/fd/0") == 0 && isatty(STDIN_FILENO)) {
+        path_validation_cache_put(host_path, follow_final, 0);
+        return 0;
+    }
+    if (!host_path_is_under_allowed_host_path(rootfs, normalized)) {
+        path_validation_cache_put(host_path, follow_final, -EXDEV);
+        return -EXDEV;
+    }
+    int cached_rc = 0;
+    if (path_validation_cache_get(host_path, follow_final, &cached_rc)) return cached_rc;
+
+    char resolved_full[PATH_MAX];
+    t0 = g_path_profile ? monotonic_now_ns() : 0;
+    if (follow_final && cached_realpath(host_path, resolved_full)) {
+        if (g_path_profile) g_path_stats.validate_realpath_full_ns += monotonic_now_ns() - t0;
+        int rc = host_path_is_under_allowed_host_path(rootfs, resolved_full) ? 0 : -EXDEV;
+        path_validation_cache_put(host_path, follow_final, rc);
+        return rc;
+    }
+    if (g_path_profile && follow_final) {
+        g_path_stats.validate_realpath_full_ns += monotonic_now_ns() - t0;
+    }
+    if (follow_final && errno != ENOENT && errno != ENOTDIR) {
+        int rc = -errno;
+        path_validation_cache_put(host_path, follow_final, rc);
+        return rc;
+    }
+
+    char probe[PATH_MAX];
+    int parent_rc = path_parent(probe, sizeof(probe), host_path);
+    if (parent_rc < 0) return parent_rc;
+    char resolved_parent[PATH_MAX];
+    for (;;) {
+        t0 = g_path_profile ? monotonic_now_ns() : 0;
+        char *parent_ok = cached_realpath(probe, resolved_parent);
+        if (g_path_profile) g_path_stats.validate_parent_realpath_ns += monotonic_now_ns() - t0;
+        if (parent_ok) break;
+        if (g_path_profile) g_path_stats.validate_parent_loops++;
+        if (errno != ENOENT && errno != ENOTDIR) {
+            int rc = -errno;
+            path_validation_cache_put(host_path, follow_final, rc);
+            return rc;
+        }
+        if (strcmp(probe, "/") == 0 || strcmp(probe, ".") == 0) {
+            int rc = -errno;
+            path_validation_cache_put(host_path, follow_final, rc);
+            return rc;
+        }
+        parent_rc = path_parent(probe, sizeof(probe), probe);
+        if (parent_rc < 0) {
+            path_validation_cache_put(host_path, follow_final, parent_rc);
+            return parent_rc;
+        }
+    }
+    int rc = host_path_is_under_allowed_host_path(rootfs, resolved_parent) ? 0 : -EXDEV;
+    path_validation_cache_put(host_path, follow_final, rc);
+    return rc;
+}
+
+static int tracee_dirfd_base(pid_t pid, int dirfd, char *out, size_t out_len) {
+    char proc_path[64];
+    if (dirfd == AT_FDCWD) {
+        snprintf(proc_path, sizeof(proc_path), "/proc/%d/cwd", (int)pid);
+    } else {
+        snprintf(proc_path, sizeof(proc_path), "/proc/%d/fd/%d", (int)pid, dirfd);
+    }
+    ssize_t n = readlink(proc_path, out, out_len - 1);
+    if (n < 0) return -errno;
+    out[n] = '\0';
+    return 0;
+}
+
+static int validate_relative_tracee_path(pid_t pid, int dirfd, const char *path,
+                                         const char *rootfs, char *candidate,
+                                         size_t candidate_len, int follow_final) {
+    char base[PATH_MAX];
+    int base_rc = tracee_dirfd_base(pid, dirfd, base, sizeof(base));
+    if (base_rc < 0) return base_rc;
+    if (!host_path_is_under_allowed_host_path(rootfs, base)) return -EXDEV;
+    if (!path || path[0] == '\0') return 0;
+    if (snprintf(candidate, candidate_len, "%s/%s", base, path) >= (int)candidate_len) {
+        return -ENAMETOOLONG;
+    }
+    return validate_host_path_under_allowed(rootfs, candidate, follow_final);
+}
+
+static int path_context_follows_final_component(const char *context) {
+    return strcmp(context, "unlinkat") != 0 &&
+           strcmp(context, "symlinkat") != 0 &&
+           strcmp(context, "mkdirat") != 0 &&
+           strcmp(context, "mknodat") != 0;
+}
+
+static int deny_path_syscall(pid_t pid, struct user_pt_regs *regs, const char *context,
+                             const char *path, int err) {
+    if (err >= 0) err = EXDEV;
+    fprintf(stderr, "pdocker-direct-trace: pid=%d deny %s unsafe path=%s (%s)\n",
+            (int)pid, context, path ? path : "", strerror(-err));
+    if (complete_emulated_syscall(pid, regs, (unsigned long long)err) != 0) return 0;
+    return REWRITE_SYSCALL_COMPLETED;
+}
+
 static void trace_interesting_path(pid_t pid, const char *context, int arg_index, const char *path) {
     if (!g_trace_paths) return;
     if (!path) return;
@@ -1517,6 +1938,10 @@ static int rewrite_path_arg_scratch(pid_t pid, struct user_pt_regs *regs, int ar
                 (int)pid, context, original);
         return 0;
     }
+    int validate_rc = validate_host_path_under_allowed(rootfs, rewritten, 1);
+    if (validate_rc < 0) {
+        return deny_path_syscall(pid, regs, context, original, validate_rc);
+    }
     unsigned long long scratch = (regs->sp - scratch_offset) & ~15ULL;
     if (write_tracee_string(pid, scratch, rewritten) != 0) {
         fprintf(stderr, "pdocker-direct-trace: pid=%d path rewrite failed for %s: %s -> %s (%s)\n",
@@ -1532,20 +1957,74 @@ static int rewrite_path_arg_scratch(pid_t pid, struct user_pt_regs *regs, int ar
 static int rewrite_at_path_arg(pid_t pid, struct user_pt_regs *regs, int dirfd_index,
                                int path_index, const char *rootfs, const char *context,
                                unsigned long long scratch_offset) {
+    unsigned long long profile_start = g_path_profile ? monotonic_now_ns() : 0;
+    if (g_path_profile) g_path_stats.calls++;
+#define RETURN_AT_PATH_PROFILE(value_) do { \
+    if (g_path_profile) g_path_stats.total_ns += monotonic_now_ns() - profile_start; \
+    return (value_); \
+} while (0)
     char original[PATH_MAX];
+    unsigned long long t0 = g_path_profile ? monotonic_now_ns() : 0;
     if (read_tracee_string(pid, regs->regs[path_index], original, sizeof(original)) < 0) {
-        return 0;
+        if (g_path_profile) g_path_stats.read_ns += monotonic_now_ns() - t0;
+        RETURN_AT_PATH_PROFILE(0);
     }
+    if (g_path_profile) g_path_stats.read_ns += monotonic_now_ns() - t0;
     trace_interesting_path(pid, context, path_index, original);
-    if (original[0] != '/') return 0;
+
+    if (original[0] == '\0') {
+        TRACE_LOG("pdocker-direct-trace: pid=%d preserve-empty-path %s\n",
+                  (int)pid, context);
+        if (g_path_profile) {
+            g_path_stats.empty_path++;
+            g_path_stats.no_rewrite++;
+        }
+        RETURN_AT_PATH_PROFILE(0);
+    }
+
+    if (original[0] != '/') {
+        if (g_path_profile) g_path_stats.relative_path++;
+        char candidate[PATH_MAX];
+        int follow_final = path_context_follows_final_component(context);
+        t0 = g_path_profile ? monotonic_now_ns() : 0;
+        int validate_rc = validate_relative_tracee_path(pid, (int)regs->regs[dirfd_index],
+                                                        original, rootfs, candidate,
+                                                        sizeof(candidate), follow_final);
+        if (g_path_profile) g_path_stats.relative_validate_ns += monotonic_now_ns() - t0;
+        if (validate_rc < 0) {
+            if (g_path_profile) g_path_stats.denied++;
+            RETURN_AT_PATH_PROFILE(deny_path_syscall(pid, regs, context, original, validate_rc));
+        }
+        TRACE_LOG("pdocker-direct-trace: pid=%d validate-relative %s %s -> %s\n",
+                  (int)pid, context, original, candidate);
+        if (g_path_profile) g_path_stats.no_rewrite++;
+        RETURN_AT_PATH_PROFILE(0);
+    }
+
+    if (g_path_profile) g_path_stats.absolute_path++;
     char rewritten[PATH_MAX];
     int bind_path = 0;
+    t0 = g_path_profile ? monotonic_now_ns() : 0;
     int resolved = resolve_guest_host_path(rootfs, original, rewritten, sizeof(rewritten), &bind_path);
-    if (resolved == 0) return 0;
+    if (g_path_profile) g_path_stats.resolve_ns += monotonic_now_ns() - t0;
+    if (resolved == 0) {
+        if (g_path_profile) g_path_stats.no_rewrite++;
+        RETURN_AT_PATH_PROFILE(0);
+    }
     if (resolved < 0) {
         fprintf(stderr, "pdocker-direct-trace: pid=%d path too long for %s: %s\n",
                 (int)pid, context, original);
-        return 0;
+        if (g_path_profile) g_path_stats.denied++;
+        RETURN_AT_PATH_PROFILE(deny_path_syscall(pid, regs, context, original, resolved));
+    }
+
+    t0 = g_path_profile ? monotonic_now_ns() : 0;
+    int validate_rc = validate_host_path_under_allowed(
+        rootfs, rewritten, path_context_follows_final_component(context));
+    if (g_path_profile) g_path_stats.validate_ns += monotonic_now_ns() - t0;
+    if (validate_rc < 0) {
+        if (g_path_profile) g_path_stats.denied++;
+        RETURN_AT_PATH_PROFILE(deny_path_syscall(pid, regs, context, original, validate_rc));
     }
 
     if (!bind_path &&
@@ -1559,19 +2038,28 @@ static int rewrite_at_path_arg(pid_t pid, struct user_pt_regs *regs, int dirfd_i
         regs->regs[path_index] = regs->regs[path_index] + 1;
         TRACE_LOG("pdocker-direct-trace: pid=%d rootfd-rewrite %s %s -> fd=%d %s\n",
                   (int)pid, context, original, g_rootfs_fd, original + 1);
-        return 1;
+        if (g_path_profile) {
+            g_path_stats.rootfd_rewrite++;
+            g_path_stats.rewrote++;
+        }
+        RETURN_AT_PATH_PROFILE(1);
     }
 
     unsigned long long scratch = (regs->sp - scratch_offset) & ~15ULL;
+    t0 = g_path_profile ? monotonic_now_ns() : 0;
     if (write_tracee_string(pid, scratch, rewritten) != 0) {
+        if (g_path_profile) g_path_stats.write_ns += monotonic_now_ns() - t0;
         fprintf(stderr, "pdocker-direct-trace: pid=%d path rewrite failed for %s: %s -> %s (%s)\n",
                 (int)pid, context, original, rewritten, strerror(errno));
-        return 0;
+        RETURN_AT_PATH_PROFILE(0);
     }
+    if (g_path_profile) g_path_stats.write_ns += monotonic_now_ns() - t0;
     regs->regs[path_index] = scratch;
     TRACE_LOG("pdocker-direct-trace: pid=%d rewrite %s %s -> %s\n",
               (int)pid, context, original, rewritten);
-    return 1;
+    if (g_path_profile) g_path_stats.rewrote++;
+    RETURN_AT_PATH_PROFILE(1);
+#undef RETURN_AT_PATH_PROFILE
 }
 
 static int rewrite_path_arg(pid_t pid, struct user_pt_regs *regs, int arg_index,
@@ -1688,8 +2176,12 @@ static int rewrite_chdir_arg(pid_t pid, struct user_pt_regs *regs, TraceeState *
 static int rewrite_path_args(pid_t pid, struct user_pt_regs *regs, int arg_a, int arg_b,
                              const char *rootfs, const char *context) {
     int rewrote = 0;
-    rewrote |= rewrite_path_arg_scratch(pid, regs, arg_a, rootfs, context, 16384u);
-    rewrote |= rewrite_path_arg_scratch(pid, regs, arg_b, rootfs, context, 8192u);
+    int rc = rewrite_path_arg_scratch(pid, regs, arg_a, rootfs, context, 16384u);
+    if (rc == REWRITE_SYSCALL_COMPLETED) return rc;
+    rewrote |= rc;
+    rc = rewrite_path_arg_scratch(pid, regs, arg_b, rootfs, context, 8192u);
+    if (rc == REWRITE_SYSCALL_COMPLETED) return rc;
+    rewrote |= rc;
     return rewrote;
 }
 
@@ -1697,9 +2189,27 @@ static int rewrite_at_path_args(pid_t pid, struct user_pt_regs *regs,
                                 int dirfd_a, int path_a, int dirfd_b, int path_b,
                                 const char *rootfs, const char *context) {
     int rewrote = 0;
-    rewrote |= rewrite_at_path_arg(pid, regs, dirfd_a, path_a, rootfs, context, 16384u);
-    rewrote |= rewrite_at_path_arg(pid, regs, dirfd_b, path_b, rootfs, context, 8192u);
+    int rc = rewrite_at_path_arg(pid, regs, dirfd_a, path_a, rootfs, context, 16384u);
+    if (rc == REWRITE_SYSCALL_COMPLETED) return rc;
+    rewrote |= rc;
+    rc = rewrite_at_path_arg(pid, regs, dirfd_b, path_b, rootfs, context, 8192u);
+    if (rc == REWRITE_SYSCALL_COMPLETED) return rc;
+    rewrote |= rc;
     return rewrote;
+}
+
+static int path_syscall_invalidates_cache(long nr) {
+    switch (nr) {
+        case 33:  /* mknodat */
+        case 35:  /* unlinkat */
+        case 36:  /* symlinkat */
+        case 37:  /* linkat */
+        case 38:  /* renameat */
+        case 276: /* renameat2 */
+            return 1;
+        default:
+            return 0;
+    }
 }
 
 static int emulate_getcwd(pid_t pid, struct user_pt_regs *regs, TraceeState *state,
@@ -1856,9 +2366,7 @@ static int copy_file_for_linkat(const char *old_host, const char *new_host, int 
 }
 
 static int host_path_is_under_rootfs(const char *rootfs, const char *path) {
-    size_t root_len = strlen(rootfs);
-    return strncmp(path, rootfs, root_len) == 0 &&
-           (path[root_len] == '\0' || path[root_len] == '/');
+    return host_path_is_under_prefix(rootfs, path);
 }
 
 static int resolve_tracee_host_path(pid_t pid, int dirfd, unsigned long long path_addr,
@@ -2616,6 +3124,11 @@ static int handle_syscall_entry(pid_t pid, struct user_pt_regs *regs, TraceeStat
     record_syscall_stat(state->last_nr);
     for (int i = 0; i < 6; ++i) state->last_args[i] = regs->regs[i];
     int forced_emulation = 0;
+    int mutation_invalidates_cache = path_syscall_invalidates_cache(state->last_nr);
+    if (mutation_invalidates_cache) {
+        begin_path_cache_mutation(state);
+        state->pending_path_cache_invalidation = 1;
+    }
     if (maybe_guard_memory_syscall(pid, regs, state, completed_in_userland)) {
         forced_emulation = 1;
     } else if (state->last_nr == 17 &&
@@ -2735,6 +3248,10 @@ static int handle_syscall_entry(pid_t pid, struct user_pt_regs *regs, TraceeStat
                     (int)pid, strerror(errno));
         }
     }
+    if (mutation_invalidates_cache && completed_in_userland && *completed_in_userland) {
+        finish_path_cache_mutation(state);
+        state->pending_path_cache_invalidation = 0;
+    }
     if (events < 80 || state->last_nr == 221 || state->last_nr == 281 ||
         state->last_nr == 293 || state->last_nr == 439 || state->last_nr == 449) {
         TRACE_LOG(
@@ -2769,6 +3286,15 @@ static int trace_and_exec(char *const exec_argv[], const char *rootfs, const cha
         _exit(126);
     }
     setpgid(child, child);
+    if (isatty(STDIN_FILENO)) {
+        struct sigaction ignore_ttou;
+        struct sigaction old_ttou;
+        memset(&ignore_ttou, 0, sizeof(ignore_ttou));
+        ignore_ttou.sa_handler = SIG_IGN;
+        sigaction(SIGTTOU, &ignore_ttou, &old_ttou);
+        tcsetpgrp(STDIN_FILENO, child);
+        sigaction(SIGTTOU, &old_ttou, NULL);
+    }
     g_trace_child_pgid = child;
     install_tracer_signal_handlers();
 
@@ -2940,6 +3466,10 @@ static int trace_and_exec(char *const exec_argv[], const char *rootfs, const cha
                 } else if (state->in_syscall && is_memory_trace_syscall(state->last_nr)) {
                     record_memory_syscall_exit(state, regs.regs[0]);
                 }
+                if (state->in_syscall && state->pending_path_cache_invalidation) {
+                    finish_path_cache_mutation(state);
+                    state->pending_path_cache_invalidation = 0;
+                }
                     state->in_syscall = completed_in_userland ? 1 : !state->in_syscall;
             }
             if (continue_tracee(got, 0) != 0) break;
@@ -3109,6 +3639,9 @@ static int trace_and_exec(char *const exec_argv[], const char *rootfs, const cha
             } else if (g_trace_memory && is_memory_trace_syscall(state->last_nr)) {
                 state->in_syscall = 1;
                 if (continue_tracee_to_syscall_exit(got, 0) != 0) break;
+            } else if (state->pending_path_cache_invalidation) {
+                state->in_syscall = 1;
+                if (continue_tracee_to_syscall_exit(got, 0) != 0) break;
             } else if (state->last_nr == 49 && state->pending_guest_cwd[0]) {
                 state->in_syscall = 1;
                 if (continue_tracee_to_syscall_exit(got, 0) != 0) break;
@@ -3208,6 +3741,15 @@ static int run_command(int argc, char **argv) {
     memset(&g_memory_stats, 0, sizeof(g_memory_stats));
     g_memory_stats_printed = 0;
     g_stats = env_flag_enabled("PDOCKER_DIRECT_STATS");
+    g_stats_top = (int)env_u64_or_default("PDOCKER_DIRECT_STATS_TOP", 12);
+    g_path_profile = env_flag_enabled("PDOCKER_DIRECT_PATH_PROFILE");
+    g_path_cache_enabled = !env_flag_enabled("PDOCKER_DIRECT_DISABLE_PATH_CACHE");
+    g_path_cache_store_disabled = 0;
+    g_path_cache_mutation_inflight = 0;
+    g_path_cache_generation = 1;
+    memset(g_path_validation_cache, 0, sizeof(g_path_validation_cache));
+    memset(g_path_realpath_cache, 0, sizeof(g_path_realpath_cache));
+    memset(&g_path_stats, 0, sizeof(g_path_stats));
     g_rootfd_rewrite = env_flag_enabled("PDOCKER_DIRECT_ROOTFD_REWRITE");
     g_validate_tracees = env_flag_enabled("PDOCKER_DIRECT_VALIDATE_TRACEES");
     g_trace_stat_paths = !env_flag_enabled("PDOCKER_DIRECT_UNTRACED_STAT_PATHS");

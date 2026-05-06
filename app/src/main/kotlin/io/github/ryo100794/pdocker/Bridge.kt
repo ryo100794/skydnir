@@ -218,9 +218,33 @@ class Bridge(
         socket.outputStream.write(body)
         socket.outputStream.flush()
         val head = readHttpHead(socket.inputStream)
+        if (!head.startsWith("HTTP/1.1 101") && !head.startsWith("HTTP/1.0 101")) {
+            val errorBody = readHttpBodyAfterHead(head, socket.inputStream)
+            val detail = listOf(head, errorBody).filter { it.isNotBlank() }.joinToString("\n")
+            recordEngineExecEvent("start-response", execId = execId, body = detail)
+            socket.close()
+            error(detail.ifBlank { head.lineSequence().firstOrNull().orEmpty() })
+        }
         recordEngineExecEvent("start-response", execId = execId, body = head)
-        check(head.startsWith("HTTP/1.1 101") || head.startsWith("HTTP/1.0 101")) { head.lineSequence().firstOrNull().orEmpty() }
         return socket
+    }
+
+    private fun readHttpBodyAfterHead(head: String, input: java.io.InputStream): String {
+        val contentLength = head.lineSequence()
+            .firstOrNull { it.startsWith("Content-Length:", ignoreCase = true) }
+            ?.substringAfter(':')
+            ?.trim()
+            ?.toIntOrNull()
+            ?: return ""
+        if (contentLength <= 0) return ""
+        val body = ByteArray(contentLength)
+        var off = 0
+        while (off < contentLength) {
+            val n = input.read(body, off, contentLength - off)
+            if (n <= 0) break
+            off += n
+        }
+        return body.copyOf(off).toString(Charsets.UTF_8)
     }
 
     private data class EngineResponse(val status: Int, val body: ByteArray)
