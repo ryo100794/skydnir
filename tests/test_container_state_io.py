@@ -54,6 +54,68 @@ class ContainerStateIoTest(unittest.TestCase):
             self.assertEqual(loaded, state)
             self.assertEqual(json.loads(path.read_text()), state)
 
+    def test_reconcile_clears_stale_healthy_status_for_exited_container(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mod = load_pdockerd(root / "pdocker")
+            cid = "stalehealthy"
+            state = {
+                "Id": cid,
+                "Name": "/stalehealthy",
+                "Config": {"Env": [], "Healthcheck": {"Test": ["CMD", "true"]}},
+                "State": {
+                    "Running": False,
+                    "Status": "exited",
+                    "ExitCode": 255,
+                    "Health": {
+                        "Status": "healthy",
+                        "FailingStreak": 0,
+                        "Log": [],
+                    },
+                },
+                "NetworkSettings": {"Ports": {}},
+            }
+            mod.save_container_state(cid, state)
+
+            reconciled = mod.reconcile_container_state(state)
+
+            health = reconciled["State"]["Health"]
+            self.assertFalse(reconciled["State"]["Running"])
+            self.assertEqual(health["Status"], "unhealthy")
+            self.assertTrue(health["PdockerStopped"])
+            self.assertIn("container is not running", health["Log"][-1]["Output"])
+
+    def test_health_monitor_cannot_mark_stopped_container_healthy(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mod = load_pdockerd(root / "pdocker")
+            cid = "stoppedhealth"
+            state = {
+                "Id": cid,
+                "Name": "/stoppedhealth",
+                "Config": {"Env": [], "Healthcheck": {"Test": ["CMD", "true"]}},
+                "State": {
+                    "Running": False,
+                    "Status": "exited",
+                    "ExitCode": 0,
+                    "Health": {
+                        "Status": "starting",
+                        "FailingStreak": 0,
+                        "Log": [],
+                    },
+                },
+                "NetworkSettings": {"Ports": {}},
+            }
+            mod.save_container_state(cid, state)
+
+            mod._set_health(cid, "healthy", 0, "")
+            loaded = mod.load_container_state(cid)
+
+            health = loaded["State"]["Health"]
+            self.assertEqual(health["Status"], "unhealthy")
+            self.assertGreaterEqual(health["FailingStreak"], 1)
+            self.assertTrue(health["PdockerStopped"])
+
 
 if __name__ == "__main__":
     unittest.main()

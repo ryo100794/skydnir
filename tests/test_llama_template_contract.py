@@ -48,6 +48,14 @@ class LlamaTemplateContractTest(unittest.TestCase):
         self.assertTrue(all(pos >= 0 for pos in positions), positions)
         self.assertEqual(positions, sorted(positions))
 
+    def test_server_build_includes_upstream_browser_ui(self):
+        self.assertIn("-DLLAMA_BUILD_WEBUI=ON", self.dockerfile)
+        self.assertNotIn("-DLLAMA_BUILD_WEBUI=OFF", self.dockerfile)
+        self.assertIn("http://127.0.0.1:18081/health", (LLAMA_ROOT / "README.md").read_text())
+        self.assertIn("http://127.0.0.1:18081/", (LLAMA_ROOT / "README.md").read_text())
+        self.assertIn("staleLlamaWebUi", self.main_activity)
+        self.assertIn('.pdocker-template-version").writeText("9', self.main_activity)
+
     def test_unfinished_pdocker_vulkan_keeps_kv_cache_on_cpu(self):
         self.assertIn("PDOCKER_VULKAN_ALLOW_KV_OFFLOAD", self.compose)
         self.assertIn("PDOCKER_VULKAN_ALLOW_KV_OFFLOAD", self.start)
@@ -66,7 +74,7 @@ class LlamaTemplateContractTest(unittest.TestCase):
             self.compose,
         )
         self.assertIn("stalePipelineOptimizationDefault", self.main_activity)
-        self.assertIn('.pdocker-template-version").writeText("8', self.main_activity)
+        self.assertIn('.pdocker-template-version").writeText("9', self.main_activity)
 
     def test_kv_guard_does_not_patch_llama_sources_or_build_flow(self):
         forbidden = [

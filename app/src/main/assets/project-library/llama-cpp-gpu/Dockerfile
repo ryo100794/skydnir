@@ -42,7 +42,7 @@ RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /opt/llama.cpp \
       -DCMAKE_BUILD_TYPE="$LLAMA_CPP_BUILD_TYPE" \
       -DLLAMA_BUILD_TESTS=OFF \
       -DLLAMA_BUILD_EXAMPLES=OFF \
-      -DLLAMA_BUILD_WEBUI=OFF \
+      -DLLAMA_BUILD_WEBUI=ON \
       -DLLAMA_OPENSSL=OFF \
       -DGGML_NATIVE=OFF \
       -DGGML_OPENMP=OFF \

@@ -5,6 +5,8 @@ This template builds a llama.cpp server workspace for pdocker.
 It includes:
 
 - `llama-server` built from `ggml-org/llama.cpp`.
+- The upstream llama.cpp browser UI at `/`, in addition to the OpenAI-style
+  HTTP API and `/health` endpoint.
 - Vulkan-oriented build flags (`GGML_VULKAN=ON`) for Android GPU passthrough.
 - The LLM engine, model loading, tokenizer, HTTP API, sampler, and llama.cpp
   scheduler stay inside the container. This template does not offload the
@@ -43,7 +45,9 @@ Usage from pdocker:
 5. Open the service on port `18081`.
 
 The compose header comment `# pdocker.service-url: 18081=llama.cpp` labels the
-local browser shortcut without changing standard Compose behavior.
+local browser shortcut without changing standard Compose behavior. A healthy
+server must make both `http://127.0.0.1:18081/health` and the browser UI at
+`http://127.0.0.1:18081/` usable.
 
 By default, first compose up downloads an 8B-class Apache-2.0 model in GGUF
 form:

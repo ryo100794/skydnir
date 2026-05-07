@@ -4421,6 +4421,7 @@ def reconcile_container_state(state):
     if not cid or not st.get("Running"):
         if st:
             _normalize_container_exit_state(st)
+            _mark_health_not_running(st)
             state["State"] = st
             _refresh_port_mapping_status(state)
             if cid:
@@ -4453,6 +4454,7 @@ def reconcile_container_state(state):
     else:
         _record_container_return_code(st, 255)
     _normalize_container_exit_state(st)
+    _mark_health_not_running(st)
     st["Error"] = st.get("Error") or "container process is not alive; state reconciled by pdockerd"
     st["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
     state["State"] = st
@@ -4468,6 +4470,27 @@ def _container_healthcheck(state):
     if not hc or not test or test[0] == "NONE":
         return None
     return hc
+
+
+def _mark_health_not_running(st, output="container is not running"):
+    health = st.get("Health")
+    if not isinstance(health, dict):
+        return
+    if health.get("Status") == "unhealthy" and health.get("PdockerStopped"):
+        return
+    entries = list(health.get("Log") or [])
+    now = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
+    entries.append({
+        "Start": now,
+        "End": now,
+        "ExitCode": 1,
+        "Output": output,
+    })
+    health["Status"] = "unhealthy"
+    health["FailingStreak"] = max(1, int(health.get("FailingStreak") or 0))
+    health["Log"] = entries[-5:]
+    health["PdockerStopped"] = True
+    st["Health"] = health
 
 
 def _health_command(healthcheck):
@@ -4499,11 +4522,17 @@ def _set_health(cid, status, exit_code=None, output="", started_at=None, ended_a
     if not state:
         return
     st = state.setdefault("State", {})
+    if not st.get("Running"):
+        _mark_health_not_running(st)
+        state["State"] = st
+        save_container_state(cid, state)
+        return
     health = st.setdefault("Health", {
         "Status": "starting",
         "FailingStreak": 0,
         "Log": [],
     })
+    health.pop("PdockerStopped", None)
     if exit_code is not None:
         if exit_code == 0:
             health["FailingStreak"] = 0
@@ -5147,6 +5176,7 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
         state["State"].pop("PidStartTime", None)
         state["State"]["ExitCode"] = 126
         state["State"]["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
+        _mark_health_not_running(state["State"], fault)
         _refresh_port_mapping_status(state)
         save_container_state(cid, state)
         raise RuntimeError(fault)
@@ -5161,6 +5191,7 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
         state["State"].pop("PidStartTime", None)
         state["State"]["ExitCode"] = 126
         state["State"]["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
+        _mark_health_not_running(state["State"], fault)
         _refresh_port_mapping_status(state)
         save_container_state(cid, state)
         attrs = _container_event_attrs(state)
@@ -5337,6 +5368,7 @@ def stop_container(cid, timeout=10):
         state["State"]["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
         if stopped and not state["State"].get("ExitCode"):
             state["State"]["ExitCode"] = 143
+        _mark_health_not_running(state["State"])
         save_container_state(cid, state)
     with running_lock:
         running_containers.pop(cid, None)

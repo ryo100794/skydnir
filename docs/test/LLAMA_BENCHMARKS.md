@@ -19,7 +19,9 @@ with `scripts/android-llama-bench.sh`.
 ## How To Run
 
 1. Start the llama.cpp project from the app or Engine compose path.
-2. Wait until `http://127.0.0.1:18081/` returns HTTP 200.
+2. Wait until `http://127.0.0.1:18081/health` returns HTTP 200, and verify
+   that `http://127.0.0.1:18081/` serves the upstream llama.cpp browser UI
+   rather than a JSON 404.
 3. Run:
 
 ```sh
