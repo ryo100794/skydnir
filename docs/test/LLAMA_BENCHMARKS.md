@@ -15,6 +15,8 @@ with `scripts/android-llama-bench.sh`.
 - Current runtime status lives in [`../plan/STATUS.md`](../plan/STATUS.md).
 - Active llama/GPU tasks live in [`../plan/TODO.md`](../plan/TODO.md).
 - Machine-readable benchmark artifacts stay in adjacent `*.json` files.
+- Latest correctness evidence is recorded in
+  `docs/test/llama-correctness-latest.json`.
 
 ## How To Run
 
@@ -22,7 +24,10 @@ with `scripts/android-llama-bench.sh`.
 2. Wait until `http://127.0.0.1:18081/health` returns HTTP 200, and verify
    that `http://127.0.0.1:18081/` serves the upstream llama.cpp browser UI
    rather than a JSON 404.
-3. Run:
+3. For any GPU-mode result, run `pdocker-llama-correctness` in the running
+   container before recording a benchmark claim. The report must show
+   `summary.correctness=pass`; `/health` alone is only service liveness.
+4. Run:
 
 ```sh
 bash scripts/android-llama-bench.sh --predict 8 --repeat 1
@@ -40,6 +45,14 @@ bash scripts/android-llama-gpu-compare.sh --model-path /models/small.gguf --mode
 ```
 
 ## 2026-05-07 Write-Only Dirty Writeback Probe
+
+Late on 2026-05-07, deterministic `/completion` probes showed that the current
+forced Vulkan path can serve HTTP while returning incorrect first-token output
+for simple prompts (`2+3=` returned `!` at NGL=1 and NGL=4). CPU fallback
+returned the expected first token for the same addition probe. Until
+`pdocker-llama-correctness` passes, GPU artifacts in this section are bridge
+throughput diagnostics only and must not be reported as verified inference
+results.
 
 - Diagnostic probe:
   `docs/test/llama-cpu-gpu-compare-20260507-ngl3-dirty-probe-protocol.json`.

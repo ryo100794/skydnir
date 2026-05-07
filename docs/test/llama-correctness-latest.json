@@ -1,0 +1,44 @@
+{
+  "created_at": "2026-05-07T14:02:04Z",
+  "probes": [
+    {
+      "content": "5",
+      "duration_ms": 28963.206,
+      "expected_prefixes": [
+        "5"
+      ],
+      "passed": true,
+      "prompt": "2+3=",
+      "required": true,
+      "status_code": 200
+    },
+    {
+      "content": "8",
+      "duration_ms": 30736.121,
+      "expected_prefixes": [
+        "84",
+        "8"
+      ],
+      "passed": true,
+      "prompt": "12*7=",
+      "required": false,
+      "status_code": 200
+    }
+  ],
+  "schema": "pdocker.llama.correctness.v1.local",
+  "service": {
+    "base_url": "http://127.0.0.1:18081",
+    "health": {
+      "body": {
+        "status": "ok"
+      },
+      "ok": true,
+      "status_code": 200
+    }
+  },
+  "summary": {
+    "benchmark_claim_allowed": true,
+    "correctness": "pass",
+    "required_failures": 0
+  }
+}

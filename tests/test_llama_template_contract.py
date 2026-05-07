@@ -7,6 +7,7 @@ LLAMA_ROOT = ROOT / "app" / "src" / "main" / "assets" / "project-library" / "lla
 LLAMA_DOCKERFILE = LLAMA_ROOT / "Dockerfile"
 LLAMA_COMPOSE = LLAMA_ROOT / "compose.yaml"
 LLAMA_START = LLAMA_ROOT / "scripts" / "start-llama-server.sh"
+LLAMA_CORRECTNESS = LLAMA_ROOT / "scripts" / "pdocker-llama-correctness.sh"
 MAIN_ACTIVITY = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "MainActivity.kt"
 
 
@@ -16,6 +17,7 @@ class LlamaTemplateContractTest(unittest.TestCase):
         cls.dockerfile = LLAMA_DOCKERFILE.read_text()
         cls.compose = LLAMA_COMPOSE.read_text()
         cls.start = LLAMA_START.read_text()
+        cls.correctness = LLAMA_CORRECTNESS.read_text()
         cls.main_activity = MAIN_ACTIVITY.read_text()
 
     def test_openblas_uses_standard_cmake_detection(self):
@@ -60,6 +62,26 @@ class LlamaTemplateContractTest(unittest.TestCase):
         self.assertIn("staleLlamaWebUi", self.main_activity)
         self.assertIn("staleLlamaStaticPath", self.main_activity)
         self.assertIn('.pdocker-template-version").writeText("10', self.main_activity)
+
+    def test_gpu_correctness_is_separate_from_http_health(self):
+        self.assertIn("COPY scripts/pdocker-llama-correctness.sh", self.dockerfile)
+        self.assertIn("/usr/local/bin/pdocker-llama-correctness", self.dockerfile)
+        self.assertIn("LLAMA_CORRECTNESS_FILE", self.compose)
+        self.assertIn("pdocker.llama.correctness.v1", self.correctness)
+        self.assertIn('"prompt": "2+3="', self.correctness)
+        self.assertIn('"expected_prefixes": ["5"]', self.correctness)
+        self.assertIn("/completion", self.correctness)
+        self.assertIn("benchmark_claim_allowed", self.correctness)
+
+        readme = (LLAMA_ROOT / "README.md").read_text()
+        benchmarks = (ROOT / "docs" / "test" / "LLAMA_BENCHMARKS.md").read_text()
+        status = (ROOT / "docs" / "plan" / "STATUS.md").read_text()
+        todo = (ROOT / "docs" / "plan" / "TODO.md").read_text()
+        for text in [readme, benchmarks, status, todo]:
+            with self.subTest(document=text[:40]):
+                self.assertIn("pdocker-llama-correctness", text)
+        self.assertIn("Server health is only a liveness check", readme)
+        self.assertIn("/health` alone is only service liveness", benchmarks)
 
     def test_unfinished_pdocker_vulkan_keeps_kv_cache_on_cpu(self):
         self.assertIn("PDOCKER_VULKAN_ALLOW_KV_OFFLOAD", self.compose)

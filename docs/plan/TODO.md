@@ -21,7 +21,10 @@ or closes.
   and measured CPU-vs-GPU comparison artifacts. Current slice: `VULKAN_DISPATCH_V2`
   carries the compute entry point and specialization constants across the
   container/APK bridge, serves the forced-GPU HTTP probe, and now exposes
-  bridge upload/copy overhead as the front performance blocker.
+  bridge upload/copy overhead as a performance blocker. New correctness gate:
+  forced Vulkan currently fails deterministic first-token probes (`2+3=`), so
+  the next bridge slice must fix logits/readback/descriptor correctness before
+  any speedup artifact can be promoted as valid inference.
 - [next] [#5](https://github.com/ryo100794/pdocker-android/issues/5)
   Terminal `-it` interactive path: refactor the terminal stack according to
   `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`. The UI must remain a generic
@@ -41,7 +44,9 @@ or closes.
   llama GPU performance workflow after Vulkan clamp: keep CPU fallback
   hiding Vulkan devices, force Vulkan only for measured GPU attempts, run the
   compare flow after every bridge fix, and report `target_met`, speedup, GPU
-  layer count, current blocker, thermal/device metadata, and artifact paths.
+  layer count, current blocker, thermal/device metadata, artifact paths, and
+  the `pdocker-llama-correctness` result. Benchmark claims are blocked when the
+  correctness report fails or is missing.
 - [doing] Active port mapping: published ports now have an Engine-visible
   `PdockerNetwork.PortMappingStatus` scaffold for planned/inactive/active/
   conflict states while the runtime remains host-network-only. Next slice:

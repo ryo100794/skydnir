@@ -76,7 +76,12 @@ What's been confirmed working on the current Android 15 test device:
   streams real llama-server output. GPU attempts remain a measured workflow:
   CPU fallback hides Vulkan devices, forced Vulkan is used only for benchmark
   runs, and completion requires the compare artifact to report speedup,
-  `target_met`, GPU layer count, blocker, and device/thermal metadata.
+  `target_met`, GPU layer count, blocker, and device/thermal metadata. GPU
+  liveness is not GPU correctness: deterministic `/completion` probes on
+  2026-05-07 found wrong first-token output in forced Vulkan mode while CPU
+  fallback answered the same addition probe correctly. The project-library
+  template now carries `pdocker-llama-correctness`; GPU runs may be described as
+  verified only when that JSON report passes.
 - xterm.js WebView terminal → spawns sh with `PATH=runtime/docker-bin:...` and `DOCKER_HOST=unix://...` so user can type `docker ps` directly
 - Terminal UTF-8 output is decoded through `TextDecoder`, uses an Android/CJK
   monospace font stack, disables IME autocorrect/capitalization, and reports

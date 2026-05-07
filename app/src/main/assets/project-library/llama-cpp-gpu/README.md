@@ -50,6 +50,13 @@ local browser shortcut without changing standard Compose behavior. A healthy
 server must make both `http://127.0.0.1:18081/health` and the browser UI at
 `http://127.0.0.1:18081/` usable.
 
+Server health is only a liveness check. GPU correctness is a separate gate:
+run `pdocker-llama-correctness` from an exec session after the service starts.
+It sends fixed deterministic `/completion` probes such as `2+3=` and writes
+JSON evidence to `/workspace/logs/pdocker-llama-correctness.json` and
+`/profiles/pdocker-llama-correctness.json`. Benchmark or UI claims may say the
+GPU path is verified only when this report has `summary.correctness=pass`.
+
 By default, first compose up downloads an 8B-class Apache-2.0 model in GGUF
 form:
 
@@ -114,5 +121,9 @@ GPU acceleration is considered real only when the glibc llama.cpp process uses
 a container-facing pdocker GPU shim. Android/Bionic GPU libraries and services
 may sit behind that shim, but they must not own the LLM engine or replace the
 container's llama-server process.
+The same distinction applies to reporting: `/health` proves only that
+`llama-server` is alive, GPU mode proves only that an accelerated backend was
+requested, and `pdocker-llama-correctness` is required before treating a GPU run
+as computation-correct.
 The default llama-server port is `18081`, offset from common development ports
 to reduce collisions with Android/Termux services.

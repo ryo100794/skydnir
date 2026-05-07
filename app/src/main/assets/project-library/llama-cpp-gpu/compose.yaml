@@ -25,6 +25,7 @@ services:
       LLAMA_GPU_PROFILE_REFRESH: "${LLAMA_GPU_PROFILE_REFRESH:-auto}"
       LLAMA_EXTRA_ARGS: "${LLAMA_EXTRA_ARGS:---path /opt/llama.cpp/tools/server/public --jinja}"
       LLAMA_LOG_FILE: "${LLAMA_LOG_FILE:-/workspace/logs/llama-server.log}"
+      LLAMA_CORRECTNESS_FILE: "${LLAMA_CORRECTNESS_FILE:-/workspace/logs/pdocker-llama-correctness.json}"
       LLAMA_MODEL_URL: "${LLAMA_MODEL_URL:-https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf}"
       PDOCKER_DOCUMENTS_MOUNT: "${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
       PDOCKER_SHARED_DOCUMENTS_MOUNT: "${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"

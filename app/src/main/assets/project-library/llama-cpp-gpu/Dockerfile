@@ -60,7 +60,8 @@ RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /opt/llama.cpp \
 
 COPY scripts/pdocker-gpu-profile.sh /usr/local/bin/pdocker-gpu-profile
 COPY scripts/start-llama-server.sh /usr/local/bin/start-llama-server
-RUN chmod +x /usr/local/bin/pdocker-gpu-profile /usr/local/bin/start-llama-server \
+COPY scripts/pdocker-llama-correctness.sh /usr/local/bin/pdocker-llama-correctness
+RUN chmod +x /usr/local/bin/pdocker-gpu-profile /usr/local/bin/start-llama-server /usr/local/bin/pdocker-llama-correctness \
     && mkdir -p /models /workspace /workspace/logs /profiles /var/log/pdocker
 
 WORKDIR /workspace
