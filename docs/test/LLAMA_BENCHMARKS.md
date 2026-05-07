@@ -46,13 +46,14 @@ bash scripts/android-llama-gpu-compare.sh --model-path /models/small.gguf --mode
 
 ## 2026-05-07 Write-Only Dirty Writeback Probe
 
-Late on 2026-05-07, deterministic `/completion` probes showed that the current
-forced Vulkan path can serve HTTP while returning incorrect first-token output
-for simple prompts (`2+3=` returned `!` at NGL=1 and NGL=4). CPU fallback
-returned the expected first token for the same addition probe. Until
-`pdocker-llama-correctness` passes, GPU artifacts in this section are bridge
-throughput diagnostics only and must not be reported as verified inference
-results.
+Late on 2026-05-07, deterministic `/completion` probes showed that one forced
+Vulkan run could serve HTTP while returning incorrect first-token output for
+simple prompts (`2+3=` returned `!` at NGL=1 and NGL=4). After restarting the
+same built image with 512 MiB Vulkan max-buffer/allocation/suballocation clamps,
+the latest NGL=4 probe in `docs/test/llama-correctness-latest.json` returned
+`2+3= -> 5` and `12*7= -> 8`. Until `pdocker-llama-correctness` passes for the
+current run, GPU artifacts in this section are bridge throughput diagnostics
+only and must not be reported as verified inference results.
 
 - Diagnostic probe:
   `docs/test/llama-cpu-gpu-compare-20260507-ngl3-dirty-probe-protocol.json`.

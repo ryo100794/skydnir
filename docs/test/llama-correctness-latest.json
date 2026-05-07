@@ -1,9 +1,9 @@
 {
-  "created_at": "2026-05-07T14:02:04Z",
+  "created_at": "2026-05-07T14:20:00Z",
   "probes": [
     {
       "content": "5",
-      "duration_ms": 28963.206,
+      "duration_ms": 31182.765,
       "expected_prefixes": [
         "5"
       ],
@@ -14,7 +14,7 @@
     },
     {
       "content": "8",
-      "duration_ms": 30736.121,
+      "duration_ms": 38723.391,
       "expected_prefixes": [
         "84",
         "8"
@@ -25,6 +25,23 @@
       "status_code": 200
     }
   ],
+  "runtime": {
+    "ggml_vk_force_max_allocation_size": "536870912",
+    "ggml_vk_force_max_buffer_size": "536870912",
+    "ggml_vk_suballocation_block_size": "536870912",
+    "gpu_layers": 4,
+    "pdocker_gpu_disable_pipeline_optimization": "0",
+    "pdocker_gpu_mode": "vulkan-raw",
+    "pdocker_gpu_mutable_buffer_cache": "1",
+    "pdocker_gpu_resident_cache": "1",
+    "pdocker_gpu_skip_unused_descriptor_transfers": "1",
+    "pdocker_gpu_use_spirv_descriptor_access": "1",
+    "pdocker_gpu_writeonly_buffer_cache": "1",
+    "pdocker_gpu_writeonly_dirty_probe": "1",
+    "pdocker_gpu_writeonly_dirty_writeback": "1",
+    "pdocker_vulkan_alias_copies": "1",
+    "pdocker_vulkan_max_buffer_bytes": "536870912"
+  },
   "schema": "pdocker.llama.correctness.v1.local",
   "service": {
     "base_url": "http://127.0.0.1:18081",
