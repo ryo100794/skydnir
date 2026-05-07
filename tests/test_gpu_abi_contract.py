@@ -163,7 +163,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_WRITEONLY_BUFFER_CACHE",
             "writeonly_buffer_cache_enabled",
             "if (!initialize_from_fd)",
-            "find_mutable_buffer_cache_entry(",
+            "find_writeonly_scratch_cache_entry",
+            "entry->scratch = 1;",
+            "entry->valid && !entry->scratch",
             "*mutable_cache_hit = 1;",
         ]:
             self.assertIn(marker, source)

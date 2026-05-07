@@ -150,10 +150,14 @@ Trace run:
   write-only buffer cache probe was also recorded:
   `docs/test/llama-cpu-gpu-compare-20260507-ngl3-writeonly-cache.json` and
   `docs/test/llama-cpu-gpu-compare-20260507-ngl3-writeonly-cache-512m.json`.
-  It did not improve this llama path because the large write-only binding uses
-  changing offsets, so cache keys do not repeat. Keep the cache opt-in only.
-  The next useful optimization remains dirty-span download for the large
-  write-only binding.
+  The first version did not improve this llama path because the large
+  write-only binding uses changing offsets, so fd/offset cache keys do not
+  repeat. A follow-up scratch-key experiment
+  `docs/test/llama-cpu-gpu-compare-20260507-ngl3-writeonly-scratch-512m.json`
+  measured 0.1535 tok/s, 2.73x vs CPU, and lowered mean upload time from
+  4.39 ms to 3.90 ms. That is useful but still below the guarded-memory
+  trace's 2.97x result, so the cache remains opt-in. The next useful
+  optimization remains dirty-span download for the large write-only binding.
 
 ## 2026-05-05 Copy-Buffer Semantics Probe Result
 

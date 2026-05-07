@@ -485,6 +485,7 @@ static VulkanResidentCacheEntry g_vulkan_resident_cache[PDOCKER_GPU_RESIDENT_CAC
 
 typedef struct {
     int valid;
+    int scratch;
     dev_t dev;
     ino_t ino;
     off_t offset;
@@ -956,9 +957,22 @@ static VulkanMutableBufferCacheEntry *find_mutable_buffer_cache_entry(
         dev_t dev, ino_t ino, off_t offset, size_t size, uint32_t binding) {
     for (size_t i = 0; i < PDOCKER_GPU_MUTABLE_BUFFER_CACHE_SLOTS; ++i) {
         VulkanMutableBufferCacheEntry *entry = &g_vulkan_mutable_buffer_cache[i];
-        if (entry->valid && entry->dev == dev && entry->ino == ino &&
+        if (entry->valid && !entry->scratch &&
+            entry->dev == dev && entry->ino == ino &&
             entry->offset == offset && entry->size == size &&
             entry->binding == binding) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static VulkanMutableBufferCacheEntry *find_writeonly_scratch_cache_entry(
+        size_t size, uint32_t binding) {
+    for (size_t i = 0; i < PDOCKER_GPU_MUTABLE_BUFFER_CACHE_SLOTS; ++i) {
+        VulkanMutableBufferCacheEntry *entry = &g_vulkan_mutable_buffer_cache[i];
+        if (entry->valid && entry->scratch &&
+            entry->size == size && entry->binding == binding) {
             return entry;
         }
     }
@@ -1527,11 +1541,10 @@ static VulkanVectorBuffer *acquire_dispatch_buffer(
     ino_t ino = 0;
     const int have_key = resident_cache_key(fd, &dev, &ino) == 0;
     if (!initialize_from_fd) {
-        if (have_key &&
-            writeonly_buffer_cache_enabled() &&
+        if (writeonly_buffer_cache_enabled() &&
             mutable_buffer_cache_candidate(binding->binding, binding->size)) {
-            VulkanMutableBufferCacheEntry *entry = find_mutable_buffer_cache_entry(
-                dev, ino, binding->offset, binding->size, binding->binding);
+            VulkanMutableBufferCacheEntry *entry = find_writeonly_scratch_cache_entry(
+                binding->size, binding->binding);
             if (entry) {
                 entry->hits++;
                 *mutable_cache_hit = 1;
@@ -1541,9 +1554,10 @@ static VulkanVectorBuffer *acquire_dispatch_buffer(
             entry = select_mutable_buffer_cache_slot(device);
             if (create_vulkan_vector_buffer(physical_device, device, binding->size, NULL, &entry->buffer) == 0) {
                 entry->valid = 1;
+                entry->scratch = 1;
                 entry->dev = dev;
                 entry->ino = ino;
-                entry->offset = binding->offset;
+                entry->offset = 0;
                 entry->size = binding->size;
                 entry->binding = binding->binding;
                 entry->hits = 1;
