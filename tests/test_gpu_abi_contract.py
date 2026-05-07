@@ -34,6 +34,9 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_dispatch_reports_binding_diagnostics(self):
         source = GPU_EXECUTOR.read_text()
         self.assertIn('\\"binding_details\\":[', source)
+        self.assertIn("profile_response", source)
+        self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", source)
+        self.assertIn("if (profile_response) {", source)
         for field in [
             '\\"binding\\":%u',
             '\\"offset\\":%lld',
@@ -96,7 +99,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"read_bindings\\":%zu,\\"write_bindings\\":%zu,', source)
         self.assertIn('\\"skipped_upload_bytes\\":%zu,\\"skipped_download_bytes\\":%zu}', source)
         self.assertIn('\\"fail_binding_index\\":%d,\\"io_result\\":%d,', source)
-        self.assertIn("active_bindings,\n                                binding_read_needed, binding_write_needed,\n                                cache_hits", source)
+        self.assertIn("if (profile_response) {", source)
+        self.assertIn("write_vulkan_binding_report(json_out(), bindings, binding_count,", source)
+        self.assertIn("active_bindings", source)
+        self.assertIn("binding_read_needed, binding_write_needed", source)
+        self.assertIn("cache_hits, cache_resident", source)
 
     def test_vulkan_copy_submit_profile_is_recorded(self):
         source = VULKAN_ICD.read_text()
@@ -208,15 +215,20 @@ class GpuAbiContractTest(unittest.TestCase):
             "dirty_writeback=%u",
             "writeonly_cache=%u",
             "mutable_cache_max=%llu",
+            "profile=1",
             "dirty_probe_min=%llu",
             "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE",
             "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
             "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
             "PDOCKER_GPU_WRITEONLY_BUFFER_CACHE",
             "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
+            "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
+            "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
         ]:
             self.assertIn(marker, icd)
         compare = LLAMA_COMPARE.read_text()
+        self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1", compare)
+        self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_LOG=1", compare)
         for field in [
             "dirty_probe_binding_samples",
             "dirty_probe_max_bytes",

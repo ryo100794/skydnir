@@ -159,6 +159,46 @@ The durable payload should remain file-backed, not SQLite-backed:
 - Project files and imported files remain app-owned normal files.
 - SQLite, when added, stores only indexes and relationships.
 
+## Layer Garbage Collection Audit
+
+Snapshot date: 2026-05-07.
+
+The current layer GC root set is intentionally conservative but incomplete.
+`referenced_layer_ids()` reads image manifests under `images/*/manifest.json`
+and treats those diff IDs as live. It does not yet include live container
+`state.json` records, `Storage.LowerDir`, `Storage.Rootfs`, or build-cache JSON
+as roots.
+
+Current implications:
+
+- Removing or retagging an image can make old layer records unreferenced even
+  when a container still points at a lower/rootfs derived from that image.
+- Materialized container rootfs payloads may survive independently, but
+  `cow_bind` lower roots can break if image roots are removed without checking
+  container references.
+- Build success can auto-prune unreferenced layers when
+  `PDOCKER_AUTO_PRUNE_UNREFERENCED_LAYERS=1`, but pull, image delete, and image
+  load paths do not all run the same layer-prune/recovery policy.
+- `/images/prune` is still effectively a no-op for layer payloads; `/build/prune`
+  and `/system/prune` are the paths that prune build artifacts and unreferenced
+  layers.
+- Partial pull/load directories and temporary archive bodies need startup
+  cleanup coverage for prefixes such as `.pull-*`, `.old-*`, `pdblob_*`,
+  `pdloadbody_*`, `pdsavebody_*`, `pdarchiveput_*`, `pdbuildctx_*`,
+  `pdload_*`, and `pdsave_*`.
+
+Required direction:
+
+- Treat live containers, image manifests, materialized image rootfs trees,
+  `cow_bind` lower roots, and active build cache entries as GC roots.
+- Make image delete, tag replacement, pull, load, build prune, and system prune
+  call the same reachability checker before deleting any layer payload.
+- Add kill-recovery tests for staged pull/load directories and stale build
+  cache JSON.
+- Keep stale build-cache JSON rebuildable and self-healing: missing layer
+  payloads must prevent cache use, then cleanup should remove or quarantine the
+  stale metadata.
+
 Expected metadata for overlay/COW indexing:
 
 - path;

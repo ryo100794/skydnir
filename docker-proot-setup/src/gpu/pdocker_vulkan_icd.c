@@ -700,6 +700,11 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
             off += (size_t)n;
         }
     }
+    if (trace_allocations() || env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", false)) {
+        n = snprintf(command + off, sizeof(command) - off, " profile=1");
+        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        off += (size_t)n;
+    }
     if (off + 2 >= sizeof(command)) return -ENAMETOOLONG;
     command[off++] = '\n';
     command[off] = '\0';
@@ -739,7 +744,8 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
             if (ch == '\n') break;
         }
         line[line_off] = '\0';
-        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG") ||
+            env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
             fprintf(stderr, "pdocker-vulkan-icd: generic dispatch response: %s", line);
             if (line_off == 0 || line[line_off - 1] != '\n') fprintf(stderr, "\n");
         }

@@ -416,6 +416,8 @@ typedef struct {
     int writeonly_buffer_cache;
     int has_mutable_buffer_cache_max_bytes;
     size_t mutable_buffer_cache_max_bytes;
+    int has_profile_response;
+    int profile_response;
 } VulkanDispatchOptions;
 
 typedef struct {
@@ -1093,6 +1095,22 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
         options->has_mutable_buffer_cache_max_bytes = 1;
         options->mutable_buffer_cache_max_bytes = (size_t)parsed;
         return 0;
+    }
+    if (strncmp(token, "profile=", 8) == 0) {
+        const char *value = token + 8;
+        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+            options->has_profile_response = 1;
+            options->profile_response = 1;
+            return 0;
+        }
+        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+            options->has_profile_response = 1;
+            options->profile_response = 0;
+            return 0;
+        }
+        return -1;
     }
     return -1;
 }
@@ -2812,6 +2830,9 @@ static int run_vulkan_dispatch_fd(
     const size_t mutable_cache_max_bytes = options && options->has_mutable_buffer_cache_max_bytes
         ? options->mutable_buffer_cache_max_bytes
         : mutable_buffer_cache_max_bytes();
+    const int profile_response = options && options->has_profile_response
+        ? options->profile_response
+        : env_truthy("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", 0);
     uint8_t shader_used_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     SpirvDescriptorAccess shader_binding_access[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t active_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -3310,25 +3331,26 @@ static int run_vulkan_dispatch_fd(
             "\"shader_bytes\":%zu,\"entry\":\"%s\",\"specializations\":%zu,"
             "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
             "\"backend_cached\":%s,\"pipeline_cache\":{\"hit\":%s,\"entries\":%u},"
-            "\"descriptor_aliases\":%zu,\"specialization_materialized\":%s,",
-            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
-            shader_size, entry_name, specialization_count, binding_count, gx, gy, gz, was_ready ? "true" : "false",
-            pipeline_cache_hit ? "true" : "false",
-            PDOCKER_GPU_PIPELINE_CACHE_SLOTS,
-            binding_alias_count,
-            specialization_materialized ? "true" : "false");
-    write_spirv_feature_report(json_out(), &spirv_summary, rt);
-    fprintf(json_out(),
-            ",\"upload_ms\":%.4f,\"dispatch_ms\":%.4f,"
-            "\"download_ms\":%.4f,\"resident_cache\":{\"enabled\":%s,"
-            "\"resident_bindings\":%zu,\"hits\":%zu,\"bytes\":%zu},"
+            "\"descriptor_aliases\":%zu,\"specialization_materialized\":%s,"
+            "\"profile_response\":%s,"
+            "\"upload_ms\":%.4f,\"dispatch_ms\":%.4f,\"download_ms\":%.4f,"
+            "\"resident_cache\":{\"enabled\":%s,\"resident_bindings\":%zu,"
+            "\"hits\":%zu,\"bytes\":%zu},"
             "\"mutable_buffer_cache\":{\"enabled\":%s,\"entries\":%u,"
             "\"reused_bindings\":%zu,\"hits\":%zu,\"bytes\":%zu},"
             "\"descriptor_usage\":{\"active_bindings\":%zu,"
             "\"read_bindings\":%zu,\"write_bindings\":%zu,"
             "\"skipped_bindings\":%zu,\"skipped_bytes\":%zu,"
             "\"skipped_upload_bytes\":%zu,\"skipped_download_bytes\":%zu},"
-            "\"valid\":true,",
+            "\"valid\":true",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            shader_size, entry_name, specialization_count, binding_count, gx, gy, gz,
+            was_ready ? "true" : "false",
+            pipeline_cache_hit ? "true" : "false",
+            PDOCKER_GPU_PIPELINE_CACHE_SLOTS,
+            binding_alias_count,
+            specialization_materialized ? "true" : "false",
+            profile_response ? "true" : "false",
             upload_ms, dispatch_ms, download_ms,
             env_truthy("PDOCKER_GPU_RESIDENT_CACHE", 1) ? "true" : "false",
             resident_count, hit_count, resident_bytes,
@@ -3338,17 +3360,22 @@ static int run_vulkan_dispatch_fd(
             active_binding_count, read_binding_count, write_binding_count,
             skipped_binding_count, skipped_binding_bytes,
             skipped_upload_bytes, skipped_download_bytes);
-    write_vulkan_binding_report(json_out(), bindings, binding_count,
-                                active_bindings,
-                                binding_read_needed, binding_write_needed,
-                                cache_hits, cache_resident,
-                                mutable_cache_hits, mutable_cache_reused,
-                                binding_upload_ms, binding_download_ms,
-                                binding_dirty_probe_pages,
-                                binding_dirty_probe_bytes,
-                                binding_dirty_probe_ms,
-                                binding_dirty_writeback_cached,
-                                binding_dirty_writeback_bytes);
+    if (profile_response) {
+        fprintf(json_out(), ",");
+        write_spirv_feature_report(json_out(), &spirv_summary, rt);
+        fprintf(json_out(), ",");
+        write_vulkan_binding_report(json_out(), bindings, binding_count,
+                                    active_bindings,
+                                    binding_read_needed, binding_write_needed,
+                                    cache_hits, cache_resident,
+                                    mutable_cache_hits, mutable_cache_reused,
+                                    binding_upload_ms, binding_download_ms,
+                                    binding_dirty_probe_pages,
+                                    binding_dirty_probe_bytes,
+                                    binding_dirty_probe_ms,
+                                    binding_dirty_writeback_cached,
+                                    binding_dirty_writeback_bytes);
+    }
     fprintf(json_out(), "}\n");
     fflush(json_out());
     ret = 0;
