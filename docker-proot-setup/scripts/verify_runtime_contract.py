@@ -1103,12 +1103,26 @@ def test_gpu_shim_contract() -> None:
             fail(f"gpu queue socket env missing: {env!r}")
         if env.get("PDOCKER_GPU_SHARED_DIR") != "/run/pdocker-gpu":
             fail(f"gpu shared dir env missing: {env!r}")
+        if env.get("PDOCKER_GPU_VIRTUAL_MEMORY") != "guarded":
+            fail(f"gpu bridge must default large allocations to guarded virtual memory: {env!r}")
+        if env.get("PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES") != "67108864":
+            fail(f"gpu guarded memory threshold missing: {env!r}")
         if env.get("PDOCKER_VULKAN_ICD") != "/usr/local/lib/pdocker-vulkan-icd.so":
             fail(f"pdocker Vulkan ICD env missing: {env!r}")
         if env.get("PDOCKER_VULKAN_ICD_KIND") != "pdocker-bridge-minimal":
             fail(f"pdocker Vulkan ICD kind missing: {env!r}")
         if env.get("PDOCKER_VULKAN_ICD_READY") != "0":
             fail(f"pdocker Vulkan ICD must not claim compute readiness yet: {env!r}")
+        if env.get("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE") != "1":
+            fail(f"pdocker Vulkan bridge must not advertise unverified 8-bit storage by default: {env!r}")
+        if env.get("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS") != "1":
+            fail(f"pdocker Vulkan bridge must alias duplicate shader descriptor bindings: {env!r}")
+        if env.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION") != "1":
+            fail(f"pdocker Vulkan bridge must default away from fragile Android pipeline optimization: {env!r}")
+        if env.get("PDOCKER_VULKAN_MAX_BUFFER_BYTES") != "2147483648":
+            fail(f"pdocker Vulkan max buffer default must avoid 512MiB pinned-memory rejection: {env!r}")
+        if env.get("GGML_VK_SUBALLOCATION_BLOCK_SIZE") != "268435456":
+            fail(f"llama Vulkan suballocation block default missing: {env!r}")
         if env.get("PDOCKER_OPENCL_ICD") != "/usr/local/lib/pdocker-opencl-icd.so":
             fail(f"pdocker OpenCL ICD env missing: {env!r}")
         if env.get("PDOCKER_OPENCL_ICD_KIND") != "pdocker-bridge-minimal":

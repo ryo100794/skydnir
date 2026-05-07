@@ -229,13 +229,13 @@ static VkBool32 advertised_storage16(void) {
 
 static VkBool32 advertised_storage8(void) {
     /*
-     * ggml Vulkan emits int8/8-bit-storage compute kernels for quantized
-     * weights. Advertise the SSBO path by default so the unmodified loader can
-     * choose the native path, but keep a hard opt-out for devices whose
-     * Android Vulkan driver rejects it.
+     * ggml Vulkan can emit int8/8-bit-storage kernels for quantized weights.
+     * The APK-side Android executor currently rejects at least one real
+     * llama.cpp 8-bit SPIR-V pipeline on this device, so keep the glibc-facing
+     * bridge conservative by default. Advanced tuning runs can opt back in.
      */
     if (env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) return VK_FALSE;
-    return env_truthy_default("PDOCKER_VULKAN_ENABLE_8BIT_STORAGE", true) ? VK_TRUE : VK_FALSE;
+    return env_truthy_default("PDOCKER_VULKAN_ENABLE_8BIT_STORAGE", false) ? VK_TRUE : VK_FALSE;
 }
 
 static VkDeviceSize pdocker_vulkan_heap_size(void) {
@@ -288,7 +288,7 @@ static VkDeviceSize pdocker_vulkan_max_buffer_size(void) {
         }
     }
     const VkDeviceSize heap = pdocker_vulkan_heap_size();
-    const VkDeviceSize bridge_default = (VkDeviceSize)(512ull * 1024ull * 1024ull);
+    const VkDeviceSize bridge_default = (VkDeviceSize)(2ull * 1024ull * 1024ull * 1024ull);
     return heap < bridge_default ? heap : bridge_default;
 }
 

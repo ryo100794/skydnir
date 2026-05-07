@@ -43,6 +43,25 @@ ngl="${LLAMA_ARG_N_GPU_LAYERS:-0}"
 extra_args="${LLAMA_EXTRA_ARGS:---jinja}"
 server="/opt/llama.cpp/build/bin/llama-server"
 
+has_llama_arg() {
+  local needle="$1"
+  case " $extra_args " in
+    *" $needle "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if [[ "${LLAMA_GPU_BACKEND:-}" = "vulkan" \
+      && "${PDOCKER_VULKAN_ICD_KIND:-}" = pdocker-* \
+      && "${PDOCKER_VULKAN_ICD_READY:-0}" != "1" \
+      && "${PDOCKER_VULKAN_ALLOW_KV_OFFLOAD:-0}" != "1" ]]; then
+  export LLAMA_ARG_KV_OFFLOAD=0
+  if ! has_llama_arg "--no-kv-offload" && ! has_llama_arg "-nkvo" && ! has_llama_arg "--kv-offload"; then
+    extra_args="--no-kv-offload ${extra_args}"
+  fi
+  echo "pdocker: disabling llama.cpp KV cache offload for unfinished pdocker Vulkan ICD; set PDOCKER_VULKAN_ALLOW_KV_OFFLOAD=1 to override"
+fi
+
 if [[ ! -f "$model" && -n "$model_url" ]]; then
   echo "Downloading GGUF model from LLAMA_MODEL_URL to $model"
   mkdir -p "$(dirname "$model")"

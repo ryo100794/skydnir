@@ -2568,6 +2568,8 @@ def _gpu_env(state):
         "PDOCKER_GPU_LLM_ENGINE_LOCATION": "container",
         "PDOCKER_GPU_SHIM": os.environ.get("PDOCKER_GPU_SHIM_CONTAINER_PATH", "/usr/local/bin/pdocker-gpu-shim"),
         "PDOCKER_GPU_SHARED_DIR": os.environ.get("PDOCKER_GPU_SHARED_DIR", "/run/pdocker-gpu"),
+        "PDOCKER_GPU_VIRTUAL_MEMORY": os.environ.get("PDOCKER_GPU_VIRTUAL_MEMORY", "guarded"),
+        "PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES": os.environ.get("PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES", "67108864"),
         "NVIDIA_VISIBLE_DEVICES": "all",
         "NVIDIA_DRIVER_CAPABILITIES": "compute,utility,graphics",
     }
@@ -2582,6 +2584,14 @@ def _gpu_env(state):
             "PDOCKER_VULKAN_ICD": os.environ.get("PDOCKER_VULKAN_ICD_CONTAINER_PATH", "/usr/local/lib/pdocker-vulkan-icd.so"),
             "PDOCKER_VULKAN_ICD_KIND": "pdocker-bridge-minimal",
             "PDOCKER_VULKAN_ICD_READY": "0",
+            "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE": os.environ.get("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", "1"),
+            "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS": os.environ.get("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "1"),
+            "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": os.environ.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "1"),
+            "PDOCKER_VULKAN_HEAP_BYTES": os.environ.get("PDOCKER_VULKAN_HEAP_BYTES", "2147483648"),
+            "PDOCKER_VULKAN_MAX_BUFFER_BYTES": os.environ.get("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648"),
+            "GGML_VK_FORCE_MAX_BUFFER_SIZE": os.environ.get("GGML_VK_FORCE_MAX_BUFFER_SIZE", os.environ.get("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648")),
+            "GGML_VK_FORCE_MAX_ALLOCATION_SIZE": os.environ.get("GGML_VK_FORCE_MAX_ALLOCATION_SIZE", os.environ.get("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648")),
+            "GGML_VK_SUBALLOCATION_BLOCK_SIZE": os.environ.get("GGML_VK_SUBALLOCATION_BLOCK_SIZE", "268435456"),
         })
     if "cuda-compat" in modes:
         env.update({
@@ -2642,6 +2652,39 @@ def _gpu_binds(state):
             out.append(b)
             seen.add(b)
     return out
+
+
+def _merge_runtime_bridge_env(state):
+    bridge_env = {
+        **_gpu_env(state),
+        **_media_env(state),
+    }
+    if not bridge_env:
+        return False
+    env_list = list(state.get("Env") or [])
+    existing = {item.split("=", 1)[0] for item in env_list if "=" in item}
+    changed = False
+    for key, value in bridge_env.items():
+        if key in existing:
+            continue
+        env_list.append(f"{key}={value}")
+        existing.add(key)
+        changed = True
+    if not changed:
+        return False
+    state["Env"] = env_list
+    config = state.setdefault("Config", {})
+    config_env = list(config.get("Env") or [])
+    config_existing = {item.split("=", 1)[0] for item in config_env if "=" in item}
+    for item in env_list:
+        if "=" not in item:
+            continue
+        key = item.split("=", 1)[0]
+        if key not in config_existing:
+            config_env.append(item)
+            config_existing.add(key)
+    config["Env"] = config_env
+    return True
 
 
 def _add_media_mode(modes, mode):
@@ -5016,6 +5059,7 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
     state = load_container_state(cid)
     if not state:
         return None
+    bridge_env_changed = _merge_runtime_bridge_env(state)
     live_pid = _container_live_pid(state)
     if live_pid:
         state.setdefault("State", {})["Running"] = True
@@ -5036,6 +5080,8 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
     if not full:
         full = ["/bin/sh"]
 
+    if bridge_env_changed:
+        save_container_state(cid, state)
     env = _container_env(state)
 
     workdir = state.get("WorkingDir", "/") or "/"

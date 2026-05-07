@@ -5760,8 +5760,16 @@ class MainActivity : AppCompatActivity() {
         if (project.name != "llama-cpp-gpu") return
         val dockerfile = File(project, "Dockerfile")
         val compose = File(project, "compose.yaml")
+        val startScript = File(project, "scripts/start-llama-server.sh")
+        val versionStamp = File(project, ".pdocker-template-version")
+        val templateVersion = if (versionStamp.isFile) {
+            runCatching { versionStamp.readText().trim().toIntOrNull() ?: 0 }.getOrDefault(0)
+        } else {
+            0
+        }
         val dockerfileText = if (dockerfile.isFile) runCatching { dockerfile.readText() }.getOrDefault("") else ""
         val composeText = if (compose.isFile) runCatching { compose.readText() }.getOrDefault("") else ""
+        val startText = if (startScript.isFile) runCatching { startScript.readText() }.getOrDefault("") else ""
         val stalePdockerShaderTuning =
             "LLAMA_CPP_VULKAN_SHADER_PROFILE" in dockerfileText ||
                 "pdocker-bridge-safe-glslc" in dockerfileText ||
@@ -5772,7 +5780,15 @@ class MainActivity : AppCompatActivity() {
         val staleCheckout =
             "git checkout \"\$LLAMA_CPP_REF\"" in dockerfileText &&
                 "git checkout --detach FETCH_HEAD" !in dockerfileText
-        if (!stalePdockerShaderTuning && !staleCheckout) return
+        val staleKvOffloadGuard =
+            templateVersion < 6 ||
+                "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" !in composeText ||
+                "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" !in startText ||
+                "--no-kv-offload" !in startText
+        val staleGpuLayerDefault =
+            templateVersion < 7 ||
+                "LLAMA_ARG_N_GPU_LAYERS: \"\${LLAMA_ARG_N_GPU_LAYERS:-2}\"" in composeText
+        if (!stalePdockerShaderTuning && !staleCheckout && !staleKvOffloadGuard && !staleGpuLayerDefault) return
         val backupDir = File(project, ".pdocker-template-backups/llama-cpp-gpu-${System.currentTimeMillis()}")
         backupDir.mkdirs()
         listOf(
@@ -5789,7 +5805,7 @@ class MainActivity : AppCompatActivity() {
             if (relative.startsWith("scripts/")) dest.setExecutable(true, false)
         }
         File(project, ".pdocker-template-id").writeText("llama-cpp-gpu\n")
-        File(project, ".pdocker-template-version").writeText("5\n")
+        File(project, ".pdocker-template-version").writeText("7\n")
         ensureProjectDocumentsEnv(project)
     }
 

@@ -407,6 +407,8 @@ def main() -> int:
         "start shows diagnostics": "LLAMA_GPU_DIAGNOSTICS" in start and "llama.cpp gpu diagnostics" in start,
         "start hides gpu env during cpu fallback": 'LLAMA_GPU_BACKEND:-cpu' in start and 'export GGML_VK_VISIBLE_DEVICES=""' in start and "unset VK_ICD_FILENAMES" in start and "unset OCL_ICD_VENDORS" in start,
         "start passes gpu layers": "--n-gpu-layers" in start,
+        "llama default gpu layers use validated bridge path": 'LLAMA_ARG_N_GPU_LAYERS: "${LLAMA_ARG_N_GPU_LAYERS:-1}"' in llama_compose and "LLAMA_ARG_N_GPU_LAYERS:-2" not in llama_compose,
+        "start guards unfinished pdocker Vulkan KV offload": "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in llama_compose and "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in start and "PDOCKER_VULKAN_ICD_READY" in start and "LLAMA_ARG_KV_OFFLOAD=0" in start and "--no-kv-offload" in start,
         "llama default port offset": "18081:18081" in llama_compose and "18081" in start,
         "llama service shortcut comment": "# pdocker.service-url: 18081=llama.cpp" in llama_compose,
         "llama default 8b model": "Qwen/Qwen3-8B-GGUF" in llama_compose and "Qwen3-8B-Q4_K_M.gguf" in llama_compose,

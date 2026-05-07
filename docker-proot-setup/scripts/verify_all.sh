@@ -771,6 +771,12 @@ assert "vulkan" in modes, modes
 assert "cuda-compat" in modes, modes
 assert env["PDOCKER_VULKAN_PASSTHROUGH"] == "1", env
 assert env["PDOCKER_CUDA_COMPAT"] == "1", env
+assert env["PDOCKER_GPU_VIRTUAL_MEMORY"] == "guarded", env
+assert env["PDOCKER_VULKAN_MAX_BUFFER_BYTES"] == "2147483648", env
+assert env["PDOCKER_VULKAN_DISABLE_8BIT_STORAGE"] == "1", env
+assert env["PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS"] == "1", env
+assert env["PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION"] == "1", env
+assert env["GGML_VK_SUBALLOCATION_BLOCK_SIZE"] == "268435456", env
 print(",".join(sorted(modes)))
 PY
 ); then

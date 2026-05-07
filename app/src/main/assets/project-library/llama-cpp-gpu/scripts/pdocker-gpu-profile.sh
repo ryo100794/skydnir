@@ -207,7 +207,8 @@ cat > "$diagnostics" <<EOF
     "shared_dir": "$(json_escape "${PDOCKER_GPU_SHARED_DIR:-/run/pdocker-gpu}")",
     "capability_probe": "$(json_escape "$bridge_probe_json")",
     "fd_vector_add_probe": "$(json_escape "$bridge_fd_probe_json")",
-    "llama_backend_wired": false
+    "llama_backend_wired": false,
+    "kv_offload_guard": "$(json_escape "pdocker Vulkan ICD keeps llama.cpp KV cache on CPU until PDOCKER_VULKAN_ICD_READY=1 or PDOCKER_VULKAN_ALLOW_KV_OFFLOAD=1")"
   },
   "outputs": {
     "env": "$(json_escape "$out")",

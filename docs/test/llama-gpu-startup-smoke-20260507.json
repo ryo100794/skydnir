@@ -1,0 +1,49 @@
+{
+  "schema": "pdocker.llama.gpu-startup-smoke.v1",
+  "timestamp_utc": "2026-05-07T05:41:00Z",
+  "device": "10.52.99.79:43859",
+  "package": "io.github.ryo100794.pdocker.compat",
+  "container": {
+    "id": "502abfaf8df646f7ac5765c624a67732",
+    "name": "/pdocker-llama-cpp",
+    "image": "pdocker/llama-cpp-gpu:latest",
+    "state": "running",
+    "health": "healthy"
+  },
+  "server": {
+    "url": "http://127.0.0.1:18081/health",
+    "health_response": {
+      "status": "ok"
+    }
+  },
+  "gpu": {
+    "backend": "vulkan",
+    "n_gpu_layers": 1,
+    "model_load": "main: model loaded",
+    "server_listening": "main: server is listening on http://0.0.0.0:18081",
+    "offload_log": "load_tensors: offloaded 1/37 layers to GPU",
+    "bridge_dispatch_seen": true,
+    "largest_successful_dispatch": {
+      "shader_bytes": 26784,
+      "bindings": 5,
+      "dispatch": [1187, 1, 64],
+      "valid": true
+    }
+  },
+  "remaining_blocker": {
+    "n_gpu_layers": 2,
+    "stage": "vulkan-dispatch",
+    "error": "create-generic-compute-pipeline",
+    "vk_result": -13,
+    "shader_bytes": 18844,
+    "bindings": 7,
+    "specialization_entries": [
+      {"constant_id": 0, "value_u64": 32},
+      {"constant_id": 1, "value_u64": 2},
+      {"constant_id": 2, "value_u64": 1}
+    ],
+    "estimated_workgroup_bytes": 256,
+    "android_vulkan_device": "Adreno (TM) 830",
+    "android_vulkan_api": "1.3"
+  }
+}

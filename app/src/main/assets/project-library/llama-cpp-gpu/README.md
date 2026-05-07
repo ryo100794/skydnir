@@ -60,9 +60,17 @@ has a visible running state.
 The entrypoint adds `--jinja` by default because the bundled Qwen3 GGUF uses a
 chat template. Override `LLAMA_EXTRA_ARGS` if you need different llama-server
 options. The template defaults `PDOCKER_GPU_MODE` to `vulkan-raw` and
-`LLAMA_ARG_N_GPU_LAYERS` to `2` so the first normal Compose run exercises the
-pdocker Vulkan ICD beyond output-layer-only offload. Raise
-`LLAMA_ARG_N_GPU_LAYERS` for deeper offload while tuning the bridge.
+`LLAMA_ARG_N_GPU_LAYERS` to `1`. This keeps the first normal Compose run on the
+currently validated pdocker Vulkan bridge path while still proving real
+container-side GPU offload. Raise `LLAMA_ARG_N_GPU_LAYERS` for deeper offload
+while tuning the bridge; `2` currently reaches an Adreno pipeline compiler
+failure in one 18 KiB ggml SPIR-V shader and is tracked as bridge work.
+When the container-facing pdocker Vulkan ICD is visible but does not yet
+advertise `PDOCKER_VULKAN_ICD_READY=1`, the entrypoint adds llama.cpp's
+standard `--no-kv-offload` option and keeps the KV cache on CPU. This avoids
+the known scheduler abort where cache tensors are reserved in an unfinished
+Vulkan buffer. Set `PDOCKER_VULKAN_ALLOW_KV_OFFLOAD=1` only when validating
+the ICD allocation/chunking path itself.
 
 The image build pins `LLAMA_CPP_REF` to `b9030` and records the resolved commit
 inside `/opt/llama.cpp/.pdocker-llama-cpp-commit`. It defaults CMake to
