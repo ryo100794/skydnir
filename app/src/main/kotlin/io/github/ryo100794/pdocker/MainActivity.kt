@@ -5795,8 +5795,12 @@ class MainActivity : AppCompatActivity() {
             templateVersion < 9 ||
                 "-DLLAMA_BUILD_WEBUI=OFF" in dockerfileText ||
                 "-DLLAMA_BUILD_WEBUI=ON" !in dockerfileText
+        val staleLlamaStaticPath =
+            templateVersion < 10 ||
+                "LLAMA_EXTRA_ARGS: \"\${LLAMA_EXTRA_ARGS:---path /opt/llama.cpp/tools/server/public --jinja}\"" !in composeText
         if (!stalePdockerShaderTuning && !staleCheckout && !staleKvOffloadGuard &&
-            !staleGpuLayerDefault && !stalePipelineOptimizationDefault && !staleLlamaWebUi) return
+            !staleGpuLayerDefault && !stalePipelineOptimizationDefault && !staleLlamaWebUi &&
+            !staleLlamaStaticPath) return
         val backupDir = File(project, ".pdocker-template-backups/llama-cpp-gpu-${System.currentTimeMillis()}")
         backupDir.mkdirs()
         listOf(
@@ -5820,7 +5824,7 @@ class MainActivity : AppCompatActivity() {
             if (relative.startsWith("scripts/")) dest.setExecutable(true, false)
         }
         File(project, ".pdocker-template-id").writeText("llama-cpp-gpu\n")
-        File(project, ".pdocker-template-version").writeText("9\n")
+        File(project, ".pdocker-template-version").writeText("10\n")
         ensureProjectDocumentsEnv(project)
     }
 

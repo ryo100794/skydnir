@@ -5,8 +5,9 @@ This template builds a llama.cpp server workspace for pdocker.
 It includes:
 
 - `llama-server` built from `ggml-org/llama.cpp`.
-- The upstream llama.cpp browser UI at `/`, in addition to the OpenAI-style
-  HTTP API and `/health` endpoint.
+- The upstream llama.cpp browser UI at `/`, served from
+  `/opt/llama.cpp/tools/server/public` with llama.cpp's standard `--path`
+  option, in addition to the OpenAI-style HTTP API and `/health` endpoint.
 - Vulkan-oriented build flags (`GGML_VULKAN=ON`) for Android GPU passthrough.
 - The LLM engine, model loading, tokenizer, HTTP API, sampler, and llama.cpp
   scheduler stay inside the container. This template does not offload the
@@ -61,9 +62,11 @@ and place a GGUF manually. If no model is available after the download attempt,
 the container still opens a small status page on port `18081` so the workspace
 has a visible running state.
 
-The entrypoint adds `--jinja` by default because the bundled Qwen3 GGUF uses a
-chat template. Override `LLAMA_EXTRA_ARGS` if you need different llama-server
-options. The template defaults `PDOCKER_GPU_MODE` to `vulkan-raw` and
+The compose template passes `--path /opt/llama.cpp/tools/server/public --jinja`
+by default because the bundled Qwen3 GGUF uses a chat template and the browser
+UI should work even when an existing image was built before embedded Web UI
+assets were enabled. Override `LLAMA_EXTRA_ARGS` if you need different
+llama-server options. The template defaults `PDOCKER_GPU_MODE` to `vulkan-raw` and
 `LLAMA_ARG_N_GPU_LAYERS` to `1`. This keeps the first normal Compose run on the
 currently validated pdocker Vulkan bridge path while still proving real
 container-side GPU offload. Raise `LLAMA_ARG_N_GPU_LAYERS` for deeper offload

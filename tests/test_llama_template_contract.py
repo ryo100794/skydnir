@@ -51,10 +51,15 @@ class LlamaTemplateContractTest(unittest.TestCase):
     def test_server_build_includes_upstream_browser_ui(self):
         self.assertIn("-DLLAMA_BUILD_WEBUI=ON", self.dockerfile)
         self.assertNotIn("-DLLAMA_BUILD_WEBUI=OFF", self.dockerfile)
+        self.assertIn(
+            'LLAMA_EXTRA_ARGS: "${LLAMA_EXTRA_ARGS:---path /opt/llama.cpp/tools/server/public --jinja}"',
+            self.compose,
+        )
         self.assertIn("http://127.0.0.1:18081/health", (LLAMA_ROOT / "README.md").read_text())
         self.assertIn("http://127.0.0.1:18081/", (LLAMA_ROOT / "README.md").read_text())
         self.assertIn("staleLlamaWebUi", self.main_activity)
-        self.assertIn('.pdocker-template-version").writeText("9', self.main_activity)
+        self.assertIn("staleLlamaStaticPath", self.main_activity)
+        self.assertIn('.pdocker-template-version").writeText("10', self.main_activity)
 
     def test_unfinished_pdocker_vulkan_keeps_kv_cache_on_cpu(self):
         self.assertIn("PDOCKER_VULKAN_ALLOW_KV_OFFLOAD", self.compose)
@@ -74,7 +79,7 @@ class LlamaTemplateContractTest(unittest.TestCase):
             self.compose,
         )
         self.assertIn("stalePipelineOptimizationDefault", self.main_activity)
-        self.assertIn('.pdocker-template-version").writeText("9', self.main_activity)
+        self.assertIn('.pdocker-template-version").writeText("10', self.main_activity)
 
     def test_kv_guard_does_not_patch_llama_sources_or_build_flow(self):
         forbidden = [
