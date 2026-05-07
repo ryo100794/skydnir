@@ -8,6 +8,7 @@ LOCAL_PORT="${PDOCKER_LLAMA_LOCAL_PORT:-28081}"
 REMOTE_PORT="${PDOCKER_LLAMA_REMOTE_PORT:-18081}"
 PREDICT="${PDOCKER_LLAMA_BENCH_PREDICT:-8}"
 REPEAT="${PDOCKER_LLAMA_BENCH_REPEAT:-1}"
+WARMUP_DISCARD="${PDOCKER_LLAMA_BENCH_WARMUP_DISCARD:-0}"
 PROMPT="${PDOCKER_LLAMA_BENCH_PROMPT:-Repeat exactly: pdocker-ok}"
 OUT="${PDOCKER_LLAMA_BENCH_OUT:-$ROOT/docs/test/llama-bench-latest.json}"
 MODE="${PDOCKER_LLAMA_BENCH_MODE:-server-current}"
@@ -15,7 +16,7 @@ DEVICE_BENCH_DIR="${PDOCKER_LLAMA_DEVICE_BENCH_DIR:-files/pdocker/bench}"
 
 usage() {
   cat <<EOF
-Usage: $0 [--predict N] [--repeat N] [--prompt TEXT] [--mode LABEL] [--local-port PORT] [--remote-port PORT] [--out PATH]
+Usage: $0 [--predict N] [--repeat N] [--warmup-discard N] [--prompt TEXT] [--mode LABEL] [--local-port PORT] [--remote-port PORT] [--out PATH]
 
 Benchmarks the currently running pdocker llama.cpp server over adb forward.
 The benchmark intentionally works against the UI/Engine-started container so
@@ -28,6 +29,8 @@ Environment:
   PDOCKER_LLAMA_REMOTE_PORT   device server port (default: $REMOTE_PORT)
   PDOCKER_LLAMA_BENCH_PREDICT generated tokens per run (default: $PREDICT)
   PDOCKER_LLAMA_BENCH_REPEAT  number of measured runs (default: $REPEAT)
+  PDOCKER_LLAMA_BENCH_WARMUP_DISCARD
+                              leading runs to exclude from primary summary
   PDOCKER_LLAMA_BENCH_PROMPT  prompt text
   PDOCKER_LLAMA_BENCH_MODE    result mode label (default: $MODE)
   PDOCKER_LLAMA_BENCH_OUT     local JSON result path
@@ -38,6 +41,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --predict) PREDICT="$2"; shift ;;
     --repeat) REPEAT="$2"; shift ;;
+    --warmup-discard) WARMUP_DISCARD="$2"; shift ;;
     --prompt) PROMPT="$2"; shift ;;
     --mode) MODE="$2"; shift ;;
     --local-port) LOCAL_PORT="$2"; shift ;;
@@ -65,7 +69,7 @@ fi
 PROFILE_JSON="$TMP/profile.json"
 "$ADB" shell "run-as $PKG sh -c 'cat files/pdocker/projects/llama-cpp-gpu/profiles/pdocker-gpu-diagnostics.json 2>/dev/null || true'" > "$PROFILE_JSON" || true
 
-python3 - "$BASE_URL" "$PREDICT" "$REPEAT" "$PROMPT" "$OUT" "$MODE" "$PROFILE_JSON" <<'PY'
+python3 - "$BASE_URL" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$PROMPT" "$OUT" "$MODE" "$PROFILE_JSON" <<'PY'
 import json
 import statistics
 import sys
@@ -73,9 +77,12 @@ import time
 import urllib.error
 import urllib.request
 
-base_url, predict_s, repeat_s, prompt, out_path, mode, profile_path = sys.argv[1:8]
+base_url, predict_s, repeat_s, warmup_discard_s, prompt, out_path, mode, profile_path = sys.argv[1:9]
 predict = int(predict_s)
 repeat = int(repeat_s)
+warmup_discard = int(warmup_discard_s)
+if warmup_discard < 0:
+    raise SystemExit("warmup discard must be >= 0")
 try:
     gpu_profile = json.load(open(profile_path, encoding="utf-8"))
 except Exception:
@@ -138,7 +145,20 @@ for i in range(repeat):
         }
     )
 
-speeds = [r["predicted_tokens_per_second"] for r in runs if r["predicted_tokens_per_second"]]
+def summarize(selected_runs):
+    speeds = [r["predicted_tokens_per_second"] for r in selected_runs if r["predicted_tokens_per_second"]]
+    return {
+        "predicted_tokens_per_second_mean": statistics.mean(speeds) if speeds else 0.0,
+        "predicted_tokens_per_second_min": min(speeds) if speeds else 0.0,
+        "predicted_tokens_per_second_max": max(speeds) if speeds else 0.0,
+        "wall_seconds_mean": statistics.mean(r["wall_seconds"] for r in selected_runs) if selected_runs else 0.0,
+        "runs": len(selected_runs),
+    }
+
+steady_runs = runs[warmup_discard:] if warmup_discard < len(runs) else []
+if not steady_runs and runs:
+    steady_runs = runs
+summary_scope = "steady_state" if warmup_discard and warmup_discard < len(runs) else "all_runs"
 result = {
     "schema": "pdocker.llama.bench.v1",
     "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -148,13 +168,11 @@ result = {
     "prompt": prompt,
     "n_predict": predict,
     "repeat": repeat,
+    "warmup_discard": warmup_discard,
+    "summary_scope": summary_scope,
     "models": models,
-    "summary": {
-        "predicted_tokens_per_second_mean": statistics.mean(speeds) if speeds else 0.0,
-        "predicted_tokens_per_second_min": min(speeds) if speeds else 0.0,
-        "predicted_tokens_per_second_max": max(speeds) if speeds else 0.0,
-        "wall_seconds_mean": statistics.mean(r["wall_seconds"] for r in runs) if runs else 0.0,
-    },
+    "summary": summarize(steady_runs),
+    "all_runs_summary": summarize(runs),
     "runs": runs,
 }
 with open(out_path, "w", encoding="utf-8") as f:

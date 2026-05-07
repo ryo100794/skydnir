@@ -229,6 +229,8 @@ class GpuAbiContractTest(unittest.TestCase):
         compare = LLAMA_COMPARE.read_text()
         self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1", compare)
         self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_LOG=1", compare)
+        self.assertIn("PDOCKER_LLAMA_BENCH_WARMUP_DISCARD", compare)
+        self.assertIn("gpu_summary_scope", compare)
         for field in [
             "dirty_probe_binding_samples",
             "dirty_probe_max_bytes",

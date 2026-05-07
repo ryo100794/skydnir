@@ -1,0 +1,143 @@
+{
+  "schema": "pdocker.llama.bench.v1",
+  "timestamp_utc": "2026-05-07T15:15:49Z",
+  "endpoint": "http://127.0.0.1:28081",
+  "mode": "gpu-ngl5-steady",
+  "gpu_profile": {
+    "backend": "vulkan",
+    "recommendation": "vulkan",
+    "reason": "raw Android Vulkan library exposure was explicitly requested",
+    "mode": "vulkan-raw",
+    "threads": 8,
+    "ctx": 2048,
+    "n_gpu_layers": 5,
+    "mem_total_kb": 1048576,
+    "signals": {
+      "pdocker_cuda_compat": true,
+      "pdocker_vulkan_passthrough": true,
+      "vk_icd_filenames": "/etc/vulkan/icd.d/pdocker-android.json",
+      "pdocker_icd_file": true,
+      "pdocker_vulkan_icd": true,
+      "pdocker_vulkan_icd_kind": "pdocker-bridge-minimal",
+      "pdocker_vulkan_icd_ready": "0",
+      "vulkaninfo_summary": false,
+      "nvidia_device": false,
+      "pdocker_opencl_passthrough": false,
+      "pdocker_opencl_icd": true,
+      "pdocker_opencl_icd_kind": "",
+      "pdocker_opencl_icd_ready": "0",
+      "pdocker_opencl_api_version": "",
+      "pdocker_opencl_icd_path": "",
+      "ocl_icd_vendors": "",
+      "pdocker_gpu_shim": true,
+      "pdocker_gpu_queue": true,
+      "pdocker_gpu_fd_shared_buffer": false
+    },
+    "pdocker_gpu_bridge": {
+      "api": "pdocker-gpu-command-v1",
+      "queue_socket": "/run/pdocker-gpu/pdocker-gpu.sock",
+      "shared_dir": "/run/pdocker-gpu",
+      "capability_probe": "",
+      "fd_vector_add_probe": "",
+      "llama_backend_wired": false
+    },
+    "outputs": {
+      "env": "/profiles/pdocker-gpu.env",
+      "diagnostics": "/profiles/pdocker-gpu-diagnostics.json"
+    }
+  },
+  "prompt": "Repeat exactly: pdocker-ok",
+  "n_predict": 2,
+  "repeat": 2,
+  "warmup_discard": 1,
+  "summary_scope": "steady_state",
+  "models": {
+    "models": [
+      {
+        "name": "model.gguf",
+        "model": "model.gguf",
+        "modified_at": "",
+        "size": "",
+        "digest": "",
+        "type": "model",
+        "description": "",
+        "tags": [
+          ""
+        ],
+        "capabilities": [
+          "completion"
+        ],
+        "parameters": "",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "",
+          "families": [
+            ""
+          ],
+          "parameter_size": "",
+          "quantization_level": ""
+        }
+      }
+    ],
+    "object": "list",
+    "data": [
+      {
+        "id": "model.gguf",
+        "aliases": [],
+        "tags": [],
+        "object": "model",
+        "created": 1778166906,
+        "owned_by": "llamacpp",
+        "meta": {
+          "vocab_type": 2,
+          "n_vocab": 151936,
+          "n_ctx_train": 40960,
+          "n_embd": 4096,
+          "n_params": 8190735360,
+          "size": 5021827072
+        }
+      }
+    ]
+  },
+  "summary": {
+    "predicted_tokens_per_second_mean": 0.22615055792473396,
+    "predicted_tokens_per_second_min": 0.22615055792473396,
+    "predicted_tokens_per_second_max": 0.22615055792473396,
+    "wall_seconds_mean": 24.814842802938074,
+    "runs": 1
+  },
+  "all_runs_summary": {
+    "predicted_tokens_per_second_mean": 0.22271840265548948,
+    "predicted_tokens_per_second_min": 0.219286247386245,
+    "predicted_tokens_per_second_max": 0.22615055792473396,
+    "wall_seconds_mean": 21.596837387478445,
+    "runs": 2
+  },
+  "runs": [
+    {
+      "index": 0,
+      "http_status": 200,
+      "wall_seconds": 18.378831972018816,
+      "prompt_tokens": 6,
+      "prompt_seconds": 9.186941000000001,
+      "prompt_tokens_per_second": 0.6531009614625805,
+      "predicted_tokens": 2,
+      "predicted_seconds": 9.120499,
+      "predicted_tokens_per_second": 0.219286247386245,
+      "content_preview": "GG"
+    },
+    {
+      "index": 1,
+      "http_status": 200,
+      "wall_seconds": 24.814842802938074,
+      "prompt_tokens": 6,
+      "prompt_seconds": 15.925225000000001,
+      "prompt_tokens_per_second": 0.37676076790123847,
+      "predicted_tokens": 2,
+      "predicted_seconds": 8.843665999999999,
+      "predicted_tokens_per_second": 0.22615055792473396,
+      "content_preview": "GG"
+    }
+  ]
+}

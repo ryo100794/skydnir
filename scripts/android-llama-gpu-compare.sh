@@ -16,6 +16,7 @@ GPU_CTX="${PDOCKER_LLAMA_GPU_CTX:-512}"
 GPU_LAYERS="${PDOCKER_LLAMA_GPU_LAYERS:-2}"
 PREDICT="${PDOCKER_LLAMA_BENCH_PREDICT:-4}"
 REPEAT="${PDOCKER_LLAMA_BENCH_REPEAT:-1}"
+WARMUP_DISCARD="${PDOCKER_LLAMA_BENCH_WARMUP_DISCARD:-0}"
 OUT="${PDOCKER_LLAMA_COMPARE_OUT:-$ROOT/docs/test/llama-gpu-compare-latest.json}"
 MODEL_PATH="${PDOCKER_LLAMA_MODEL_PATH:-/models/model.gguf}"
 MODEL_URL="${PDOCKER_LLAMA_MODEL_URL:-https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf}"
@@ -28,7 +29,7 @@ CURRENT_CONTAINER_ID=""
 
 usage() {
   cat <<EOF
-Usage: $0 [--out PATH] [--gpu-layers N] [--gpu-ctx N] [--cpu-ctx N] [--predict N] [--repeat N] [--model-path PATH] [--model-url URL] [--gpu-only] [--cpu-tps N] [--trace-alloc] [--restore] [--no-restore]
+Usage: $0 [--out PATH] [--gpu-layers N] [--gpu-ctx N] [--cpu-ctx N] [--predict N] [--repeat N] [--warmup-discard N] [--model-path PATH] [--model-url URL] [--gpu-only] [--cpu-tps N] [--trace-alloc] [--restore] [--no-restore]
 
 Runs a repeatable Android llama.cpp CPU/GPU comparison scenario without
 modifying llama.cpp:
@@ -64,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     --cpu-ctx) CPU_CTX="$2"; shift ;;
     --predict) PREDICT="$2"; shift ;;
     --repeat) REPEAT="$2"; shift ;;
+    --warmup-discard) WARMUP_DISCARD="$2"; shift ;;
     --model-path) MODEL_PATH="$2"; shift ;;
     --model-url) MODEL_URL="$2"; shift ;;
     --gpu-only) RUN_CPU=0 ;;
@@ -401,6 +403,7 @@ bench_http() {
     PDOCKER_LLAMA_REMOTE_PORT="$REMOTE_PORT" \
     PDOCKER_LLAMA_BENCH_PREDICT="$PREDICT" \
     PDOCKER_LLAMA_BENCH_REPEAT="$REPEAT" \
+    PDOCKER_LLAMA_BENCH_WARMUP_DISCARD="$WARMUP_DISCARD" \
     PDOCKER_LLAMA_BENCH_MODE="$mode" \
     PDOCKER_LLAMA_BENCH_OUT="$out" \
     "$ROOT/scripts/android-llama-bench.sh"
@@ -473,14 +476,14 @@ fi
 container_state > "$GPU_STATE"
 container_logs > "$GPU_LOG"
 
-python3 - "$CPU_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" <<'PY'
+python3 - "$CPU_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" <<'PY'
 import json
 import re
 import sys
 import time
 from pathlib import Path
 
-cpu_path, gpu_path, gpu_log_path, gpu_state_path, out_path, gpu_served_s, gpu_layers, gpu_ctx, predict, repeat, trace_alloc, model_path, model_url = sys.argv[1:14]
+cpu_path, gpu_path, gpu_log_path, gpu_state_path, out_path, gpu_served_s, gpu_layers, gpu_ctx, predict, repeat, warmup_discard, trace_alloc, model_path, model_url = sys.argv[1:15]
 cpu = json.load(open(cpu_path, encoding="utf-8"))
 gpu = {}
 if Path(gpu_path).is_file() and Path(gpu_path).stat().st_size:
@@ -908,6 +911,8 @@ result = {
         "gpu_ctx": int(gpu_ctx),
         "predict": int(predict),
         "repeat": int(repeat),
+        "warmup_discard": int(warmup_discard),
+        "gpu_summary_scope": gpu.get("summary_scope", "all_runs"),
         "trace_alloc": bool(int(trace_alloc)),
         "cpu_reused": bool(cpu.get("reused_cpu_baseline")),
         "model_path": model_path,
