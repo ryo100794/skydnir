@@ -61,7 +61,8 @@ class LlamaTemplateContractTest(unittest.TestCase):
         self.assertIn("http://127.0.0.1:18081/", (LLAMA_ROOT / "README.md").read_text())
         self.assertIn("staleLlamaWebUi", self.main_activity)
         self.assertIn("staleLlamaStaticPath", self.main_activity)
-        self.assertIn('.pdocker-template-version").writeText("10', self.main_activity)
+        self.assertIn("staleLlamaCorrectnessProbe", self.main_activity)
+        self.assertIn('.pdocker-template-version").writeText("11', self.main_activity)
 
     def test_gpu_correctness_is_separate_from_http_health(self):
         self.assertIn("COPY scripts/pdocker-llama-correctness.sh", self.dockerfile)
@@ -100,8 +101,17 @@ class LlamaTemplateContractTest(unittest.TestCase):
             'PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION: "${PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION:-0}"',
             self.compose,
         )
+        for key in [
+            "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
+            "GGML_VK_FORCE_MAX_BUFFER_SIZE",
+            "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
+            "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
+        ]:
+            with self.subTest(key=key):
+                self.assertIn(f'{key}: "${{{key}:-536870912}}"', self.compose)
         self.assertIn("stalePipelineOptimizationDefault", self.main_activity)
-        self.assertIn('.pdocker-template-version").writeText("10', self.main_activity)
+        self.assertIn("staleLlamaBridgeClamps", self.main_activity)
+        self.assertIn('.pdocker-template-version").writeText("11', self.main_activity)
 
     def test_kv_guard_does_not_patch_llama_sources_or_build_flow(self):
         forbidden = [

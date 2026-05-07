@@ -5798,9 +5798,18 @@ class MainActivity : AppCompatActivity() {
         val staleLlamaStaticPath =
             templateVersion < 10 ||
                 "LLAMA_EXTRA_ARGS: \"\${LLAMA_EXTRA_ARGS:---path /opt/llama.cpp/tools/server/public --jinja}\"" !in composeText
+        val staleLlamaBridgeClamps =
+            templateVersion < 11 ||
+                "PDOCKER_VULKAN_MAX_BUFFER_BYTES" !in composeText ||
+                "GGML_VK_FORCE_MAX_BUFFER_SIZE" !in composeText ||
+                "GGML_VK_FORCE_MAX_ALLOCATION_SIZE" !in composeText ||
+                "GGML_VK_SUBALLOCATION_BLOCK_SIZE" !in composeText
+        val staleLlamaCorrectnessProbe =
+            templateVersion < 11 ||
+                !File(project, "scripts/pdocker-llama-correctness.sh").isFile
         if (!stalePdockerShaderTuning && !staleCheckout && !staleKvOffloadGuard &&
             !staleGpuLayerDefault && !stalePipelineOptimizationDefault && !staleLlamaWebUi &&
-            !staleLlamaStaticPath) return
+            !staleLlamaStaticPath && !staleLlamaBridgeClamps && !staleLlamaCorrectnessProbe) return
         val backupDir = File(project, ".pdocker-template-backups/llama-cpp-gpu-${System.currentTimeMillis()}")
         backupDir.mkdirs()
         listOf(
@@ -5808,6 +5817,7 @@ class MainActivity : AppCompatActivity() {
             "compose.yaml",
             "README.md",
             "scripts/pdocker-gpu-profile.sh",
+            "scripts/pdocker-llama-correctness.sh",
             "scripts/start-llama-server.sh",
             ".dockerignore",
         ).forEach { relative ->
@@ -5824,7 +5834,7 @@ class MainActivity : AppCompatActivity() {
             if (relative.startsWith("scripts/")) dest.setExecutable(true, false)
         }
         File(project, ".pdocker-template-id").writeText("llama-cpp-gpu\n")
-        File(project, ".pdocker-template-version").writeText("10\n")
+        File(project, ".pdocker-template-version").writeText("11\n")
         ensureProjectDocumentsEnv(project)
     }
 

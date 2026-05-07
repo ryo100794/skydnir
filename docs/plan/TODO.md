@@ -22,8 +22,9 @@ or closes.
   carries the compute entry point and specialization constants across the
   container/APK bridge, serves the forced-GPU HTTP probe, and now exposes
   bridge upload/copy overhead as a performance blocker. New correctness gate:
-  forced Vulkan currently fails deterministic first-token probes (`2+3=`), so
-  the next bridge slice must fix logits/readback/descriptor correctness before
+  one forced Vulkan run failed deterministic first-token probes (`2+3=`), while
+  the latest 512 MiB-clamped NGL=4 run passes. The next bridge slice must keep
+  this correctness gate green while reducing dispatch/transfer overhead before
   any speedup artifact can be promoted as valid inference.
 - [next] [#5](https://github.com/ryo100794/pdocker-android/issues/5)
   Terminal `-it` interactive path: refactor the terminal stack according to

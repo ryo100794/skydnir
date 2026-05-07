@@ -76,7 +76,10 @@ assets were enabled. Override `LLAMA_EXTRA_ARGS` if you need different
 llama-server options. The template defaults `PDOCKER_GPU_MODE` to `vulkan-raw` and
 `LLAMA_ARG_N_GPU_LAYERS` to `1`. This keeps the first normal Compose run on the
 currently validated pdocker Vulkan bridge path while still proving real
-container-side GPU offload. Raise `LLAMA_ARG_N_GPU_LAYERS` for deeper offload
+container-side GPU offload. The template also clamps Vulkan max buffer,
+allocation, and ggml suballocation sizes to 512 MiB by default so llama.cpp's
+allocator plans match the current bridge-safe range instead of assuming a
+larger native driver allocation. Raise `LLAMA_ARG_N_GPU_LAYERS` for deeper offload
 while tuning the bridge; `2` currently reaches an Adreno pipeline compiler
 failure in one 18 KiB ggml SPIR-V shader and is tracked as bridge work.
 When the container-facing pdocker Vulkan ICD is visible but does not yet
