@@ -655,6 +655,32 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
         if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
         off += (size_t)n;
     }
+    if (getenv("PDOCKER_GPU_WRITEONLY_DIRTY_PROBE")) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " dirty_probe=%u",
+                     env_truthy_default("PDOCKER_GPU_WRITEONLY_DIRTY_PROBE", false) ? 1u : 0u);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        off += (size_t)n;
+    }
+    if (getenv("PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK")) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " dirty_writeback=%u",
+                     env_truthy_default("PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK", false) ? 1u : 0u);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        off += (size_t)n;
+    }
+    const char *dirty_probe_min = getenv("PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES");
+    if (dirty_probe_min && dirty_probe_min[0]) {
+        char *end = NULL;
+        unsigned long long parsed = strtoull(dirty_probe_min, &end, 10);
+        if (end && *end == '\0') {
+            n = snprintf(command + off, sizeof(command) - off,
+                         " dirty_probe_min=%llu",
+                         parsed);
+            if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+            off += (size_t)n;
+        }
+    }
     if (off + 2 >= sizeof(command)) return -ENAMETOOLONG;
     command[off++] = '\n';
     command[off] = '\0';

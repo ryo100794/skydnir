@@ -37,6 +37,31 @@ SMALL_GGUF_URL=https://.../small.gguf
 bash scripts/android-llama-gpu-compare.sh --model-path /models/small.gguf --model-url "$SMALL_GGUF_URL" --gpu-layers 1 --gpu-ctx 512 --predict 2 --repeat 1
 ```
 
+## 2026-05-07 Write-Only Dirty Writeback Probe
+
+- Diagnostic probe:
+  `docs/test/llama-cpu-gpu-compare-20260507-ngl3-dirty-probe-protocol.json`.
+- Partial writeback:
+  `docs/test/llama-cpu-gpu-compare-20260507-ngl3-dirty-writeback-cached.json`.
+- Partial writeback plus scratch-cache attempt:
+  `docs/test/llama-cpu-gpu-compare-20260507-ngl3-dirty-writeback-scratch.json`.
+- CPU baseline: 0.056159 tok/s.
+- Policy: llama.cpp was not modified; all changes are in the pdocker Vulkan ICD,
+  APK GPU executor, and benchmark parser.
+
+| Run | NGL | Predict | GPU Speed | Speedup vs CPU | Main Evidence |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Dirty probe only | 3 | 2 | 0.1331 tok/s | 2.37x | 319,553,536B write-only binding dirtied only 32-96 KiB, but full scan cost 418-498ms |
+| Dirty writeback cached | 3 | 4 | 0.0915 tok/s | 1.63x | cached partial writeback reduced repeated 319,553,536B downloads to 0.09-0.20ms |
+| Dirty writeback + scratch flag | 3 | 4 | 0.1038 tok/s | 1.85x | downloads stayed low, but 319,553,536B buffer acquisition remained 451-542ms |
+
+Conclusion: writeback volume is no longer the only blocker. The next hotspot is
+large write-only buffer acquisition on the APK executor side. The existing
+write-only scratch flag is still not propagated as an executor-side runtime
+option for this path, so a follow-up must move more tuning options into the
+Vulkan dispatch protocol or make safe write-only scratch reuse an executor
+policy.
+
 ## 2026-05-07 CPU/GPU Comparison After Descriptor Transfer Skip
 
 - Local full comparison: `docs/test/llama-cpu-gpu-compare-20260507-full.json`.

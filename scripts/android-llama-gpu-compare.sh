@@ -264,6 +264,9 @@ for key in [
     "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
     "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
     "PDOCKER_GPU_WRITEONLY_BUFFER_CACHE",
+    "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE",
+    "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
+    "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
 ]:
     value = os.environ.get(key)
     if value is not None:
@@ -812,6 +815,11 @@ for event_index, event in enumerate(executor_events):
             "mutable_cache_hit": bool(detail.get("mutable_cache_hit")),
             "upload_ms": float(detail.get("upload_ms") or 0.0),
             "download_ms": float(detail.get("download_ms") or 0.0),
+            "dirty_probe_pages": int(detail.get("dirty_probe_pages") or 0),
+            "dirty_probe_bytes": int(detail.get("dirty_probe_bytes") or 0),
+            "dirty_probe_ms": float(detail.get("dirty_probe_ms") or 0.0),
+            "dirty_writeback_cached": bool(detail.get("dirty_writeback_cached")),
+            "dirty_writeback_bytes": int(detail.get("dirty_writeback_bytes") or 0),
         })
 top_binding_uploads = sorted(
     binding_timing_samples,
@@ -821,6 +829,11 @@ top_binding_uploads = sorted(
 top_binding_downloads = sorted(
     binding_timing_samples,
     key=lambda item: item["download_ms"],
+    reverse=True,
+)[:8]
+top_dirty_probe_bindings = sorted(
+    [item for item in binding_timing_samples if item["dirty_probe_pages"] > 0],
+    key=lambda item: item["dirty_probe_bytes"],
     reverse=True,
 )[:8]
 bridge_dispatch_profile = {
@@ -845,8 +858,15 @@ bridge_dispatch_profile = {
     "binding_timing_samples": len(binding_timing_samples),
     "binding_upload_ms_max": max((item["upload_ms"] for item in binding_timing_samples), default=0.0),
     "binding_download_ms_max": max((item["download_ms"] for item in binding_timing_samples), default=0.0),
+    "dirty_probe_binding_samples": sum(1 for item in binding_timing_samples if item["dirty_probe_pages"] > 0),
+    "dirty_probe_max_bytes": max((item["dirty_probe_bytes"] for item in binding_timing_samples), default=0),
+    "dirty_probe_total_bytes": sum(item["dirty_probe_bytes"] for item in binding_timing_samples),
+    "dirty_probe_ms_max": max((item["dirty_probe_ms"] for item in binding_timing_samples), default=0.0),
+    "dirty_writeback_cached_samples": sum(1 for item in binding_timing_samples if item["dirty_writeback_cached"]),
+    "dirty_writeback_total_bytes": sum(item["dirty_writeback_bytes"] for item in binding_timing_samples),
     "top_binding_uploads": top_binding_uploads,
     "top_binding_downloads": top_binding_downloads,
+    "top_dirty_probe_bindings": top_dirty_probe_bindings,
 }
 speedup = (gpu_tps / cpu_tps) if cpu_tps and gpu_tps else 0.0
 target_met = bool(cpu_tps and gpu_tps >= target_tps)

@@ -47,11 +47,18 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"mutable_cache_hit\\":%s',
             '\\"upload_ms\\":%.4f',
             '\\"download_ms\\":%.4f',
+            '\\"dirty_probe_pages\\":%zu',
+            '\\"dirty_probe_bytes\\":%zu',
+            '\\"dirty_probe_ms\\":%.4f',
+            '\\"dirty_writeback_cached\\":%s',
+            '\\"dirty_writeback_bytes\\":%zu',
         ]:
             self.assertIn(field, source)
         self.assertGreaterEqual(source.count("write_vulkan_binding_report(json_out()"), 2)
         self.assertIn("binding_upload_ms[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
         self.assertIn("binding_download_ms[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
+        self.assertIn("binding_dirty_probe_pages[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
+        self.assertIn("binding_dirty_probe_bytes[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
         self.assertIn("binding_upload_ms[i] = now_ms() - binding_start;", source)
         self.assertIn("binding_download_ms[i] = now_ms() - binding_start;", source)
 
@@ -153,6 +160,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
             "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
             "PDOCKER_GPU_WRITEONLY_BUFFER_CACHE",
+            "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE",
+            "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
+            "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
         ]:
             self.assertIn(f'"{key}"', compare)
         self.assertIn("value = os.environ.get(key)", compare)
@@ -169,6 +179,47 @@ class GpuAbiContractTest(unittest.TestCase):
             "*mutable_cache_hit = 1;",
         ]:
             self.assertIn(marker, source)
+
+    def test_gpu_executor_has_opt_in_writeonly_dirty_probe(self):
+        source = GPU_EXECUTOR.read_text()
+        for marker in [
+            "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE",
+            "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
+            "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
+            "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_SENTINEL",
+            "writeonly_dirty_probe_enabled",
+            "writeonly_dirty_writeback_enabled",
+            "VulkanDirtyMaskCacheEntry",
+            "find_dirty_mask_cache_entry",
+            "update_dirty_mask_cache",
+            "write_dirty_pages_exact",
+            "count_dirty_probe_pages",
+            "parse_vulkan_dispatch_option",
+            "binding_dirty_probe_pages",
+            "!binding_read_needed[i]",
+        ]:
+            self.assertIn(marker, source)
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "dirty_probe=%u",
+            "dirty_writeback=%u",
+            "dirty_probe_min=%llu",
+            "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE",
+            "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
+            "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
+        ]:
+            self.assertIn(marker, icd)
+        compare = LLAMA_COMPARE.read_text()
+        for field in [
+            "dirty_probe_binding_samples",
+            "dirty_probe_max_bytes",
+            "dirty_probe_total_bytes",
+            "dirty_probe_ms_max",
+            "dirty_writeback_cached_samples",
+            "dirty_writeback_total_bytes",
+            "top_dirty_probe_bindings",
+        ]:
+            self.assertIn(field, compare)
 
 
 if __name__ == "__main__":
