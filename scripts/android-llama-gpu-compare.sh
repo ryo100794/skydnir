@@ -647,6 +647,9 @@ elif queue_submit_blocker:
 elif evidence["generic_spirv_dispatch_seen"] and bool(int(gpu_served_s)):
     blocker_class = "bridge_dispatch_performance"
     blocker_detail = "generic SPIR-V dispatch served; benchmark throughput is the remaining gap"
+elif evidence["offload_seen"] and gpu_offloaded_layers > 1 and bool(int(gpu_served_s)):
+    blocker_class = "bridge_dispatch_performance"
+    blocker_detail = "Vulkan offload served with repeating transformer layers, but throughput is still below the 10x target"
 elif evidence["gpu_output_only_offload"] and bool(int(gpu_served_s)):
     blocker_class = "insufficient_gpu_offload_depth"
     blocker_detail = "llama.cpp served, but only the output layer was offloaded; repeating transformer layers stayed on CPU"

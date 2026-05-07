@@ -67,6 +67,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", source)
         self.assertIn("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", source)
         self.assertIn("collect_spirv_descriptor_accesses", source)
+        self.assertIn("type_non_readable", source)
+        self.assertIn("type_non_writable", source)
+        self.assertIn("op == 72", source)
+        self.assertIn("pointer_target_by_id", source)
+        self.assertIn("variable_type_by_id", source)
         self.assertIn("uint8_t active_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
         self.assertIn("uint8_t binding_read_needed[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
         self.assertIn("uint8_t binding_write_needed[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
@@ -75,6 +80,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"descriptor_usage\\":{\\"active_bindings\\":%zu,', source)
         self.assertIn('\\"read_bindings\\":%zu,\\"write_bindings\\":%zu,', source)
         self.assertIn('\\"skipped_upload_bytes\\":%zu,\\"skipped_download_bytes\\":%zu}', source)
+        self.assertIn('\\"fail_binding_index\\":%d,\\"io_result\\":%d,', source)
         self.assertIn("active_bindings,\n                                binding_read_needed, binding_write_needed,\n                                cache_hits", source)
 
 

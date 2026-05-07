@@ -1,0 +1,158 @@
+{
+  "schema": "pdocker.llama.gpu.compare.v1",
+  "timestamp_utc": "2026-05-07T08:22:23Z",
+  "policy": {
+    "llama_cpp_modified": false,
+    "gpu_entry": "standard Vulkan loader through pdocker-vulkan-icd.so",
+    "target_speedup": 10.0
+  },
+  "settings": {
+    "gpu_layers": 6,
+    "gpu_ctx": 2048,
+    "predict": 4,
+    "repeat": 1,
+    "trace_alloc": false,
+    "cpu_reused": true,
+    "model_path": "/models/model.gguf",
+    "model_url_set": true
+  },
+  "cpu": {
+    "tokens_per_second": 0.056159072144302755,
+    "summary": {
+      "predicted_tokens_per_second_mean": 0.056159072144302755,
+      "predicted_tokens_per_second_min": 0.056159072144302755,
+      "predicted_tokens_per_second_max": 0.056159072144302755
+    }
+  },
+  "gpu": {
+    "tokens_per_second": 0.09496946280665818,
+    "summary": {
+      "predicted_tokens_per_second_mean": 0.09496946280665818,
+      "predicted_tokens_per_second_min": 0.09496946280665818,
+      "predicted_tokens_per_second_max": 0.09496946280665818,
+      "wall_seconds_mean": 64.78078185103368
+    },
+    "served": true,
+    "state_excerpt": "{\"Id\": \"9cada71b53324bfdb00bd3b1e55bc4d8\", \"Created\": \"2026-05-07T08:19:46.000000000Z\", \"Path\": \"/usr/local/bin/start-llama-server\", \"Args\": [], \"State\": {\"Status\": \"running\", \"Running\": true, \"Paused\": false, \"Restarting\": false, \"OOMKilled\": false, \"Dead\": false, \"Pid\": 19665, \"PidStartTime\": \"59473060\", \"ExitCode\": 0, \"PdockerRawReturnCode\": 0, \"PdockerSignal\": 0, \"Error\": \"\", \"StartedAt\": \"2026-05-07T08:19:48.000000000Z\", \"FinishedAt\": \"0001-01-01T00:00:00.000000000Z\", \"Health\": {\"Status\": \"healthy\", \"FailingStreak\": 0, \"Log\": [{\"Start\": \"2026-05-07T08:19:50.000000000Z\", \"End\": \"2026-05-07T08:19:50.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-07T08:20:20.000000000Z\", \"End\": \"2026-05-07T08:20:20.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-07T08:20:50.000000000Z\", \"End\": \"2026-05-07T08:20:51.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-07T08:21:21.000000000Z\", \"End\": \"2026-05-07T08:21:21.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-07T08:21:51.000000000Z\", \"End\": \"2026-05-07T08:21:51.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}]}, \"PdockerLauncherPid\": 19665, \"PdockerLauncherPidStartTime\": \"59473060\", \"PdockerKnownPids\": [{\"Pid\": 19665, \"StartTime\": \"59473060\"}, {\"Pid\": 19674, \"StartTime\": \"59473080\"}, {\"Pid\": 19734, \"StartTime\": \"59473095\"}]}, \"Image\": \"sha256:58d05029dc291a38125b3b19e96956072fc277021a4e40e74b8731b8f77e87de\", \"ResolvConfPath\": \"\", \"HostnamePath\": \"\", \"HostsPath\": \"\", \"LogPath\": \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/logs/9cada71b53324bfdb00bd3b1e55bc4d8.log\", \"Name\": \"/pdocker-llama-cpp\", \"RestartCount\": 0, \"Driver\": \"pdocker-direct\", \"Platform\": \"linux\", \"Moun",
+    "log_excerpt": " params to free memory took 0.52 seconds\nllama_model_loader: loaded meta data with 28 key-value pairs and 399 tensors from /models/model.gguf (version GGUF V3 (latest))\nllama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nllama_model_loader: - kv   0:                       general.architecture str              = qwen3\nllama_model_loader: - kv   1:                               general.type str              = model\nllama_model_loader: - kv   2:                               general.name str              = Qwen3 8B Awq Compatible Instruct\nllama_model_loader: - kv   3:                           general.finetune str              = awq-compatible-Instruct\nllama_model_loader: - kv   4:                           general.basename str              = Qwen3\nllama_model_loader: - kv   5:                         general.size_label str              = 8B\nllama_model_loader: - kv   6:                          qwen3.block_count u32              = 36\nllama_model_loader: - kv   7:                       qwen3.context_length u32              = 40960\nllama_model_loader: - kv   8:                     qwen3.embedding_length u32              = 4096\nllama_model_loader: - kv   9:                  qwen3.feed_forward_length u32              = 12288\nllama_model_loader: - kv  10:                 qwen3.attention.head_count u32              = 32\nllama_model_loader: - kv  11:              qwen3.attention.head_count_kv u32              = 8\nllama_model_loader: - kv  12:                       qwen3.rope.freq_base f32              = 1000000.000000\nllama_model_loader: - kv  13:     qwen3.attention.layer_norm_rms_epsilon f32              = 0.000001\nllama_model_loader: - kv  14:                 qwen3.attention.key_length u32              = 128\nllama_model_loader: - kv  15:               qwen3.attention.value_length u32              = 128\nllama_model_loader: - kv  16:                       tokenizer.ggml.model str              = gpt2\nllama_model_loader: - kv  17:                         tokenizer.ggml.pre str              = qwen2\nllama_model_loader: - kv  18:                      tokenizer.ggml.tokens arr[str,151936]  = [\"!\", \"\\\"\", \"#\", \"$\", \"%\", \"&\", \"'\", ...\nllama_model_loader: - kv  19:                  tokenizer.ggml.token_type arr[i32,151936]  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ...\nllama_model_loader: - kv  20:                      tokenizer.ggml.merges arr[str,151387]  = [\"Ġ Ġ\", \"ĠĠ ĠĠ\", \"i n\", \"Ġ t\",...\nllama_model_loader: - kv  21:                tokenizer.ggml.eos_token_id u32              = 151645\nllama_model_loader: - kv  22:            tokenizer.ggml.padding_token_id u32              = 151643\nllama_model_loader: - kv  23:                tokenizer.ggml.bos_token_id u32              = 151643\nllama_model_loader: - kv  24:               tokenizer.ggml.add_bos_token bool             = false\nllama_model_loader: - kv  25:                    tokenizer.chat_template str              = {%- if tools %}\\n    {{- '<|im_start|>...\nllama_model_loader: - kv  26:               general.quantization_version u32              = 2\nllama_model_loader: - kv  27:                          general.file_type u32              = 15\nllama_model_loader: - type  f32:  145 tensors\nllama_model_loader: - type q4_K:  217 tensors\nllama_model_loader: - type q6_K:   37 tensors\nprint_info: file format = GGUF V3 (latest)\nprint_info: file type   = Q4_K - Medium\nprint_info: file size   = 4.68 GiB (4.90 BPW) \nllama_prepare_model_devices: using device Vulkan0 (pdocker Vulkan bridge (queue)) (unknown id) - 2048 MiB free\nload: 0 unused tokens\nload: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden\nload: printing all EOG tokens:\nload:   - 128247 ('</s>')\nload:   - 151643 ('<|endoftext|>')\nload:   - 151645 ('<|im_end|>')\nload:   - 151662 ('<|fim_pad|>')\nload:   - 151663 ('<|repo_name|>')\nload:   - 151664 ('<|file_sep|>')\nload: special tokens cache size = 27\nload: token to piece cache size = 0.9311 MB\nprint_info: arch                  = qwen3\nprint_info: vocab_only            = 0\nprint_info: no_alloc              = 0\nprint_info: n_ctx_train           = 40960\nprint_info: n_embd                = 4096\nprint_info: n_embd_inp            = 4096\nprint_info: n_layer               = 36\nprint_info: n_head                = 32\nprint_info: n_head_kv             = 8\nprint_info: n_rot                 = 128\nprint_info: n_swa                 = 0\nprint_info: is_swa_any            = 0\nprint_info: n_embd_head_k         = 128\nprint_info: n_embd_head_v         = 128\nprint_info: n_gqa                 = 4\nprint_info: n_embd_k_gqa          = 1024\nprint_info: n_embd_v_gqa          = 1024\nprint_info: f_norm_eps            = 0.0e+00\nprint_info: f_norm_rms_eps        = 1.0e-06\nprint_info: f_clamp_kqv           = 0.0e+00\nprint_info: f_max_alibi_bias      = 0.0e+00\nprint_info: f_logit_scale         = 0.0e+00\nprint_info: f_attn_scale          = 0.0e+00\nprint_info: n_ff                  = 12288\nprint_info: n_expert              = 0\nprint_info: n_expert_used         = 0\nprint_info: n_expert_groups       = 0\nprint_info: n_group_used          = 0\nprint_info: causal attn           = 1\nprint_info: pooling type          = -1\nprint_info: rope type             = 2\nprint_info: rope scaling          = linear\nprint_info: freq_base_train       = 1000000.0\nprint_info: freq_scale_train      = 1\nprint_info: n_ctx_orig_yarn       = 40960\nprint_info: rope_yarn_log_mul     = 0.0000\nprint_info: rope_finetuned        = unknown\nprint_info: model type            = 8B\nprint_info: model params          = 8.19 B\nprint_info: general.name          = Qwen3 8B Awq Compatible Instruct\nprint_info: vocab type            = BPE\nprint_info: n_vocab               = 151936\nprint_info: n_merges              = 151387\nprint_info: BOS token             = 151643 '<|endoftext|>'\nprint_info: EOS token             = 151645 '<|im_end|>'\nprint_info: EOT token             = 151645 '<|im_end|>'\nprint_info: PAD token             = 151643 '<|endoftext|>'\nprint_info: LF token              = 198 'Ċ'\nprint_info: FIM PRE token         = 151659 '<|fim_prefix|>'\nprint_info: FIM SUF token         = 151661 '<|fim_suffix|>'\nprint_info: FIM MID token         = 151660 '<|fim_middle|>'\nprint_info: FIM PAD token         = 151662 '<|fim_pad|>'\nprint_info: FIM REP token         = 151663 '<|repo_name|>'\nprint_info: FIM SEP token         = 151664 '<|file_sep|>'\nprint_info: EOG token             = 128247 '</s>'\nprint_info: EOG token             = 151643 '<|endoftext|>'\nprint_info: EOG token             = 151645 '<|im_end|>'\nprint_info: EOG token             = 151662 '<|fim_pad|>'\nprint_info: EOG token             = 151663 '<|repo_name|>'\nprint_info: EOG token             = 151664 '<|file_sep|>'\nprint_info: max token length      = 256\nload_tensors: loading model tensors, this can take a while... (mmap = true, direct_io = false)\nload_tensors: offloading output layer to GPU\nload_tensors: offloading 5 repeating layers to GPU\nload_tensors: offloaded 6/37 layers to GPU\nload_tensors:   CPU_Mapped model buffer size =  3717.62 MiB\nload_tensors:      Vulkan0 model buffer size =  1071.56 MiB\n......................................................................................\ncommon_init_result: added </s> logit bias = -inf\ncommon_init_result: added <|endoftext|> logit bias = -inf\ncommon_init_result: added <|im_end|> logit bias = -inf\ncommon_init_result: added <|fim_pad|> logit bias = -inf\ncommon_init_result: added <|repo_name|> logit bias = -inf\ncommon_init_result: added <|file_sep|> logit bias = -inf\nllama_context: constructing llama_context\nllama_context: n_seq_max     = 4\nllama_context: n_ctx         = 2048\nllama_context: n_ctx_seq     = 2048\nllama_context: n_batch       = 2048\nllama_context: n_ubatch      = 512\nllama_context: causal_attn   = 1\nllama_context: flash_attn    = auto\nllama_context: kv_unified    = true\nllama_context: freq_base     = 1000000.0\nllama_context: freq_scale    = 1\nllama_context: n_ctx_seq (2048) < n_ctx_train (40960) -- the full capacity of the model will not be utilized\nllama_context: Vulkan_Host  output buffer size =     2.32 MiB\nllama_kv_cache:        CPU KV buffer size =   248.00 MiB\nllama_kv_cache:    Vulkan0 KV buffer size =    40.00 MiB\nllama_kv_cache: size =  288.00 MiB (  2048 cells,  36 layers,  4/1 seqs), K (f16):  144.00 MiB, V (f16):  144.00 MiB\nllama_kv_cache: attn_rot_k = 0, n_embd_head_k_all = 128\nllama_kv_cache: attn_rot_v = 0, n_embd_head_k_all = 128\nsched_reserve: reserving ...\nsched_reserve: layer 31 is assigned to device Vulkan0 but the Flash Attention tensor is assigned to device CPU (usually due to missing support)\nsched_reserve: Flash Attention was auto, set to disabled\nsched_reserve: resolving fused Gated Delta Net support:\nsched_reserve: fused Gated Delta Net (autoregressive) enabled\nsched_reserve: fused Gated Delta Net (chunked) enabled\nsched_reserve:    Vulkan0 compute buffer size =   304.75 MiB\nsched_reserve:        CPU compute buffer size =    56.00 MiB\nsched_reserve: Vulkan_Host compute buffer size =   154.01 MiB\nsched_reserve: graph nodes  = 1446\nsched_reserve: graph splits = 529 (with bs=512), 126 (with bs=1)\nsched_reserve: reserve took 13.05 ms, sched copies = 1\ncommon_init_from_params: warming up the model with an empty run - please wait ... (--no-warmup to disable)\nsrv    load_model: initializing slots, n_slots = 4\nno implementations specified for speculative decoding\nslot   load_model: id  0 | task -1 | new slot, n_ctx = 2048\nno implementations specified for speculative decoding\nslot   load_model: id  1 | task -1 | new slot, n_ctx = 2048\nno implementations specified for speculative decoding\nslot   load_model: id  2 | task -1 | new slot, n_ctx = 2048\nno implementations specified for speculative decoding\nslot   load_model: id  3 | task -1 | new slot, n_ctx = 2048\nsrv    load_model: prompt cache is enabled, size limit: 8192 MiB\nsrv    load_model: use `--cache-ram 0` to disable the prompt cache\nsrv    load_model: for more info see https://github.com/ggml-org/llama.cpp/pull/16391\nsrv          init: init: idle slots will be saved to prompt cache and cleared upon starting a new task\ninit: chat template, example_format: '<|im_start|>system\nYou are a helpful assistant<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\nHi there<|im_end|>\n<|im_start|>user\nHow are you?<|im_end|>\n<|im_start|>assistant\n'\nsrv          init: init: chat template, thinking = 1\nmain: model loaded\nmain: server is listening on http://0.0.0.0:18081\nmain: starting the main loop...\nsrv  update_slots: all slots are idle\nslot get_availabl: id  3 | task -1 | selected slot by LRU, t_last = -1\nsrv  get_availabl: updating prompt cache\nsrv          load:  - looking for better prompt, base f_keep = -1.000, sim = 0.000\nsrv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 2048 tokens, 8589934592 est)\nsrv  get_availabl: prompt cache update took 0.02 ms\nslot launch_slot_: id  3 | task -1 | sampler chain: logits -> ?penalties -> ?dry -> ?top-n-sigma -> top-k -> ?typical -> top-p -> min-p -> ?xtc -> temp-ext -> dist \nslot launch_slot_: id  3 | task 0 | processing task, is_child = 0\nslot update_slots: id  3 | task 0 | new prompt, n_ctx_slot = 2048, n_keep = 0, task.n_tokens = 6\nslot update_slots: id  3 | task 0 | n_tokens = 0, memory_seq_rm [0, end)\nslot init_sampler: id  3 | task 0 | init sampler, took 0.02 ms, tokens: text = 6, total = 6\nslot update_slots: id  3 | task 0 | prompt processing done, n_tokens = 6, batch.n_tokens = 6\nslot print_timing: id  3 | task 0 | \nprompt eval time =   22579.66 ms /     6 tokens ( 3763.28 ms per token,     0.27 tokens per second)\n       eval time =   42118.80 ms /     4 tokens (10529.70 ms per token,     0.09 tokens per second)\n      total time =   64698.46 ms /    10 tokens\nslot      release: id  3 | task 0 | stop processing: n_tokens = 9, truncated = 0\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: POST /completion 127.0.0.1 200\n",
+    "evidence": {
+      "vulkan_device_seen": true,
+      "offload_seen": true,
+      "model_loaded": true,
+      "serve_reachable": true,
+      "buffer_allocation_blocker": false,
+      "assert_blocker": false,
+      "buffer_range_assert_blocker": false,
+      "gpu_model_buffer_seen": true,
+      "gpu_repeating_layers": 5,
+      "gpu_offloaded_layers": 6,
+      "gpu_total_layers": 37,
+      "gpu_output_only_offload": false,
+      "generic_dispatch_response_seen": false,
+      "generic_spirv_dispatch_attempted": false,
+      "generic_spirv_dispatch_seen": false,
+      "generic_spirv_dispatch_failed": false,
+      "pipeline_feature_blocker": false,
+      "executor_spirv_trace_seen": false,
+      "executor_feature_trace_seen": false,
+      "android_vulkan_dispatch_blocker": false,
+      "executor_submit_generic_dispatch_error": false,
+      "executor_fallback_dispatch_blocker": false,
+      "queue_submit_blocker": false,
+      "spirv_dispatch_blocker": false
+    },
+    "allocation_trace_bytes": [],
+    "bridge_dispatch_profile": {
+      "samples": 0,
+      "upload_ms_mean": 0.0,
+      "dispatch_ms_mean": 0.0,
+      "download_ms_mean": 0.0,
+      "copy_buffer_ops_in_log": 0,
+      "copy_buffer_bytes_in_log": 0
+    },
+    "diagnostics": {
+      "blocker_class": "vulkan_device_discovery",
+      "blocker_detail": "Vulkan offload evidence was not sufficient to classify a later blocker",
+      "failure_axes": {
+        "advertised_limits": {
+          "state": "not_front_blocker",
+          "reason": "no feature-limit submit failure in this run"
+        },
+        "chunking": {
+          "state": "pressure",
+          "reason": "large model/buffer allocations are at or above the 512MiB bridge clamp; future failures should distinguish splitting/chunk transport from shader lowering"
+        },
+        "generic_spirv_dispatch": {
+          "state": "not_reached",
+          "reason": "generic SPIR-V dispatch was not the failing axis in this run"
+        }
+      },
+      "advertised_limits": {
+        "configured_clamps": {
+          "PDOCKER_VULKAN_MAX_BUFFER_BYTES": 536870912,
+          "GGML_VK_FORCE_MAX_BUFFER_SIZE": 536870912,
+          "GGML_VK_FORCE_MAX_ALLOCATION_SIZE": 536870912,
+          "GGML_VK_SUBALLOCATION_BLOCK_SIZE": 536870912
+        },
+        "icd_advertises_subgroup_arithmetic_by_default": true,
+        "executor_android_features": {},
+        "spirv_trace_count": 0,
+        "last_spirv_trace": {}
+      },
+      "chunking_pressure": {
+        "configured_bridge_max_buffer_bytes": 536870912,
+        "largest_allocation_bytes": 0,
+        "largest_created_buffer_bytes": 0,
+        "allocation_near_clamp": false,
+        "model_cpu_mapped_bytes": 3898207109,
+        "model_cpu_mapped_exceeds_bridge_clamp": true,
+        "vulkan_model_buffer_mib": 1071.56,
+        "descriptor_range_max_bytes": 0
+      },
+      "generic_spirv_dispatch": {
+        "attempted": false,
+        "valid_android_vulkan_events": [],
+        "failed_events": [],
+        "fallback_events": [],
+        "llama_throw": ""
+      },
+      "executor_backends": [],
+      "executor_errors": [],
+      "spirv_hashes": []
+    }
+  },
+  "comparison": {
+    "speedup": 1.691079627573453,
+    "target_tokens_per_second": 0.5615907214430276,
+    "target_met": false
+  },
+  "bridge_overhead_phase": {
+    "phase": "served_without_bridge_profile",
+    "served": true,
+    "gpu_layers": 6,
+    "cpu_tokens_per_second": 0.056159072144302755,
+    "gpu_tokens_per_second": 0.09496946280665818,
+    "speedup": 1.691079627573453,
+    "target_speedup": 10.0,
+    "target_tokens_per_second": 0.5615907214430276,
+    "target_met": false,
+    "blocker": "Vulkan offload evidence was not sufficient to classify a later blocker",
+    "next_action": "make Vulkan device discovery reliable",
+    "bridge_dispatch_profile": {
+      "samples": 0,
+      "upload_ms_mean": 0.0,
+      "dispatch_ms_mean": 0.0,
+      "download_ms_mean": 0.0,
+      "copy_buffer_ops_in_log": 0,
+      "copy_buffer_bytes_in_log": 0
+    }
+  },
+  "operation": {
+    "kind": "llama-gpu-compare",
+    "ui_surface": "Overview daemon operation/progress card",
+    "container_surface": "pdocker-llama-cpp remains the container shown by Engine container listing",
+    "cleanup": "remove adb port forward and mark failed operation on nonzero exit; CPU restore is opt-in with --restore because the next run recreates the required mode"
+  },
+  "next_blocker": "Vulkan offload evidence was not sufficient to classify a later blocker",
+  "next_action": "make Vulkan device discovery reliable"
+}

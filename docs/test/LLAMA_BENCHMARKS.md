@@ -71,6 +71,50 @@ descriptor alias shape to the Android Vulkan executor, then either lower that
 shader correctly or clamp the glibc-facing advertised capabilities so llama.cpp
 chooses a supported path.
 
+## 2026-05-07 Member-Decorated Access Fix Result
+
+- Local NGL=2 result:
+  `docs/test/llama-cpu-gpu-compare-20260507-ngl2-after-member-access.json`.
+- Local NGL=3 result:
+  `docs/test/llama-cpu-gpu-compare-20260507-ngl3-after-member-access.json`.
+- Local NGL=6 result:
+  `docs/test/llama-cpu-gpu-compare-20260507-ngl6-after-member-access.json`.
+- Change tested: the APK-side Vulkan executor now recognizes
+  `OpMemberDecorate ... NonWritable/NonReadable` on storage-buffer block
+  members, not only variable-level `OpDecorate`. This lets the bridge skip
+  read-only downloads and write-only uploads for real llama.cpp SPIR-V.
+
+| Mode | Served | Offload Evidence | Generation Speed | Speedup vs CPU |
+| --- | --- | --- | ---: | ---: |
+| CPU baseline | Yes | CPU only | 0.0562 tok/s | 1.00x |
+| Vulkan NGL=1 | Yes | output layer only, 1/37 layers | 0.1153 tok/s | 2.05x |
+| Vulkan NGL=2 | Yes | output + 1 repeating layer, 2/37 layers | 0.1168 tok/s | 2.08x |
+| Vulkan NGL=3 | Yes | output + 2 repeating layers, 3/37 layers | 0.1222 tok/s | 2.18x |
+| Vulkan NGL=6 | Yes | output + 5 repeating layers, 6/37 layers | 0.0950 tok/s | 1.69x |
+
+The previous NGL=2 warmup crash is closed by the member-decoration access fix.
+More layers now run, but NGL=6 regresses throughput, so the next priority is
+not simply increasing layer count. The bridge needs per-dispatch transfer/copy
+profiling with tracing enabled on a short run, then tuning around the layer
+depth that minimizes boundary traffic. Current best short result is NGL=3 at
+2.18x CPU, still below the 10x target.
+
+Trace run:
+
+- Local path: `docs/test/llama-cpu-gpu-compare-20260507-ngl3-trace.json`.
+- Scenario: NGL=3, context 2048, `n_predict=2`, trace allocation enabled.
+- Result: GPU 0.1909 tok/s, 3.40x vs the current CPU baseline, still below
+  the 10x target.
+- Bridge profile: 179 generic SPIR-V samples, mean upload 17.56 ms, mean
+  dispatch 3.52 ms, mean download 7.01 ms, plus 566 copy-buffer operations
+  covering about 772 MB in the captured log excerpt.
+- Evidence from the largest sampled dispatch: a 510,504,960-byte binding is
+  resident and cache-hit, but copy-buffer traffic and mutable activation
+  transfers remain large enough to dominate. The next implementation target is
+  to keep repeated copy sources/destinations registered across submissions and
+  batch transfer-only command buffers so they stop crossing the APK/container
+  boundary every token.
+
 ## 2026-05-05 Copy-Buffer Semantics Probe Result
 
 - Local path: `docs/test/llama-gpu-compare-latest.json`.

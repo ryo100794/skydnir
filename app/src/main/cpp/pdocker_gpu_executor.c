@@ -1319,15 +1319,28 @@ static int collect_spirv_descriptor_accesses(
     const uint32_t bound = code[3];
     if (bound == 0 || bound > 65536) return 0;
     int32_t *binding_by_id = (int32_t *)malloc(bound * sizeof(binding_by_id[0]));
+    int32_t *pointer_target_by_id = (int32_t *)malloc(bound * sizeof(pointer_target_by_id[0]));
+    int32_t *variable_type_by_id = (int32_t *)malloc(bound * sizeof(variable_type_by_id[0]));
     uint8_t *non_readable = (uint8_t *)calloc(bound, sizeof(non_readable[0]));
     uint8_t *non_writable = (uint8_t *)calloc(bound, sizeof(non_writable[0]));
-    if (!binding_by_id || !non_readable || !non_writable) {
+    uint8_t *type_non_readable = (uint8_t *)calloc(bound, sizeof(type_non_readable[0]));
+    uint8_t *type_non_writable = (uint8_t *)calloc(bound, sizeof(type_non_writable[0]));
+    if (!binding_by_id || !pointer_target_by_id || !variable_type_by_id ||
+        !non_readable || !non_writable || !type_non_readable || !type_non_writable) {
         free(binding_by_id);
+        free(pointer_target_by_id);
+        free(variable_type_by_id);
         free(non_readable);
         free(non_writable);
+        free(type_non_readable);
+        free(type_non_writable);
         return 0;
     }
-    for (uint32_t i = 0; i < bound; ++i) binding_by_id[i] = -1;
+    for (uint32_t i = 0; i < bound; ++i) {
+        binding_by_id[i] = -1;
+        pointer_target_by_id[i] = -1;
+        variable_type_by_id[i] = -1;
+    }
     for (size_t i = 5; i < words;) {
         uint32_t inst = code[i];
         uint16_t word_count = (uint16_t)(inst >> 16);
@@ -1345,20 +1358,56 @@ static int collect_spirv_descriptor_accesses(
                     non_readable[target] = 1;
                 }
             }
+        } else if (op == 72 && word_count >= 4) {
+            uint32_t target = code[i + 1];
+            uint32_t decoration = code[i + 3];
+            if (target < bound) {
+                if (decoration == 24) {
+                    type_non_writable[target] = 1;
+                } else if (decoration == 25) {
+                    type_non_readable[target] = 1;
+                }
+            }
+        } else if (op == 32 && word_count >= 4) {
+            uint32_t result_id = code[i + 1];
+            uint32_t pointee_type = code[i + 3];
+            if (result_id < bound && pointee_type < bound) {
+                pointer_target_by_id[result_id] = (int32_t)pointee_type;
+            }
+        } else if (op == 59 && word_count >= 4) {
+            uint32_t result_type = code[i + 1];
+            uint32_t result_id = code[i + 2];
+            if (result_id < bound && result_type < bound) {
+                variable_type_by_id[result_id] = (int32_t)result_type;
+            }
         }
         i += word_count;
     }
     for (uint32_t id = 0; id < bound; ++id) {
         int32_t binding = binding_by_id[id];
         if (binding < 0 || (size_t)binding >= access_count) continue;
+        int is_non_readable = non_readable[id];
+        int is_non_writable = non_writable[id];
+        int32_t variable_type = variable_type_by_id[id];
+        if (variable_type >= 0 && (uint32_t)variable_type < bound) {
+            int32_t pointee_type = pointer_target_by_id[variable_type];
+            if (pointee_type >= 0 && (uint32_t)pointee_type < bound) {
+                is_non_readable |= type_non_readable[pointee_type];
+                is_non_writable |= type_non_writable[pointee_type];
+            }
+        }
         SpirvDescriptorAccess *access = &accesses[binding];
         access->used = 1;
-        if (!non_readable[id]) access->readable = 1;
-        if (!non_writable[id]) access->writable = 1;
+        if (!is_non_readable) access->readable = 1;
+        if (!is_non_writable) access->writable = 1;
     }
     free(binding_by_id);
+    free(pointer_target_by_id);
+    free(variable_type_by_id);
     free(non_readable);
     free(non_writable);
+    free(type_non_readable);
+    free(type_non_writable);
     return 0;
 }
 
@@ -2351,6 +2400,8 @@ static int run_vulkan_dispatch_fd(
     const char *fail_stage = "start";
     VkResult rc = VK_SUCCESS;
     int ret = -21;
+    int io_rc = 0;
+    int fail_binding = -1;
     uint32_t max_binding = 0;
     for (size_t i = 0; i < binding_count; ++i) {
         if (bindings[i].binding > max_binding) max_binding = bindings[i].binding;
@@ -2526,6 +2577,7 @@ static int run_vulkan_dispatch_fd(
     double upload_start = now_ms();
     for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i]) continue;
+        fail_binding = (int)i;
         fail_stage = "create-dispatch-buffer";
         vk_buffers[i] = acquire_dispatch_buffer(
             rt->physical_device,
@@ -2540,6 +2592,7 @@ static int run_vulkan_dispatch_fd(
             &mutable_cache_reused[i]);
         if (!vk_buffers[i]) goto cleanup;
     }
+    fail_binding = -1;
     double upload_ms = now_ms() - upload_start;
 
     if (specialization_count > 0) {
@@ -2743,8 +2796,12 @@ static int run_vulkan_dispatch_fd(
         if (!active_bindings[i]) continue;
         if (!binding_write_needed[i]) continue;
         if (cache_resident[i]) continue;
-        if (write_fd_exact(buffer_fds[i], vk_buffers[i]->map, bindings[i].size, bindings[i].offset) != 0) goto cleanup;
+        fail_stage = "download-dispatch-buffer";
+        fail_binding = (int)i;
+        io_rc = write_fd_exact(buffer_fds[i], vk_buffers[i]->map, bindings[i].size, bindings[i].offset);
+        if (io_rc != 0) goto cleanup;
     }
+    fail_binding = -1;
     double download_ms = now_ms() - download_start;
     size_t resident_count = 0;
     size_t hit_count = 0;
@@ -2838,6 +2895,7 @@ cleanup:
                 "\"vk_result\":%d,\"shader_bytes\":%zu,\"entry\":\"%s\","
                 "\"specializations\":%zu,\"bindings\":%zu,"
                 "\"layout_bindings\":%u,"
+                "\"fail_binding_index\":%d,\"io_result\":%d,"
                 "\"dispatch\":[%u,%u,%u],\"push_bytes\":%zu,"
                 "\"estimated_workgroup_bytes\":%llu,"
                 "\"specialization_materialized\":%s,"
@@ -2850,6 +2908,7 @@ cleanup:
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 fail_stage, rc, shader_size, entry_name, specialization_count,
                 binding_count, layout_count,
+                fail_binding, io_rc,
                 gx, gy, gz, push_size,
                 (unsigned long long)estimated_workgroup_bytes,
                 specialization_materialized ? "true" : "false",
