@@ -203,6 +203,10 @@
     <string name="confirm_clean_image_cache_fmt">イメージ %1$s を削除し、ビルドキャッシュと未参照レイヤも prune しますか？失敗ビルドで壊れたタグや古いキャッシュが残ったときに使います。</string>
     <string name="message_no_pulled_images">pull 済みイメージはまだありません。</string>
     <string name="detail_image_rootfs">イメージ rootfs</string>
+    <string name="widget_image_cache_health">レイヤー/キャッシュ状態</string>
+    <string name="image_cache_health_clean">レイヤーゴミは検出されていません</string>
+    <string name="image_cache_health_attention_fmt">古いキャッシュメタデータ %1$d / 未参照レイヤー %2$d</string>
+    <string name="image_cache_health_detail_fmt">layers %1$d / referenced %2$d / unreferenced %3$s / build-cache %4$d (%5$d stale) / temp %6$d</string>
     <string name="section_image_references">イメージ参照</string>
     <string name="image_reference_legend_image">image/base</string>
     <string name="image_reference_legend_cache">cache/shared layer</string>

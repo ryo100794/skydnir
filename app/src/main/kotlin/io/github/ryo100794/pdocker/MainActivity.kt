@@ -126,6 +126,16 @@ class MainActivity : AppCompatActivity() {
         val totalLayerBytes: Long,
     )
 
+    private data class ImageCacheHealth(
+        val layerCount: Int,
+        val referencedLayerCount: Int,
+        val unreferencedLayerCount: Int,
+        val unreferencedLayerBytes: Long,
+        val buildCacheCount: Int,
+        val staleBuildCacheCount: Int,
+        val tempArtifactCount: Int,
+    )
+
     private enum class ImageGraphKind(
         val label: String,
         val color: Int,
@@ -957,11 +967,12 @@ class MainActivity : AppCompatActivity() {
             runPruneBuildCache()
         }
         val images = imageDirs()
+        val imageInfos = imageReferenceInfos(images)
+        renderImageCacheHealth(imageInfos)
         if (images.isEmpty()) {
             addMessage(getString(R.string.message_no_pulled_images))
             return
         }
-        val imageInfos = imageReferenceInfos(images)
         renderImageReferenceTree(imageInfos)
     }
 
@@ -4714,6 +4725,83 @@ class MainActivity : AppCompatActivity() {
         }.sortedBy { it.displayRef }
     }
 
+    private fun renderImageCacheHealth(images: List<ImageReferenceInfo>) {
+        val health = imageCacheHealth(images)
+        val needsMaintenance = health.staleBuildCacheCount > 0 ||
+            health.unreferencedLayerCount > 0 ||
+            health.tempArtifactCount > 0
+        val value = if (needsMaintenance) {
+            getString(
+                R.string.image_cache_health_attention_fmt,
+                health.staleBuildCacheCount,
+                health.unreferencedLayerCount,
+            )
+        } else {
+            getString(R.string.image_cache_health_clean)
+        }
+        addWidget(
+            getString(R.string.widget_image_cache_health),
+            value,
+            getString(
+                R.string.image_cache_health_detail_fmt,
+                health.layerCount,
+                health.referencedLayerCount,
+                formatBytes(health.unreferencedLayerBytes),
+                health.buildCacheCount,
+                health.staleBuildCacheCount,
+                health.tempArtifactCount,
+            ),
+            detailLines = 4,
+        ) {
+            runPruneBuildCache()
+        }
+    }
+
+    private fun imageCacheHealth(images: List<ImageReferenceInfo>): ImageCacheHealth {
+        val referencedLayers = images
+            .flatMap { it.diffIds }
+            .map { it.removePrefix("sha256:") }
+            .filter { layerIdRegex.matches(it) }
+            .toSet()
+        val layerDirs = layerRoot.listFiles()
+            ?.filter { it.isDirectory && layerIdRegex.matches(it.name) }
+            .orEmpty()
+        val layerIds = layerDirs.map { it.name }.toSet()
+        val unreferencedLayerIds = layerIds - referencedLayers
+        val unreferencedBytes = unreferencedLayerIds.sumOf { layerSize(it) }
+        val buildCacheFiles = File(pdockerHome, "meta/build-cache")
+            .listFiles { file -> file.isFile && file.extension == "json" }
+            ?.toList()
+            .orEmpty()
+        val staleBuildCacheCount = buildCacheFiles.count { file ->
+            val did = runCatching {
+                JSONObject(file.readText()).optString("diff_id")
+                    .removePrefix("sha256:")
+            }.getOrDefault("")
+            did.isBlank() || !layerIdRegex.matches(did) || did !in layerIds
+        }
+        val tempPrefixes = listOf(
+            "pdlayer_", "pdbase_", "pdstage_", "pdblob_", "pdloadbody_",
+            "pdsavebody_", "pdarchiveput_", "pdbuildctx_", "pdload_", "pdsave_",
+        )
+        val tmpArtifacts = File(pdockerHome, "tmp")
+            .listFiles()
+            ?.count { file -> tempPrefixes.any { prefix -> file.name.startsWith(prefix) } }
+            ?: 0
+        val stagedImages = imageRoot.listFiles()
+            ?.count { file -> ".pull-" in file.name || ".old-" in file.name }
+            ?: 0
+        return ImageCacheHealth(
+            layerCount = layerIds.size,
+            referencedLayerCount = referencedLayers.count { it in layerIds },
+            unreferencedLayerCount = unreferencedLayerIds.size,
+            unreferencedLayerBytes = unreferencedBytes,
+            buildCacheCount = buildCacheFiles.size,
+            staleBuildCacheCount = staleBuildCacheCount,
+            tempArtifactCount = tmpArtifacts + stagedImages,
+        )
+    }
+
     private fun readImageDiffIds(imageDir: File): List<String> =
         runCatching {
             val config = JSONObject(File(imageDir, "config.json").readText())
@@ -4727,6 +4815,8 @@ class MainActivity : AppCompatActivity() {
         runCatching {
             JSONObject(File(layerRoot, "${diffId.removePrefix("sha256:")}/meta.json").readText()).optLong("size", 0L)
         }.getOrDefault(0L)
+
+    private val layerIdRegex = Regex("[A-Fa-f0-9]{64}")
 
     private fun renderImageReferenceTree(images: List<ImageReferenceInfo>) {
         if (images.isEmpty()) return

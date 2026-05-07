@@ -5490,11 +5490,43 @@ def prune_build_artifacts(min_age_seconds=0, skip_active=True):
                 removed.append(name)
             except OSError as exc:
                 log(f"build prune {name} error: {exc}")
+    if os.path.isdir(BUILD_CACHE_DIR):
+        for name in os.listdir(BUILD_CACHE_DIR):
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join(BUILD_CACHE_DIR, name)
+            try:
+                if min_age_seconds > 0:
+                    age = time.time() - os.path.getmtime(path)
+                    if age < min_age_seconds:
+                        continue
+                with open(path) as f:
+                    entry = json.load(f)
+                did = str(entry.get("diff_id", "")).split(":", 1)[-1]
+                if not re.fullmatch(r"[A-Fa-f0-9]{64}", did or ""):
+                    os.remove(path)
+                    removed.append(f"build-cache-invalid:{name}")
+                elif not _layer_exists(did):
+                    os.remove(path)
+                    removed.append(f"build-cache-stale:{name}")
+            except (OSError, json.JSONDecodeError) as exc:
+                try:
+                    os.remove(path)
+                    removed.append(f"build-cache-unreadable:{name}")
+                except OSError:
+                    log(f"build cache prune {name} error: {exc}")
     if os.path.isdir(PDOCKER_TMP):
         for name in os.listdir(PDOCKER_TMP):
             if not (name.startswith("pdlayer_") or
                     name.startswith("pdbase_") or
-                    name.startswith("pdstage_")):
+                    name.startswith("pdstage_") or
+                    name.startswith("pdblob_") or
+                    name.startswith("pdloadbody_") or
+                    name.startswith("pdsavebody_") or
+                    name.startswith("pdarchiveput_") or
+                    name.startswith("pdbuildctx_") or
+                    name.startswith("pdload_") or
+                    name.startswith("pdsave_")):
                 continue
             path = os.path.join(PDOCKER_TMP, name)
             try:

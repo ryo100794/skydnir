@@ -203,6 +203,10 @@
     <string name="confirm_clean_image_cache_fmt">Delete image %1$s and prune build cache/unreferenced layers? Use this when a failed build left a bad tagged image or stale cache.</string>
     <string name="message_no_pulled_images">No pulled images yet.</string>
     <string name="detail_image_rootfs">Image rootfs</string>
+    <string name="widget_image_cache_health">Layer/cache health</string>
+    <string name="image_cache_health_clean">No layer garbage detected</string>
+    <string name="image_cache_health_attention_fmt">%1$d stale cache metadata / %2$d unreferenced layers</string>
+    <string name="image_cache_health_detail_fmt">layers %1$d / referenced %2$d / unreferenced %3$s / build-cache %4$d (%5$d stale) / temp %6$d</string>
     <string name="section_image_references">Image references</string>
     <string name="image_reference_legend_image">image/base</string>
     <string name="image_reference_legend_cache">cache/shared layer</string>
