@@ -61,10 +61,35 @@ def seed_base_image(mod, tmp: Path) -> str:
     return diff_id
 
 
+def verify_materialize_drops_stale_symlink_marker(mod, tmp: Path) -> None:
+    stage = tmp / "symlink-marker-stage"
+    (stage / "etc" / "alternatives").mkdir(parents=True, exist_ok=True)
+    (stage / ".pdocker-absolute-symlinks-normalized").write_text("stale=1\n")
+    target = stage / "etc" / "alternatives" / "libprobe.so"
+    target.write_text("not an elf\n")
+    link = stage / "usr" / "lib" / "aarch64-linux-gnu" / "libprobe.so"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to("/etc/alternatives/libprobe.so")
+
+    tar_path = tmp / "symlink-marker-layer.tar"
+    with tarfile.open(tar_path, "w") as tf:
+        tf.add(stage, arcname=".")
+    diff_id = mod._sha256_file(str(tar_path))
+    mod._extract_layer_tar(str(tar_path), diff_id)
+
+    rootfs = tmp / "materialized-marker-rootfs"
+    mod.materialize_container_rootfs(str(rootfs), [diff_id])
+    if (rootfs / ".pdocker-absolute-symlinks-normalized").exists():
+        raise SystemExit("materialized rootfs kept stale absolute-symlink marker")
+    if os.readlink(rootfs / "usr/lib/aarch64-linux-gnu/libprobe.so") != "/etc/alternatives/libprobe.so":
+        raise SystemExit("materialize unexpectedly rewrote image symlink content")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="pdocker-build-profile-") as td:
         tmp = Path(td)
         mod = load_pdockerd(tmp)
+        verify_materialize_drops_stale_symlink_marker(mod, tmp)
         base_diff_id = seed_base_image(mod, tmp)
         p1: dict[str, object] = {}
         idx1 = mod._build_layer_index([base_diff_id], profile=p1)

@@ -3898,6 +3898,9 @@ loader_found:
         return 126;
     }
 
+    if (strcmp(mode, "build") == 0 && !getenv("PDOCKER_DIRECT_NORMALIZE_SYMLINKS")) {
+        setenv("PDOCKER_DIRECT_NORMALIZE_SYMLINKS", "always", 1);
+    }
     if (!getenv("PDOCKER_DIRECT_PRESERVE_ABSOLUTE_SYMLINKS")) {
         normalize_absolute_symlinks_once(rootfs);
     }

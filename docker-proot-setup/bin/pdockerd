@@ -1364,6 +1364,12 @@ def materialize_container_rootfs(dst_rootfs, diff_ids):
     """
     os.makedirs(dst_rootfs, exist_ok=True)
     merge_layers_into(dst_rootfs, diff_ids)
+    try:
+        os.remove(os.path.join(dst_rootfs, ".pdocker-absolute-symlinks-normalized"))
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
     ensure_rootfs_dynamic_loader(dst_rootfs, diff_ids)
     _install_libcow(dst_rootfs)
 
@@ -7860,6 +7866,7 @@ def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit,
     # libcow is a runtime shim; resolv.conf/hosts are rewritten per run.
     _BUILD_SKIP = (
         ".libcow.so",
+        ".pdocker-absolute-symlinks-normalized",
         "etc/resolv.conf",
         "etc/hosts",
         "etc/apt/apt.conf.d/00pdocker-direct-sandbox",

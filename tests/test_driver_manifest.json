@@ -108,6 +108,20 @@
         }
       ]
     },
+    "android-blas-cmake-build": {
+      "description": "Device build route for apt-installed OpenBLAS visibility across Dockerfile RUN layers and standard CMake FindBLAS.",
+      "requires": ["adb", "installed-debug-apk"],
+      "commands": [
+        {
+          "id": "android-blas-cmake-build-smoke",
+          "argv": ["bash", "scripts/android-blas-cmake-build-smoke.sh"],
+          "artifacts": [
+            "docs/test/android-blas-cmake-build-latest.json",
+            "docs/test/android-blas-cmake-build-latest.log"
+          ]
+        }
+      ]
+    },
     "android-file-io-microbench": {
       "description": "Device benchmark route for native/container file-I/O overhead, including Documents/SD mirror paths when configured.",
       "requires": ["adb", "installed-debug-apk", "aarch64-linux-gnu-gcc"],

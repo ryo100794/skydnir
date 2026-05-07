@@ -12,6 +12,80 @@ val syncPdockerdAsset by tasks.registering(Copy::class) {
     rename { "pdockerd" }
 }
 
+val verifyPackagedPayloadFresh by tasks.registering {
+    group = "verification"
+    description = "Fail APK builds when generated native/backend payloads are older than their sources."
+    dependsOn(syncPdockerdAsset)
+
+    fun requireFresh(output: File, input: File, rebuildHint: String) {
+        if (!input.isFile) {
+            throw GradleException("Packaged payload freshness check failed: missing source $input")
+        }
+        if (!output.isFile) {
+            throw GradleException(
+                "Packaged payload freshness check failed: missing output $output\n" +
+                    "Run: $rebuildHint"
+            )
+        }
+        if (output.lastModified() < input.lastModified()) {
+            throw GradleException(
+                "Packaged payload freshness check failed: $output is older than $input\n" +
+                    "Run: $rebuildHint"
+            )
+        }
+    }
+
+    fun requireSameBytes(output: File, input: File) {
+        if (!input.isFile) {
+            throw GradleException("Packaged payload freshness check failed: missing source $input")
+        }
+        if (!output.isFile) {
+            throw GradleException("Packaged payload freshness check failed: missing output $output")
+        }
+        if (!output.readBytes().contentEquals(input.readBytes())) {
+            throw GradleException(
+                "Packaged payload freshness check failed: $output differs from $input\n" +
+                    "Run: ./gradlew :app:syncPdockerdAsset"
+            )
+        }
+    }
+
+    doLast {
+        val abiDir = project.file("src/main/jniLibs/arm64-v8a")
+        val appCppDir = project.file("src/main/cpp")
+        val gpuSrcDir = rootProject.file("docker-proot-setup/src/gpu")
+        val backendLibDir = rootProject.file("docker-proot-setup/lib")
+        val nativeHint = "bash scripts/build-native-termux.sh"
+        val gpuHint = "bash scripts/build-gpu-shim.sh"
+        val stageHint = "bash scripts/copy-native.sh"
+
+        requireFresh(abiDir.resolve("libpdockerpty.so"), appCppDir.resolve("pty.c"), nativeHint)
+        requireFresh(abiDir.resolve("libpdockerdirect.so"), appCppDir.resolve("pdocker_direct_exec.c"), nativeHint)
+        requireFresh(abiDir.resolve("libpdockergpuexecutor.so"), appCppDir.resolve("pdocker_gpu_executor.c"), nativeHint)
+        requireFresh(abiDir.resolve("libpdockermediaexecutor.so"), appCppDir.resolve("pdocker_media_executor.c"), nativeHint)
+
+        requireFresh(abiDir.resolve("libpdockergpushim.so"), gpuSrcDir.resolve("pdocker_gpu_shim.c"), gpuHint)
+        requireFresh(abiDir.resolve("libpdockervulkanicd.so"), gpuSrcDir.resolve("pdocker_vulkan_icd.c"), gpuHint)
+        requireFresh(abiDir.resolve("libpdockeropenclicd.so"), gpuSrcDir.resolve("pdocker_opencl_icd.c"), gpuHint)
+
+        requireFresh(abiDir.resolve("libcrane.so"), rootProject.file("docker-proot-setup/docker-bin/crane"), stageHint)
+        requireFresh(abiDir.resolve("libcow.so"), backendLibDir.resolve("libcow.so"), stageHint)
+        val rootfsShim = backendLibDir.resolve("pdocker-rootfs-shim.so")
+        if (rootfsShim.isFile) {
+            requireFresh(abiDir.resolve("libpdocker-rootfs-shim.so"), rootfsShim, stageHint)
+        }
+        val glibcLoader = System.getenv("PDOCKER_GLIBC_LOADER")?.takeIf { it.isNotBlank() }?.let(::File)
+        if (glibcLoader?.isFile == true) {
+            requireFresh(abiDir.resolve("libpdocker-ld-linux-aarch64.so"), glibcLoader, stageHint)
+        }
+
+        requireSameBytes(
+            project.file("src/main/assets/pdockerd/pdockerd"),
+            rootProject.file("docker-proot-setup/bin/pdockerd")
+        )
+    }
+}
+
 val pdockerVersionProps = Properties().apply {
     rootProject.file("version.properties").inputStream().use(::load)
 }
@@ -131,9 +205,12 @@ android {
     }
 }
 
-tasks.matching { it.name == "preBuild" || (it.name.startsWith("merge") && it.name.endsWith("Assets")) }
+tasks.matching {
+    it.name == "preBuild" ||
+        (it.name.startsWith("merge") && (it.name.endsWith("Assets") || it.name.endsWith("NativeLibs")))
+}
     .configureEach {
-        dependsOn(syncPdockerdAsset)
+        dependsOn(verifyPackagedPayloadFresh)
     }
 
 chaquopy {

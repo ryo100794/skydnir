@@ -14,6 +14,12 @@ class LlamaTemplateContractTest(unittest.TestCase):
     def test_openblas_uses_standard_cmake_detection(self):
         self.assertIn("-DGGML_BLAS=ON", self.dockerfile)
         self.assertIn("-DGGML_BLAS_VENDOR=OpenBLAS", self.dockerfile)
+        self.assertIn("libopenblas-dev", self.dockerfile)
+        self.assertLess(
+            self.dockerfile.find("libopenblas-dev"),
+            self.dockerfile.find("cmake -B build -G Ninja"),
+            "OpenBLAS must be installed before standard CMake detection runs",
+        )
         forbidden = [
             "-DBLAS_LIBRARIES=",
             "-DBLAS_INCLUDE_DIRS=",

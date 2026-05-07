@@ -1,0 +1,10 @@
+{
+  "blas_not_found": false,
+  "command": "scripts/android-blas-cmake-build-smoke.sh",
+  "exit_code": 0,
+  "found_blas": true,
+  "log": "/root/tl/pdocker-android/docs/test/android-blas-cmake-build-latest.log",
+  "log_sha256": "7045f795fdf54aec571f73b4e0c284cf127bca795113d0d2d6816c4ef92c0b54",
+  "log_size": 43127,
+  "schema": "pdocker.android.blas-cmake-build.v1"
+}
