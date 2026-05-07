@@ -394,6 +394,35 @@ static bool register_guarded_memory(PdockerVkMemory *memory) {
     return false;
 }
 
+static size_t guarded_page_count(const unsigned char *pages, size_t count) {
+    if (!pages) return 0;
+    size_t out = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (pages[i]) out++;
+    }
+    return out;
+}
+
+static void trace_guarded_binding(uint32_t binding,
+                                  const PdockerVkMemory *memory,
+                                  VkDeviceSize offset,
+                                  size_t size) {
+    if (!trace_allocations() || !memory || !memory->guarded || !memory->page_size) return;
+    size_t resident_pages = guarded_page_count(memory->resident_pages, memory->page_count);
+    size_t dirty_pages = guarded_page_count(memory->dirty_pages, memory->page_count);
+    fprintf(stderr,
+            "pdocker-vulkan-icd: guarded-binding binding=%u offset=%llu range=%zu allocation=%zu page_size=%zu resident_pages=%zu dirty_pages=%zu resident_bytes=%llu dirty_bytes=%llu\n",
+            binding,
+            (unsigned long long)offset,
+            size,
+            memory->size,
+            memory->page_size,
+            resident_pages,
+            dirty_pages,
+            (unsigned long long)(resident_pages * memory->page_size),
+            (unsigned long long)(dirty_pages * memory->page_size));
+}
+
 static void unregister_guarded_memory(PdockerVkMemory *memory) {
     if (!memory) return;
     for (size_t i = 0; i < PDOCKER_VK_MAX_GUARDED_MEMORIES; ++i) {
@@ -563,6 +592,7 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
         offsets[binding_count] = dispatch_offset;
         sizes[binding_count] = bytes;
         fds[1 + binding_count] = dispatch_memory->fd;
+        trace_guarded_binding(i, dispatch_memory, dispatch_offset, bytes);
         if (alias_hit && trace_allocations()) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: descriptor alias binding=%u offset=%llu range=%zu source_mem=%zu source_off=%llu\n",

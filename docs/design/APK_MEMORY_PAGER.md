@@ -258,11 +258,33 @@ The current llama GPU evidence makes this the next useful slice:
 
 - The 8B GGUF is mmap-backed on the CPU side.
 - The offloaded Vulkan model buffer is about 486.87 MiB.
-- `--n-gpu-layers 1` serves, but only the output layer is offloaded and the GPU
-  path is slower than CPU.
-- To reach useful speedup, `--n-gpu-layers 2+` must offload repeating
-  transformer layers without whole-buffer bridge copies or duplicate
-  OOM-sized allocations.
+- `--n-gpu-layers 3` serves with repeating transformer layers through the
+  pdocker Vulkan ICD and APK-side Android Vulkan executor.
+- Current best measured short run is 0.1436 tokens/s, 2.56x the CPU baseline,
+  with llama.cpp unmodified.
+- Trace evidence now shows `vkCmdCopyBuffer` replay is almost entirely
+  alias-only: 565 of 566 copy submits avoided host-side `memmove`, leaving one
+  16 KiB real copy in the captured run.
+- The remaining bottleneck is generic dispatch transport: repeated
+  upload/download of mutable activation buffers and per-dispatch
+  container/APK synchronization.
+
+Current implementation status:
+
+- `pdocker-vulkan-icd.so` can reserve large bridge allocations as
+  `memfd`-backed `mmap(PROT_NONE)` regions when
+  `PDOCKER_GPU_VIRTUAL_MEMORY=guarded` is set.
+- The ICD-owned `SIGSEGV` handler materializes faulted pages with `mprotect` and
+  records resident/dirty page bitmaps for those guarded bridge allocations.
+- Trace mode records guarded binding resident/dirty byte summaries into the
+  llama GPU comparison artifact.
+- Dirty tracking is currently conservative first-touch tracking. Once a page is
+  made read/write, later writes to the same page do not generate another fault.
+  This is enough to prove sparse residency and avoid eager physical memory
+  commitment, but it is not yet sufficient for precise dirty-span upload.
+- `VULKAN_DISPATCH_V2` still passes whole binding ranges. The planned V3 step is
+  to pass page-span metadata so the executor can update cached Android Vulkan
+  buffers from only changed guarded pages.
 
 ## Implementation Plan
 

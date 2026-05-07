@@ -166,6 +166,13 @@ useful.
 | llama.cpp Vulkan/OpenCL bridge | Avoid whole model copies; use bridge-safe chunks and dirty spans. | GPU bridge virtual memory contract independent from the general pager. |
 | UI / pdockerd | Keep heavy work off the UI thread and persist operations in pdockerd. | Separate service/process survival and restart reconciliation. |
 
+The GPU bridge guarded-memory path is partially implemented as of
+2026-05-07. Large `VkDeviceMemory` bridge allocations can be backed by guarded
+`memfd` mappings and traced with resident/dirty page summaries. This is an OOM
+and transport foundation, not a complete swap system: dispatch still transfers
+whole binding ranges until the V3 protocol carries dirty-span metadata to the
+APK-side executor.
+
 ## Implementation Plan
 
 1. Add an operation memory ring writer in pdockerd and direct executor.

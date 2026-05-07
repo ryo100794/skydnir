@@ -122,7 +122,9 @@ Trace run:
   `vkCmdCopyBuffer` replay as the current dominant cost. The remaining target
   is generic dispatch transfer overhead, especially repeated mutable-buffer
   upload/download and per-dispatch synchronization across the container/APK
-  bridge.
+  bridge. Newer trace artifacts also record guarded-memory resident/dirty byte
+  summaries so the next V3 dispatch protocol can be measured against page-span
+  transfer targets instead of whole binding ranges.
 - Pipeline optimization probe:
   `docs/test/llama-cpu-gpu-compare-20260507-ngl3-pipeline-opt.json` measured
   0.1436 tok/s, 2.56x vs CPU, with
@@ -131,6 +133,14 @@ Trace run:
   measured 0.1253 tok/s, 2.23x vs CPU under trace overhead. The llama project
   template now defaults this setting to `0` while leaving an env opt-out for
   devices where Android pipeline optimization proves unstable.
+- Guarded-memory trace:
+  `docs/test/llama-cpu-gpu-compare-20260507-ngl3-guarded-trace.json` measured
+  0.1668 tok/s, 2.97x vs CPU. The trace recorded 885 guarded binding samples,
+  with a maximum guarded range/resident/dirty size of 510,504,960 bytes. Dirty
+  bytes currently mean first-touched guarded pages, not precise post-dispatch
+  write spans. This confirms the virtual-memory guard is active for the large
+  bridge allocation, and also confirms the next speed target is a V3 dispatch
+  protocol that sends dirty page spans instead of whole mutable binding ranges.
 
 ## 2026-05-05 Copy-Buffer Semantics Probe Result
 

@@ -105,6 +105,25 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(field, compare)
 
+    def test_vulkan_guarded_memory_profile_is_recorded(self):
+        source = VULKAN_ICD.read_text()
+        for marker in [
+            "guarded_sigsegv_handler",
+            "guarded_page_count",
+            "trace_guarded_binding",
+            "resident_pages=%zu dirty_pages=%zu",
+            "trace_guarded_binding(i, dispatch_memory, dispatch_offset, bytes)",
+        ]:
+            self.assertIn(marker, source)
+        compare = LLAMA_COMPARE.read_text()
+        for field in [
+            "guarded_binding_samples",
+            "guarded_binding_max_resident_bytes",
+            "guarded_binding_max_dirty_bytes",
+            "guarded_binding_max_range_bytes",
+        ]:
+            self.assertIn(field, compare)
+
     def test_llama_gpu_compare_can_forward_bridge_tuning_env(self):
         compare = LLAMA_COMPARE.read_text()
         self.assertIn("import os", compare)

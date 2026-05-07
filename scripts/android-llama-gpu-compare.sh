@@ -779,6 +779,19 @@ copy_submit_summaries = [
         log,
     )
 ]
+guarded_bindings = [
+    {
+        "binding": int(m.group(1)),
+        "range": int(m.group(2)),
+        "allocation": int(m.group(3)),
+        "resident_bytes": int(m.group(4)),
+        "dirty_bytes": int(m.group(5)),
+    }
+    for m in re.finditer(
+        r"pdocker-vulkan-icd: guarded-binding binding=([0-9]+) offset=[0-9]+ range=([0-9]+) allocation=([0-9]+) page_size=[0-9]+ resident_pages=[0-9]+ dirty_pages=[0-9]+ resident_bytes=([0-9]+) dirty_bytes=([0-9]+)",
+        log,
+    )
+]
 bridge_dispatch_profile = {
     "samples": len(dispatch_ms),
     "upload_ms_mean": (sum(dispatch_upload_ms) / len(dispatch_upload_ms)) if dispatch_upload_ms else 0.0,
@@ -794,6 +807,10 @@ bridge_dispatch_profile = {
     "copy_submit_alias_bytes": sum(item["alias_bytes"] for item in copy_submit_summaries),
     "copy_submit_memmove_bytes": sum(item["memmove_bytes"] for item in copy_submit_summaries),
     "copy_submit_skipped_bytes": sum(item["skipped_bytes"] for item in copy_submit_summaries),
+    "guarded_binding_samples": len(guarded_bindings),
+    "guarded_binding_max_resident_bytes": max((item["resident_bytes"] for item in guarded_bindings), default=0),
+    "guarded_binding_max_dirty_bytes": max((item["dirty_bytes"] for item in guarded_bindings), default=0),
+    "guarded_binding_max_range_bytes": max((item["range"] for item in guarded_bindings), default=0),
 }
 speedup = (gpu_tps / cpu_tps) if cpu_tps and gpu_tps else 0.0
 target_met = bool(cpu_tps and gpu_tps >= target_tps)

@@ -1,0 +1,706 @@
+{
+  "schema": "pdocker.llama.gpu.compare.v1",
+  "timestamp_utc": "2026-05-07T09:15:00Z",
+  "policy": {
+    "llama_cpp_modified": false,
+    "gpu_entry": "standard Vulkan loader through pdocker-vulkan-icd.so",
+    "target_speedup": 10.0
+  },
+  "settings": {
+    "gpu_layers": 3,
+    "gpu_ctx": 2048,
+    "predict": 2,
+    "repeat": 1,
+    "trace_alloc": true,
+    "cpu_reused": true,
+    "model_path": "/models/model.gguf",
+    "model_url_set": true
+  },
+  "cpu": {
+    "tokens_per_second": 0.056159072144302755,
+    "summary": {
+      "predicted_tokens_per_second_mean": 0.056159072144302755,
+      "predicted_tokens_per_second_min": 0.056159072144302755,
+      "predicted_tokens_per_second_max": 0.056159072144302755
+    }
+  },
+  "gpu": {
+    "tokens_per_second": 0.16680586616197882,
+    "summary": {
+      "predicted_tokens_per_second_mean": 0.16680586616197882,
+      "predicted_tokens_per_second_min": 0.16680586616197882,
+      "predicted_tokens_per_second_max": 0.16680586616197882,
+      "wall_seconds_mean": 37.17829576693475
+    },
+    "served": true,
+    "state_excerpt": "{\"Id\": \"9bcaf1ab6fa341bbaff535a9e60e11d8\", \"Created\": \"2026-05-07T09:12:44.000000000Z\", \"Path\": \"/usr/local/bin/start-llama-server\", \"Args\": [], \"State\": {\"Status\": \"running\", \"Running\": true, \"Paused\": false, \"Restarting\": false, \"OOMKilled\": false, \"Dead\": false, \"Pid\": 17770, \"PidStartTime\": \"59790837\", \"ExitCode\": 0, \"PdockerRawReturnCode\": 0, \"PdockerSignal\": 0, \"Error\": \"\", \"StartedAt\": \"2026-05-07T09:12:46.000000000Z\", \"FinishedAt\": \"0001-01-01T00:00:00.000000000Z\", \"Health\": {\"Status\": \"healthy\", \"FailingStreak\": 0, \"Log\": [{\"Start\": \"2026-05-07T09:12:48.000000000Z\", \"End\": \"2026-05-07T09:12:48.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-07T09:13:18.000000000Z\", \"End\": \"2026-05-07T09:13:18.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-07T09:13:48.000000000Z\", \"End\": \"2026-05-07T09:13:48.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-07T09:14:18.000000000Z\", \"End\": \"2026-05-07T09:14:19.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-07T09:14:49.000000000Z\", \"End\": \"2026-05-07T09:14:49.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}]}, \"PdockerLauncherPid\": 17770, \"PdockerLauncherPidStartTime\": \"59790837\", \"PdockerKnownPids\": [{\"Pid\": 17770, \"StartTime\": \"59790837\"}, {\"Pid\": 17785, \"StartTime\": \"59790888\"}, {\"Pid\": 17899, \"StartTime\": \"59790911\"}]}, \"Image\": \"sha256:58d05029dc291a38125b3b19e96956072fc277021a4e40e74b8731b8f77e87de\", \"ResolvConfPath\": \"\", \"HostnamePath\": \"\", \"HostsPath\": \"\", \"LogPath\": \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/logs/9bcaf1ab6fa341bbaff535a9e60e11d8.log\", \"Name\": \"/pdocker-llama-cpp\", \"RestartCount\": 0, \"Driver\": \"pdocker-direct\", \"Platform\": \"linux\", \"Moun",
+    "log_excerpt": "riptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: guarded-binding binding=0 offset=34320 range=524288 allocation=319553536 page_size=4096 resident_pages=0 dirty_pages=0 resident_bytes=0 dirty_bytes=0\npdocker-vulkan-icd: guarded-binding binding=1 offset=574992 range=32768 allocation=319553536 page_size=4096 resident_pages=0 dirty_pages=0 resident_bytes=0 dirty_bytes=0\npdocker-vulkan-icd: guarded-binding binding=2 offset=0 range=16384 allocation=319553536 page_size=4096 resident_pages=0 dirty_pages=0 resident_bytes=0 dirty_bytes=0\npdocker-vulkan-icd: guarded-binding binding=3 offset=0 range=16384 allocation=319553536 page_size=4096 resident_pages=0 dirty_pages=0 resident_bytes=0 dirty_bytes=0\npdocker-vulkan-icd: guarded-binding binding=4 offset=0 range=16384 allocation=319553536 page_size=4096 resident_pages=0 dirty_pages=0 resident_bytes=0 dirty_bytes=0\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":19284,\"entry\":\"main\",\"specializations\":3,\"bindings\":5,\"dispatch\":[64,32,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":false,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"spirv_feature_requirements\":{\"float16\":false,\"int16\":false,\"int8\":false,\"int64\":false,\"storage16\":true,\"storage8\":false,\"subgroup_arithmetic\":false},\"spirv_feature_mismatch\":false,\"spirv_feature_mismatches\":[],\"upload_ms\":1.2036,\"dispatch_ms\":7.1345,\"download_ms\":0.0209,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":4,\"hits\":1,\"bytes\":589824},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":589824},\"valid\":true,\"binding_details\":[{\"index\":0,\"binding\":0,\"offset\":34320,\"size\":524288,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":true,\"mutable_cache_hit\":false},{\"index\":1,\"binding\":1,\"offset\":574992,\"size\":32768,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":true,\"mutable_cache_hit\":false},{\"index\":2,\"binding\":2,\"offset\":0,\"size\":16384,\"active\":true,\"readable\":false,\"writable\":true,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":false,\"mutable_cache_hit\":false},{\"index\":3,\"binding\":3,\"offset\":0,\"size\":16384,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":true,\"mutable_cache_hit\":false},{\"index\":4,\"binding\":4,\"offset\":0,\"size\":16384,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":true,\"mutable_cache_hit\":true}]}\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16432 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=220529664 offset=113164288 range=9437184 effective=9437184\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16432 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=16416 range=4 effective=4\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=16432 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=16432 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=558608 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=16432 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=16432 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=16432 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=220529664 offset=122602496 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=16432 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=220529664 offset=122618880 range=28311552 effective=28311552\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=32816 range=49152 effective=49152\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=32816 range=49152 effective=49152\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=32816 range=49152 effective=49152\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=220529664 offset=192218112 range=28311552 effective=28311552\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=81968 range=49152 effective=49152\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=81968 range=49152 effective=49152\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=81968 range=49152 effective=49152\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=32816 range=49152 effective=49152\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=81968 range=49152 effective=49152\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=131120 range=49152 effective=49152\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=220529664 offset=150930432 range=41287680 effective=41287680\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=131120 range=49152 effective=49152\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=16432 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=535229440 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=0 buffer_size=535229440 offset=16384 range=510504960 effective=510504960\npdocker-vulkan-icd: descriptor storage binding=1 buffer_size=319553536 offset=0 range=16384 effective=16384\npdocker-vulkan-icd: descriptor storage binding=2 buffer_size=319553536 offset=16384 range=607744 effective=607744\npdocker-vulkan-icd: descriptor storage binding=3 buffer_size=319553536 offset=16384 range=607744 effective=607744\npdocker-vulkan-icd: descriptor storage binding=4 buffer_size=319553536 offset=16384 range=607744 effective=607744\npdocker-vulkan-icd: guarded-binding binding=0 offset=0 range=510504960 allocation=510504960 page_size=4096 resident_pages=124635 dirty_pages=124635 resident_bytes=510504960 dirty_bytes=510504960\npdocker-vulkan-icd: descriptor alias binding=0 offset=16384 range=510504960 source_mem=510504960 source_off=0\npdocker-vulkan-icd: guarded-binding binding=1 offset=0 range=16384 allocation=319553536 page_size=4096 resident_pages=0 dirty_pages=0 resident_bytes=0 dirty_bytes=0\npdocker-vulkan-icd: guarded-binding binding=2 offset=16384 range=607744 allocation=319553536 page_size=4096 resident_pages=0 dirty_pages=0 resident_bytes=0 dirty_bytes=0\npdocker-vulkan-icd: guarded-binding binding=3 offset=16384 range=607744 allocation=319553536 page_size=4096 resident_pages=0 dirty_pages=0 resident_bytes=0 dirty_bytes=0\npdocker-vulkan-icd: guarded-binding binding=4 offset=16384 range=607744 allocation=319553536 page_size=4096 resident_pages=0 dirty_pages=0 resident_bytes=0 dirty_bytes=0\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":26688,\"entry\":\"main\",\"specializations\":3,\"bindings\":5,\"dispatch\":[1187,1,64],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":1,\"specialization_materialized\":true,\"spirv_feature_requirements\":{\"float16\":false,\"int16\":false,\"int8\":true,\"int64\":false,\"storage16\":true,\"storage8\":true,\"subgroup_arithmetic\":false},\"spirv_feature_mismatch\":false,\"spirv_feature_mismatches\":[],\"upload_ms\":1.0276,\"dispatch_ms\":22.8423,\"download_ms\":0.5322,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":1,\"hits\":1,\"bytes\":510504960},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":3,\"hits\":3,\"bytes\":1231872},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":607744,\"skipped_download_bytes\":511736832},\"valid\":true,\"binding_details\":[{\"index\":0,\"binding\":0,\"offset\":0,\"size\":510504960,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":true,\"cache_hit\":true,\"mutable_reused\":false,\"mutable_cache_hit\":false},{\"index\":1,\"binding\":1,\"offset\":0,\"size\":16384,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":true,\"mutable_cache_hit\":true},{\"index\":2,\"binding\":2,\"offset\":16384,\"size\":607744,\"active\":true,\"readable\":false,\"writable\":true,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":false,\"mutable_cache_hit\":false},{\"index\":3,\"binding\":3,\"offset\":16384,\"size\":607744,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":true,\"mutable_cache_hit\":true},{\"index\":4,\"binding\":4,\"offset\":16384,\"size\":607744,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":true,\"mutable_cache_hit\":true}]}\npdocker-vulkan-icd: copy-buffer src_size=319553536 src_mem=319553536 src_off=16384 dst_size=2431008 dst_mem=2431008 dst_off=0 bytes=607744 ok=1\npdocker-vulkan-icd: copy-alias dst_size=2431008 dst_off=0 src_mem=319553536 src_off=16384 bytes=607744\npdocker-vulkan-icd: copy-submit summary ops=1 alias_ops=1 memmove_ops=0 skipped_ops=0 alias_bytes=607744 memmove_bytes=0 skipped_bytes=0\npdocker-vulkan-icd: queue-submit transfer-only command buffer\nslot print_timing: id  3 | task 0 | \nprompt eval time =   25100.51 ms /     6 tokens ( 4183.42 ms per token,     0.24 tokens per second)\n       eval time =   11989.99 ms /     2 tokens ( 5994.99 ms per token,     0.17 tokens per second)\n      total time =   37090.49 ms /     8 tokens\nslot      release: id  3 | task 0 | stop processing: n_tokens = 7, truncated = 0\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: POST /completion 127.0.0.1 200\n",
+    "evidence": {
+      "vulkan_device_seen": true,
+      "offload_seen": true,
+      "model_loaded": true,
+      "serve_reachable": true,
+      "buffer_allocation_blocker": false,
+      "assert_blocker": false,
+      "buffer_range_assert_blocker": false,
+      "gpu_model_buffer_seen": true,
+      "gpu_repeating_layers": 2,
+      "gpu_offloaded_layers": 3,
+      "gpu_total_layers": 37,
+      "gpu_output_only_offload": false,
+      "generic_dispatch_response_seen": true,
+      "generic_spirv_dispatch_attempted": true,
+      "generic_spirv_dispatch_seen": true,
+      "generic_spirv_dispatch_failed": false,
+      "pipeline_feature_blocker": false,
+      "executor_spirv_trace_seen": false,
+      "executor_feature_trace_seen": false,
+      "android_vulkan_dispatch_blocker": false,
+      "executor_submit_generic_dispatch_error": false,
+      "executor_fallback_dispatch_blocker": false,
+      "queue_submit_blocker": false,
+      "spirv_dispatch_blocker": false
+    },
+    "allocation_trace_bytes": [
+      2431008,
+      535229440,
+      220529664,
+      16384,
+      510504960,
+      2431008,
+      16777216,
+      319553536,
+      161495072,
+      1024,
+      524288,
+      262144
+    ],
+    "bridge_dispatch_profile": {
+      "samples": 179,
+      "upload_ms_mean": 17.962730726256982,
+      "dispatch_ms_mean": 4.314636312849162,
+      "download_ms_mean": 6.514915083798884,
+      "copy_buffer_ops_in_log": 566,
+      "copy_buffer_bytes_in_log": 772575468,
+      "copy_submit_count": 566,
+      "copy_submit_ops": 566,
+      "copy_submit_alias_ops": 565,
+      "copy_submit_memmove_ops": 1,
+      "copy_submit_skipped_ops": 0,
+      "copy_submit_alias_bytes": 772559084,
+      "copy_submit_memmove_bytes": 16384,
+      "copy_submit_skipped_bytes": 0,
+      "guarded_binding_samples": 885,
+      "guarded_binding_max_resident_bytes": 510504960,
+      "guarded_binding_max_dirty_bytes": 510504960,
+      "guarded_binding_max_range_bytes": 510504960
+    },
+    "diagnostics": {
+      "blocker_class": "bridge_dispatch_performance",
+      "blocker_detail": "served through generic SPIR-V, but bridge upload/copy overhead keeps GPU below CPU throughput",
+      "failure_axes": {
+        "advertised_limits": {
+          "state": "not_front_blocker",
+          "reason": "no feature-limit submit failure in this run"
+        },
+        "chunking": {
+          "state": "pressure",
+          "reason": "large model/buffer allocations are at or above the 512MiB bridge clamp; future failures should distinguish splitting/chunk transport from shader lowering"
+        },
+        "generic_spirv_dispatch": {
+          "state": "passed",
+          "reason": "generic SPIR-V dispatch was not the failing axis in this run"
+        }
+      },
+      "advertised_limits": {
+        "configured_clamps": {
+          "PDOCKER_VULKAN_MAX_BUFFER_BYTES": 536870912,
+          "GGML_VK_FORCE_MAX_BUFFER_SIZE": 536870912,
+          "GGML_VK_FORCE_MAX_ALLOCATION_SIZE": 536870912,
+          "GGML_VK_SUBALLOCATION_BLOCK_SIZE": 536870912
+        },
+        "icd_advertises_subgroup_arithmetic_by_default": true,
+        "executor_android_features": {},
+        "spirv_trace_count": 0,
+        "last_spirv_trace": {}
+      },
+      "chunking_pressure": {
+        "configured_bridge_max_buffer_bytes": 536870912,
+        "largest_allocation_bytes": 535229440,
+        "largest_created_buffer_bytes": 535229440,
+        "allocation_near_clamp": true,
+        "model_cpu_mapped_bytes": 4266068541,
+        "model_cpu_mapped_exceeds_bridge_clamp": true,
+        "vulkan_model_buffer_mib": 720.75,
+        "descriptor_range_max_bytes": 510504960
+      },
+      "generic_spirv_dispatch": {
+        "attempted": true,
+        "valid_android_vulkan_events": [
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "shader_bytes": 11604,
+            "entry": "main",
+            "specializations": 0,
+            "bindings": 5,
+            "dispatch": [
+              32,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 32
+            },
+            "descriptor_aliases": 0,
+            "specialization_materialized": false,
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "upload_ms": 0.1435,
+            "dispatch_ms": 0.6023,
+            "download_ms": 0.0112,
+            "resident_cache": {
+              "enabled": true,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": true,
+              "entries": 32,
+              "reused_bindings": 4,
+              "hits": 4,
+              "bytes": 49156
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 4,
+              "write_bindings": 1,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 16384,
+              "skipped_download_bytes": 49156
+            },
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 66880,
+                "size": 16384,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 16896,
+                "size": 4,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": false,
+                "mutable_cache_hit": false
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 0,
+                "size": 16384,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              }
+            ]
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "shader_bytes": 11604,
+            "entry": "main",
+            "specializations": 0,
+            "bindings": 5,
+            "dispatch": [
+              32,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 32
+            },
+            "descriptor_aliases": 0,
+            "specialization_materialized": false,
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "upload_ms": 0.1328,
+            "dispatch_ms": 0.785,
+            "download_ms": 0.0109,
+            "resident_cache": {
+              "enabled": true,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": true,
+              "entries": 32,
+              "reused_bindings": 4,
+              "hits": 4,
+              "bytes": 49156
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 4,
+              "write_bindings": 1,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 16384,
+              "skipped_download_bytes": 49156
+            },
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 66880,
+                "size": 16384,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 16896,
+                "size": 4,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": false,
+                "mutable_cache_hit": false
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 0,
+                "size": 16384,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              }
+            ]
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "shader_bytes": 19284,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              64,
+              32,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 32
+            },
+            "descriptor_aliases": 0,
+            "specialization_materialized": false,
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": true,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "upload_ms": 1.2036,
+            "dispatch_ms": 7.1345,
+            "download_ms": 0.0209,
+            "resident_cache": {
+              "enabled": true,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": true,
+              "entries": 32,
+              "reused_bindings": 4,
+              "hits": 1,
+              "bytes": 589824
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 4,
+              "write_bindings": 1,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 16384,
+              "skipped_download_bytes": 589824
+            },
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 34320,
+                "size": 524288,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": false
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 574992,
+                "size": 32768,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": false
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": false,
+                "mutable_cache_hit": false
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": false
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 0,
+                "size": 16384,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              }
+            ]
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "shader_bytes": 26688,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              1187,
+              1,
+              64
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 32
+            },
+            "descriptor_aliases": 1,
+            "specialization_materialized": true,
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": true,
+              "int64": false,
+              "storage16": true,
+              "storage8": true,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "upload_ms": 1.0276,
+            "dispatch_ms": 22.8423,
+            "download_ms": 0.5322,
+            "resident_cache": {
+              "enabled": true,
+              "resident_bindings": 1,
+              "hits": 1,
+              "bytes": 510504960
+            },
+            "mutable_buffer_cache": {
+              "enabled": true,
+              "entries": 32,
+              "reused_bindings": 3,
+              "hits": 3,
+              "bytes": 1231872
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 4,
+              "write_bindings": 1,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 607744,
+              "skipped_download_bytes": 511736832
+            },
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 510504960,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": true,
+                "cache_hit": true,
+                "mutable_reused": false,
+                "mutable_cache_hit": false
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 16384,
+                "size": 607744,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": false,
+                "mutable_cache_hit": false
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 16384,
+                "size": 607744,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 16384,
+                "size": 607744,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": true,
+                "mutable_cache_hit": true
+              }
+            ]
+          }
+        ],
+        "failed_events": [],
+        "fallback_events": [],
+        "llama_throw": ""
+      },
+      "executor_backends": [
+        "android_vulkan"
+      ],
+      "executor_errors": [],
+      "spirv_hashes": []
+    }
+  },
+  "comparison": {
+    "speedup": 2.970238997776978,
+    "target_tokens_per_second": 0.5615907214430276,
+    "target_met": false
+  },
+  "bridge_overhead_phase": {
+    "phase": "served_but_transfer_bound",
+    "served": true,
+    "gpu_layers": 3,
+    "cpu_tokens_per_second": 0.056159072144302755,
+    "gpu_tokens_per_second": 0.16680586616197882,
+    "speedup": 2.970238997776978,
+    "target_speedup": 10.0,
+    "target_tokens_per_second": 0.5615907214430276,
+    "target_met": false,
+    "blocker": "served through generic SPIR-V, but bridge upload/copy overhead keeps GPU below CPU throughput",
+    "next_action": "reduce bridge upload/copy overhead with persistent registered buffers; rerun with larger n_predict",
+    "bridge_dispatch_profile": {
+      "samples": 179,
+      "upload_ms_mean": 17.962730726256982,
+      "dispatch_ms_mean": 4.314636312849162,
+      "download_ms_mean": 6.514915083798884,
+      "copy_buffer_ops_in_log": 566,
+      "copy_buffer_bytes_in_log": 772575468,
+      "copy_submit_count": 566,
+      "copy_submit_ops": 566,
+      "copy_submit_alias_ops": 565,
+      "copy_submit_memmove_ops": 1,
+      "copy_submit_skipped_ops": 0,
+      "copy_submit_alias_bytes": 772559084,
+      "copy_submit_memmove_bytes": 16384,
+      "copy_submit_skipped_bytes": 0,
+      "guarded_binding_samples": 885,
+      "guarded_binding_max_resident_bytes": 510504960,
+      "guarded_binding_max_dirty_bytes": 510504960,
+      "guarded_binding_max_range_bytes": 510504960
+    }
+  },
+  "operation": {
+    "kind": "llama-gpu-compare",
+    "ui_surface": "Overview daemon operation/progress card",
+    "container_surface": "pdocker-llama-cpp remains the container shown by Engine container listing",
+    "cleanup": "remove adb port forward and mark failed operation on nonzero exit; CPU restore is opt-in with --restore because the next run recreates the required mode"
+  },
+  "next_blocker": "served through generic SPIR-V, but bridge upload/copy overhead keeps GPU below CPU throughput",
+  "next_action": "reduce bridge upload/copy overhead with persistent registered buffers; rerun with larger n_predict"
+}
