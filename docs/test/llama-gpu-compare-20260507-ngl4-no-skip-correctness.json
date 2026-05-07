@@ -1,0 +1,469 @@
+{
+  "schema": "pdocker.llama.gpu.compare.v1",
+  "timestamp_utc": "2026-05-07T22:08:02Z",
+  "policy": {
+    "llama_cpp_modified": false,
+    "gpu_entry": "standard Vulkan loader through pdocker-vulkan-icd.so",
+    "target_speedup": 10.0
+  },
+  "settings": {
+    "gpu_layers": 4,
+    "gpu_ctx": 512,
+    "predict": 2,
+    "repeat": 1,
+    "warmup_discard": 0,
+    "gpu_summary_scope": "all_runs",
+    "trace_alloc": false,
+    "cpu_reused": true,
+    "model_path": "/models/model.gguf",
+    "model_url_set": true
+  },
+  "cpu": {
+    "tokens_per_second": 0.36100235915041706,
+    "summary": {
+      "predicted_tokens_per_second_mean": 0.36100235915041706,
+      "predicted_tokens_per_second_min": 0.36100235915041706,
+      "predicted_tokens_per_second_max": 0.36100235915041706
+    }
+  },
+  "gpu": {
+    "tokens_per_second": 0.15737068830870338,
+    "summary": {
+      "predicted_tokens_per_second_mean": 0.15737068830870338,
+      "predicted_tokens_per_second_min": 0.15737068830870338,
+      "predicted_tokens_per_second_max": 0.15737068830870338,
+      "wall_seconds_mean": 44.649709930992685,
+      "runs": 1
+    },
+    "served": true,
+    "state_excerpt": "{\"Id\": \"3b048bcefc984c0a8765315265c4f5b5\", \"Created\": \"2026-05-07T22:03:42.000000000Z\", \"Path\": \"/usr/local/bin/start-llama-server\", \"Args\": [], \"State\": {\"Status\": \"running\", \"Running\": true, \"Paused\": false, \"Restarting\": false, \"OOMKilled\": false, \"Dead\": false, \"Pid\": 17723, \"PidStartTime\": \"64416670\", \"ExitCode\": 0, \"PdockerRawReturnCode\": 0, \"PdockerSignal\": 0, \"Error\": \"\", \"StartedAt\": \"2026-05-07T22:03:44.000000000Z\", \"FinishedAt\": \"0001-01-01T00:00:00.000000000Z\", \"Health\": {\"Status\": \"healthy\", \"FailingStreak\": 0, \"Log\": [{\"Start\": \"2026-05-07T22:05:48.000000000Z\", \"End\": \"2026-05-07T22:05:48.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-07T22:06:18.000000000Z\", \"End\": \"2026-05-07T22:06:18.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-07T22:06:48.000000000Z\", \"End\": \"2026-05-07T22:06:49.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-07T22:07:19.000000000Z\", \"End\": \"2026-05-07T22:07:19.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-07T22:07:49.000000000Z\", \"End\": \"2026-05-07T22:07:50.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}]}, \"PdockerLauncherPid\": 17723, \"PdockerLauncherPidStartTime\": \"64416670\", \"PdockerKnownPids\": [{\"Pid\": 17723, \"StartTime\": \"64416670\"}, {\"Pid\": 17731, \"StartTime\": \"64416709\"}, {\"Pid\": 17788, \"StartTime\": \"64416734\"}]}, \"Image\": \"sha256:58d05029dc291a38125b3b19e96956072fc277021a4e40e74b8731b8f77e87de\", \"ResolvConfPath\": \"\", \"HostnamePath\": \"\", \"HostsPath\": \"\", \"LogPath\": \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/logs/3b048bcefc984c0a8765315265c4f5b5.log\", \"Name\": \"/pdocker-llama-cpp\", \"RestartCount\": 0, \"Driver\": \"pdocker-direct\", \"Platform\": \"linux\", \"MountLabel\": \"\", \"ProcessLabel\": \"\", \"AppArmorProfile\": \"\", \"ExecIDs\": null, \"HostConfig\": {\"Binds\": [\"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/models/llama-cpp-gpu:/models\", \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/workspaces/llama-cpp-gpu:/workspace\", \"/data/use",
+    "log_excerpt": "criptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.2811,\"dispatch_ms\":6.6888,\"download_ms\":0.0190,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.2403,\"dispatch_ms\":5.1755,\"download_ms\":0.0170,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.2328,\"dispatch_ms\":5.0927,\"download_ms\":0.0132,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.2183,\"dispatch_ms\":5.1843,\"download_ms\":0.0153,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.2328,\"dispatch_ms\":5.2157,\"download_ms\":0.0145,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.3258,\"dispatch_ms\":5.2717,\"download_ms\":0.0137,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.2539,\"dispatch_ms\":6.4222,\"download_ms\":0.0155,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.2994,\"dispatch_ms\":6.8613,\"download_ms\":0.0137,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.2435,\"dispatch_ms\":6.0934,\"download_ms\":0.0142,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.2539,\"dispatch_ms\":5.5350,\"download_ms\":0.0193,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.1844,\"dispatch_ms\":5.4243,\"download_ms\":0.0239,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":0.1647,\"dispatch_ms\":5.7309,\"download_ms\":0.0277,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":16384,\"skipped_download_bytes\":49156},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":10744,\"entry\":\"main\",\"specializations\":0,\"bindings\":4,\"dispatch\":[8,4,8],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":0,\"specialization_materialized\":false,\"profile_response\":false,\"upload_ms\":1.8821,\"dispatch_ms\":6.0247,\"download_ms\":1.0400,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":2,\"read_bindings\":1,\"write_bindings\":1,\"skipped_bindings\":2,\"skipped_bytes\":196608,\"skipped_upload_bytes\":524288,\"skipped_download_bytes\":524288},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"shader_bytes\":26688,\"entry\":\"main\",\"specializations\":3,\"bindings\":5,\"dispatch\":[1187,1,64],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":true,\"entries\":32},\"descriptor_aliases\":1,\"specialization_materialized\":true,\"profile_response\":false,\"upload_ms\":2.1395,\"dispatch_ms\":13.5209,\"download_ms\":0.5177,\"resident_cache\":{\"enabled\":true,\"resident_bindings\":1,\"hits\":1,\"bytes\":510504960},\"mutable_buffer_cache\":{\"enabled\":true,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":5,\"read_bindings\":4,\"write_bindings\":1,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":607744,\"skipped_download_bytes\":511736832},\"valid\":true}\nslot print_timing: id  0 | task 7 | \nprompt eval time =   20255.77 ms /     6 tokens ( 3375.96 ms per token,     0.30 tokens per second)\n       eval time =   34363.47 ms /     4 tokens ( 8590.87 ms per token,     0.12 tokens per second)\n      total time =   54619.24 ms /    10 tokens\nslot      release: id  0 | task 7 | stop processing: n_tokens = 9, truncated = 0\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: POST /completion 127.0.0.1 200\n",
+    "evidence": {
+      "vulkan_device_seen": true,
+      "offload_seen": true,
+      "model_loaded": true,
+      "serve_reachable": true,
+      "buffer_allocation_blocker": false,
+      "assert_blocker": false,
+      "buffer_range_assert_blocker": false,
+      "gpu_model_buffer_seen": true,
+      "gpu_repeating_layers": 3,
+      "gpu_offloaded_layers": 4,
+      "gpu_total_layers": 37,
+      "gpu_output_only_offload": false,
+      "generic_dispatch_response_seen": true,
+      "generic_spirv_dispatch_attempted": true,
+      "generic_spirv_dispatch_seen": true,
+      "generic_spirv_dispatch_failed": false,
+      "pipeline_feature_blocker": false,
+      "executor_spirv_trace_seen": false,
+      "executor_feature_trace_seen": false,
+      "android_vulkan_dispatch_blocker": false,
+      "executor_submit_generic_dispatch_error": false,
+      "executor_fallback_dispatch_blocker": false,
+      "queue_submit_blocker": false,
+      "spirv_dispatch_blocker": false
+    },
+    "allocation_trace_bytes": [],
+    "bridge_dispatch_profile": {
+      "samples": 483,
+      "upload_ms_mean": 4.0028455486542445,
+      "dispatch_ms_mean": 2.666550724637681,
+      "download_ms_mean": 0.04668053830227743,
+      "copy_buffer_ops_in_log": 0,
+      "copy_buffer_bytes_in_log": 0,
+      "copy_submit_count": 0,
+      "copy_submit_ops": 0,
+      "copy_submit_alias_ops": 0,
+      "copy_submit_memmove_ops": 0,
+      "copy_submit_skipped_ops": 0,
+      "copy_submit_alias_bytes": 0,
+      "copy_submit_memmove_bytes": 0,
+      "copy_submit_skipped_bytes": 0,
+      "guarded_binding_samples": 0,
+      "guarded_binding_max_resident_bytes": 0,
+      "guarded_binding_max_dirty_bytes": 0,
+      "guarded_binding_max_range_bytes": 0,
+      "binding_timing_samples": 0,
+      "binding_upload_ms_max": 0.0,
+      "binding_download_ms_max": 0.0,
+      "dirty_probe_binding_samples": 0,
+      "dirty_probe_max_bytes": 0,
+      "dirty_probe_total_bytes": 0,
+      "dirty_probe_ms_max": 0.0,
+      "dirty_writeback_cached_samples": 0,
+      "dirty_writeback_total_bytes": 0,
+      "top_binding_uploads": [],
+      "top_binding_downloads": [],
+      "top_dirty_probe_bindings": []
+    },
+    "diagnostics": {
+      "blocker_class": "bridge_dispatch_performance",
+      "blocker_detail": "served through generic SPIR-V, but bridge upload/copy overhead keeps GPU below CPU throughput",
+      "failure_axes": {
+        "advertised_limits": {
+          "state": "not_front_blocker",
+          "reason": "no feature-limit submit failure in this run"
+        },
+        "chunking": {
+          "state": "pressure",
+          "reason": "large model/buffer allocations are at or above the 512MiB bridge clamp; future failures should distinguish splitting/chunk transport from shader lowering"
+        },
+        "generic_spirv_dispatch": {
+          "state": "passed",
+          "reason": "generic SPIR-V dispatch was not the failing axis in this run"
+        }
+      },
+      "advertised_limits": {
+        "configured_clamps": {
+          "PDOCKER_VULKAN_MAX_BUFFER_BYTES": 536870912,
+          "GGML_VK_FORCE_MAX_BUFFER_SIZE": 536870912,
+          "GGML_VK_FORCE_MAX_ALLOCATION_SIZE": 536870912,
+          "GGML_VK_SUBALLOCATION_BLOCK_SIZE": 536870912
+        },
+        "icd_advertises_subgroup_arithmetic_by_default": true,
+        "executor_android_features": {},
+        "spirv_trace_count": 0,
+        "last_spirv_trace": {}
+      },
+      "chunking_pressure": {
+        "configured_bridge_max_buffer_bytes": 536870912,
+        "largest_allocation_bytes": 0,
+        "largest_created_buffer_bytes": 0,
+        "allocation_near_clamp": false,
+        "model_cpu_mapped_bytes": 4143448064,
+        "model_cpu_mapped_exceeds_bridge_clamp": true,
+        "vulkan_model_buffer_mib": 837.69,
+        "descriptor_range_max_bytes": 0
+      },
+      "generic_spirv_dispatch": {
+        "attempted": true,
+        "valid_android_vulkan_events": [
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "shader_bytes": 11604,
+            "entry": "main",
+            "specializations": 0,
+            "bindings": 5,
+            "dispatch": [
+              32,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 32
+            },
+            "descriptor_aliases": 0,
+            "specialization_materialized": false,
+            "profile_response": false,
+            "upload_ms": 0.1844,
+            "dispatch_ms": 5.4243,
+            "download_ms": 0.0239,
+            "resident_cache": {
+              "enabled": true,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": true,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 4,
+              "write_bindings": 1,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 16384,
+              "skipped_download_bytes": 49156
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "shader_bytes": 11604,
+            "entry": "main",
+            "specializations": 0,
+            "bindings": 5,
+            "dispatch": [
+              32,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 32
+            },
+            "descriptor_aliases": 0,
+            "specialization_materialized": false,
+            "profile_response": false,
+            "upload_ms": 0.1647,
+            "dispatch_ms": 5.7309,
+            "download_ms": 0.0277,
+            "resident_cache": {
+              "enabled": true,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": true,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 4,
+              "write_bindings": 1,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 16384,
+              "skipped_download_bytes": 49156
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "shader_bytes": 10744,
+            "entry": "main",
+            "specializations": 0,
+            "bindings": 4,
+            "dispatch": [
+              8,
+              4,
+              8
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 32
+            },
+            "descriptor_aliases": 0,
+            "specialization_materialized": false,
+            "profile_response": false,
+            "upload_ms": 1.8821,
+            "dispatch_ms": 6.0247,
+            "download_ms": 1.04,
+            "resident_cache": {
+              "enabled": true,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": true,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 2,
+              "read_bindings": 1,
+              "write_bindings": 1,
+              "skipped_bindings": 2,
+              "skipped_bytes": 196608,
+              "skipped_upload_bytes": 524288,
+              "skipped_download_bytes": 524288
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "shader_bytes": 26688,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              1187,
+              1,
+              64
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 32
+            },
+            "descriptor_aliases": 1,
+            "specialization_materialized": true,
+            "profile_response": false,
+            "upload_ms": 2.1395,
+            "dispatch_ms": 13.5209,
+            "download_ms": 0.5177,
+            "resident_cache": {
+              "enabled": true,
+              "resident_bindings": 1,
+              "hits": 1,
+              "bytes": 510504960
+            },
+            "mutable_buffer_cache": {
+              "enabled": true,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 4,
+              "write_bindings": 1,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 607744,
+              "skipped_download_bytes": 511736832
+            },
+            "valid": true
+          }
+        ],
+        "failed_events": [],
+        "fallback_events": [],
+        "llama_throw": ""
+      },
+      "executor_backends": [
+        "android_vulkan"
+      ],
+      "executor_errors": [],
+      "spirv_hashes": []
+    },
+    "correctness": {
+      "schema": "pdocker.llama.correctness.v1.compare",
+      "timestamp_utc": "2026-05-07T22:07:55Z",
+      "endpoint": "http://127.0.0.1:28081",
+      "mode": "vulkan-forced-ngl-4",
+      "gpu_layers": 4,
+      "model_path": "/models/model.gguf",
+      "probes": [
+        {
+          "name": "addition",
+          "prompt": "2+3=",
+          "expected": [
+            "5"
+          ],
+          "required": true,
+          "passed": false,
+          "content": "!",
+          "error": null,
+          "duration_ms": 27353.343,
+          "status_code": 200
+        },
+        {
+          "name": "multiplication_prefix",
+          "prompt": "12*7=",
+          "expected": [
+            "84",
+            "8"
+          ],
+          "required": false,
+          "passed": false,
+          "content": "!",
+          "error": null,
+          "duration_ms": 24351.781,
+          "status_code": 200
+        },
+        {
+          "name": "identity_text",
+          "prompt": "Repeat exactly: pdocker-ok",
+          "expected": [
+            "pdocker-ok",
+            " pdocker-ok"
+          ],
+          "required": false,
+          "passed": false,
+          "content": "!!!!",
+          "error": null,
+          "duration_ms": 54669.34,
+          "status_code": 200
+        }
+      ],
+      "summary": {
+        "correctness": "fail",
+        "required_failures": 1,
+        "optional_failures": 2,
+        "benchmark_claim_allowed": false
+      }
+    }
+  },
+  "comparison": {
+    "speedup": 0.4359270357098484,
+    "target_tokens_per_second": 3.6100235915041705,
+    "target_met": false
+  },
+  "bridge_overhead_phase": {
+    "phase": "served_but_transfer_bound",
+    "served": true,
+    "gpu_layers": 4,
+    "cpu_tokens_per_second": 0.36100235915041706,
+    "gpu_tokens_per_second": 0.15737068830870338,
+    "speedup": 0.4359270357098484,
+    "target_speedup": 10.0,
+    "target_tokens_per_second": 3.6100235915041705,
+    "target_met": false,
+    "blocker": "served through generic SPIR-V, but bridge upload/copy overhead keeps GPU below CPU throughput",
+    "next_action": "reduce bridge upload/copy overhead with persistent registered buffers; rerun with larger n_predict",
+    "bridge_dispatch_profile": {
+      "samples": 483,
+      "upload_ms_mean": 4.0028455486542445,
+      "dispatch_ms_mean": 2.666550724637681,
+      "download_ms_mean": 0.04668053830227743,
+      "copy_buffer_ops_in_log": 0,
+      "copy_buffer_bytes_in_log": 0,
+      "copy_submit_count": 0,
+      "copy_submit_ops": 0,
+      "copy_submit_alias_ops": 0,
+      "copy_submit_memmove_ops": 0,
+      "copy_submit_skipped_ops": 0,
+      "copy_submit_alias_bytes": 0,
+      "copy_submit_memmove_bytes": 0,
+      "copy_submit_skipped_bytes": 0,
+      "guarded_binding_samples": 0,
+      "guarded_binding_max_resident_bytes": 0,
+      "guarded_binding_max_dirty_bytes": 0,
+      "guarded_binding_max_range_bytes": 0,
+      "binding_timing_samples": 0,
+      "binding_upload_ms_max": 0.0,
+      "binding_download_ms_max": 0.0,
+      "dirty_probe_binding_samples": 0,
+      "dirty_probe_max_bytes": 0,
+      "dirty_probe_total_bytes": 0,
+      "dirty_probe_ms_max": 0.0,
+      "dirty_writeback_cached_samples": 0,
+      "dirty_writeback_total_bytes": 0,
+      "top_binding_uploads": [],
+      "top_binding_downloads": [],
+      "top_dirty_probe_bindings": []
+    }
+  },
+  "operation": {
+    "kind": "llama-gpu-compare",
+    "ui_surface": "Overview daemon operation/progress card",
+    "container_surface": "pdocker-llama-cpp remains the container shown by Engine container listing",
+    "cleanup": "remove adb port forward and mark failed operation on nonzero exit; CPU restore is opt-in with --restore because the next run recreates the required mode"
+  },
+  "next_blocker": "served through generic SPIR-V, but bridge upload/copy overhead keeps GPU below CPU throughput",
+  "next_action": "reduce bridge upload/copy overhead with persistent registered buffers; rerun with larger n_predict"
+}

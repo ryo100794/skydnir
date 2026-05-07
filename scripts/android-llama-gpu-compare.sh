@@ -24,6 +24,7 @@ RESTORE_CPU=0
 RUN_CPU=1
 CPU_TPS_OVERRIDE="${PDOCKER_LLAMA_CPU_TPS:-}"
 TRACE_ALLOC="${PDOCKER_LLAMA_TRACE_ALLOC:-0}"
+CORRECTNESS="${PDOCKER_LLAMA_CORRECTNESS:-1}"
 OP_ID="llama-gpu-compare-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 CURRENT_CONTAINER_ID=""
 
@@ -263,7 +264,9 @@ if mode == "vulkan-raw":
         env.append("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1")
 for key in [
     "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
+    "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
     "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
+    "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
     "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
     "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
     "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
@@ -409,6 +412,93 @@ bench_http() {
     "$ROOT/scripts/android-llama-bench.sh"
 }
 
+probe_http_correctness() {
+  local mode="$1"
+  local out="$2"
+  "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
+  "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
+  python3 - "http://127.0.0.1:$LOCAL_PORT" "$mode" "$GPU_LAYERS" "$MODEL_PATH" "$out" <<'PY'
+import json
+import sys
+import time
+import urllib.request
+
+base_url, mode, gpu_layers, model_path, out_path = sys.argv[1:6]
+
+def post_json(path, body, timeout):
+    data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        base_url + path,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    started = time.monotonic()
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        payload = json.loads(resp.read().decode("utf-8", "replace"))
+        return resp.status, round((time.monotonic() - started) * 1000.0, 3), payload
+
+probes = [
+    {"name": "addition", "prompt": "2+3=", "expected": ["5"], "required": True},
+    {"name": "multiplication_prefix", "prompt": "12*7=", "expected": ["84", "8"], "required": False},
+    {"name": "identity_text", "prompt": "Repeat exactly: pdocker-ok", "expected": ["pdocker-ok", " pdocker-ok"], "required": False},
+]
+results = []
+for probe in probes:
+    item = dict(probe)
+    item.update({"passed": False, "content": "", "error": None, "duration_ms": None, "status_code": None})
+    try:
+        status, duration_ms, payload = post_json(
+            "/completion",
+            {
+                "prompt": probe["prompt"],
+                "n_predict": 4 if probe["name"] == "identity_text" else 1,
+                "temperature": 0,
+                "top_k": 1,
+                "top_p": 1,
+                "cache_prompt": False,
+                "stream": False,
+                "stop": ["\n"],
+            },
+            timeout=180,
+        )
+        content = str(payload.get("content", ""))
+        normalized = content.lstrip()
+        item.update({
+            "status_code": status,
+            "duration_ms": duration_ms,
+            "content": content[:256],
+            "passed": any(normalized.startswith(prefix) for prefix in probe["expected"]),
+        })
+    except Exception as exc:
+        item["error"] = f"{type(exc).__name__}: {exc}"
+    results.append(item)
+
+required_failures = [p for p in results if p["required"] and not p["passed"]]
+optional_failures = [p for p in results if not p["required"] and not p["passed"]]
+summary = {
+    "correctness": "fail" if required_failures else "pass",
+    "required_failures": len(required_failures),
+    "optional_failures": len(optional_failures),
+    "benchmark_claim_allowed": not required_failures,
+}
+report = {
+    "schema": "pdocker.llama.correctness.v1.compare",
+    "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "endpoint": base_url,
+    "mode": mode,
+    "gpu_layers": int(gpu_layers),
+    "model_path": model_path,
+    "probes": results,
+    "summary": summary,
+}
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(report, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+print(json.dumps(summary, indent=2))
+PY
+}
+
 wait_for_engine
 DEVICE_PROJECT="$(run_as "cd $(remote_quote "$PROJECT") && pwd" | tr -d '\r')"
 DEVICE_MODEL_HOST="$(run_as "cd $(remote_quote "$PROJECT") && . ./.env >/dev/null 2>&1 && printf '%s' \"\${PDOCKER_MODEL_HOST:-$DEVICE_PROJECT/models}\"" | tr -d '\r')"
@@ -465,9 +555,14 @@ start_gpu >/dev/null
 GPU_LOG="$TMP/gpu.log"
 GPU_STATE="$TMP/gpu-state.txt"
 GPU_JSON="$TMP/gpu.json"
+CORRECTNESS_JSON="$TMP/correctness.json"
 if wait_server 120; then
   operation_notify "running" "Forced Vulkan served; recording HTTP benchmark"
   bench_http "vulkan-forced-ngl-$GPU_LAYERS" "$GPU_JSON" >/dev/null || true
+  if [[ "$CORRECTNESS" != "0" ]]; then
+    operation_notify "running" "Forced Vulkan served; checking arithmetic correctness"
+    probe_http_correctness "vulkan-forced-ngl-$GPU_LAYERS" "$CORRECTNESS_JSON" >/dev/null || true
+  fi
   gpu_served=1
 else
   operation_notify "running" "Forced Vulkan did not serve; collecting container logs"
@@ -476,14 +571,14 @@ fi
 container_state > "$GPU_STATE"
 container_logs > "$GPU_LOG"
 
-python3 - "$CPU_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" <<'PY'
+python3 - "$CPU_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$CORRECTNESS_JSON" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" <<'PY'
 import json
 import re
 import sys
 import time
 from pathlib import Path
 
-cpu_path, gpu_path, gpu_log_path, gpu_state_path, out_path, gpu_served_s, gpu_layers, gpu_ctx, predict, repeat, warmup_discard, trace_alloc, model_path, model_url = sys.argv[1:15]
+cpu_path, gpu_path, gpu_log_path, gpu_state_path, correctness_path, out_path, gpu_served_s, gpu_layers, gpu_ctx, predict, repeat, warmup_discard, trace_alloc, model_path, model_url = sys.argv[1:16]
 cpu = json.load(open(cpu_path, encoding="utf-8"))
 gpu = {}
 if Path(gpu_path).is_file() and Path(gpu_path).stat().st_size:
@@ -493,6 +588,12 @@ if Path(gpu_path).is_file() and Path(gpu_path).stat().st_size:
         gpu = {}
 log = Path(gpu_log_path).read_text(encoding="utf-8", errors="replace") if Path(gpu_log_path).is_file() else ""
 state = Path(gpu_state_path).read_text(encoding="utf-8", errors="replace") if Path(gpu_state_path).is_file() else ""
+correctness = {}
+if Path(correctness_path).is_file() and Path(correctness_path).stat().st_size:
+    try:
+        correctness = json.load(open(correctness_path, encoding="utf-8"))
+    except Exception:
+        correctness = {}
 cpu_tps = float(cpu.get("summary", {}).get("predicted_tokens_per_second_mean") or 0.0)
 gpu_tps = float(gpu.get("summary", {}).get("predicted_tokens_per_second_mean") or 0.0)
 target_tps = cpu_tps * 10.0
@@ -942,6 +1043,7 @@ result = {
             "executor_errors": executor_errors,
             "spirv_hashes": spirv_hashes[-4:],
         },
+        "correctness": correctness,
     },
     "comparison": {
         "speedup": speedup,
@@ -996,6 +1098,7 @@ print(
     f"speedup {d['comparison']['speedup']:.2f}x; "
     f"target_met={str(d['comparison']['target_met']).lower()}; "
     f"gpu_layers={d['settings']['gpu_layers']}; "
+    f"correctness={d['gpu'].get('correctness', {}).get('summary', {}).get('correctness', 'not-run')}; "
     f"next: {d['next_blocker']}"
 )
 PY
@@ -1005,6 +1108,11 @@ operation_notify "running" "$SUMMARY"
 DEVICE_NAME="$(basename "$OUT")"
 "$ADB" push "$OUT" "/data/local/tmp/$DEVICE_NAME" >/dev/null
 run_as "mkdir -p files/pdocker/bench && cp /data/local/tmp/$DEVICE_NAME files/pdocker/bench/$DEVICE_NAME"
+if [[ -s "$CORRECTNESS_JSON" ]]; then
+  CORRECTNESS_DEVICE_NAME="llama-correctness-$(date -u +%Y%m%dT%H%M%SZ).json"
+  "$ADB" push "$CORRECTNESS_JSON" "/data/local/tmp/$CORRECTNESS_DEVICE_NAME" >/dev/null
+  run_as "mkdir -p files/pdocker/bench && cp /data/local/tmp/$CORRECTNESS_DEVICE_NAME files/pdocker/bench/$CORRECTNESS_DEVICE_NAME"
+fi
 
 if [[ "$RESTORE_CPU" -eq 1 ]]; then
   echo "[pdocker llama compare] restore CPU server"
