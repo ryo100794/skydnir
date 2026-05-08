@@ -57,6 +57,7 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-compare-20260508-ngl1-disable-storage16.json` | 1 | 16-bit storage feature disabled | n/a | n/a | fail | model load crashed with `sig=11` |
 | `llama-gpu-compare-20260508-ngl1-push-layout.json` | 1 | Full pipeline-layout push-constant size preserved across the bridge | 0.1813 | 0.50x | fail | `+`, `细细`, empty |
 | `llama-gpu-compare-20260508-ngl1-differential-cpu-gpu.json` | 1 | Full CPU/no-offload vs GPU/offload differential correctness gate | 0.1949 | 0.15x | fail | CPU: `5`, `8`, empty; GPU: `+`, `细细`, empty |
+| `llama-gpu-compare-20260508-ngl1-no-dup-latest.json` | 1 | Duplicate descriptor rewrite disabled after push-layout fix | 0.1962 | 0.15x | fail | `礼拜`, `羽毛`, `itol Bjitol刊登` |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -123,6 +124,9 @@ Two ICD correctness fixes were added on 2026-05-08:
   merely prompt ambiguity. On the same image and prompts, CPU/no-offload returns
   `5` and `8` for the arithmetic probes while GPU/offload returns `+` and
   `细细`. Performance claims remain blocked until this differential gate passes.
+- Disabling duplicate descriptor rewrite after the push-layout fix again changes
+  the wrong output shape. That keeps descriptor identity/aliasing in the active
+  suspect set, but it is not sufficient to restore correctness.
 
 The NGL=0 control also does not satisfy the arithmetic probe, so the absolute
 math prompt is not strong enough as the only correctness oracle. However, the
