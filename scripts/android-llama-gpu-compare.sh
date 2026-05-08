@@ -25,6 +25,7 @@ RUN_CPU=1
 CPU_TPS_OVERRIDE="${PDOCKER_LLAMA_CPU_TPS:-}"
 TRACE_ALLOC="${PDOCKER_LLAMA_TRACE_ALLOC:-0}"
 CORRECTNESS="${PDOCKER_LLAMA_CORRECTNESS:-1}"
+LOG_TAIL_LINES="${PDOCKER_LLAMA_LOG_TAIL_LINES:-2000}"
 OP_ID="llama-gpu-compare-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 CURRENT_CONTAINER_ID=""
 
@@ -348,7 +349,7 @@ container_ref() {
 container_logs() {
   local ref
   ref="$(container_ref)"
-  engine_request GET "/containers/$(urlencode "$ref")/logs?stdout=1&stderr=1&tail=320" | decode_engine_logs || true
+  engine_request GET "/containers/$(urlencode "$ref")/logs?stdout=1&stderr=1&tail=$LOG_TAIL_LINES" | decode_engine_logs || true
 }
 
 container_state() {
@@ -662,15 +663,54 @@ spirv_hashes = sorted(set(re.findall(r'"spirv_hash"\s*:\s*"([^"]+)"', log)))
 
 def extract_executor_json_events(text):
     events = []
-    for line in text.splitlines():
+    marker = "generic dispatch response:"
+    starts = []
+    search_from = 0
+    while True:
+        marker_pos = text.find(marker, search_from)
+        if marker_pos < 0:
+            break
+        brace_pos = text.find("{", marker_pos + len(marker))
+        if brace_pos < 0:
+            break
+        starts.append(brace_pos)
+        search_from = brace_pos + 1
+    for line_start, line in enumerate(text.splitlines()):
         raw = line.strip()
-        marker = "generic dispatch response:"
-        if marker in raw:
-            raw = raw.split(marker, 1)[1].strip()
-        if not raw.startswith("{"):
+        if raw.startswith("{"):
+            starts.append(text.find(line, 0 if line_start == 0 else 0))
+    seen_starts = set()
+    for start in starts:
+        if start < 0 or start in seen_starts:
+            continue
+        seen_starts.add(start)
+        depth = 0
+        in_string = False
+        escaped = False
+        end = -1
+        for pos in range(start, len(text)):
+            ch = text[pos]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = pos + 1
+                    break
+        if end < 0:
             continue
         try:
-            event = json.loads(raw)
+            event = json.loads(text[start:end])
         except Exception:
             continue
         if event.get("executor") == "pdocker-gpu-executor":
@@ -879,6 +919,26 @@ advertised_limits = {
 generic_spirv_dispatch = {
     "attempted": generic_spirv_attempted,
     "valid_android_vulkan_events": [e for e in executor_events if e.get("kernel") == "generic_spirv" and e.get("backend_impl") == "android_vulkan" and e.get("valid") is True][-4:],
+    "largest_shader_events": sorted(
+        [
+            e for e in executor_events
+            if e.get("kernel") == "generic_spirv"
+            and e.get("backend_impl") == "android_vulkan"
+            and e.get("valid") is True
+        ],
+        key=lambda event: int(event.get("shader_bytes") or 0),
+        reverse=True,
+    )[:8],
+    "largest_binding_events": sorted(
+        [
+            e for e in executor_events
+            if e.get("kernel") == "generic_spirv"
+            and e.get("backend_impl") == "android_vulkan"
+            and e.get("valid") is True
+        ],
+        key=lambda event: sum(int(detail.get("size") or 0) for detail in event.get("binding_details") or []),
+        reverse=True,
+    )[:8],
     "failed_events": [
         e for e in executor_events
         if e.get("valid") is False and (e.get("kernel") == "generic_spirv" or e.get("error") == "submit-generic-dispatch")

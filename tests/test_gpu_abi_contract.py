@@ -74,6 +74,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("binding_group_base[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
         self.assertIn("binding_group_end[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
         self.assertIn("binding_gpu_offset[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
+        self.assertIn("write_vulkan_descriptor_write_report", source)
+        self.assertIn("write_vulkan_binding_compact_report", source)
+        self.assertIn('\\"compact_summary\\":true', source)
+        self.assertIn('\\"descriptor_writes\\":[', source)
+        self.assertIn('\\"dst_binding\\":%u', source)
+        self.assertIn('\\"source_index\\":%zu', source)
+        self.assertIn('\\"source_binding\\":%u', source)
+        self.assertIn('\\"alias_write\\":%s', source)
         self.assertIn("binding_group_span_seen[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
         self.assertIn("binding_alias_rep[i] != i", source)
         self.assertIn("i0 < j1 && j0 < i1", source)
@@ -211,6 +219,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "binding_download_ms_max",
             "top_binding_uploads",
             "top_binding_downloads",
+            "largest_shader_events",
+            "largest_binding_events",
         ]:
             self.assertIn(field, compare)
         self.assertIn('detail.get("upload_ms")', compare)

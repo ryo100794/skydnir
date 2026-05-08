@@ -58,6 +58,7 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-compare-20260508-ngl1-push-layout.json` | 1 | Full pipeline-layout push-constant size preserved across the bridge | 0.1813 | 0.50x | fail | `+`, `细细`, empty |
 | `llama-gpu-compare-20260508-ngl1-differential-cpu-gpu.json` | 1 | Full CPU/no-offload vs GPU/offload differential correctness gate | 0.1949 | 0.15x | fail | CPU: `5`, `8`, empty; GPU: `+`, `细细`, empty |
 | `llama-gpu-compare-20260508-ngl1-no-dup-latest.json` | 1 | Duplicate descriptor rewrite disabled after push-layout fix | 0.1962 | 0.15x | fail | `礼拜`, `羽毛`, `itol Bjitol刊登` |
+| `llama-gpu-compare-20260508-ngl1-compact-summary.json` | 1 | Compact per-dispatch descriptor summary for the long final projection event | 0.1973 | 0.15x | fail | `+`, `细细`, empty |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -127,6 +128,13 @@ Two ICD correctness fixes were added on 2026-05-08:
 - Disabling duplicate descriptor rewrite after the push-layout fix again changes
   the wrong output shape. That keeps descriptor identity/aliasing in the active
   suspect set, but it is not sufficient to restore correctness.
+- Long final-projection dispatch events exceeded practical log-line parsing
+  limits when full binding diagnostics and descriptor writes were emitted on one
+  line. The executor now emits a separate compact per-dispatch JSON summary.
+  This captured the active final projection dispatch (`shader_bytes=26784`,
+  `dispatch=[1187,1,64]`) with the 510 MiB model buffer at binding 0, the
+  607 KiB logits/work buffer shared by bindings 2/3/4, and the duplicate binding
+  rewrite that maps the second binding-0 SPIR-V variable to descriptor binding 5.
 
 The NGL=0 control also does not satisfy the arithmetic probe, so the absolute
 math prompt is not strong enough as the only correctness oracle. However, the

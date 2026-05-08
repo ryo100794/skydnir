@@ -1901,6 +1901,77 @@ static void write_vulkan_binding_report(
     fprintf(out, "]");
 }
 
+static void write_vulkan_descriptor_write_report(
+        FILE *out,
+        const uint32_t *dst_bindings,
+        const size_t *source_indices,
+        const uint32_t *source_bindings,
+        const size_t *alias_reps,
+        const VkDeviceSize *offsets,
+        const VkDeviceSize *ranges,
+        const uint8_t *alias_writes,
+        size_t write_count) {
+    fprintf(out, "\"descriptor_writes\":[");
+    for (size_t i = 0; i < write_count; ++i) {
+        fprintf(out,
+                "%s{\"index\":%zu,\"dst_binding\":%u,"
+                "\"source_index\":%zu,\"source_binding\":%u,"
+                "\"alias_rep\":%zu,\"offset\":%llu,\"range\":%llu,"
+                "\"alias_write\":%s}",
+                i ? "," : "",
+                i,
+                dst_bindings ? dst_bindings[i] : 0,
+                source_indices ? source_indices[i] : (size_t)0,
+                source_bindings ? source_bindings[i] : 0,
+                alias_reps ? alias_reps[i] : (source_indices ? source_indices[i] : (size_t)0),
+                (unsigned long long)(offsets ? offsets[i] : 0),
+                (unsigned long long)(ranges ? ranges[i] : 0),
+                alias_writes && alias_writes[i] ? "true" : "false");
+    }
+    fprintf(out, "]");
+}
+
+static void write_vulkan_binding_compact_report(
+        FILE *out,
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        const uint8_t *active,
+        const uint8_t *readable,
+        const uint8_t *writable,
+        const int *cache_resident,
+        const int *cache_hits,
+        const uint64_t *fd_before_hash,
+        const uint64_t *gpu_after_dispatch_hash,
+        const uint64_t *fd_after_hash,
+        const size_t *alias_rep) {
+    fprintf(out, "\"binding_details\":[");
+    for (size_t i = 0; i < binding_count; ++i) {
+        fprintf(out,
+                "%s{\"index\":%zu,\"binding\":%u,\"offset\":%lld,"
+                "\"size\":%zu,\"alias_rep\":%zu,\"active\":%s,"
+                "\"readable\":%s,\"writable\":%s,\"resident\":%s,"
+                "\"cache_hit\":%s,\"fd_before_hash\":\"0x%016llx\","
+                "\"gpu_after_dispatch_hash\":\"0x%016llx\","
+                "\"fd_after_hash\":\"0x%016llx\"}",
+                i ? "," : "",
+                i,
+                bindings[i].binding,
+                (long long)bindings[i].offset,
+                bindings[i].size,
+                alias_rep ? alias_rep[i] : i,
+                active && active[i] ? "true" : "false",
+                readable && readable[i] ? "true" : "false",
+                writable && writable[i] ? "true" : "false",
+                cache_resident && cache_resident[i] ? "true" : "false",
+                cache_hits && cache_hits[i] ? "true" : "false",
+                (unsigned long long)(fd_before_hash ? fd_before_hash[i] : 0),
+                (unsigned long long)(gpu_after_dispatch_hash ? gpu_after_dispatch_hash[i] : 0),
+                (unsigned long long)(fd_after_hash ? fd_after_hash[i] : 0));
+    }
+    fprintf(out, "]");
+}
+
+
 static VulkanVectorBuffer *acquire_dispatch_buffer(
         VkPhysicalDevice physical_device,
         VkDevice device,
@@ -3365,7 +3436,21 @@ static int run_vulkan_dispatch_fd(
     if (rc != VK_SUCCESS) goto cleanup;
     VkDescriptorBufferInfo infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     VkWriteDescriptorSet writes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint32_t descriptor_write_dst_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint32_t descriptor_write_source_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    size_t descriptor_write_source_indices[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    size_t descriptor_write_alias_reps[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VkDeviceSize descriptor_write_offsets[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VkDeviceSize descriptor_write_ranges[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint8_t descriptor_write_alias_flags[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     memset(writes, 0, sizeof(writes));
+    memset(descriptor_write_dst_bindings, 0, sizeof(descriptor_write_dst_bindings));
+    memset(descriptor_write_source_bindings, 0, sizeof(descriptor_write_source_bindings));
+    memset(descriptor_write_source_indices, 0, sizeof(descriptor_write_source_indices));
+    memset(descriptor_write_alias_reps, 0, sizeof(descriptor_write_alias_reps));
+    memset(descriptor_write_offsets, 0, sizeof(descriptor_write_offsets));
+    memset(descriptor_write_ranges, 0, sizeof(descriptor_write_ranges));
+    memset(descriptor_write_alias_flags, 0, sizeof(descriptor_write_alias_flags));
     size_t write_count = 0;
     for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i]) continue;
@@ -3378,6 +3463,13 @@ static int run_vulkan_dispatch_fd(
         writes[write_count].descriptorCount = 1;
         writes[write_count].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[write_count].pBufferInfo = &infos[write_count];
+        descriptor_write_dst_bindings[write_count] = bindings[i].binding;
+        descriptor_write_source_indices[write_count] = i;
+        descriptor_write_source_bindings[write_count] = bindings[i].binding;
+        descriptor_write_alias_reps[write_count] = binding_alias_rep[i];
+        descriptor_write_offsets[write_count] = infos[write_count].offset;
+        descriptor_write_ranges[write_count] = infos[write_count].range;
+        descriptor_write_alias_flags[write_count] = 0;
         ++write_count;
     }
     for (size_t i = 0; i < binding_alias_count; ++i) {
@@ -3410,6 +3502,13 @@ static int run_vulkan_dispatch_fd(
         writes[write_count].descriptorCount = 1;
         writes[write_count].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[write_count].pBufferInfo = &infos[write_count];
+        descriptor_write_dst_bindings[write_count] = binding_aliases[i].rewritten_binding;
+        descriptor_write_source_indices[write_count] = (size_t)original_index;
+        descriptor_write_source_bindings[write_count] = bindings[original_index].binding;
+        descriptor_write_alias_reps[write_count] = binding_alias_rep[original_index];
+        descriptor_write_offsets[write_count] = infos[write_count].offset;
+        descriptor_write_ranges[write_count] = infos[write_count].range;
+        descriptor_write_alias_flags[write_count] = 1;
         ++write_count;
     }
     vkUpdateDescriptorSets(rt->device, (uint32_t)write_count, writes, 0, NULL);
@@ -3567,6 +3666,42 @@ static int run_vulkan_dispatch_fd(
         }
         if (mutable_cache_hits[i]) mutable_hit_count++;
     }
+    if (profile_response) {
+        fprintf(json_out(),
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\","
+                "\"compact_summary\":true,"
+                "\"shader_bytes\":%zu,\"entry\":\"%s\",\"specializations\":%zu,"
+                "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
+                "\"descriptor_aliases\":%zu,\"specialization_materialized\":%s,"
+                "\"resident_bytes\":%zu,\"mutable_bytes\":%zu,"
+                "\"valid\":true,",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                shader_size, entry_name, specialization_count, binding_count, gx, gy, gz,
+                binding_alias_count,
+                specialization_materialized ? "true" : "false",
+                resident_bytes,
+                mutable_bytes);
+        write_vulkan_binding_compact_report(json_out(), bindings, binding_count,
+                                            active_bindings,
+                                            binding_read_needed, binding_write_needed,
+                                            cache_resident, cache_hits,
+                                            binding_fd_before_hash,
+                                            binding_gpu_after_dispatch_hash,
+                                            binding_fd_after_hash,
+                                            binding_alias_rep);
+        fprintf(json_out(), ",");
+        write_vulkan_descriptor_write_report(json_out(),
+                                             descriptor_write_dst_bindings,
+                                             descriptor_write_source_indices,
+                                             descriptor_write_source_bindings,
+                                             descriptor_write_alias_reps,
+                                             descriptor_write_offsets,
+                                             descriptor_write_ranges,
+                                             descriptor_write_alias_flags,
+                                             write_count);
+        fprintf(json_out(), "}\n");
+    }
     fprintf(json_out(),
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
             "\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\","
@@ -3622,6 +3757,16 @@ static int run_vulkan_dispatch_fd(
                                     binding_gpu_after_dispatch_hash,
                                     binding_fd_after_hash,
                                     binding_alias_rep);
+        fprintf(json_out(), ",");
+        write_vulkan_descriptor_write_report(json_out(),
+                                             descriptor_write_dst_bindings,
+                                             descriptor_write_source_indices,
+                                             descriptor_write_source_bindings,
+                                             descriptor_write_alias_reps,
+                                             descriptor_write_offsets,
+                                             descriptor_write_ranges,
+                                             descriptor_write_alias_flags,
+                                             write_count);
     }
     fprintf(json_out(), "}\n");
     fflush(json_out());
