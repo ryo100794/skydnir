@@ -226,6 +226,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "top_binding_downloads",
             "largest_shader_events",
             "largest_binding_events",
+            "gpu_correctness_mismatch",
         ]:
             self.assertIn(field, compare)
         self.assertIn('detail.get("upload_ms")', compare)

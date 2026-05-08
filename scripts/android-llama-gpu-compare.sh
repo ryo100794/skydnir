@@ -843,6 +843,8 @@ evidence = {
         or generic_spirv_dispatch_blocker
     ),
 }
+gpu_correctness_summary = correctness.get("summary", {}).get("correctness")
+differential_correctness_summary = differential_correctness.get("summary")
 if evidence["buffer_range_assert_blocker"]:
     blocker_class = "vulkan_buffer_range_accounting"
     blocker_detail = "scheduler warmup hit ggml_backend_buffer_get_alloc_size"
@@ -858,6 +860,12 @@ elif generic_spirv_dispatch_blocker:
 elif queue_submit_blocker:
     blocker_class = "vulkan_queue_submit_feature"
     blocker_detail = "llama.cpp submitted a Vulkan workload, but vkQueueSubmit failed with ErrorFeatureNotPresent before the executor trace boundary"
+elif bool(int(gpu_served_s)) and (
+    gpu_correctness_summary == "fail" or
+    differential_correctness_summary == "fail"
+):
+    blocker_class = "gpu_correctness_mismatch"
+    blocker_detail = "GPU offload served, but correctness probes do not match the CPU/no-offload control"
 elif evidence["generic_spirv_dispatch_seen"] and bool(int(gpu_served_s)):
     blocker_class = "bridge_dispatch_performance"
     blocker_detail = "generic SPIR-V dispatch served; benchmark throughput is the remaining gap"
@@ -1103,6 +1111,8 @@ next_action = (
     if evidence["android_vulkan_dispatch_blocker"] and evidence["executor_spirv_trace_seen"]
     else "lower llama.cpp SPIR-V dispatch into the Android GPU executor"
     if evidence["spirv_dispatch_blocker"] or evidence["queue_submit_blocker"]
+    else "trace final-projection descriptor aliases and feature requirements until GPU output matches CPU/no-offload"
+    if blocker_class == "gpu_correctness_mismatch"
     else "increase n-gpu-layers until repeating transformer layers are offloaded"
     if blocker_class == "insufficient_gpu_offload_depth"
     else "reduce bridge upload/copy overhead with persistent registered buffers; rerun with larger n_predict"
