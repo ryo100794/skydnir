@@ -43,6 +43,7 @@ probing.
 | `llama-gpu-compare-20260508-ngl1-all-transfers.json` | 1 | Transfer skipping and caches disabled after alias fixes | 0.1335 | 0.37x | fail | `!`, `!`, `!!!!` |
 | `llama-gpu-compare-20260508-ngl1-descriptor-semantics.json` | 1 | Descriptor array/copy/dynamic-offset hardening | 0.1628 | 0.45x | fail | `!`, `!`, `!!!!` |
 | `llama-gpu-compare-20260508-ngl1-descriptor-trace.json` | 1 | Descriptor hardening with allocation trace | 0.1573 | 0.44x | fail | `!`, `!`, `!!!!` |
+| `llama-gpu-compare-20260508-ngl1-workgroup-spec-guard.json` | 1 | Keep BuiltIn WorkgroupSize specialization subtree at default during materialization | 0.1353 | 0.37x | fail | `!`, `!`, `!!!!` |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -86,6 +87,11 @@ Two ICD correctness fixes were added on 2026-05-08:
   semantics. The traced NGL=1 llama run did not show those paths as the active
   failure trigger, so they remain important compatibility fixes rather than the
   current llama correctness root cause.
+- The executor now avoids materializing the `BuiltIn WorkgroupSize`
+  specialization subtree when the shader still uses literal `LocalSize`. This
+  prevents an invalid mismatch between `gl_WorkGroupSize` and actual local
+  invocation count. The NGL=1 probe still fails, so this was another real
+  hardening fix but not the final output-collapse cause.
 
 The NGL=0 control also does not satisfy the arithmetic probe, so the absolute
 math prompt is not strong enough as the only correctness oracle. However, the

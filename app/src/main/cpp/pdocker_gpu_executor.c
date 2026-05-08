@@ -1326,12 +1326,17 @@ static int materialize_spirv_specialization_constants(
     if (bound == 0 || bound > 65536) return 0;
     uint32_t *spec_ids = (uint32_t *)calloc(bound, sizeof(uint32_t));
     uint8_t *has_spec_id = (uint8_t *)calloc(bound, sizeof(uint8_t));
+    uint8_t *skip_spec_materialization = (uint8_t *)calloc(bound, sizeof(uint8_t));
+    uint8_t *workgroup_size_id = (uint8_t *)calloc(bound, sizeof(uint8_t));
     SpirvScalarConstant *scalars = (SpirvScalarConstant *)calloc(bound, sizeof(SpirvScalarConstant));
     SpirvCompositeConstant *composites = (SpirvCompositeConstant *)calloc(bound, sizeof(SpirvCompositeConstant));
     uint32_t *out = (uint32_t *)malloc(*bytes);
-    if (!spec_ids || !has_spec_id || !scalars || !composites || !out) {
+    if (!spec_ids || !has_spec_id || !skip_spec_materialization ||
+        !workgroup_size_id || !scalars || !composites || !out) {
         free(spec_ids);
         free(has_spec_id);
+        free(skip_spec_materialization);
+        free(workgroup_size_id);
         free(scalars);
         free(composites);
         free(out);
@@ -1343,9 +1348,39 @@ static int materialize_spirv_specialization_constants(
         uint16_t word_count = (uint16_t)(inst >> 16);
         uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) break;
-        if (op == 71 && word_count >= 4 && code[i + 2] == 1 && code[i + 1] < bound) {
-            has_spec_id[code[i + 1]] = 1;
-            spec_ids[code[i + 1]] = code[i + 3];
+        if (op == 71 && word_count >= 4 && code[i + 1] < bound) {
+            if (code[i + 2] == 1) {
+                has_spec_id[code[i + 1]] = 1;
+                spec_ids[code[i + 1]] = code[i + 3];
+            } else if (code[i + 2] == 11 && code[i + 3] == 25) {
+                /*
+                 * Some ggml Vulkan shaders carry a BuiltIn WorkgroupSize
+                 * SpecConstantComposite even when OpExecutionMode uses a
+                 * literal LocalSize.  If we materialize the shared SpecId into
+                 * that composite while leaving LocalSize unchanged, the shader
+                 * observes a gl_WorkGroupSize that does not match the actual
+                 * number of local invocations.  Keep that specialization
+                 * subtree at its SPIR-V default unless LocalSizeId support is
+                 * explicitly implemented.
+                 */
+                workgroup_size_id[code[i + 1]] = 1;
+                skip_spec_materialization[code[i + 1]] = 1;
+            }
+        }
+        i += word_count;
+    }
+    for (size_t i = 5; i < words;) {
+        uint32_t inst = code[i];
+        uint16_t word_count = (uint16_t)(inst >> 16);
+        uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) break;
+        if (op == 51 && word_count >= 3 && code[i + 2] < bound &&
+            workgroup_size_id[code[i + 2]]) {
+            for (uint16_t j = 3; j < word_count; ++j) {
+                if (code[i + j] < bound) {
+                    skip_spec_materialization[code[i + j]] = 1;
+                }
+            }
         }
         i += word_count;
     }
@@ -1363,7 +1398,8 @@ static int materialize_spirv_specialization_constants(
             break;
         }
 
-        if (op == 71 && word_count >= 4 && code[i + 2] == 1 && code[i + 1] < bound) {
+        if (op == 71 && word_count >= 4 && code[i + 2] == 1 &&
+            code[i + 1] < bound && !skip_spec_materialization[code[i + 1]]) {
             changed = 1;
             i += word_count;
             continue;
@@ -1384,7 +1420,8 @@ static int materialize_spirv_specialization_constants(
                 }
                 cc->values[cc->count++] = scalars[id].value;
             }
-        } else if (op == 50 && word_count >= 4 && code[i + 2] < bound) {
+        } else if (op == 50 && word_count >= 4 && code[i + 2] < bound &&
+                   !skip_spec_materialization[code[i + 2]]) {
             uint64_t value = code[i + 3];
             if (has_spec_id[code[i + 2]]) {
                 (void)specialization_value_for_id(
@@ -1405,7 +1442,8 @@ static int materialize_spirv_specialization_constants(
             changed = 1;
             i += word_count;
             continue;
-        } else if (op == 51 && word_count >= 3 && code[i + 2] < bound) {
+        } else if (op == 51 && word_count >= 3 && code[i + 2] < bound &&
+                   !skip_spec_materialization[code[i + 2]]) {
             out[out_words++] = ((uint32_t)word_count << 16) | 44u;
             for (uint16_t j = 1; j < word_count; ++j) out[out_words++] = code[i + j];
             SpirvCompositeConstant *cc = &composites[code[i + 2]];
@@ -1413,7 +1451,7 @@ static int materialize_spirv_specialization_constants(
             cc->count = 0;
             for (uint16_t j = 3; j < word_count && cc->count < 4; ++j) {
                 uint32_t id = code[i + j];
-                if (id >= bound || !scalars[id].valid) {
+                if (id >= bound || skip_spec_materialization[id] || !scalars[id].valid) {
                     cc->valid = 0;
                     break;
                 }
@@ -1423,6 +1461,19 @@ static int materialize_spirv_specialization_constants(
             i += word_count;
             continue;
         } else if (op == 52 && word_count >= 5 && code[i + 2] < bound) {
+            int uses_skipped_spec = skip_spec_materialization[code[i + 2]];
+            for (uint16_t j = 4; j < word_count; ++j) {
+                if (code[i + j] < bound && skip_spec_materialization[code[i + j]]) {
+                    uses_skipped_spec = 1;
+                    break;
+                }
+            }
+            if (uses_skipped_spec) {
+                memcpy(out + out_words, code + i, word_count * sizeof(uint32_t));
+                out_words += word_count;
+                i += word_count;
+                continue;
+            }
             uint32_t spec_op = code[i + 3];
             uint64_t value = 0;
             int folded = 0;
@@ -1475,6 +1526,8 @@ static int materialize_spirv_specialization_constants(
     }
     free(spec_ids);
     free(has_spec_id);
+    free(skip_spec_materialization);
+    free(workgroup_size_id);
     free(scalars);
     free(composites);
     free(out);

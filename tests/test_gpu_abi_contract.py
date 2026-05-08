@@ -97,6 +97,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", source)
         self.assertIn("vk_spec_ptr = specialization_materialized ? NULL : &vk_spec_info;", source)
         self.assertIn('\\"specialization_materialized\\":%s', source)
+        self.assertIn("BuiltIn WorkgroupSize", source)
+        self.assertIn("skip_spec_materialization", source)
+        self.assertIn("code[i + 2] == 11 && code[i + 3] == 25", source)
 
     def test_vulkan_dispatch_can_skip_unused_descriptor_transfers(self):
         source = GPU_EXECUTOR.read_text()
