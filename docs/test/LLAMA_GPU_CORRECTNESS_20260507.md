@@ -41,6 +41,8 @@ probing.
 | `llama-gpu-compare-20260508-ngl1-overlap-alias.json` | 1 | Overlapping descriptor ranges share one executor buffer | 0.1657 | 0.46x | fail | `!`, `!`, `!!!!` |
 | `llama-gpu-compare-20260508-ngl1-all-copy-alias.json` | 1 | ICD copy-alias resolution applies to all descriptor bindings | 0.1316 | 0.36x | fail | `!`, `!`, `!!!!` |
 | `llama-gpu-compare-20260508-ngl1-all-transfers.json` | 1 | Transfer skipping and caches disabled after alias fixes | 0.1335 | 0.37x | fail | `!`, `!`, `!!!!` |
+| `llama-gpu-compare-20260508-ngl1-descriptor-semantics.json` | 1 | Descriptor array/copy/dynamic-offset hardening | 0.1628 | 0.45x | fail | `!`, `!`, `!!!!` |
+| `llama-gpu-compare-20260508-ngl1-descriptor-trace.json` | 1 | Descriptor hardening with allocation trace | 0.1573 | 0.44x | fail | `!`, `!`, `!!!!` |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -79,6 +81,11 @@ Two ICD correctness fixes were added on 2026-05-08:
   than only binding 0, and its advertised storage-buffer descriptor limits now
   match the bridge's implemented capacity. These are correctness hardening fixes;
   they did not restore llama correctness in the NGL=1 probe.
+- The ICD now records descriptor array element offsets, descriptor-copy updates,
+  and dynamic storage-buffer offsets instead of silently ignoring those Vulkan
+  semantics. The traced NGL=1 llama run did not show those paths as the active
+  failure trigger, so they remain important compatibility fixes rather than the
+  current llama correctness root cause.
 
 The NGL=0 control also does not satisfy the arithmetic probe, so the absolute
 math prompt is not strong enough as the only correctness oracle. However, the
@@ -93,8 +100,10 @@ against a hard-coded arithmetic answer.
   same prompts and model path.
 - Add bounded binding checksums around the final projection dispatch and compare
   output buffer bytes against the no-offload control.
-- Inspect descriptor set/array semantics, dynamic storage-buffer descriptors,
-  and any descriptor-copy usage. These are now the highest-risk remaining Vulkan
-  semantic gaps after command ordering and descriptor aliasing.
+- Inspect the final projection shader itself. The current dump shows duplicate
+  `Binding 0` storage-buffer variables with different struct views; descriptor
+  rewrite and aliasing are present, but the remaining failure may be in
+  specialization/local-size lowering, feature advertisement, or shader memory
+  visibility rather than in descriptor delivery.
 - Keep performance claims blocked while
   `gpu.correctness.summary.benchmark_claim_allowed` is false.

@@ -105,13 +105,18 @@ struct PdockerVkDescriptorBinding {
     PdockerVkBuffer *buffer;
     VkDeviceSize offset;
     VkDeviceSize range;
+    VkDescriptorType descriptor_type;
+    bool dynamic;
 };
 
 struct PdockerVkDescriptorSetLayout {
     uint32_t storage_binding_count;
+    VkDescriptorType storage_binding_types[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t storage_binding_counts[PDOCKER_VK_MAX_STORAGE_BUFFERS];
 };
 
 struct PdockerVkDescriptorSet {
+    PdockerVkDescriptorSetLayout *layout;
     PdockerVkDescriptorBinding storage_buffers[PDOCKER_VK_MAX_STORAGE_BUFFERS];
 };
 
@@ -151,6 +156,7 @@ typedef struct {
 typedef struct {
     PdockerVkPipeline *pipeline;
     PdockerVkDescriptorSet *set;
+    PdockerVkDescriptorSet set_snapshot;
     uint32_t dispatch_x;
     uint32_t dispatch_y;
     uint32_t dispatch_z;
@@ -180,6 +186,7 @@ typedef struct {
     VK_LOADER_DATA loader;
     PdockerVkPipeline *pipeline;
     PdockerVkDescriptorSet *set;
+    PdockerVkDescriptorSet bound_set_snapshot;
     PdockerVkCopyOp copy_ops[PDOCKER_VK_MAX_COPY_OPS];
     uint32_t copy_op_count;
     PdockerVkDispatchOp dispatch_ops[PDOCKER_VK_MAX_DISPATCH_OPS];
@@ -1941,10 +1948,25 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
     for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->bindingCount; ++i) {
         const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[i];
-        if (binding->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER &&
+        if ((binding->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
+             binding->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC) &&
             binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS &&
             binding->binding + 1 > layout->storage_binding_count) {
             layout->storage_binding_count = binding->binding + 1;
+        }
+        if ((binding->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
+             binding->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC) &&
+            binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+            layout->storage_binding_types[binding->binding] = binding->descriptorType;
+            layout->storage_binding_counts[binding->binding] = binding->descriptorCount;
+            if (trace_allocations() && binding->descriptorCount > 1) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: descriptor array layout binding=%u count=%u type=%u flattened_capacity=%u\n",
+                        binding->binding,
+                        binding->descriptorCount,
+                        binding->descriptorType,
+                        PDOCKER_VK_MAX_STORAGE_BUFFERS);
+            }
         }
     }
     *pSetLayout = (VkDescriptorSetLayout)layout;
@@ -2033,6 +2055,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
     for (uint32_t i = 0; i < pAllocateInfo->descriptorSetCount; ++i) {
         PdockerVkDescriptorSet *set = pdocker_alloc_handle(sizeof(*set));
         if (!set) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        if (pAllocateInfo->pSetLayouts) {
+            set->layout = (PdockerVkDescriptorSetLayout *)pAllocateInfo->pSetLayouts[i];
+        }
         pDescriptorSets[i] = (VkDescriptorSet)set;
     }
     return VK_SUCCESS;
@@ -2058,28 +2083,57 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
         uint32_t descriptorCopyCount,
         const VkCopyDescriptorSet *pDescriptorCopies) {
     (void)device;
-    (void)descriptorCopyCount;
-    (void)pDescriptorCopies;
     for (uint32_t i = 0; i < descriptorWriteCount; ++i) {
         const VkWriteDescriptorSet *w = &pDescriptorWrites[i];
         PdockerVkDescriptorSet *set = (PdockerVkDescriptorSet *)w->dstSet;
-        if (!set || w->descriptorType != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER || !w->pBufferInfo) continue;
+        if (!set ||
+            (w->descriptorType != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER &&
+             w->descriptorType != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC) ||
+            !w->pBufferInfo) continue;
         for (uint32_t j = 0; j < w->descriptorCount; ++j) {
-            uint32_t binding = w->dstBinding + j;
-            if (binding < 16) {
+            uint32_t binding = w->dstBinding + w->dstArrayElement + j;
+            if (binding < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
                 set->storage_buffers[binding].buffer = (PdockerVkBuffer *)w->pBufferInfo[j].buffer;
                 set->storage_buffers[binding].offset = w->pBufferInfo[j].offset;
                 set->storage_buffers[binding].range = w->pBufferInfo[j].range;
+                set->storage_buffers[binding].descriptor_type = w->descriptorType;
+                set->storage_buffers[binding].dynamic =
+                    w->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
                 if (trace_allocations()) {
                     PdockerVkBuffer *buffer = set->storage_buffers[binding].buffer;
                     fprintf(stderr,
-                            "pdocker-vulkan-icd: descriptor storage binding=%u buffer_size=%zu offset=%llu range=%llu effective=%zu\n",
+                            "pdocker-vulkan-icd: descriptor storage binding=%u base_binding=%u array=%u type=%u buffer_size=%zu offset=%llu range=%llu effective=%zu\n",
                             binding,
+                            w->dstBinding,
+                            w->dstArrayElement + j,
+                            w->descriptorType,
                             buffer ? buffer->size : 0,
                             (unsigned long long)set->storage_buffers[binding].offset,
                             (unsigned long long)set->storage_buffers[binding].range,
                             descriptor_binding_size(&set->storage_buffers[binding]));
                 }
+            }
+        }
+    }
+    for (uint32_t i = 0; i < descriptorCopyCount; ++i) {
+        const VkCopyDescriptorSet *c = &pDescriptorCopies[i];
+        PdockerVkDescriptorSet *src = c ? (PdockerVkDescriptorSet *)c->srcSet : NULL;
+        PdockerVkDescriptorSet *dst = c ? (PdockerVkDescriptorSet *)c->dstSet : NULL;
+        if (!src || !dst) continue;
+        for (uint32_t j = 0; j < c->descriptorCount; ++j) {
+            uint32_t src_binding = c->srcBinding + c->srcArrayElement + j;
+            uint32_t dst_binding = c->dstBinding + c->dstArrayElement + j;
+            if (src_binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS ||
+                dst_binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+                continue;
+            }
+            dst->storage_buffers[dst_binding] = src->storage_buffers[src_binding];
+            if (trace_allocations()) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: descriptor copy src=%u dst=%u count=%u\n",
+                        src_binding,
+                        dst_binding,
+                        c->descriptorCount);
             }
         }
     }
@@ -2289,12 +2343,45 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         const uint32_t *pDynamicOffsets) {
     (void)pipelineBindPoint;
     (void)layout;
-    (void)firstSet;
-    (void)dynamicOffsetCount;
-    (void)pDynamicOffsets;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (cmd && descriptorSetCount > 0 && pDescriptorSets) {
-        cmd->set = (PdockerVkDescriptorSet *)pDescriptorSets[0];
+        if (firstSet != 0 && (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG"))) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: descriptor set firstSet=%u is flattened to set 0\n",
+                    firstSet);
+        }
+        if (descriptorSetCount > 1 && (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG"))) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: descriptorSetCount=%u flattened to first set\n",
+                    descriptorSetCount);
+        }
+        PdockerVkDescriptorSet *set = (PdockerVkDescriptorSet *)pDescriptorSets[0];
+        if (!set) return;
+        cmd->bound_set_snapshot = *set;
+        uint32_t dynamic_index = 0;
+        for (uint32_t binding = 0; binding < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++binding) {
+            PdockerVkDescriptorBinding *slot = &cmd->bound_set_snapshot.storage_buffers[binding];
+            if (!slot->dynamic) continue;
+            if (dynamic_index < dynamicOffsetCount && pDynamicOffsets) {
+                slot->offset += pDynamicOffsets[dynamic_index];
+                if (trace_allocations()) {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: dynamic descriptor binding=%u dyn_index=%u add=%u effective_offset=%llu\n",
+                            binding,
+                            dynamic_index,
+                            pDynamicOffsets[dynamic_index],
+                            (unsigned long long)slot->offset);
+                }
+            } else if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: missing dynamic offset binding=%u dyn_index=%u count=%u\n",
+                        binding,
+                        dynamic_index,
+                        dynamicOffsetCount);
+            }
+            dynamic_index++;
+        }
+        cmd->set = &cmd->bound_set_snapshot;
     }
 }
 
@@ -2315,7 +2402,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
             uint32_t op_index = cmd->dispatch_op_count++;
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
             op->pipeline = cmd->pipeline;
-            op->set = cmd->set;
+            if (cmd->set) {
+                op->set_snapshot = *cmd->set;
+                op->set = &op->set_snapshot;
+            } else {
+                op->set = NULL;
+            }
             op->dispatch_x = groupCountX;
             op->dispatch_y = groupCountY;
             op->dispatch_z = groupCountZ;
