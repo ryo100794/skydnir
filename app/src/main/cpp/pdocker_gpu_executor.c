@@ -1548,13 +1548,18 @@ static int rewrite_duplicate_descriptor_bindings(
         return 0;
     }
     const size_t words = bytes / sizeof(uint32_t);
+    const uint32_t bound = code[3];
     uint8_t used[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t first_seen[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint32_t *descriptor_sets = NULL;
+    int ret = -1;
     memset(used, 0, sizeof(used));
     memset(first_seen, 0, sizeof(first_seen));
+    descriptor_sets = (uint32_t *)calloc(bound ? bound : 1, sizeof(uint32_t));
+    if (!descriptor_sets) return -1;
     for (size_t i = 0; i < binding_count; ++i) {
         if (!bindings) break;
-        if (bindings[i].binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -1;
+        if (bindings[i].binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) goto cleanup;
         used[bindings[i].binding] = 1;
     }
 
@@ -1563,9 +1568,24 @@ static int rewrite_duplicate_descriptor_bindings(
         uint16_t word_count = (uint16_t)(inst >> 16);
         uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) break;
-        if (op == 71 && word_count >= 4 && code[i + 2] == 33) {
+        if (op == 71 && word_count >= 4 && code[i + 1] < bound && code[i + 2] == 34) {
+            descriptor_sets[code[i + 1]] = code[i + 3];
+        }
+        i += word_count;
+    }
+
+    for (size_t i = 5; i < words;) {
+        uint32_t inst = code[i];
+        uint16_t word_count = (uint16_t)(inst >> 16);
+        uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) break;
+        if (op == 71 && word_count >= 4 && code[i + 1] < bound && code[i + 2] == 33) {
+            if (descriptor_sets[code[i + 1]] != 0) {
+                i += word_count;
+                continue;
+            }
             uint32_t binding = code[i + 3];
-            if (binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -1;
+            if (binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) goto cleanup;
             used[binding] = 1;
         }
         i += word_count;
@@ -1577,9 +1597,13 @@ static int rewrite_duplicate_descriptor_bindings(
         uint16_t word_count = (uint16_t)(inst >> 16);
         uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) break;
-        if (op == 71 && word_count >= 4 && code[i + 2] == 33) {
+        if (op == 71 && word_count >= 4 && code[i + 1] < bound && code[i + 2] == 33) {
+            if (descriptor_sets[code[i + 1]] != 0) {
+                i += word_count;
+                continue;
+            }
             uint32_t binding = code[i + 3];
-            if (binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -1;
+            if (binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) goto cleanup;
             if (!first_seen[binding]) {
                 first_seen[binding] = 1;
             } else {
@@ -1592,7 +1616,7 @@ static int rewrite_duplicate_descriptor_bindings(
                 }
                 if (alias_used >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
                     alias_binding == UINT32_MAX) {
-                    return -1;
+                    goto cleanup;
                 }
                 used[alias_binding] = 1;
                 aliases[alias_used].target_id = code[i + 1];
@@ -1606,7 +1630,10 @@ static int rewrite_duplicate_descriptor_bindings(
         i += word_count;
     }
     *alias_count = alias_used;
-    return 0;
+    ret = 0;
+cleanup:
+    free(descriptor_sets);
+    return ret;
 }
 
 static int collect_spirv_descriptor_bindings(

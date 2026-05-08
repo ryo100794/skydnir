@@ -100,6 +100,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("const VulkanDispatchBinding *bindings", source)
         self.assertIn("size_t binding_count", source)
         self.assertIn("used[bindings[i].binding] = 1;", source)
+        self.assertIn("descriptor_sets[code[i + 1]] = code[i + 3];", source)
+        self.assertIn("descriptor_sets[code[i + 1]] != 0", source)
         self.assertIn("rewrite_duplicate_descriptor_bindings(\n                shader_code,\n                shader_size,\n                bindings,\n                binding_count,", source)
 
     def test_vulkan_specialization_constants_can_be_materialized(self):
