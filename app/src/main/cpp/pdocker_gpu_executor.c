@@ -427,6 +427,7 @@ typedef struct {
 } VulkanDispatchSpecialization;
 
 typedef struct {
+    uint32_t target_id;
     uint32_t original_binding;
     uint32_t rewritten_binding;
 } VulkanBindingAlias;
@@ -1594,6 +1595,7 @@ static int rewrite_duplicate_descriptor_bindings(
                     return -1;
                 }
                 used[alias_binding] = 1;
+                aliases[alias_used].target_id = code[i + 1];
                 aliases[alias_used].original_binding = binding;
                 aliases[alias_used].rewritten_binding = alias_binding;
                 code[i + 3] = alias_binding;
@@ -1927,6 +1929,24 @@ static void write_vulkan_descriptor_write_report(
                 (unsigned long long)(offsets ? offsets[i] : 0),
                 (unsigned long long)(ranges ? ranges[i] : 0),
                 alias_writes && alias_writes[i] ? "true" : "false");
+    }
+    fprintf(out, "]");
+}
+
+static void write_vulkan_descriptor_alias_report(
+        FILE *out,
+        const VulkanBindingAlias *aliases,
+        size_t alias_count) {
+    fprintf(out, "\"descriptor_alias_map\":[");
+    for (size_t i = 0; i < alias_count; ++i) {
+        fprintf(out,
+                "%s{\"index\":%zu,\"target_id\":%u,"
+                "\"original_binding\":%u,\"rewritten_binding\":%u}",
+                i ? "," : "",
+                i,
+                aliases ? aliases[i].target_id : 0,
+                aliases ? aliases[i].original_binding : 0,
+                aliases ? aliases[i].rewritten_binding : 0);
     }
     fprintf(out, "]");
 }
@@ -3700,6 +3720,10 @@ static int run_vulkan_dispatch_fd(
                                              descriptor_write_ranges,
                                              descriptor_write_alias_flags,
                                              write_count);
+        fprintf(json_out(), ",");
+        write_vulkan_descriptor_alias_report(json_out(),
+                                             binding_aliases,
+                                             binding_alias_count);
         fprintf(json_out(), "}\n");
     }
     fprintf(json_out(),
@@ -3767,6 +3791,10 @@ static int run_vulkan_dispatch_fd(
                                              descriptor_write_ranges,
                                              descriptor_write_alias_flags,
                                              write_count);
+        fprintf(json_out(), ",");
+        write_vulkan_descriptor_alias_report(json_out(),
+                                             binding_aliases,
+                                             binding_alias_count);
     }
     fprintf(json_out(), "}\n");
     fflush(json_out());
