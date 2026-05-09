@@ -2671,6 +2671,8 @@ typedef struct {
     double q6_packed16_view_abs_delta;
     double partial_lanes[32];
     size_t partial_lane_count;
+    CpuOracleSample row_window[32];
+    size_t row_window_count;
     int has_first_mismatch;
     CpuOracleSample first_mismatch;
     CpuOracleSample samples[8];
@@ -2849,6 +2851,23 @@ static void write_cpu_oracle_report(
                 report->first_mismatch.src0,
                 report->first_mismatch.src1,
                 report->first_mismatch.abs_error);
+    }
+    if (report->row_window_count > 0) {
+        fprintf(out, ",\"row_window\":[");
+        for (size_t i = 0; i < report->row_window_count; ++i) {
+            const CpuOracleSample *sample = &report->row_window[i];
+            fprintf(out,
+                    "%s{\"dst_index\":%llu,\"expected\":%.9g,"
+                    "\"half_expected\":%.9g,\"gpu\":%.9g,"
+                    "\"abs_error\":%.9g}",
+                    i ? "," : "",
+                    (unsigned long long)sample->dst_index,
+                    sample->expected,
+                    sample->src0,
+                    sample->gpu,
+                    sample->abs_error);
+        }
+        fprintf(out, "]");
     }
     fprintf(out, ",\"samples\":[");
     for (size_t i = 0; i < report->sample_count; ++i) {
@@ -3652,7 +3671,8 @@ static void run_cpu_oracle_q6k_matvec_sample(
     }
     const uint32_t num_blocks_per_row = ncols / 256u;
     const size_t block_bytes = 210;
-    const uint32_t sample_rows[] = {0, 1, 2, 3, 4, 7, 16, 31};
+    uint32_t sample_rows[32];
+    for (uint32_t i = 0; i < 32u; ++i) sample_rows[i] = i;
     report->expected_hash = 1469598103934665603ull;
     report->gpu_hash = 1469598103934665603ull;
     for (size_t si = 0; si < sizeof(sample_rows) / sizeof(sample_rows[0]); ++si) {
@@ -3778,6 +3798,15 @@ static void run_cpu_oracle_q6k_matvec_sample(
         }
         report->compared_floats++;
         report->compared_iter0++;
+        if (report->row_window_count < sizeof(report->row_window) / sizeof(report->row_window[0])) {
+            CpuOracleSample *window = &report->row_window[report->row_window_count++];
+            window->dst_index = row;
+            window->expected = expected;
+            window->gpu = gpu;
+            window->src0 = expected * 0.5f;
+            window->src1 = (float)ncols;
+            window->abs_error = abs_error;
+        }
     }
     report->executed = 1;
     report->skipped = 0;

@@ -82,6 +82,7 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-ngl1-q6k-decode-variant-20260509.json` | 1 | Q6_K decode-variant split for high bits, signed scales, and zero-point | n/a | 0.94x | fail | canonical full `13.878`; no-high `-1.309`; unsigned-scale `-10.048`; no-center `17.219`; GPU `6.831` |
 | `llama-gpu-ngl1-q6k-packed16-view-20260509.json` | 1 | CPU-side byte-view vs packed16-view Q6_K descriptor-view equivalence check | n/a | 2.30x | fail | packed16-view sum `13.8780234`; byte-view delta `0`; GPU still `6.831` |
 | `llama-gpu-ngl1-q6k-partial-lanes-fixed-20260509.json` | 1 | Q6_K 32-lane partial-sum diagnostic for reduction/output-layout split | n/a | 2.02x | fail | row0 lane sum `13.878`; first16 `8.507`; second16 `5.371`; half-full `6.939`; GPU `6.831` |
+| `llama-gpu-ngl1-q6k-row-window-20260509.json` | 1 | Contiguous 32-row Q6_K oracle window for output-index mapping | n/a | 1.84x | fail | 32/32 rows mismatch; packed16 delta remains `0`; no stable same-row or half-row mapping |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -270,6 +271,12 @@ Two ICD correctness fixes were added on 2026-05-08:
   Other sampled rows do not follow a simple "half reduction" rule. This keeps
   the focus on output row/workgroup mapping and shared-memory reduction
   semantics, not a global divide-by-two mistake.
+- The contiguous 32-row window shows `32/32` Q6_K row mismatches. GPU row 2 is
+  close to row 0's half sum, and several rows are close to half sums from other
+  nearby rows, but there is no stable same-row, half-row, even-lane, or odd-lane
+  mapping. Treat the current blocker as an execution-indexing/reduction problem:
+  the CPU oracle likely needs to mirror the shader's workgroup-to-output layout
+  and reduction ordering more exactly before a bridge-side fix can be selected.
 - The compare driver now requests `completion_probabilities` with bounded
   `n_probs` during correctness probes. This records selected token ids and
   top-logprob lists for both CPU/no-offload and GPU/offload. The latest full

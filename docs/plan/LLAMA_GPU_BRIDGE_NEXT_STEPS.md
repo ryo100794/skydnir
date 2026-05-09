@@ -269,6 +269,13 @@ Pass criteria:
   contiguous row window, then compare GPU output indices against expected row
   sums and half/subgroup sums to detect output-layout or workgroup-row mapping
   mistakes.
+- The contiguous window is now recorded in
+  `llama-gpu-ngl1-q6k-row-window-20260509.json`. All 32 rows still mismatch.
+  Some GPU values are close to half sums from nearby rows, but no stable mapping
+  emerges. Next, inspect the Q6_K SPIR-V index arithmetic directly: derive the
+  exact output index expression from `GlobalInvocationId`, specialization
+  constants, and push constants, then update the oracle to follow that mapping
+  instead of assuming `dst[row]`.
 
 Fail criteria:
 
