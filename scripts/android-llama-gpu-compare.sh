@@ -964,6 +964,7 @@ evidence = {
     "generic_dispatch_response_seen": "generic dispatch response:" in log,
     "generic_spirv_dispatch_attempted": generic_spirv_attempted,
     "generic_spirv_dispatch_seen": json_string_field_seen("kernel", "generic_spirv") and json_bool_field_seen("valid", True),
+    "ngl_zero_generic_spirv_dispatch": int(gpu_layers) == 0 and json_string_field_seen("kernel", "generic_spirv") and json_bool_field_seen("valid", True),
     "executor_spirv_feature_mismatch": bool(executor_feature_mismatches),
     "executor_spirv_feature_mismatches": executor_feature_mismatches,
     "generic_spirv_dispatch_failed": generic_spirv_dispatch_failed,
@@ -1006,6 +1007,12 @@ elif executor_feature_mismatches:
 elif config_propagation["summary"] == "fail":
     blocker_class = "config_propagation_mismatch"
     blocker_detail = "one or more requested bridge tuning options did not appear with the expected value in executor evidence"
+elif int(gpu_layers) == 0 and evidence["generic_spirv_dispatch_seen"] and bool(int(gpu_served_s)) and (
+    gpu_correctness_summary == "fail" or
+    differential_correctness_summary == "fail"
+):
+    blocker_class = "vulkan_backend_control_mismatch"
+    blocker_detail = "Vulkan mode with n-gpu-layers=0 still executed generic SPIR-V and diverged from the CPU/no-offload control"
 elif bool(int(gpu_served_s)) and (
     gpu_correctness_summary == "fail" or
     differential_correctness_summary == "fail"
@@ -1420,6 +1427,8 @@ next_action = (
     if evidence["spirv_dispatch_blocker"] or evidence["queue_submit_blocker"]
     else "trace final-projection descriptor aliases and feature requirements until GPU output matches CPU/no-offload"
     if blocker_class == "gpu_correctness_mismatch"
+    else "treat n-gpu-layers as an insufficient isolation knob; bisect by first generic SPIR-V shader hash under Vulkan mode"
+    if blocker_class == "vulkan_backend_control_mismatch"
     else "increase n-gpu-layers until repeating transformer layers are offloaded"
     if blocker_class == "insufficient_gpu_offload_depth"
     else "reduce bridge upload/copy overhead with persistent registered buffers; rerun with larger n_predict"

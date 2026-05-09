@@ -424,6 +424,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_LOG=1", compare)
         self.assertIn("descriptor_array_layout_seen", compare)
         self.assertIn("descriptor_array_layouts", compare)
+        self.assertIn("ngl_zero_generic_spirv_dispatch", compare)
+        self.assertIn("vulkan_backend_control_mismatch", compare)
+        self.assertIn("n-gpu-layers as an insufficient isolation knob", compare)
         self.assertIn("PDOCKER_LLAMA_BENCH_WARMUP_DISCARD", compare)
         self.assertIn("gpu_summary_scope", compare)
         for field in [

@@ -300,3 +300,22 @@ Current active branch: the upload path and simple environment propagation are
 now less likely.  The next split should stay around final projection numeric
 semantics: quantized storage interpretation, descriptor/push layout, and exact
 logit buffer layout against the CPU/no-offload control.
+
+## 2026-05-09 Boundary Control: `n-gpu-layers=0` Is Not a No-GPU Control
+
+The root isolation assumption was rechecked by running Vulkan mode with
+`LLAMA_ARG_N_GPU_LAYERS=0` and matching CPU/GPU context sizes (`ctx=512`).
+This still diverged from the CPU/no-offload control:
+
+| Artifact | CPU probes | Vulkan mode `ngl=0` probes | Dispatch evidence |
+|---|---|---|---|
+| `llama-gpu-boundary-ngl0-ctx512-20260509.json` | `5`, `8`, empty | `+`, `2`, empty | `gpu_offloaded_layers=0/37`, `generic_spirv_dispatch_seen=true` |
+
+This means `n-gpu-layers` alone is not a sufficient isolation knob for the
+pdocker Vulkan route.  Even with zero model layers reported as offloaded,
+llama.cpp still emits generic SPIR-V dispatches through the Vulkan backend.
+Future correctness work must therefore bisect by actual dispatched shader hash
+and descriptor event, not only by layer count.  The compare driver now records
+`ngl_zero_generic_spirv_dispatch` and classifies this case as
+`vulkan_backend_control_mismatch` instead of treating it as a clean partial
+offload result.
