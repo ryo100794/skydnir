@@ -2124,6 +2124,48 @@ static uint64_t sample_fd_hash(int fd, off_t offset, size_t size) {
     return hash;
 }
 
+static float sample_f32_at(const void *data, size_t size, size_t index) {
+    float value = 0.0f;
+    size_t offset = index * sizeof(float);
+    if (!data || offset + sizeof(value) > size) return 0.0f;
+    memcpy(&value, (const unsigned char *)data + offset, sizeof(value));
+    return value;
+}
+
+static void write_f32_sample_array(FILE *out, const void *data, size_t size) {
+    fprintf(out, "[");
+    const size_t count = size / sizeof(float);
+    size_t positions[8];
+    size_t position_count = 0;
+    if (count > 0) {
+        positions[position_count++] = 0;
+        if (count > 1) positions[position_count++] = 1;
+        if (count > 2) positions[position_count++] = 2;
+        if (count > 3) positions[position_count++] = 3;
+        if (count > 8) {
+            size_t mid = count / 2;
+            positions[position_count++] = mid > 1 ? mid - 1 : mid;
+            positions[position_count++] = mid;
+            positions[position_count++] = count - 2;
+            positions[position_count++] = count - 1;
+        }
+    }
+    for (size_t i = 0; i < position_count; ++i) {
+        float value = sample_f32_at(data, size, positions[i]);
+        fprintf(out,
+                "%s{\"index\":%zu,\"value\":",
+                i ? "," : "",
+                positions[i]);
+        if (isfinite(value)) {
+            fprintf(out, "%.9g", (double)value);
+        } else {
+            fprintf(out, "null");
+        }
+        fprintf(out, "}");
+    }
+    fprintf(out, "]");
+}
+
 static void write_vulkan_binding_report(
         FILE *out,
         const VulkanDispatchBinding *bindings,
@@ -2242,6 +2284,8 @@ static void write_vulkan_binding_compact_report(
         FILE *out,
         const VulkanDispatchBinding *bindings,
         size_t binding_count,
+        VulkanVectorBuffer * const *vk_buffers,
+        const size_t *binding_gpu_offset,
         const uint8_t *active,
         const uint8_t *readable,
         const uint8_t *writable,
@@ -2259,7 +2303,7 @@ static void write_vulkan_binding_compact_report(
                 "\"readable\":%s,\"writable\":%s,\"resident\":%s,"
                 "\"cache_hit\":%s,\"fd_before_hash\":\"0x%016llx\","
                 "\"gpu_after_dispatch_hash\":\"0x%016llx\","
-                "\"fd_after_hash\":\"0x%016llx\"}",
+                "\"fd_after_hash\":\"0x%016llx\"",
                 i ? "," : "",
                 i,
                 bindings[i].binding,
@@ -2274,6 +2318,18 @@ static void write_vulkan_binding_compact_report(
                 (unsigned long long)(fd_before_hash ? fd_before_hash[i] : 0),
                 (unsigned long long)(gpu_after_dispatch_hash ? gpu_after_dispatch_hash[i] : 0),
                 (unsigned long long)(fd_after_hash ? fd_after_hash[i] : 0));
+        if (active && active[i] && writable && writable[i] &&
+            vk_buffers && vk_buffers[i] && vk_buffers[i]->map &&
+            binding_gpu_offset && binding_gpu_offset[i] < vk_buffers[i]->size) {
+            size_t local_size = vk_buffers[i]->size - binding_gpu_offset[i];
+            if (local_size > bindings[i].size) local_size = bindings[i].size;
+            fprintf(out, ",\"f32_after_dispatch\":");
+            write_f32_sample_array(
+                out,
+                (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
+                local_size);
+        }
+        fprintf(out, "}");
     }
     fprintf(out, "]");
 }
@@ -4041,6 +4097,8 @@ static int run_vulkan_dispatch_fd(
                 resident_bytes,
                 mutable_bytes);
         write_vulkan_binding_compact_report(json_out(), bindings, binding_count,
+                                            vk_buffers,
+                                            binding_gpu_offset,
                                             active_bindings,
                                             binding_read_needed, binding_write_needed,
                                             cache_resident, cache_hits,

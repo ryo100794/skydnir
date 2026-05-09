@@ -77,6 +77,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("write_vulkan_descriptor_write_report", source)
         self.assertIn("write_vulkan_descriptor_alias_report", source)
         self.assertIn("write_vulkan_binding_compact_report", source)
+        self.assertIn('\\"f32_after_dispatch\\":', source)
+        self.assertIn("write_f32_sample_array", source)
         self.assertIn('\\"compact_summary\\":true', source)
         self.assertIn("write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);", source)
         self.assertIn("write_spirv_execution_report(json_out(),", source)
