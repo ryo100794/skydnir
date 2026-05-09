@@ -2664,6 +2664,9 @@ typedef struct {
     double partial_best_abs_error;
     double partial_first16_sum;
     double partial_second16_sum;
+    double q6_no_high_bits_sum;
+    double q6_unsigned_scales_sum;
+    double q6_no_center_sum;
     int has_first_mismatch;
     CpuOracleSample first_mismatch;
     CpuOracleSample samples[8];
@@ -2804,12 +2807,18 @@ static void write_cpu_oracle_report(
         fprintf(out,
                 ",\"partial_diagnostic\":{\"best_lane\":%d,"
                 "\"best_value\":%.9g,\"best_abs_error\":%.9g,"
-                "\"first16_sum\":%.9g,\"second16_sum\":%.9g}",
+                "\"first16_sum\":%.9g,\"second16_sum\":%.9g,"
+                "\"q6_no_high_bits_sum\":%.9g,"
+                "\"q6_unsigned_scales_sum\":%.9g,"
+                "\"q6_no_center_sum\":%.9g}",
                 report->partial_best_lane,
                 report->partial_best_value,
                 report->partial_best_abs_error,
                 report->partial_first16_sum,
-                report->partial_second16_sum);
+                report->partial_second16_sum,
+                report->q6_no_high_bits_sum,
+                report->q6_unsigned_scales_sum,
+                report->q6_no_center_sum);
     }
     if (report->has_first_mismatch) {
         fprintf(out,
@@ -3497,6 +3506,25 @@ static float q6k_value_at(const uint8_t block[210], uint32_t k) {
     return f16_to_f32(d_bits) * (float)scale * (float)q;
 }
 
+static float q6k_value_variant_at(const uint8_t block[210], uint32_t k, int variant) {
+    const uint32_t pos = k & 127u;
+    const uint32_t half = k >> 7;
+    const uint32_t ql_index = half * 64u + (pos & 63u);
+    const uint32_t qh_index = 128u + half * 32u + (pos & 31u);
+    const uint32_t scale_index = 192u + (k >> 4);
+    const uint8_t ql_byte = block[ql_index];
+    const uint8_t qh_byte = block[qh_index];
+    const uint32_t low4 = (pos < 64u) ? (ql_byte & 0x0fu) : ((ql_byte >> 4) & 0x0fu);
+    uint32_t high2 = (qh_byte >> (2u * ((pos >> 5) & 3u))) & 0x03u;
+    if (variant == 1) high2 = 0;
+    int32_t q = (int32_t)(low4 | (high2 << 4));
+    if (variant != 3) q -= 32;
+    const int32_t scale = variant == 2 ? (int32_t)block[scale_index] : (int32_t)(int8_t)block[scale_index];
+    uint16_t d_bits = 0;
+    memcpy(&d_bits, block + 208, sizeof(d_bits));
+    return f16_to_f32(d_bits) * (float)scale * (float)q;
+}
+
 static int q6k_accumulate_tid_partial(
         const int weight_fd,
         const int vector_fd,
@@ -3590,6 +3618,9 @@ static void run_cpu_oracle_q6k_matvec_sample(
         const uint32_t row = sample_rows[si];
         if (row >= stride_d || ((size_t)row + 1u) * sizeof(float) > bindings[idx2].size) continue;
         double sum = 0.0;
+        double variant_no_high = 0.0;
+        double variant_unsigned_scales = 0.0;
+        double variant_no_center = 0.0;
         double partials[32];
         memset(partials, 0, sizeof(partials));
         int have_partials = 1;
@@ -3612,7 +3643,13 @@ static void run_cpu_oracle_q6k_matvec_sample(
                     snprintf(report->status, sizeof(report->status), "%s", "oracle-vector-read-failed");
                     return;
                 }
-                sum += (double)q6k_value_at(block, e) * (double)b;
+                const double bv = (double)b;
+                sum += (double)q6k_value_at(block, e) * bv;
+                if (si == 0) {
+                    variant_no_high += (double)q6k_value_variant_at(block, e, 1) * bv;
+                    variant_unsigned_scales += (double)q6k_value_variant_at(block, e, 2) * bv;
+                    variant_no_center += (double)q6k_value_variant_at(block, e, 3) * bv;
+                }
             }
         }
         for (uint32_t tid = 0; tid < 32u; ++tid) {
@@ -3653,6 +3690,9 @@ static void run_cpu_oracle_q6k_matvec_sample(
             report->partial_best_abs_error = fabs(partials[0] - (double)gpu);
             report->partial_first16_sum = 0.0;
             report->partial_second16_sum = 0.0;
+            report->q6_no_high_bits_sum = variant_no_high;
+            report->q6_unsigned_scales_sum = variant_unsigned_scales;
+            report->q6_no_center_sum = variant_no_center;
             for (uint32_t tid = 0; tid < 32u; ++tid) {
                 const double per_tid_error = fabs(partials[tid] - (double)gpu);
                 if (per_tid_error < report->partial_best_abs_error) {

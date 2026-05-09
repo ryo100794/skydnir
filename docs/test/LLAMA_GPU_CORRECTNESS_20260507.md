@@ -79,6 +79,7 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-ngl1-q6k-sample-oracle-20260509.json` | 1 | Bounded CPU oracle for eight Q6_K final-projection rows | n/a | 1.61x | fail | oracle mismatch for 8/8 rows; first expected `13.878`, GPU `6.831` |
 | `llama-gpu-ngl1-q6k-sample-oracle-no-dup-20260509-rerun.json` | 1 | Same sampled Q6_K oracle with duplicate descriptor rewrite disabled | n/a | 2.15x | fail | hash changes to `0x1bf751845c5dce75`; same 8/8 oracle mismatch |
 | `llama-gpu-ngl1-local-size-patch-oracle-20260509.json` | 1 | Patch literal `LocalSize 1` to specialization value `32` for WorkgroupSize-style shader | n/a | 2.37x | fail | patched hash `0x09c4622d92c6acb9`; local size `[32,1,1]`; same Q6_K oracle mismatch |
+| `llama-gpu-ngl1-q6k-decode-variant-20260509.json` | 1 | Q6_K decode-variant split for high bits, signed scales, and zero-point | n/a | 0.94x | fail | canonical full `13.878`; no-high `-1.309`; unsigned-scale `-10.048`; no-center `17.219`; GPU `6.831` |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -246,6 +247,13 @@ Two ICD correctness fixes were added on 2026-05-08:
   Q6_K oracle still mismatches the same first row. This removes the simplest
   local-size-only explanation and pushes the next split toward Q6_K block decode
   layout, descriptor view aliasing, or shared-memory reduction semantics.
+- Decode-variant diagnostics now compare the canonical Q6_K decode against
+  common wrong interpretations for the first sampled row. Ignoring high 2-bit
+  planes gives `-1.30868773`, treating scales as unsigned gives `-10.0479286`,
+  and omitting the `-32` center gives `17.2191929`, while the GPU remains
+  `6.83085108`. None of these simple decode mistakes explains the GPU value;
+  the next split should inspect descriptor-view aliasing and reduction/shared
+  memory behavior rather than only signedness/zero-point mistakes.
 - The compare driver now requests `completion_probabilities` with bounded
   `n_probs` during correctness probes. This records selected token ids and
   top-logprob lists for both CPU/no-offload and GPU/offload. The latest full

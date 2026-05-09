@@ -249,6 +249,11 @@ Pass criteria:
   oracle still mismatches. Treat local-size patching as a necessary compatibility
   hardening step, not as the current root cause. The next most valuable split is
   a dequant-only check for the same Q6_K blocks before reduction.
+- The first decode-variant check rules out the obvious high-bit, signed-scale,
+  and zero-point mistakes: none produces the GPU's row-0 value. Continue with a
+  descriptor-view/reduction split: verify the byte view and packed16 view
+  produce identical per-lane inputs, then inspect whether the shared-memory
+  reduction writes the same full sum that the sampled oracle computes.
 
 Fail criteria:
 
