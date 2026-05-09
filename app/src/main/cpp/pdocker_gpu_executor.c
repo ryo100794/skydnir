@@ -28,6 +28,19 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifndef VK_KHR_8BIT_STORAGE_EXTENSION_NAME
+#define VK_KHR_8BIT_STORAGE_EXTENSION_NAME "VK_KHR_8bit_storage"
+#endif
+#ifndef VK_KHR_16BIT_STORAGE_EXTENSION_NAME
+#define VK_KHR_16BIT_STORAGE_EXTENSION_NAME "VK_KHR_16bit_storage"
+#endif
+#ifndef VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME
+#define VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME "VK_KHR_shader_float16_int8"
+#endif
+#ifndef VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME
+#define VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME "VK_KHR_storage_buffer_storage_class"
+#endif
+
 #define PDOCKER_GPU_MAX_PASSED_FDS 24
 #define PDOCKER_GPU_MAX_COMMAND_BYTES 4096
 #define PDOCKER_GPU_MAX_VULKAN_BINDINGS 16
@@ -390,6 +403,47 @@ static uint32_t find_vulkan_memory_type(VkPhysicalDevice physical_device, uint32
         if ((type_bits & (1u << i)) && (props.memoryTypes[i].propertyFlags & flags) == flags) return i;
     }
     return UINT32_MAX;
+}
+
+static int vulkan_device_extension_supported(
+        VkPhysicalDevice physical_device,
+        const char *name) {
+    if (!name || !name[0]) return 0;
+    uint32_t count = 0;
+    if (vkEnumerateDeviceExtensionProperties(physical_device, NULL, &count, NULL) != VK_SUCCESS ||
+        count == 0) {
+        return 0;
+    }
+    VkExtensionProperties *props =
+        (VkExtensionProperties *)calloc(count, sizeof(VkExtensionProperties));
+    if (!props) return 0;
+    VkResult rc = vkEnumerateDeviceExtensionProperties(
+        physical_device, NULL, &count, props);
+    int found = 0;
+    if (rc == VK_SUCCESS) {
+        for (uint32_t i = 0; i < count; ++i) {
+            if (strcmp(props[i].extensionName, name) == 0) {
+                found = 1;
+                break;
+            }
+        }
+    }
+    free(props);
+    return found;
+}
+
+static void append_vulkan_device_extension(
+        VkPhysicalDevice physical_device,
+        const char **extensions,
+        uint32_t *count,
+        uint32_t capacity,
+        const char *name) {
+    if (!extensions || !count || *count >= capacity || !name || !name[0]) return;
+    for (uint32_t i = 0; i < *count; ++i) {
+        if (strcmp(extensions[i], name) == 0) return;
+    }
+    if (!vulkan_device_extension_supported(physical_device, name)) return;
+    extensions[(*count)++] = name;
 }
 
 typedef struct {
@@ -2432,12 +2486,48 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         enabled_storage16.pNext = device_features_pnext;
         device_features_pnext = &enabled_storage16;
     }
+    const char *enabled_extensions[8];
+    uint32_t enabled_extension_count = 0;
+    memset(enabled_extensions, 0, sizeof(enabled_extensions));
+    if (enabled_storage16.storageBuffer16BitAccess ||
+        enabled_storage16.uniformAndStorageBuffer16BitAccess ||
+        enabled_storage16.storagePushConstant16 ||
+        enabled_storage16.storageInputOutput16) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_KHR_16BIT_STORAGE_EXTENSION_NAME);
+    }
+    if (enabled_storage8.storageBuffer8BitAccess ||
+        enabled_storage8.uniformAndStorageBuffer8BitAccess ||
+        enabled_storage8.storagePushConstant8) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
+    }
+    if (enabled_float16_int8.shaderFloat16 || enabled_float16_int8.shaderInt8) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+    }
+    append_vulkan_device_extension(rt->physical_device,
+                                   enabled_extensions,
+                                   &enabled_extension_count,
+                                   (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                   VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME);
     VkDeviceCreateInfo dci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = device_features_pnext,
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &qci,
         .pEnabledFeatures = &enabled_features,
+        .enabledExtensionCount = enabled_extension_count,
+        .ppEnabledExtensionNames = enabled_extension_count ? enabled_extensions : NULL,
     };
     stage = "create-device";
     log_vulkan_enabled_feature_trace(&enabled_features, &enabled_storage16, &enabled_storage8, &enabled_float16_int8);

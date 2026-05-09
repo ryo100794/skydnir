@@ -64,6 +64,7 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-compare-20260509-ngl1-feature-mismatch-blocker.json` | 1 | Feature-mismatch classifier evidence; current service still injected `PDOCKER_VULKAN_DISABLE_8BIT_STORAGE=1` | 0.1441 | 0.11x | fail | blocked as `vulkan_feature_mismatch` for `int8`/`storage8` |
 | `llama-gpu-compare-20260509-ngl1-default-storage8-unmasked.json` | 1 | Rebuilt APK with default storage8/int8 feature state preserved | 0.1371 | 0.11x | fail | `+`, `细细`, empty; feature mismatch cleared |
 | `llama-gpu-compare-20260509-ngl1-execution-summary.json` | 1 | Compact success events now include SPIR-V hash, push size, local size, and specialization entries | 0.1599 | 0.12x | fail | final projection: hash `0x274f68a67dfef210`, local size `[1,1,1]`, specs `32,2,1` |
+| `llama-gpu-compare-20260509-ngl1-device-extensions.json` | 1 | Executor enables supported storage/int8 Vulkan device extensions alongside feature structs | 0.1430 | 0.11x | fail | extension hardening did not change the `+`, `细细`, empty output shape |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -171,6 +172,11 @@ Two ICD correctness fixes were added on 2026-05-08:
   projection dispatch is stable at shader hash `0x274f68a67dfef210`,
   dispatch `[1187,1,64]`, push bytes `116`, local size `[1,1,1]`, and
   specialization values `constant_id 0=32`, `1=2`, `2=1`.
+- The Android executor now enables supported Vulkan device extensions for
+  8-bit storage, 16-bit storage, shader float16/int8, and storage-buffer storage
+  class in addition to the feature-struct pNext chain. The NGL=1 correctness
+  failure remains unchanged, so missing extension enablement is no longer the
+  leading explanation for the final-projection collapse on this device.
 
 The NGL=0 control also does not satisfy the arithmetic probe, so the absolute
 math prompt is not strong enough as the only correctness oracle. However, the

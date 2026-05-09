@@ -257,6 +257,9 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "apply_vulkan_feature_policy",
             "effective_vulkan_runtime_for_dispatch",
+            "append_vulkan_device_extension",
+            "VK_KHR_8BIT_STORAGE_EXTENSION_NAME",
+            "VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME",
             "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE",
             "PDOCKER_VULKAN_DISABLE_16BIT_STORAGE",
             "PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC",
