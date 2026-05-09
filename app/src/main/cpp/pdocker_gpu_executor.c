@@ -474,6 +474,10 @@ typedef struct {
     int profile_response;
     int has_rewrite_duplicate_descriptors;
     int rewrite_duplicate_descriptors;
+    int has_materialize_specialization_constants;
+    int materialize_specialization_constants;
+    int has_disable_pipeline_optimization;
+    int disable_pipeline_optimization;
     int disable_storage8;
     int disable_storage16;
     int disable_subgroup_arithmetic;
@@ -1312,6 +1316,38 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
             strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
             options->has_rewrite_duplicate_descriptors = 1;
             options->rewrite_duplicate_descriptors = 0;
+            return 0;
+        }
+        return -1;
+    }
+    if (strncmp(token, "materialize_specialization=", 27) == 0) {
+        const char *value = token + 27;
+        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+            options->has_materialize_specialization_constants = 1;
+            options->materialize_specialization_constants = 1;
+            return 0;
+        }
+        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+            options->has_materialize_specialization_constants = 1;
+            options->materialize_specialization_constants = 0;
+            return 0;
+        }
+        return -1;
+    }
+    if (strncmp(token, "disable_pipeline_optimization=", 30) == 0) {
+        const char *value = token + 30;
+        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+            options->has_disable_pipeline_optimization = 1;
+            options->disable_pipeline_optimization = 1;
+            return 0;
+        }
+        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+            options->has_disable_pipeline_optimization = 1;
+            options->disable_pipeline_optimization = 0;
             return 0;
         }
         return -1;
@@ -3373,7 +3409,11 @@ static int run_vulkan_dispatch_fd(
     memset(binding_fd_ino, 0, sizeof(binding_fd_ino));
     if (!shader_code) return -21;
     if (read_fd_exact(shader_fd, shader_code, shader_size, 0) != 0) goto cleanup;
-    if (env_truthy("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", 1)) {
+    const int materialize_specialization_constants =
+        options && options->has_materialize_specialization_constants
+            ? options->materialize_specialization_constants
+            : env_truthy("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", 1);
+    if (materialize_specialization_constants) {
         specialization_materialized = materialize_spirv_specialization_constants(
             shader_code,
             &shader_size,
@@ -3704,7 +3744,9 @@ static int run_vulkan_dispatch_fd(
         if (rc != VK_SUCCESS) goto cleanup;
         VkComputePipelineCreateInfo cpci = {
             .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-            .flags = env_truthy("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", 1)
+            .flags = (options && options->has_disable_pipeline_optimization
+                      ? options->disable_pipeline_optimization
+                      : env_truthy("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", 1))
                 ? VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT
                 : 0,
             .stage = {
@@ -3986,6 +4028,7 @@ static int run_vulkan_dispatch_fd(
                 "\"shader_bytes\":%zu,\"entry\":\"%s\",\"specializations\":%zu,"
                 "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
                 "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
+                "\"materialize_specialization\":%s,"
                 "\"specialization_materialized\":%s,"
                 "\"resident_bytes\":%zu,\"mutable_bytes\":%zu,"
                 "\"valid\":true,",
@@ -3993,6 +4036,7 @@ static int run_vulkan_dispatch_fd(
                 shader_size, entry_name, specialization_count, binding_count, gx, gy, gz,
                 binding_alias_count,
                 rewrite_duplicate_descriptors ? "true" : "false",
+                materialize_specialization_constants ? "true" : "false",
                 specialization_materialized ? "true" : "false",
                 resident_bytes,
                 mutable_bytes);
@@ -4037,6 +4081,7 @@ static int run_vulkan_dispatch_fd(
             "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
             "\"backend_cached\":%s,\"pipeline_cache\":{\"hit\":%s,\"entries\":%u},"
             "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
+            "\"materialize_specialization\":%s,"
             "\"specialization_materialized\":%s,"
             "\"profile_response\":%s,"
             "\"upload_ms\":%.4f,\"dispatch_ms\":%.4f,\"download_ms\":%.4f,"
@@ -4056,6 +4101,7 @@ static int run_vulkan_dispatch_fd(
             PDOCKER_GPU_PIPELINE_CACHE_SLOTS,
             binding_alias_count,
             rewrite_duplicate_descriptors ? "true" : "false",
+            materialize_specialization_constants ? "true" : "false",
             specialization_materialized ? "true" : "false",
             profile_response ? "true" : "false",
             upload_ms, dispatch_ms, download_ms,
@@ -4148,6 +4194,7 @@ cleanup:
                 "\"dispatch\":[%u,%u,%u],\"push_bytes\":%zu,"
                 "\"estimated_workgroup_bytes\":%llu,"
                 "\"duplicate_descriptor_rewrite\":%s,"
+                "\"materialize_specialization\":%s,"
                 "\"specialization_materialized\":%s,"
                 "\"spirv_hash\":\"0x%016llx\","
                 "\"spirv_valid\":%s,\"spirv_truncated\":%u,"
@@ -4162,6 +4209,7 @@ cleanup:
                 gx, gy, gz, push_size,
                 (unsigned long long)estimated_workgroup_bytes,
                 rewrite_duplicate_descriptors ? "true" : "false",
+                materialize_specialization_constants ? "true" : "false",
                 specialization_materialized ? "true" : "false",
                 (unsigned long long)spirv_summary.hash,
                 spirv_summary.valid ? "true" : "false",

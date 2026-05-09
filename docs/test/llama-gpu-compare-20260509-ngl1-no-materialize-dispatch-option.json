@@ -1,0 +1,4801 @@
+{
+  "schema": "pdocker.llama.gpu.compare.v1",
+  "timestamp_utc": "2026-05-09T01:52:54Z",
+  "policy": {
+    "llama_cpp_modified": false,
+    "gpu_entry": "standard Vulkan loader through pdocker-vulkan-icd.so",
+    "target_speedup": 10.0
+  },
+  "settings": {
+    "gpu_layers": 1,
+    "gpu_ctx": 512,
+    "predict": 2,
+    "repeat": 1,
+    "warmup_discard": 0,
+    "gpu_summary_scope": "all_runs",
+    "trace_alloc": false,
+    "cpu_reused": true,
+    "model_path": "/models/model.gguf",
+    "model_url_set": true
+  },
+  "cpu": {
+    "tokens_per_second": 1.303225352424716,
+    "summary": {
+      "predicted_tokens_per_second_mean": 1.303225352424716,
+      "predicted_tokens_per_second_min": 1.303225352424716,
+      "predicted_tokens_per_second_max": 1.303225352424716
+    },
+    "correctness": {}
+  },
+  "gpu": {
+    "tokens_per_second": 0.1723491176112964,
+    "summary": {
+      "predicted_tokens_per_second_mean": 0.1723491176112964,
+      "predicted_tokens_per_second_min": 0.1723491176112964,
+      "predicted_tokens_per_second_max": 0.1723491176112964,
+      "wall_seconds_mean": 32.192867018980905,
+      "runs": 1
+    },
+    "served": true,
+    "state_excerpt": "{\"Id\": \"242b610edcec461cbe31e50f697d6f9c\", \"Created\": \"2026-05-09T01:49:22.000000000Z\", \"Path\": \"/usr/local/bin/start-llama-server\", \"Args\": [], \"State\": {\"Status\": \"running\", \"Running\": true, \"Paused\": false, \"Restarting\": false, \"OOMKilled\": false, \"Dead\": false, \"Pid\": 2855, \"ExitCode\": 0, \"PdockerRawReturnCode\": 0, \"PdockerSignal\": 0, \"Error\": \"\", \"StartedAt\": \"2026-05-09T01:49:24.000000000Z\", \"FinishedAt\": \"0001-01-01T00:00:00.000000000Z\", \"Health\": {\"Status\": \"healthy\", \"FailingStreak\": 0, \"Log\": [{\"Start\": \"2026-05-09T01:50:27.000000000Z\", \"End\": \"2026-05-09T01:50:27.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-09T01:50:57.000000000Z\", \"End\": \"2026-05-09T01:50:57.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-09T01:51:27.000000000Z\", \"End\": \"2026-05-09T01:51:27.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-09T01:51:57.000000000Z\", \"End\": \"2026-05-09T01:51:58.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-09T01:52:28.000000000Z\", \"End\": \"2026-05-09T01:52:28.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}]}, \"PdockerKnownPids\": [{\"Pid\": 2855, \"StartTime\": \"74410670\"}, {\"Pid\": 2872, \"StartTime\": \"74410735\"}, {\"Pid\": 2981, \"StartTime\": \"74410755\"}], \"PidStartTime\": \"74410670\", \"PdockerLauncherPid\": 2855, \"PdockerLauncherPidStartTime\": \"74410670\"}, \"Image\": \"sha256:58d05029dc291a38125b3b19e96956072fc277021a4e40e74b8731b8f77e87de\", \"ResolvConfPath\": \"\", \"HostnamePath\": \"\", \"HostsPath\": \"\", \"LogPath\": \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/logs/242b610edcec461cbe31e50f697d6f9c.log\", \"Name\": \"/pdocker-llama-cpp\", \"RestartCount\": 0, \"Driver\": \"pdocker-direct\", \"Platform\": \"linux\", \"MountLabel\": \"\", \"ProcessLabel\": \"\", \"AppArmorProfile\": \"\", \"ExecIDs\": null, \"HostConfig\": {\"Binds\": [\"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/models/llama-cpp-gpu:/models\", \"/data/user/0/i",
+    "log_excerpt": "te\":false}],\"descriptor_alias_map\":[]}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"compact_summary\":true,\"shader_bytes\":11604,\"entry\":\"main\",\"specializations\":0,\"bindings\":5,\"dispatch\":[32,1,1],\"descriptor_aliases\":0,\"duplicate_descriptor_rewrite\":true,\"materialize_specialization\":false,\"specialization_materialized\":false,\"resident_bytes\":0,\"mutable_bytes\":65540,\"valid\":true,\"binding_details\":[{\"index\":0,\"binding\":0,\"offset\":0,\"size\":16384,\"alias_rep\":0,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x3d16a6dae25994bb\",\"gpu_after_dispatch_hash\":\"0x94d83e75c8d15bb5\",\"fd_after_hash\":\"0x94d83e75c8d15bb5\"},{\"index\":1,\"binding\":1,\"offset\":16896,\"size\":4,\"alias_rep\":1,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x3129a6e3385015bb\",\"gpu_after_dispatch_hash\":\"0x3129a6e3385015bb\",\"fd_after_hash\":\"0x3129a6e3385015bb\"},{\"index\":2,\"binding\":2,\"offset\":0,\"size\":16384,\"alias_rep\":0,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x3d16a6dae25994bb\",\"gpu_after_dispatch_hash\":\"0x94d83e75c8d15bb5\",\"fd_after_hash\":\"0x94d83e75c8d15bb5\"},{\"index\":3,\"binding\":3,\"offset\":0,\"size\":16384,\"alias_rep\":0,\"active\":true,\"readable\":false,\"writable\":true,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x3d16a6dae25994bb\",\"gpu_after_dispatch_hash\":\"0x94d83e75c8d15bb5\",\"fd_after_hash\":\"0x94d83e75c8d15bb5\"},{\"index\":4,\"binding\":4,\"offset\":0,\"size\":16384,\"alias_rep\":0,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x3d16a6dae25994bb\",\"gpu_after_dispatch_hash\":\"0x94d83e75c8d15bb5\",\"fd_after_hash\":\"0x94d83e75c8d15bb5\"}],\"spirv_feature_requirements\":{\"float16\":false,\"int16\":false,\"int8\":false,\"int64\":false,\"storage16\":false,\"storage8\":false,\"subgroup_arithmetic\":false},\"spirv_feature_mismatch\":false,\"spirv_feature_mismatches\":[],\"push_bytes\":116,\"spirv_hash\":\"0xac41e8033a67af4a\",\"spirv_valid\":true,\"spirv_truncated\":0,\"spirv_local_size\":[1,256,1],\"spirv_local_size_id\":[0,0,0],\"spirv_local_size_resolved\":[1,256,1],\"specialization_entries\":[],\"descriptor_writes\":[{\"index\":0,\"dst_binding\":0,\"source_index\":0,\"source_binding\":0,\"alias_rep\":0,\"offset\":0,\"range\":16384,\"alias_write\":false},{\"index\":1,\"dst_binding\":1,\"source_index\":1,\"source_binding\":1,\"alias_rep\":1,\"offset\":0,\"range\":4,\"alias_write\":false},{\"index\":2,\"dst_binding\":2,\"source_index\":2,\"source_binding\":2,\"alias_rep\":0,\"offset\":0,\"range\":16384,\"alias_write\":false},{\"index\":3,\"dst_binding\":3,\"source_index\":3,\"source_binding\":3,\"alias_rep\":0,\"offset\":0,\"range\":16384,\"alias_write\":false},{\"index\":4,\"dst_binding\":4,\"source_index\":4,\"source_binding\":4,\"alias_rep\":0,\"offset\":0,\"range\":16384,\"alias_write\":false}],\"descriptor_alias_map\":[]}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"compact_summary\":true,\"shader_bytes\":5880,\"entry\":\"main\",\"specializations\":1,\"bindings\":4,\"dispatch\":[1,8,1],\"descriptor_aliases\":0,\"duplicate_descriptor_rewrite\":true,\"materialize_specialization\":false,\"specialization_materialized\":false,\"resident_bytes\":0,\"mutable_bytes\":49152,\"valid\":true,\"binding_details\":[{\"index\":0,\"binding\":0,\"offset\":0,\"size\":16384,\"alias_rep\":0,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x094c0674cd55b6d1\",\"gpu_after_dispatch_hash\":\"0x6520ddc7e6989d65\",\"fd_after_hash\":\"0x6520ddc7e6989d65\"},{\"index\":1,\"binding\":1,\"offset\":16384,\"size\":16384,\"alias_rep\":1,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0xa06a9b3989f5169a\",\"gpu_after_dispatch_hash\":\"0xa06a9b3989f5169a\",\"fd_after_hash\":\"0xa06a9b3989f5169a\"},{\"index\":2,\"binding\":2,\"offset\":0,\"size\":16384,\"alias_rep\":0,\"active\":true,\"readable\":false,\"writable\":true,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x094c0674cd55b6d1\",\"gpu_after_dispatch_hash\":\"0x6520ddc7e6989d65\",\"fd_after_hash\":\"0x6520ddc7e6989d65\"},{\"index\":3,\"binding\":3,\"offset\":0,\"size\":16384,\"alias_rep\":3,\"active\":false,\"readable\":false,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x0000000000000000\",\"gpu_after_dispatch_hash\":\"0x0000000000000000\",\"fd_after_hash\":\"0x0000000000000000\"}],\"spirv_feature_requirements\":{\"float16\":false,\"int16\":false,\"int8\":false,\"int64\":false,\"storage16\":false,\"storage8\":false,\"subgroup_arithmetic\":false},\"spirv_feature_mismatch\":false,\"spirv_feature_mismatches\":[],\"push_bytes\":116,\"spirv_hash\":\"0x11c0523df6c795b8\",\"spirv_valid\":true,\"spirv_truncated\":0,\"spirv_local_size\":[256,1,1],\"spirv_local_size_id\":[0,0,0],\"spirv_local_size_resolved\":[256,1,1],\"specialization_entries\":[{\"constant_id\":0,\"offset\":0,\"size\":4,\"value_u64\":1}],\"descriptor_writes\":[{\"index\":0,\"dst_binding\":0,\"source_index\":0,\"source_binding\":0,\"alias_rep\":0,\"offset\":0,\"range\":16384,\"alias_write\":false},{\"index\":1,\"dst_binding\":1,\"source_index\":1,\"source_binding\":1,\"alias_rep\":1,\"offset\":0,\"range\":16384,\"alias_write\":false},{\"index\":2,\"dst_binding\":2,\"source_index\":2,\"source_binding\":2,\"alias_rep\":0,\"offset\":0,\"range\":16384,\"alias_write\":false}],\"descriptor_alias_map\":[]}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"compact_summary\":true,\"shader_bytes\":67176,\"entry\":\"main\",\"specializations\":2,\"bindings\":5,\"dispatch\":[1,1,1],\"descriptor_aliases\":0,\"duplicate_descriptor_rewrite\":true,\"materialize_specialization\":false,\"specialization_materialized\":false,\"resident_bytes\":0,\"mutable_bytes\":49152,\"valid\":true,\"binding_details\":[{\"index\":0,\"binding\":0,\"offset\":0,\"size\":16384,\"alias_rep\":0,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x6520ddc7e6989d65\",\"gpu_after_dispatch_hash\":\"0x9578762d51e32d35\",\"fd_after_hash\":\"0x9578762d51e32d35\"},{\"index\":1,\"binding\":1,\"offset\":0,\"size\":16384,\"alias_rep\":1,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0xfd12f7ee0ab5548b\",\"gpu_after_dispatch_hash\":\"0xfd12f7ee0ab5548b\",\"fd_after_hash\":\"0xfd12f7ee0ab5548b\"},{\"index\":2,\"binding\":2,\"offset\":0,\"size\":16384,\"alias_rep\":0,\"active\":true,\"readable\":false,\"writable\":true,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x6520ddc7e6989d65\",\"gpu_after_dispatch_hash\":\"0x9578762d51e32d35\",\"fd_after_hash\":\"0x9578762d51e32d35\"},{\"index\":3,\"binding\":3,\"offset\":0,\"size\":16384,\"alias_rep\":3,\"active\":false,\"readable\":false,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x0000000000000000\",\"gpu_after_dispatch_hash\":\"0x0000000000000000\",\"fd_after_hash\":\"0x0000000000000000\"},{\"index\":4,\"binding\":4,\"offset\":0,\"size\":16384,\"alias_rep\":4,\"active\":false,\"readable\":false,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x0000000000000000\",\"gpu_after_dispatch_hash\":\"0x0000000000000000\",\"fd_after_hash\":\"0x0000000000000000\"}],\"spirv_feature_requirements\":{\"float16\":false,\"int16\":false,\"int8\":false,\"int64\":false,\"storage16\":false,\"storage8\":false,\"subgroup_arithmetic\":false},\"spirv_feature_mismatch\":false,\"spirv_feature_mismatches\":[],\"push_bytes\":116,\"spirv_hash\":\"0xf2f988b94bd3e0dc\",\"spirv_valid\":true,\"spirv_truncated\":0,\"spirv_local_size\":[512,1,1],\"spirv_local_size_id\":[0,0,0],\"spirv_local_size_resolved\":[512,1,1],\"specialization_entries\":[{\"constant_id\":0,\"offset\":0,\"size\":4,\"value_u64\":0},{\"constant_id\":1,\"offset\":4,\"size\":4,\"value_u64\":1}],\"descriptor_writes\":[{\"index\":0,\"dst_binding\":0,\"source_index\":0,\"source_binding\":0,\"alias_rep\":0,\"offset\":0,\"range\":16384,\"alias_write\":false},{\"index\":1,\"dst_binding\":1,\"source_index\":1,\"source_binding\":1,\"alias_rep\":1,\"offset\":0,\"range\":16384,\"alias_write\":false},{\"index\":2,\"dst_binding\":2,\"source_index\":2,\"source_binding\":2,\"alias_rep\":0,\"offset\":0,\"range\":16384,\"alias_write\":false}],\"descriptor_alias_map\":[]}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"compact_summary\":true,\"shader_bytes\":26784,\"entry\":\"main\",\"specializations\":3,\"bindings\":5,\"dispatch\":[1187,1,64],\"descriptor_aliases\":1,\"duplicate_descriptor_rewrite\":true,\"materialize_specialization\":false,\"specialization_materialized\":false,\"resident_bytes\":510504960,\"mutable_bytes\":1839616,\"valid\":true,\"binding_details\":[{\"index\":0,\"binding\":0,\"offset\":16384,\"size\":510504960,\"alias_rep\":0,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":true,\"cache_hit\":true,\"fd_before_hash\":\"0x37329ee7b5f73ed0\",\"gpu_after_dispatch_hash\":\"0x37329ee7b5f73ed0\",\"fd_after_hash\":\"0x37329ee7b5f73ed0\"},{\"index\":1,\"binding\":1,\"offset\":0,\"size\":16384,\"alias_rep\":1,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0x9578762d51e32d35\",\"gpu_after_dispatch_hash\":\"0x9578762d51e32d35\",\"fd_after_hash\":\"0x9578762d51e32d35\"},{\"index\":2,\"binding\":2,\"offset\":16384,\"size\":607744,\"alias_rep\":2,\"active\":true,\"readable\":false,\"writable\":true,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0xae7f152167b95b94\",\"gpu_after_dispatch_hash\":\"0x893192edeed90dc5\",\"fd_after_hash\":\"0x893192edeed90dc5\"},{\"index\":3,\"binding\":3,\"offset\":16384,\"size\":607744,\"alias_rep\":2,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0xae7f152167b95b94\",\"gpu_after_dispatch_hash\":\"0x893192edeed90dc5\",\"fd_after_hash\":\"0x893192edeed90dc5\"},{\"index\":4,\"binding\":4,\"offset\":16384,\"size\":607744,\"alias_rep\":2,\"active\":true,\"readable\":true,\"writable\":false,\"resident\":false,\"cache_hit\":false,\"fd_before_hash\":\"0xae7f152167b95b94\",\"gpu_after_dispatch_hash\":\"0x893192edeed90dc5\",\"fd_after_hash\":\"0x893192edeed90dc5\"}],\"spirv_feature_requirements\":{\"float16\":false,\"int16\":false,\"int8\":true,\"int64\":false,\"storage16\":true,\"storage8\":true,\"subgroup_arithmetic\":false},\"spirv_feature_mismatch\":false,\"spirv_feature_mismatches\":[],\"push_bytes\":116,\"spirv_hash\":\"0x274f68a67dfef210\",\"spirv_valid\":true,\"spirv_truncated\":0,\"spirv_local_size\":[1,1,1],\"spirv_local_size_id\":[0,0,0],\"spirv_local_size_resolved\":[1,1,1],\"specialization_entries\":[{\"constant_id\":0,\"offset\":0,\"size\":4,\"value_u64\":32},{\"constant_id\":1,\"offset\":4,\"size\":4,\"value_u64\":2},{\"constant_id\":2,\"offset\":8,\"size\":4,\"value_u64\":1}],\"descriptor_writes\":[{\"index\":0,\"dst_binding\":0,\"source_index\":0,\"source_binding\":0,\"alias_rep\":0,\"offset\":0,\"range\":510504960,\"alias_write\":false},{\"index\":1,\"dst_binding\":1,\"source_index\":1,\"source_binding\":1,\"alias_rep\":1,\"offset\":0,\"range\":16384,\"alias_write\":false},{\"index\":2,\"dst_binding\":2,\"source_index\":2,\"source_binding\":2,\"alias_rep\":2,\"offset\":0,\"range\":607744,\"alias_write\":false},{\"index\":3,\"dst_binding\":3,\"source_index\":3,\"source_binding\":3,\"alias_rep\":2,\"offset\":0,\"range\":607744,\"alias_write\":false},{\"index\":4,\"dst_binding\":4,\"source_index\":4,\"source_binding\":4,\"alias_rep\":2,\"offset\":0,\"range\":607744,\"alias_write\":false},{\"index\":5,\"dst_binding\":5,\"source_index\":0,\"source_binding\":0,\"alias_rep\":0,\"offset\":0,\"range\":510504960,\"alias_write\":true}],\"descriptor_alias_map\":[{\"index\":0,\"target_id\":371,\"original_binding\":0,\"rewritten_binding\":5}]}\nslot print_timing: id  0 | task 7 | \nprompt eval time =   19329.53 ms /     6 tokens ( 3221.59 ms per token,     0.31 tokens per second)\n       eval time =   37657.83 ms /     4 tokens ( 9414.46 ms per token,     0.11 tokens per second)\n      total time =   56987.36 ms /    10 tokens\nslot      release: id  0 | task 7 | stop processing: n_tokens = 9, truncated = 0\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: POST /completion 127.0.0.1 200\n",
+    "evidence": {
+      "vulkan_device_seen": true,
+      "offload_seen": true,
+      "model_loaded": true,
+      "serve_reachable": true,
+      "buffer_allocation_blocker": false,
+      "assert_blocker": false,
+      "buffer_range_assert_blocker": false,
+      "gpu_model_buffer_seen": true,
+      "gpu_repeating_layers": 0,
+      "gpu_offloaded_layers": 1,
+      "gpu_total_layers": 37,
+      "gpu_output_only_offload": true,
+      "generic_dispatch_response_seen": true,
+      "generic_spirv_dispatch_attempted": true,
+      "generic_spirv_dispatch_seen": true,
+      "executor_spirv_feature_mismatch": false,
+      "executor_spirv_feature_mismatches": [],
+      "generic_spirv_dispatch_failed": false,
+      "pipeline_feature_blocker": false,
+      "executor_spirv_trace_seen": false,
+      "executor_feature_trace_seen": false,
+      "android_vulkan_dispatch_blocker": false,
+      "executor_submit_generic_dispatch_error": false,
+      "executor_fallback_dispatch_blocker": false,
+      "queue_submit_blocker": false,
+      "spirv_dispatch_blocker": false
+    },
+    "allocation_trace_bytes": [],
+    "bridge_dispatch_profile": {
+      "samples": 0,
+      "upload_ms_mean": 0.0,
+      "dispatch_ms_mean": 0.0,
+      "download_ms_mean": 0.0,
+      "copy_buffer_ops_in_log": 0,
+      "copy_buffer_bytes_in_log": 0,
+      "copy_submit_count": 0,
+      "copy_submit_ops": 0,
+      "copy_submit_alias_ops": 0,
+      "copy_submit_memmove_ops": 0,
+      "copy_submit_skipped_ops": 0,
+      "copy_submit_alias_bytes": 0,
+      "copy_submit_memmove_bytes": 0,
+      "copy_submit_skipped_bytes": 0,
+      "guarded_binding_samples": 0,
+      "guarded_binding_max_resident_bytes": 0,
+      "guarded_binding_max_dirty_bytes": 0,
+      "guarded_binding_max_range_bytes": 0,
+      "binding_timing_samples": 4640,
+      "binding_upload_ms_max": 0.0,
+      "binding_download_ms_max": 0.0,
+      "dirty_probe_binding_samples": 0,
+      "dirty_probe_max_bytes": 0,
+      "dirty_probe_total_bytes": 0,
+      "dirty_probe_ms_max": 0.0,
+      "dirty_writeback_cached_samples": 0,
+      "dirty_writeback_total_bytes": 0,
+      "top_binding_uploads": [
+        {
+          "event_index": 0,
+          "binding": 0,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 0,
+          "binding": 1,
+          "size": 512,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 0,
+          "binding": 2,
+          "size": 32768,
+          "readable": false,
+          "writable": true,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 0,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 1,
+          "size": 8,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 2,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 3,
+          "size": 32768,
+          "readable": false,
+          "writable": true,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 4,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        }
+      ],
+      "top_binding_downloads": [
+        {
+          "event_index": 0,
+          "binding": 0,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 0,
+          "binding": 1,
+          "size": 512,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 0,
+          "binding": 2,
+          "size": 32768,
+          "readable": false,
+          "writable": true,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 0,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 1,
+          "size": 8,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 2,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 3,
+          "size": 32768,
+          "readable": false,
+          "writable": true,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 4,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        }
+      ],
+      "top_dirty_probe_bindings": []
+    },
+    "diagnostics": {
+      "blocker_class": "gpu_correctness_mismatch",
+      "blocker_detail": "GPU offload served, but correctness probes do not match the CPU/no-offload control",
+      "failure_axes": {
+        "advertised_limits": {
+          "state": "not_front_blocker",
+          "reason": "no feature-limit submit failure in this run"
+        },
+        "chunking": {
+          "state": "pressure",
+          "reason": "large model/buffer allocations are at or above the 512MiB bridge clamp; future failures should distinguish splitting/chunk transport from shader lowering"
+        },
+        "generic_spirv_dispatch": {
+          "state": "passed",
+          "reason": "generic SPIR-V dispatch was not the failing axis in this run"
+        }
+      },
+      "advertised_limits": {
+        "configured_clamps": {
+          "PDOCKER_VULKAN_MAX_BUFFER_BYTES": 536870912,
+          "GGML_VK_FORCE_MAX_BUFFER_SIZE": 536870912,
+          "GGML_VK_FORCE_MAX_ALLOCATION_SIZE": 536870912,
+          "GGML_VK_SUBALLOCATION_BLOCK_SIZE": 536870912
+        },
+        "icd_advertises_subgroup_arithmetic_by_default": true,
+        "executor_android_features": {},
+        "spirv_trace_count": 0,
+        "last_spirv_trace": {}
+      },
+      "chunking_pressure": {
+        "configured_bridge_max_buffer_bytes": 536870912,
+        "largest_allocation_bytes": 0,
+        "largest_created_buffer_bytes": 0,
+        "allocation_near_clamp": false,
+        "model_cpu_mapped_bytes": 4511309496,
+        "model_cpu_mapped_exceeds_bridge_clamp": true,
+        "vulkan_model_buffer_mib": 486.87,
+        "descriptor_range_max_bytes": 0
+      },
+      "generic_spirv_dispatch": {
+        "attempted": true,
+        "valid_android_vulkan_events": [
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 11604,
+            "entry": "main",
+            "specializations": 0,
+            "bindings": 5,
+            "dispatch": [
+              32,
+              1,
+              1
+            ],
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 0,
+            "mutable_bytes": 65540,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x3d16a6dae25994bb",
+                "gpu_after_dispatch_hash": "0x94d83e75c8d15bb5",
+                "fd_after_hash": "0x94d83e75c8d15bb5"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 16896,
+                "size": 4,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x3129a6e3385015bb",
+                "gpu_after_dispatch_hash": "0x3129a6e3385015bb",
+                "fd_after_hash": "0x3129a6e3385015bb"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x3d16a6dae25994bb",
+                "gpu_after_dispatch_hash": "0x94d83e75c8d15bb5",
+                "fd_after_hash": "0x94d83e75c8d15bb5"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x3d16a6dae25994bb",
+                "gpu_after_dispatch_hash": "0x94d83e75c8d15bb5",
+                "fd_after_hash": "0x94d83e75c8d15bb5"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x3d16a6dae25994bb",
+                "gpu_after_dispatch_hash": "0x94d83e75c8d15bb5",
+                "fd_after_hash": "0x94d83e75c8d15bb5"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0xac41e8033a67af4a",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              1,
+              256,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              256,
+              1
+            ],
+            "specialization_entries": [],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 4,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 3,
+                "dst_binding": 3,
+                "source_index": 3,
+                "source_binding": 3,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 4,
+                "dst_binding": 4,
+                "source_index": 4,
+                "source_binding": 4,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              }
+            ],
+            "descriptor_alias_map": []
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 5880,
+            "entry": "main",
+            "specializations": 1,
+            "bindings": 4,
+            "dispatch": [
+              1,
+              8,
+              1
+            ],
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 0,
+            "mutable_bytes": 49152,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x094c0674cd55b6d1",
+                "gpu_after_dispatch_hash": "0x6520ddc7e6989d65",
+                "fd_after_hash": "0x6520ddc7e6989d65"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 16384,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xa06a9b3989f5169a",
+                "gpu_after_dispatch_hash": "0xa06a9b3989f5169a",
+                "fd_after_hash": "0xa06a9b3989f5169a"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x094c0674cd55b6d1",
+                "gpu_after_dispatch_hash": "0x6520ddc7e6989d65",
+                "fd_after_hash": "0x6520ddc7e6989d65"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 3,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0x11c0523df6c795b8",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              256,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              256,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              }
+            ],
+            "descriptor_alias_map": []
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 5,
+            "dispatch": [
+              1,
+              1,
+              1
+            ],
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 0,
+            "mutable_bytes": 49152,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x6520ddc7e6989d65",
+                "gpu_after_dispatch_hash": "0x9578762d51e32d35",
+                "fd_after_hash": "0x9578762d51e32d35"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xfd12f7ee0ab5548b",
+                "gpu_after_dispatch_hash": "0xfd12f7ee0ab5548b",
+                "fd_after_hash": "0xfd12f7ee0ab5548b"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x6520ddc7e6989d65",
+                "gpu_after_dispatch_hash": "0x9578762d51e32d35",
+                "fd_after_hash": "0x9578762d51e32d35"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 3,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 4,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0xf2f988b94bd3e0dc",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 0
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              }
+            ],
+            "descriptor_alias_map": []
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 26784,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              1187,
+              1,
+              64
+            ],
+            "descriptor_aliases": 1,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 510504960,
+            "mutable_bytes": 1839616,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 16384,
+                "size": 510504960,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": true,
+                "cache_hit": true,
+                "fd_before_hash": "0x37329ee7b5f73ed0",
+                "gpu_after_dispatch_hash": "0x37329ee7b5f73ed0",
+                "fd_after_hash": "0x37329ee7b5f73ed0"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x9578762d51e32d35",
+                "gpu_after_dispatch_hash": "0x9578762d51e32d35",
+                "fd_after_hash": "0x9578762d51e32d35"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xae7f152167b95b94",
+                "gpu_after_dispatch_hash": "0x893192edeed90dc5",
+                "fd_after_hash": "0x893192edeed90dc5"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xae7f152167b95b94",
+                "gpu_after_dispatch_hash": "0x893192edeed90dc5",
+                "fd_after_hash": "0x893192edeed90dc5"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xae7f152167b95b94",
+                "gpu_after_dispatch_hash": "0x893192edeed90dc5",
+                "fd_after_hash": "0x893192edeed90dc5"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": true,
+              "int64": false,
+              "storage16": true,
+              "storage8": true,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0x274f68a67dfef210",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              1,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 32
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 2
+              },
+              {
+                "constant_id": 2,
+                "offset": 8,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 3,
+                "dst_binding": 3,
+                "source_index": 3,
+                "source_binding": 3,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 4,
+                "dst_binding": 4,
+                "source_index": 4,
+                "source_binding": 4,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 5,
+                "dst_binding": 5,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": true
+              }
+            ],
+            "descriptor_alias_map": [
+              {
+                "index": 0,
+                "target_id": 371,
+                "original_binding": 0,
+                "rewritten_binding": 5
+              }
+            ]
+          }
+        ],
+        "largest_shader_events": [
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 5,
+            "dispatch": [
+              1,
+              1,
+              1
+            ],
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 0,
+            "mutable_bytes": 49152,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x6f167284bf69617f",
+                "gpu_after_dispatch_hash": "0x9797ff52635c7acf",
+                "fd_after_hash": "0x9797ff52635c7acf"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xfd12f7ee0ab5548b",
+                "gpu_after_dispatch_hash": "0xfd12f7ee0ab5548b",
+                "fd_after_hash": "0xfd12f7ee0ab5548b"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x6f167284bf69617f",
+                "gpu_after_dispatch_hash": "0x9797ff52635c7acf",
+                "fd_after_hash": "0x9797ff52635c7acf"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 3,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 0,
+                "size": 32768,
+                "alias_rep": 4,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0xf2f988b94bd3e0dc",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 0
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              }
+            ],
+            "descriptor_alias_map": []
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 5,
+            "dispatch": [
+              1,
+              1,
+              1
+            ],
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 0,
+            "mutable_bytes": 49152,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xe904ab74ff3c9a8c",
+                "gpu_after_dispatch_hash": "0xb28dfc886299bf21",
+                "fd_after_hash": "0xb28dfc886299bf21"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xfd12f7ee0ab5548b",
+                "gpu_after_dispatch_hash": "0xfd12f7ee0ab5548b",
+                "fd_after_hash": "0xfd12f7ee0ab5548b"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xe904ab74ff3c9a8c",
+                "gpu_after_dispatch_hash": "0xb28dfc886299bf21",
+                "fd_after_hash": "0xb28dfc886299bf21"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 3,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 0,
+                "size": 32768,
+                "alias_rep": 4,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0xf2f988b94bd3e0dc",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 0
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              }
+            ],
+            "descriptor_alias_map": []
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 5,
+            "dispatch": [
+              1,
+              1,
+              1
+            ],
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 0,
+            "mutable_bytes": 49152,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x17e2895b5fff12ed",
+                "gpu_after_dispatch_hash": "0xc9b8fe10d994fd37",
+                "fd_after_hash": "0xc9b8fe10d994fd37"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xfd12f7ee0ab5548b",
+                "gpu_after_dispatch_hash": "0xfd12f7ee0ab5548b",
+                "fd_after_hash": "0xfd12f7ee0ab5548b"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x17e2895b5fff12ed",
+                "gpu_after_dispatch_hash": "0xc9b8fe10d994fd37",
+                "fd_after_hash": "0xc9b8fe10d994fd37"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 3,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 98848,
+                "size": 24576,
+                "alias_rep": 4,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0xf2f988b94bd3e0dc",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 0
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              }
+            ],
+            "descriptor_alias_map": []
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 5,
+            "dispatch": [
+              1,
+              1,
+              1
+            ],
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 0,
+            "mutable_bytes": 49152,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x672c82b7e1c8167b",
+                "gpu_after_dispatch_hash": "0x864f9633673ea8ac",
+                "fd_after_hash": "0x864f9633673ea8ac"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xfd12f7ee0ab5548b",
+                "gpu_after_dispatch_hash": "0xfd12f7ee0ab5548b",
+                "fd_after_hash": "0xfd12f7ee0ab5548b"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x672c82b7e1c8167b",
+                "gpu_after_dispatch_hash": "0x864f9633673ea8ac",
+                "fd_after_hash": "0x864f9633673ea8ac"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 3,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 4,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0xf2f988b94bd3e0dc",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 0
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              }
+            ],
+            "descriptor_alias_map": []
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 5,
+            "dispatch": [
+              1,
+              1,
+              1
+            ],
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 0,
+            "mutable_bytes": 49152,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x55682a546baf0f12",
+                "gpu_after_dispatch_hash": "0x0229c57873a72b01",
+                "fd_after_hash": "0x0229c57873a72b01"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xfd12f7ee0ab5548b",
+                "gpu_after_dispatch_hash": "0xfd12f7ee0ab5548b",
+                "fd_after_hash": "0xfd12f7ee0ab5548b"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x55682a546baf0f12",
+                "gpu_after_dispatch_hash": "0x0229c57873a72b01",
+                "fd_after_hash": "0x0229c57873a72b01"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 3,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 66064,
+                "size": 16384,
+                "alias_rep": 4,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0xf2f988b94bd3e0dc",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 0
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              }
+            ],
+            "descriptor_alias_map": []
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 5,
+            "dispatch": [
+              1,
+              1,
+              1
+            ],
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 0,
+            "mutable_bytes": 49152,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x4d353334ae240094",
+                "gpu_after_dispatch_hash": "0x1869ed073bb61756",
+                "fd_after_hash": "0x1869ed073bb61756"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xfd12f7ee0ab5548b",
+                "gpu_after_dispatch_hash": "0xfd12f7ee0ab5548b",
+                "fd_after_hash": "0xfd12f7ee0ab5548b"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x4d353334ae240094",
+                "gpu_after_dispatch_hash": "0x1869ed073bb61756",
+                "fd_after_hash": "0x1869ed073bb61756"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 3,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 82464,
+                "size": 20480,
+                "alias_rep": 4,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0xf2f988b94bd3e0dc",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 0
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              }
+            ],
+            "descriptor_alias_map": []
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 5,
+            "dispatch": [
+              1,
+              1,
+              1
+            ],
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 0,
+            "mutable_bytes": 49152,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x17e2895b5fff12ed",
+                "gpu_after_dispatch_hash": "0xc9b8fe10d994fd37",
+                "fd_after_hash": "0xc9b8fe10d994fd37"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xfd12f7ee0ab5548b",
+                "gpu_after_dispatch_hash": "0xfd12f7ee0ab5548b",
+                "fd_after_hash": "0xfd12f7ee0ab5548b"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x17e2895b5fff12ed",
+                "gpu_after_dispatch_hash": "0xc9b8fe10d994fd37",
+                "fd_after_hash": "0xc9b8fe10d994fd37"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 3,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 98848,
+                "size": 24576,
+                "alias_rep": 4,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0xf2f988b94bd3e0dc",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 0
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              }
+            ],
+            "descriptor_alias_map": []
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 5,
+            "dispatch": [
+              1,
+              1,
+              1
+            ],
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 0,
+            "mutable_bytes": 49152,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x672c82b7e1c8167b",
+                "gpu_after_dispatch_hash": "0x864f9633673ea8ac",
+                "fd_after_hash": "0x864f9633673ea8ac"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xfd12f7ee0ab5548b",
+                "gpu_after_dispatch_hash": "0xfd12f7ee0ab5548b",
+                "fd_after_hash": "0xfd12f7ee0ab5548b"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 0,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x672c82b7e1c8167b",
+                "gpu_after_dispatch_hash": "0x864f9633673ea8ac",
+                "fd_after_hash": "0x864f9633673ea8ac"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 3,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 4,
+                "active": false,
+                "readable": false,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": false,
+              "int64": false,
+              "storage16": false,
+              "storage8": false,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0xf2f988b94bd3e0dc",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 0
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              }
+            ],
+            "descriptor_alias_map": []
+          }
+        ],
+        "largest_binding_events": [
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 26784,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              1187,
+              1,
+              64
+            ],
+            "descriptor_aliases": 1,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 510504960,
+            "mutable_bytes": 1839616,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 16384,
+                "size": 510504960,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": true,
+                "cache_hit": false,
+                "fd_before_hash": "0x37329ee7b5f73ed0",
+                "gpu_after_dispatch_hash": "0x37329ee7b5f73ed0",
+                "fd_after_hash": "0x37329ee7b5f73ed0"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x9797ff52635c7acf",
+                "gpu_after_dispatch_hash": "0x9797ff52635c7acf",
+                "fd_after_hash": "0x9797ff52635c7acf"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xca24cd9a4c9b8097",
+                "gpu_after_dispatch_hash": "0xac03469f116d274e",
+                "fd_after_hash": "0xac03469f116d274e"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xca24cd9a4c9b8097",
+                "gpu_after_dispatch_hash": "0xac03469f116d274e",
+                "fd_after_hash": "0xac03469f116d274e"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xca24cd9a4c9b8097",
+                "gpu_after_dispatch_hash": "0xac03469f116d274e",
+                "fd_after_hash": "0xac03469f116d274e"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": true,
+              "int64": false,
+              "storage16": true,
+              "storage8": true,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0x274f68a67dfef210",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              1,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 32
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 2
+              },
+              {
+                "constant_id": 2,
+                "offset": 8,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 3,
+                "dst_binding": 3,
+                "source_index": 3,
+                "source_binding": 3,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 4,
+                "dst_binding": 4,
+                "source_index": 4,
+                "source_binding": 4,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 5,
+                "dst_binding": 5,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": true
+              }
+            ],
+            "descriptor_alias_map": [
+              {
+                "index": 0,
+                "target_id": 371,
+                "original_binding": 0,
+                "rewritten_binding": 5
+              }
+            ]
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 26784,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              1187,
+              1,
+              64
+            ],
+            "descriptor_aliases": 1,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 510504960,
+            "mutable_bytes": 1839616,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 16384,
+                "size": 510504960,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": true,
+                "cache_hit": true,
+                "fd_before_hash": "0x37329ee7b5f73ed0",
+                "gpu_after_dispatch_hash": "0x37329ee7b5f73ed0",
+                "fd_after_hash": "0x37329ee7b5f73ed0"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xb28dfc886299bf21",
+                "gpu_after_dispatch_hash": "0xb28dfc886299bf21",
+                "fd_after_hash": "0xb28dfc886299bf21"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xf09cae3d72e3b9d8",
+                "gpu_after_dispatch_hash": "0x8026769875ce844a",
+                "fd_after_hash": "0x8026769875ce844a"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xf09cae3d72e3b9d8",
+                "gpu_after_dispatch_hash": "0x8026769875ce844a",
+                "fd_after_hash": "0x8026769875ce844a"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xf09cae3d72e3b9d8",
+                "gpu_after_dispatch_hash": "0x8026769875ce844a",
+                "fd_after_hash": "0x8026769875ce844a"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": true,
+              "int64": false,
+              "storage16": true,
+              "storage8": true,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0x274f68a67dfef210",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              1,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 32
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 2
+              },
+              {
+                "constant_id": 2,
+                "offset": 8,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 3,
+                "dst_binding": 3,
+                "source_index": 3,
+                "source_binding": 3,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 4,
+                "dst_binding": 4,
+                "source_index": 4,
+                "source_binding": 4,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 5,
+                "dst_binding": 5,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": true
+              }
+            ],
+            "descriptor_alias_map": [
+              {
+                "index": 0,
+                "target_id": 371,
+                "original_binding": 0,
+                "rewritten_binding": 5
+              }
+            ]
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 26784,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              1187,
+              1,
+              64
+            ],
+            "descriptor_aliases": 1,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 510504960,
+            "mutable_bytes": 1839616,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 16384,
+                "size": 510504960,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": true,
+                "cache_hit": true,
+                "fd_before_hash": "0x37329ee7b5f73ed0",
+                "gpu_after_dispatch_hash": "0x37329ee7b5f73ed0",
+                "fd_after_hash": "0x37329ee7b5f73ed0"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xc9b8fe10d994fd37",
+                "gpu_after_dispatch_hash": "0xc9b8fe10d994fd37",
+                "fd_after_hash": "0xc9b8fe10d994fd37"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xe808dea41ceb615a",
+                "gpu_after_dispatch_hash": "0x7d63497bde00dff5",
+                "fd_after_hash": "0x7d63497bde00dff5"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xe808dea41ceb615a",
+                "gpu_after_dispatch_hash": "0x7d63497bde00dff5",
+                "fd_after_hash": "0x7d63497bde00dff5"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xe808dea41ceb615a",
+                "gpu_after_dispatch_hash": "0x7d63497bde00dff5",
+                "fd_after_hash": "0x7d63497bde00dff5"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": true,
+              "int64": false,
+              "storage16": true,
+              "storage8": true,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0x274f68a67dfef210",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              1,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 32
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 2
+              },
+              {
+                "constant_id": 2,
+                "offset": 8,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 3,
+                "dst_binding": 3,
+                "source_index": 3,
+                "source_binding": 3,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 4,
+                "dst_binding": 4,
+                "source_index": 4,
+                "source_binding": 4,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 5,
+                "dst_binding": 5,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": true
+              }
+            ],
+            "descriptor_alias_map": [
+              {
+                "index": 0,
+                "target_id": 371,
+                "original_binding": 0,
+                "rewritten_binding": 5
+              }
+            ]
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 26784,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              1187,
+              1,
+              64
+            ],
+            "descriptor_aliases": 1,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 510504960,
+            "mutable_bytes": 1839616,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 16384,
+                "size": 510504960,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": true,
+                "cache_hit": true,
+                "fd_before_hash": "0x37329ee7b5f73ed0",
+                "gpu_after_dispatch_hash": "0x37329ee7b5f73ed0",
+                "fd_after_hash": "0x37329ee7b5f73ed0"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x864f9633673ea8ac",
+                "gpu_after_dispatch_hash": "0x864f9633673ea8ac",
+                "fd_after_hash": "0x864f9633673ea8ac"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x114ff15a4d1adec0",
+                "gpu_after_dispatch_hash": "0x0098cac740b57fe8",
+                "fd_after_hash": "0x0098cac740b57fe8"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x114ff15a4d1adec0",
+                "gpu_after_dispatch_hash": "0x0098cac740b57fe8",
+                "fd_after_hash": "0x0098cac740b57fe8"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x114ff15a4d1adec0",
+                "gpu_after_dispatch_hash": "0x0098cac740b57fe8",
+                "fd_after_hash": "0x0098cac740b57fe8"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": true,
+              "int64": false,
+              "storage16": true,
+              "storage8": true,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0x274f68a67dfef210",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              1,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 32
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 2
+              },
+              {
+                "constant_id": 2,
+                "offset": 8,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 3,
+                "dst_binding": 3,
+                "source_index": 3,
+                "source_binding": 3,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 4,
+                "dst_binding": 4,
+                "source_index": 4,
+                "source_binding": 4,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 5,
+                "dst_binding": 5,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": true
+              }
+            ],
+            "descriptor_alias_map": [
+              {
+                "index": 0,
+                "target_id": 371,
+                "original_binding": 0,
+                "rewritten_binding": 5
+              }
+            ]
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 26784,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              1187,
+              1,
+              64
+            ],
+            "descriptor_aliases": 1,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 510504960,
+            "mutable_bytes": 1839616,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 16384,
+                "size": 510504960,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": true,
+                "cache_hit": true,
+                "fd_before_hash": "0x37329ee7b5f73ed0",
+                "gpu_after_dispatch_hash": "0x37329ee7b5f73ed0",
+                "fd_after_hash": "0x37329ee7b5f73ed0"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x0229c57873a72b01",
+                "gpu_after_dispatch_hash": "0x0229c57873a72b01",
+                "fd_after_hash": "0x0229c57873a72b01"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x9eed49891fbe26e3",
+                "gpu_after_dispatch_hash": "0x144777fe2cfc4b93",
+                "fd_after_hash": "0x144777fe2cfc4b93"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x9eed49891fbe26e3",
+                "gpu_after_dispatch_hash": "0x144777fe2cfc4b93",
+                "fd_after_hash": "0x144777fe2cfc4b93"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x9eed49891fbe26e3",
+                "gpu_after_dispatch_hash": "0x144777fe2cfc4b93",
+                "fd_after_hash": "0x144777fe2cfc4b93"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": true,
+              "int64": false,
+              "storage16": true,
+              "storage8": true,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0x274f68a67dfef210",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              1,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 32
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 2
+              },
+              {
+                "constant_id": 2,
+                "offset": 8,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 3,
+                "dst_binding": 3,
+                "source_index": 3,
+                "source_binding": 3,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 4,
+                "dst_binding": 4,
+                "source_index": 4,
+                "source_binding": 4,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 5,
+                "dst_binding": 5,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": true
+              }
+            ],
+            "descriptor_alias_map": [
+              {
+                "index": 0,
+                "target_id": 371,
+                "original_binding": 0,
+                "rewritten_binding": 5
+              }
+            ]
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 26784,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              1187,
+              1,
+              64
+            ],
+            "descriptor_aliases": 1,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 510504960,
+            "mutable_bytes": 1839616,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 16384,
+                "size": 510504960,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": true,
+                "cache_hit": true,
+                "fd_before_hash": "0x37329ee7b5f73ed0",
+                "gpu_after_dispatch_hash": "0x37329ee7b5f73ed0",
+                "fd_after_hash": "0x37329ee7b5f73ed0"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x1869ed073bb61756",
+                "gpu_after_dispatch_hash": "0x1869ed073bb61756",
+                "fd_after_hash": "0x1869ed073bb61756"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xb5ddd4ed6664b97b",
+                "gpu_after_dispatch_hash": "0x5808dc771b8098ae",
+                "fd_after_hash": "0x5808dc771b8098ae"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xb5ddd4ed6664b97b",
+                "gpu_after_dispatch_hash": "0x5808dc771b8098ae",
+                "fd_after_hash": "0x5808dc771b8098ae"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xb5ddd4ed6664b97b",
+                "gpu_after_dispatch_hash": "0x5808dc771b8098ae",
+                "fd_after_hash": "0x5808dc771b8098ae"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": true,
+              "int64": false,
+              "storage16": true,
+              "storage8": true,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0x274f68a67dfef210",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              1,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 32
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 2
+              },
+              {
+                "constant_id": 2,
+                "offset": 8,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 3,
+                "dst_binding": 3,
+                "source_index": 3,
+                "source_binding": 3,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 4,
+                "dst_binding": 4,
+                "source_index": 4,
+                "source_binding": 4,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 5,
+                "dst_binding": 5,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": true
+              }
+            ],
+            "descriptor_alias_map": [
+              {
+                "index": 0,
+                "target_id": 371,
+                "original_binding": 0,
+                "rewritten_binding": 5
+              }
+            ]
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 26784,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              1187,
+              1,
+              64
+            ],
+            "descriptor_aliases": 1,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 510504960,
+            "mutable_bytes": 1839616,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 16384,
+                "size": 510504960,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": true,
+                "cache_hit": true,
+                "fd_before_hash": "0x37329ee7b5f73ed0",
+                "gpu_after_dispatch_hash": "0x37329ee7b5f73ed0",
+                "fd_after_hash": "0x37329ee7b5f73ed0"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xc9b8fe10d994fd37",
+                "gpu_after_dispatch_hash": "0xc9b8fe10d994fd37",
+                "fd_after_hash": "0xc9b8fe10d994fd37"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xe366b0c3bd27c56c",
+                "gpu_after_dispatch_hash": "0x7d63497bde00dff5",
+                "fd_after_hash": "0x7d63497bde00dff5"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xe366b0c3bd27c56c",
+                "gpu_after_dispatch_hash": "0x7d63497bde00dff5",
+                "fd_after_hash": "0x7d63497bde00dff5"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0xe366b0c3bd27c56c",
+                "gpu_after_dispatch_hash": "0x7d63497bde00dff5",
+                "fd_after_hash": "0x7d63497bde00dff5"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": true,
+              "int64": false,
+              "storage16": true,
+              "storage8": true,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0x274f68a67dfef210",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              1,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 32
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 2
+              },
+              {
+                "constant_id": 2,
+                "offset": 8,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 3,
+                "dst_binding": 3,
+                "source_index": 3,
+                "source_binding": 3,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 4,
+                "dst_binding": 4,
+                "source_index": 4,
+                "source_binding": 4,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 5,
+                "dst_binding": 5,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": true
+              }
+            ],
+            "descriptor_alias_map": [
+              {
+                "index": 0,
+                "target_id": 371,
+                "original_binding": 0,
+                "rewritten_binding": 5
+              }
+            ]
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "compact_summary": true,
+            "shader_bytes": 26784,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              1187,
+              1,
+              64
+            ],
+            "descriptor_aliases": 1,
+            "duplicate_descriptor_rewrite": true,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "resident_bytes": 510504960,
+            "mutable_bytes": 1839616,
+            "valid": true,
+            "binding_details": [
+              {
+                "index": 0,
+                "binding": 0,
+                "offset": 16384,
+                "size": 510504960,
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": true,
+                "cache_hit": true,
+                "fd_before_hash": "0x37329ee7b5f73ed0",
+                "gpu_after_dispatch_hash": "0x37329ee7b5f73ed0",
+                "fd_after_hash": "0x37329ee7b5f73ed0"
+              },
+              {
+                "index": 1,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x864f9633673ea8ac",
+                "gpu_after_dispatch_hash": "0x864f9633673ea8ac",
+                "fd_after_hash": "0x864f9633673ea8ac"
+              },
+              {
+                "index": 2,
+                "binding": 2,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": false,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x114ff15a4d1adec0",
+                "gpu_after_dispatch_hash": "0x0098cac740b57fe8",
+                "fd_after_hash": "0x0098cac740b57fe8"
+              },
+              {
+                "index": 3,
+                "binding": 3,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x114ff15a4d1adec0",
+                "gpu_after_dispatch_hash": "0x0098cac740b57fe8",
+                "fd_after_hash": "0x0098cac740b57fe8"
+              },
+              {
+                "index": 4,
+                "binding": 4,
+                "offset": 16384,
+                "size": 607744,
+                "alias_rep": 2,
+                "active": true,
+                "readable": true,
+                "writable": false,
+                "resident": false,
+                "cache_hit": false,
+                "fd_before_hash": "0x114ff15a4d1adec0",
+                "gpu_after_dispatch_hash": "0x0098cac740b57fe8",
+                "fd_after_hash": "0x0098cac740b57fe8"
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": true,
+              "int64": false,
+              "storage16": true,
+              "storage8": true,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "push_bytes": 116,
+            "spirv_hash": "0x274f68a67dfef210",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              1,
+              1,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              1,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 32
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 2
+              },
+              {
+                "constant_id": 2,
+                "offset": 8,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_writes": [
+              {
+                "index": 0,
+                "dst_binding": 0,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": false
+              },
+              {
+                "index": 1,
+                "dst_binding": 1,
+                "source_index": 1,
+                "source_binding": 1,
+                "alias_rep": 1,
+                "offset": 0,
+                "range": 16384,
+                "alias_write": false
+              },
+              {
+                "index": 2,
+                "dst_binding": 2,
+                "source_index": 2,
+                "source_binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 3,
+                "dst_binding": 3,
+                "source_index": 3,
+                "source_binding": 3,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 4,
+                "dst_binding": 4,
+                "source_index": 4,
+                "source_binding": 4,
+                "alias_rep": 2,
+                "offset": 0,
+                "range": 607744,
+                "alias_write": false
+              },
+              {
+                "index": 5,
+                "dst_binding": 5,
+                "source_index": 0,
+                "source_binding": 0,
+                "alias_rep": 0,
+                "offset": 0,
+                "range": 510504960,
+                "alias_write": true
+              }
+            ],
+            "descriptor_alias_map": [
+              {
+                "index": 0,
+                "target_id": 371,
+                "original_binding": 0,
+                "rewritten_binding": 5
+              }
+            ]
+          }
+        ],
+        "failed_events": [],
+        "fallback_events": [],
+        "llama_throw": ""
+      },
+      "executor_backends": [
+        "android_vulkan"
+      ],
+      "executor_errors": [],
+      "spirv_hashes": [
+        "0x11d5243c43b23a7b",
+        "0x274f68a67dfef210",
+        "0xac41e8033a67af4a",
+        "0xf2f988b94bd3e0dc"
+      ]
+    },
+    "correctness": {
+      "schema": "pdocker.llama.correctness.v1.compare",
+      "timestamp_utc": "2026-05-09T01:52:49Z",
+      "endpoint": "http://127.0.0.1:28081",
+      "mode": "vulkan-forced-ngl-1",
+      "gpu_layers": 1,
+      "model_path": "/models/model.gguf",
+      "probes": [
+        {
+          "name": "addition",
+          "prompt": "2+3=",
+          "expected": [
+            "5"
+          ],
+          "required": true,
+          "passed": false,
+          "content": " Marvel",
+          "error": null,
+          "duration_ms": 17729.534,
+          "status_code": 200
+        },
+        {
+          "name": "multiplication_prefix",
+          "prompt": "12*7=",
+          "expected": [
+            "84",
+            "8"
+          ],
+          "required": false,
+          "passed": false,
+          "content": " _",
+          "error": null,
+          "duration_ms": 18595.419,
+          "status_code": 200
+        },
+        {
+          "name": "identity_text",
+          "prompt": "Repeat exactly: pdocker-ok",
+          "expected": [
+            "pdocker-ok",
+            " pdocker-ok"
+          ],
+          "required": false,
+          "passed": false,
+          "content": "util dong dong dong",
+          "error": null,
+          "duration_ms": 57033.38,
+          "status_code": 200
+        }
+      ],
+      "summary": {
+        "correctness": "fail",
+        "required_failures": 1,
+        "optional_failures": 2,
+        "benchmark_claim_allowed": false
+      }
+    }
+  },
+  "differential_correctness": {
+    "enabled": false,
+    "shared_probe_count": 0,
+    "mismatch_count": 0,
+    "summary": "not-run",
+    "probes": []
+  },
+  "comparison": {
+    "speedup": 0.13224813136932323,
+    "target_tokens_per_second": 13.03225352424716,
+    "target_met": false
+  },
+  "bridge_overhead_phase": {
+    "phase": "served_without_bridge_profile",
+    "served": true,
+    "gpu_layers": 1,
+    "cpu_tokens_per_second": 1.303225352424716,
+    "gpu_tokens_per_second": 0.1723491176112964,
+    "speedup": 0.13224813136932323,
+    "target_speedup": 10.0,
+    "target_tokens_per_second": 13.03225352424716,
+    "target_met": false,
+    "blocker": "GPU offload served, but correctness probes do not match the CPU/no-offload control",
+    "next_action": "trace final-projection descriptor aliases and feature requirements until GPU output matches CPU/no-offload",
+    "bridge_dispatch_profile": {
+      "samples": 0,
+      "upload_ms_mean": 0.0,
+      "dispatch_ms_mean": 0.0,
+      "download_ms_mean": 0.0,
+      "copy_buffer_ops_in_log": 0,
+      "copy_buffer_bytes_in_log": 0,
+      "copy_submit_count": 0,
+      "copy_submit_ops": 0,
+      "copy_submit_alias_ops": 0,
+      "copy_submit_memmove_ops": 0,
+      "copy_submit_skipped_ops": 0,
+      "copy_submit_alias_bytes": 0,
+      "copy_submit_memmove_bytes": 0,
+      "copy_submit_skipped_bytes": 0,
+      "guarded_binding_samples": 0,
+      "guarded_binding_max_resident_bytes": 0,
+      "guarded_binding_max_dirty_bytes": 0,
+      "guarded_binding_max_range_bytes": 0,
+      "binding_timing_samples": 4640,
+      "binding_upload_ms_max": 0.0,
+      "binding_download_ms_max": 0.0,
+      "dirty_probe_binding_samples": 0,
+      "dirty_probe_max_bytes": 0,
+      "dirty_probe_total_bytes": 0,
+      "dirty_probe_ms_max": 0.0,
+      "dirty_writeback_cached_samples": 0,
+      "dirty_writeback_total_bytes": 0,
+      "top_binding_uploads": [
+        {
+          "event_index": 0,
+          "binding": 0,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 0,
+          "binding": 1,
+          "size": 512,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 0,
+          "binding": 2,
+          "size": 32768,
+          "readable": false,
+          "writable": true,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 0,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 1,
+          "size": 8,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 2,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 3,
+          "size": 32768,
+          "readable": false,
+          "writable": true,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 4,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        }
+      ],
+      "top_binding_downloads": [
+        {
+          "event_index": 0,
+          "binding": 0,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 0,
+          "binding": 1,
+          "size": 512,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 0,
+          "binding": 2,
+          "size": 32768,
+          "readable": false,
+          "writable": true,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 0,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 1,
+          "size": 8,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 2,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 3,
+          "size": 32768,
+          "readable": false,
+          "writable": true,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        },
+        {
+          "event_index": 1,
+          "binding": 4,
+          "size": 32768,
+          "readable": true,
+          "writable": false,
+          "resident": false,
+          "cache_hit": false,
+          "mutable_reused": false,
+          "mutable_cache_hit": false,
+          "upload_ms": 0.0,
+          "download_ms": 0.0,
+          "dirty_probe_pages": 0,
+          "dirty_probe_bytes": 0,
+          "dirty_probe_ms": 0.0,
+          "dirty_writeback_cached": false,
+          "dirty_writeback_bytes": 0
+        }
+      ],
+      "top_dirty_probe_bindings": []
+    }
+  },
+  "operation": {
+    "kind": "llama-gpu-compare",
+    "ui_surface": "Overview daemon operation/progress card",
+    "container_surface": "pdocker-llama-cpp remains the container shown by Engine container listing",
+    "cleanup": "remove adb port forward and mark failed operation on nonzero exit; CPU restore is opt-in with --restore because the next run recreates the required mode"
+  },
+  "next_blocker": "GPU offload served, but correctness probes do not match the CPU/no-offload control",
+  "next_action": "trace final-projection descriptor aliases and feature requirements until GPU output matches CPU/no-offload"
+}
