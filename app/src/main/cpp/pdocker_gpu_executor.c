@@ -618,6 +618,7 @@ typedef struct {
     int valid;
     uint64_t shader_hash;
     uint64_t spec_hash;
+    uint64_t policy_hash;
     size_t shader_size;
     size_t specialization_data_size;
     size_t specialization_count;
@@ -2104,6 +2105,7 @@ static void destroy_pipeline_cache_entry(VkDevice device, VulkanPipelineCacheEnt
 static VulkanPipelineCacheEntry *find_pipeline_cache_entry(
         uint64_t shader_hash,
         uint64_t spec_hash,
+        uint64_t policy_hash,
         size_t shader_size,
         size_t specialization_data_size,
         size_t specialization_count,
@@ -2115,6 +2117,7 @@ static VulkanPipelineCacheEntry *find_pipeline_cache_entry(
         if (entry->valid &&
             entry->shader_hash == shader_hash &&
             entry->spec_hash == spec_hash &&
+            entry->policy_hash == policy_hash &&
             entry->shader_size == shader_size &&
             entry->specialization_data_size == specialization_data_size &&
             entry->specialization_count == specialization_count &&
@@ -2125,6 +2128,35 @@ static VulkanPipelineCacheEntry *find_pipeline_cache_entry(
         }
     }
     return NULL;
+}
+
+static uint64_t vulkan_pipeline_policy_hash(
+        int rewrite_duplicate_descriptors,
+        int materialize_specialization_constants,
+        int specialization_materialized,
+        int disable_pipeline_optimization,
+        int skip_unused_descriptor_transfers,
+        int use_spirv_descriptor_access,
+        int disable_overlap_aliasing) {
+    /*
+     * Keep diagnostic/bridge policy in the pipeline cache key.  Some flags
+     * already alter shader bytes or specialization state, but including the
+     * explicit policy bits prevents one bisection run from silently reusing a
+     * pipeline created under a different executor policy.
+     *
+     * This stays allocation-free and local to the dispatch hot path.
+     */
+    uint64_t hash = 1469598103934665603ull;
+    const unsigned char bits[] = {
+        (unsigned char)(rewrite_duplicate_descriptors ? 1 : 0),
+        (unsigned char)(materialize_specialization_constants ? 1 : 0),
+        (unsigned char)(specialization_materialized ? 1 : 0),
+        (unsigned char)(disable_pipeline_optimization ? 1 : 0),
+        (unsigned char)(skip_unused_descriptor_transfers ? 1 : 0),
+        (unsigned char)(use_spirv_descriptor_access ? 1 : 0),
+        (unsigned char)(disable_overlap_aliasing ? 1 : 0),
+    };
+    return fnv1a64_update(hash, bits, sizeof(bits));
 }
 
 static VulkanPipelineCacheEntry *select_pipeline_cache_slot(VkDevice device) {
@@ -3571,6 +3603,14 @@ static int run_vulkan_dispatch_fd(
             goto cleanup;
         }
     }
+    const uint64_t pipeline_policy_hash = vulkan_pipeline_policy_hash(
+        rewrite_duplicate_descriptors,
+        materialize_specialization_constants,
+        specialization_materialized,
+        disable_pipeline_optimization,
+        skip_unused_descriptor_transfers,
+        use_spirv_descriptor_access,
+        disable_overlap_aliasing);
     spirv_summary = summarize_spirv(shader_code, shader_size);
     have_spirv_summary = 1;
     if (skip_unused_descriptor_transfers) {
@@ -3816,6 +3856,7 @@ static int run_vulkan_dispatch_fd(
     pipeline_cache_entry = find_pipeline_cache_entry(
         spirv_summary.hash,
         spec_hash,
+        pipeline_policy_hash,
         shader_size,
         specialization_data_size,
         specialization_count,
@@ -3888,6 +3929,7 @@ static int run_vulkan_dispatch_fd(
         pipeline_cache_entry->valid = 1;
         pipeline_cache_entry->shader_hash = spirv_summary.hash;
         pipeline_cache_entry->spec_hash = spec_hash;
+        pipeline_cache_entry->policy_hash = pipeline_policy_hash;
         pipeline_cache_entry->shader_size = shader_size;
         pipeline_cache_entry->specialization_data_size = specialization_data_size;
         pipeline_cache_entry->specialization_count = specialization_count;
@@ -4205,6 +4247,7 @@ static int run_vulkan_dispatch_fd(
                 "\"materialize_specialization\":%s,"
                 "\"disable_pipeline_optimization\":%s,"
                 "\"specialization_materialized\":%s,"
+                "\"pipeline_policy_hash\":\"0x%016llx\","
                 "\"resident_bytes\":%zu,\"mutable_bytes\":%zu,"
                 "\"pre_barriers\":%u,\"post_barriers\":%u,"
                 "\"valid\":true,",
@@ -4218,6 +4261,7 @@ static int run_vulkan_dispatch_fd(
                 materialize_specialization_constants ? "true" : "false",
                 disable_pipeline_optimization ? "true" : "false",
                 specialization_materialized ? "true" : "false",
+                (unsigned long long)pipeline_policy_hash,
                 resident_bytes,
                 mutable_bytes,
                 pre_barrier_count,
@@ -4272,6 +4316,7 @@ static int run_vulkan_dispatch_fd(
             "\"materialize_specialization\":%s,"
             "\"disable_pipeline_optimization\":%s,"
             "\"specialization_materialized\":%s,"
+            "\"pipeline_policy_hash\":\"0x%016llx\","
             "\"profile_response\":%s,"
             "\"pre_barriers\":%u,\"post_barriers\":%u,"
             "\"upload_ms\":%.4f,\"dispatch_ms\":%.4f,\"download_ms\":%.4f,"
@@ -4297,6 +4342,7 @@ static int run_vulkan_dispatch_fd(
             materialize_specialization_constants ? "true" : "false",
             disable_pipeline_optimization ? "true" : "false",
             specialization_materialized ? "true" : "false",
+            (unsigned long long)pipeline_policy_hash,
             profile_response ? "true" : "false",
             pre_barrier_count,
             post_barrier_count,
