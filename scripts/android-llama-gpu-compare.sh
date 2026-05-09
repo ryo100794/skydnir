@@ -428,11 +428,13 @@ probe_http_correctness() {
   "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
   python3 - "http://127.0.0.1:$LOCAL_PORT" "$mode" "$GPU_LAYERS" "$MODEL_PATH" "$out" <<'PY'
 import json
+import os
 import sys
 import time
 import urllib.request
 
 base_url, mode, gpu_layers, model_path, out_path = sys.argv[1:6]
+n_probs = max(0, int(os.environ.get("PDOCKER_LLAMA_N_PROBS", "10") or "0"))
 
 def post_json(path, body, timeout):
     data = json.dumps(body, separators=(",", ":")).encode("utf-8")
@@ -467,12 +469,32 @@ for probe in probes:
                 "top_p": 1,
                 "cache_prompt": False,
                 "stream": False,
+                "n_probs": n_probs,
+                "completion_probabilities": n_probs > 0,
                 "stop": ["\n"],
             },
             timeout=180,
         )
         content = str(payload.get("content", ""))
         normalized = content.lstrip()
+        probabilities = payload.get("completion_probabilities") or []
+        if probabilities and isinstance(probabilities, list) and isinstance(probabilities[0], dict):
+            first = probabilities[0]
+            top_logprobs = []
+            for entry in first.get("top_logprobs") or []:
+                if not isinstance(entry, dict):
+                    continue
+                top_logprobs.append({
+                    "id": entry.get("id"),
+                    "token": str(entry.get("token", ""))[:96],
+                    "logprob": entry.get("logprob"),
+                })
+            item["selected_token"] = {
+                "id": first.get("id"),
+                "token": str(first.get("token", ""))[:96],
+                "logprob": first.get("logprob"),
+            }
+            item["top_logprobs"] = top_logprobs[:n_probs]
         item.update({
             "status_code": status,
             "duration_ms": duration_ms,
@@ -498,6 +520,7 @@ report = {
     "mode": mode,
     "gpu_layers": int(gpu_layers),
     "model_path": model_path,
+    "n_probs": n_probs,
     "probes": results,
     "summary": summary,
 }
@@ -587,6 +610,8 @@ container_logs > "$GPU_LOG"
 
 python3 - "$CPU_JSON" "$CPU_CORRECTNESS_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$CORRECTNESS_JSON" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" <<'PY'
 import json
+import math
+import os
 import re
 import sys
 import time
@@ -625,6 +650,26 @@ def probe_map(report):
         if isinstance(item, dict)
     }
 
+def probe_probability_map(report):
+    mapped = {}
+    for item in report.get("probes", []):
+        if not isinstance(item, dict):
+            continue
+        top_logprobs = item.get("top_logprobs") or []
+        if not isinstance(top_logprobs, list):
+            top_logprobs = []
+        selected = item.get("selected_token") or {}
+        if not isinstance(selected, dict):
+            selected = {}
+        mapped[str(item.get("name"))] = {
+            "selected_token": selected,
+            "top_logprobs": [
+                entry for entry in top_logprobs
+                if isinstance(entry, dict)
+            ],
+        }
+    return mapped
+
 cpu_probe_outputs = probe_map(cpu_correctness)
 gpu_probe_outputs = probe_map(correctness)
 shared_probe_names = sorted(set(cpu_probe_outputs) & set(gpu_probe_outputs))
@@ -651,6 +696,48 @@ differential_correctness = {
     "probes": differential_probe_results,
 }
 
+cpu_probe_probabilities = probe_probability_map(cpu_correctness)
+gpu_probe_probabilities = probe_probability_map(correctness)
+shared_probability_probe_names = sorted(set(cpu_probe_probabilities) & set(gpu_probe_probabilities))
+differential_probability_results = []
+for name in shared_probability_probe_names:
+    cpu_prob = cpu_probe_probabilities[name]
+    gpu_prob = gpu_probe_probabilities[name]
+    cpu_top = cpu_prob.get("top_logprobs") or []
+    gpu_top = gpu_prob.get("top_logprobs") or []
+    cpu_top_ids = [entry.get("id") for entry in cpu_top]
+    gpu_top_ids = [entry.get("id") for entry in gpu_top]
+    cpu_selected = cpu_prob.get("selected_token") or {}
+    gpu_selected = gpu_prob.get("selected_token") or {}
+    cpu_selected_id = cpu_selected.get("id")
+    gpu_selected_id = gpu_selected.get("id")
+    differential_probability_results.append({
+        "name": name,
+        "cpu_selected_token": cpu_selected,
+        "gpu_selected_token": gpu_selected,
+        "top1_matched": bool(cpu_top_ids and gpu_top_ids and cpu_top_ids[0] == gpu_top_ids[0]),
+        "selected_token_matched": cpu_selected_id is not None and cpu_selected_id == gpu_selected_id,
+        "cpu_selected_rank_in_gpu_top": gpu_top_ids.index(cpu_selected_id) + 1 if cpu_selected_id in gpu_top_ids else None,
+        "gpu_selected_rank_in_cpu_top": cpu_top_ids.index(gpu_selected_id) + 1 if gpu_selected_id in cpu_top_ids else None,
+        "shared_top_token_ids": sorted(set(cpu_top_ids) & set(gpu_top_ids), key=lambda token_id: cpu_top_ids.index(token_id)),
+        "cpu_top_logprobs": cpu_top,
+        "gpu_top_logprobs": gpu_top,
+    })
+differential_probabilities = {
+    "enabled": bool(cpu_probe_probabilities and gpu_probe_probabilities),
+    "shared_probe_count": len(shared_probability_probe_names),
+    "top1_mismatch_count": sum(1 for item in differential_probability_results if not item["top1_matched"]),
+    "selected_token_mismatch_count": sum(1 for item in differential_probability_results if not item["selected_token_matched"]),
+    "summary": (
+        "pass"
+        if differential_probability_results and all(item["top1_matched"] for item in differential_probability_results)
+        else "fail"
+        if differential_probability_results
+        else "not-run"
+    ),
+    "probes": differential_probability_results,
+}
+
 def json_string_field_seen(name, value):
     return re.search(rf'"{re.escape(name)}"\s*:\s*"{re.escape(value)}"', log) is not None
 
@@ -660,6 +747,12 @@ def json_bool_field_seen(name, value):
 executor_backends = sorted(set(re.findall(r'"backend_impl"\s*:\s*"([^"]+)"', log)))
 executor_errors = sorted(set(re.findall(r'"error"\s*:\s*"([^"]+)"', log)))
 spirv_hashes = sorted(set(re.findall(r'"spirv_hash"\s*:\s*"([^"]+)"', log)))
+
+def env_bool(name):
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 def extract_executor_json_events(text):
     events = []
@@ -716,6 +809,13 @@ def extract_executor_json_events(text):
         if event.get("executor") == "pdocker-gpu-executor":
             events.append(event)
     return events
+
+def observed_event_values(events, field):
+    values = []
+    for event in events:
+        if isinstance(event, dict) and field in event:
+            values.append(event.get(field))
+    return values
 
 def parse_android_feature_trace(text):
     m = re.search(
@@ -776,6 +876,34 @@ executor_events = extract_executor_json_events(log)
 executor_backends = sorted(set(executor_backends) | {e.get("backend_impl") for e in executor_events if e.get("backend_impl")})
 executor_errors = sorted(set(executor_errors) | {e.get("error") for e in executor_events if e.get("error")})
 spirv_hashes = sorted(set(spirv_hashes) | {e.get("spirv_hash") for e in executor_events if e.get("spirv_hash")})
+config_expectations = [
+    ("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "duplicate_descriptor_rewrite"),
+    ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
+    ("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "disable_pipeline_optimization"),
+]
+config_checks = []
+for env_name, event_field in config_expectations:
+    expected = env_bool(env_name)
+    observed = observed_event_values(executor_events, event_field)
+    if expected is None:
+        status = "not-requested"
+    elif not observed:
+        status = "missing-evidence"
+    elif all(value == expected for value in observed):
+        status = "pass"
+    else:
+        status = "mismatch"
+    config_checks.append({
+        "env": env_name,
+        "executor_field": event_field,
+        "expected": expected,
+        "observed_values": observed[-8:],
+        "status": status,
+    })
+config_propagation = {
+    "summary": "fail" if any(item["status"] in {"missing-evidence", "mismatch"} for item in config_checks) else "pass",
+    "checks": config_checks,
+}
 android_feature_trace = parse_android_feature_trace(log)
 spirv_traces = parse_spirv_traces(log)
 generic_spirv_attempted = (
@@ -871,6 +999,9 @@ elif queue_submit_blocker:
 elif executor_feature_mismatches:
     blocker_class = "vulkan_feature_mismatch"
     blocker_detail = "generic SPIR-V dispatch ran while executor feature policy reports missing features: " + ",".join(executor_feature_mismatches)
+elif config_propagation["summary"] == "fail":
+    blocker_class = "config_propagation_mismatch"
+    blocker_detail = "one or more requested bridge tuning options did not appear with the expected value in executor evidence"
 elif bool(int(gpu_served_s)) and (
     gpu_correctness_summary == "fail" or
     differential_correctness_summary == "fail"
@@ -964,6 +1095,88 @@ generic_spirv_dispatch = {
     ][-4:],
     "fallback_events": [e for e in executor_events if e.get("backend_affinity") == "fallback"][-4:],
     "llama_throw": "vk::Queue::submit: ErrorFeatureNotPresent" if queue_submit_blocker else "",
+}
+
+valid_spirv_events = [
+    e for e in executor_events
+    if e.get("kernel") == "generic_spirv"
+    and e.get("backend_impl") == "android_vulkan"
+    and e.get("valid") is True
+]
+final_projection_candidate = max(
+    valid_spirv_events,
+    key=lambda event: sum(int(detail.get("size") or 0) for detail in event.get("binding_details") or []),
+    default={},
+)
+f32_samples = []
+for detail in final_projection_candidate.get("binding_details") or []:
+    if isinstance(detail, dict) and isinstance(detail.get("f32_after_dispatch"), list):
+        f32_samples.extend(detail.get("f32_after_dispatch") or [])
+finite_f32_sample_count = sum(
+    1
+    for sample in f32_samples
+    if isinstance(sample, dict)
+    and isinstance(sample.get("value"), (int, float))
+    and math.isfinite(float(sample.get("value")))
+)
+diagnostic_bisection = {
+    "method": "binary-search fault isolation over API, graph, ICD, executor, and readback boundaries",
+    "nodes": [
+        {
+            "id": "api_cpu_baseline",
+            "question": "Does the same model and server API produce deterministic CPU/no-offload answers?",
+            "state": "pass" if cpu_correctness.get("summary", {}).get("correctness") == "pass" else "fail" if cpu_correctness else "not-run",
+            "routes": {"pass": "gpu_server_output", "fail": "llama_api_or_model_input"},
+        },
+        {
+            "id": "gpu_server_output",
+            "question": "Does GPU/offload output match CPU/no-offload at the HTTP completion boundary?",
+            "state": "pass" if differential_correctness.get("summary") == "pass" else "fail" if differential_correctness.get("summary") == "fail" else "not-run",
+            "routes": {"pass": "performance_only", "fail": "token_probability_boundary"},
+        },
+        {
+            "id": "token_probability_boundary",
+            "question": "Do CPU and GPU agree on selected/top token probabilities before sampling policy can hide the error?",
+            "state": "pass" if differential_probabilities.get("summary") == "pass" else "fail" if differential_probabilities.get("summary") == "fail" else "not-run",
+            "routes": {"pass": "sampler_or_decoding", "fail": "logits_or_final_projection"},
+        },
+        {
+            "id": "executor_dispatch_boundary",
+            "question": "Did generic SPIR-V reach the Android Vulkan executor and complete successfully?",
+            "state": "pass" if valid_spirv_events else "fail" if generic_spirv_attempted else "not-reached",
+            "routes": {"pass": "post_dispatch_logits", "fail": "icd_or_executor_submit"},
+        },
+        {
+            "id": "post_dispatch_logits",
+            "question": "Does the largest/final-projection-like writable binding contain finite float samples after dispatch?",
+            "state": "pass" if finite_f32_sample_count else "not-instrumented" if final_projection_candidate else "not-reached",
+            "routes": {"pass": "numeric_layout_or_readback", "not-instrumented": "enable_f32_samples", "not-reached": "dispatch_boundary"},
+        },
+        {
+            "id": "env_propagation",
+            "question": "Did requested bridge tuning environment variables reach the executor as dispatch evidence?",
+            "state": config_propagation["summary"],
+            "routes": {"pass": "trust_tuning_experiments", "fail": "fix_icd_to_executor_option_transport_first"},
+        },
+    ],
+    "current_focus": (
+        "numeric_layout_or_readback"
+        if finite_f32_sample_count and differential_probabilities.get("summary") == "fail"
+        else "icd_or_executor_submit"
+        if generic_spirv_attempted and not valid_spirv_events
+        else "llama_api_or_model_input"
+        if cpu_correctness and cpu_correctness.get("summary", {}).get("correctness") != "pass"
+        else "config_propagation"
+        if config_propagation["summary"] == "fail"
+        else "collect_more_boundaries"
+    ),
+    "finite_f32_sample_count": finite_f32_sample_count,
+    "final_projection_candidate": {
+        "spirv_hash": final_projection_candidate.get("spirv_hash"),
+        "dispatch": final_projection_candidate.get("dispatch"),
+        "push_bytes": final_projection_candidate.get("push_bytes"),
+        "binding_count": final_projection_candidate.get("bindings"),
+    } if final_projection_candidate else {},
 }
 failure_axes = {
     "advertised_limits": {
@@ -1178,10 +1391,13 @@ result = {
             "executor_backends": executor_backends,
             "executor_errors": executor_errors,
             "spirv_hashes": spirv_hashes[-4:],
+            "config_propagation": config_propagation,
+            "diagnostic_bisection": diagnostic_bisection,
         },
         "correctness": correctness,
     },
     "differential_correctness": differential_correctness,
+    "differential_probabilities": differential_probabilities,
     "comparison": {
         "speedup": speedup,
         "target_tokens_per_second": target_tps,

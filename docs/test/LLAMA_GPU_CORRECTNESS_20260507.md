@@ -69,6 +69,8 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-compare-20260509-ngl1-no-materialize-dispatch-option.json` | 1 | Specialization materialization disabled through the ICD-to-executor dispatch option | 0.1723 | 0.13x | fail | output changes to ` Marvel`, ` _`, `util dong dong dong` |
 | `llama-gpu-compare-20260509-ngl1-pipeline-opt-dispatch-option.json` | 1 | Android pipeline optimization enabled through the dispatch option | 0.1186 | 0.09x | fail | output changes to `" '--"`, `ode`, empty |
 | `llama-gpu-compare-20260509-ngl1-f32-samples-fixed.json` | 1 | Writable binding float32 samples recorded after final-projection dispatch | 0.1697 | 0.13x | fail | final binding 2 sample starts `[1.3597, 1.8112, 2.5802, -0.3651]` |
+| `llama-cpu-gpu-probs-20260509-ngl1.json` | 1 | CPU/GPU HTTP `/completion` top-token probability capture | 0.1749 | 2.61x | fail | CPU top1: `5`/`8`; GPU top1: `+`/`细细`; no shared top-10 token ids |
+| `llama-cpu-gpu-bisection-20260509-ngl1.json` | 1 | Diagnostic bisection tree plus bridge option propagation evidence | 0.1525 | 2.20x | fail | focus: `numeric_layout_or_readback`; env propagation: pass; finite f32 samples: 8 |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -198,6 +200,24 @@ Two ICD correctness fixes were added on 2026-05-08:
   `1.35967982`, `1.81122828`, `2.580235`, `-0.365148783`. The failure has
   therefore moved from "did the dispatch write anything?" to "are the logits
   numerically correct / interpreted with the expected layout?".
+- The compare driver now requests `completion_probabilities` with bounded
+  `n_probs` during correctness probes. This records selected token ids and
+  top-logprob lists for both CPU/no-offload and GPU/offload. The latest full
+  run shows zero overlap between CPU and GPU top-token sets for the arithmetic
+  probes: CPU selects token `5` for `2+3=`, while GPU selects unrelated tokens
+  such as `礼拜`; CPU selects token `8` for `12*7=`, while GPU selects `羽毛`.
+  The failure is therefore before sampling policy: the GPU logits distribution
+  itself is wrong.
+- The report now includes a `diagnostic_bisection` tree. The current route is:
+  CPU API baseline passes, GPU HTTP output diverges, top-token probabilities
+  diverge, Android Vulkan dispatch completes, writable final-projection samples
+  are finite, so the active focus is `numeric_layout_or_readback`.
+- Bridge tuning environment propagation is now evidence-checked. Explicit
+  tuning env vars must appear with the expected values in executor JSON fields
+  such as `duplicate_descriptor_rewrite`, `materialize_specialization`, and
+  `disable_pipeline_optimization`; otherwise the run is classified as
+  `config_propagation_mismatch` before interpreting any performance or
+  correctness delta.
 
 The NGL=0 control also does not satisfy the arithmetic probe, so the absolute
 math prompt is not strong enough as the only correctness oracle. However, the
@@ -219,6 +239,10 @@ against a hard-coded arithmetic answer.
 - Treat every container-side bridge knob as suspect unless it appears in the
   executor JSON event; the no-dup probe proved that environment-only toggles
   can silently miss the persistent executor process.
+- Use the diagnostic bisection tree for the next investigations: every new
+  probe should split one unresolved boundary into two smaller regions, then
+  record the chosen branch in the JSON evidence. Avoid one-off knob testing
+  unless the knob's actual executor-side value is also captured.
 - Compare the final-projection output buffer before sampling, after dispatch,
   and after writeback under the three now-real modes: default, no
   specialization materialization, and pipeline optimization enabled.

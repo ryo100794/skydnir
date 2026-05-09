@@ -240,6 +240,46 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('detail.get("upload_ms")', compare)
         self.assertIn('detail.get("download_ms")', compare)
 
+    def test_llama_compare_records_server_token_probabilities(self):
+        compare = LLAMA_COMPARE.read_text()
+        for marker in [
+            "PDOCKER_LLAMA_N_PROBS",
+            '"completion_probabilities": n_probs > 0',
+            '"n_probs": n_probs',
+            '"selected_token"',
+            '"top_logprobs"',
+            "def probe_probability_map(report):",
+            "differential_probabilities",
+            "cpu_selected_rank_in_gpu_top",
+            "gpu_selected_rank_in_cpu_top",
+            "shared_top_token_ids",
+            "top1_mismatch_count",
+            "selected_token_mismatch_count",
+        ]:
+            self.assertIn(marker, compare)
+
+    def test_llama_compare_records_bisection_and_config_propagation(self):
+        compare = LLAMA_COMPARE.read_text()
+        for marker in [
+            "config_propagation",
+            "config_expectations",
+            "config_propagation_mismatch",
+            "observed_event_values(executor_events",
+            "disable_pipeline_optimization",
+            "diagnostic_bisection",
+            "binary-search fault isolation",
+            "api_cpu_baseline",
+            "gpu_server_output",
+            "token_probability_boundary",
+            "executor_dispatch_boundary",
+            "post_dispatch_logits",
+            "numeric_layout_or_readback",
+        ]:
+            self.assertIn(marker, compare)
+        source = GPU_EXECUTOR.read_text()
+        self.assertIn('\\"disable_pipeline_optimization\\":%s', source)
+        self.assertIn("const int disable_pipeline_optimization =", source)
+
     def test_llama_gpu_compare_can_forward_bridge_tuning_env(self):
         compare = LLAMA_COMPARE.read_text()
         self.assertIn("import os", compare)

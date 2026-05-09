@@ -3469,6 +3469,10 @@ static int run_vulkan_dispatch_fd(
         options && options->has_materialize_specialization_constants
             ? options->materialize_specialization_constants
             : env_truthy("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", 1);
+    const int disable_pipeline_optimization =
+        options && options->has_disable_pipeline_optimization
+            ? options->disable_pipeline_optimization
+            : env_truthy("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", 1);
     if (materialize_specialization_constants) {
         specialization_materialized = materialize_spirv_specialization_constants(
             shader_code,
@@ -3800,11 +3804,7 @@ static int run_vulkan_dispatch_fd(
         if (rc != VK_SUCCESS) goto cleanup;
         VkComputePipelineCreateInfo cpci = {
             .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-            .flags = (options && options->has_disable_pipeline_optimization
-                      ? options->disable_pipeline_optimization
-                      : env_truthy("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", 1))
-                ? VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT
-                : 0,
+            .flags = disable_pipeline_optimization ? VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT : 0,
             .stage = {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                 .stage = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -4085,6 +4085,7 @@ static int run_vulkan_dispatch_fd(
                 "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
                 "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
                 "\"materialize_specialization\":%s,"
+                "\"disable_pipeline_optimization\":%s,"
                 "\"specialization_materialized\":%s,"
                 "\"resident_bytes\":%zu,\"mutable_bytes\":%zu,"
                 "\"valid\":true,",
@@ -4093,6 +4094,7 @@ static int run_vulkan_dispatch_fd(
                 binding_alias_count,
                 rewrite_duplicate_descriptors ? "true" : "false",
                 materialize_specialization_constants ? "true" : "false",
+                disable_pipeline_optimization ? "true" : "false",
                 specialization_materialized ? "true" : "false",
                 resident_bytes,
                 mutable_bytes);
@@ -4140,6 +4142,7 @@ static int run_vulkan_dispatch_fd(
             "\"backend_cached\":%s,\"pipeline_cache\":{\"hit\":%s,\"entries\":%u},"
             "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
             "\"materialize_specialization\":%s,"
+            "\"disable_pipeline_optimization\":%s,"
             "\"specialization_materialized\":%s,"
             "\"profile_response\":%s,"
             "\"upload_ms\":%.4f,\"dispatch_ms\":%.4f,\"download_ms\":%.4f,"
@@ -4160,6 +4163,7 @@ static int run_vulkan_dispatch_fd(
             binding_alias_count,
             rewrite_duplicate_descriptors ? "true" : "false",
             materialize_specialization_constants ? "true" : "false",
+            disable_pipeline_optimization ? "true" : "false",
             specialization_materialized ? "true" : "false",
             profile_response ? "true" : "false",
             upload_ms, dispatch_ms, download_ms,
