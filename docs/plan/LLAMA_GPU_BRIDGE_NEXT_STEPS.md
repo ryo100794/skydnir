@@ -125,7 +125,7 @@ Current `ngl=1` front-blocker candidates:
 |---|---|---|
 | `0xac41e8033a67af4a` | RoPE/Yarn | oracle matches in `docs/test/llama-gpu-ngl1-rms-norm-oracle-20260509.json` |
 | `0xf2f988b94bd3e0dc` | RMSNorm with optional multiply | oracle matches in `docs/test/llama-gpu-ngl1-rms-norm-oracle-20260509.json` |
-| `0x274f68a67dfef210` | `mul_mat_vec_q4_k`-like large quantized matvec / final projection | bounded oracle not implemented; metadata and read/write alias diagnostics required first |
+| `0x274f68a67dfef210` | `mul_mat_vec_q6_k`-like large quantized matvec / final projection | sampled Q6_K oracle executes and currently mismatches |
 
 Procedure:
 
@@ -213,7 +213,7 @@ Procedure:
    - storage format clues from SPIR-V,
    - output binding sample hash before/after,
    - whether output and read-only bindings overlap.
-   The current shader dump matches llama.cpp's `mul_mat_vec_q4_k` family:
+   The current shader dump matches llama.cpp's `mul_mat_vec_q6_k` family:
    it declares multiple binding-0 views for the same quantized weight buffer,
    uses storage8/storage16/int8 features, and specializes
    `BLOCK_SIZE=32`, `NUM_ROWS=2`, `NUM_COLS=1`.
@@ -221,6 +221,8 @@ Procedure:
    sampled oracle can reproduce row/stride coordinates without copying the
    large weight buffer.
 3. Add a sample-window oracle only if a bounded subset can be proven correct.
+   This is now implemented for the observed Q6_K layout: it reads only eight
+   output rows, `8 * 16 * 210` weight bytes, and the 16 KiB vector input.
 4. Compare the sampled output values with CPU/no-offload logits if available.
 
 Pass criteria:
@@ -233,6 +235,10 @@ Pass criteria:
   - or Android Vulkan execution mismatch.
 - Any oracle for this hash is bounded by memory and time caps.
 - The output includes enough sample coordinates to reproduce the mismatch.
+- Current evidence `llama-gpu-ngl1-q6k-sample-oracle-20260509.json` reports a
+  bounded oracle mismatch for all eight sampled rows. This shifts the next
+  split from "unknown large shader" to "Q6_K decode/math vs descriptor-view
+  semantics/local-size execution".
 
 Fail criteria:
 

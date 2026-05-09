@@ -306,6 +306,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("write_vulkan_rw_alias_hazard_report", source)
         self.assertIn('\\"rw_alias_hazards\\":{\\"count\\":%zu', source)
         self.assertIn('\\"push_u32\\":[', source)
+        self.assertIn("run_cpu_oracle_q6k_matvec_sample", source)
+        self.assertIn("mul-mat-vec-q6-k-large", source)
         self.assertIn('\\"cpu_oracle_requested\\":%s', source)
         self.assertIn('\\"pre_barriers\\":%u,\\"post_barriers\\":%u', source)
         self.assertIn("vkCmdPipelineBarrier(command_buffer,", source)

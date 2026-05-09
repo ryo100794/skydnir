@@ -74,8 +74,9 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-bisection-upload-dispatch-20260509-ngl1.json` | 1 | Split read-only input upload from post-dispatch mutation | 0.0984 | 1.42x | fail | upload hash mismatches: 0; primary read-only dispatch mutations: 806 |
 | `llama-gpu-bisection-all-readwrite-forwarded-fixed-20260509-ngl1.json` | 1 | Verified `PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS=0` propagation; all active descriptors treated conservatively | 0.1722 | 2.49x | fail | env propagation: pass; primary read-only mutations: 0; output still `+`, `细细`, empty |
 | `llama-gpu-final-layout-all-readwrite-20260509-ngl1.json` | 1 | All-read/write conservative run with larger log capture | 0.1401 | 2.02x | fail | focus: `output_layout_or_shader_math`; upload/mutation checks clean |
-| `llama-gpu-ngl1-matvec-alias-diagnostics-20260509.json` | 1 | Q4_K matvec classification and read/write alias hazard diagnostics for `0x274f68a67dfef210` | n/a | 2.17x | fail | `cpu_oracle.kernel_hint=mul-mat-vec-q4-k-large`; `rw_alias_hazards.count=2` |
-| `llama-gpu-ngl1-matvec-push-alias-diagnostics-20260509.json` | 1 | Same Q4_K matvec diagnostic with bounded push-constant capture | n/a | 2.38x | fail | `push_u32=[4096,4096,4096,151936,...]`; `rw_alias_hazards.count=2` |
+| `llama-gpu-ngl1-matvec-alias-diagnostics-20260509.json` | 1 | Q6_K matvec classification and read/write alias hazard diagnostics for `0x274f68a67dfef210` | n/a | 2.17x | fail | `cpu_oracle.kernel_hint=mul-mat-vec-q6-k-large`; `rw_alias_hazards.count=2` |
+| `llama-gpu-ngl1-matvec-push-alias-diagnostics-20260509.json` | 1 | Same Q6_K matvec diagnostic with bounded push-constant capture | n/a | 2.38x | fail | `push_u32=[4096,4096,4096,151936,...]`; `rw_alias_hazards.count=2` |
+| `llama-gpu-ngl1-q6k-sample-oracle-20260509.json` | 1 | Bounded CPU oracle for eight Q6_K final-projection rows | n/a | 1.61x | fail | oracle mismatch for 8/8 rows; first expected `13.878`, GPU `6.831` |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -207,11 +208,11 @@ Two ICD correctness fixes were added on 2026-05-08:
   numerically correct / interpreted with the expected layout?".
 - The current final-projection shader hash `0x274f68a67dfef210` has now been
   classified against the dumped llama.cpp shader sources as a
-  `mul_mat_vec_q4_k`-like large quantized matvec. It uses the `block_q4_K`
+  `mul_mat_vec_q6_k`-like large quantized matvec. It uses the `block_q6_K`
   weight layout, duplicate binding-0 views for packed 8/16/32-bit access, and
   specialization values `BLOCK_SIZE=32`, `NUM_ROWS=2`, `NUM_COLS=1`. A full CPU
   oracle would require the 510 MiB model range, so the next safe step is
-  bounded alias/layout diagnostics before any sampled Q4_K decode oracle.
+  bounded alias/layout diagnostics before any sampled Q6_K decode oracle.
 - Executor diagnostics now include an explicit `rw_alias_hazards` object so the
   compact JSON shows when a writable descriptor overlaps readable descriptors
   through the same bridge alias group. The observed `0x274f68a67dfef210`
@@ -219,11 +220,19 @@ Two ICD correctness fixes were added on 2026-05-08:
   bindings 3 and 4 read the same 607 KiB range, so future runs can distinguish
   a legitimate in-place/fuse pattern from a bridge aliasing error.
 - Compact execution diagnostics also include bounded `push_u32` values. The
-  current Q4_K dispatch reports `[4096,4096,4096,151936,622329856,4096,151936,
+  current Q6_K dispatch reports `[4096,4096,4096,151936,622329856,4096,151936,
   ...]`, which matches the matvec push layout shape (`ncols=4096`,
   `stride_d=151936`, batch strides present) and gives the next sampled oracle a
   stable coordinate system without logging or copying the full push blob
   elsewhere.
+- A bounded Q6_K sample oracle now executes for `0x274f68a67dfef210`. It reads
+  only the sampled row blocks from the 510 MiB weight range and the 16 KiB input
+  vector, then compares eight output rows before writeback. The first run
+  mismatches all eight sampled rows (`expected_hash=0x221604951e806c53`,
+  `gpu_hash=0x3d9204797e9c4247`), with row 0 expected `13.8780231` and GPU
+  `6.83085108`. This proves the remaining blocker is inside Q6_K matvec
+  layout/decode/descriptor-view/local-size semantics, not merely sampling or
+  HTTP serving.
 - The compare driver now requests `completion_probabilities` with bounded
   `n_probs` during correctness probes. This records selected token ids and
   top-logprob lists for both CPU/no-offload and GPU/offload. The latest full

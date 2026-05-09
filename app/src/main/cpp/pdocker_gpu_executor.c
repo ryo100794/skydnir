@@ -2578,7 +2578,7 @@ static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
         return "rms-norm";
     }
     if (spirv_hash == 0x274f68a67dfef210ull) {
-        return "mul-mat-vec-q4-k-large";
+        return "mul-mat-vec-q6-k-large";
     }
     return "unknown";
 }
@@ -2644,6 +2644,31 @@ static float u32_to_f32(uint32_t bits) {
     float value = 0.0f;
     memcpy(&value, &bits, sizeof(value));
     return value;
+}
+
+static float f16_to_f32(uint16_t h) {
+    uint32_t sign = (uint32_t)(h & 0x8000u) << 16;
+    uint32_t exp = (h >> 10) & 0x1fu;
+    uint32_t mant = h & 0x03ffu;
+    uint32_t bits = 0;
+    if (exp == 0) {
+        if (mant == 0) {
+            bits = sign;
+        } else {
+            exp = 1;
+            while ((mant & 0x0400u) == 0) {
+                mant <<= 1;
+                exp--;
+            }
+            mant &= 0x03ffu;
+            bits = sign | ((exp + 127u - 15u) << 23) | (mant << 13);
+        }
+    } else if (exp == 0x1fu) {
+        bits = sign | 0x7f800000u | (mant << 13);
+    } else {
+        bits = sign | ((exp + 127u - 15u) << 23) | (mant << 13);
+    }
+    return u32_to_f32(bits);
 }
 
 static void store_hash_f32(uint64_t *hash, float value) {
@@ -3366,6 +3391,150 @@ static void run_cpu_oracle_rms_norm(
     free(src0);
     free(src1);
     free(dst);
+}
+
+static int q6k_read_block(const int fd, off_t block_offset, uint8_t block[210]) {
+    size_t done = 0;
+    while (done < 210) {
+        ssize_t n = pread(fd, block + done, 210 - done, block_offset + (off_t)done);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return 0;
+        }
+        if (n == 0) return 0;
+        done += (size_t)n;
+    }
+    return 1;
+}
+
+static float q6k_value_at(const uint8_t block[210], uint32_t k) {
+    const uint32_t pos = k & 127u;
+    const uint32_t half = k >> 7;
+    const uint32_t ql_index = half * 64u + (pos & 63u);
+    const uint32_t qh_index = 128u + half * 32u + (pos & 31u);
+    const uint32_t scale_index = 192u + (k >> 4);
+    const uint8_t ql_byte = block[ql_index];
+    const uint8_t qh_byte = block[qh_index];
+    const uint32_t low4 = (pos < 64u) ? (ql_byte & 0x0fu) : ((ql_byte >> 4) & 0x0fu);
+    const uint32_t high2 = (qh_byte >> (2u * ((pos >> 5) & 3u))) & 0x03u;
+    const int32_t q = (int32_t)(low4 | (high2 << 4)) - 32;
+    const int32_t scale = (int8_t)block[scale_index];
+    uint16_t d_bits = 0;
+    memcpy(&d_bits, block + 208, sizeof(d_bits));
+    return f16_to_f32(d_bits) * (float)scale * (float)q;
+}
+
+static void run_cpu_oracle_q6k_matvec_sample(
+        CpuOracleReport *report,
+        const int *buffer_fds,
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        VulkanVectorBuffer * const *vk_buffers,
+        const size_t *binding_gpu_offset,
+        const uint8_t *active,
+        const uint8_t *writable,
+        const uint8_t *push,
+        size_t push_size) {
+    if (!report || !report->requested) return;
+    init_cpu_oracle_report(report, report->requested, 0x274f68a67dfef210ull);
+    int idx0 = binding_index_for_number(bindings, binding_count, 0);
+    int idx1 = binding_index_for_number(bindings, binding_count, 1);
+    int idx2 = binding_index_for_number(bindings, binding_count, 2);
+    if (idx0 < 0 || idx1 < 0 || idx2 < 0 || !buffer_fds || buffer_fds[idx0] < 0 ||
+        buffer_fds[idx1] < 0 || !vk_buffers || !vk_buffers[idx2] || !vk_buffers[idx2]->map ||
+        !active || !active[idx0] || !active[idx1] || !active[idx2] ||
+        !writable || !writable[idx2] || !push || push_size < 8 * sizeof(uint32_t)) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "missing-oracle-inputs");
+        return;
+    }
+    const uint32_t ncols = load_le_u32(push, push_size, 0);
+    const uint32_t stride_d = load_le_u32(push, push_size, 3);
+    const uint32_t batch_stride_b = load_le_u32(push, push_size, 5);
+    const uint32_t base_work_group_y = load_le_u32(push, push_size, 7);
+    if (ncols == 0 || ncols > 16384 || (ncols % 256u) != 0 ||
+        bindings[idx1].size < (size_t)ncols * sizeof(float) ||
+        bindings[idx2].size < sizeof(float)) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "unsupported-q6k-layout");
+        return;
+    }
+    const uint32_t num_blocks_per_row = ncols / 256u;
+    const size_t block_bytes = 210;
+    const uint32_t sample_rows[] = {0, 1, 2, 3, 4, 7, 16, 31};
+    report->expected_hash = 1469598103934665603ull;
+    report->gpu_hash = 1469598103934665603ull;
+    for (size_t si = 0; si < sizeof(sample_rows) / sizeof(sample_rows[0]); ++si) {
+        const uint32_t row = sample_rows[si];
+        if (row >= stride_d || ((size_t)row + 1u) * sizeof(float) > bindings[idx2].size) continue;
+        double sum = 0.0;
+        for (uint32_t block_index = 0; block_index < num_blocks_per_row; ++block_index) {
+            uint8_t block[210];
+            off_t off = bindings[idx0].offset +
+                        (off_t)(((uint64_t)row * num_blocks_per_row + block_index) * block_bytes);
+            if (!q6k_read_block(buffer_fds[idx0], off, block)) {
+                report->skipped = 1;
+                snprintf(report->status, sizeof(report->status), "%s", "oracle-weight-read-failed");
+                return;
+            }
+            for (uint32_t e = 0; e < 256u; ++e) {
+                float b = 0.0f;
+                const off_t b_off = bindings[idx1].offset +
+                                    (off_t)((uint64_t)base_work_group_y * batch_stride_b * sizeof(float)) +
+                                    (off_t)((uint64_t)(block_index * 256u + e) * sizeof(float));
+                if (pread(buffer_fds[idx1], &b, sizeof(b), b_off) != (ssize_t)sizeof(b)) {
+                    report->skipped = 1;
+                    snprintf(report->status, sizeof(report->status), "%s", "oracle-vector-read-failed");
+                    return;
+                }
+                sum += (double)q6k_value_at(block, e) * (double)b;
+            }
+        }
+        int ok = 0;
+        float gpu = load_f32_at_index((const uint8_t *)vk_buffers[idx2]->map + binding_gpu_offset[idx2],
+                                      bindings[idx2].size, row, &ok);
+        if (!ok) {
+            report->skipped = 1;
+            snprintf(report->status, sizeof(report->status), "%s", "oracle-output-read-failed");
+            return;
+        }
+        float expected = (float)sum;
+        store_hash_f32(&report->expected_hash, expected);
+        store_hash_f32(&report->gpu_hash, gpu);
+        double abs_error = fabs((double)expected - (double)gpu);
+        double denom = fabs((double)expected);
+        double rel_error = denom > 1e-30 ? abs_error / denom : abs_error;
+        if (abs_error > report->max_abs_error) report->max_abs_error = abs_error;
+        if (rel_error > report->max_rel_error) report->max_rel_error = rel_error;
+        if (report->sample_count < sizeof(report->samples) / sizeof(report->samples[0])) {
+            CpuOracleSample *sample = &report->samples[report->sample_count++];
+            sample->dst_index = row;
+            sample->expected = expected;
+            sample->gpu = gpu;
+            sample->src0 = (float)row;
+            sample->src1 = (float)ncols;
+            sample->abs_error = abs_error;
+        }
+        if (abs_error > 1e-3 && rel_error > 1e-4) {
+            if (!report->has_first_mismatch) {
+                report->has_first_mismatch = 1;
+                report->first_mismatch.dst_index = row;
+                report->first_mismatch.expected = expected;
+                report->first_mismatch.gpu = gpu;
+                report->first_mismatch.src0 = (float)row;
+                report->first_mismatch.src1 = (float)ncols;
+                report->first_mismatch.abs_error = abs_error;
+            }
+            report->mismatch_count++;
+            if (gpu == 0.0f && expected != 0.0f) report->zero_gpu_mismatch_count++;
+        }
+        report->compared_floats++;
+        report->compared_iter0++;
+    }
+    report->executed = 1;
+    report->skipped = 0;
+    snprintf(report->status, sizeof(report->status), "%s",
+             report->mismatch_count ? "mismatch" : "match");
 }
 
 static void run_cpu_oracle_small_f32_indexing(
@@ -5390,6 +5559,17 @@ static int run_vulkan_dispatch_fd(
                                 gx,
                                 gy,
                                 gz);
+    } else if (spirv_summary.hash == 0x274f68a67dfef210ull) {
+        run_cpu_oracle_q6k_matvec_sample(&cpu_oracle_report,
+                                         buffer_fds,
+                                         bindings,
+                                         binding_count,
+                                         vk_buffers,
+                                         binding_gpu_offset,
+                                         active_bindings,
+                                         binding_write_needed,
+                                         push,
+                                         push_size);
     } else {
         run_cpu_oracle_small_f32_indexing(&cpu_oracle_report,
                                           spirv_summary.hash,
