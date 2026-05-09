@@ -299,6 +299,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"api_offset\\":%lld', source)
         self.assertIn('\\"api_range\\":%zu', source)
         self.assertIn('\\"api_descriptor_type\\":%u', source)
+        self.assertIn("write_spirv_binding_reflection_report", source)
+        self.assertIn("write_cpu_oracle_report", source)
+        self.assertIn("cpu_oracle_known_small_llama_hash", source)
+        self.assertIn('\\"cpu_oracle_requested\\":%s', source)
         self.assertIn('\\"pre_barriers\\":%u,\\"post_barriers\\":%u', source)
         self.assertIn("vkCmdPipelineBarrier(command_buffer,", source)
         self.assertIn("VK_ACCESS_HOST_WRITE_BIT", source)
@@ -313,6 +317,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
             "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
             "PDOCKER_GPU_DISABLE_OVERLAP_ALIASING",
+            "PDOCKER_GPU_CPU_ORACLE",
             "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
             "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
             "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
@@ -343,6 +348,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("skip_unused_descriptor_transfers=%u", icd)
         self.assertIn("use_spirv_descriptor_access=%u", icd)
         self.assertIn("disable_overlap_aliasing=%u", icd)
+        self.assertIn("cpu_oracle=%u", icd)
         self.assertIn("api_offsets[binding_count]", icd)
         self.assertIn("api_descriptor_types[binding_count]", icd)
         self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_LOG", icd)
@@ -434,6 +440,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("n-gpu-layers as an insufficient isolation knob", compare)
         self.assertIn("api_understanding", compare)
         self.assertIn("effective_offset_mismatch_count", compare)
+        self.assertIn('("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle_requested")', compare)
         self.assertIn("PDOCKER_LLAMA_BENCH_WARMUP_DISCARD", compare)
         self.assertIn("gpu_summary_scope", compare)
         for field in [

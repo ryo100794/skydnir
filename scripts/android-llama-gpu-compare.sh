@@ -268,6 +268,7 @@ for key in [
     "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
     "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
     "PDOCKER_GPU_DISABLE_OVERLAP_ALIASING",
+    "PDOCKER_GPU_CPU_ORACLE",
     "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
     "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
     "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
@@ -884,6 +885,7 @@ config_expectations = [
     ("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", "skip_unused_descriptor_transfers"),
     ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "spirv_descriptor_access"),
     ("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", "disable_overlap_aliasing"),
+    ("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle_requested"),
 ]
 config_checks = []
 for env_name, event_field in config_expectations:

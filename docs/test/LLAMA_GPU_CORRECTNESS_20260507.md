@@ -376,3 +376,27 @@ out one class of bridge bugs: the executor is no longer blindly reporting only
 its own flattened binding view.  The next missing independent check is SPIR-V
 reflection: shader-declared binding types and push-constant access must be
 compared with the API trace before trusting a CPU oracle.
+
+## 2026-05-09 CPU Oracle Scaffold
+
+A debug-only CPU oracle scaffold is now wired through the container
+environment, ICD command, executor parser, and executor JSON:
+
+- set `PDOCKER_GPU_CPU_ORACLE=1` to request the oracle path,
+- executor events report `cpu_oracle_requested`,
+- known small llama hashes are classified as oracle candidates,
+- the current scaffold does **not** execute the kernels yet; it reports
+  `executed=false` and `status=scaffold-ready-needs-kernel-implementation`.
+
+`llama-gpu-cpu-oracle-scaffold-ngl0-20260509.json` confirms the request reaches
+the executor and that both zero-layer front-blocker hashes are candidates:
+
+| SPIR-V hash | Oracle hint | Current status |
+|---|---|---|
+| `0x7bf05c459ac87f2b` | `small-f32-indexing` | scaffold only |
+| `0xac41e8033a67af4a` | `rope-yarn` | scaffold only |
+
+The same run also records `spirv_binding_reflection`, showing shader-declared
+bindings, read/write access, and whether each binding was present at the API
+boundary. This is the guardrail against feeding the CPU oracle the same wrong
+API interpretation as the GPU path.

@@ -490,6 +490,8 @@ typedef struct {
     int use_spirv_descriptor_access;
     int has_disable_overlap_aliasing;
     int disable_overlap_aliasing;
+    int has_cpu_oracle;
+    int cpu_oracle;
     int disable_storage8;
     int disable_storage16;
     int disable_subgroup_arithmetic;
@@ -1409,6 +1411,22 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
             strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
             options->has_disable_overlap_aliasing = 1;
             options->disable_overlap_aliasing = 0;
+            return 0;
+        }
+        return -1;
+    }
+    if (strncmp(token, "cpu_oracle=", 11) == 0) {
+        const char *value = token + 11;
+        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+            options->has_cpu_oracle = 1;
+            options->cpu_oracle = 1;
+            return 0;
+        }
+        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+            options->has_cpu_oracle = 1;
+            options->cpu_oracle = 0;
             return 0;
         }
         return -1;
@@ -2380,6 +2398,84 @@ static void write_vulkan_descriptor_alias_report(
                 aliases ? aliases[i].rewritten_binding : 0);
     }
     fprintf(out, "]");
+}
+
+static void write_spirv_binding_reflection_report(
+        FILE *out,
+        const uint8_t *shader_used_bindings,
+        const SpirvDescriptorAccess *shader_binding_access,
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count) {
+    fprintf(out, "\"spirv_binding_reflection\":[");
+    int first = 1;
+    for (uint32_t binding = 0; binding < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++binding) {
+        int declared = shader_used_bindings && shader_used_bindings[binding];
+        int readable = shader_binding_access && shader_binding_access[binding].readable;
+        int writable = shader_binding_access && shader_binding_access[binding].writable;
+        int api_bound = 0;
+        size_t api_index = 0;
+        size_t api_size = 0;
+        off_t api_offset = 0;
+        for (size_t i = 0; i < binding_count; ++i) {
+            if (bindings[i].binding == binding) {
+                api_bound = 1;
+                api_index = i;
+                api_size = bindings[i].size;
+                api_offset = bindings[i].offset;
+                break;
+            }
+        }
+        if (!declared && !api_bound) continue;
+        fprintf(out,
+                "%s{\"binding\":%u,\"shader_declared\":%s,"
+                "\"shader_readable\":%s,\"shader_writable\":%s,"
+                "\"api_bound\":%s,\"api_index\":%zu,"
+                "\"effective_offset\":%lld,\"effective_size\":%zu}",
+                first ? "" : ",",
+                binding,
+                declared ? "true" : "false",
+                readable ? "true" : "false",
+                writable ? "true" : "false",
+                api_bound ? "true" : "false",
+                api_index,
+                (long long)api_offset,
+                api_size);
+        first = 0;
+    }
+    fprintf(out, "]");
+}
+
+static int cpu_oracle_known_small_llama_hash(uint64_t spirv_hash) {
+    return spirv_hash == 0x7bf05c459ac87f2bull ||
+           spirv_hash == 0xac41e8033a67af4aull;
+}
+
+static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
+    if (spirv_hash == 0x7bf05c459ac87f2bull) {
+        return "small-f32-indexing";
+    }
+    if (spirv_hash == 0xac41e8033a67af4aull) {
+        return "rope-yarn";
+    }
+    return "unknown";
+}
+
+static void write_cpu_oracle_report(
+        FILE *out,
+        int requested,
+        uint64_t spirv_hash) {
+    const int candidate = cpu_oracle_known_small_llama_hash(spirv_hash);
+    fprintf(out,
+            "\"cpu_oracle\":{\"requested\":%s,"
+            "\"candidate\":%s,\"executed\":false,"
+            "\"status\":\"%s\",\"kernel_hint\":\"%s\","
+            "\"scope\":\"debug-only-spv-hash-gated\"}",
+            requested ? "true" : "false",
+            candidate ? "true" : "false",
+            requested
+                ? (candidate ? "scaffold-ready-needs-kernel-implementation" : "unsupported-shader-hash")
+                : "not-requested",
+            cpu_oracle_kernel_hint(spirv_hash));
 }
 
 static void write_vulkan_binding_compact_report(
@@ -3519,6 +3615,10 @@ static int run_vulkan_dispatch_fd(
         options && options->has_disable_overlap_aliasing
             ? options->disable_overlap_aliasing
             : env_truthy("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", 0);
+    const int cpu_oracle_requested =
+        options && options->has_cpu_oracle
+            ? options->cpu_oracle
+            : env_truthy("PDOCKER_GPU_CPU_ORACLE", 0);
     const int dirty_probe_enabled = options && options->has_dirty_probe
         ? options->dirty_probe
         : writeonly_dirty_probe_enabled();
@@ -4269,6 +4369,7 @@ static int run_vulkan_dispatch_fd(
                 "\"skip_unused_descriptor_transfers\":%s,"
                 "\"spirv_descriptor_access\":%s,"
                 "\"disable_overlap_aliasing\":%s,"
+                "\"cpu_oracle_requested\":%s,"
                 "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
                 "\"materialize_specialization\":%s,"
                 "\"disable_pipeline_optimization\":%s,"
@@ -4282,6 +4383,7 @@ static int run_vulkan_dispatch_fd(
                 skip_unused_descriptor_transfers ? "true" : "false",
                 use_spirv_descriptor_access ? "true" : "false",
                 disable_overlap_aliasing ? "true" : "false",
+                cpu_oracle_requested ? "true" : "false",
                 binding_alias_count,
                 rewrite_duplicate_descriptors ? "true" : "false",
                 materialize_specialization_constants ? "true" : "false",
@@ -4327,6 +4429,16 @@ static int run_vulkan_dispatch_fd(
         write_vulkan_descriptor_alias_report(json_out(),
                                              binding_aliases,
                                              binding_alias_count);
+        fprintf(json_out(), ",");
+        write_spirv_binding_reflection_report(json_out(),
+                                              shader_used_bindings,
+                                              shader_binding_access,
+                                              bindings,
+                                              binding_count);
+        fprintf(json_out(), ",");
+        write_cpu_oracle_report(json_out(),
+                                cpu_oracle_requested,
+                                spirv_summary.hash);
         fprintf(json_out(), "}\n");
     }
     fprintf(json_out(),
@@ -4338,6 +4450,7 @@ static int run_vulkan_dispatch_fd(
             "\"skip_unused_descriptor_transfers\":%s,"
             "\"spirv_descriptor_access\":%s,"
             "\"disable_overlap_aliasing\":%s,"
+            "\"cpu_oracle_requested\":%s,"
             "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
             "\"materialize_specialization\":%s,"
             "\"disable_pipeline_optimization\":%s,"
@@ -4363,6 +4476,7 @@ static int run_vulkan_dispatch_fd(
             skip_unused_descriptor_transfers ? "true" : "false",
             use_spirv_descriptor_access ? "true" : "false",
             disable_overlap_aliasing ? "true" : "false",
+            cpu_oracle_requested ? "true" : "false",
             binding_alias_count,
             rewrite_duplicate_descriptors ? "true" : "false",
             materialize_specialization_constants ? "true" : "false",
@@ -4423,6 +4537,16 @@ static int run_vulkan_dispatch_fd(
         write_vulkan_descriptor_alias_report(json_out(),
                                              binding_aliases,
                                              binding_alias_count);
+        fprintf(json_out(), ",");
+        write_spirv_binding_reflection_report(json_out(),
+                                              shader_used_bindings,
+                                              shader_binding_access,
+                                              bindings,
+                                              binding_count);
+        fprintf(json_out(), ",");
+        write_cpu_oracle_report(json_out(),
+                                cpu_oracle_requested,
+                                spirv_summary.hash);
     }
     fprintf(json_out(), "}\n");
     fflush(json_out());
