@@ -83,6 +83,9 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-ngl1-q6k-packed16-view-20260509.json` | 1 | CPU-side byte-view vs packed16-view Q6_K descriptor-view equivalence check | n/a | 2.30x | fail | packed16-view sum `13.8780234`; byte-view delta `0`; GPU still `6.831` |
 | `llama-gpu-ngl1-q6k-partial-lanes-fixed-20260509.json` | 1 | Q6_K 32-lane partial-sum diagnostic for reduction/output-layout split | n/a | 2.02x | fail | row0 lane sum `13.878`; first16 `8.507`; second16 `5.371`; half-full `6.939`; GPU `6.831` |
 | `llama-gpu-ngl1-q6k-row-window-20260509.json` | 1 | Contiguous 32-row Q6_K oracle window for output-index mapping | n/a | 1.84x | fail | 32/32 rows mismatch; packed16 delta remains `0`; no stable same-row or half-row mapping |
+| `llama-gpu-ngl1-q6k-shader-like-oracle-20260509.json` | 1 | Shader-like Q6_K oracle using llama's packed 32-bit load and scale-cache flow | n/a | 2.01x | fail | shader-like sum `13.8780238`; canonical delta `4.16e-7`; GPU still `6.831` |
+| `llama-gpu-ngl1-q6k-materialized-alias-icd-20260509.json` | 1 | Duplicate Binding 0 alias materialized as a separate descriptor buffer | n/a | 2.17x | fail | option propagated as `true`; output unchanged, so same-VkBuffer aliasing is not sufficient |
+| `llama-gpu-ngl1-q6k-materialized-specialization-20260509.json` | 1 | SPIR-V specialization materialization probe | n/a | 2.65x | fail | Q6_K still mismatches; materializer did not rewrite this shader's Q6 specialization path |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -277,6 +280,18 @@ Two ICD correctness fixes were added on 2026-05-08:
   mapping. Treat the current blocker as an execution-indexing/reduction problem:
   the CPU oracle likely needs to mirror the shader's workgroup-to-output layout
   and reduction ordering more exactly before a bridge-side fix can be selected.
+- A shader-like Q6_K oracle now mirrors llama.cpp's optimized `mul_mat_vec_q6_k`
+  path: packed 32-bit `ql/qh` loads, four-lane vector accumulation, signed
+  scale-cache indexing, and `fma` ordering. It matches the canonical oracle
+  within `4.16e-7`, so the remaining mismatch is not explained by the oracle
+  using a simpler mathematical decode.
+- Materializing the duplicate Binding 0 packed16 alias into a separate Vulkan
+  buffer now propagates through the container ICD and executor
+  (`materialize_descriptor_aliases=true`), but the Q6_K output is unchanged.
+  This rules out "same VkBuffer bound to two rewritten descriptors" as the
+  primary cause. The next suspect remains the shader execution semantics around
+  specialization, shared memory, and reduction/order on the Android Vulkan
+  backend.
 - The compare driver now requests `completion_probabilities` with bounded
   `n_probs` during correctness probes. This records selected token ids and
   top-logprob lists for both CPU/no-offload and GPU/offload. The latest full

@@ -276,6 +276,17 @@ Pass criteria:
   exact output index expression from `GlobalInvocationId`, specialization
   constants, and push constants, then update the oracle to follow that mapping
   instead of assuming `dst[row]`.
+- The shader-like oracle in
+  `llama-gpu-ngl1-q6k-shader-like-oracle-20260509.json` follows the source
+  shader's packed 32-bit loads and scale-cache accumulation and still matches
+  the canonical oracle within `4.16e-7`. Do not add a data conversion layer.
+- The duplicate Binding 0 materialization probe in
+  `llama-gpu-ngl1-q6k-materialized-alias-icd-20260509.json` confirms the option
+  is propagated through the container ICD and executor, but output is unchanged.
+  Same-buffer aliasing is therefore not the sole failure. Next probes should
+  reduce the shader execution model itself: specialize/materialize constants
+  more completely, then force/disable shared-memory reduction variants or
+  emulate the Q6_K shader as a bridge-owned kernel for this hash.
 
 Fail criteria:
 

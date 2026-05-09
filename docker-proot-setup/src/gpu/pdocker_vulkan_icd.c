@@ -807,6 +807,13 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
         off += (size_t)n;
     }
+    if (getenv("PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES")) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " materialize_descriptor_aliases=%u",
+                     env_truthy_default("PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES", false) ? 1u : 0u);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        off += (size_t)n;
+    }
     if (getenv("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " materialize_specialization=%u",

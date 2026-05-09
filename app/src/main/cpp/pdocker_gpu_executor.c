@@ -489,6 +489,8 @@ typedef struct {
     int profile_response;
     int has_rewrite_duplicate_descriptors;
     int rewrite_duplicate_descriptors;
+    int has_materialize_descriptor_aliases;
+    int materialize_descriptor_aliases;
     int has_materialize_specialization_constants;
     int materialize_specialization_constants;
     int has_disable_pipeline_optimization;
@@ -1353,6 +1355,22 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
             strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
             options->has_rewrite_duplicate_descriptors = 1;
             options->rewrite_duplicate_descriptors = 0;
+            return 0;
+        }
+        return -1;
+    }
+    if (strncmp(token, "materialize_descriptor_aliases=", 31) == 0) {
+        const char *value = token + 31;
+        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+            options->has_materialize_descriptor_aliases = 1;
+            options->materialize_descriptor_aliases = 1;
+            return 0;
+        }
+        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+            options->has_materialize_descriptor_aliases = 1;
+            options->materialize_descriptor_aliases = 0;
             return 0;
         }
         return -1;
@@ -2669,6 +2687,8 @@ typedef struct {
     double q6_no_center_sum;
     double q6_packed16_view_sum;
     double q6_packed16_view_abs_delta;
+    double q6_shader_like_sum;
+    double q6_shader_like_abs_delta;
     double partial_lanes[32];
     size_t partial_lane_count;
     CpuOracleSample row_window[32];
@@ -2818,7 +2838,9 @@ static void write_cpu_oracle_report(
                 "\"q6_unsigned_scales_sum\":%.9g,"
                 "\"q6_no_center_sum\":%.9g,"
                 "\"q6_packed16_view_sum\":%.9g,"
-                "\"q6_packed16_view_abs_delta\":%.9g",
+                "\"q6_packed16_view_abs_delta\":%.9g,"
+                "\"q6_shader_like_sum\":%.9g,"
+                "\"q6_shader_like_abs_delta\":%.9g",
                 report->partial_best_lane,
                 report->partial_best_value,
                 report->partial_best_abs_error,
@@ -2828,7 +2850,9 @@ static void write_cpu_oracle_report(
                 report->q6_unsigned_scales_sum,
                 report->q6_no_center_sum,
                 report->q6_packed16_view_sum,
-                report->q6_packed16_view_abs_delta);
+                report->q6_packed16_view_abs_delta,
+                report->q6_shader_like_sum,
+                report->q6_shader_like_abs_delta);
         if (report->partial_lane_count > 0) {
             fprintf(out, ",\"partial_lanes\":[");
             for (size_t i = 0; i < report->partial_lane_count; ++i) {
@@ -3567,6 +3591,16 @@ static uint16_t load_le_u16_unaligned(const uint8_t *bytes) {
     return value;
 }
 
+static uint32_t load_le_u32_unaligned(const uint8_t *bytes) {
+    uint32_t value = 0;
+    memcpy(&value, bytes, sizeof(value));
+    return value;
+}
+
+static int32_t unpack8_u32_lane(uint32_t value, uint32_t lane) {
+    return (int32_t)((value >> ((lane & 3u) * 8u)) & 0xffu);
+}
+
 static float q6k_value_packed16_view_at(const uint8_t block[210], uint32_t idx) {
     const uint32_t b = (idx & 0x40u) >> 6;
     const uint32_t qhshift = (idx & 0x60u) >> 4;
@@ -3583,6 +3617,92 @@ static float q6k_value_packed16_view_at(const uint8_t block[210], uint32_t idx) 
     uint16_t d_bits = 0;
     memcpy(&d_bits, block + 208, sizeof(d_bits));
     return f16_to_f32(d_bits) * (float)scale * (float)q;
+}
+
+static int q6k_accumulate_tid_partial_shader_like(
+        const int weight_fd,
+        const int vector_fd,
+        const VulkanDispatchBinding *weight_binding,
+        const VulkanDispatchBinding *vector_binding,
+        uint32_t row,
+        uint32_t tid,
+        uint32_t ncols,
+        uint32_t batch_stride_b,
+        uint32_t base_work_group_y,
+        double *out_sum) {
+    if (!weight_binding || !vector_binding || !out_sum || ncols == 0 || (ncols % 256u) != 0) {
+        return 0;
+    }
+    const uint32_t num_blocks_per_row = ncols / 256u;
+    const uint32_t it_size = 32u / 16u;
+    const uint32_t itid = tid % 16u;
+    const uint32_t ix = tid / 16u;
+    const uint32_t v_im = itid / 8u;
+    const uint32_t v_in = itid - 8u * v_im;
+    const uint32_t l0 = 4u * v_in;
+    const uint32_t is = v_in / 4u;
+    const uint32_t ql_offset = 64u * v_im + l0;
+    const uint32_t qh_offset = 32u * v_im + l0;
+    const uint32_t s_offset = 8u * v_im + is;
+    const uint32_t y_offset = 128u * v_im + l0;
+    float temp = 0.0f;
+    for (uint32_t i = ix; i < num_blocks_per_row; i += it_size) {
+        uint8_t block[210];
+        off_t off = weight_binding->offset +
+                    (off_t)(((uint64_t)row * num_blocks_per_row + i) * 210ull);
+        if (!q6k_read_block(weight_fd, off, block)) return 0;
+        const uint32_t ql0_u32 = load_le_u32_unaligned(block + ql_offset);
+        const uint32_t ql32_u32 = load_le_u32_unaligned(block + ql_offset + 32u);
+        const uint32_t ql0_u32_lo4 = ql0_u32 & 0x0F0F0F0Fu;
+        const uint32_t ql0_u32_hi4 = (ql0_u32 >> 4) & 0x0F0F0F0Fu;
+        const uint32_t ql32_u32_lo4 = ql32_u32 & 0x0F0F0F0Fu;
+        const uint32_t ql32_u32_hi4 = (ql32_u32 >> 4) & 0x0F0F0F0Fu;
+        const uint32_t qh_u32 = load_le_u32_unaligned(block + 128u + qh_offset);
+        const uint32_t qh0_u32 = (qh_u32 & 0x03030303u) << 4;
+        const uint32_t qh2_u32 = (qh_u32 & 0x0C0C0C0Cu) << 2;
+        const uint32_t qh4_u32 = (qh_u32 & 0x30303030u);
+        const uint32_t qh6_u32 = (qh_u32 & 0xC0C0C0C0u) >> 2;
+        const uint32_t q_u32[4] = {
+            ql0_u32_lo4 | qh0_u32,
+            ql32_u32_lo4 | qh2_u32,
+            ql0_u32_hi4 | qh4_u32,
+            ql32_u32_hi4 | qh6_u32,
+        };
+        const int32_t scales[4] = {
+            (int8_t)block[192u + s_offset],
+            (int8_t)block[192u + s_offset + 2u],
+            (int8_t)block[192u + s_offset + 4u],
+            (int8_t)block[192u + s_offset + 6u],
+        };
+        uint16_t d_bits = 0;
+        memcpy(&d_bits, block + 208, sizeof(d_bits));
+        const float d = f16_to_f32(d_bits);
+        float sum[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        for (uint32_t l = 0; l < 4u; ++l) {
+            const uint32_t b_indices[4] = {
+                i * 256u + y_offset + l,
+                i * 256u + y_offset + 32u + l,
+                i * 256u + y_offset + 64u + l,
+                i * 256u + y_offset + 96u + l,
+            };
+            for (uint32_t q = 0; q < 4u; ++q) {
+                float b = 0.0f;
+                const off_t b_off = vector_binding->offset +
+                                    (off_t)((uint64_t)base_work_group_y * batch_stride_b * sizeof(float)) +
+                                    (off_t)((uint64_t)b_indices[q] * sizeof(float));
+                if (pread(vector_fd, &b, sizeof(b), b_off) != (ssize_t)sizeof(b)) return 0;
+                sum[q] = fmaf(b, (float)(unpack8_u32_lane(q_u32[q], l) - 32), sum[q]);
+            }
+        }
+        const float scaled =
+            fmaf(sum[0], (float)scales[0],
+                 fmaf(sum[1], (float)scales[1],
+                      fmaf(sum[2], (float)scales[2],
+                           sum[3] * (float)scales[3])));
+        temp = fmaf(scaled, d, temp);
+    }
+    *out_sum = (double)temp;
+    return 1;
 }
 
 static int q6k_accumulate_tid_partial(
@@ -3684,8 +3804,11 @@ static void run_cpu_oracle_q6k_matvec_sample(
         double variant_no_center = 0.0;
         double variant_packed16_view = 0.0;
         double partials[32];
+        double shader_like_partials[32];
         memset(partials, 0, sizeof(partials));
+        memset(shader_like_partials, 0, sizeof(shader_like_partials));
         int have_partials = 1;
+        int have_shader_like_partials = 1;
         for (uint32_t block_index = 0; block_index < num_blocks_per_row; ++block_index) {
             uint8_t block[210];
             off_t off = bindings[idx0].offset +
@@ -3730,6 +3853,21 @@ static void run_cpu_oracle_q6k_matvec_sample(
                 break;
             }
         }
+        for (uint32_t tid = 0; tid < 32u; ++tid) {
+            if (!q6k_accumulate_tid_partial_shader_like(buffer_fds[idx0],
+                                                       buffer_fds[idx1],
+                                                       &bindings[idx0],
+                                                       &bindings[idx1],
+                                                       row,
+                                                       tid,
+                                                       ncols,
+                                                       batch_stride_b,
+                                                       base_work_group_y,
+                                                       &shader_like_partials[tid])) {
+                have_shader_like_partials = 0;
+                break;
+            }
+        }
         int ok = 0;
         float gpu = load_f32_at_index((const uint8_t *)vk_buffers[idx2]->map + binding_gpu_offset[idx2],
                                       bindings[idx2].size, row, &ok);
@@ -3758,6 +3896,13 @@ static void run_cpu_oracle_q6k_matvec_sample(
             report->q6_no_center_sum = variant_no_center;
             report->q6_packed16_view_sum = variant_packed16_view;
             report->q6_packed16_view_abs_delta = fabs(variant_packed16_view - sum);
+            report->q6_shader_like_sum = 0.0;
+            if (have_shader_like_partials) {
+                for (uint32_t tid = 0; tid < 32u; ++tid) {
+                    report->q6_shader_like_sum += shader_like_partials[tid];
+                }
+                report->q6_shader_like_abs_delta = fabs(report->q6_shader_like_sum - sum);
+            }
             report->partial_lane_count = 32;
             for (uint32_t tid = 0; tid < 32u; ++tid) {
                 report->partial_lanes[tid] = partials[tid];
@@ -5132,6 +5277,7 @@ static int run_vulkan_dispatch_fd(
 
     uint32_t *shader_code = (uint32_t *)malloc(shader_size);
     VulkanVectorBuffer temp_buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VulkanVectorBuffer alias_temp_buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     VulkanVectorBuffer *vk_buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     int cache_hits[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     int cache_resident[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -5204,6 +5350,10 @@ static int run_vulkan_dispatch_fd(
     const int profile_response = options && options->has_profile_response
         ? options->profile_response
         : env_truthy("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", 0);
+    const int materialize_descriptor_aliases =
+        options && options->has_materialize_descriptor_aliases
+            ? options->materialize_descriptor_aliases
+            : env_truthy("PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES", 0);
     uint8_t shader_used_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     SpirvDescriptorAccess shader_binding_access[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t active_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -5218,6 +5368,7 @@ static int run_vulkan_dispatch_fd(
     dev_t binding_fd_dev[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     ino_t binding_fd_ino[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     memset(temp_buffers, 0, sizeof(temp_buffers));
+    memset(alias_temp_buffers, 0, sizeof(alias_temp_buffers));
     memset(vk_buffers, 0, sizeof(vk_buffers));
     memset(cache_hits, 0, sizeof(cache_hits));
     memset(cache_resident, 0, sizeof(cache_resident));
@@ -5710,8 +5861,24 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
-        infos[write_count].buffer = vk_buffers[original_index]->buffer;
-        infos[write_count].offset = (VkDeviceSize)binding_gpu_offset[original_index];
+        if (materialize_descriptor_aliases &&
+            bindings[original_index].size > 0 &&
+            vk_buffers[original_index] &&
+            vk_buffers[original_index]->map &&
+            binding_gpu_offset[original_index] + bindings[original_index].size <=
+                vk_buffers[original_index]->size &&
+            create_vulkan_vector_buffer(
+                rt->physical_device,
+                rt->device,
+                bindings[original_index].size,
+                (const unsigned char *)vk_buffers[original_index]->map + binding_gpu_offset[original_index],
+                &alias_temp_buffers[i]) == 0) {
+            infos[write_count].buffer = alias_temp_buffers[i].buffer;
+            infos[write_count].offset = 0;
+        } else {
+            infos[write_count].buffer = vk_buffers[original_index]->buffer;
+            infos[write_count].offset = (VkDeviceSize)binding_gpu_offset[original_index];
+        }
         infos[write_count].range = (VkDeviceSize)bindings[original_index].size;
         writes[write_count].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[write_count].dstSet = descriptor_set;
@@ -6009,6 +6176,7 @@ static int run_vulkan_dispatch_fd(
                 "\"disable_overlap_aliasing\":%s,"
                 "\"cpu_oracle_requested\":%s,"
                 "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
+                "\"materialize_descriptor_aliases\":%s,"
                 "\"materialize_specialization\":%s,"
                 "\"disable_pipeline_optimization\":%s,"
                 "\"specialization_materialized\":%s,"
@@ -6025,6 +6193,7 @@ static int run_vulkan_dispatch_fd(
                 cpu_oracle_requested ? "true" : "false",
                 binding_alias_count,
                 rewrite_duplicate_descriptors ? "true" : "false",
+                materialize_descriptor_aliases ? "true" : "false",
                 materialize_specialization_constants ? "true" : "false",
                 disable_pipeline_optimization ? "true" : "false",
                 specialization_materialized ? "true" : "false",
@@ -6097,6 +6266,7 @@ static int run_vulkan_dispatch_fd(
             "\"disable_overlap_aliasing\":%s,"
             "\"cpu_oracle_requested\":%s,"
             "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
+            "\"materialize_descriptor_aliases\":%s,"
             "\"materialize_specialization\":%s,"
             "\"disable_pipeline_optimization\":%s,"
             "\"specialization_materialized\":%s,"
@@ -6125,6 +6295,7 @@ static int run_vulkan_dispatch_fd(
             cpu_oracle_requested ? "true" : "false",
             binding_alias_count,
             rewrite_duplicate_descriptors ? "true" : "false",
+            materialize_descriptor_aliases ? "true" : "false",
             materialize_specialization_constants ? "true" : "false",
             disable_pipeline_optimization ? "true" : "false",
             specialization_materialized ? "true" : "false",
@@ -6361,6 +6532,9 @@ cleanup:
     for (size_t i = 0; i < binding_count; ++i) {
         free(binding_dirty_probe_masks[i]);
         destroy_vulkan_vector_buffer(rt->device, &temp_buffers[i]);
+    }
+    for (size_t i = 0; i < binding_alias_count; ++i) {
+        destroy_vulkan_vector_buffer(rt->device, &alias_temp_buffers[i]);
     }
     free(shader_code);
     return ret;
