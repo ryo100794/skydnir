@@ -319,3 +319,32 @@ and descriptor event, not only by layer count.  The compare driver now records
 `ngl_zero_generic_spirv_dispatch` and classifies this case as
 `vulkan_backend_control_mismatch` instead of treating it as a clean partial
 offload result.
+
+### First `ngl=0` Dispatch Scale
+
+The zero-layer Vulkan control produced small generic SPIR-V workloads, so a CPU
+emulation/oracle path is feasible for correctness isolation:
+
+| SPIR-V hash | Likely operation | Dispatch | Local size | Invocations | Binding bytes | Notes |
+|---|---|---:|---:|---:|---:|---|
+| `0x7bf05c459ac87f2b` | unnamed scalar/indexing shader | `[1,12,1]` / `[1,48,1]` | `[256,1,1]` | 3,072 / 12,288 | 49,664 / 197,120 | 3 storage buffers, f32 arrays, one specialization constant |
+| `0xac41e8033a67af4a` | RoPE/Yarn shader | `[48,1,1]` / `[192,1,1]` | `[1,256,1]` | 12,288 / 49,152 | 98,328 / 393,240 | 5 storage buffers, f32/int arrays, no quantized storage requirement |
+
+These are not large matrix-multiply kernels.  The data movement is under 400 KiB
+per captured dispatch and the static SPIR-V contains only ordinary Shader
+capability with f32/int storage.  That makes them good candidates for a
+debug-only CPU oracle:
+
+1. Capture the exact descriptor byte ranges, push constants, specialization
+   constants, dispatch geometry, and shader hash.
+2. Run the same operation through a CPU reference path inside the executor.
+3. Compare CPU-oracle output bytes against Android Vulkan output bytes before
+   writing back to the container fd.
+4. If the CPU oracle matches llama CPU behavior while Vulkan diverges, the
+   bridge/Vulkan execution path is guilty.  If the oracle also diverges, the
+   issue is descriptor/push layout interpretation or the test route, not the
+   Android GPU driver.
+
+The first implementation should not be a full SPIR-V VM.  Start with a
+hash-gated debug oracle for these two kernels, then graduate to a small
+interpreter subset only if more shader hashes become front blockers.
