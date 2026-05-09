@@ -239,6 +239,11 @@ Pass criteria:
   bounded oracle mismatch for all eight sampled rows. This shifts the next
   split from "unknown large shader" to "Q6_K decode/math vs descriptor-view
   semantics/local-size execution".
+- The no-duplicate-rewrite rerun changes the rewritten shader hash from
+  `0x274f68a67dfef210` to `0x1bf751845c5dce75`, but the sampled Q6_K oracle
+  still mismatches the same first row. Do not spend the next iteration only on
+  duplicate descriptor rewrite; split local-size/specialization execution,
+  Q6_K decode layout, and descriptor-view semantics instead.
 
 Fail criteria:
 

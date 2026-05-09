@@ -77,6 +77,7 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-ngl1-matvec-alias-diagnostics-20260509.json` | 1 | Q6_K matvec classification and read/write alias hazard diagnostics for `0x274f68a67dfef210` | n/a | 2.17x | fail | `cpu_oracle.kernel_hint=mul-mat-vec-q6-k-large`; `rw_alias_hazards.count=2` |
 | `llama-gpu-ngl1-matvec-push-alias-diagnostics-20260509.json` | 1 | Same Q6_K matvec diagnostic with bounded push-constant capture | n/a | 2.38x | fail | `push_u32=[4096,4096,4096,151936,...]`; `rw_alias_hazards.count=2` |
 | `llama-gpu-ngl1-q6k-sample-oracle-20260509.json` | 1 | Bounded CPU oracle for eight Q6_K final-projection rows | n/a | 1.61x | fail | oracle mismatch for 8/8 rows; first expected `13.878`, GPU `6.831` |
+| `llama-gpu-ngl1-q6k-sample-oracle-no-dup-20260509-rerun.json` | 1 | Same sampled Q6_K oracle with duplicate descriptor rewrite disabled | n/a | 2.15x | fail | hash changes to `0x1bf751845c5dce75`; same 8/8 oracle mismatch |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -233,6 +234,10 @@ Two ICD correctness fixes were added on 2026-05-08:
   `6.83085108`. This proves the remaining blocker is inside Q6_K matvec
   layout/decode/descriptor-view/local-size semantics, not merely sampling or
   HTTP serving.
+- Re-running the same sampled oracle with duplicate descriptor rewriting
+  disabled changes the shader hash to `0x1bf751845c5dce75` but produces the
+  same first-row mismatch shape. Duplicate binding rewrite is therefore not the
+  primary cause of the current Q6_K sampled mismatch.
 - The compare driver now requests `completion_probabilities` with bounded
   `n_probs` during correctness probes. This records selected token ids and
   top-logprob lists for both CPU/no-offload and GPU/offload. The latest full

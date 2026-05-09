@@ -2562,7 +2562,8 @@ static int cpu_oracle_known_llama_hash(uint64_t spirv_hash) {
            spirv_hash == 0x11c0523df6c795b8ull ||
            spirv_hash == 0xac41e8033a67af4aull ||
            spirv_hash == 0xf2f988b94bd3e0dcull ||
-           spirv_hash == 0x274f68a67dfef210ull;
+           spirv_hash == 0x274f68a67dfef210ull ||
+           spirv_hash == 0x1bf751845c5dce75ull;
 }
 
 static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
@@ -2577,7 +2578,8 @@ static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
     if (spirv_hash == 0xf2f988b94bd3e0dcull) {
         return "rms-norm";
     }
-    if (spirv_hash == 0x274f68a67dfef210ull) {
+    if (spirv_hash == 0x274f68a67dfef210ull ||
+        spirv_hash == 0x1bf751845c5dce75ull) {
         return "mul-mat-vec-q6-k-large";
     }
     return "unknown";
@@ -3426,6 +3428,7 @@ static float q6k_value_at(const uint8_t block[210], uint32_t k) {
 
 static void run_cpu_oracle_q6k_matvec_sample(
         CpuOracleReport *report,
+        uint64_t spirv_hash,
         const int *buffer_fds,
         const VulkanDispatchBinding *bindings,
         size_t binding_count,
@@ -3436,7 +3439,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
         const uint8_t *push,
         size_t push_size) {
     if (!report || !report->requested) return;
-    init_cpu_oracle_report(report, report->requested, 0x274f68a67dfef210ull);
+    init_cpu_oracle_report(report, report->requested, spirv_hash);
     int idx0 = binding_index_for_number(bindings, binding_count, 0);
     int idx1 = binding_index_for_number(bindings, binding_count, 1);
     int idx2 = binding_index_for_number(bindings, binding_count, 2);
@@ -5559,8 +5562,10 @@ static int run_vulkan_dispatch_fd(
                                 gx,
                                 gy,
                                 gz);
-    } else if (spirv_summary.hash == 0x274f68a67dfef210ull) {
+    } else if (spirv_summary.hash == 0x274f68a67dfef210ull ||
+               spirv_summary.hash == 0x1bf751845c5dce75ull) {
         run_cpu_oracle_q6k_matvec_sample(&cpu_oracle_report,
+                                         spirv_summary.hash,
                                          buffer_fds,
                                          bindings,
                                          binding_count,
