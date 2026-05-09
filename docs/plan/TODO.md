@@ -23,9 +23,9 @@ or closes.
   container/APK bridge, serves the forced-GPU HTTP probe, and now exposes
   bridge upload/copy overhead as a performance blocker. Current correctness
   gate: NGL=0 default is green, SPIR-V materialization is opt-in, and the
-  `small-f32-indexing` oracles match for the zero-layer and first NGL=1 small
-  shader hashes. NGL=1 still fails required probes; next hashes to classify are
-  `0xac41e8033a67af4a`, `0xf2f988b94bd3e0dc`, and `0x274f68a67dfef210`.
+  `small-f32-indexing`, `rope-yarn`, and `rms-norm` oracles match for the
+  observed NGL=1 front-blocker hashes. NGL=1 still fails required probes; the
+  next primary blocker is `0x274f68a67dfef210`.
   Stage gates and compact-model handoff are maintained in
   `docs/plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`.
 - [next] [#5](https://github.com/ryo100794/pdocker-android/issues/5)

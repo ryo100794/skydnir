@@ -2458,7 +2458,8 @@ static int cpu_oracle_known_small_llama_hash(uint64_t spirv_hash) {
     return spirv_hash == 0x7bf05c459ac87f2bull ||
            spirv_hash == 0x11d5243c43b23a7bull ||
            spirv_hash == 0x11c0523df6c795b8ull ||
-           spirv_hash == 0xac41e8033a67af4aull;
+           spirv_hash == 0xac41e8033a67af4aull ||
+           spirv_hash == 0xf2f988b94bd3e0dcull;
 }
 
 static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
@@ -2469,6 +2470,9 @@ static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
     }
     if (spirv_hash == 0xac41e8033a67af4aull) {
         return "rope-yarn";
+    }
+    if (spirv_hash == 0xf2f988b94bd3e0dcull) {
+        return "rms-norm";
     }
     return "unknown";
 }
@@ -2515,6 +2519,24 @@ static float load_f32_at_index(const uint8_t *bytes, size_t size, size_t index, 
     }
     memcpy(&value, bytes + offset, sizeof(value));
     if (ok) *ok = 1;
+    return value;
+}
+
+static int32_t load_i32_at_index(const uint8_t *bytes, size_t size, size_t index, int *ok) {
+    size_t offset = index * sizeof(int32_t);
+    int32_t value = 0;
+    if (!bytes || offset + sizeof(int32_t) > size) {
+        if (ok) *ok = 0;
+        return value;
+    }
+    memcpy(&value, bytes + offset, sizeof(value));
+    if (ok) *ok = 1;
+    return value;
+}
+
+static float u32_to_f32(uint32_t bits) {
+    float value = 0.0f;
+    memcpy(&value, &bits, sizeof(value));
     return value;
 }
 
@@ -2613,6 +2635,631 @@ static void write_cpu_oracle_report(
                 report->samples[i].abs_error);
     }
     fprintf(out, "]}");
+}
+
+
+static float rope_yarn_ramp(float low, float high, uint32_t i0) {
+    float y = (float)(i0 / 2u) - low;
+    float span = high - low;
+    if (span < 1.0e-3f) span = 1.0e-3f;
+    float t = y / span;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return 1.0f - t;
+}
+
+static void run_cpu_oracle_rope_yarn(
+        CpuOracleReport *report,
+        const int *buffer_fds,
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        VulkanVectorBuffer * const *vk_buffers,
+        const size_t *binding_gpu_offset,
+        const size_t *binding_alias_rep,
+        const uint8_t *active,
+        const uint8_t *writable,
+        const uint8_t *push,
+        size_t push_size,
+        uint32_t gx,
+        uint32_t gy,
+        uint32_t gz) {
+    int idx0 = binding_index_for_number(bindings, binding_count, 0);
+    int idx1 = binding_index_for_number(bindings, binding_count, 1);
+    int idx2 = binding_index_for_number(bindings, binding_count, 2);
+    int idx3 = binding_index_for_number(bindings, binding_count, 3);
+    int idx4 = binding_index_for_number(bindings, binding_count, 4);
+    if (!report || !report->requested) return;
+    init_cpu_oracle_report(report, report->requested, 0xac41e8033a67af4aull);
+    if (idx0 < 0 || idx1 < 0 || idx2 < 0 || idx3 < 0 || idx4 < 0 ||
+        !buffer_fds || !vk_buffers ||
+        !vk_buffers[idx0] || !vk_buffers[idx0]->map ||
+        !vk_buffers[idx1] || !vk_buffers[idx1]->map ||
+        !vk_buffers[idx2] || !vk_buffers[idx2]->map ||
+        !vk_buffers[idx3] || !vk_buffers[idx3]->map ||
+        !vk_buffers[idx4] || !vk_buffers[idx4]->map || !push || push_size < 27 * sizeof(uint32_t)) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "missing-oracle-inputs");
+        return;
+    }
+    const off_t src0_start = bindings[idx0].offset;
+    const off_t src0_end = bindings[idx0].offset + (off_t)bindings[idx0].size;
+    const off_t src1_start = bindings[idx1].offset;
+    const off_t src1_end = bindings[idx1].offset + (off_t)bindings[idx1].size;
+    const off_t src2_start = bindings[idx2].offset;
+    const off_t src2_end = bindings[idx2].offset + (off_t)bindings[idx2].size;
+    const off_t dst_start = bindings[idx3].offset;
+    const off_t dst_end = bindings[idx3].offset + (off_t)bindings[idx3].size;
+    report->input_output_overlap =
+        ((binding_alias_rep && binding_alias_rep[idx0] == binding_alias_rep[idx3]) ||
+         buffer_fds[idx0] == buffer_fds[idx3]) &&
+        src0_start < dst_end && dst_start < src0_end;
+    report->input_output_overlap = report->input_output_overlap ||
+        (((binding_alias_rep && binding_alias_rep[idx1] == binding_alias_rep[idx3]) ||
+          buffer_fds[idx1] == buffer_fds[idx3]) &&
+         src1_start < dst_end && dst_start < src1_end);
+    report->input_output_overlap = report->input_output_overlap ||
+        (((binding_alias_rep && binding_alias_rep[idx2] == binding_alias_rep[idx3]) ||
+          buffer_fds[idx2] == buffer_fds[idx3]) &&
+         src2_start < dst_end && dst_start < src2_end);
+    if (active && (!active[idx0] || !active[idx1] || !active[idx2] ||
+                  !active[idx3] || !active[idx4])) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "inactive-oracle-binding");
+        return;
+    }
+    if (writable && !writable[idx3]) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "output-binding-not-writable");
+        return;
+    }
+    const size_t oracle_cap = 8u * 1024u * 1024u;
+    if (bindings[idx0].size > oracle_cap || bindings[idx1].size > oracle_cap ||
+        bindings[idx2].size > oracle_cap || bindings[idx3].size > oracle_cap ||
+        bindings[idx4].size > oracle_cap) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "binding-too-large-for-oracle");
+        return;
+    }
+    uint8_t *x = (uint8_t *)malloc(bindings[idx0].size);
+    uint8_t *y = (uint8_t *)malloc(bindings[idx1].size);
+    uint8_t *z = (uint8_t *)malloc(bindings[idx2].size);
+    uint8_t *i_buf = (uint8_t *)malloc(bindings[idx4].size);
+    uint8_t *dst = (uint8_t *)malloc(bindings[idx3].size);
+    if (!x || !y || !z || !i_buf || !dst) {
+        free(x);
+        free(y);
+        free(z);
+        free(i_buf);
+        free(dst);
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "oracle-oom");
+        return;
+    }
+    if (read_fd_exact(buffer_fds[idx0], x, bindings[idx0].size, bindings[idx0].offset) != 0 ||
+        read_fd_exact(buffer_fds[idx1], y, bindings[idx1].size, bindings[idx1].offset) != 0 ||
+        read_fd_exact(buffer_fds[idx2], z, bindings[idx2].size, bindings[idx2].offset) != 0 ||
+        read_fd_exact(buffer_fds[idx4], i_buf, bindings[idx4].size, bindings[idx4].offset) != 0) {
+        free(x); free(y); free(z); free(i_buf); free(dst);
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "oracle-read-failed");
+        return;
+    }
+    uint32_t pc[27];
+    for (size_t i = 0; i < 27; ++i) pc[i] = load_le_u32(push, push_size, i);
+    const uint32_t n_rows = pc[1];
+    const uint32_t n_dims = pc[2];
+    const float freq_scale = u32_to_f32(pc[3]);
+    const float ext_factor = u32_to_f32(pc[5]);
+    const float attn_factor = u32_to_f32(pc[6]);
+    const float corr_low = u32_to_f32(pc[7]);
+    const float corr_high = u32_to_f32(pc[8]);
+    const float theta_scale = u32_to_f32(pc[9]);
+    const uint32_t has_ff = pc[10];
+    const uint32_t is_back = pc[16];
+    const uint32_t set_rows_stride = pc[17];
+    const uint32_t ne00 = pc[18];
+    const uint32_t ne01 = pc[19];
+    const uint32_t ne02 = pc[20];
+    const uint32_t nb01 = pc[21];
+    const uint32_t nb02 = pc[22];
+    const uint32_t nb03 = pc[23];
+    const uint32_t nb11 = pc[24];
+    const uint32_t nb12 = pc[25];
+    const uint32_t nb13 = pc[26];
+    if (n_rows == 0 || n_dims == 0 || ne00 == 0 || ne01 == 0 || ne02 == 0) {
+        free(x); free(y); free(z); free(i_buf); free(dst);
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "invalid-push-shape");
+        return;
+    }
+    const uint64_t row_plane = (uint64_t)ne01 * (uint64_t)ne02;
+    if (row_plane == 0 || row_plane > UINT32_MAX || (n_dims & 1u) != 0) {
+        free(x); free(y); free(z); free(i_buf); free(dst);
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "unsupported-push-shape");
+        return;
+    }
+    const uint64_t max_dispatch_invocations =
+        (uint64_t)(gx ? gx : 1u) * (uint64_t)(gy ? gy : 1u) *
+        (uint64_t)(gz ? gz : 1u) * 256ull;
+    const uint64_t max_float_ops = max_dispatch_invocations * 2ull;
+    if (max_float_ops > 4ull * 1024ull * 1024ull) {
+        free(x); free(y); free(z); free(i_buf); free(dst);
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "dispatch-too-large-for-oracle");
+        return;
+    }
+    memcpy(dst, (const uint8_t *)vk_buffers[idx3]->map + binding_gpu_offset[idx3], bindings[idx3].size);
+    report->expected_hash = 1469598103934665603ull;
+    report->gpu_hash = 1469598103934665603ull;
+    const uint64_t half_n_dims = (uint64_t)n_dims >> 1;
+    const uint32_t dispatch_x = gx ? gx : 1u;
+    const uint32_t dispatch_y = gy ? gy : 1u;
+    const uint32_t dispatch_z = gz ? gz : 1u;
+    for (uint32_t zc = 0; zc < dispatch_z; ++zc) {
+        for (uint32_t wy = 0; wy < dispatch_y; ++wy) {
+            for (uint32_t ly = 0; ly < 256u; ++ly) {
+                const uint64_t i0 = 2ull * ((uint64_t)wy * 256ull + (uint64_t)ly);
+                if (i0 >= ne00) continue;
+                const uint64_t i0_pair = i0 >> 1;
+                for (uint32_t wx = 0; wx < dispatch_x; ++wx) {
+                    const uint64_t row = (uint64_t)wx + (uint64_t)zc * 32768ull;
+                    if (row >= n_rows) continue;
+                    const uint64_t i3 = row / row_plane;
+                    const uint64_t row_rem = row - i3 * row_plane;
+                    const uint64_t i2 = row_rem / ne01;
+                    const uint64_t i1 = row_rem - i2 * ne01;
+                    uint64_t idst = i0_pair + i1 * nb11 + i2 * nb12 + i3 * nb13;
+                    const uint64_t ix = i0_pair + i1 * nb01 + i2 * nb02 + i3 * nb03;
+                    if (set_rows_stride != 0) {
+                        int row_stride_ok = 0;
+                        int32_t row_stride_value = load_i32_at_index(i_buf, bindings[idx4].size,
+                                                                     (size_t)(i2 * 2ull),
+                                                                     &row_stride_ok);
+                        if (!row_stride_ok) {
+                            free(x); free(y); free(z); free(i_buf); free(dst);
+                            report->skipped = 1;
+                            snprintf(report->status, sizeof(report->status), "%s", "oracle-index-out-of-range");
+                            return;
+                        }
+                        idst = i1 * nb11 + i0_pair;
+                        idst += (uint64_t)(uint32_t)row_stride_value * (uint64_t)set_rows_stride;
+                    }
+                    if (i0 >= n_dims) {
+                        const uint64_t dst0 = idst + i0_pair;
+                        const uint64_t dst1 = idst + i0_pair + 1ull;
+                        const uint64_t src0_idx = ix + i0_pair;
+                        const uint64_t src1_idx = ix + i0_pair + 1ull;
+                        if (dst0 >= (size_t)(bindings[idx3].size / sizeof(float)) ||
+                            dst1 >= (size_t)(bindings[idx3].size / sizeof(float)) ||
+                            src0_idx >= (size_t)(bindings[idx0].size / sizeof(float)) ||
+                            src1_idx >= (size_t)(bindings[idx0].size / sizeof(float))) {
+                            free(x); free(y); free(z); free(i_buf); free(dst);
+                            report->skipped = 1;
+                            snprintf(report->status, sizeof(report->status), "%s", "oracle-index-out-of-range");
+                            return;
+                        }
+                        float expected0 = load_f32_at_index(x, bindings[idx0].size, (size_t)src0_idx, NULL);
+                        float expected1 = load_f32_at_index(x, bindings[idx0].size, (size_t)src1_idx, NULL);
+                        float gpu0 = load_f32_at_index(dst, bindings[idx3].size, (size_t)dst0, NULL);
+                        float gpu1 = load_f32_at_index(dst, bindings[idx3].size, (size_t)dst1, NULL);
+                        double abs_error0 = fabs((double)expected0 - (double)gpu0);
+                        double abs_error1 = fabs((double)expected1 - (double)gpu1);
+                        double rel_error0 = fabs((double)expected0) > 1e-30 ? abs_error0 / fabs((double)expected0) : abs_error0;
+                        double rel_error1 = fabs((double)expected1) > 1e-30 ? abs_error1 / fabs((double)expected1) : abs_error1;
+                        store_hash_f32(&report->expected_hash, expected0);
+                        store_hash_f32(&report->expected_hash, expected1);
+                        store_hash_f32(&report->gpu_hash, gpu0);
+                        store_hash_f32(&report->gpu_hash, gpu1);
+                        if (abs_error0 > report->max_abs_error) report->max_abs_error = abs_error0;
+                        if (abs_error1 > report->max_abs_error) report->max_abs_error = abs_error1;
+                        if (rel_error0 > report->max_rel_error) report->max_rel_error = rel_error0;
+                        if (rel_error1 > report->max_rel_error) report->max_rel_error = rel_error1;
+                        if (abs_error0 > 1.0e-5 || abs_error1 > 1.0e-5) {
+                            if (report->sample_count < sizeof(report->samples) / sizeof(report->samples[0])) {
+                                CpuOracleSample *sample0 = &report->samples[report->sample_count++];
+                                sample0->dst_index = dst0;
+                                sample0->expected = expected0;
+                                sample0->gpu = gpu0;
+                                sample0->src0 = expected0;
+                                sample0->src1 = expected1;
+                                sample0->abs_error = abs_error0;
+                            }
+                        }
+                        if (!report->has_first_mismatch && abs_error0 > 1e-5) {
+                            report->has_first_mismatch = 1;
+                            report->first_mismatch.dst_index = dst0;
+                            report->first_mismatch.expected = expected0;
+                            report->first_mismatch.gpu = gpu0;
+                            report->first_mismatch.src0 = expected0;
+                            report->first_mismatch.src1 = expected1;
+                            report->first_mismatch.abs_error = abs_error0;
+                        }
+                        report->compared_floats += 2;
+                        report->compared_iter0 += 1;
+                        if (abs_error0 > 1e-5) {
+                            report->mismatch_count += 1;
+                            report->mismatch_iter0 += 1;
+                            if (gpu0 == 0.0f && expected0 != 0.0f) report->zero_gpu_mismatch_count += 1;
+                        }
+                        if (abs_error1 > 1e-5) {
+                            report->mismatch_count += 1;
+                            report->mismatch_iter1 += 1;
+                            if (gpu1 == 0.0f && expected1 != 0.0f) report->zero_gpu_mismatch_count += 1;
+                        }
+                        continue;
+                    }
+                    if (i0_pair >= half_n_dims) {
+                        free(x); free(y); free(z); free(i_buf); free(dst);
+                        report->skipped = 1;
+                        snprintf(report->status, sizeof(report->status), "%s", "invalid-push-shape");
+                        return;
+                    }
+                    size_t y_index = (size_t)i2;
+                    if (y_index >= bindings[idx1].size / sizeof(int32_t)) {
+                        free(x); free(y); free(z); free(i_buf); free(dst);
+                        report->skipped = 1;
+                        snprintf(report->status, sizeof(report->status), "%s", "oracle-index-out-of-range");
+                        return;
+                    }
+                    int y_ok = 0;
+                    int32_t y_raw = load_i32_at_index(y, bindings[idx1].size, y_index, &y_ok);
+                    if (!y_ok) {
+                        free(x); free(y); free(z); free(i_buf); free(dst);
+                        report->skipped = 1;
+                        snprintf(report->status, sizeof(report->status), "%s", "oracle-index-out-of-range");
+                        return;
+                    }
+                    float theta_base = (float)y_raw * powf(theta_scale, (float)i0_pair);
+                    float freq_factor = 1.0f;
+                    if (has_ff != 0) {
+                        if (i0_pair >= (uint64_t)bindings[idx2].size / sizeof(float)) {
+                            free(x); free(y); free(z); free(i_buf); free(dst);
+                            report->skipped = 1;
+                            snprintf(report->status, sizeof(report->status), "%s", "oracle-index-out-of-range");
+                            return;
+                        }
+                        freq_factor = load_f32_at_index(z, bindings[idx2].size, (size_t)i0_pair, NULL);
+                    }
+                    if (freq_factor == 0.0f) {
+                        free(x); free(y); free(z); free(i_buf); free(dst);
+                        report->skipped = 1;
+                        snprintf(report->status, sizeof(report->status), "%s", "invalid-push-shape");
+                        return;
+                    }
+                    const float theta_extrap = theta_base / freq_factor;
+                    float theta = freq_scale * theta_extrap;
+                    float mscale = attn_factor;
+                    if (fabsf(ext_factor) > 0.0f) {
+                        const float ramp = rope_yarn_ramp(corr_low, corr_high, (uint32_t)i0);
+                        const float ramp_mix = ext_factor * ramp;
+                        theta = theta * (1.0f - ramp_mix) + theta_extrap * ramp_mix;
+                        if (freq_scale > 0.0f) {
+                            mscale *= 1.0f + 0.1f * logf(1.0f / freq_scale);
+                        }
+                    }
+                    if (is_back) theta = -theta;
+                    float cos_theta = cosf(theta) * mscale;
+                    float sin_theta = sinf(theta) * mscale;
+                    const uint64_t src0_idx = ix;
+                    const uint64_t src1_idx = ix + half_n_dims;
+                    if (src0_idx >= (size_t)(bindings[idx0].size / sizeof(float)) ||
+                        src1_idx >= (size_t)(bindings[idx0].size / sizeof(float))) {
+                        free(x); free(y); free(z); free(i_buf); free(dst);
+                        report->skipped = 1;
+                        snprintf(report->status, sizeof(report->status), "%s", "oracle-index-out-of-range");
+                        return;
+                    }
+                    float x0 = load_f32_at_index(x, bindings[idx0].size, src0_idx, NULL);
+                    float x1 = load_f32_at_index(x, bindings[idx0].size, src1_idx, NULL);
+                    uint64_t dst0 = idst;
+                    uint64_t dst1 = idst + half_n_dims;
+                    if (dst0 >= (size_t)(bindings[idx3].size / sizeof(float)) ||
+                        dst1 >= (size_t)(bindings[idx3].size / sizeof(float))) {
+                        free(x); free(y); free(z); free(i_buf); free(dst);
+                        report->skipped = 1;
+                        snprintf(report->status, sizeof(report->status), "%s", "oracle-index-out-of-range");
+                        return;
+                    }
+                    float expected0 = x0 * cos_theta - x1 * sin_theta;
+                    float expected1 = x0 * sin_theta + x1 * cos_theta;
+                    float gpu0 = load_f32_at_index(dst, bindings[idx3].size, dst0, NULL);
+                    float gpu1 = load_f32_at_index(dst, bindings[idx3].size, dst1, NULL);
+                    store_hash_f32(&report->expected_hash, expected0);
+                    store_hash_f32(&report->expected_hash, expected1);
+                    store_hash_f32(&report->gpu_hash, gpu0);
+                    store_hash_f32(&report->gpu_hash, gpu1);
+                    double abs_error0 = fabs((double)expected0 - (double)gpu0);
+                    double abs_error1 = fabs((double)expected1 - (double)gpu1);
+                    double rel_error0 = fabs((double)expected0) > 1e-30 ? abs_error0 / fabs((double)expected0) : abs_error0;
+                    double rel_error1 = fabs((double)expected1) > 1e-30 ? abs_error1 / fabs((double)expected1) : abs_error1;
+                    if (report->sample_count < sizeof(report->samples) / sizeof(report->samples[0])) {
+                        CpuOracleSample *sample0 = &report->samples[report->sample_count++];
+                        sample0->dst_index = dst0;
+                        sample0->expected = expected0;
+                        sample0->gpu = gpu0;
+                        sample0->src0 = x0;
+                        sample0->src1 = x1;
+                        sample0->abs_error = abs_error0;
+                    }
+                    if (!report->has_first_mismatch && abs_error0 > 1e-5) {
+                        report->has_first_mismatch = 1;
+                        report->first_mismatch.dst_index = dst0;
+                        report->first_mismatch.expected = expected0;
+                        report->first_mismatch.gpu = gpu0;
+                        report->first_mismatch.src0 = x0;
+                        report->first_mismatch.src1 = x1;
+                        report->first_mismatch.abs_error = abs_error0;
+                    }
+                    report->compared_floats += 2;
+                    report->compared_iter0 += 1;
+                    if (abs_error0 > 1e-5 && rel_error0 > 1e-4) {
+                        report->mismatch_count++;
+                        report->mismatch_iter0++;
+                        if (gpu0 == 0.0f && expected0 != 0.0f) report->zero_gpu_mismatch_count++;
+                    }
+                    if (abs_error1 > 1e-5 && rel_error1 > 1e-4) {
+                        if (report->sample_count < sizeof(report->samples) / sizeof(report->samples[0])) {
+                            CpuOracleSample *sample1 = &report->samples[report->sample_count++];
+                            sample1->dst_index = dst1;
+                            sample1->expected = expected1;
+                            sample1->gpu = gpu1;
+                            sample1->src0 = x0;
+                            sample1->src1 = x1;
+                            sample1->abs_error = abs_error1;
+                        }
+                        if (!report->has_first_mismatch && abs_error1 > 1e-5) {
+                            report->has_first_mismatch = 1;
+                            report->first_mismatch.dst_index = dst1;
+                            report->first_mismatch.expected = expected1;
+                            report->first_mismatch.gpu = gpu1;
+                            report->first_mismatch.src0 = x0;
+                            report->first_mismatch.src1 = x1;
+                            report->first_mismatch.abs_error = abs_error1;
+                        }
+                        report->mismatch_count++;
+                        report->mismatch_iter1++;
+                        if (gpu1 == 0.0f && expected1 != 0.0f) report->zero_gpu_mismatch_count++;
+                        if (rel_error1 > report->max_rel_error) report->max_rel_error = rel_error1;
+                    }
+                    if (abs_error0 > report->max_abs_error) report->max_abs_error = abs_error0;
+                    if (abs_error1 > report->max_abs_error) report->max_abs_error = abs_error1;
+                    if (rel_error0 > report->max_rel_error) report->max_rel_error = rel_error0;
+                }
+            }
+        }
+    }
+    report->executed = 1;
+    report->skipped = 0;
+    snprintf(report->status, sizeof(report->status), "%s", report->mismatch_count ? "mismatch" : "match");
+    free(x); free(y); free(z); free(i_buf); free(dst);
+}
+
+static void run_cpu_oracle_rms_norm(
+        CpuOracleReport *report,
+        const int *buffer_fds,
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        VulkanVectorBuffer * const *vk_buffers,
+        const size_t *binding_gpu_offset,
+        const size_t *binding_alias_rep,
+        const uint8_t *active,
+        const uint8_t *writable,
+        const VulkanDispatchSpecialization *specializations,
+        size_t specialization_count,
+        const uint8_t *specialization_data,
+        size_t specialization_data_size,
+        const uint8_t *push,
+        size_t push_size,
+        uint32_t gx,
+        uint32_t gy,
+        uint32_t gz) {
+    int idx0 = binding_index_for_number(bindings, binding_count, 0);
+    int idx1 = binding_index_for_number(bindings, binding_count, 1);
+    int idx2 = binding_index_for_number(bindings, binding_count, 2);
+    if (!report || !report->requested) return;
+    init_cpu_oracle_report(report, report->requested, 0xf2f988b94bd3e0dcull);
+    if (idx0 < 0 || idx1 < 0 || idx2 < 0 || !buffer_fds || !vk_buffers ||
+        !vk_buffers[idx2] || !vk_buffers[idx2]->map || !push ||
+        push_size < 29 * sizeof(uint32_t)) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "missing-oracle-inputs");
+        return;
+    }
+    const off_t src0_start = bindings[idx0].offset;
+    const off_t src0_end = bindings[idx0].offset + (off_t)bindings[idx0].size;
+    const off_t dst_start = bindings[idx2].offset;
+    const off_t dst_end = bindings[idx2].offset + (off_t)bindings[idx2].size;
+    report->input_output_overlap =
+        (((binding_alias_rep && binding_alias_rep[idx0] == binding_alias_rep[idx2]) ||
+          buffer_fds[idx0] == buffer_fds[idx2]) &&
+         src0_start < dst_end && dst_start < src0_end);
+    if (active && (!active[idx0] || !active[idx1] || !active[idx2])) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "inactive-oracle-binding");
+        return;
+    }
+    if (writable && !writable[idx2]) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "output-binding-not-writable");
+        return;
+    }
+    const size_t oracle_cap = 8u * 1024u * 1024u;
+    if (bindings[idx0].size > oracle_cap || bindings[idx1].size > oracle_cap ||
+        bindings[idx2].size > oracle_cap) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "binding-too-large-for-oracle");
+        return;
+    }
+    uint8_t *src0 = (uint8_t *)malloc(bindings[idx0].size);
+    uint8_t *src1 = (uint8_t *)malloc(bindings[idx1].size);
+    uint8_t *dst = (uint8_t *)malloc(bindings[idx2].size);
+    if (!src0 || !src1 || !dst) {
+        free(src0);
+        free(src1);
+        free(dst);
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "oracle-oom");
+        return;
+    }
+    if (read_fd_exact(buffer_fds[idx0], src0, bindings[idx0].size, bindings[idx0].offset) != 0 ||
+        read_fd_exact(buffer_fds[idx1], src1, bindings[idx1].size, bindings[idx1].offset) != 0) {
+        free(src0);
+        free(src1);
+        free(dst);
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "oracle-read-failed");
+        return;
+    }
+    memcpy(dst, (const uint8_t *)vk_buffers[idx2]->map + binding_gpu_offset[idx2], bindings[idx2].size);
+    uint32_t pc[29];
+    for (size_t i = 0; i < 29; ++i) pc[i] = load_le_u32(push, push_size, i);
+    const uint32_t ncols = pc[1];
+    const uint32_t ne10 = pc[9];
+    const uint32_t ne11 = pc[10];
+    const uint32_t ne12 = pc[11];
+    const uint32_t ne13 = pc[12];
+    const uint32_t nb11 = pc[14];
+    const uint32_t nb12 = pc[15];
+    const uint32_t nb13 = pc[16];
+    const uint32_t nb01 = pc[6];
+    const uint32_t nb02 = pc[7];
+    const uint32_t nb03 = pc[8];
+    const uint32_t misalign_offsets = pc[25];
+    const uint32_t aoffset = misalign_offsets >> 16u;
+    const uint32_t boffset = (misalign_offsets >> 8u) & 255u;
+    const uint32_t doffset = misalign_offsets & 255u;
+    const float eps = u32_to_f32(pc[26]);
+    uint64_t spec_value = 0;
+    const int norepeat =
+        specialization_value_for_id(specializations, specialization_count,
+                                    specialization_data, specialization_data_size,
+                                    0, &spec_value) && spec_value != 0;
+    spec_value = 0;
+    const int do_multiply =
+        specialization_value_for_id(specializations, specialization_count,
+                                    specialization_data, specialization_data_size,
+                                    1, &spec_value) && spec_value != 0;
+    if (ncols == 0 || gx == 0 || gy == 0 || gz == 0) {
+        free(src0);
+        free(src1);
+        free(dst);
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "invalid-push-shape");
+        return;
+    }
+    const uint64_t total_rows = (uint64_t)gx * (uint64_t)gy * (uint64_t)gz;
+    if (total_rows * (uint64_t)ncols > 4ull * 1024ull * 1024ull) {
+        free(src0);
+        free(src1);
+        free(dst);
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "dispatch-too-large-for-oracle");
+        return;
+    }
+    report->expected_hash = 1469598103934665603ull;
+    report->gpu_hash = 1469598103934665603ull;
+    for (uint32_t samp = 0; samp < gz; ++samp) {
+        for (uint32_t channel = 0; channel < gy; ++channel) {
+            for (uint32_t row = 0; row < gx; ++row) {
+                const uint64_t a_base = (uint64_t)samp * nb03 +
+                                        (uint64_t)channel * nb02 +
+                                        (uint64_t)row * nb01 + aoffset;
+                const uint64_t d_base = (((uint64_t)samp * gy + channel) * gx + row) *
+                                        (uint64_t)ncols + doffset;
+                uint64_t b_base = boffset;
+                if (norepeat) {
+                    b_base += (uint64_t)samp * nb13 +
+                              (uint64_t)channel * nb12 +
+                              (uint64_t)row * nb11;
+                } else {
+                    b_base += (uint64_t)broadcast_index_u32(samp, ne13) * nb13 +
+                              (uint64_t)broadcast_index_u32(channel, ne12) * nb12 +
+                              (uint64_t)broadcast_index_u32(row, ne11) * nb11;
+                }
+                double sum_sq = 0.0;
+                for (uint32_t col = 0; col < ncols; ++col) {
+                    int ok = 0;
+                    float value = load_f32_at_index(src0, bindings[idx0].size,
+                                                    (size_t)(a_base + col), &ok);
+                    if (!ok) {
+                        free(src0);
+                        free(src1);
+                        free(dst);
+                        report->skipped = 1;
+                        snprintf(report->status, sizeof(report->status), "%s", "oracle-index-out-of-range");
+                        return;
+                    }
+                    sum_sq += (double)value * (double)value;
+                }
+                const float scale = 1.0f / sqrtf((float)(sum_sq / (double)ncols) + eps);
+                for (uint32_t col = 0; col < ncols; ++col) {
+                    const uint64_t src0_idx = a_base + col;
+                    const uint64_t dst_idx = d_base + col;
+                    uint64_t src1_idx = b_base + col;
+                    if (do_multiply && ncols > ne10) {
+                        src1_idx = b_base + broadcast_index_u32(col, ne10);
+                    }
+                    int ok0 = 0, ok1 = 1, ok2 = 0;
+                    float a = load_f32_at_index(src0, bindings[idx0].size, (size_t)src0_idx, &ok0);
+                    float b = 1.0f;
+                    if (do_multiply) {
+                        b = load_f32_at_index(src1, bindings[idx1].size, (size_t)src1_idx, &ok1);
+                    }
+                    float gpu = load_f32_at_index(dst, bindings[idx2].size, (size_t)dst_idx, &ok2);
+                    if (!ok0 || !ok1 || !ok2) {
+                        free(src0);
+                        free(src1);
+                        free(dst);
+                        report->skipped = 1;
+                        snprintf(report->status, sizeof(report->status), "%s", "oracle-index-out-of-range");
+                        return;
+                    }
+                    float expected = scale * a * b;
+                    store_hash_f32(&report->expected_hash, expected);
+                    store_hash_f32(&report->gpu_hash, gpu);
+                    double abs_error = fabs((double)expected - (double)gpu);
+                    double denom = fabs((double)expected);
+                    double rel_error = denom > 1e-30 ? abs_error / denom : abs_error;
+                    if (abs_error > report->max_abs_error) report->max_abs_error = abs_error;
+                    if (rel_error > report->max_rel_error) report->max_rel_error = rel_error;
+                    if (report->sample_count < sizeof(report->samples) / sizeof(report->samples[0])) {
+                        CpuOracleSample *sample = &report->samples[report->sample_count++];
+                        sample->dst_index = dst_idx;
+                        sample->expected = expected;
+                        sample->gpu = gpu;
+                        sample->src0 = a;
+                        sample->src1 = b;
+                        sample->abs_error = abs_error;
+                    }
+                    if (abs_error > 1e-5 && rel_error > 1e-4) {
+                        if (!report->has_first_mismatch) {
+                            report->has_first_mismatch = 1;
+                            report->first_mismatch.dst_index = dst_idx;
+                            report->first_mismatch.expected = expected;
+                            report->first_mismatch.gpu = gpu;
+                            report->first_mismatch.src0 = a;
+                            report->first_mismatch.src1 = b;
+                            report->first_mismatch.abs_error = abs_error;
+                        }
+                        report->mismatch_count++;
+                        if (gpu == 0.0f && expected != 0.0f) {
+                            report->zero_gpu_mismatch_count++;
+                        }
+                    }
+                    report->compared_floats++;
+                    report->compared_iter0++;
+                }
+            }
+        }
+    }
+    report->executed = 1;
+    report->skipped = 0;
+    snprintf(report->status, sizeof(report->status), "%s",
+             report->mismatch_count ? "mismatch" : "match");
+    free(src0);
+    free(src1);
+    free(dst);
 }
 
 static void run_cpu_oracle_small_f32_indexing(
@@ -4603,21 +5250,57 @@ static int run_vulkan_dispatch_fd(
                                    bindings[i].size);
         }
     }
-    run_cpu_oracle_small_f32_indexing(&cpu_oracle_report,
-                                      spirv_summary.hash,
-                                      buffer_fds,
-                                      bindings,
-                                      binding_count,
-                                      vk_buffers,
-                                      binding_gpu_offset,
-                                      binding_alias_rep,
-                                      active_bindings,
-                                      binding_write_needed,
-                                      push,
-                                      push_size,
-                                      gx,
-                                      gy,
-                                      gz);
+    if (spirv_summary.hash == 0xac41e8033a67af4aull) {
+        run_cpu_oracle_rope_yarn(&cpu_oracle_report,
+                                 buffer_fds,
+                                 bindings,
+                                 binding_count,
+                                 vk_buffers,
+                                 binding_gpu_offset,
+                                 binding_alias_rep,
+                                 active_bindings,
+                                 binding_write_needed,
+                                 push,
+                                 push_size,
+                                 gx,
+                                 gy,
+                                 gz);
+    } else if (spirv_summary.hash == 0xf2f988b94bd3e0dcull) {
+        run_cpu_oracle_rms_norm(&cpu_oracle_report,
+                                buffer_fds,
+                                bindings,
+                                binding_count,
+                                vk_buffers,
+                                binding_gpu_offset,
+                                binding_alias_rep,
+                                active_bindings,
+                                binding_write_needed,
+                                specializations,
+                                specialization_count,
+                                specialization_data,
+                                specialization_data_size,
+                                push,
+                                push_size,
+                                gx,
+                                gy,
+                                gz);
+    } else {
+        run_cpu_oracle_small_f32_indexing(&cpu_oracle_report,
+                                          spirv_summary.hash,
+                                          buffer_fds,
+                                          bindings,
+                                          binding_count,
+                                          vk_buffers,
+                                          binding_gpu_offset,
+                                          binding_alias_rep,
+                                          active_bindings,
+                                          binding_write_needed,
+                                          push,
+                                          push_size,
+                                          gx,
+                                          gy,
+                                          gz);
+    }
     double download_start = now_ms();
     for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i]) continue;

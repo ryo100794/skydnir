@@ -123,8 +123,8 @@ Current `ngl=1` front-blocker candidates:
 
 | Hash | Current classification | Current status |
 |---|---|---|
-| `0xac41e8033a67af4a` | RoPE/Yarn | oracle not implemented |
-| `0xf2f988b94bd3e0dc` | unknown | oracle not implemented |
+| `0xac41e8033a67af4a` | RoPE/Yarn | oracle matches in `docs/test/llama-gpu-ngl1-rms-norm-oracle-20260509.json` |
+| `0xf2f988b94bd3e0dc` | RMSNorm with optional multiply | oracle matches in `docs/test/llama-gpu-ngl1-rms-norm-oracle-20260509.json` |
 | `0x274f68a67dfef210` | large final-projection-like candidate | oracle not implemented |
 
 Procedure:
@@ -196,6 +196,13 @@ Fail criteria:
 
 Purpose: decide whether the remaining correctness failure is final-projection,
 quantized matmul, descriptor aliasing, or writeback/residency.
+
+Current entry condition: Stage 3 is complete for the observed `ngl=1` run.
+Both `0xac41e8033a67af4a` (`rope-yarn`) and `0xf2f988b94bd3e0dc`
+(`rms-norm`) execute bounded CPU oracles and report `mismatch_count == 0` in
+`docs/test/llama-gpu-ngl1-rms-norm-oracle-20260509.json`.  The model-level
+correctness probe still fails, so `0x274f68a67dfef210` is now the next primary
+blocker.
 
 Procedure:
 
