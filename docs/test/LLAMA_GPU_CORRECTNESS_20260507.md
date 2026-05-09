@@ -443,8 +443,19 @@ hash to `0x11d5243c43b23a7b` and restored the required correctness probe:
 |---|---:|---:|---:|---|
 | `llama-gpu-cpu-oracle-iter-diagnosis-ngl0-20260509.json` | enabled | fail | `2.47x` | specialization-materialized shader writes zeros outside the first broadcast block |
 | `llama-gpu-cpu-oracle-no-materialize-ngl0-20260509.json` | disabled | pass | `2.33x` | bridge upload/copy overhead |
+| `llama-gpu-default-oracle-match-ngl0-20260509.json` | default disabled | pass | `2.22x` | bridge upload/copy overhead |
 
 Because correctness beats this micro-optimization, executor-side SPIR-V
 specialization materialization is now opt-in.  The default path keeps Vulkan
 specialization info intact and lets the Android Vulkan driver consume the
-original SPIR-V.
+original SPIR-V.  The CPU oracle now recognizes the default non-materialized
+hash `0x11d5243c43b23a7b` as the same `small-f32-indexing` shader and confirms
+that it matches exactly for the captured zero-layer dispatches
+(`mismatch_count=0` for both 24,576-float and 6,144-float events).
+
+The next boundary is real layer offload.  `llama-gpu-default-no-materialize-ngl1-20260509.json`
+served with `n-gpu-layers=1`, but the required correctness probe failed and the
+speedup was only `1.82x`.  That run introduced additional generic SPIR-V hashes
+(`0x11c0523df6c795b8`, `0xf2f988b94bd3e0dc`, `0x274f68a67dfef210`) beyond the
+zero-layer hashes.  The next correctness split should target those hashes before
+raising `n-gpu-layers`.

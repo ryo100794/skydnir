@@ -2456,11 +2456,13 @@ static void write_spirv_binding_reflection_report(
 
 static int cpu_oracle_known_small_llama_hash(uint64_t spirv_hash) {
     return spirv_hash == 0x7bf05c459ac87f2bull ||
+           spirv_hash == 0x11d5243c43b23a7bull ||
            spirv_hash == 0xac41e8033a67af4aull;
 }
 
 static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
-    if (spirv_hash == 0x7bf05c459ac87f2bull) {
+    if (spirv_hash == 0x7bf05c459ac87f2bull ||
+        spirv_hash == 0x11d5243c43b23a7bull) {
         return "small-f32-indexing";
     }
     if (spirv_hash == 0xac41e8033a67af4aull) {
@@ -2629,7 +2631,8 @@ static void run_cpu_oracle_small_f32_indexing(
         uint32_t gz) {
     if (!report || !report->requested) return;
     init_cpu_oracle_report(report, report->requested, spirv_hash);
-    if (spirv_hash != 0x7bf05c459ac87f2bull) {
+    if (spirv_hash != 0x7bf05c459ac87f2bull &&
+        spirv_hash != 0x11d5243c43b23a7bull) {
         report->skipped = 1;
         snprintf(report->status, sizeof(report->status), "%s",
                  report->candidate ? "kernel-not-implemented-yet" : "unsupported-shader-hash");
