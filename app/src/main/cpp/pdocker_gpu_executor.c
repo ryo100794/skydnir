@@ -949,16 +949,29 @@ static void write_spirv_execution_report(
         size_t specialization_count,
         const uint8_t *specialization_data,
         size_t specialization_data_size,
+        const uint8_t *push,
         size_t push_size) {
     if (!out || !summary) return;
     fprintf(out,
             "\"push_bytes\":%zu,"
+            "\"push_u32\":[",
+            push_size);
+    size_t push_u32_count = push && push_size >= sizeof(uint32_t)
+        ? push_size / sizeof(uint32_t)
+        : 0;
+    if (push_u32_count > 32) push_u32_count = 32;
+    for (size_t i = 0; i < push_u32_count; ++i) {
+        uint32_t value = 0;
+        memcpy(&value, push + i * sizeof(uint32_t), sizeof(value));
+        fprintf(out, "%s%u", i ? "," : "", value);
+    }
+    fprintf(out,
+            "],"
             "\"spirv_hash\":\"0x%016llx\","
             "\"spirv_valid\":%s,\"spirv_truncated\":%u,"
             "\"spirv_local_size\":[%u,%u,%u],"
             "\"spirv_local_size_id\":[%u,%u,%u],"
             "\"spirv_local_size_resolved\":[",
-            push_size,
             (unsigned long long)summary->hash,
             summary->valid ? "true" : "false",
             summary->truncated,
@@ -5571,6 +5584,7 @@ static int run_vulkan_dispatch_fd(
                                      specialization_count,
                                      specialization_data,
                                      specialization_data_size,
+                                     push,
                                      push_size);
         fprintf(json_out(), ",");
         write_vulkan_descriptor_write_report(json_out(),
@@ -5666,6 +5680,7 @@ static int run_vulkan_dispatch_fd(
                                      specialization_count,
                                      specialization_data,
                                      specialization_data_size,
+                                     push,
                                      push_size);
         fprintf(json_out(), ",");
         write_vulkan_binding_report(json_out(), bindings, binding_count,

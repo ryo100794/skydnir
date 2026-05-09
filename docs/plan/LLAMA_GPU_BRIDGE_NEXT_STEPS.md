@@ -217,6 +217,9 @@ Procedure:
    it declares multiple binding-0 views for the same quantized weight buffer,
    uses storage8/storage16/int8 features, and specializes
    `BLOCK_SIZE=32`, `NUM_ROWS=2`, `NUM_COLS=1`.
+   The compact executor event must also include bounded `push_u32` values so a
+   sampled oracle can reproduce row/stride coordinates without copying the
+   large weight buffer.
 3. Add a sample-window oracle only if a bounded subset can be proven correct.
 4. Compare the sampled output values with CPU/no-offload logits if available.
 

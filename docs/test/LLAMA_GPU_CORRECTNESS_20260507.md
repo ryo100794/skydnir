@@ -75,6 +75,7 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-bisection-all-readwrite-forwarded-fixed-20260509-ngl1.json` | 1 | Verified `PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS=0` propagation; all active descriptors treated conservatively | 0.1722 | 2.49x | fail | env propagation: pass; primary read-only mutations: 0; output still `+`, `细细`, empty |
 | `llama-gpu-final-layout-all-readwrite-20260509-ngl1.json` | 1 | All-read/write conservative run with larger log capture | 0.1401 | 2.02x | fail | focus: `output_layout_or_shader_math`; upload/mutation checks clean |
 | `llama-gpu-ngl1-matvec-alias-diagnostics-20260509.json` | 1 | Q4_K matvec classification and read/write alias hazard diagnostics for `0x274f68a67dfef210` | n/a | 2.17x | fail | `cpu_oracle.kernel_hint=mul-mat-vec-q4-k-large`; `rw_alias_hazards.count=2` |
+| `llama-gpu-ngl1-matvec-push-alias-diagnostics-20260509.json` | 1 | Same Q4_K matvec diagnostic with bounded push-constant capture | n/a | 2.38x | fail | `push_u32=[4096,4096,4096,151936,...]`; `rw_alias_hazards.count=2` |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -217,6 +218,12 @@ Two ICD correctness fixes were added on 2026-05-08:
   dispatch intentionally or accidentally presents binding 2 as writable while
   bindings 3 and 4 read the same 607 KiB range, so future runs can distinguish
   a legitimate in-place/fuse pattern from a bridge aliasing error.
+- Compact execution diagnostics also include bounded `push_u32` values. The
+  current Q4_K dispatch reports `[4096,4096,4096,151936,622329856,4096,151936,
+  ...]`, which matches the matvec push layout shape (`ncols=4096`,
+  `stride_d=151936`, batch strides present) and gives the next sampled oracle a
+  stable coordinate system without logging or copying the full push blob
+  elsewhere.
 - The compare driver now requests `completion_probabilities` with bounded
   `n_probs` during correctness probes. This records selected token ids and
   top-logprob lists for both CPU/no-offload and GPU/offload. The latest full
