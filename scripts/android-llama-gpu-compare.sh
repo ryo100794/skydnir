@@ -908,6 +908,56 @@ config_propagation = {
     "summary": "fail" if any(item["status"] in {"missing-evidence", "mismatch"} for item in config_checks) else "pass",
     "checks": config_checks,
 }
+api_trace_binding_samples = []
+api_trace_missing = 0
+api_trace_range_mismatches = 0
+api_trace_effective_offset_mismatches = 0
+for event_index, event in enumerate(executor_events):
+    if event.get("kernel") != "generic_spirv" or event.get("valid") is not True:
+        continue
+    for detail in event.get("binding_details") or []:
+        if not isinstance(detail, dict):
+            continue
+        if "api_offset" not in detail or "api_range" not in detail:
+            api_trace_missing += 1
+            continue
+        api_offset = int(detail.get("api_offset") or 0)
+        api_range = int(detail.get("api_range") or 0)
+        api_memory_offset = int(detail.get("api_memory_offset") or 0)
+        effective_offset = int(detail.get("offset") or 0)
+        effective_size = int(detail.get("size") or 0)
+        if api_range and api_range != effective_size:
+            api_trace_range_mismatches += 1
+        if api_memory_offset + api_offset != effective_offset:
+            api_trace_effective_offset_mismatches += 1
+        if len(api_trace_binding_samples) < 16:
+            api_trace_binding_samples.append({
+                "event_index": event_index,
+                "binding": int(detail.get("binding") or 0),
+                "api_offset": api_offset,
+                "api_range": api_range,
+                "api_buffer_size": int(detail.get("api_buffer_size") or 0),
+                "api_descriptor_type": int(detail.get("api_descriptor_type") or 0),
+                "api_dynamic": bool(detail.get("api_dynamic")),
+                "api_memory_offset": api_memory_offset,
+                "effective_offset": effective_offset,
+                "effective_size": effective_size,
+            })
+api_understanding = {
+    "summary": (
+        "missing"
+        if api_trace_missing and not api_trace_binding_samples
+        else "mismatch"
+        if api_trace_range_mismatches or api_trace_effective_offset_mismatches
+        else "pass"
+        if api_trace_binding_samples
+        else "not-observed"
+    ),
+    "missing_binding_details": api_trace_missing,
+    "range_mismatch_count": api_trace_range_mismatches,
+    "effective_offset_mismatch_count": api_trace_effective_offset_mismatches,
+    "binding_samples": api_trace_binding_samples,
+}
 android_feature_trace = parse_android_feature_trace(log)
 spirv_traces = parse_spirv_traces(log)
 generic_spirv_attempted = (
@@ -1482,6 +1532,7 @@ result = {
             "executor_errors": executor_errors,
             "spirv_hashes": spirv_hashes[-4:],
             "config_propagation": config_propagation,
+            "api_understanding": api_understanding,
             "diagnostic_bisection": diagnostic_bisection,
         },
         "correctness": correctness,

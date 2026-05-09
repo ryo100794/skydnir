@@ -457,6 +457,12 @@ typedef struct {
     uint32_t binding;
     off_t offset;
     size_t size;
+    off_t api_offset;
+    size_t api_range;
+    size_t api_buffer_size;
+    uint32_t api_descriptor_type;
+    int api_dynamic;
+    off_t api_memory_offset;
 } VulkanDispatchBinding;
 
 typedef struct {
@@ -2279,7 +2285,11 @@ static void write_vulkan_binding_report(
     for (size_t i = 0; i < binding_count; ++i) {
         fprintf(out,
                 "%s{\"index\":%zu,\"binding\":%u,\"offset\":%lld,"
-                "\"size\":%zu,\"alias_rep\":%zu,\"active\":%s,\"readable\":%s,\"writable\":%s,"
+                "\"size\":%zu,"
+                "\"api_offset\":%lld,\"api_range\":%zu,"
+                "\"api_buffer_size\":%zu,\"api_descriptor_type\":%u,"
+                "\"api_dynamic\":%s,\"api_memory_offset\":%lld,"
+                "\"alias_rep\":%zu,\"active\":%s,\"readable\":%s,\"writable\":%s,"
                 "\"resident\":%s,\"cache_hit\":%s,"
                 "\"mutable_reused\":%s,\"mutable_cache_hit\":%s,"
                 "\"upload_ms\":%.4f,\"download_ms\":%.4f,"
@@ -2295,6 +2305,12 @@ static void write_vulkan_binding_report(
                 bindings[i].binding,
                 (long long)bindings[i].offset,
                 bindings[i].size,
+                (long long)bindings[i].api_offset,
+                bindings[i].api_range,
+                bindings[i].api_buffer_size,
+                bindings[i].api_descriptor_type,
+                bindings[i].api_dynamic ? "true" : "false",
+                (long long)bindings[i].api_memory_offset,
                 alias_rep ? alias_rep[i] : i,
                 active && active[i] ? "true" : "false",
                 readable && readable[i] ? "true" : "false",
@@ -2386,7 +2402,11 @@ static void write_vulkan_binding_compact_report(
     for (size_t i = 0; i < binding_count; ++i) {
         fprintf(out,
                 "%s{\"index\":%zu,\"binding\":%u,\"offset\":%lld,"
-                "\"size\":%zu,\"alias_rep\":%zu,\"active\":%s,"
+                "\"size\":%zu,"
+                "\"api_offset\":%lld,\"api_range\":%zu,"
+                "\"api_buffer_size\":%zu,\"api_descriptor_type\":%u,"
+                "\"api_dynamic\":%s,\"api_memory_offset\":%lld,"
+                "\"alias_rep\":%zu,\"active\":%s,"
                 "\"readable\":%s,\"writable\":%s,\"resident\":%s,"
                 "\"cache_hit\":%s,\"fd_before_hash\":\"0x%016llx\","
                 "\"gpu_after_upload_hash\":\"0x%016llx\","
@@ -2397,6 +2417,12 @@ static void write_vulkan_binding_compact_report(
                 bindings[i].binding,
                 (long long)bindings[i].offset,
                 bindings[i].size,
+                (long long)bindings[i].api_offset,
+                bindings[i].api_range,
+                bindings[i].api_buffer_size,
+                bindings[i].api_descriptor_type,
+                bindings[i].api_dynamic ? "true" : "false",
+                (long long)bindings[i].api_memory_offset,
                 alias_rep ? alias_rep[i] : i,
                 active && active[i] ? "true" : "false",
                 readable && readable[i] ? "true" : "false",
@@ -5485,6 +5511,24 @@ static int serve_socket(const char *path) {
                     tok = strtok_r(NULL, " ", &save);
                     if (!tok) { parse_ok = 0; break; }
                     bindings[i].size = (size_t)strtoull(tok, NULL, 10);
+                    tok = strtok_r(NULL, " ", &save);
+                    if (!tok) { parse_ok = 0; break; }
+                    bindings[i].api_offset = (off_t)strtoll(tok, NULL, 10);
+                    tok = strtok_r(NULL, " ", &save);
+                    if (!tok) { parse_ok = 0; break; }
+                    bindings[i].api_range = (size_t)strtoull(tok, NULL, 10);
+                    tok = strtok_r(NULL, " ", &save);
+                    if (!tok) { parse_ok = 0; break; }
+                    bindings[i].api_buffer_size = (size_t)strtoull(tok, NULL, 10);
+                    tok = strtok_r(NULL, " ", &save);
+                    if (!tok) { parse_ok = 0; break; }
+                    bindings[i].api_descriptor_type = (uint32_t)strtoul(tok, NULL, 10);
+                    tok = strtok_r(NULL, " ", &save);
+                    if (!tok) { parse_ok = 0; break; }
+                    bindings[i].api_dynamic = (int)strtol(tok, NULL, 10);
+                    tok = strtok_r(NULL, " ", &save);
+                    if (!tok) { parse_ok = 0; break; }
+                    bindings[i].api_memory_offset = (off_t)strtoll(tok, NULL, 10);
                 }
                 while (parse_ok && (tok = strtok_r(NULL, " ", &save)) != NULL) {
                     if (parse_vulkan_dispatch_option(&options, tok) != 0) {

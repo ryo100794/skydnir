@@ -348,3 +348,31 @@ debug-only CPU oracle:
 The first implementation should not be a full SPIR-V VM.  Start with a
 hash-gated debug oracle for these two kernels, then graduate to a small
 interpreter subset only if more shader hashes become front blockers.
+
+### API Understanding Trace
+
+The compare driver now records an `api_understanding` diagnostic block that
+checks whether descriptor data captured at the Vulkan API boundary survives the
+ICD-to-executor handoff:
+
+- original descriptor offset/range,
+- storage buffer size,
+- descriptor type,
+- dynamic descriptor flag,
+- bound memory offset,
+- effective executor offset/size.
+
+`llama-gpu-api-understanding-ngl0-20260509.json` shows
+`api_understanding.summary=pass` for the zero-layer Vulkan control:
+
+| Check | Result |
+|---|---|
+| Missing API binding metadata | `0` |
+| API range vs executor size mismatches | `0` |
+| API memory offset + descriptor offset vs executor offset mismatches | `0` |
+
+This does **not** prove the whole Vulkan API contract is correct, but it rules
+out one class of bridge bugs: the executor is no longer blindly reporting only
+its own flattened binding view.  The next missing independent check is SPIR-V
+reflection: shader-declared binding types and push-constant access must be
+compared with the API trace before trusting a CPU oracle.

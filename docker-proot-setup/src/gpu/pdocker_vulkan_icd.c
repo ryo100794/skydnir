@@ -645,6 +645,12 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     uint32_t bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkDeviceSize offsets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     size_t sizes[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkDeviceSize api_offsets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkDeviceSize api_ranges[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    size_t api_buffer_sizes[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t api_descriptor_types[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t api_dynamic_flags[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkDeviceSize api_memory_offsets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     size_t binding_count = 0;
     fds[0] = shader->code_fd;
     for (uint32_t i = 0; i < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++i) {
@@ -662,6 +668,12 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         }
         offsets[binding_count] = dispatch_offset;
         sizes[binding_count] = bytes;
+        api_offsets[binding_count] = binding->offset;
+        api_ranges[binding_count] = binding->range;
+        api_buffer_sizes[binding_count] = binding->buffer ? binding->buffer->size : 0;
+        api_descriptor_types[binding_count] = (uint32_t)binding->descriptor_type;
+        api_dynamic_flags[binding_count] = binding->dynamic ? 1u : 0u;
+        api_memory_offsets[binding_count] = binding->buffer ? binding->buffer->memory_offset : 0;
         fds[1 + binding_count] = dispatch_memory->fd;
         trace_guarded_binding(i, dispatch_memory, dispatch_offset, bytes);
         if (alias_hit && trace_allocations()) {
@@ -725,10 +737,16 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     }
     for (size_t i = 0; i < binding_count; ++i) {
         n = snprintf(command + off, sizeof(command) - off,
-                     " %u %llu %zu",
+                     " %u %llu %zu %llu %llu %zu %u %u %llu",
                      bindings[i],
                      (unsigned long long)offsets[i],
-                     sizes[i]);
+                     sizes[i],
+                     (unsigned long long)api_offsets[i],
+                     (unsigned long long)api_ranges[i],
+                     api_buffer_sizes[i],
+                     api_descriptor_types[i],
+                     api_dynamic_flags[i],
+                     (unsigned long long)api_memory_offsets[i]);
         if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
         off += (size_t)n;
     }
