@@ -73,6 +73,7 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-cpu-gpu-bisection-20260509-ngl1.json` | 1 | Diagnostic bisection tree plus bridge option propagation evidence | 0.1525 | 2.20x | fail | focus: `numeric_layout_or_readback`; env propagation: pass; finite f32 samples: 8 |
 | `llama-gpu-bisection-upload-dispatch-20260509-ngl1.json` | 1 | Split read-only input upload from post-dispatch mutation | 0.0984 | 1.42x | fail | upload hash mismatches: 0; primary read-only dispatch mutations: 806 |
 | `llama-gpu-bisection-all-readwrite-forwarded-fixed-20260509-ngl1.json` | 1 | Verified `PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS=0` propagation; all active descriptors treated conservatively | 0.1722 | 2.49x | fail | env propagation: pass; primary read-only mutations: 0; output still `+`, `细细`, empty |
+| `llama-gpu-final-layout-all-readwrite-20260509-ngl1.json` | 1 | All-read/write conservative run with larger log capture | 0.1401 | 2.02x | fail | focus: `output_layout_or_shader_math`; upload/mutation checks clean |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
