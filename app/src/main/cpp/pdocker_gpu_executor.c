@@ -507,6 +507,8 @@ typedef struct {
     int disable_overlap_aliasing;
     int has_cpu_oracle;
     int cpu_oracle;
+    int has_q6k_oracle_writeback;
+    int q6k_oracle_writeback;
     int disable_storage8;
     int disable_storage16;
     int disable_subgroup_arithmetic;
@@ -1505,6 +1507,22 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
             strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
             options->has_cpu_oracle = 1;
             options->cpu_oracle = 0;
+            return 0;
+        }
+        return -1;
+    }
+    if (strncmp(token, "q6k_oracle_writeback=", 21) == 0) {
+        const char *value = token + 21;
+        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+            options->has_q6k_oracle_writeback = 1;
+            options->q6k_oracle_writeback = 1;
+            return 0;
+        }
+        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+            options->has_q6k_oracle_writeback = 1;
+            options->q6k_oracle_writeback = 0;
             return 0;
         }
         return -1;
@@ -2752,6 +2770,8 @@ typedef struct {
     double q6_shader_like_abs_delta;
     double partial_lanes[32];
     size_t partial_lane_count;
+    int oracle_writeback;
+    size_t oracle_writeback_rows;
     CpuOracleSample row_window[32];
     size_t row_window_count;
     int has_first_mismatch;
@@ -2871,6 +2891,7 @@ static void write_cpu_oracle_report(
             "\"max_abs_error\":%.9g,\"max_rel_error\":%.9g,"
             "\"expected_hash\":\"0x%016llx\",\"gpu_hash\":\"0x%016llx\","
             "\"input_output_overlap\":%s,"
+            "\"oracle_writeback\":%s,\"oracle_writeback_rows\":%zu,"
             "\"scope\":\"debug-only-spv-hash-gated\"",
             report->requested ? "true" : "false",
             report->candidate ? "true" : "false",
@@ -2889,7 +2910,9 @@ static void write_cpu_oracle_report(
             report->max_rel_error,
             (unsigned long long)report->expected_hash,
             (unsigned long long)report->gpu_hash,
-            report->input_output_overlap ? "true" : "false");
+            report->input_output_overlap ? "true" : "false",
+            report->oracle_writeback ? "true" : "false",
+            report->oracle_writeback_rows);
     if (report->has_partial_diagnostic) {
         fprintf(out,
                 ",\"partial_diagnostic\":{\"best_lane\":%d,"
@@ -3825,7 +3848,8 @@ static void run_cpu_oracle_q6k_matvec_sample(
         const uint8_t *active,
         const uint8_t *writable,
         const uint8_t *push,
-        size_t push_size) {
+        size_t push_size,
+        int q6k_oracle_writeback) {
     if (!report || !report->requested) return;
     init_cpu_oracle_report(report, report->requested, spirv_hash);
     int idx0 = binding_index_for_number(bindings, binding_count, 0);
@@ -3930,14 +3954,22 @@ static void run_cpu_oracle_q6k_matvec_sample(
             }
         }
         int ok = 0;
-        float gpu = load_f32_at_index((const uint8_t *)vk_buffers[idx2]->map + binding_gpu_offset[idx2],
-                                      bindings[idx2].size, row, &ok);
+        unsigned char *dst_base =
+            (unsigned char *)vk_buffers[idx2]->map + binding_gpu_offset[idx2];
+        float gpu = load_f32_at_index(dst_base, bindings[idx2].size, row, &ok);
         if (!ok) {
             report->skipped = 1;
             snprintf(report->status, sizeof(report->status), "%s", "oracle-output-read-failed");
             return;
         }
         float expected = (float)sum;
+        if (q6k_oracle_writeback &&
+            (size_t)row * sizeof(float) + sizeof(float) <= bindings[idx2].size) {
+            memcpy(dst_base + (size_t)row * sizeof(float), &expected, sizeof(expected));
+            report->oracle_writeback = 1;
+            report->oracle_writeback_rows++;
+            gpu = expected;
+        }
         store_hash_f32(&report->expected_hash, expected);
         store_hash_f32(&report->gpu_hash, gpu);
         double abs_error = fabs((double)expected - (double)gpu);
@@ -6078,6 +6110,10 @@ static int run_vulkan_dispatch_fd(
                spirv_summary.hash == 0x1bf751845c5dce75ull ||
                spirv_summary.hash == 0x09c4622d92c6acb9ull ||
                spirv_summary.hash == 0x498c69a047eb3b2full) {
+        const int q6k_oracle_writeback =
+            options && options->has_q6k_oracle_writeback
+                ? options->q6k_oracle_writeback
+                : env_truthy("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", 0);
         run_cpu_oracle_q6k_matvec_sample(&cpu_oracle_report,
                                          spirv_summary.hash,
                                          buffer_fds,
@@ -6088,7 +6124,8 @@ static int run_vulkan_dispatch_fd(
                                          active_bindings,
                                          binding_write_needed,
                                          push,
-                                         push_size);
+                                         push_size,
+                                         q6k_oracle_writeback);
     } else {
         run_cpu_oracle_small_f32_indexing(&cpu_oracle_report,
                                           spirv_summary.hash,

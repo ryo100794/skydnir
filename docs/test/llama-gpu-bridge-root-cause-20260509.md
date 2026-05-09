@@ -42,3 +42,28 @@ Add a targeted Q6_K micro-dispatch probe that does not run the full model. It sh
 5. a bridge-owned CPU oracle writeback mode for Q6_K only.
 
 The pass/fail condition is simple: if CPU oracle writeback makes the downstream llama comparison pass, the remaining issue is inside this one GPU shader execution path rather than surrounding tensor plumbing.
+
+## Q6_K oracle writeback conclusion
+
+A gated diagnostic was added with `PDOCKER_GPU_Q6K_ORACLE_WRITEBACK=1`. It rewrites the sampled Q6_K output rows with the bridge-side CPU oracle result after the Android Vulkan dispatch and before fd download.
+
+Evidence file:
+
+- `docs/test/llama-gpu-ngl1-q6k-oracle-writeback-20260509.json`
+
+Result:
+
+- All sampled Q6_K oracle events changed from mismatch to match.
+- Example event: `oracle_writeback=true`, `oracle_writeback_rows=32`, `status=match`, `mismatch_count=0`.
+- The compare script's blocker moved away from correctness and now reports throughput/copy overhead:
+  `served through generic SPIR-V, but bridge upload/copy overhead keeps GPU below CPU throughput`.
+
+Conclusion:
+
+The bridge data transport and Q6_K tensor interpretation are sufficient for the sampled rows. The remaining correctness failure is inside the Android Vulkan execution result of the llama.cpp Q6_K shader path, not in model bytes, Dockerfile, fd upload/download, duplicate descriptor binding rewrite, or resident cache reuse.
+
+Next implementation direction:
+
+1. Keep the writeback mode as diagnostic-only and disabled by default.
+2. Build a Q6_K micro-dispatch suite to isolate the exact Vulkan primitive: storage8/16 load, local-size specialization, workgroup shared-memory reduction, or barrier semantics.
+3. If driver behavior remains incompatible, add a bridge-owned Q6_K safe kernel/fallback behind a hash-gated policy, without modifying llama.cpp.
