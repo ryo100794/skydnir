@@ -782,6 +782,27 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
         off += (size_t)n;
     }
+    if (getenv("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " disable_storage8=%u",
+                     env_truthy_default("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", false) ? 1u : 0u);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        off += (size_t)n;
+    }
+    if (getenv("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE")) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " disable_storage16=%u",
+                     env_truthy_default("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE", false) ? 1u : 0u);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        off += (size_t)n;
+    }
+    if (getenv("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC")) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " disable_subgroup_arithmetic=%u",
+                     env_truthy_default("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC", false) ? 1u : 0u);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        off += (size_t)n;
+    }
     if (off + 2 >= sizeof(command)) return -ENAMETOOLONG;
     command[off++] = '\n';
     command[off] = '\0';

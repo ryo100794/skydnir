@@ -418,6 +418,9 @@ typedef struct {
     size_t mutable_buffer_cache_max_bytes;
     int has_profile_response;
     int profile_response;
+    int disable_storage8;
+    int disable_storage16;
+    int disable_subgroup_arithmetic;
 } VulkanDispatchOptions;
 
 typedef struct {
@@ -913,6 +916,49 @@ static int env_truthy(const char *name, int default_value) {
     return 1;
 }
 
+static void apply_vulkan_feature_policy(VulkanRuntime *rt) {
+    if (!rt) return;
+    if (env_truthy("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", 0)) {
+        rt->physical_storage8.storageBuffer8BitAccess = VK_FALSE;
+        rt->physical_storage8.uniformAndStorageBuffer8BitAccess = VK_FALSE;
+        rt->physical_storage8.storagePushConstant8 = VK_FALSE;
+        rt->physical_float16_int8.shaderInt8 = VK_FALSE;
+    }
+    if (env_truthy("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE", 0)) {
+        rt->physical_storage16.storageBuffer16BitAccess = VK_FALSE;
+        rt->physical_storage16.uniformAndStorageBuffer16BitAccess = VK_FALSE;
+        rt->physical_storage16.storagePushConstant16 = VK_FALSE;
+        rt->physical_storage16.storageInputOutput16 = VK_FALSE;
+    }
+    if (env_truthy("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC", 0)) {
+        rt->subgroup_properties.supportedOperations &= ~VK_SUBGROUP_FEATURE_ARITHMETIC_BIT;
+    }
+}
+
+static VulkanRuntime effective_vulkan_runtime_for_dispatch(
+        const VulkanRuntime *rt,
+        const VulkanDispatchOptions *options) {
+    VulkanRuntime effective;
+    memset(&effective, 0, sizeof(effective));
+    if (rt) effective = *rt;
+    if (options && options->disable_storage8) {
+        effective.physical_storage8.storageBuffer8BitAccess = VK_FALSE;
+        effective.physical_storage8.uniformAndStorageBuffer8BitAccess = VK_FALSE;
+        effective.physical_storage8.storagePushConstant8 = VK_FALSE;
+        effective.physical_float16_int8.shaderInt8 = VK_FALSE;
+    }
+    if (options && options->disable_storage16) {
+        effective.physical_storage16.storageBuffer16BitAccess = VK_FALSE;
+        effective.physical_storage16.uniformAndStorageBuffer16BitAccess = VK_FALSE;
+        effective.physical_storage16.storagePushConstant16 = VK_FALSE;
+        effective.physical_storage16.storageInputOutput16 = VK_FALSE;
+    }
+    if (options && options->disable_subgroup_arithmetic) {
+        effective.subgroup_properties.supportedOperations &= ~VK_SUBGROUP_FEATURE_ARITHMETIC_BIT;
+    }
+    return effective;
+}
+
 static size_t resident_cache_threshold(void) {
     const char *value = getenv("PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES");
     if (value && value[0]) {
@@ -1112,6 +1158,27 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
             return 0;
         }
         return -1;
+    }
+    if (strncmp(token, "disable_storage8=", 17) == 0) {
+        const char *value = token + 17;
+        options->disable_storage8 =
+            (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+             strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0);
+        return 0;
+    }
+    if (strncmp(token, "disable_storage16=", 18) == 0) {
+        const char *value = token + 18;
+        options->disable_storage16 =
+            (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+             strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0);
+        return 0;
+    }
+    if (strncmp(token, "disable_subgroup_arithmetic=", 28) == 0) {
+        const char *value = token + 28;
+        options->disable_subgroup_arithmetic =
+            (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+             strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0);
+        return 0;
     }
     return -1;
 }
@@ -2213,6 +2280,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         properties2.pNext = &rt->subgroup_properties;
         get_properties2(rt->physical_device, &properties2);
     }
+    apply_vulkan_feature_policy(rt);
     uint32_t family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(rt->physical_device, &family_count, NULL);
     if (family_count == 0) { stage = "queue-family-count"; goto fail; }
@@ -3713,6 +3781,7 @@ static int run_vulkan_dispatch_fd(
         }
         if (mutable_cache_hits[i]) mutable_hit_count++;
     }
+    VulkanRuntime effective_rt = effective_vulkan_runtime_for_dispatch(rt, options);
     if (profile_response) {
         fprintf(json_out(),
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
@@ -3738,7 +3807,7 @@ static int run_vulkan_dispatch_fd(
                                             binding_fd_after_hash,
                                             binding_alias_rep);
         fprintf(json_out(), ",");
-        write_spirv_feature_report(json_out(), &spirv_summary, rt);
+        write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);
         fprintf(json_out(), ",");
         write_vulkan_descriptor_write_report(json_out(),
                                              descriptor_write_dst_bindings,
@@ -3792,7 +3861,7 @@ static int run_vulkan_dispatch_fd(
             skipped_upload_bytes, skipped_download_bytes);
     if (profile_response) {
         fprintf(json_out(), ",");
-        write_spirv_feature_report(json_out(), &spirv_summary, rt);
+        write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);
         fprintf(json_out(), ",");
         write_vulkan_binding_report(json_out(), bindings, binding_count,
                                     active_bindings,
@@ -3941,7 +4010,7 @@ cleanup:
                                     binding_fd_after_hash,
                                     binding_alias_rep);
         fprintf(json_out(), ",");
-        write_spirv_feature_report(json_out(), &spirv_summary, rt);
+        write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);
         fprintf(json_out(), ",");
         write_vulkan_limits_report(json_out(), rt);
         fprintf(json_out(),

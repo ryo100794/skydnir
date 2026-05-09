@@ -78,7 +78,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("write_vulkan_descriptor_alias_report", source)
         self.assertIn("write_vulkan_binding_compact_report", source)
         self.assertIn('\\"compact_summary\\":true', source)
-        self.assertIn("write_spirv_feature_report(json_out(), &spirv_summary, rt);", source)
+        self.assertIn("write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);", source)
         self.assertIn('\\"descriptor_writes\\":[', source)
         self.assertIn('\\"descriptor_alias_map\\":[', source)
         self.assertIn('\\"target_id\\":%u', source)
@@ -250,6 +250,19 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(f'"{key}"', compare)
         self.assertIn("value = os.environ.get(key)", compare)
+        source = GPU_EXECUTOR.read_text()
+        for marker in [
+            "apply_vulkan_feature_policy",
+            "effective_vulkan_runtime_for_dispatch",
+            "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE",
+            "PDOCKER_VULKAN_DISABLE_16BIT_STORAGE",
+            "PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC",
+        ]:
+            self.assertIn(marker, source)
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("disable_storage8=%u", icd)
+        self.assertIn("disable_storage16=%u", icd)
+        self.assertIn("disable_subgroup_arithmetic=%u", icd)
 
     def test_gpu_executor_has_opt_in_writeonly_buffer_cache(self):
         source = GPU_EXECUTOR.read_text()

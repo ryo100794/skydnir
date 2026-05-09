@@ -60,6 +60,7 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-compare-20260508-ngl1-no-dup-latest.json` | 1 | Duplicate descriptor rewrite disabled after push-layout fix | 0.1962 | 0.15x | fail | `礼拜`, `羽毛`, `itol Bjitol刊登` |
 | `llama-gpu-compare-20260508-ngl1-compact-summary.json` | 1 | Compact per-dispatch descriptor summary for the long final projection event | 0.1973 | 0.15x | fail | `+`, `细细`, empty |
 | `llama-gpu-compare-20260508-ngl1-alias-map-set-aware.json` | 1 | Set-aware duplicate descriptor rewrite with alias target-id evidence | 0.2358 | 0.18x | fail | `+`, `细细`, empty |
+| `llama-gpu-compare-20260509-ngl1-dispatch-policy-disable-storage8.json` | 1 | Dispatch-scoped executor feature policy with storage8 disabled | 0.1479 | 0.11x | fail | `+`, `细细`, empty; final projection reports `storage8`/`int8` mismatch |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -143,6 +144,13 @@ Two ICD correctness fixes were added on 2026-05-08:
   by binding 0. This hardens the compatibility layer, but correctness still
   fails, so the next probes should focus on storage8/storage16 semantics and
   final-projection input/output bytes rather than on cross-set binding confusion.
+- Vulkan feature policy is now passed from the glibc ICD to the persistent
+  Android executor on each dispatch, not only through the executor process
+  environment. With `PDOCKER_VULKAN_DISABLE_8BIT_STORAGE=1`, the final
+  projection shader still requires `storage8` and `int8`, and the compact
+  summary correctly records those as feature mismatches. This confirms that
+  storage8/int8 support is part of the active final-projection path, but simply
+  treating it as unavailable does not restore correctness.
 
 The NGL=0 control also does not satisfy the arithmetic probe, so the absolute
 math prompt is not strong enough as the only correctness oracle. However, the
