@@ -65,6 +65,7 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-compare-20260509-ngl1-default-storage8-unmasked.json` | 1 | Rebuilt APK with default storage8/int8 feature state preserved | 0.1371 | 0.11x | fail | `+`, `细细`, empty; feature mismatch cleared |
 | `llama-gpu-compare-20260509-ngl1-execution-summary.json` | 1 | Compact success events now include SPIR-V hash, push size, local size, and specialization entries | 0.1599 | 0.12x | fail | final projection: hash `0x274f68a67dfef210`, local size `[1,1,1]`, specs `32,2,1` |
 | `llama-gpu-compare-20260509-ngl1-device-extensions.json` | 1 | Executor enables supported storage/int8 Vulkan device extensions alongside feature structs | 0.1430 | 0.11x | fail | extension hardening did not change the `+`, `细细`, empty output shape |
+| `llama-gpu-compare-20260509-ngl1-no-dup-dispatch-option.json` | 1 | Duplicate descriptor rewrite disabled through the ICD-to-executor dispatch option | 0.1669 | 0.13x | fail | alias map is truly empty; output shape still `+`, `细细`, empty |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -177,6 +178,12 @@ Two ICD correctness fixes were added on 2026-05-08:
   class in addition to the feature-struct pNext chain. The NGL=1 correctness
   failure remains unchanged, so missing extension enablement is no longer the
   leading explanation for the final-projection collapse on this device.
+- Bridge tuning options that live in the container environment must cross the
+  glibc ICD to APK-executor boundary explicitly. `PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS=0`
+  previously did not affect the persistent executor. The ICD now forwards a
+  `rewrite_duplicate_descriptors=` dispatch option, and the latest no-dup run
+  confirms the final projection has `descriptor_aliases=0`. Correctness still
+  fails, so duplicate descriptor rewriting is not the sole cause.
 
 The NGL=0 control also does not satisfy the arithmetic probe, so the absolute
 math prompt is not strong enough as the only correctness oracle. However, the
@@ -195,6 +202,9 @@ against a hard-coded arithmetic answer.
 - Use the stable final-projection shader hash and specialization tuple as the
   key for the next byte-level probe, so future optimizations do not compare
   different kernels by accident.
+- Treat every container-side bridge knob as suspect unless it appears in the
+  executor JSON event; the no-dup probe proved that environment-only toggles
+  can silently miss the persistent executor process.
 - Inspect the final projection shader itself. The current dump shows duplicate
   `Binding 0` storage-buffer variables with different struct views; descriptor
   rewrite and aliasing are present, but the remaining failure may be in

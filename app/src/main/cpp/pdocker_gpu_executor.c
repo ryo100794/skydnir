@@ -472,6 +472,8 @@ typedef struct {
     size_t mutable_buffer_cache_max_bytes;
     int has_profile_response;
     int profile_response;
+    int has_rewrite_duplicate_descriptors;
+    int rewrite_duplicate_descriptors;
     int disable_storage8;
     int disable_storage16;
     int disable_subgroup_arithmetic;
@@ -1294,6 +1296,22 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
             strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
             options->has_profile_response = 1;
             options->profile_response = 0;
+            return 0;
+        }
+        return -1;
+    }
+    if (strncmp(token, "rewrite_duplicate_descriptors=", 30) == 0) {
+        const char *value = token + 30;
+        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+            options->has_rewrite_duplicate_descriptors = 1;
+            options->rewrite_duplicate_descriptors = 1;
+            return 0;
+        }
+        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+            options->has_rewrite_duplicate_descriptors = 1;
+            options->rewrite_duplicate_descriptors = 0;
             return 0;
         }
         return -1;
@@ -3364,7 +3382,11 @@ static int run_vulkan_dispatch_fd(
             specialization_data,
             specialization_data_size);
     }
-    if (env_truthy("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", 1)) {
+    const int rewrite_duplicate_descriptors =
+        options && options->has_rewrite_duplicate_descriptors
+            ? options->rewrite_duplicate_descriptors
+            : env_truthy("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", 1);
+    if (rewrite_duplicate_descriptors) {
         if (rewrite_duplicate_descriptor_bindings(
                 shader_code,
                 shader_size,
@@ -3963,12 +3985,14 @@ static int run_vulkan_dispatch_fd(
                 "\"compact_summary\":true,"
                 "\"shader_bytes\":%zu,\"entry\":\"%s\",\"specializations\":%zu,"
                 "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
-                "\"descriptor_aliases\":%zu,\"specialization_materialized\":%s,"
+                "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
+                "\"specialization_materialized\":%s,"
                 "\"resident_bytes\":%zu,\"mutable_bytes\":%zu,"
                 "\"valid\":true,",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
                 shader_size, entry_name, specialization_count, binding_count, gx, gy, gz,
                 binding_alias_count,
+                rewrite_duplicate_descriptors ? "true" : "false",
                 specialization_materialized ? "true" : "false",
                 resident_bytes,
                 mutable_bytes);
@@ -4012,7 +4036,8 @@ static int run_vulkan_dispatch_fd(
             "\"shader_bytes\":%zu,\"entry\":\"%s\",\"specializations\":%zu,"
             "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
             "\"backend_cached\":%s,\"pipeline_cache\":{\"hit\":%s,\"entries\":%u},"
-            "\"descriptor_aliases\":%zu,\"specialization_materialized\":%s,"
+            "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
+            "\"specialization_materialized\":%s,"
             "\"profile_response\":%s,"
             "\"upload_ms\":%.4f,\"dispatch_ms\":%.4f,\"download_ms\":%.4f,"
             "\"resident_cache\":{\"enabled\":%s,\"resident_bindings\":%zu,"
@@ -4030,6 +4055,7 @@ static int run_vulkan_dispatch_fd(
             pipeline_cache_hit ? "true" : "false",
             PDOCKER_GPU_PIPELINE_CACHE_SLOTS,
             binding_alias_count,
+            rewrite_duplicate_descriptors ? "true" : "false",
             specialization_materialized ? "true" : "false",
             profile_response ? "true" : "false",
             upload_ms, dispatch_ms, download_ms,
@@ -4121,6 +4147,7 @@ cleanup:
                 "\"fail_binding_index\":%d,\"io_result\":%d,"
                 "\"dispatch\":[%u,%u,%u],\"push_bytes\":%zu,"
                 "\"estimated_workgroup_bytes\":%llu,"
+                "\"duplicate_descriptor_rewrite\":%s,"
                 "\"specialization_materialized\":%s,"
                 "\"spirv_hash\":\"0x%016llx\","
                 "\"spirv_valid\":%s,\"spirv_truncated\":%u,"
@@ -4134,6 +4161,7 @@ cleanup:
                 fail_binding, io_rc,
                 gx, gy, gz, push_size,
                 (unsigned long long)estimated_workgroup_bytes,
+                rewrite_duplicate_descriptors ? "true" : "false",
                 specialization_materialized ? "true" : "false",
                 (unsigned long long)spirv_summary.hash,
                 spirv_summary.valid ? "true" : "false",

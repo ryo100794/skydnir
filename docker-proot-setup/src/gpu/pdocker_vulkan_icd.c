@@ -782,6 +782,13 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
         off += (size_t)n;
     }
+    if (getenv("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS")) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " rewrite_duplicate_descriptors=%u",
+                     env_truthy_default("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", true) ? 1u : 0u);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        off += (size_t)n;
+    }
     if (getenv("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " disable_storage8=%u",

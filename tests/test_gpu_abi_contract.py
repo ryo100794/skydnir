@@ -82,6 +82,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("write_spirv_execution_report(json_out(),", source)
         self.assertIn('\\"spirv_local_size_resolved\\":[', source)
         self.assertIn('\\"specialization_entries\\":[', source)
+        self.assertIn('\\"duplicate_descriptor_rewrite\\":%s', source)
         self.assertIn('\\"descriptor_writes\\":[', source)
         self.assertIn('\\"descriptor_alias_map\\":[', source)
         self.assertIn('\\"target_id\\":%u', source)
@@ -266,6 +267,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, source)
         icd = VULKAN_ICD.read_text()
+        self.assertIn("rewrite_duplicate_descriptors=%u", icd)
         self.assertIn("disable_storage8=%u", icd)
         self.assertIn("disable_storage16=%u", icd)
         self.assertIn("disable_subgroup_arithmetic=%u", icd)
