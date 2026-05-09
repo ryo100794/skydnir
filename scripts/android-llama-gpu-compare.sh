@@ -880,6 +880,8 @@ config_expectations = [
     ("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "duplicate_descriptor_rewrite"),
     ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
     ("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "disable_pipeline_optimization"),
+    ("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", "skip_unused_descriptor_transfers"),
+    ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "spirv_descriptor_access"),
 ]
 config_checks = []
 for env_name, event_field in config_expectations:
@@ -1119,6 +1121,38 @@ finite_f32_sample_count = sum(
     and isinstance(sample.get("value"), (int, float))
     and math.isfinite(float(sample.get("value")))
 )
+readonly_binding_hash_mismatches = []
+primary_readonly_upload_hash_mismatches = []
+primary_readonly_dispatch_mutations = []
+for event in valid_spirv_events:
+    for detail in event.get("binding_details") or []:
+        if not isinstance(detail, dict):
+            continue
+        if not detail.get("readable") or detail.get("writable"):
+            continue
+        before_hash = detail.get("fd_before_hash")
+        upload_hash = detail.get("gpu_after_upload_hash")
+        gpu_hash = detail.get("gpu_after_dispatch_hash")
+        if before_hash and gpu_hash and before_hash != gpu_hash:
+            readonly_binding_hash_mismatches.append({
+                "spirv_hash": event.get("spirv_hash"),
+                "dispatch": event.get("dispatch"),
+                "binding": detail.get("binding"),
+                "index": detail.get("index"),
+                "alias_rep": detail.get("alias_rep"),
+                "offset": detail.get("offset"),
+                "size": detail.get("size"),
+                "fd_before_hash": before_hash,
+                "gpu_after_upload_hash": upload_hash,
+                "gpu_after_dispatch_hash": gpu_hash,
+            })
+            if detail.get("alias_rep") == detail.get("index"):
+                if upload_hash and before_hash != upload_hash:
+                    primary_readonly_upload_hash_mismatches.append(readonly_binding_hash_mismatches[-1])
+                elif upload_hash and upload_hash != gpu_hash:
+                    primary_readonly_dispatch_mutations.append(readonly_binding_hash_mismatches[-1])
+                elif not upload_hash:
+                    primary_readonly_upload_hash_mismatches.append(readonly_binding_hash_mismatches[-1])
 diagnostic_bisection = {
     "method": "binary-search fault isolation over API, graph, ICD, executor, and readback boundaries",
     "nodes": [
@@ -1153,6 +1187,24 @@ diagnostic_bisection = {
             "routes": {"pass": "numeric_layout_or_readback", "not-instrumented": "enable_f32_samples", "not-reached": "dispatch_boundary"},
         },
         {
+            "id": "readonly_input_integrity",
+            "question": "Do non-aliased read-only descriptor bindings match immediately after upload, then remain stable through dispatch?",
+            "state": (
+                "upload-fail"
+                if primary_readonly_upload_hash_mismatches
+                else "dispatch-mutated"
+                if primary_readonly_dispatch_mutations
+                else "pass"
+                if valid_spirv_events
+                else "not-reached"
+            ),
+            "routes": {
+                "pass": "output_layout_or_shader_math",
+                "upload-fail": "upload_offset_descriptor_or_hash_scope",
+                "dispatch-mutated": "shader_access_or_barrier_scope",
+            },
+        },
+        {
             "id": "env_propagation",
             "question": "Did requested bridge tuning environment variables reach the executor as dispatch evidence?",
             "state": config_propagation["summary"],
@@ -1160,6 +1212,13 @@ diagnostic_bisection = {
         },
     ],
     "current_focus": (
+        "upload_offset_descriptor_or_hash_scope"
+        if primary_readonly_upload_hash_mismatches
+        else "shader_access_or_barrier_scope"
+        if primary_readonly_dispatch_mutations
+        else "output_layout_or_shader_math"
+        if finite_f32_sample_count and gpu_correctness_summary == "fail"
+        else
         "numeric_layout_or_readback"
         if finite_f32_sample_count and differential_probabilities.get("summary") == "fail"
         else "icd_or_executor_submit"
@@ -1171,6 +1230,12 @@ diagnostic_bisection = {
         else "collect_more_boundaries"
     ),
     "finite_f32_sample_count": finite_f32_sample_count,
+    "readonly_binding_hash_mismatch_count": len(readonly_binding_hash_mismatches),
+    "readonly_binding_hash_mismatches": readonly_binding_hash_mismatches[-16:],
+    "primary_readonly_upload_hash_mismatch_count": len(primary_readonly_upload_hash_mismatches),
+    "primary_readonly_upload_hash_mismatches": primary_readonly_upload_hash_mismatches[-16:],
+    "primary_readonly_dispatch_mutation_count": len(primary_readonly_dispatch_mutations),
+    "primary_readonly_dispatch_mutations": primary_readonly_dispatch_mutations[-16:],
     "final_projection_candidate": {
         "spirv_hash": final_projection_candidate.get("spirv_hash"),
         "dispatch": final_projection_candidate.get("dispatch"),

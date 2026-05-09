@@ -71,6 +71,8 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-compare-20260509-ngl1-f32-samples-fixed.json` | 1 | Writable binding float32 samples recorded after final-projection dispatch | 0.1697 | 0.13x | fail | final binding 2 sample starts `[1.3597, 1.8112, 2.5802, -0.3651]` |
 | `llama-cpu-gpu-probs-20260509-ngl1.json` | 1 | CPU/GPU HTTP `/completion` top-token probability capture | 0.1749 | 2.61x | fail | CPU top1: `5`/`8`; GPU top1: `+`/`细细`; no shared top-10 token ids |
 | `llama-cpu-gpu-bisection-20260509-ngl1.json` | 1 | Diagnostic bisection tree plus bridge option propagation evidence | 0.1525 | 2.20x | fail | focus: `numeric_layout_or_readback`; env propagation: pass; finite f32 samples: 8 |
+| `llama-gpu-bisection-upload-dispatch-20260509-ngl1.json` | 1 | Split read-only input upload from post-dispatch mutation | 0.0984 | 1.42x | fail | upload hash mismatches: 0; primary read-only dispatch mutations: 806 |
+| `llama-gpu-bisection-all-readwrite-forwarded-fixed-20260509-ngl1.json` | 1 | Verified `PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS=0` propagation; all active descriptors treated conservatively | 0.1722 | 2.49x | fail | env propagation: pass; primary read-only mutations: 0; output still `+`, `细细`, empty |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -218,6 +220,18 @@ Two ICD correctness fixes were added on 2026-05-08:
   `disable_pipeline_optimization`; otherwise the run is classified as
   `config_propagation_mismatch` before interpreting any performance or
   correctness delta.
+- The bisection split for input integrity now distinguishes upload from
+  post-dispatch mutation. With compact `gpu_after_upload_hash` evidence,
+  primary read-only bindings match immediately after upload, which rules out
+  the fd-to-GPU copy path for the current failure. When SPIR-V descriptor access
+  analysis is disabled and every active descriptor is handled conservatively,
+  primary read-only mutations disappear, but correctness still fails. The next
+  focus is therefore output layout / shader math rather than skipped writeback.
+- The same run caught and fixed another propagation blind spot:
+  `PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS=0` initially did not cross the
+  glibc ICD to persistent executor boundary. The ICD now forwards
+  `skip_unused_descriptor_transfers=` and `use_spirv_descriptor_access=`, and
+  the executor records both values in dispatch evidence.
 
 The NGL=0 control also does not satisfy the arithmetic probe, so the absolute
 math prompt is not strong enough as the only correctness oracle. However, the
@@ -246,6 +260,11 @@ against a hard-coded arithmetic answer.
 - Compare the final-projection output buffer before sampling, after dispatch,
   and after writeback under the three now-real modes: default, no
   specialization materialization, and pipeline optimization enabled.
+- Next split: compare final-projection output layout/math with conservative
+  all-read/write descriptor handling. If the output buffer remains finite but
+  top-token probabilities are unrelated to CPU, inspect descriptor alias target
+  ranges, push constants, and specialization-lowered local size for the stable
+  shader hash `0x274f68a67dfef210`.
 - Add a CPU/no-offload logits probe for the same token position and compare the
   sampled logits against the GPU binding-2 float samples.
 - Inspect the final projection shader itself. The current dump shows duplicate

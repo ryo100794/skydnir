@@ -803,6 +803,20 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
         off += (size_t)n;
     }
+    if (getenv("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS")) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " skip_unused_descriptor_transfers=%u",
+                     env_truthy_default("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", true) ? 1u : 0u);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        off += (size_t)n;
+    }
+    if (getenv("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS")) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " use_spirv_descriptor_access=%u",
+                     env_truthy_default("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", true) ? 1u : 0u);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        off += (size_t)n;
+    }
     if (getenv("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " disable_storage8=%u",

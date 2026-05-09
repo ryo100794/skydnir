@@ -478,6 +478,10 @@ typedef struct {
     int materialize_specialization_constants;
     int has_disable_pipeline_optimization;
     int disable_pipeline_optimization;
+    int has_skip_unused_descriptor_transfers;
+    int skip_unused_descriptor_transfers;
+    int has_use_spirv_descriptor_access;
+    int use_spirv_descriptor_access;
     int disable_storage8;
     int disable_storage16;
     int disable_subgroup_arithmetic;
@@ -1348,6 +1352,38 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
             strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
             options->has_disable_pipeline_optimization = 1;
             options->disable_pipeline_optimization = 0;
+            return 0;
+        }
+        return -1;
+    }
+    if (strncmp(token, "skip_unused_descriptor_transfers=", 33) == 0) {
+        const char *value = token + 33;
+        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+            options->has_skip_unused_descriptor_transfers = 1;
+            options->skip_unused_descriptor_transfers = 1;
+            return 0;
+        }
+        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+            options->has_skip_unused_descriptor_transfers = 1;
+            options->skip_unused_descriptor_transfers = 0;
+            return 0;
+        }
+        return -1;
+    }
+    if (strncmp(token, "use_spirv_descriptor_access=", 28) == 0) {
+        const char *value = token + 28;
+        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+            options->has_use_spirv_descriptor_access = 1;
+            options->use_spirv_descriptor_access = 1;
+            return 0;
+        }
+        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+            options->has_use_spirv_descriptor_access = 1;
+            options->use_spirv_descriptor_access = 0;
             return 0;
         }
         return -1;
@@ -2292,6 +2328,7 @@ static void write_vulkan_binding_compact_report(
         const int *cache_resident,
         const int *cache_hits,
         const uint64_t *fd_before_hash,
+        const uint64_t *gpu_after_upload_hash,
         const uint64_t *gpu_after_dispatch_hash,
         const uint64_t *fd_after_hash,
         const size_t *alias_rep) {
@@ -2302,6 +2339,7 @@ static void write_vulkan_binding_compact_report(
                 "\"size\":%zu,\"alias_rep\":%zu,\"active\":%s,"
                 "\"readable\":%s,\"writable\":%s,\"resident\":%s,"
                 "\"cache_hit\":%s,\"fd_before_hash\":\"0x%016llx\","
+                "\"gpu_after_upload_hash\":\"0x%016llx\","
                 "\"gpu_after_dispatch_hash\":\"0x%016llx\","
                 "\"fd_after_hash\":\"0x%016llx\"",
                 i ? "," : "",
@@ -2316,6 +2354,7 @@ static void write_vulkan_binding_compact_report(
                 cache_resident && cache_resident[i] ? "true" : "false",
                 cache_hits && cache_hits[i] ? "true" : "false",
                 (unsigned long long)(fd_before_hash ? fd_before_hash[i] : 0),
+                (unsigned long long)(gpu_after_upload_hash ? gpu_after_upload_hash[i] : 0),
                 (unsigned long long)(gpu_after_dispatch_hash ? gpu_after_dispatch_hash[i] : 0),
                 (unsigned long long)(fd_after_hash ? fd_after_hash[i] : 0));
         if (active && active[i] && writable && writable[i] &&
@@ -3393,9 +3432,13 @@ static int run_vulkan_dispatch_fd(
     int have_spirv_summary = 0;
     int specialization_materialized = 0;
     const int skip_unused_descriptor_transfers =
-        env_truthy("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", 1);
+        options && options->has_skip_unused_descriptor_transfers
+            ? options->skip_unused_descriptor_transfers
+            : env_truthy("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", 1);
     const int use_spirv_descriptor_access =
-        env_truthy("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", 1);
+        options && options->has_use_spirv_descriptor_access
+            ? options->use_spirv_descriptor_access
+            : env_truthy("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", 1);
     const int dirty_probe_enabled = options && options->has_dirty_probe
         ? options->dirty_probe
         : writeonly_dirty_probe_enabled();
@@ -4083,6 +4126,8 @@ static int run_vulkan_dispatch_fd(
                 "\"compact_summary\":true,"
                 "\"shader_bytes\":%zu,\"entry\":\"%s\",\"specializations\":%zu,"
                 "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
+                "\"skip_unused_descriptor_transfers\":%s,"
+                "\"spirv_descriptor_access\":%s,"
                 "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
                 "\"materialize_specialization\":%s,"
                 "\"disable_pipeline_optimization\":%s,"
@@ -4091,6 +4136,8 @@ static int run_vulkan_dispatch_fd(
                 "\"valid\":true,",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
                 shader_size, entry_name, specialization_count, binding_count, gx, gy, gz,
+                skip_unused_descriptor_transfers ? "true" : "false",
+                use_spirv_descriptor_access ? "true" : "false",
                 binding_alias_count,
                 rewrite_duplicate_descriptors ? "true" : "false",
                 materialize_specialization_constants ? "true" : "false",
@@ -4105,6 +4152,7 @@ static int run_vulkan_dispatch_fd(
                                             binding_read_needed, binding_write_needed,
                                             cache_resident, cache_hits,
                                             binding_fd_before_hash,
+                                            binding_gpu_after_upload_hash,
                                             binding_gpu_after_dispatch_hash,
                                             binding_fd_after_hash,
                                             binding_alias_rep);
@@ -4140,6 +4188,8 @@ static int run_vulkan_dispatch_fd(
             "\"shader_bytes\":%zu,\"entry\":\"%s\",\"specializations\":%zu,"
             "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
             "\"backend_cached\":%s,\"pipeline_cache\":{\"hit\":%s,\"entries\":%u},"
+            "\"skip_unused_descriptor_transfers\":%s,"
+            "\"spirv_descriptor_access\":%s,"
             "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
             "\"materialize_specialization\":%s,"
             "\"disable_pipeline_optimization\":%s,"
@@ -4160,6 +4210,8 @@ static int run_vulkan_dispatch_fd(
             was_ready ? "true" : "false",
             pipeline_cache_hit ? "true" : "false",
             PDOCKER_GPU_PIPELINE_CACHE_SLOTS,
+            skip_unused_descriptor_transfers ? "true" : "false",
+            use_spirv_descriptor_access ? "true" : "false",
             binding_alias_count,
             rewrite_duplicate_descriptors ? "true" : "false",
             materialize_specialization_constants ? "true" : "false",

@@ -266,6 +266,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "config_propagation_mismatch",
             "observed_event_values(executor_events",
             "disable_pipeline_optimization",
+            "skip_unused_descriptor_transfers",
+            "spirv_descriptor_access",
             "diagnostic_bisection",
             "binary-search fault isolation",
             "api_cpu_baseline",
@@ -273,11 +275,22 @@ class GpuAbiContractTest(unittest.TestCase):
             "token_probability_boundary",
             "executor_dispatch_boundary",
             "post_dispatch_logits",
+            "readonly_input_integrity",
+            "readonly_binding_hash_mismatches",
+            "primary_readonly_upload_hash_mismatches",
+            "primary_readonly_dispatch_mutations",
+            "shader_access_or_barrier_scope",
+            "alias_rep",
+            "upload_offset_descriptor_or_hash_scope",
+            "output_layout_or_shader_math",
             "numeric_layout_or_readback",
         ]:
             self.assertIn(marker, compare)
         source = GPU_EXECUTOR.read_text()
         self.assertIn('\\"disable_pipeline_optimization\\":%s', source)
+        self.assertIn('\\"skip_unused_descriptor_transfers\\":%s', source)
+        self.assertIn('\\"spirv_descriptor_access\\":%s', source)
+        self.assertIn('\\"gpu_after_upload_hash\\":\\"0x%016llx\\"', source)
         self.assertIn("const int disable_pipeline_optimization =", source)
 
     def test_llama_gpu_compare_can_forward_bridge_tuning_env(self):
@@ -313,6 +326,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("rewrite_duplicate_descriptors=%u", icd)
         self.assertIn("materialize_specialization=%u", icd)
         self.assertIn("disable_pipeline_optimization=%u", icd)
+        self.assertIn("skip_unused_descriptor_transfers=%u", icd)
+        self.assertIn("use_spirv_descriptor_access=%u", icd)
         self.assertIn("disable_storage8=%u", icd)
         self.assertIn("disable_storage16=%u", icd)
         self.assertIn("disable_subgroup_arithmetic=%u", icd)
