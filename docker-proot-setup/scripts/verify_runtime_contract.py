@@ -1117,8 +1117,8 @@ def test_gpu_shim_contract() -> None:
             fail(f"pdocker Vulkan ICD kind missing: {env!r}")
         if env.get("PDOCKER_VULKAN_ICD_READY") != "0":
             fail(f"pdocker Vulkan ICD must not claim compute readiness yet: {env!r}")
-        if env.get("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE") != "1":
-            fail(f"pdocker Vulkan bridge must not advertise unverified 8-bit storage by default: {env!r}")
+        if env.get("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE") != "0":
+            fail(f"pdocker Vulkan bridge must preserve the runtime 8-bit storage feature by default: {env!r}")
         if env.get("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS") != "1":
             fail(f"pdocker Vulkan bridge must alias duplicate shader descriptor bindings: {env!r}")
         if env.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION") != "1":

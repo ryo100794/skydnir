@@ -264,6 +264,19 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("disable_storage16=%u", icd)
         self.assertIn("disable_subgroup_arithmetic=%u", icd)
 
+    def test_llama_gpu_compare_classifies_executor_feature_mismatches(self):
+        compare = LLAMA_COMPARE.read_text()
+        for marker in [
+            "executor_feature_mismatches = sorted({",
+            'event.get("spirv_feature_mismatch") is True',
+            '"executor_spirv_feature_mismatch": bool(executor_feature_mismatches)',
+            '"executor_spirv_feature_mismatches": executor_feature_mismatches',
+            'blocker_class = "vulkan_feature_mismatch"',
+            "generic SPIR-V dispatch ran while executor feature policy reports missing features",
+            "clamp or translate llama.cpp storage8/int8 final-projection shaders before accepting performance results",
+        ]:
+            self.assertIn(marker, compare)
+
     def test_gpu_executor_has_opt_in_writeonly_buffer_cache(self):
         source = GPU_EXECUTOR.read_text()
         for marker in [

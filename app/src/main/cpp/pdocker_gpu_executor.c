@@ -2280,7 +2280,6 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         properties2.pNext = &rt->subgroup_properties;
         get_properties2(rt->physical_device, &properties2);
     }
-    apply_vulkan_feature_policy(rt);
     uint32_t family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(rt->physical_device, &family_count, NULL);
     if (family_count == 0) { stage = "queue-family-count"; goto fail; }

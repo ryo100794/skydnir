@@ -802,6 +802,12 @@ generic_spirv_dispatch_blocker = (
         or queue_submit_blocker
     )
 )
+executor_feature_mismatches = sorted({
+    str(item)
+    for event in executor_events
+    if event.get("spirv_feature_mismatch") is True
+    for item in (event.get("spirv_feature_mismatches") or [])
+})
 repeating_layer_matches = [int(m.group(1)) for m in re.finditer(r"offloading ([0-9]+) repeating layers to GPU", log)]
 offloaded_layer_matches = [
     (int(m.group(1)), int(m.group(2)))
@@ -826,6 +832,8 @@ evidence = {
     "generic_dispatch_response_seen": "generic dispatch response:" in log,
     "generic_spirv_dispatch_attempted": generic_spirv_attempted,
     "generic_spirv_dispatch_seen": json_string_field_seen("kernel", "generic_spirv") and json_bool_field_seen("valid", True),
+    "executor_spirv_feature_mismatch": bool(executor_feature_mismatches),
+    "executor_spirv_feature_mismatches": executor_feature_mismatches,
     "generic_spirv_dispatch_failed": generic_spirv_dispatch_failed,
     "pipeline_feature_blocker": pipeline_feature_blocker,
     "executor_spirv_trace_seen": "pdocker-gpu-executor: SPIR-V trace" in log,
@@ -860,6 +868,9 @@ elif generic_spirv_dispatch_blocker:
 elif queue_submit_blocker:
     blocker_class = "vulkan_queue_submit_feature"
     blocker_detail = "llama.cpp submitted a Vulkan workload, but vkQueueSubmit failed with ErrorFeatureNotPresent before the executor trace boundary"
+elif executor_feature_mismatches:
+    blocker_class = "vulkan_feature_mismatch"
+    blocker_detail = "generic SPIR-V dispatch ran while executor feature policy reports missing features: " + ",".join(executor_feature_mismatches)
 elif bool(int(gpu_served_s)) and (
     gpu_correctness_summary == "fail" or
     differential_correctness_summary == "fail"
@@ -1109,6 +1120,8 @@ next_action = (
     if blocker_class in {"vulkan_generic_spirv_dispatch", "vulkan_queue_submit_feature"}
     else "inspect traced Android Vulkan feature/SPIR-V mismatch"
     if evidence["android_vulkan_dispatch_blocker"] and evidence["executor_spirv_trace_seen"]
+    else "clamp or translate llama.cpp storage8/int8 final-projection shaders before accepting performance results"
+    if blocker_class == "vulkan_feature_mismatch"
     else "lower llama.cpp SPIR-V dispatch into the Android GPU executor"
     if evidence["spirv_dispatch_blocker"] or evidence["queue_submit_blocker"]
     else "trace final-projection descriptor aliases and feature requirements until GPU output matches CPU/no-offload"
