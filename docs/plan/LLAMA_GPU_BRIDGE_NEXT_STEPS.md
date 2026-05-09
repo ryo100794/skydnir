@@ -244,6 +244,11 @@ Pass criteria:
   still mismatches the same first row. Do not spend the next iteration only on
   duplicate descriptor rewrite; split local-size/specialization execution,
   Q6_K decode layout, and descriptor-view semantics instead.
+- The literal-local-size patch changes the active hash to
+  `0x09c4622d92c6acb9` and records `spirv_local_size=[32,1,1]`, but the sampled
+  oracle still mismatches. Treat local-size patching as a necessary compatibility
+  hardening step, not as the current root cause. The next most valuable split is
+  a dequant-only check for the same Q6_K blocks before reduction.
 
 Fail criteria:
 

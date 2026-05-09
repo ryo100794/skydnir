@@ -78,6 +78,7 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-ngl1-matvec-push-alias-diagnostics-20260509.json` | 1 | Same Q6_K matvec diagnostic with bounded push-constant capture | n/a | 2.38x | fail | `push_u32=[4096,4096,4096,151936,...]`; `rw_alias_hazards.count=2` |
 | `llama-gpu-ngl1-q6k-sample-oracle-20260509.json` | 1 | Bounded CPU oracle for eight Q6_K final-projection rows | n/a | 1.61x | fail | oracle mismatch for 8/8 rows; first expected `13.878`, GPU `6.831` |
 | `llama-gpu-ngl1-q6k-sample-oracle-no-dup-20260509-rerun.json` | 1 | Same sampled Q6_K oracle with duplicate descriptor rewrite disabled | n/a | 2.15x | fail | hash changes to `0x1bf751845c5dce75`; same 8/8 oracle mismatch |
+| `llama-gpu-ngl1-local-size-patch-oracle-20260509.json` | 1 | Patch literal `LocalSize 1` to specialization value `32` for WorkgroupSize-style shader | n/a | 2.37x | fail | patched hash `0x09c4622d92c6acb9`; local size `[32,1,1]`; same Q6_K oracle mismatch |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -238,6 +239,13 @@ Two ICD correctness fixes were added on 2026-05-08:
   disabled changes the shader hash to `0x1bf751845c5dce75` but produces the
   same first-row mismatch shape. Duplicate binding rewrite is therefore not the
   primary cause of the current Q6_K sampled mismatch.
+- The executor now patches the specific SPIR-V shape where llama.cpp's shader
+  exposes a specialization-backed `BuiltIn WorkgroupSize` but also contains a
+  literal `OpExecutionMode LocalSize 1 1 1`. The patched dispatch reports
+  `local_size_patched=true` and `spirv_local_size=[32,1,1]`, but the sampled
+  Q6_K oracle still mismatches the same first row. This removes the simplest
+  local-size-only explanation and pushes the next split toward Q6_K block decode
+  layout, descriptor view aliasing, or shared-memory reduction semantics.
 - The compare driver now requests `completion_probabilities` with bounded
   `n_probs` during correctness probes. This records selected token ids and
   top-logprob lists for both CPU/no-offload and GPU/offload. The latest full

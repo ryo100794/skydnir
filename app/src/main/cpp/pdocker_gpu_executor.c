@@ -1896,6 +1896,58 @@ static int materialize_spirv_specialization_constants(
     return changed;
 }
 
+static int patch_spirv_literal_local_size_from_spec(
+        uint32_t *code,
+        size_t bytes,
+        const VulkanDispatchSpecialization *specializations,
+        size_t specialization_count,
+        const uint8_t *specialization_data,
+        size_t specialization_data_size) {
+    if (!code || bytes < 20 || (bytes % sizeof(uint32_t)) != 0 ||
+        code[0] != 0x07230203u || !specializations || specialization_count == 0) {
+        return 0;
+    }
+    const size_t words = bytes / sizeof(uint32_t);
+    int has_workgroup_size_builtin = 0;
+    for (size_t i = 5; i < words;) {
+        uint32_t inst = code[i];
+        uint16_t word_count = (uint16_t)(inst >> 16);
+        uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == 71 && word_count >= 4 && code[i + 2] == 11 && code[i + 3] == 25) {
+            has_workgroup_size_builtin = 1;
+            break;
+        }
+        i += word_count;
+    }
+    if (!has_workgroup_size_builtin) return 0;
+    uint64_t local_x = 0;
+    if (!specialization_value_for_id(specializations,
+                                     specialization_count,
+                                     specialization_data,
+                                     specialization_data_size,
+                                     0,
+                                     &local_x) ||
+        local_x <= 1 || local_x > 1024) {
+        return 0;
+    }
+    for (size_t i = 5; i < words;) {
+        uint32_t inst = code[i];
+        uint16_t word_count = (uint16_t)(inst >> 16);
+        uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == 16 && word_count >= 6 && code[i + 2] == 17 &&
+            code[i + 3] == 1 && code[i + 4] == 1 && code[i + 5] == 1) {
+            code[i + 3] = (uint32_t)local_x;
+            code[i + 4] = 1;
+            code[i + 5] = 1;
+            return 1;
+        }
+        i += word_count;
+    }
+    return 0;
+}
+
 static int rewrite_duplicate_descriptor_bindings(
         uint32_t *code,
         size_t bytes,
@@ -2563,7 +2615,8 @@ static int cpu_oracle_known_llama_hash(uint64_t spirv_hash) {
            spirv_hash == 0xac41e8033a67af4aull ||
            spirv_hash == 0xf2f988b94bd3e0dcull ||
            spirv_hash == 0x274f68a67dfef210ull ||
-           spirv_hash == 0x1bf751845c5dce75ull;
+           spirv_hash == 0x1bf751845c5dce75ull ||
+           spirv_hash == 0x09c4622d92c6acb9ull;
 }
 
 static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
@@ -2579,7 +2632,8 @@ static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
         return "rms-norm";
     }
     if (spirv_hash == 0x274f68a67dfef210ull ||
-        spirv_hash == 0x1bf751845c5dce75ull) {
+        spirv_hash == 0x1bf751845c5dce75ull ||
+        spirv_hash == 0x09c4622d92c6acb9ull) {
         return "mul-mat-vec-q6-k-large";
     }
     return "unknown";
@@ -2604,6 +2658,12 @@ typedef struct {
     uint64_t expected_hash;
     uint64_t gpu_hash;
     int input_output_overlap;
+    int has_partial_diagnostic;
+    int partial_best_lane;
+    double partial_best_value;
+    double partial_best_abs_error;
+    double partial_first16_sum;
+    double partial_second16_sum;
     int has_first_mismatch;
     CpuOracleSample first_mismatch;
     CpuOracleSample samples[8];
@@ -2740,6 +2800,17 @@ static void write_cpu_oracle_report(
             (unsigned long long)report->expected_hash,
             (unsigned long long)report->gpu_hash,
             report->input_output_overlap ? "true" : "false");
+    if (report->has_partial_diagnostic) {
+        fprintf(out,
+                ",\"partial_diagnostic\":{\"best_lane\":%d,"
+                "\"best_value\":%.9g,\"best_abs_error\":%.9g,"
+                "\"first16_sum\":%.9g,\"second16_sum\":%.9g}",
+                report->partial_best_lane,
+                report->partial_best_value,
+                report->partial_best_abs_error,
+                report->partial_first16_sum,
+                report->partial_second16_sum);
+    }
     if (report->has_first_mismatch) {
         fprintf(out,
                 ",\"first_mismatch\":{\"dst_index\":%llu,"
@@ -3426,6 +3497,54 @@ static float q6k_value_at(const uint8_t block[210], uint32_t k) {
     return f16_to_f32(d_bits) * (float)scale * (float)q;
 }
 
+static int q6k_accumulate_tid_partial(
+        const int weight_fd,
+        const int vector_fd,
+        const VulkanDispatchBinding *weight_binding,
+        const VulkanDispatchBinding *vector_binding,
+        uint32_t row,
+        uint32_t tid,
+        uint32_t ncols,
+        uint32_t batch_stride_b,
+        uint32_t base_work_group_y,
+        double *out_sum) {
+    if (!weight_binding || !vector_binding || !out_sum || ncols == 0 || (ncols % 256u) != 0) {
+        return 0;
+    }
+    const uint32_t num_blocks_per_row = ncols / 256u;
+    const uint32_t itid = tid % 16u;
+    const uint32_t ix = tid / 16u;
+    const uint32_t v_im = itid / 8u;
+    const uint32_t v_in = itid - 8u * v_im;
+    const uint32_t l0 = 4u * v_in;
+    const uint32_t y_offset = 128u * v_im + l0;
+    double sum = 0.0;
+    for (uint32_t block_index = ix; block_index < num_blocks_per_row; block_index += 2u) {
+        uint8_t block[210];
+        off_t off = weight_binding->offset +
+                    (off_t)(((uint64_t)row * num_blocks_per_row + block_index) * 210ull);
+        if (!q6k_read_block(weight_fd, off, block)) return 0;
+        for (uint32_t l = 0; l < 4u; ++l) {
+            const uint32_t elems[4] = {
+                y_offset + l,
+                y_offset + 32u + l,
+                y_offset + 64u + l,
+                y_offset + 96u + l,
+            };
+            for (uint32_t q = 0; q < 4u; ++q) {
+                float b = 0.0f;
+                const off_t b_off = vector_binding->offset +
+                                    (off_t)((uint64_t)base_work_group_y * batch_stride_b * sizeof(float)) +
+                                    (off_t)((uint64_t)(block_index * 256u + elems[q]) * sizeof(float));
+                if (pread(vector_fd, &b, sizeof(b), b_off) != (ssize_t)sizeof(b)) return 0;
+                sum += (double)q6k_value_at(block, elems[q]) * (double)b;
+            }
+        }
+    }
+    *out_sum = sum;
+    return 1;
+}
+
 static void run_cpu_oracle_q6k_matvec_sample(
         CpuOracleReport *report,
         uint64_t spirv_hash,
@@ -3471,6 +3590,9 @@ static void run_cpu_oracle_q6k_matvec_sample(
         const uint32_t row = sample_rows[si];
         if (row >= stride_d || ((size_t)row + 1u) * sizeof(float) > bindings[idx2].size) continue;
         double sum = 0.0;
+        double partials[32];
+        memset(partials, 0, sizeof(partials));
+        int have_partials = 1;
         for (uint32_t block_index = 0; block_index < num_blocks_per_row; ++block_index) {
             uint8_t block[210];
             off_t off = bindings[idx0].offset +
@@ -3493,6 +3615,21 @@ static void run_cpu_oracle_q6k_matvec_sample(
                 sum += (double)q6k_value_at(block, e) * (double)b;
             }
         }
+        for (uint32_t tid = 0; tid < 32u; ++tid) {
+            if (!q6k_accumulate_tid_partial(buffer_fds[idx0],
+                                           buffer_fds[idx1],
+                                           &bindings[idx0],
+                                           &bindings[idx1],
+                                           row,
+                                           tid,
+                                           ncols,
+                                           batch_stride_b,
+                                           base_work_group_y,
+                                           &partials[tid])) {
+                have_partials = 0;
+                break;
+            }
+        }
         int ok = 0;
         float gpu = load_f32_at_index((const uint8_t *)vk_buffers[idx2]->map + binding_gpu_offset[idx2],
                                       bindings[idx2].size, row, &ok);
@@ -3509,6 +3646,27 @@ static void run_cpu_oracle_q6k_matvec_sample(
         double rel_error = denom > 1e-30 ? abs_error / denom : abs_error;
         if (abs_error > report->max_abs_error) report->max_abs_error = abs_error;
         if (rel_error > report->max_rel_error) report->max_rel_error = rel_error;
+        if (si == 0 && have_partials) {
+            report->has_partial_diagnostic = 1;
+            report->partial_best_lane = 0;
+            report->partial_best_value = partials[0];
+            report->partial_best_abs_error = fabs(partials[0] - (double)gpu);
+            report->partial_first16_sum = 0.0;
+            report->partial_second16_sum = 0.0;
+            for (uint32_t tid = 0; tid < 32u; ++tid) {
+                const double per_tid_error = fabs(partials[tid] - (double)gpu);
+                if (per_tid_error < report->partial_best_abs_error) {
+                    report->partial_best_abs_error = per_tid_error;
+                    report->partial_best_lane = (int)tid;
+                    report->partial_best_value = partials[tid];
+                }
+                if (tid < 16u) {
+                    report->partial_first16_sum += partials[tid];
+                } else {
+                    report->partial_second16_sum += partials[tid];
+                }
+            }
+        }
         if (report->sample_count < sizeof(report->samples) / sizeof(report->samples[0])) {
             CpuOracleSample *sample = &report->samples[report->sample_count++];
             sample->dst_index = row;
@@ -4892,6 +5050,7 @@ static int run_vulkan_dispatch_fd(
     size_t binding_alias_count = 0;
     int have_spirv_summary = 0;
     int specialization_materialized = 0;
+    int local_size_patched = 0;
     const int skip_unused_descriptor_transfers =
         options && options->has_skip_unused_descriptor_transfers
             ? options->skip_unused_descriptor_transfers
@@ -4996,6 +5155,13 @@ static int run_vulkan_dispatch_fd(
             specialization_data,
             specialization_data_size);
     }
+    local_size_patched = patch_spirv_literal_local_size_from_spec(
+        shader_code,
+        shader_size,
+        specializations,
+        specialization_count,
+        specialization_data,
+        specialization_data_size);
     const int rewrite_duplicate_descriptors =
         options && options->has_rewrite_duplicate_descriptors
             ? options->rewrite_duplicate_descriptors
@@ -5563,7 +5729,8 @@ static int run_vulkan_dispatch_fd(
                                 gy,
                                 gz);
     } else if (spirv_summary.hash == 0x274f68a67dfef210ull ||
-               spirv_summary.hash == 0x1bf751845c5dce75ull) {
+               spirv_summary.hash == 0x1bf751845c5dce75ull ||
+               spirv_summary.hash == 0x09c4622d92c6acb9ull) {
         run_cpu_oracle_q6k_matvec_sample(&cpu_oracle_report,
                                          spirv_summary.hash,
                                          buffer_fds,
@@ -5729,6 +5896,7 @@ static int run_vulkan_dispatch_fd(
                 "\"materialize_specialization\":%s,"
                 "\"disable_pipeline_optimization\":%s,"
                 "\"specialization_materialized\":%s,"
+                "\"local_size_patched\":%s,"
                 "\"pipeline_policy_hash\":\"0x%016llx\","
                 "\"resident_bytes\":%zu,\"mutable_bytes\":%zu,"
                 "\"pre_barriers\":%u,\"post_barriers\":%u,"
@@ -5744,6 +5912,7 @@ static int run_vulkan_dispatch_fd(
                 materialize_specialization_constants ? "true" : "false",
                 disable_pipeline_optimization ? "true" : "false",
                 specialization_materialized ? "true" : "false",
+                local_size_patched ? "true" : "false",
                 (unsigned long long)pipeline_policy_hash,
                 resident_bytes,
                 mutable_bytes,
@@ -5815,6 +5984,7 @@ static int run_vulkan_dispatch_fd(
             "\"materialize_specialization\":%s,"
             "\"disable_pipeline_optimization\":%s,"
             "\"specialization_materialized\":%s,"
+            "\"local_size_patched\":%s,"
             "\"pipeline_policy_hash\":\"0x%016llx\","
             "\"profile_response\":%s,"
             "\"pre_barriers\":%u,\"post_barriers\":%u,"
@@ -5842,6 +6012,7 @@ static int run_vulkan_dispatch_fd(
             materialize_specialization_constants ? "true" : "false",
             disable_pipeline_optimization ? "true" : "false",
             specialization_materialized ? "true" : "false",
+            local_size_patched ? "true" : "false",
             (unsigned long long)pipeline_policy_hash,
             profile_response ? "true" : "false",
             pre_barrier_count,
