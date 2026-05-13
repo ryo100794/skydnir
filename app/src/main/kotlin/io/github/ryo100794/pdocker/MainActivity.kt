@@ -3192,10 +3192,58 @@ class MainActivity : AppCompatActivity() {
                 "UI exec -it is not attached to a controlling tty"
             }
 
-            val script = "p=pdocker-ui-it\necho \${p}-ok\n/usr/bin/[ \"x\" = \"x\" ] && echo \${p}-bracket-ok\npwd\n[ -t 0 ] && echo \${p}-tty-ok\n[ \"\$TERM\" = \"xterm-256color\" ] && echo \${p}-term-ok\n[ -n \"\$BASH_VERSION\" ] && echo \${p}-bash-ok\ntop -b -n 1 >/dev/null && echo \${p}-top-ok\nsleep 15\n"
+            val script = "p=pdocker-ui-it\necho \${p}-ok\n/usr/bin/[ \"x\" = \"x\" ] && echo \${p}-bracket-ok\npwd\n[ -t 0 ] && echo \${p}-tty-ok\n[ \"\$TERM\" = \"xterm-256color\" ] && echo \${p}-term-ok\n[ -n \"\$BASH_VERSION\" ] && echo \${p}-bash-ok\ntop -b -n 1 >/dev/null && echo \${p}-top-ok\necho \${p}-arrow-seed\n"
             ui.post {
                 webView?.evaluateJavascript(
                     "window.pdockerTestSendInput && window.pdockerTestSendInput(${JSONObject.quote(script)}, false)",
+                    null,
+                )
+            }
+            check(waitUntil(5_000) {
+                val text = output.toString()
+                text.contains("pdocker-ui-it-ok") &&
+                    text.contains("pdocker-ui-it-bracket-ok") &&
+                    text.contains("pdocker-ui-it-tty-ok") &&
+                    text.contains("pdocker-ui-it-term-ok") &&
+                    text.contains("pdocker-ui-it-bash-ok") &&
+                    text.contains("pdocker-ui-it-top-ok") &&
+                    text.contains("pdocker-ui-it-arrow-seed")
+            }) { "UI exec -it did not echo initial expected markers" }
+            ui.post {
+                webView?.evaluateJavascript(
+                    "window.pdockerTestSendInput && window.pdockerTestSendInput('\\u001b[A\\r', true)",
+                    null,
+                )
+            }
+            check(waitUntil(3_000) {
+                Regex("pdocker-ui-it-arrow-seed").findAll(output.toString()).count() >= 2
+            }) { "UI exec -it arrow key did not reach shell readline/history as an escape sequence" }
+            ui.post {
+                webView?.evaluateJavascript(
+                    "window.pdockerTestSendInput && window.pdockerTestSendInput('top\\n', false)",
+                    null,
+                )
+            }
+            Thread.sleep(1_200)
+            ui.post {
+                webView?.evaluateJavascript(
+                    "window.pdockerTestSendInput && window.pdockerTestSendInput('q', true)",
+                    null,
+                )
+            }
+            Thread.sleep(500)
+            ui.post {
+                webView?.evaluateJavascript(
+                    "window.pdockerTestSendInput && window.pdockerTestSendInput('echo \${p}-topq-ok\\n', false)",
+                    null,
+                )
+            }
+            check(waitUntil(5_000) { output.toString().contains("pdocker-ui-it-topq-ok") }) {
+                "UI exec -it fullscreen top did not accept q over the terminal input stream"
+            }
+            ui.post {
+                webView?.evaluateJavascript(
+                    "window.pdockerTestSendInput && window.pdockerTestSendInput('sleep 15\\n', false)",
                     null,
                 )
             }
@@ -3213,19 +3261,14 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             val passed = waitUntil(5_000) {
-                val text = output.toString()
-                text.contains("pdocker-ui-it-ok") &&
-                    text.contains("pdocker-ui-it-bracket-ok") &&
-                    text.contains("pdocker-ui-it-tty-ok") &&
-                    text.contains("pdocker-ui-it-term-ok") &&
-                    text.contains("pdocker-ui-it-bash-ok") &&
-                    text.contains("pdocker-ui-it-top-ok") &&
-                    text.contains("pdocker-ui-it-ctrlc-ok")
+                output.toString().contains("pdocker-ui-it-ctrlc-ok")
             }
             val text = output.toString()
             val bracketNoise = Regex("(/usr/bin/)?\\[: extra argument").containsMatchIn(text)
-            check(passed) { "UI exec -it did not echo expected markers" }
+            val arrowNoise = text.contains("\u001b[A")
+            check(passed) { "UI exec -it Ctrl+C did not interrupt sleep and return to the shell" }
             check(!bracketNoise) { "UI exec -it produced bracket argv noise" }
+            check(!arrowNoise) { "UI exec -it printed arrow escape bytes instead of treating them as terminal input" }
             check(text.contains("pdocker-ui-it-ok\r\n") || text.contains("pdocker-ui-it-ok\n")) {
                 "UI exec -it did not preserve terminal CRLF line control"
             }

@@ -106,6 +106,11 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn("if ((mods.ctrl || mods.alt || mods.esc) && event.key && event.key.length === 1)", self.xterm)
         self.assertIn("suppressTerminalDataOnce(event.key);", self.xterm)
         self.assertIn("sendInput(event.key, false);", self.xterm)
+        self.assertIn("ta.addEventListener('compositionstart'", self.xterm)
+        self.assertIn("ta.addEventListener('compositionend'", self.xterm)
+        self.assertIn("lastCompositionTerminalData", self.xterm)
+        self.assertIn("if (event.inputType === 'insertCompositionText') return;", self.xterm)
+        self.assertIn("sendInput(data, true);", self.xterm)
 
     def test_ui_it_selftest_keeps_regression_symptoms_observable(self):
         self.assertIn('.put("Name", "ui-engine-exec-it")', self.main)
@@ -117,9 +122,18 @@ class TerminalExecItContractTest(unittest.TestCase):
             "pdocker-ui-it-term-ok",
             "pdocker-ui-it-bash-ok",
             "pdocker-ui-it-top-ok",
+            "pdocker-ui-it-arrow-seed",
+            "pdocker-ui-it-topq-ok",
             "pdocker-ui-it-ctrlc-ok",
         ]:
             self.assertIn(marker, self.main)
+        self.assertIn("window.pdockerTestSendInput('\\\\u001b[A\\\\r', true)", self.main)
+        self.assertIn('Regex("pdocker-ui-it-arrow-seed").findAll', self.main)
+        self.assertIn('UI exec -it printed arrow escape bytes', self.main)
+        self.assertIn("window.pdockerTestSendInput('top\\\\n', false)", self.main)
+        self.assertIn("window.pdockerTestSendInput('q', true)", self.main)
+        self.assertIn(r"window.pdockerTestSendInput('echo \${p}-topq-ok\\n', false)", self.main)
+        self.assertIn('"UI exec -it fullscreen top did not accept q', self.main)
         self.assertIn('Regex("(/usr/bin/)?\\\\[: extra argument")', self.main)
         self.assertIn('"UI exec -it produced bracket argv noise"', self.main)
         self.assertIn('"UI exec -it did not preserve terminal CRLF line control"', self.main)

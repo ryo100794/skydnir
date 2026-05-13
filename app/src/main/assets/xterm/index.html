@@ -234,6 +234,9 @@
   let allSelected = false;
   const touchScrollThreshold = 6;
   const suppressedTerminalData = [];
+  let composing = false;
+  let lastCompositionTerminalData = '';
+  let lastCompositionTerminalDataAt = 0;
 
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const distance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -483,6 +486,10 @@
   if (!readOnly) {
     term.onData((data) => {
       if (consumeSuppressedTerminalData(data)) return;
+      if (composing && data) {
+        lastCompositionTerminalData = normalizeTerminalInput(data);
+        lastCompositionTerminalDataAt = Date.now();
+      }
       if ((mods.ctrl || mods.alt || mods.esc) && data && data.length === 1) {
         suppressTerminalDataOnce(data);
       }
@@ -587,8 +594,26 @@
     const ta = helperTextarea();
     if (!ta || ta.dataset.pdockerFallback === '1') return;
     ta.dataset.pdockerFallback = '1';
+    ta.addEventListener('compositionstart', () => {
+      composing = true;
+      lastCompositionTerminalData = '';
+      lastCompositionTerminalDataAt = 0;
+    }, true);
+    ta.addEventListener('compositionend', (event) => {
+      if (readOnly || selectionSuppressesIme()) return;
+      composing = false;
+      const data = normalizeTerminalInput(event.data || ta.value || '');
+      if (!data) return;
+      const alreadyForwarded = lastCompositionTerminalData === data && (Date.now() - lastCompositionTerminalDataAt) < 500;
+      if (!alreadyForwarded) {
+        suppressTerminalDataOnce(data);
+        sendInput(data, true);
+      }
+      ta.value = '';
+    }, true);
     ta.addEventListener('beforeinput', (event) => {
       if (readOnly || selectionSuppressesIme()) return;
+      if (event.inputType === 'insertCompositionText') return;
       if (event.data && consumeSuppressedTerminalData(event.data)) {
         claimImeEvent(event);
         ta.value = '';
