@@ -501,6 +501,30 @@ snapshot_ps() {
   (ps -A -o PID,PPID,USER,NAME,ARGS 2>/dev/null || ps -A -ef 2>/dev/null || ps 2>/dev/null) >"$DIAG/$label.txt" 2>"$DIAG/$label.err"
 }
 
+snapshot_listeners() {
+  label="$1"
+  {
+    printf '%s\n' '--- /proc/net/tcp ---'
+    cat /proc/net/tcp 2>/dev/null || true
+    printf '%s\n' '--- /proc/net/tcp6 ---'
+    cat /proc/net/tcp6 2>/dev/null || true
+    printf '%s\n' '--- ss -ltnp ---'
+    ss -ltnp 2>/dev/null || true
+    printf '%s\n' '--- netstat -ltnp ---'
+    netstat -ltnp 2>/dev/null || true
+  } >"$DIAG/$label.txt" 2>"$DIAG/$label.err"
+}
+
+snapshot_executor_residue() {
+  label="$1"
+  snapshot_ps "$label-all-processes"
+  {
+    printf '%s\n' 'Residue search terms: pdocker gpu media camera audio vulkan executor'
+    grep -Ei 'pdocker.*(gpu|media|camera|audio|vulkan|executor)|gpuexecutor|media.*executor|camera|audio|vulkan' \
+      "$DIAG/$label-all-processes.txt" 2>/dev/null || true
+  } >"$DIAG/$label.txt" 2>"$DIAG/$label.err"
+}
+
 snapshot_state_json() {
   label="$1"
   out="$DIAG/$label.txt"
@@ -516,8 +540,83 @@ container_id_from_out() {
   tr -d '\r\n' < "$1" | sed 's/[^0-9a-f].*$//'
 }
 
+inspect_pid_from_http() {
+  grep -ao '"Pid"[[:space:]]*:[[:space:]]*[0-9][0-9]*' "$1" 2>/dev/null \
+    | head -n 1 \
+    | sed 's/.*://; s/[^0-9]//g'
+}
+
+write_pid_evidence() {
+  label="$1"
+  cid="$2"
+  inspect_http="$3"
+  process_snapshot="$4"
+  pid="$(inspect_pid_from_http "$inspect_http")"
+  if [ -z "$pid" ] || [ "$pid" = "0" ]; then
+    present="unknown"
+  elif grep -Eq "(^|[[:space:]])$pid([[:space:]]|$)" "$process_snapshot" 2>/dev/null; then
+    present="true"
+  else
+    present="false"
+  fi
+  cat >"$DIAG/$label.json" <<JSON
+{
+  "ContainerId": $(json_string "$cid"),
+  "InspectHttp": $(json_string "files/$inspect_http"),
+  "ProcessSnapshot": $(json_string "files/$process_snapshot"),
+  "InspectPid": $(json_string "$pid"),
+  "PidStillPresentInSnapshot": $(json_string "$present"),
+  "Contract": "A stopped/killed/removed container is not proven torn down until its inspect PID/process tree and any stale PID references are absent for the same Engine container ID."
+}
+JSON
+}
+
+write_same_id_evidence() {
+  label="$1"
+  cid="$2"
+  create_out="$3"
+  inspect_before="$4"
+  inspect_after="$5"
+  inspect_after_rm="$6"
+  process_after="$7"
+  listener_after="$8"
+  residue_after="$9"
+  logs_after="${10}"
+  cat >"$DIAG/$label.json" <<JSON
+{
+  "ContainerId": $(json_string "$cid"),
+  "RequiredSameContainerId": [
+    "EngineCreateOutput",
+    "EngineInspectBefore",
+    "EngineInspectAfterOperation",
+    "EngineInspectAfterRemove",
+    "ProcessTree",
+    "ListenerAbsence",
+    "StalePidAbsence",
+    "GpuMediaExecutorResidue",
+    "ContainerLogs"
+  ],
+  "Evidence": {
+    "EngineCreateOutput": $(json_string "files/$create_out"),
+    "EngineInspectBefore": $(json_string "files/$inspect_before"),
+    "EngineInspectAfterOperation": $(json_string "files/$inspect_after"),
+    "EngineInspectAfterRemove": $(json_string "files/$inspect_after_rm"),
+    "ProcessTree": $(json_string "files/$process_after"),
+    "ListenerAbsence": $(json_string "files/$listener_after"),
+    "GpuMediaExecutorResidue": $(json_string "files/$residue_after"),
+    "ContainerLogs": $(json_string "files/$logs_after")
+  },
+  "Status": "planned-gap",
+  "Success": false,
+  "Contract": "Same-container-ID teardown proof is collected, but this scaffold must remain non-passing until the device verifier proves process tree, listeners, stale PID references, GPU/media executor residue, Engine inspect, and logs all agree for this exact container ID."
+}
+JSON
+}
+
 http_get engine-containers-before '/containers/json?all=1'
 snapshot_ps process-before
+snapshot_listeners listeners-before
+snapshot_executor_residue executor-residue-before
 snapshot_state_json persisted-state-before
 
 record_cmd create-stop docker create --name "$STOP_NAME" "$IMAGE" sh -lc 'trap "" TERM; while true; do sleep 30; done'
@@ -526,15 +625,24 @@ record_cmd start-stop docker start "$STOP_CID"
 http_get stop-inspect-before "/containers/$STOP_CID/json"
 record_cmd logs-stop-before docker logs "$STOP_CID"
 snapshot_ps process-after-stop-start
+snapshot_listeners listeners-after-stop-start
+snapshot_executor_residue executor-residue-after-stop-start
 snapshot_state_json persisted-state-after-stop-start
 record_cmd stop docker stop -t 1 "$STOP_CID"
 http_get stop-inspect-after "/containers/$STOP_CID/json"
 record_cmd logs-stop-after docker logs "$STOP_CID"
 snapshot_ps process-after-stop
+snapshot_listeners listeners-after-stop
+snapshot_executor_residue executor-residue-after-stop
+write_pid_evidence stop-stale-pid-after-stop "$STOP_CID" "$DIAG/stop-inspect-after.http" "$DIAG/process-after-stop.txt"
 snapshot_state_json persisted-state-after-stop
 record_cmd rm-stopped docker rm "$STOP_CID"
 http_get stop-inspect-after-rm "/containers/$STOP_CID/json"
 snapshot_ps process-after-rm-stopped
+snapshot_listeners listeners-after-rm-stopped
+snapshot_executor_residue executor-residue-after-rm-stopped
+write_pid_evidence stop-stale-pid-after-rm "$STOP_CID" "$DIAG/stop-inspect-after-rm.http" "$DIAG/process-after-rm-stopped.txt"
+write_same_id_evidence same-container-id-stop-rm "$STOP_CID" "$DIAG/create-stop.out" "$DIAG/stop-inspect-before.http" "$DIAG/stop-inspect-after.http" "$DIAG/stop-inspect-after-rm.http" "$DIAG/process-after-rm-stopped.txt" "$DIAG/listeners-after-rm-stopped.txt" "$DIAG/executor-residue-after-rm-stopped.txt" "$DIAG/logs-stop-after.out"
 snapshot_state_json persisted-state-after-rm-stopped
 
 record_cmd create-kill docker create --name "$KILL_NAME" "$IMAGE" sh -lc 'while true; do sleep 30; done'
@@ -543,15 +651,24 @@ record_cmd start-kill docker start "$KILL_CID"
 http_get kill-inspect-before "/containers/$KILL_CID/json"
 record_cmd logs-kill-before docker logs "$KILL_CID"
 snapshot_ps process-after-kill-start
+snapshot_listeners listeners-after-kill-start
+snapshot_executor_residue executor-residue-after-kill-start
 snapshot_state_json persisted-state-after-kill-start
 record_cmd kill docker kill "$KILL_CID"
 http_get kill-inspect-after "/containers/$KILL_CID/json"
 record_cmd logs-kill-after docker logs "$KILL_CID"
 snapshot_ps process-after-kill
+snapshot_listeners listeners-after-kill
+snapshot_executor_residue executor-residue-after-kill
+write_pid_evidence kill-stale-pid-after-kill "$KILL_CID" "$DIAG/kill-inspect-after.http" "$DIAG/process-after-kill.txt"
 snapshot_state_json persisted-state-after-kill
 record_cmd rm-killed docker rm "$KILL_CID"
 http_get kill-inspect-after-rm "/containers/$KILL_CID/json"
 snapshot_ps process-after-rm-killed
+snapshot_listeners listeners-after-rm-killed
+snapshot_executor_residue executor-residue-after-rm-killed
+write_pid_evidence kill-stale-pid-after-rm "$KILL_CID" "$DIAG/kill-inspect-after-rm.http" "$DIAG/process-after-rm-killed.txt"
+write_same_id_evidence same-container-id-kill-rm "$KILL_CID" "$DIAG/create-kill.out" "$DIAG/kill-inspect-before.http" "$DIAG/kill-inspect-after.http" "$DIAG/kill-inspect-after-rm.http" "$DIAG/process-after-rm-killed.txt" "$DIAG/listeners-after-rm-killed.txt" "$DIAG/executor-residue-after-rm-killed.txt" "$DIAG/logs-kill-after.out"
 snapshot_state_json persisted-state-after-rm-killed
 http_get engine-containers-after '/containers/json?all=1'
 
@@ -601,13 +718,30 @@ cat > "$LATEST" <<JSON
     "EngineApiContainersJson": ["files/$DIAG/engine-containers-before.http", "files/$DIAG/engine-containers-after.http"],
     "EngineApiInspect": ["files/$DIAG/stop-inspect-before.http", "files/$DIAG/stop-inspect-after.http", "files/$DIAG/stop-inspect-after-rm.http", "files/$DIAG/kill-inspect-before.http", "files/$DIAG/kill-inspect-after.http", "files/$DIAG/kill-inspect-after-rm.http"],
     "ProcessTable": ["files/$DIAG/process-before.txt", "files/$DIAG/process-after-stop-start.txt", "files/$DIAG/process-after-stop.txt", "files/$DIAG/process-after-rm-stopped.txt", "files/$DIAG/process-after-kill-start.txt", "files/$DIAG/process-after-kill.txt", "files/$DIAG/process-after-rm-killed.txt"],
+    "ProcessTree": ["files/$DIAG/same-container-id-stop-rm.json", "files/$DIAG/same-container-id-kill-rm.json"],
+    "ListenerAbsence": ["files/$DIAG/listeners-before.txt", "files/$DIAG/listeners-after-stop.txt", "files/$DIAG/listeners-after-rm-stopped.txt", "files/$DIAG/listeners-after-kill.txt", "files/$DIAG/listeners-after-rm-killed.txt"],
+    "StalePid": ["files/$DIAG/stop-stale-pid-after-stop.json", "files/$DIAG/stop-stale-pid-after-rm.json", "files/$DIAG/kill-stale-pid-after-kill.json", "files/$DIAG/kill-stale-pid-after-rm.json"],
+    "GpuMediaExecutorResidue": ["files/$DIAG/executor-residue-before.txt", "files/$DIAG/executor-residue-after-rm-stopped.txt", "files/$DIAG/executor-residue-after-rm-killed.txt"],
+    "SameContainerId": ["files/$DIAG/same-container-id-stop-rm.json", "files/$DIAG/same-container-id-kill-rm.json"],
     "PersistedStateJson": ["files/$DIAG/persisted-state-before.txt", "files/$DIAG/persisted-state-after-stop.txt", "files/$DIAG/persisted-state-after-rm-stopped.txt", "files/$DIAG/persisted-state-after-kill.txt", "files/$DIAG/persisted-state-after-rm-killed.txt"],
     "LifecycleLogs": ["files/$DIAG/stop.out", "files/$DIAG/stop.err", "files/$DIAG/kill.out", "files/$DIAG/kill.err", "files/$DIAG/rm-stopped.out", "files/$DIAG/rm-stopped.err", "files/$DIAG/rm-killed.out", "files/$DIAG/rm-killed.err", "files/$DIAG/cleanup-leftovers.out", "files/$DIAG/cleanup-leftovers.err"],
     "ContainerLogs": ["files/$DIAG/logs-stop-before.out", "files/$DIAG/logs-stop-after.out", "files/$DIAG/logs-kill-before.out", "files/$DIAG/logs-kill-after.out"]
   },
+  "RequiredSameContainerId": [
+    "EngineCreateOutput",
+    "EngineInspect",
+    "ProcessTree",
+    "ListenerAbsence",
+    "StalePidAbsence",
+    "GpuMediaExecutorResidue",
+    "ContainerLogs"
+  ],
+  "TruthContract": "stop/kill/rm remains non-passing with no fake success until every teardown evidence source proves absence for the same Engine container ID; HTTP 204, CLI exit 0, stale state.json, or configured name alone is never sufficient.",
   "Unresolved": [
     "HTTP/CLI acknowledgement is recorded but not accepted as proof of teardown.",
     "The smoke does not yet map every observed process back to the Engine container ID/process tree.",
+    "Listener absence, stale PID absence, and GPU/media executor residue are collected but not yet reduced by a device verifier into a passing proof.",
+    "This planned-gap artifact is explicitly not fake success.",
     "pdockerd implementation still needs strict stop/kill/rm verification before this can pass."
   ]
 }
