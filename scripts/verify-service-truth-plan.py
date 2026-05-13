@@ -137,6 +137,10 @@ def validate_docs() -> None:
             "listener probe",
             "logs",
             "Engine container ID",
+            "engine-candidates.json",
+            "state-id-comparison.json",
+            "listener-probe.json",
+            "/proc/net/tcp",
         ],
     )
 
@@ -160,6 +164,11 @@ def validate_android_smoke_entrypoints() -> None:
             "PersistedStateJson",
             "ProcessTable",
             "ListenerProbe",
+            "CandidateSelection",
+            "engine-candidates.json",
+            "state-id-comparison.json",
+            "listener-probe.json",
+            "/proc/net/tcp",
             "LifecycleLogs",
             "ContainerLogs",
             "\"Success\": false",

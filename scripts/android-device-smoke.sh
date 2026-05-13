@@ -168,18 +168,120 @@ collect_project_ports() {
   sort -u "$DIAG/configured-ports.txt" -o "$DIAG/configured-ports.txt" 2>/dev/null || true
 }
 
+json_bool() {
+  case "$1" in
+    true|1|yes) printf 'true' ;;
+    *) printf 'false' ;;
+  esac
+}
+
+json_number_or_null() {
+  case "$1" in
+    ''|*[!0-9]*) printf 'null' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 snapshot_listener_probe() {
   : >"$DIAG/listener-probe.txt"
+  : >"$DIAG/listener-probe.json"
   (cat /proc/net/tcp 2>/dev/null; cat /proc/net/tcp6 2>/dev/null) >"$DIAG/proc-net-tcp.txt" 2>"$DIAG/proc-net-tcp.err"
   (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || true) >"$DIAG/listeners-tool.txt" 2>"$DIAG/listeners-tool.err"
+  printf '{"ProcNetTcpArtifact":"files/%s/proc-net-tcp.txt","Ports":[\n' "$DIAG" >"$DIAG/listener-probe.json"
+  first=1
   while IFS= read -r port; do
     [ -n "$port" ] || continue
     hex=$(printf '%04X' "$port" 2>/dev/null)
     proc_matches=$(grep -i ":$hex" "$DIAG/proc-net-tcp.txt" 2>/dev/null | wc -l | tr -d ' ')
     printf 'port=%s hex=%s proc_net_tcp_matches=%s\n' "$port" "$hex" "$proc_matches" >>"$DIAG/listener-probe.txt"
     (echo | nc -w 2 127.0.0.1 "$port") >"$DIAG/listener-$port.out" 2>"$DIAG/listener-$port.err"
-    printf '%s' "$?" >"$DIAG/listener-$port.rc"
+    nc_rc="$?"
+    printf '%s' "$nc_rc" >"$DIAG/listener-$port.rc"
+    [ "$first" = 1 ] || printf ',\n' >>"$DIAG/listener-probe.json"
+    first=0
+    printf '  {"Port":%s,"Hex":%s,"ProcNetTcpMatches":%s,"TcpConnectExitCode":%s,"ProcNetTcpProven":%s,"Artifacts":[%s,%s,%s]}' \
+      "$(json_number_or_null "$port")" "$(json_string "$hex")" "$(json_number_or_null "$proc_matches")" "$(json_number_or_null "$nc_rc")" \
+      "$(json_bool "$( [ "${proc_matches:-0}" != 0 ] && echo true || echo false )")" \
+      "$(json_string "files/$DIAG/proc-net-tcp.txt")" "$(json_string "files/$DIAG/listener-$port.out")" "$(json_string "files/$DIAG/listener-$port.err")" >>"$DIAG/listener-probe.json"
   done <"$DIAG/configured-ports.txt"
+  printf '\n]}\n' >>"$DIAG/listener-probe.json"
+}
+
+collect_engine_candidates() {
+  : >"$DIAG/engine-candidates.tsv"
+  docker ps --no-trunc --format '{{.ID}}	{{.Names}}	{{.Labels}}	{{.Ports}}	{{.Status}}' >"$DIAG/engine-candidates.tsv" 2>"$DIAG/engine-candidates.err"
+  printf '%s' "$?" >"$DIAG/engine-candidates.rc"
+  : >"$DIAG/engine-candidate-selected.txt"
+  target_lc=$(printf '%s' "$TARGET" | tr '[:upper:]' '[:lower:]')
+  best_id= best_score=-1 best_reasons= best_names= best_labels= best_ports= best_status=
+  while IFS='	' read -r cid names labels ports status; do
+    [ -n "$cid" ] || continue
+    hay=$(printf '%s %s' "$names" "$labels" | tr '[:upper:]' '[:lower:]')
+    score=0
+    reasons=
+    case "$hay" in *pdocker*) score=$((score + 10)); reasons="${reasons}pdocker-label-or-name," ;; esac
+    case "$hay" in *"$target_lc"*) score=$((score + 8)); reasons="${reasons}target-match," ;; esac
+    case "$target_lc" in
+      default-workspace|workspace) case "$hay" in *workspace*|*code-server*|*vscode*) score=$((score + 5)); reasons="${reasons}workspace-service-hint," ;; esac ;;
+      llama) case "$hay" in *llama*) score=$((score + 5)); reasons="${reasons}llama-service-hint," ;; esac ;;
+    esac
+    case "$labels" in *com.docker.compose.service*|*pdocker.service*|*pdocker.project*) score=$((score + 4)); reasons="${reasons}service-label," ;; esac
+    case "$ports" in *18080*|*18081*) score=$((score + 3)); reasons="${reasons}known-service-port," ;; esac
+    if [ "$score" -gt "$best_score" ]; then
+      best_score="$score"; best_id="$cid"; best_reasons="$reasons"; best_names="$names"; best_labels="$labels"; best_ports="$ports"; best_status="$status"
+    fi
+  done <"$DIAG/engine-candidates.tsv"
+  [ "${best_score:-0}" -gt 0 ] && printf '%s' "$best_id" >"$DIAG/engine-candidate-selected.txt"
+  write_engine_candidates_json "$best_id" "$best_score" "$best_reasons" "$best_names" "$best_labels" "$best_ports" "$best_status"
+}
+
+write_engine_candidates_json() {
+  selected_id="$1"; selected_score="$2"; selected_reasons="$3"; selected_names="$4"; selected_labels="$5"; selected_ports="$6"; selected_status="$7"
+  printf '{\n  "SelectionRule": "Score running Engine containers by pdocker/project/service labels, names, target hints, and known listener ports; names alone are hints, not proof.",\n  "SelectedContainerId": %s,\n  "SelectedScore": %s,\n  "SelectedNames": %s,\n  "SelectedLabels": %s,\n  "SelectedPorts": %s,\n  "SelectedStatus": %s,\n  "SelectedReasons": %s,\n  "Candidates": [\n' \
+    "$( [ -n "$selected_id" ] && json_string "$selected_id" || printf null )" \
+    "$(json_number_or_null "$selected_score")" \
+    "$(json_string "$selected_names")" "$(json_string "$selected_labels")" "$(json_string "$selected_ports")" "$(json_string "$selected_status")" "$(json_string "$selected_reasons")" >"$DIAG/engine-candidates.json"
+  first=1
+  target_lc=$(printf '%s' "$TARGET" | tr '[:upper:]' '[:lower:]')
+  while IFS='	' read -r cid names labels ports status; do
+    [ -n "$cid" ] || continue
+    hay=$(printf '%s %s' "$names" "$labels" | tr '[:upper:]' '[:lower:]')
+    score=0; reasons=
+    case "$hay" in *pdocker*) score=$((score + 10)); reasons="${reasons}pdocker-label-or-name," ;; esac
+    case "$hay" in *"$target_lc"*) score=$((score + 8)); reasons="${reasons}target-match," ;; esac
+    case "$target_lc" in default-workspace|workspace) case "$hay" in *workspace*|*code-server*|*vscode*) score=$((score + 5)); reasons="${reasons}workspace-service-hint," ;; esac ;; llama) case "$hay" in *llama*) score=$((score + 5)); reasons="${reasons}llama-service-hint," ;; esac ;; esac
+    case "$labels" in *com.docker.compose.service*|*pdocker.service*|*pdocker.project*) score=$((score + 4)); reasons="${reasons}service-label," ;; esac
+    case "$ports" in *18080*|*18081*) score=$((score + 3)); reasons="${reasons}known-service-port," ;; esac
+    [ "$first" = 1 ] || printf ',\n' >>"$DIAG/engine-candidates.json"
+    first=0
+    printf '    {"Id":%s,"Names":%s,"Labels":%s,"Ports":%s,"Status":%s,"Score":%s,"Reasons":%s,"Selected":%s}' \
+      "$(json_string "$cid")" "$(json_string "$names")" "$(json_string "$labels")" "$(json_string "$ports")" "$(json_string "$status")" \
+      "$(json_number_or_null "$score")" "$(json_string "$reasons")" "$(json_bool "$( [ "$cid" = "$selected_id" ] && echo true || echo false )")" >>"$DIAG/engine-candidates.json"
+  done <"$DIAG/engine-candidates.tsv"
+  printf '\n  ]\n}\n' >>"$DIAG/engine-candidates.json"
+}
+
+extract_state_ids_and_compare() {
+  selected_id="$1"
+  : >"$DIAG/state-container-ids.tsv"
+  find pdocker -name state.json -type f 2>/dev/null | sort | while IFS= read -r f; do
+    sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F][0-9a-fA-F]*\)".*/\1/p; s/.*"containerId"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F][0-9a-fA-F]*\)".*/\1/p; s/.*"container_id"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F][0-9a-fA-F]*\)".*/\1/p' "$f" 2>/dev/null | while IFS= read -r sid; do
+      [ -n "$sid" ] && printf '%s	%s\n' "$f" "$sid" >>"$DIAG/state-container-ids.tsv"
+    done
+  done
+  match=false
+  [ -n "$selected_id" ] && awk -F '\t' -v id="$selected_id" 'index(id,$2)==1 || index($2,id)==1 { found=1 } END{ exit found ? 0 : 1 }' "$DIAG/state-container-ids.tsv" 2>/dev/null && match=true
+  printf '{\n  "SelectedEngineContainerId": %s,\n  "AnyStateIdMatchesSelected": %s,\n  "Matches": [\n' "$( [ -n "$selected_id" ] && json_string "$selected_id" || printf null )" "$(json_bool "$match")" >"$DIAG/state-id-comparison.json"
+  first=1
+  while IFS='	' read -r path sid; do
+    [ -n "$sid" ] || continue
+    row_match=false
+    if [ -n "$selected_id" ]; then case "$selected_id" in "$sid"*) row_match=true ;; esac; case "$sid" in "$selected_id"*) row_match=true ;; esac; fi
+    [ "$first" = 1 ] || printf ',\n' >>"$DIAG/state-id-comparison.json"
+    first=0
+    printf '    {"Path":%s,"StateContainerId":%s,"MatchesSelected":%s}' "$(json_string "$path")" "$(json_string "$sid")" "$(json_bool "$row_match")" >>"$DIAG/state-id-comparison.json"
+  done <"$DIAG/state-container-ids.tsv"
+  printf '\n  ]\n}\n' >>"$DIAG/state-id-comparison.json"
 }
 
 http_get engine-containers-json '/containers/json?all=1'
@@ -190,6 +292,9 @@ collect_project_ports
 snapshot_ps process-table
 snapshot_state_json persisted-state-json
 snapshot_listener_probe
+collect_engine_candidates
+SELECTED_ENGINE_CID="$(cat "$DIAG/engine-candidate-selected.txt" 2>/dev/null)"
+extract_state_ids_and_compare "$SELECTED_ENGINE_CID"
 
 : >"$DIAG/container-ids.txt"
 cat "$DIAG/engine-ps-running.out" 2>/dev/null | while IFS= read -r cid; do
@@ -205,6 +310,9 @@ ENGINE_HTTP_RC="$(cat "$DIAG/engine-containers-json.rc" 2>/dev/null)"
 ENGINE_STATUS="$(cat "$DIAG/engine-containers-json.status" 2>/dev/null)"
 CID_COUNT="$(wc -l <"$DIAG/container-ids.txt" 2>/dev/null | tr -d ' ')"
 PORTS="$(tr '\n' ' ' <"$DIAG/configured-ports.txt" 2>/dev/null | sed 's/[[:space:]]*$//')"
+STATE_MATCH="false"
+grep -q '"AnyStateIdMatchesSelected": true' "$DIAG/state-id-comparison.json" 2>/dev/null && STATE_MATCH="true"
+LISTENER_PROC_MATCH_PORTS="$(sed -n 's/^port=\([0-9][0-9]*\).*proc_net_tcp_matches=\([1-9][0-9]*\).*/\1/p' "$DIAG/listener-probe.txt" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 
 cat > "$LATEST" <<JSON
 {
@@ -225,7 +333,24 @@ cat > "$LATEST" <<JSON
     "EngineApiContainersStatus": $(json_string "$ENGINE_STATUS"),
     "EngineApiContainersRc": $(json_string "$ENGINE_HTTP_RC"),
     "RunningContainerIdCount": $(json_string "$CID_COUNT"),
-    "ConfiguredPorts": $(json_string "$PORTS")
+    "ConfiguredPorts": $(json_string "$PORTS"),
+    "SelectedEngineContainerId": $( [ -n "$SELECTED_ENGINE_CID" ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+    "StateJsonMatchesSelectedEngineContainerId": $(json_bool "$STATE_MATCH"),
+    "ListenerProcNetTcpMatchedPorts": $(json_string "$LISTENER_PROC_MATCH_PORTS")
+  },
+  "CandidateSelection": {
+    "SelectedEngineContainerId": $( [ -n "$SELECTED_ENGINE_CID" ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+    "Rule": "Select the best Engine container ID candidate from docker ps labels, names, target hints, and known listener ports; this is evidence, not acceptance, until UI/state/process/listener/log sources agree.",
+    "Artifacts": ["files/$DIAG/engine-candidates.json", "files/$DIAG/engine-candidates.tsv", "files/$DIAG/engine-candidate-selected.txt"]
+  },
+  "StateIdComparison": {
+    "SelectedEngineContainerId": $( [ -n "$SELECTED_ENGINE_CID" ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+    "AnyStateIdMatchesSelected": $(json_bool "$STATE_MATCH"),
+    "Artifacts": ["files/$DIAG/state-id-comparison.json", "files/$DIAG/state-container-ids.tsv", "files/$DIAG/persisted-state-json.txt"]
+  },
+  "ListenerProcNetTcpEvidence": {
+    "MatchedPorts": $(json_string "$LISTENER_PROC_MATCH_PORTS"),
+    "Artifacts": ["files/$DIAG/listener-probe.json", "files/$DIAG/listener-probe.txt", "files/$DIAG/proc-net-tcp.txt", "files/$DIAG/listeners-tool.txt"]
   },
   "Sources": {
     "UICard": {
@@ -235,16 +360,18 @@ cat > "$LATEST" <<JSON
       "Gap": "The shell smoke can collect UI input files but cannot yet export the rendered UI card service-health container ID."
     },
     "EngineApiContainersJson": {
-      "ContainerId": null,
+      "ContainerId": $( [ -n "$SELECTED_ENGINE_CID" ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+      "CandidateSelected": $(json_bool "$( [ -n "$SELECTED_ENGINE_CID" ] && echo true || echo false )"),
       "Proven": false,
-      "Artifacts": ["files/$DIAG/engine-containers-json.http", "files/$DIAG/engine-ps.out", "files/$DIAG/container-ids.txt"],
-      "Gap": "Engine candidates are captured, but the verifier does not yet select the service container and bind it to the UI card."
+      "Artifacts": ["files/$DIAG/engine-containers-json.http", "files/$DIAG/engine-ps.out", "files/$DIAG/container-ids.txt", "files/$DIAG/engine-candidates.json"],
+      "Gap": "Engine candidate selection from labels/names is machine-readable, but it is not acceptance until bound to the UI card."
     },
     "PersistedStateJson": {
-      "ContainerId": null,
+      "ContainerId": $( [ "$STATE_MATCH" = true ] && [ -n "$SELECTED_ENGINE_CID" ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+      "MatchesSelectedEngineContainerId": $(json_bool "$STATE_MATCH"),
       "Proven": false,
-      "Artifacts": ["files/$DIAG/persisted-state-json.txt"],
-      "Gap": "state.json snapshots are raw evidence until matched to the selected Engine container ID."
+      "Artifacts": ["files/$DIAG/persisted-state-json.txt", "files/$DIAG/state-id-comparison.json", "files/$DIAG/state-container-ids.tsv"],
+      "Gap": "state.json ID comparison is machine-readable, but still not a same-source acceptance proof without UI/process/listener/log agreement."
     },
     "ProcessTable": {
       "ContainerId": null,
@@ -257,8 +384,9 @@ cat > "$LATEST" <<JSON
       "ContainerId": null,
       "Pid": null,
       "Proven": false,
-      "Artifacts": ["files/$DIAG/configured-ports.txt", "files/$DIAG/listener-probe.txt", "files/$DIAG/proc-net-tcp.txt", "files/$DIAG/listeners-tool.txt"],
-      "Gap": "Listener presence/absence is captured, but listener socket ownership is not yet mapped to the selected container process tree."
+      "Artifacts": ["files/$DIAG/configured-ports.txt", "files/$DIAG/listener-probe.json", "files/$DIAG/listener-probe.txt", "files/$DIAG/proc-net-tcp.txt", "files/$DIAG/listeners-tool.txt"],
+      "ProcNetTcpMatchedPorts": $(json_string "$LISTENER_PROC_MATCH_PORTS"),
+      "Gap": "Listener port and /proc/net/tcp evidence is machine-readable, but listener socket ownership is not yet mapped to the selected container process tree."
     },
     "ContainerLogs": {
       "ContainerId": null,
@@ -269,15 +397,15 @@ cat > "$LATEST" <<JSON
   },
   "Evidence": {
     "UICard": ["files/$DIAG/ui-jobs.json", "files/$DIAG/ui-project-snippets.txt"],
-    "EngineApiContainersJson": ["files/$DIAG/engine-containers-json.http", "files/$DIAG/engine-ps.out", "files/$DIAG/container-ids.txt"],
-    "PersistedStateJson": ["files/$DIAG/persisted-state-json.txt"],
+    "EngineApiContainersJson": ["files/$DIAG/engine-containers-json.http", "files/$DIAG/engine-ps.out", "files/$DIAG/container-ids.txt", "files/$DIAG/engine-candidates.json"],
+    "PersistedStateJson": ["files/$DIAG/persisted-state-json.txt", "files/$DIAG/state-id-comparison.json"],
     "ProcessTable": ["files/$DIAG/process-table.txt"],
-    "ListenerProbe": ["files/$DIAG/configured-ports.txt", "files/$DIAG/listener-probe.txt", "files/$DIAG/proc-net-tcp.txt", "files/$DIAG/listeners-tool.txt"],
+    "ListenerProbe": ["files/$DIAG/configured-ports.txt", "files/$DIAG/listener-probe.json", "files/$DIAG/listener-probe.txt", "files/$DIAG/proc-net-tcp.txt", "files/$DIAG/listeners-tool.txt"],
     "ContainerLogs": ["files/$DIAG/logs-<container-id>.out"]
   },
   "Unresolved": [
     "Rendered UI card container ID is not exported by this smoke entrypoint.",
-    "Engine API, persisted state.json, process table, listener socket owner, and logs are not yet reduced to one same-container-ID proof.",
+    "Engine candidate selection, state.json ID comparison, and listener /proc/net/tcp evidence are recorded, but process/listener ownership and UI card agreement are not yet reduced to one same-container-ID proof.",
     "Negative cases for configured-port-only, stale listener/PID, duplicate name, and previous-container logs remain unproven on device."
   ]
 }

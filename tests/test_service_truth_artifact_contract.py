@@ -25,6 +25,15 @@ def test_service_truth_device_artifact_is_non_passing_until_same_id_proof():
     ]:
         assert source in body
         assert f'"{source}":' in body or source in body.split("RequiredSameContainerId", 1)[1]
+    for term in [
+        "CandidateSelection",
+        "engine-candidates.json",
+        "state-id-comparison.json",
+        "listener-probe.json",
+        "SelectedEngineContainerId",
+        "/proc/net/tcp",
+    ]:
+        assert term in body
     assert "fake success" not in body.lower()
     assert "Rendered UI card container ID is not exported" in body
 
@@ -37,6 +46,10 @@ def test_static_verifier_and_docs_require_concrete_service_truth_schema():
         "TruthContract",
         "RequiredSameContainerId",
         "ListenerProbe",
+        "CandidateSelection",
+        "engine-candidates.json",
+        "state-id-comparison.json",
+        "listener-probe.json",
     ]:
         assert term in verifier
     for term in [
@@ -45,5 +58,9 @@ def test_static_verifier_and_docs_require_concrete_service_truth_schema():
         "Success: false",
         "RequiredSameContainerId",
         "fake success",
+        "engine-candidates.json",
+        "state-id-comparison.json",
+        "listener-probe.json",
+        "/proc/net/tcp",
     ]:
         assert term in compat

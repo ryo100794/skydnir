@@ -233,7 +233,15 @@ Known gaps:
   are all reduced to one `RequiredSameContainerId` proof.  The artifact records
   UI input files, `/containers/json`, `docker ps`, state snapshots, process
   table, configured/listening ports, per-container logs, and explicit
-  unresolved gaps so a device run cannot be mistaken for fake success.
+  unresolved gaps so a device run cannot be mistaken for fake success.  The
+  current planned-gap runner now also emits machine-readable intermediate
+  evidence: `engine-candidates.json` scores Engine container ID candidates from
+  labels, names, target hints, and known service ports;
+  `state-id-comparison.json` compares the selected Engine candidate against
+  IDs found in persisted `state.json`; and `listener-probe.json` records each
+  probed listener port alongside `/proc/net/tcp` match counts and TCP connect
+  exit codes.  These fields improve device debugging but still cannot promote
+  `Success: false` while the rendered UI card container ID is unavailable.
 - Runtime teardown is not yet a compatibility gate: stop/kill/rm must prove
   process-tree and executor cleanup rather than trusting an HTTP 204 response.
   `scripts/android-device-smoke.sh --runtime-teardown <target>` now writes the
