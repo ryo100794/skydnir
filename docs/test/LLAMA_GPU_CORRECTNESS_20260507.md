@@ -248,11 +248,18 @@ Two ICD correctness fixes were added on 2026-05-08:
   primary cause of the current Q6_K sampled mismatch.
 - The executor now patches the specific SPIR-V shape where llama.cpp's shader
   exposes a specialization-backed `BuiltIn WorkgroupSize` but also contains a
-  literal `OpExecutionMode LocalSize 1 1 1`. The patched dispatch reports
-  `local_size_patched=true` and `spirv_local_size=[32,1,1]`, but the sampled
-  Q6_K oracle still mismatches the same first row. This removes the simplest
-  local-size-only explanation and pushes the next split toward Q6_K block decode
-  layout, descriptor view aliasing, or shared-memory reduction semantics.
+  literal `OpExecutionMode LocalSize 1 1 1`. The first version only copied
+  `SpecId 0` into `LocalSize.x`, producing `[32,1,1]` for Q6_K even though the
+  application supplied `[32,2,1]`. That can silently run only half of the
+  intended local invocations. The current implementation copies all available
+  `SpecId 0..2` dimensions and rejects invalid or over-large workgroup sizes.
+  The next device run must confirm that Q6_K reports `local_size_patched=true`
+  with `spirv_local_size=[32,2,1]` and then re-check the sampled oracle.
+- The compare driver now refuses to start a llama container when Android memory
+  headroom is already unsafe. Defaults are `PDOCKER_LLAMA_MIN_FREE_MB=512` and
+  `PDOCKER_LLAMA_MIN_SWAP_FREE_MB=1024`. This prevents GPU tuning runs from
+  starving the browser-backed VS Code session or making failures look like GPU
+  correctness regressions when they are actually low-memory pressure.
 - Decode-variant diagnostics now compare the canonical Q6_K decode against
   common wrong interpretations for the first sampled row. Ignoring high 2-bit
   planes gives `-1.30868773`, treating scales as unsigned gives `-10.0479286`,
@@ -572,3 +579,261 @@ reports `mismatch_count=0`.
 The `ngl=1` model-level correctness probe still fails (`2+3=` produced
 `Marvel` in the latest run), so the remaining primary front blocker is now
 `0x274f68a67dfef210`.
+
+### NGL2 Q4K And Fused RMS/RoPE Split (2026-05-10)
+
+`docs/test/llama-gpu-ngl1-q6k-regression-restart-20260510.json` is the current
+highest correctness-passing performance evidence: `ngl=1` passes the required
+prompt gate and reaches about `2.63x` against the saved CPU baseline.
+
+For `ngl=2`, the Q4_K safe-kernel path has local oracle evidence: sampled
+`0x533df01b7fd2ed97` dispatches match the CPU reconstruction.  The next failure
+is therefore not currently attributed to Q4_K block decoding.
+
+The next observed front family is `0x4f37d4d51dd83526` / `0x53c67d2aebf48739`.
+Disassembly shows these are fused RMSNorm + RoPE/Yarn kernels: the RMSNorm stage
+writes into workgroup memory, then the same shader applies the nested RoPE/Yarn
+stage before writing the final output.  The earlier plain-RMS sampled oracle was
+therefore invalid for these hashes because it compared final output against an
+intermediate value.  The executor now classifies them as
+`rms-norm-rope-fused` and reports `fused-rms-rope-oracle-pending` instead of a
+false mismatch.
+
+Latest log-only evidence is recorded in
+`docs/test/llama-gpu-ngl2-fused-rms-rope-classified-20260510-log-summary.json`.
+That run timed out before the compare wrapper wrote a final correctness JSON, so
+it must not be used as a benchmark claim.  It does establish the next precise
+work item: implement a bounded full fused RMSNorm+RoPE oracle, then continue to
+classify the following unsupported hashes if the fused oracle matches.
+
+### Strict Vulkan Passthrough Mode (2026-05-10)
+
+A strict passthrough switch was added as `PDOCKER_GPU_STRICT_PASSTHROUGH=1` and
+is now the default for `scripts/android-llama-gpu-compare.sh` Vulkan runs unless
+explicitly overridden.  This mode is intended to stop the bridge from solving
+llama.cpp one shader hash at a time.  Under strict mode the executor defaults
+are changed to favor API fidelity over speed:
+
+- no SPIR-V specialization materialization unless explicitly requested,
+- no literal local-size patching,
+- no duplicate descriptor binding rewrite unless explicitly requested,
+- no Q4_K/Q6_K safe-kernel substitution unless explicitly requested,
+- no Q4_K targeted specialization materialization,
+- no unused-descriptor transfer elision,
+- no SPIR-V descriptor-access based transfer trimming,
+- no resident/mutable/write-only buffer cache shortcuts,
+- no dirty-page probe/writeback optimization,
+- no `VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT` default.
+
+Overlap alias grouping is intentionally still enabled because it preserves the
+observable semantics of descriptors that refer to overlapping ranges of the same
+container allocation.  This is a bridge fidelity mechanism, not a performance
+shortcut.
+
+Strict `ngl=1` has now been exercised on device:
+
+| Evidence | Bridge shape | Correctness | Important result |
+|---|---|---|---|
+| `llama-gpu-strict-passthrough-forced-ngl1-20260510.json` | descriptor-range staging | fail | Q6_K raw SPIR-V `0x1bf751845c5dce75` mismatches CPU oracle (`13.8780231` expected, `6.83085108` observed at sample 0). |
+| `llama-gpu-strict-passthrough-no-storage8-ngl1-20260510.json` | descriptor-range staging, storage8 disabled in bridge policy | fail | The same shader still runs while the executor policy reports missing `int8`/`storage8`; performance evidence is rejected as a feature-policy mismatch. |
+| `llama-gpu-strict-passthrough-preserve-buffer-ngl1-20260510.json` | VkBuffer-coordinate staging | fail | Strict mode now stages the full VkBuffer coordinate space and preserves descriptor offsets. RoPE/small sampled oracles match, but Q6_K still mismatches and the run is too slow for a benchmark claim. |
+
+The current conclusion is deliberately narrow: the old descriptor-range staging
+was not API-faithful enough, so strict mode now preserves the application's
+VkBuffer coordinate space.  That did not close the Q6_K result mismatch, which
+means the next pass-through work must preserve more of the Vulkan object graph
+and feature contract rather than adding another llama-specific shader
+substitution.  The most likely remaining bridge gaps are VkBuffer/VkDeviceMemory
+identity, original buffer bind offsets, and feature-gated shader selection for
+the `int8`/`storage8` final-projection path.
+
+The next bridge step is now implemented in code as `VULKAN_DISPATCH_V3`.
+The container-side ICD includes object identity and sizing metadata for each
+storage descriptor:
+
+- `api_memory_id`
+- `api_memory_size`
+- `api_buffer_id`
+- `api_memory_offset`
+- `api_buffer_size`
+- descriptor `api_offset` / `api_range`
+
+When `PDOCKER_GPU_STRICT_PASSTHROUGH=1`, the Android executor uses this metadata
+to create an Android-side Vulkan object graph with one `VkDeviceMemory` per
+container memory identity and one `VkBuffer` per container buffer identity,
+then binds each buffer at the original `vkBindBufferMemory` offset.  The data
+upload is still range-limited to the descriptor ranges for practicality, but
+the driver-facing object graph is no longer collapsed to independent
+`fd+offset+size` buffers.
+
+This is the intended pass-through direction: transfer Vulkan API semantics and
+object identity across the glibc/Bionic process boundary, not llama-specific
+shader semantics.
+
+### Descriptor Set V4 and Adreno Pipeline Blocker (2026-05-10)
+
+`VULKAN_DISPATCH_V4` now transports descriptor-set identity in addition to
+binding number, buffer identity, memory identity, offsets, and ranges.  The ICD
+snapshots multiple descriptor sets from `vkCmdBindDescriptorSets`; the Android
+executor allocates matching descriptor set layouts/sets and binds the whole set
+array to the pipeline.  It no longer silently flattens all descriptors into set
+0.  Multi-set pipelines deliberately bypass the current single-set pipeline
+cache until the cache key is extended.
+
+The latest strict test is:
+
+- `docs/test/llama-gpu-strict-passthrough-v4-dump2-ngl2-20260510.json`
+
+Result: the bridge reaches generic SPIR-V dispatch, preserves strict object
+graph evidence, but Android Vulkan rejects a ggml Q4_K compute pipeline during
+`vkCreateComputePipelines` with `VK_ERROR_UNKNOWN` (`vk_result=-13`).  The
+failing upstream shader was identified from the container shader bundle as:
+
+- `mul_mat_vec_q4_k_f32_f32.spv`
+- original FNV-1a shader hash: `0xf3cd7d18f0276b42`
+- capabilities: `Shader`, `Int8`, `StorageBuffer16BitAccess`,
+  `StorageBuffer8BitAccess`
+
+This is now classified as a driver/pipeline-creation blocker, not a container
+process, Dockerfile, model, or prompt blocker.  Pure strict pass-through does
+not yet survive this Adreno shader.  A compatibility-lowering run with duplicate
+descriptor rewrite enabled moves the blocker to the rewritten Q4_K pipeline,
+which confirms the next work item is the Vulkan pipeline compatibility layer,
+not container startup.
+
+The best currently reproducible GPU-serving run is:
+
+- `docs/test/llama-gpu-safe-ngl1-20260510.json`
+
+That run starts llama.cpp with Vulkan offload (`ngl=1`) and serves HTTP
+successfully.  Required prompt correctness passed (`2+3=` returned `5`), but
+throughput is only about `0.09 tok/s`, far below the CPU baseline and the 10x
+target.  It is evidence that the end-to-end GPU path can serve, not a
+performance success.
+
+Next implementation focus:
+
+1. Keep strict V4 as the fidelity baseline.
+2. Treat Adreno pipeline rejection separately from API object transport.
+3. Implement a generic Vulkan compatibility-lowering layer for driver-rejected
+   SPIR-V patterns (starting with Q4_K duplicate binding / int8-storage
+   patterns) without changing llama.cpp, Dockerfile, model, or prompt.
+4. Keep correctness probes enabled whenever a run reaches HTTP serving.
+
+### Specialization Retry Breakthrough (2026-05-10)
+
+The Q4_K pipeline blocker above was narrowed further.  The same upstream
+`mul_mat_vec_q4_k_f32_f32.spv` module can compile for some specialization
+tuples and fail for another tuple.  The failing strict case used
+`SpecId 2 = 1`; earlier calls using the same module completed successfully.
+
+The executor now retries failed pipeline creation by materializing Vulkan
+specialization constants into ordinary SPIR-V constants.  This is intended as a
+generic driver-compatibility lowering: Vulkan specialization constants are
+pipeline-creation-time constants, so pre-materializing them preserves the API
+meaning while avoiding an Adreno specialization compiler failure.  It does not
+change llama.cpp, the Dockerfile, the model, the prompt, descriptors, memory
+identity, or buffer ranges.
+
+Evidence:
+
+- `docs/test/llama-gpu-strict-v4-specialization-retry-ngl2-20260510.json`
+
+Result: the previous `VK_ERROR_UNKNOWN` pipeline blocker disappeared.  The
+container stayed running and the HTTP health endpoint became reachable after
+the compare wrapper had already timed out.  Manual probing then reached the
+server, but the `2+3=` one-token check returned an incorrect token (`!`) and was
+extremely slow.  Therefore this is a pipeline-creation breakthrough, not yet a
+correctness or performance success.
+
+Current next blocker:
+
+1. Capture CPU-oracle / descriptor hash evidence for the first incorrect
+   `ngl=2` response after specialization retry.
+2. Determine whether the wrong token is caused by a specific remaining shader,
+   descriptor writeback/readback ordering, or insufficient synchronization
+   around materialized-specialization pipelines.
+3. Keep `ngl=1` as the current end-to-end serving baseline and use `ngl=2` as
+   the active correctness target.
+
+### Strict Object Graph Device-Local Staging Probe (2026-05-10)
+
+ADB is currently unavailable, so the next correctness probe was implemented and
+built locally but is not yet device-verified.  The executor now has an opt-in
+strict path controlled by `PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING=1`.
+
+This path keeps the same Vulkan API object graph and descriptor bytes, but places
+the shader-visible storage buffers in device-local memory when the Android Vulkan
+driver exposes a suitable memory type.  A host-visible coherent staging buffer is
+created per strict memory object for upload/download using `vkCmdCopyBuffer`.
+The intent is to test whether the remaining Q6_K mismatch is caused by executing
+packed `int8` / `storage8` SSBO shaders directly from host-visible memory on the
+Android driver.  It is not a shader replacement, CPU oracle writeback, descriptor
+rewrite, or llama.cpp-specific data transformation.
+
+Local evidence completed without ADB:
+
+- `python3 -m unittest tests.test_gpu_abi_contract` passed.
+- `bash scripts/build-gpu-shim.sh` passed.
+- `bash scripts/build-native-termux.sh` passed.
+- `./gradlew :app:assembleCompatDebug` passed.
+
+When ADB is available again, the first device run should be the existing strict
+ngl=1 compare with these additional environment variables:
+
+- `PDOCKER_GPU_STRICT_PASSTHROUGH=1`
+- `PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING=1`
+- `PDOCKER_GPU_CPU_ORACLE=1`
+- `PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1` only if the compact oracle still
+  cannot identify the Q6_K transition.
+
+Pass condition: the Q6_K `mul-mat-vec-q6-k-large` CPU oracle changes from
+`mismatch` to `match`, and the API prompt check still returns the CPU baseline
+answer.  If Q6_K still mismatches with device-local staging, the next target is
+honest capability negotiation or a driver-level minimal reproduction for the
+native Q6_K SPIR-V module.
+
+### Q6_K Workgroup-Shape Hardening (2026-05-13)
+
+The active Q6_K mismatch was narrowed to a workgroup-shape hazard rather than a
+quantization-layout conversion.  Some llama.cpp Vulkan kernels provide
+`LocalSize` through specialization constants.  The bridge previously had a
+compatibility materialization path that only copied `SpecId 0` into the literal
+SPIR-V `LocalSize`, which can collapse a `32x2x1` shader into `32x1x1`.
+
+The executor now treats this as an API contract issue:
+
+- materialized SPIR-V copies `SpecId 0`, `SpecId 1`, and `SpecId 2`;
+- strict passthrough refuses to dispatch if the literal and resolved local sizes
+  disagree;
+- invocation count calculation is overflow-checked and capped at Vulkan's 1024
+  local-invocation limit;
+- Q6_K oracle evidence records `q6_local_size`, `q6_local_invocations`, and a
+  64-lane shader-like diagnostic sum so the next device run can distinguish a
+  true math mismatch from a half-workgroup execution.
+
+Local evidence:
+
+- `python3 -m unittest tests.test_gpu_abi_contract` passed.
+- `bash scripts/build-native-termux.sh` passed.
+- `./gradlew :app:assembleCompatDebug` passed.
+- The compat debug APK was installed on `10.79.130.150:35389`.
+- Device preflight refused the heavy llama run before daemon startup and wrote
+  `docs/test/llama-gpu-workgroup3d-preflight-20260513.json` because the device
+  had only about 21 MiB of free swap after the previous model-start attempt.
+  No llama container was started by that guarded run.
+
+Device llama comparison was intentionally stopped from this step because the
+device was memory-constrained.  A short forced-GPU attempt showed that model
+startup can consume the remaining swap before the HTTP server becomes reachable.
+The compare script now has a stricter preflight gate (`SwapFree >= 1024 MiB` by
+default), stale-target cleanup for `pdocker-llama-cpp`, an Engine start timeout,
+and a runtime watchdog.  It will record memory-pressure evidence instead of
+pushing Android toward LMK/OOM.  The thresholds remain overridable for
+controlled experiments, but benchmark evidence should use the defaults.
+
+Next pass condition: on the next `ngl=1` strict run, the JSON event for
+`mul-mat-vec-q6-k-large` must show `spirv_local_size_resolved:[32,2,1]`,
+`spirv_local_size_consistent:true`, and either `cpu_oracle_status:"match"` or a
+new mismatch whose `q6_shader_like_64_abs_delta` rules out the collapsed
+workgroup-shape hypothesis.

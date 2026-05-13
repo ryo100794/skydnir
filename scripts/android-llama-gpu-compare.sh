@@ -27,7 +27,16 @@ TRACE_ALLOC="${PDOCKER_LLAMA_TRACE_ALLOC:-0}"
 CORRECTNESS="${PDOCKER_LLAMA_CORRECTNESS:-1}"
 LOG_TAIL_LINES="${PDOCKER_LLAMA_LOG_TAIL_LINES:-2000}"
 RESTART_APP_DAEMON="${PDOCKER_LLAMA_RESTART_APP_DAEMON:-1}"
-EXPECTED_GPU_EXECUTOR_MARKER="${PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER:-gpu-executor-core-feature-chain-20260510}"
+MIN_FREE_MB="${PDOCKER_LLAMA_MIN_FREE_MB:-512}"
+MIN_SWAP_FREE_MB="${PDOCKER_LLAMA_MIN_SWAP_FREE_MB:-1024}"
+WAIT_FOR_MEMORY_SEC="${PDOCKER_LLAMA_WAIT_FOR_MEMORY_SEC:-0}"
+WAIT_FOR_MEMORY_INTERVAL_SEC="${PDOCKER_LLAMA_WAIT_FOR_MEMORY_INTERVAL_SEC:-10}"
+RUNTIME_MIN_FREE_MB="${PDOCKER_LLAMA_RUNTIME_MIN_FREE_MB:-384}"
+RUNTIME_MIN_SWAP_FREE_MB="${PDOCKER_LLAMA_RUNTIME_MIN_SWAP_FREE_MB:-512}"
+STOP_ON_FAILURE="${PDOCKER_LLAMA_STOP_ON_FAILURE:-1}"
+ENGINE_START_TIMEOUT_SEC="${PDOCKER_LLAMA_ENGINE_START_TIMEOUT_SEC:-15}"
+STOP_STALE_TARGET_BEFORE_PREFLIGHT="${PDOCKER_LLAMA_STOP_STALE_TARGET_BEFORE_PREFLIGHT:-1}"
+EXPECTED_GPU_EXECUTOR_MARKER="${PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER:-gpu-executor-workgroup3d-20260513}"
 EXPECTED_VULKAN_ICD_MARKER="${PDOCKER_VULKAN_ICD_EXPECTED_MARKER:-vulkan-icd-runtime-marker-20260510}"
 OP_ID="llama-gpu-compare-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 CURRENT_CONTAINER_ID=""
@@ -92,11 +101,19 @@ fi
 mkdir -p "$(dirname "$OUT")"
 TMP="$(mktemp -d)"
 CURRENT_STAGE="initializing"
+RUNTIME_ABORT_JSON="$TMP/runtime-memory-abort.json"
 
 cleanup() {
   local status="$?"
   if [[ "$status" -ne 0 ]]; then
     operation_notify "failed" "$CURRENT_STAGE failed with exit code $status" 1 >/dev/null 2>&1 || true
+    if [[ -s "$RUNTIME_ABORT_JSON" && ! -s "$OUT" ]]; then
+      mkdir -p "$(dirname "$OUT")"
+      cp "$RUNTIME_ABORT_JSON" "$OUT" >/dev/null 2>&1 || true
+    fi
+    if [[ "$STOP_ON_FAILURE" == "1" ]]; then
+      remove_container >/dev/null 2>&1 || true
+    fi
   fi
   rm -rf "$TMP"
   "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
@@ -108,7 +125,18 @@ remote_quote() {
 }
 
 run_as() {
-  "$ADB" shell "run-as $PKG sh -c $(remote_quote "$1")"
+  # Some Android run-as builds preserve the app cwd for direct exec but reset
+  # cwd to / for `sh -c`, which breaks relative access to files/pdocker/*.  Run
+  # a short script file through run-as instead; the interpreter opens it via
+  # the app cwd and then keeps that cwd for the script body.
+  local host_script="$TMP/run-as-$$-$RANDOM.sh"
+  local device_script="files/.pdocker-run-as-$$-$RANDOM.sh"
+  printf '%s\n' "$1" > "$host_script"
+  "$ADB" push "$host_script" "/data/local/tmp/$(basename "$host_script")" >/dev/null
+  "$ADB" shell "run-as $PKG cp /data/local/tmp/$(basename "$host_script") $device_script && run-as $PKG sh $device_script"
+  local rc="$?"
+  "$ADB" shell "rm -f /data/local/tmp/$(basename "$host_script"); run-as $PKG rm -f $device_script" >/dev/null 2>&1 || true
+  return "$rc"
 }
 
 start_daemon_for_test() {
@@ -125,8 +153,11 @@ restart_app_daemon_for_test() {
   if [[ "$RESTART_APP_DAEMON" != "1" ]]; then
     return 0
   fi
-  "$ADB" shell "run-as $PKG sh -c 'pkill -f pdocker-gpu-executor 2>/dev/null; pkill -f pdocker-media-executor 2>/dev/null; pkill -f pdockerd 2>/dev/null; true'" >/dev/null 2>&1 || true
-  "$ADB" shell am kill "$PKG" >/dev/null 2>&1 || true
+  "$ADB" shell "run-as $PKG sh -c 'pkill -x pdocker-gpu-executor 2>/dev/null; pkill -x pdocker-media-executor 2>/dev/null; pkill -f pdockerd 2>/dev/null; true'" >/dev/null 2>&1 || true
+  # `am kill` may leave app-owned native children alive on some devices.  Use
+  # force-stop for this explicit test route so native executor freshness is
+  # deterministic after reinstall/rebuild.
+  "$ADB" shell am force-stop "$PKG" >/dev/null 2>&1 || true
   sleep 1
   start_daemon_for_test
 }
@@ -155,11 +186,23 @@ PY
   run_as "cd files && { printf 'POST /system/operations HTTP/1.1\r\nHost: pdocker\r\nContent-Type: application/json\r\nContent-Length: $len\r\nConnection: close\r\n\r\n'; printf %s $(remote_quote "$json"); } | toybox nc -U pdocker/pdockerd.sock >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
 }
 
+stop_stale_target_if_engine_alive() {
+  if [[ "$STOP_STALE_TARGET_BEFORE_PREFLIGHT" != "1" ]]; then
+    return 0
+  fi
+  local encoded
+  encoded="$(urlencode "$CONTAINER")"
+  # Narrow cleanup only: if a previous compare left the target llama container
+  # alive, stop that Engine object before measuring headroom.  Do not start
+  # pdockerd here; the preflight must remain a low-impact device safety gate.
+  run_as "cd files && test -S pdocker/pdockerd.sock && { printf 'POST /containers/$encoded/stop HTTP/1.1\r\nHost: pdocker\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'; } | toybox nc -U -W 3 pdocker/pdockerd.sock >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
+}
+
 wait_for_engine() {
   local i
   start_daemon_for_test
   for i in $(seq 1 45); do
-    if run_as 'cd files && test -S pdocker/pdockerd.sock && { printf "GET /_ping HTTP/1.1\r\nHost: pdocker\r\nConnection: close\r\n\r\n"; } | toybox nc -U pdocker/pdockerd.sock | grep -q OK' >/dev/null 2>&1; then
+    if run_as 'cd files && test -S pdocker/pdockerd.sock && { printf "GET /_ping HTTP/1.1\r\nHost: pdocker\r\nConnection: close\r\n\r\n"; } | toybox nc -U -W 3 pdocker/pdockerd.sock | grep -q OK' >/dev/null 2>&1; then
       return 0
     fi
     if (( i % 5 == 0 )); then
@@ -169,6 +212,202 @@ wait_for_engine() {
   done
   echo "pdockerd socket did not appear" >&2
   return 1
+}
+
+memory_snapshot_json() {
+  local raw
+  raw="$("$ADB" shell 'cat /proc/meminfo 2>/dev/null; echo ---FREE-M---; free -m 2>/dev/null' 2>/dev/null || true)"
+  python3 - "$raw" <<'PY'
+import json
+import re
+import sys
+
+raw = sys.argv[1] if len(sys.argv) > 1 else ""
+snap = {
+    "mem_total_mb": 0,
+    "mem_used_mb": 0,
+    "mem_free_mb": 0,
+    "mem_available_mb": 0,
+    "mem_preflight_free_mb": 0,
+    "swap_total_mb": 0,
+    "swap_used_mb": 0,
+    "swap_free_mb": 0,
+    "swap_cached_mb": 0,
+}
+def kb_to_mb(value):
+    return int(value) // 1024
+
+for line in raw.splitlines():
+    m = re.match(r"^([A-Za-z_()]+):\s+([0-9]+)\s+kB$", line.strip())
+    if not m:
+        continue
+    key, value = m.group(1), int(m.group(2))
+    if key == "MemTotal":
+        snap["mem_total_mb"] = kb_to_mb(value)
+    elif key == "MemFree":
+        snap["mem_free_mb"] = kb_to_mb(value)
+    elif key == "MemAvailable":
+        snap["mem_available_mb"] = kb_to_mb(value)
+    elif key == "SwapTotal":
+        snap["swap_total_mb"] = kb_to_mb(value)
+    elif key == "SwapFree":
+        snap["swap_free_mb"] = kb_to_mb(value)
+    elif key == "SwapCached":
+        snap["swap_cached_mb"] = kb_to_mb(value)
+
+for line in raw.splitlines():
+    parts = line.split()
+    if not parts:
+        continue
+    if parts[0].startswith("Mem:") and len(parts) >= 4:
+        snap["mem_total_mb"] = snap["mem_total_mb"] or int(parts[1])
+        snap["mem_used_mb"] = int(parts[2])
+        snap["mem_free_mb"] = snap["mem_free_mb"] or int(parts[3])
+    elif parts[0].startswith("Swap:") and len(parts) >= 4:
+        snap["swap_total_mb"] = snap["swap_total_mb"] or int(parts[1])
+        snap["swap_used_mb"] = int(parts[2])
+        snap["swap_free_mb"] = snap["swap_free_mb"] or int(parts[3])
+if not snap["mem_used_mb"] and snap["mem_total_mb"]:
+    snap["mem_used_mb"] = max(0, snap["mem_total_mb"] - snap["mem_free_mb"])
+snap["mem_preflight_free_mb"] = snap["mem_available_mb"] or snap["mem_free_mb"]
+print(json.dumps(snap, separators=(",", ":")))
+PY
+}
+
+ensure_memory_headroom() {
+  local phase="$1"
+  local snap free_mb swap_free_mb
+  snap="$(memory_snapshot_json || printf '{}')"
+  free_mb="$(python3 - "$snap" <<'PY'
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+    print(int(data.get("mem_preflight_free_mb") or data.get("mem_available_mb") or data.get("mem_free_mb") or 0))
+except Exception:
+    print(0)
+PY
+)"
+  swap_free_mb="$(python3 - "$snap" <<'PY'
+import json, sys
+try:
+    print(int(json.loads(sys.argv[1]).get("swap_free_mb") or 0))
+except Exception:
+    print(0)
+PY
+)"
+  if (( free_mb < MIN_FREE_MB || swap_free_mb < MIN_SWAP_FREE_MB )); then
+    operation_notify "failed" "Insufficient memory before $phase: $snap" 1 >/dev/null 2>&1 || true
+    python3 - "$OUT" "$phase" "$snap" "$MIN_FREE_MB" "$MIN_SWAP_FREE_MB" <<'PY' || true
+import json
+import sys
+from pathlib import Path
+
+out, phase, snap_s, min_free, min_swap = sys.argv[1:6]
+try:
+    snap = json.loads(snap_s)
+except Exception:
+    snap = {}
+report = {
+    "error": "insufficient_memory",
+    "phase": phase,
+    "memory": snap,
+    "required": {
+        "mem_free_mb": int(min_free),
+        "swap_free_mb": int(min_swap),
+    },
+    "next_blocker": (
+        f"insufficient Android memory before {phase}; "
+        f"require mem_free>={min_free}MB and swap_free>={min_swap}MB"
+    ),
+    "device_actions": [
+        "Stop the pdocker llama container from the UI or Engine if it is still running.",
+        "Close memory-heavy foreground apps only with user approval; do not force-stop the browser/VS Code session during automated runs.",
+        "Wait until MemAvailable and SwapFree recover, then rerun with PDOCKER_LLAMA_WAIT_FOR_MEMORY_SEC set.",
+        "Keep the generated JSON artifact with the APK/build commit for regression evidence.",
+    ],
+}
+Path(out).parent.mkdir(parents=True, exist_ok=True)
+Path(out).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+    echo "[pdocker llama compare] insufficient memory before $phase: $snap; require mem_free>=${MIN_FREE_MB}MB swap_free>=${MIN_SWAP_FREE_MB}MB" >&2
+    return 1
+  fi
+  echo "[pdocker llama compare] memory before $phase: $snap"
+}
+
+wait_for_memory_headroom() {
+  local phase="$1"
+  local waited=0
+  while true; do
+    if ensure_memory_headroom "$phase"; then
+      return 0
+    fi
+    if (( WAIT_FOR_MEMORY_SEC <= 0 || waited >= WAIT_FOR_MEMORY_SEC )); then
+      return 1
+    fi
+    echo "[pdocker llama compare] waiting for memory headroom (${waited}/${WAIT_FOR_MEMORY_SEC}s)" >&2
+    sleep "$WAIT_FOR_MEMORY_INTERVAL_SEC"
+    waited=$(( waited + WAIT_FOR_MEMORY_INTERVAL_SEC ))
+  done
+}
+
+runtime_memory_headroom_ok() {
+  local phase="$1"
+  local snap free_mb swap_free_mb
+  snap="$(memory_snapshot_json || printf '{}')"
+  free_mb="$(python3 - "$snap" <<'PY'
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+    print(int(data.get("mem_preflight_free_mb") or data.get("mem_available_mb") or data.get("mem_free_mb") or 0))
+except Exception:
+    print(0)
+PY
+)"
+  swap_free_mb="$(python3 - "$snap" <<'PY'
+import json, sys
+try:
+    print(int(json.loads(sys.argv[1]).get("swap_free_mb") or 0))
+except Exception:
+    print(0)
+PY
+)"
+  if (( free_mb < RUNTIME_MIN_FREE_MB || swap_free_mb < RUNTIME_MIN_SWAP_FREE_MB )); then
+    python3 - "$RUNTIME_ABORT_JSON" "$phase" "$snap" "$RUNTIME_MIN_FREE_MB" "$RUNTIME_MIN_SWAP_FREE_MB" <<'PY' || true
+import json
+import sys
+from pathlib import Path
+
+out, phase, snap_s, min_free, min_swap = sys.argv[1:6]
+try:
+    snap = json.loads(snap_s)
+except Exception:
+    snap = {}
+Path(out).write_text(json.dumps({
+    "error": "runtime_memory_pressure",
+    "phase": phase,
+    "memory": snap,
+    "required": {
+        "mem_preflight_free_mb": int(min_free),
+        "swap_free_mb": int(min_swap),
+    },
+    "next_blocker": (
+        f"stopped llama GPU attempt during {phase} before Android LMK/OOM; "
+        f"require mem_available>={min_free}MB and swap_free>={min_swap}MB"
+    ),
+    "device_actions": [
+        "Inspect the generated report before rerunning; it indicates a device-memory failure, not a GPU-correctness result.",
+        "Let Android reclaim swap, or reboot the test device if swap remains exhausted.",
+        "Rerun with the same APK and output path after memory recovers; do not rebuild the llama image just because this guard fired.",
+    ],
+}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+    operation_notify "failed" "Runtime memory pressure during $phase: $snap" 1 >/dev/null 2>&1 || true
+    echo "[pdocker llama compare] runtime memory pressure during $phase: $snap; stopping container" >&2
+    remove_container >/dev/null 2>&1 || true
+    return 1
+  fi
+  return 0
 }
 
 urlencode() {
@@ -207,6 +446,18 @@ engine_request() {
 
 engine_body() {
   engine_request "$@" | http_body
+}
+
+engine_request_with_host_timeout() {
+  local timeout_sec="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    export ADB PKG TMP
+    export -f remote_quote run_as engine_request
+    timeout "${timeout_sec}s" bash -c 'engine_request "$@"' _ "$@"
+  else
+    engine_request "$@"
+  fi
 }
 
 parse_engine_id() {
@@ -255,6 +506,18 @@ import os
 import sys
 
 image, project, model_host, workspace_host, mode, ctx, gpu_layers, port, trace_alloc, model_path, model_url = sys.argv[1:12]
+
+def env_key(item):
+    return item.split("=", 1)[0]
+
+def set_env(env, item):
+    key = env_key(item)
+    for idx, existing in enumerate(env):
+        if env_key(existing) == key:
+            env[idx] = item
+            return
+    env.append(item)
+
 env = [
     "PDOCKER_GPU=auto",
     "PDOCKER_GPU_AUTO=1",
@@ -263,26 +526,30 @@ env = [
     f"LLAMA_ARG_CTX={ctx}",
     f"LLAMA_ARG_PORT={port}",
     "LLAMA_LOG_FILE=/workspace/logs/llama-server.log",
-    f"PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER={os.environ.get('PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER', 'gpu-executor-core-feature-chain-20260510')}",
+    f"PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER={os.environ.get('PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER', 'gpu-executor-workgroup3d-20260513')}",
     f"PDOCKER_VULKAN_ICD_EXPECTED_MARKER={os.environ.get('PDOCKER_VULKAN_ICD_EXPECTED_MARKER', 'vulkan-icd-runtime-marker-20260510')}",
 ]
 if model_url:
-    env.append(f"LLAMA_MODEL_URL={model_url}")
+    set_env(env, f"LLAMA_MODEL_URL={model_url}")
 if mode == "vulkan-raw":
-    env.extend([
+    for item in [
         "PDOCKER_VULKAN_MAX_BUFFER_BYTES=536870912",
         "PDOCKER_VULKAN_DUMP_SPIRV_DIR=/workspace/logs",
+        f"PDOCKER_GPU_FAILED_SPIRV_DIR={workspace_host}/logs",
         "PDOCKER_GPU_DISPATCH_PROFILE_LOG=1",
+        f"PDOCKER_GPU_STRICT_PASSTHROUGH={os.environ.get('PDOCKER_GPU_STRICT_PASSTHROUGH', '1')}",
         "GGML_VK_FORCE_MAX_BUFFER_SIZE=536870912",
         "GGML_VK_FORCE_MAX_ALLOCATION_SIZE=536870912",
         "GGML_VK_SUBALLOCATION_BLOCK_SIZE=536870912",
         f"LLAMA_ARG_N_GPU_LAYERS={gpu_layers}",
-    ])
+    ]:
+        set_env(env, item)
     if trace_alloc == "1":
-        env.append("PDOCKER_VULKAN_ICD_TRACE_ALLOC=1")
-        env.append("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1")
+        set_env(env, "PDOCKER_VULKAN_ICD_TRACE_ALLOC=1")
+        set_env(env, "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1")
 for key in [
     "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
+    "PDOCKER_GPU_STRICT_PASSTHROUGH",
     "PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES",
     "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
     "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
@@ -291,6 +558,8 @@ for key in [
     "PDOCKER_GPU_CPU_ORACLE",
     "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
     "PDOCKER_GPU_Q6K_SAFE_KERNEL",
+    "PDOCKER_GPU_Q4K_SAFE_KERNEL",
+    "PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION",
     "PDOCKER_GPU_RESIDENT_CACHE",
     "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
     "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
@@ -301,6 +570,11 @@ for key in [
     "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
     "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
     "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
+    "PDOCKER_GPU_FAILED_SPIRV_DIR",
+    "PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS",
+    "PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION",
+    "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
+    "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",
     "PDOCKER_GPU_MUTABLE_BUFFER_CACHE",
     "PDOCKER_GPU_VIRTUAL_MEMORY",
     "PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES",
@@ -317,10 +591,11 @@ for key in [
     "PDOCKER_VULKAN_ENABLE_16BIT_STORAGE",
     "PDOCKER_VULKAN_ENABLE_INT64",
     "PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC",
+    "PDOCKER_VULKAN_SUBGROUP_SIZE",
 ]:
     value = os.environ.get(key)
     if value is not None:
-        env.append(f"{key}={value}")
+        set_env(env, f"{key}={value}")
 port_key = f"{port}/tcp"
 payload = {
     "Image": image,
@@ -367,6 +642,7 @@ wait_server() {
   "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
   "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
   for _ in $(seq 1 "$seconds"); do
+    runtime_memory_headroom_ok "wait-server" || return 2
     if curl -fsS --max-time 2 "http://127.0.0.1:$LOCAL_PORT/v1/models" >/dev/null 2>&1 && container_running; then
       return 0
     fi
@@ -424,12 +700,16 @@ start_container_mode() {
   local gpu_layers="${3:-}"
   local payload create_body cid
   wait_for_engine
+  ensure_memory_headroom "starting $mode container"
   remove_container
   payload="$(container_payload "$mode" "$ctx" "$gpu_layers")"
   create_body="$(engine_body POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload")"
   cid="$(printf "%s" "$create_body" | parse_engine_id)"
-  engine_request POST "/containers/$cid/start" "" >/dev/null
   CURRENT_CONTAINER_ID="$cid"
+  if ! engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" POST "/containers/$cid/start" "" >/dev/null; then
+    echo "[pdocker llama compare] Engine start did not return within ${ENGINE_START_TIMEOUT_SEC}s for $cid; continuing with runtime watchdog" >&2
+    runtime_memory_headroom_ok "engine-start-timeout" || return 1
+  fi
   printf "%s\n" "$cid"
 }
 
@@ -564,6 +844,9 @@ print(json.dumps(summary, indent=2))
 PY
 }
 
+CURRENT_STAGE="memory preflight"
+stop_stale_target_if_engine_alive
+wait_for_memory_headroom "preflight before daemon start"
 restart_app_daemon_for_test
 wait_for_engine
 DEVICE_PROJECT="$(run_as "cd $(remote_quote "$PROJECT") && pwd" | tr -d '\r')"
@@ -642,6 +925,7 @@ fi
 container_state > "$GPU_STATE"
 container_logs > "$GPU_LOG"
 
+PDOCKER_LLAMA_RUNTIME_ABORT_JSON="$RUNTIME_ABORT_JSON" \
 python3 - "$CPU_JSON" "$CPU_CORRECTNESS_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$CORRECTNESS_JSON" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" <<'PY'
 import json
 import math
@@ -667,6 +951,13 @@ if Path(correctness_path).is_file() and Path(correctness_path).stat().st_size:
         correctness = json.load(open(correctness_path, encoding="utf-8"))
     except Exception:
         correctness = {}
+runtime_abort = {}
+runtime_abort_path = os.environ.get("PDOCKER_LLAMA_RUNTIME_ABORT_JSON", "")
+if runtime_abort_path and Path(runtime_abort_path).is_file() and Path(runtime_abort_path).stat().st_size:
+    try:
+        runtime_abort = json.load(open(runtime_abort_path, encoding="utf-8"))
+    except Exception:
+        runtime_abort = {}
 cpu_correctness = {}
 if Path(cpu_correctness_path).is_file() and Path(cpu_correctness_path).stat().st_size:
     try:
@@ -931,12 +1222,16 @@ config_expectations = [
     ("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "duplicate_descriptor_rewrite"),
     ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
     ("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "disable_pipeline_optimization"),
+    ("PDOCKER_GPU_STRICT_PASSTHROUGH", "strict_passthrough"),
     ("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", "skip_unused_descriptor_transfers"),
     ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "spirv_descriptor_access"),
     ("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", "disable_overlap_aliasing"),
     ("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle_requested"),
+    ("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", "strict_object_graph.device_local_staging_requested"),
     ("PDOCKER_GPU_Q6K_SAFE_KERNEL", "q6k_safe_kernel"),
     ("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", "cpu_oracle.oracle_writeback"),
+    ("PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel"),
+    ("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization_materialized"),
     ("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_buffer_cache.enabled"),
 ]
 config_checks = []
@@ -947,7 +1242,12 @@ for env_name, event_field in config_expectations:
         status = "not-requested"
     elif not observed:
         status = "missing-evidence"
-    elif env_name in {"PDOCKER_GPU_Q6K_SAFE_KERNEL", "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK"} and expected in observed:
+    elif env_name in {
+        "PDOCKER_GPU_Q6K_SAFE_KERNEL",
+        "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
+        "PDOCKER_GPU_Q4K_SAFE_KERNEL",
+        "PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION",
+    } and expected in observed:
         status = "pass"
     elif all(value == expected for value in observed):
         status = "pass"
@@ -964,7 +1264,7 @@ config_propagation = {
     "summary": "fail" if any(item["status"] in {"missing-evidence", "mismatch"} for item in config_checks) else "pass",
     "checks": config_checks,
 }
-expected_executor_marker = os.environ.get("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", "gpu-executor-core-feature-chain-20260510")
+expected_executor_marker = os.environ.get("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", "gpu-executor-workgroup3d-20260513")
 expected_icd_marker = os.environ.get("PDOCKER_VULKAN_ICD_EXPECTED_MARKER", "vulkan-icd-runtime-marker-20260510")
 observed_executor_markers = sorted({
     str(e.get("executor_build_marker"))
@@ -1310,6 +1610,50 @@ for event in valid_spirv_events:
                     primary_readonly_dispatch_mutations.append(readonly_binding_hash_mismatches[-1])
                 elif not upload_hash:
                     primary_readonly_upload_hash_mismatches.append(readonly_binding_hash_mismatches[-1])
+q6_oracle_events = [
+    e for e in valid_spirv_events
+    if isinstance(e.get("cpu_oracle"), dict)
+    and e.get("cpu_oracle", {}).get("kernel_hint") == "mul-mat-vec-q6-k-large"
+]
+q6_latest = q6_oracle_events[-1] if q6_oracle_events else {}
+q6_latest_oracle = q6_latest.get("cpu_oracle") if isinstance(q6_latest.get("cpu_oracle"), dict) else {}
+q6_latest_partial = (
+    q6_latest_oracle.get("partial_diagnostic")
+    if isinstance(q6_latest_oracle.get("partial_diagnostic"), dict)
+    else {}
+)
+q6_workgroup_diagnostics = {
+    "event_count": len(q6_oracle_events),
+    "latest_spirv_hash": q6_latest.get("spirv_hash"),
+    "latest_status": q6_latest_oracle.get("status"),
+    "latest_mismatch_count": q6_latest_oracle.get("mismatch_count"),
+    "local_size": q6_latest.get("spirv_local_size"),
+    "local_size_resolved": q6_latest.get("spirv_local_size_resolved"),
+    "local_size_consistent": q6_latest.get("spirv_local_size_consistent"),
+    "q6_local_size": q6_latest_partial.get("q6_local_size"),
+    "q6_local_invocations": q6_latest_partial.get("q6_local_invocations"),
+    "q6_shader_like_abs_delta": q6_latest_partial.get("q6_shader_like_abs_delta"),
+    "q6_shader_like_64_abs_delta": q6_latest_partial.get("q6_shader_like_64_abs_delta"),
+    "workgroup_shape_blocker": bool(
+        q6_latest
+        and (
+            q6_latest.get("spirv_local_size_consistent") is False
+            or (
+                isinstance(q6_latest_partial.get("q6_local_size"), list)
+                and q6_latest_partial.get("q6_local_size") != q6_latest.get("spirv_local_size_resolved")
+            )
+        )
+    ),
+    "diagnostic_interpretation": (
+        "no-q6-oracle-event"
+        if not q6_oracle_events
+        else "workgroup-shape-inconsistent"
+        if q6_latest.get("spirv_local_size_consistent") is False
+        else "q6-oracle-matches"
+        if q6_latest_oracle.get("status") == "match"
+        else "q6-mismatch-after-workgroup-check"
+    ),
+}
 diagnostic_bisection = {
     "method": "binary-search fault isolation over API, graph, ICD, executor, and readback boundaries",
     "nodes": [
@@ -1362,6 +1706,24 @@ diagnostic_bisection = {
             },
         },
         {
+            "id": "q6_workgroup_shape",
+            "question": "Does Q6_K execute with the same three-dimensional local size that llama.cpp specialized?",
+            "state": (
+                "inconsistent"
+                if q6_workgroup_diagnostics["workgroup_shape_blocker"]
+                else "match"
+                if q6_workgroup_diagnostics["latest_status"] == "match"
+                else "mismatch"
+                if q6_workgroup_diagnostics["latest_status"] == "mismatch"
+                else "not-reached"
+            ),
+            "routes": {
+                "inconsistent": "fix_local_size_materialization",
+                "match": "next_ngl_shader_or_performance",
+                "mismatch": "q6_descriptor_memory_or_math",
+            },
+        },
+        {
             "id": "env_propagation",
             "question": "Did requested bridge tuning environment variables reach the executor as dispatch evidence?",
             "state": config_propagation["summary"],
@@ -1399,6 +1761,7 @@ diagnostic_bisection = {
         "push_bytes": final_projection_candidate.get("push_bytes"),
         "binding_count": final_projection_candidate.get("bindings"),
     } if final_projection_candidate else {},
+    "q6_workgroup_diagnostics": q6_workgroup_diagnostics,
 }
 failure_axes = {
     "advertised_limits": {
@@ -1544,6 +1907,12 @@ bridge_dispatch_profile = {
 speedup = (gpu_tps / cpu_tps) if cpu_tps and gpu_tps else 0.0
 target_met = bool(cpu_tps and gpu_tps >= target_tps)
 next_action = (
+    "free Android memory or lower the llama runtime memory footprint, then rerun; the watchdog stopped before LMK/OOM"
+    if runtime_abort
+    else
+    "fix Q6_K three-dimensional workgroup shape propagation before interpreting numeric mismatch"
+    if q6_workgroup_diagnostics["workgroup_shape_blocker"]
+    else
     "fix Vulkan buffer base/range accounting for scheduler warmup"
     if evidence["buffer_range_assert_blocker"]
     else
@@ -1571,6 +1940,9 @@ next_action = (
 )
 if blocker_class == "bridge_dispatch_performance":
     blocker_detail = "served through generic SPIR-V, but bridge upload/copy overhead keeps GPU below CPU throughput"
+if runtime_abort:
+    blocker_detail = runtime_abort.get("next_blocker") or "runtime memory pressure stopped the llama GPU attempt before Android LMK/OOM"
+    blocker_class = "runtime_memory_pressure"
 result = {
     "schema": "pdocker.llama.gpu.compare.v1",
     "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1603,6 +1975,7 @@ result = {
         "state_excerpt": state[:2000],
         "log_excerpt": log[-12000:],
         "evidence": evidence,
+        "runtime_abort": runtime_abort,
         "allocation_trace_bytes": allocations[-32:],
         "bridge_dispatch_profile": bridge_dispatch_profile,
         "diagnostics": {
@@ -1619,6 +1992,7 @@ result = {
             "config_propagation": config_propagation,
             "api_understanding": api_understanding,
             "diagnostic_bisection": diagnostic_bisection,
+            "q6_workgroup_diagnostics": q6_workgroup_diagnostics,
         },
         "correctness": correctness,
     },

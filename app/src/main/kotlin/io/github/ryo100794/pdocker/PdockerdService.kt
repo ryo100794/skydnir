@@ -181,6 +181,7 @@ class PdockerdService : Service() {
         }
     }
 
+    @Synchronized
     private fun startGpuExecutor(runtime: File) {
         if (gpuExecutorProcess?.isAlive == true) return
         killStaleSidecar("pdocker-gpu-executor")
@@ -209,11 +210,13 @@ class PdockerdService : Service() {
         }
     }
 
+    @Synchronized
     private fun stopGpuExecutor() {
         gpuExecutorProcess?.destroy()
         gpuExecutorProcess = null
     }
 
+    @Synchronized
     private fun startMediaExecutor(runtime: File) {
         if (mediaExecutorProcess?.isAlive == true) return
         killStaleSidecar("pdocker-media-executor")

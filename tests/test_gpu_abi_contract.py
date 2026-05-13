@@ -9,6 +9,7 @@ CONTAINER_HEADER = ROOT / "docker-proot-setup" / "src" / "gpu" / "pdocker_gpu_ab
 GPU_EXECUTOR = ROOT / "app" / "src" / "main" / "cpp" / "pdocker_gpu_executor.c"
 VULKAN_ICD = ROOT / "docker-proot-setup" / "src" / "gpu" / "pdocker_vulkan_icd.c"
 LLAMA_COMPARE = ROOT / "scripts" / "android-llama-gpu-compare.sh"
+PDOCKERD = ROOT / "docker-proot-setup" / "bin" / "pdockerd"
 PDOCKERD_SERVICE = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "PdockerdService.kt"
 
 
@@ -101,7 +102,22 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("binding_alias_rep[i] != i", source)
         self.assertIn("i0 < j1 && j0 < i1", source)
         self.assertIn("!binding_group_span_seen[rep] || start < binding_group_base[rep]", source)
-        self.assertIn("infos[write_count].offset = (VkDeviceSize)binding_gpu_offset[i];", source)
+        self.assertIn("binding_descriptor_offset[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
+        self.assertIn("infos[write_count].offset = (VkDeviceSize)binding_descriptor_offset[i];", source)
+        self.assertIn("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", source)
+        self.assertIn("has_strict_device_local_staging", source)
+        self.assertIn("strict_device_local_staging=", source)
+        self.assertIn("device_local_staged", source)
+        self.assertIn("vkCmdCopyBuffer(command_buffer,", source)
+        self.assertIn("device_local_staging_requested", source)
+        self.assertIn("staging_upload_copies", source)
+        self.assertIn("staging_download_copies", source)
+        self.assertIn("PDOCKER_GPU_DISPATCH_TIMEOUT_MS", source)
+        self.assertIn("vulkan-dispatch-timeout", source)
+        self.assertIn("(strict_passthrough && !strict_device_local_staging) ? 0", source)
+        self.assertIn("!binding_read_needed[i] || !vk_buffers[i]", source)
+        self.assertIn("only the union of descriptor", source)
+        self.assertIn("vulkan_vector_staging_offset", source)
         self.assertIn("sample_fd_hash(", source)
         self.assertIn("sample_memory_hash(", source)
         self.assertIn("binding_upload_ms[i] = now_ms() - binding_start;", source)
@@ -112,7 +128,8 @@ class GpuAbiContractTest(unittest.TestCase):
         service = PDOCKERD_SERVICE.read_text()
         self.assertIn("RESTART_APP_DAEMON", compare)
         self.assertIn("restart_app_daemon_for_test", compare)
-        self.assertIn("pkill -f pdocker-gpu-executor", compare)
+        self.assertIn("pkill -x pdocker-gpu-executor", compare)
+        self.assertIn("am force-stop", compare)
         self.assertIn("EXPECTED_GPU_EXECUTOR_MARKER", compare)
         self.assertIn("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", compare)
         self.assertIn("EXPECTED_VULKAN_ICD_MARKER", compare)
@@ -125,6 +142,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("while helper executors are gone", service)
         self.assertIn("killStaleSidecar", service)
         self.assertIn("pkill -f '$processName'", service)
+        self.assertIn("@Synchronized\n    private fun startGpuExecutor", service)
         self.assertIn("startGpuExecutor(runtime)", service)
         self.assertIn("startMediaExecutor(runtime)", service)
 
@@ -132,8 +150,12 @@ class GpuAbiContractTest(unittest.TestCase):
         compare = LLAMA_COMPARE.read_text()
         for env_name, field_name in [
             ("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle_requested"),
+            ("PDOCKER_GPU_STRICT_PASSTHROUGH", "strict_passthrough"),
+            ("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", "strict_object_graph.device_local_staging_requested"),
             ("PDOCKER_GPU_Q6K_SAFE_KERNEL", "q6k_safe_kernel"),
             ("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", "cpu_oracle.oracle_writeback"),
+            ("PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel"),
+            ("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization_materialized"),
             ("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_buffer_cache.enabled"),
             ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
             ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "spirv_descriptor_access"),
@@ -141,7 +163,21 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(env_name, compare)
             self.assertIn(field_name, compare)
         source = GPU_EXECUTOR.read_text()
+        self.assertIn("strict_vulkan_passthrough_requested", source)
+        self.assertIn("PDOCKER_GPU_STRICT_PASSTHROUGH", source)
+        self.assertIn('\\"strict_passthrough\\":%s', source)
+        self.assertIn('\\"requested_feature_mask\\":\\"0x%016llx\\"', source)
+        self.assertIn("requested_feature_mask=", source)
+        self.assertIn("#define PDOCKER_GPU_PIPELINE_CACHE_SLOTS 256", source)
+        self.assertIn("last_used = g_vulkan_pipeline_cache_clock++", source)
+        self.assertIn('\\"pipeline_key\\":{\\"spirv_hash\\":\\"0x%016llx\\"', source)
+        self.assertIn("only the mapped constant IDs and their referenced bytes participate", source)
+        self.assertIn('env_truthy("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", 0)', source)
         self.assertIn('\\"mutable_buffer_cache\\":{\\"enabled\\":%s,\\"max_bytes\\":%zu}', source)
+        self.assertIn('\\"q4k_targeted_specialization_materialized\\":%s', source)
+        self.assertIn('\\"q4k_safe_kernel\\":%s', source)
+        self.assertIn("kQ4kSafeSpv", source)
+        self.assertIn('"PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": os.environ.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0")', PDOCKERD.read_text())
 
     def test_vulkan_duplicate_binding_rewrite_avoids_passed_bindings(self):
         source = GPU_EXECUTOR.read_text()
@@ -149,8 +185,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("size_t binding_count", source)
         self.assertIn("used[bindings[i].binding] = 1;", source)
         self.assertIn("descriptor_sets[code[i + 1]] = code[i + 3];", source)
-        self.assertIn("descriptor_sets[code[i + 1]] != 0", source)
+        self.assertIn("has_descriptor_set[code[i + 1]] = 1;", source)
+        self.assertIn("!has_descriptor_set[code[i + 1]] || descriptor_sets[code[i + 1]] != 0", source)
         self.assertIn("rewrite_duplicate_descriptor_bindings(\n                shader_code,\n                shader_size,\n                bindings,\n                binding_count,", source)
+
+    def test_fused_rms_rope_hashes_do_not_use_plain_rms_oracle(self):
+        source = GPU_EXECUTOR.read_text()
+        self.assertIn("rms-norm-rope-fused", source)
+        self.assertIn("fused-rms-rope-oracle-pending", source)
+        self.assertIn("0x4f37d4d51dd83526ull", source)
+        self.assertIn("0x53c67d2aebf48739ull", source)
 
     def test_vulkan_specialization_constants_can_be_materialized(self):
         source = GPU_EXECUTOR.read_text()
@@ -217,6 +261,48 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;", source)
         descriptor_size = source.split("static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding) {", 1)[1].split("\n}", 1)[0]
         self.assertNotIn("buffer_available(binding->buffer, binding->offset)", descriptor_size)
+
+    def test_strict_passthrough_preserves_vkbuffer_coordinate_space(self):
+        source = GPU_EXECUTOR.read_text() + "\n" + VULKAN_ICD.read_text()
+        for marker in [
+            "Strict passthrough keeps the application's VkBuffer coordinate",
+            "VULKAN_DISPATCH_V3",
+            "VULKAN_DISPATCH_V4",
+            "api_memory_sizes[binding_count]",
+            "api_memory_ids[binding_count]",
+            "api_buffer_ids[binding_count]",
+            "api_descriptor_sets[binding_count]",
+            "bindings[i].descriptor_set",
+            "VulkanStrictMemoryObject",
+            "VulkanStrictBufferObject",
+            "create_strict_vulkan_object_graph",
+            "vkBindBufferMemory(device, buffers[b].buffer, memory->memory, buffers[b].memory_offset)",
+            "strict_object_graph",
+            "unsupported_descriptor_set_layout",
+            "descriptor-set-index-out-of-range",
+            "VkDescriptorSetLayout set_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]",
+            "VkDescriptorSet descriptor_sets[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS]",
+            ".setLayoutCount = descriptor_set_count",
+            ".pSetLayouts = set_layouts",
+            ".descriptorSetCount = descriptor_set_count",
+            "vkAllocateDescriptorSets(rt->device, &dsai, descriptor_sets)",
+            "writes[write_count].dstSet = descriptor_sets[bindings[i].descriptor_set]",
+            "descriptor_set_count,\n                            descriptor_sets",
+            "binding_object_base[PDOCKER_GPU_MAX_VULKAN_BINDINGS]",
+            "binding_object_end[PDOCKER_GPU_MAX_VULKAN_BINDINGS]",
+            "object_base = bindings[i].api_memory_offset;",
+            "object_end = bindings[i].api_memory_offset + (off_t)bindings[i].api_buffer_size;",
+            "const off_t i0 = strict_passthrough ? binding_object_base[i] : bindings[i].offset;",
+            "const off_t j0 = strict_passthrough ? binding_object_base[j] : bindings[j].offset;",
+            "const off_t start = strict_passthrough ? binding_object_base[i] : bindings[i].offset;",
+            "descriptor_absolute = bindings[i].api_memory_offset + bindings[i].api_offset;",
+            "binding_gpu_offset[i] = (size_t)(descriptor_absolute - binding_group_base[rep]);",
+            ": (size_t)descriptor_absolute;",
+            "binding_descriptor_offset[i] = (size_t)bindings[i].api_offset;",
+            "VkDescriptorBufferInfo.offset",
+            "object-graph coordinate fidelity",
+        ]:
+            self.assertIn(marker, source)
 
     def test_vulkan_command_buffer_replays_all_recorded_dispatches(self):
         source = VULKAN_ICD.read_text()
@@ -342,15 +428,35 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"api_descriptor_type\\":%u', source)
         self.assertIn("write_spirv_binding_reflection_report", source)
         self.assertIn("write_cpu_oracle_report", source)
+        self.assertIn("triage must not require turning on every descriptor dump", source)
         self.assertIn("cpu_oracle_known_llama_hash", source)
         self.assertIn("write_vulkan_rw_alias_hazard_report", source)
         self.assertIn('\\"rw_alias_hazards\\":{\\"count\\":%zu', source)
         self.assertIn('\\"push_u32\\":[', source)
         self.assertIn("run_cpu_oracle_q6k_matvec_sample", source)
         self.assertIn("mul-mat-vec-q6-k-large", source)
+        self.assertIn("0xbefdfb97e9734eb3ull", source)
         self.assertIn('\\"partial_diagnostic\\":', source)
         self.assertIn("patch_spirv_literal_local_size_from_spec", source)
+        self.assertIn("legalizes the execution", source)
+        self.assertIn("found_local_size_spec", source)
+        self.assertIn("local_size[dim] = value;", source)
+        self.assertIn("const uint64_t invocation_count", source)
         self.assertIn('\\"local_size_patched\\":%s', source)
+        self.assertIn('\\"spirv_local_size\\":[%u,%u,%u]', source)
+        self.assertIn('\\"spirv_local_size_resolved\\":[%llu,%llu,%llu]', source)
+        self.assertIn('\\"spirv_local_size_consistent\\":%s', source)
+        self.assertIn("spirv_local_size_consistent(", source)
+        self.assertIn("spirv-local-size-inconsistent", source)
+        self.assertIn("strict passthrough refused", source)
+        self.assertIn("spirv_local_invocation_count", source)
+        self.assertIn("product > UINT64_MAX / local_size[i]", source)
+        self.assertIn("invalid-q6-local-size", source)
+        self.assertIn('\\"q6_local_size\\":[%llu,%llu,%llu]', source)
+        self.assertIn('\\"q6_local_invocations\\":%llu', source)
+        self.assertIn('\\"q6_shader_like_64_sum\\":%.9g', source)
+        self.assertIn("q6_resolved_local_size", source)
+        self.assertIn("q6_diag_lanes", source)
         self.assertIn('\\"cpu_oracle_requested\\":%s', source)
         self.assertIn('\\"pre_barriers\\":%u,\\"post_barriers\\":%u', source)
         self.assertIn("vkCmdPipelineBarrier(command_buffer,", source)
@@ -362,6 +468,47 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_llama_gpu_compare_can_forward_bridge_tuning_env(self):
         compare = LLAMA_COMPARE.read_text()
         self.assertIn("import os", compare)
+        self.assertIn("def set_env(env, item):", compare)
+        self.assertIn("env[idx] = item", compare)
+        self.assertIn("set_env(env, f\"{key}={value}\")", compare)
+
+    def test_llama_gpu_compare_memory_preflight_uses_available_memory(self):
+        compare = LLAMA_COMPARE.read_text()
+        self.assertIn("MemAvailable", compare)
+        self.assertIn('"mem_available_mb"', compare)
+        self.assertIn('"mem_preflight_free_mb"', compare)
+        self.assertIn('data.get("mem_preflight_free_mb")', compare)
+        self.assertIn('wait_for_memory_headroom "preflight before daemon start"', compare)
+        preflight_call = compare.index('wait_for_memory_headroom "preflight before daemon start"')
+        self.assertLess(
+            preflight_call,
+            compare.index("restart_app_daemon_for_test", preflight_call),
+        )
+        self.assertIn("runtime_memory_headroom_ok", compare)
+        self.assertIn("RUNTIME_MIN_SWAP_FREE_MB", compare)
+        self.assertIn('MIN_SWAP_FREE_MB="${PDOCKER_LLAMA_MIN_SWAP_FREE_MB:-1024}"', compare)
+        self.assertIn('WAIT_FOR_MEMORY_SEC="${PDOCKER_LLAMA_WAIT_FOR_MEMORY_SEC:-0}"', compare)
+        self.assertIn("wait_for_memory_headroom", compare)
+        self.assertIn('RUNTIME_MIN_SWAP_FREE_MB="${PDOCKER_LLAMA_RUNTIME_MIN_SWAP_FREE_MB:-512}"', compare)
+        self.assertIn('STOP_ON_FAILURE="${PDOCKER_LLAMA_STOP_ON_FAILURE:-1}"', compare)
+        self.assertIn('ENGINE_START_TIMEOUT_SEC="${PDOCKER_LLAMA_ENGINE_START_TIMEOUT_SEC:-15}"', compare)
+        self.assertIn('STOP_STALE_TARGET_BEFORE_PREFLIGHT="${PDOCKER_LLAMA_STOP_STALE_TARGET_BEFORE_PREFLIGHT:-1}"', compare)
+        self.assertIn("stop_stale_target_if_engine_alive", compare)
+        self.assertIn("Do not start", compare)
+        self.assertIn("engine_request_with_host_timeout", compare)
+        self.assertIn("continuing with runtime watchdog", compare)
+        self.assertIn("engine-start-timeout", compare)
+        self.assertIn('"runtime_memory_pressure"', compare)
+        self.assertIn('"runtime_abort": runtime_abort', compare)
+        self.assertIn('"device_actions"', compare)
+        self.assertIn("do not force-stop the browser/VS Code session", compare)
+        self.assertIn("do not rebuild the llama image", compare)
+        self.assertIn('cp "$RUNTIME_ABORT_JSON" "$OUT"', compare)
+        self.assertIn("remove_container >/dev/null 2>&1 || true", compare)
+        self.assertIn("q6_workgroup_diagnostics", compare)
+        self.assertIn("workgroup_shape_blocker", compare)
+        self.assertIn("fix Q6_K three-dimensional workgroup shape propagation", compare)
+        self.assertIn("q6_shader_like_64_abs_delta", compare)
         for key in [
             "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
             "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
@@ -380,12 +527,22 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES",
             "PDOCKER_GPU_DISABLE_ANDROID_VULKAN",
             "PDOCKER_GPU_DISABLE_ANDROID_OPENCL",
+            "PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS",
+            "PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION",
+            "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
+            "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",
             "PDOCKER_ANDROID_OPENCL_LIBRARY",
             "PDOCKER_VULKAN_HEAP_BYTES",
             "PDOCKER_VULKAN_ICD_DEBUG",
+            "PDOCKER_VULKAN_SUBGROUP_SIZE",
         ]:
             self.assertIn(f'"{key}"', compare)
         self.assertIn("value = os.environ.get(key)", compare)
+        self.assertIn("PDOCKER_LLAMA_MIN_FREE_MB", compare)
+        self.assertIn("PDOCKER_LLAMA_MIN_SWAP_FREE_MB", compare)
+        self.assertIn("ensure_memory_headroom", compare)
+        self.assertIn("insufficient memory before", compare)
+        self.assertIn("toybox nc -U -W 3 pdocker/pdockerd.sock", compare)
         source = GPU_EXECUTOR.read_text()
         for marker in [
             "apply_vulkan_feature_policy",
@@ -399,8 +556,15 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, source)
         icd = VULKAN_ICD.read_text()
+        self.assertIn("requested_feature_mask_from_device_create_info", icd)
+        self.assertIn("pipeline->requested_feature_mask", icd)
+        self.assertIn("requested_feature_mask=%llu", icd)
         self.assertIn("rewrite_duplicate_descriptors=%u", icd)
         self.assertIn("mutable_cache=%u", icd)
+        self.assertIn("q4k_safe_kernel=%u", icd)
+        self.assertIn("q4k_targeted_specialization=%u", icd)
+        self.assertIn("strict_passthrough=%u", icd)
+        self.assertIn("strict_device_local_staging=%u", icd)
         self.assertIn("materialize_specialization=%u", icd)
         self.assertIn("disable_pipeline_optimization=%u", icd)
         self.assertIn("skip_unused_descriptor_transfers=%u", icd)
@@ -422,6 +586,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("disable_storage8=%u", icd)
         self.assertIn("disable_storage16=%u", icd)
         self.assertIn("disable_subgroup_arithmetic=%u", icd)
+        self.assertIn("advertised_subgroup_size", icd)
+        self.assertIn("PDOCKER_VULKAN_SUBGROUP_SIZE", icd)
+        self.assertIn("subgroupSize = advertised_subgroup_size()", icd)
 
     def test_llama_gpu_compare_classifies_executor_feature_mismatches(self):
         compare = LLAMA_COMPARE.read_text()
