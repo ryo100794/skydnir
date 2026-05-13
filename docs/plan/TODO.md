@@ -14,6 +14,13 @@ or closes.
 
 ### Next Queue Generated 2026-05-04
 
+- [doing] Cross-project incomplete implementation audit:
+  `docs/plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md` now tracks
+  unfinished, partial, temporary, or insufficiently verified work across
+  Markdown docs, Kotlin/Android UI, native/direct runtime, GPU bridge, scripts,
+  and test ledgers.  Before claiming a feature is complete, reconcile it
+  against that audit and either close it with implementation plus evidence or
+  keep it visible as an explicit planned gap.
 - [doing] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
   llama GPU bridge ABI: keep llama.cpp unmodified while expanding the
   pdocker Vulkan/OpenCL bridge from device discovery and model-buffer
@@ -28,7 +35,14 @@ or closes.
   next primary blocker is `0x274f68a67dfef210`, now classified as a
   `mul_mat_vec_q6_k`-like large quantized matvec. The bounded sample oracle now
   executes and mismatches 8/8 sampled rows, so the next split is Q6_K
-  decode/math vs descriptor-view/local-size execution semantics.
+  decode/math vs descriptor-view/local-size execution semantics. Current slice:
+  the executor preserves three-dimensional specialized local size
+  (`32x2x1` instead of a collapsed `32x1x1`), emits Q6_K 64-lane diagnostic
+  evidence, and the compare runner refuses llama GPU starts when Android swap
+  headroom is unsafe. `scripts/verify-llama-gpu-artifact.py` classifies memory
+  blockers, Q6 workgroup-clear evidence, and remaining Q6 numeric mismatches so
+  device results are not interpreted ad hoc. Device-side validation steps are maintained in
+  `docs/test/LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`.
   Stage gates and compact-model handoff are maintained in
   `docs/plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`.
 - [next] [#5](https://github.com/ryo100794/pdocker-android/issues/5)

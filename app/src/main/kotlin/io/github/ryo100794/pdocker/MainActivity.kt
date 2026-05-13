@@ -9,7 +9,10 @@ import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Canvas
+import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.LocalSocket
@@ -847,6 +850,7 @@ class MainActivity : AppCompatActivity() {
         addWidget(getString(R.string.widget_dockerfiles), dockerfiles().size.toString(), getString(R.string.detail_dockerfiles_inventory))
         renderStorageMetrics()
         renderHostEnvironment()
+        renderMemoryLayerVisualization()
         renderDaemonOperations()
         renderProjectDashboard()
         val daemonJobIds = daemonOperations.mapNotNull { daemonOperationJob(it)?.id }.toSet()
@@ -1540,6 +1544,320 @@ class MainActivity : AppCompatActivity() {
         val fdCount: Int,
         val cmdline: String,
     )
+
+    private data class MemoryLayerSnapshot(
+        val memTotal: Long,
+        val memAvailable: Long,
+        val swapTotal: Long,
+        val swapFree: Long,
+        val pdockerProcessCount: Int,
+        val pdockerVmSize: Long,
+        val pdockerRss: Long,
+        val pdockerSwap: Long,
+        val appVmSize: Long,
+        val appVmRss: Long,
+        val appVmData: Long,
+        val appVmStk: Long,
+        val appVmSwap: Long,
+        val javaHeapMax: Long,
+        val javaHeapUsed: Long,
+        val managedReserveBytes: Long,
+        val managedResidentBytes: Long,
+        val managedBackingBytes: Long,
+        val managedPageIns: Long,
+        val managedPageOuts: Long,
+        val managedElapsedNs: Long,
+        val transparentRegistered: Boolean,
+        val transparentSigsegvStops: Long,
+        val source: String,
+    )
+
+    private data class PdockerMemoryFootprint(
+        val processCount: Int,
+        val vmSize: Long,
+        val rss: Long,
+        val swap: Long,
+    )
+
+    private fun renderMemoryLayerVisualization() {
+        val snapshot = memoryLayerSnapshot()
+        addSection(getString(R.string.section_memory_layers))
+        content.addView(MemoryLayerView(this).apply {
+            setSnapshot(snapshot)
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dp(430),
+        ))
+        addMessage(memoryLayerSummary(snapshot))
+        addAction(getString(R.string.action_debug_memory_layers), getString(R.string.detail_debug_memory_layers)) {
+            openTextToolAsync(getString(R.string.section_memory_layers), getString(R.string.action_debug_memory_layers)) {
+                memoryLayerSnapshotText(memoryLayerSnapshot())
+            }
+        }
+        addAction(getString(R.string.action_run_memory_pager_selftest), getString(R.string.detail_run_memory_pager_selftest)) {
+            runMemoryPagerSelfTest()
+        }
+    }
+
+    private fun memoryLayerSnapshot(): MemoryLayerSnapshot {
+        val mem = readMeminfoBytes()
+        val proc = readProcStatus(File("/proc/${android.os.Process.myPid()}")).orEmpty()
+        val runtime = Runtime.getRuntime()
+        val pdockerFootprint = pdockerMemoryFootprint()
+        val managed = readLatestPagerMetrics("apk-memory-pager-managed-latest.json")
+        val transparent = readLatestPagerMetrics("apk-memory-pager-transparent-latest.json")
+        val managedReserve = managed.optLong("reserve_bytes", 0L)
+        val managedResidentPages = managed.optLong("resident_pages", managed.optLong("max_resident_pages", 0L))
+        val managedBytesOut = managed.optLong("bytes_out", 0L)
+        val transparentRegistered = transparent.optString("registered").equals("yes", ignoreCase = true) ||
+            transparent.optString("result").equals("ok", ignoreCase = true)
+        return MemoryLayerSnapshot(
+            memTotal = mem["MemTotal"] ?: 0L,
+            memAvailable = mem["MemAvailable"] ?: mem["MemFree"] ?: 0L,
+            swapTotal = mem["SwapTotal"] ?: 0L,
+            swapFree = mem["SwapFree"] ?: 0L,
+            pdockerProcessCount = pdockerFootprint.processCount,
+            pdockerVmSize = pdockerFootprint.vmSize,
+            pdockerRss = pdockerFootprint.rss,
+            pdockerSwap = pdockerFootprint.swap,
+            appVmSize = procStatusBytes(proc, "VmSize"),
+            appVmRss = procStatusBytes(proc, "VmRSS"),
+            appVmData = procStatusBytes(proc, "VmData"),
+            appVmStk = procStatusBytes(proc, "VmStk"),
+            appVmSwap = procStatusBytes(proc, "VmSwap"),
+            javaHeapMax = runtime.maxMemory(),
+            javaHeapUsed = runtime.totalMemory() - runtime.freeMemory(),
+            managedReserveBytes = managedReserve,
+            managedResidentBytes = managedResidentPages * 4096L,
+            managedBackingBytes = maxOf(managedBytesOut, managedReserve),
+            managedPageIns = managed.optLong("page_ins", transparent.optLong("page_ins", 0L)),
+            managedPageOuts = managed.optLong("page_outs", transparent.optLong("page_outs", 0L)),
+            managedElapsedNs = maxOf(managed.optLong("elapsed_ns", 0L), transparent.optLong("elapsed_ns", 0L)),
+            transparentRegistered = transparentRegistered,
+            transparentSigsegvStops = transparent.optLong("sigsegv_stops", 0L),
+            source = when {
+                transparent.length() > 0 -> "transparent artifact"
+                managed.length() > 0 -> "managed artifact"
+                else -> "live /proc only"
+            },
+        )
+    }
+
+    private fun memoryLayerSummary(snapshot: MemoryLayerSnapshot): String =
+        listOf(
+            getString(
+                R.string.memory_layers_os_summary_fmt,
+                formatBytes((snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L)),
+                formatBytes(snapshot.memAvailable),
+                formatBytes((snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L)),
+                formatBytes(snapshot.swapFree),
+            ),
+            getString(
+                R.string.memory_layers_pdocker_share_fmt,
+                formatBytes(snapshot.pdockerRss),
+                formatPercent(snapshot.pdockerRss, snapshot.memTotal),
+                formatPercent(snapshot.pdockerRss, (snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L)),
+                formatBytes(snapshot.pdockerSwap),
+                formatPercent(snapshot.pdockerSwap, (snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L)),
+                snapshot.pdockerProcessCount,
+            ),
+            getString(
+                R.string.memory_layers_app_summary_fmt,
+                formatBytes(snapshot.appVmSize),
+                formatBytes(snapshot.appVmRss),
+                formatBytes(snapshot.javaHeapUsed),
+                formatBytes(snapshot.javaHeapMax),
+            ),
+            getString(
+                R.string.memory_layers_pager_summary_fmt,
+                if (snapshot.transparentRegistered) "transparent SIGSEGV" else "available / idle",
+                formatBytes(snapshot.managedReserveBytes),
+                formatBytes(snapshot.managedResidentBytes),
+                formatBytes(snapshot.managedBackingBytes),
+                snapshot.managedPageIns,
+                snapshot.managedPageOuts,
+            ),
+            getString(
+                R.string.memory_layers_perf_summary_fmt,
+                formatDurationMs(snapshot.managedElapsedNs),
+                formatPagerRate(snapshot.managedPageIns + snapshot.managedPageOuts, snapshot.managedElapsedNs),
+                snapshot.transparentSigsegvStops,
+            ),
+        ).joinToString("\n")
+
+    private fun memoryLayerSnapshotText(snapshot: MemoryLayerSnapshot): String = buildString {
+        appendLine("pdocker memory layer visualization")
+        appendLine("source=${snapshot.source}")
+        appendLine()
+        appendLine("== OS-governed memory ==")
+        appendLine("physical.total=${formatBytes(snapshot.memTotal)}")
+        appendLine("physical.used=${formatBytes((snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L))}")
+        appendLine("physical.available=${formatBytes(snapshot.memAvailable)}")
+        appendLine("swap.total=${formatBytes(snapshot.swapTotal)}")
+        appendLine("swap.used=${formatBytes((snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L))}")
+        appendLine("swap.free=${formatBytes(snapshot.swapFree)}")
+        appendLine("pdocker.processes=${snapshot.pdockerProcessCount}")
+        appendLine("pdocker.VmSize=${formatBytes(snapshot.pdockerVmSize)}")
+        appendLine("pdocker.RSS=${formatBytes(snapshot.pdockerRss)}")
+        appendLine("pdocker.RSS.percent_of_RAM=${formatPercent(snapshot.pdockerRss, snapshot.memTotal)}")
+        appendLine("pdocker.RSS.percent_of_used_RAM=${formatPercent(snapshot.pdockerRss, (snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L))}")
+        appendLine("pdocker.VmSwap=${formatBytes(snapshot.pdockerSwap)}")
+        appendLine("pdocker.VmSwap.percent_of_used_swap=${formatPercent(snapshot.pdockerSwap, (snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L))}")
+        appendLine()
+        appendLine("== App process allocation view ==")
+        appendLine("VmSize=${formatBytes(snapshot.appVmSize)}")
+        appendLine("VmRSS=${formatBytes(snapshot.appVmRss)}")
+        appendLine("VmData=${formatBytes(snapshot.appVmData)}")
+        appendLine("VmStk=${formatBytes(snapshot.appVmStk)}")
+        appendLine("VmSwap=${formatBytes(snapshot.appVmSwap)}")
+        appendLine("JavaHeap.used=${formatBytes(snapshot.javaHeapUsed)}")
+        appendLine("JavaHeap.max=${formatBytes(snapshot.javaHeapMax)}")
+        appendLine()
+        appendLine("== pdocker managed virtual-memory skin ==")
+        appendLine("mode=${if (snapshot.transparentRegistered) "transparent SIGSEGV pager observed" else "capability present / no live region observed"}")
+        appendLine("reserve=${formatBytes(snapshot.managedReserveBytes)}")
+        appendLine("resident=${formatBytes(snapshot.managedResidentBytes)}")
+        appendLine("backing=${formatBytes(snapshot.managedBackingBytes)}")
+        appendLine("page_ins=${snapshot.managedPageIns}")
+        appendLine("page_outs=${snapshot.managedPageOuts}")
+        appendLine("sigsegv_stops=${snapshot.transparentSigsegvStops}")
+        appendLine("elapsed=${formatDurationMs(snapshot.managedElapsedNs)}")
+        appendLine("page_ops_per_sec=${formatPagerRate(snapshot.managedPageIns + snapshot.managedPageOuts, snapshot.managedElapsedNs)}")
+        appendLine()
+        appendLine("Layer model:")
+        appendLine("Linux/Android kernel owns physical RAM, swap/zram, page tables, and LMK.")
+        appendLine("pdocker only wraps selected large private anonymous mappings.")
+        appendLine("The wrapper reserves guest virtual address space as PROT_NONE, pages data into a bounded resident window, and writes evicted pages into an app-owned backing file.")
+    }
+
+    private fun readMeminfoBytes(): Map<String, Long> =
+        readSmallProcFile(File("/proc/meminfo"), 120)
+            .lineSequence()
+            .mapNotNull { line ->
+                val key = line.substringBefore(':', "").trim()
+                val kb = Regex("""([0-9]+)\s+kB""").find(line)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                if (key.isBlank() || kb == null) null else key to kb * 1024L
+            }
+            .toMap()
+
+    private fun procStatusBytes(status: Map<String, String>, key: String): Long =
+        Regex("""([0-9]+)\s+kB""")
+            .find(status[key].orEmpty())
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toLongOrNull()
+            ?.times(1024L)
+            ?: 0L
+
+    private fun pdockerMemoryFootprint(): PdockerMemoryFootprint {
+        val appUid = applicationInfo.uid.toString()
+        var count = 0
+        var vmSize = 0L
+        var rss = 0L
+        var swap = 0L
+        File("/proc").listFiles().orEmpty()
+            .filter { it.name.all(Char::isDigit) }
+            .forEach { dir ->
+                val status = readProcStatus(dir) ?: return@forEach
+                val uid = status["Uid"]?.split(Regex("\\s+"))?.firstOrNull().orEmpty()
+                val cmdline = procCmdline(dir)
+                val name = status["Name"].orEmpty()
+                val interesting = uid == appUid ||
+                    cmdline.contains(packageName) ||
+                    cmdline.contains("pdocker") ||
+                    name.contains("pdocker", ignoreCase = true)
+                if (!interesting) return@forEach
+                count++
+                vmSize += procStatusBytes(status, "VmSize")
+                rss += procStatusBytes(status, "VmRSS")
+                swap += procStatusBytes(status, "VmSwap")
+            }
+        return PdockerMemoryFootprint(count, vmSize, rss, swap)
+    }
+
+    private fun formatPercent(part: Long, total: Long): String =
+        if (part <= 0L || total <= 0L) "0.0%" else String.format("%.1f%%", part * 100.0 / total)
+
+    private fun readLatestPagerMetrics(fileName: String): JSONObject {
+        val candidates = listOf(
+            File(pdockerHome, "docs/test/$fileName"),
+            File(pdockerHome, "test/$fileName"),
+            File(projectRoot, "default/docs/test/$fileName"),
+            File(filesDir, "docs/test/$fileName"),
+        )
+        val file = candidates.firstOrNull { it.isFile } ?: return JSONObject()
+        return runCatching {
+            JSONObject(file.readText()).optJSONObject("metrics") ?: JSONObject()
+        }.getOrDefault(JSONObject())
+    }
+
+    private fun runMemoryPagerSelfTest() {
+        status.text = getString(R.string.action_run_memory_pager_selftest)
+        thread(isDaemon = true, name = "pdocker-memory-pager-selftest") {
+            val report = runCatching {
+                val testDir = File(pdockerHome, "docs/test").apply { mkdirs() }
+                val managed = runDirectPagerProbe("--pdocker-memory-pager-managed-poc")
+                val transparent = runDirectPagerProbe("--pdocker-memory-pager-transparent-poc")
+                val managedJson = pagerProbeJson("pdocker.apk-memory-pager-managed.ui.v1", managed)
+                val transparentJson = pagerProbeJson("pdocker.apk-memory-pager-transparent.ui.v1", transparent)
+                File(testDir, "apk-memory-pager-managed-latest.json").writeText(managedJson.toString(2))
+                File(testDir, "apk-memory-pager-transparent-latest.json").writeText(transparentJson.toString(2))
+                buildString {
+                    appendLine("pdocker memory pager self-test")
+                    appendLine("managed=${managed.status} rc=${managed.exitCode}")
+                    appendLine(managed.output.trim())
+                    appendLine()
+                    appendLine("transparent=${transparent.status} rc=${transparent.exitCode}")
+                    appendLine(transparent.output.trim())
+                }
+            }.getOrElse { getString(R.string.engine_operation_failed_fmt, it.message.orEmpty()) }
+            ui.post {
+                renderContent()
+                openTextTool(getString(R.string.section_memory_layers), getString(R.string.action_run_memory_pager_selftest), report)
+            }
+        }
+    }
+
+    private data class PagerProbeRun(val status: String, val exitCode: Int, val output: String)
+
+    private fun runDirectPagerProbe(arg: String): PagerProbeRun {
+        PdockerdRuntime.prepare(this)
+        val direct = File(filesDir, "pdocker-runtime/docker-bin/pdocker-direct")
+        val pb = ProcessBuilder(direct.absolutePath, arg)
+            .directory(filesDir)
+            .redirectErrorStream(true)
+        pb.environment()["TMPDIR"] = "files"
+        pb.environment()["PDOCKER_MEMORY_PAGER_POC_PAGES"] = "16"
+        pb.environment()["PDOCKER_MEMORY_PAGER_POC_RESIDENT_PAGES"] = "2"
+        val proc = pb.start()
+        val output = proc.inputStream.bufferedReader().use { it.readText() }
+        val rc = proc.waitFor()
+        val ok = rc == 0 && output.contains("result=ok")
+        return PagerProbeRun(if (ok) "pass" else "fail", rc, output)
+    }
+
+    private fun pagerProbeJson(schema: String, run: PagerProbeRun): JSONObject {
+        val metrics = JSONObject()
+        run.output.lineSequence().forEach { line ->
+            val match = Regex("""pager-[a-z-]+-poc:([a-z_]+)=([0-9]+|ok|fail|yes|no)""")
+                .find(line.trim()) ?: return@forEach
+            val value = match.groupValues[2]
+            metrics.put(match.groupValues[1], value.toLongOrNull() ?: value)
+        }
+        return JSONObject()
+            .put("schema", schema)
+            .put("created_at_epoch", System.currentTimeMillis() / 1000L)
+            .put("status", run.status)
+            .put("return_codes", JSONObject().put("run", run.exitCode))
+            .put("metrics", metrics)
+            .put("stdout", run.output)
+    }
+
+    private fun formatDurationMs(ns: Long): String =
+        if (ns <= 0L) "-" else String.format("%.3f ms", ns / 1_000_000.0)
+
+    private fun formatPagerRate(ops: Long, ns: Long): String =
+        if (ops <= 0L || ns <= 0L) "-" else String.format("%.0f ops/s", ops * 1_000_000_000.0 / ns)
 
     private fun debugProcesses(): List<DebugProc> {
         val appUid = applicationInfo.uid.toString()
@@ -4626,6 +4944,307 @@ class MainActivity : AppCompatActivity() {
                 }
             }, LinearLayout.LayoutParams(dp(360), LinearLayout.LayoutParams.WRAP_CONTENT))
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, rowHeight))
+    }
+
+    private class MemoryLayerView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2.5f * resources.displayMetrics.density
+            color = 0x88aeeaff.toInt()
+        }
+        private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xffe8e8e8.toInt()
+            textSize = 12f * resources.displayMetrics.scaledDensity
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        private val smallTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xffd0d0d0.toInt()
+            textSize = 10f * resources.displayMetrics.scaledDensity
+        }
+        private var snapshot = MemoryLayerSnapshot(
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, false, 0, "",
+        )
+
+        init {
+            setLayerType(LAYER_TYPE_SOFTWARE, null)
+        }
+
+        fun setSnapshot(snapshot: MemoryLayerSnapshot) {
+            this.snapshot = snapshot
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            drawBackgroundGrid(canvas)
+            val density = resources.displayMetrics.density
+            val pad = 16f * density
+            val barLeft = pad
+            val barRight = width - pad
+            val globalScaleBytes = maxOf(
+                snapshot.memTotal,
+                snapshot.swapTotal,
+                snapshot.pdockerVmSize,
+                snapshot.appVmSize,
+                snapshot.javaHeapMax,
+                snapshot.managedReserveBytes,
+                snapshot.managedBackingBytes,
+                1L,
+            )
+            var y = pad + 18f * density
+            drawHud(canvas, barLeft, barRight, y)
+            y += 52f * density
+            drawTitle(canvas, "OS-governed allocation", y)
+            y += 8f * density
+            y = drawBar(
+                canvas,
+                y,
+                "RAM",
+                snapshot.memTotal,
+                listOf(
+                    Segment("pdocker RSS", snapshot.pdockerRss.coerceAtMost((snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L)), 0xff58ffd2.toInt()),
+                    Segment("other used", ((snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L) - snapshot.pdockerRss).coerceAtLeast(0L), 0xffc75b5b.toInt()),
+                    Segment("available", snapshot.memAvailable, 0xff5fbf7a.toInt()),
+                ),
+                barLeft,
+                barRight,
+                globalScaleBytes,
+            ) + 13f * density
+            y = drawBar(
+                canvas,
+                y,
+                "swap/zram",
+                snapshot.swapTotal,
+                listOf(
+                    Segment("pdocker swap", snapshot.pdockerSwap.coerceAtMost((snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L)), 0xff58ffd2.toInt()),
+                    Segment("other used", ((snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L) - snapshot.pdockerSwap).coerceAtLeast(0L), 0xffcaa24a.toInt()),
+                    Segment("free", snapshot.swapFree, 0xff6aa6d9.toInt()),
+                ),
+                barLeft,
+                barRight,
+                globalScaleBytes,
+            ) + 22f * density
+            drawTitle(canvas, "App process view", y)
+            y += 8f * density
+            y = drawBar(
+                canvas,
+                y,
+                "process",
+                maxOf(snapshot.appVmSize, snapshot.javaHeapMax, 1L),
+                listOf(
+                    Segment("RSS", snapshot.appVmRss, 0xff8e6bd8.toInt()),
+                    Segment("Java heap", snapshot.javaHeapUsed, 0xff5ba8c7.toInt()),
+                    Segment("VmSwap", snapshot.appVmSwap, 0xffcc7c5a.toInt()),
+                ),
+                barLeft,
+                barRight,
+                globalScaleBytes,
+            ) + 22f * density
+            drawTitle(canvas, "pdocker managed virtual-memory skin", y)
+            y += 8f * density
+            val pagerBarTop = y
+            y = drawBar(
+                canvas,
+                y,
+                if (snapshot.transparentRegistered) "SIGSEGV pager" else "pager model",
+                maxOf(snapshot.managedReserveBytes, snapshot.managedBackingBytes, snapshot.managedResidentBytes, 1L),
+                listOf(
+                    Segment("reserved VA", snapshot.managedReserveBytes, 0xff707070.toInt()),
+                    Segment("resident", snapshot.managedResidentBytes, 0xff4cc2a0.toInt()),
+                    Segment("backing", snapshot.managedBackingBytes, 0xffd6904d.toInt()),
+                ),
+                barLeft,
+                barRight,
+                globalScaleBytes,
+            )
+            val footerY = (height - pad - 2f * density).coerceAtLeast(y + 18f * density)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 2.2f * density
+            paint.color = if (snapshot.transparentRegistered) 0xff58ffd2.toInt() else 0xff888888.toInt()
+            val midX = (barLeft + barRight) / 2f
+            paint.setShadowLayer(10f, 0f, 0f, paint.color)
+            canvas.drawLine(midX, (pagerBarTop - 6f * density).coerceAtLeast(pad), midX, footerY - 16f * density, paint)
+            paint.clearShadowLayer()
+            canvas.drawText(
+                "perf: ${(snapshot.managedPageIns + snapshot.managedPageOuts)} page ops / ${compactNs(snapshot.managedElapsedNs)}",
+                barLeft,
+                footerY - 12f * density,
+                smallTextPaint,
+            )
+            canvas.drawText(
+                "wrapper: PROT_NONE → resident window → backing file",
+                barLeft,
+                footerY + 2f * density,
+                smallTextPaint,
+            )
+        }
+
+        private data class Segment(val label: String, val bytes: Long, val color: Int)
+
+        private fun drawBackgroundGrid(canvas: Canvas) {
+            val d = resources.displayMetrics.density
+            paint.style = Paint.Style.FILL
+            paint.shader = LinearGradient(
+                0f, 0f, width.toFloat(), height.toFloat(),
+                0xff121722.toInt(), 0xff07090d.toInt(), Shader.TileMode.CLAMP,
+            )
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
+            paint.shader = null
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1f
+            paint.color = 0x2240d8ff
+            val step = 28f * d
+            var x = -height.toFloat()
+            while (x < width + height) {
+                canvas.drawLine(x, height.toFloat(), x + height, 0f, paint)
+                x += step
+            }
+            var y = 0f
+            while (y < height) {
+                canvas.drawLine(0f, y, width.toFloat(), y, paint)
+                y += step
+            }
+        }
+
+        private fun drawTitle(canvas: Canvas, label: String, y: Float) {
+            canvas.drawText(label, 16f * resources.displayMetrics.density, y, textPaint)
+        }
+
+        private fun drawHud(canvas: Canvas, left: Float, right: Float, baseline: Float) {
+            val density = resources.displayMetrics.density
+            val resident = snapshot.managedResidentBytes.coerceAtLeast(1L)
+            val reserve = snapshot.managedReserveBytes.coerceAtLeast(0L)
+            val multiplier = if (reserve > 0L) reserve.toDouble() / resident.toDouble() else 0.0
+            val title = "Guest memory illusion"
+            val detail = if (reserve > 0L) {
+                "container sees ${compactBytes(reserve)}; Android keeps ${compactBytes(snapshot.managedResidentBytes)} hot (${String.format("%.1f×", multiplier)} headroom); pdocker RSS ${compactBytes(snapshot.pdockerRss)}"
+            } else {
+                "pager ready; OS share now pdocker RSS ${compactBytes(snapshot.pdockerRss)} / swap ${compactBytes(snapshot.pdockerSwap)}"
+            }
+            val boxTop = baseline - 20f * density
+            val boxBottom = baseline + 34f * density
+            paint.style = Paint.Style.FILL
+            paint.shader = LinearGradient(left, boxTop, right, boxBottom, 0x6638e8ff, 0x221f5dff, Shader.TileMode.CLAMP)
+            canvas.drawRoundRect(left, boxTop, right, boxBottom, 16f * density, 16f * density, paint)
+            paint.shader = null
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1.2f * density
+            paint.color = if (snapshot.transparentRegistered) 0xff58ffd2.toInt() else 0xff607080.toInt()
+            canvas.drawRoundRect(left, boxTop, right, boxBottom, 16f * density, 16f * density, paint)
+            canvas.drawText(title, left + 12f * density, baseline - 1f * density, textPaint)
+            canvas.drawText(ellipsizeForWidth(detail, right - left - 24f * density), left + 12f * density, baseline + 20f * density, smallTextPaint)
+        }
+
+        private fun drawBar(
+            canvas: Canvas,
+            y: Float,
+            label: String,
+            total: Long,
+            segments: List<Segment>,
+            left: Float,
+            right: Float,
+            scaleTotal: Long,
+        ): Float {
+            val density = resources.displayMetrics.density
+            val top = y + 14f * density
+            val bottom = top + 22f * density
+            val depthX = 11f * density
+            val depthY = -7f * density
+            drawPrism(canvas, left, top, right, bottom, depthX, depthY, 0xff263040.toInt())
+            var x = left
+            val scale = scaleTotal.coerceAtLeast(1L).toDouble()
+            segments.forEach { segment ->
+                val width = ((right - left) * (segment.bytes.coerceAtLeast(0L).toDouble() / scale)).toFloat()
+                    .coerceIn(0f, right - x)
+                if (width > 0.5f) {
+                    drawPrism(canvas, x, top, x + width, bottom, depthX, depthY, segment.color)
+                    x += width
+                }
+            }
+            glowPaint.color = 0x88aeeaff.toInt()
+            canvas.drawLine(left, top, right + depthX, top + depthY, glowPaint)
+            val totalRatio = total.coerceAtLeast(0L).toDouble() / scale
+            canvas.drawText("$label  total ${compactBytes(total)} (${String.format("%.1f%%", totalRatio * 100.0)} of chart scale)", left, top - 4f, smallTextPaint)
+            val detail = segments.joinToString("  ") { "${it.label}: ${compactBytes(it.bytes)}" }
+            canvas.drawText(ellipsizeForWidth(detail, right - left), left, bottom + 15f * density, smallTextPaint)
+            return bottom + 17f * density
+        }
+
+        private fun ellipsizeForWidth(text: String, maxWidth: Float): String {
+            if (smallTextPaint.measureText(text) <= maxWidth) return text
+            val ellipsis = "…"
+            var end = text.length
+            while (end > 0 && smallTextPaint.measureText(text.substring(0, end) + ellipsis) > maxWidth) {
+                end--
+            }
+            return if (end <= 0) ellipsis else text.substring(0, end) + ellipsis
+        }
+
+        private fun drawPrism(canvas: Canvas, left: Float, top: Float, right: Float, bottom: Float, dx: Float, dy: Float, color: Int) {
+            if (right <= left) return
+            val front = Path().apply {
+                moveTo(left, top)
+                lineTo(right, top)
+                lineTo(right, bottom)
+                lineTo(left, bottom)
+                close()
+            }
+            val topFace = Path().apply {
+                moveTo(left, top)
+                lineTo(left + dx, top + dy)
+                lineTo(right + dx, top + dy)
+                lineTo(right, top)
+                close()
+            }
+            val sideFace = Path().apply {
+                moveTo(right, top)
+                lineTo(right + dx, top + dy)
+                lineTo(right + dx, bottom + dy)
+                lineTo(right, bottom)
+                close()
+            }
+            paint.style = Paint.Style.FILL
+            paint.shader = LinearGradient(left, top, right, bottom, lighten(color), darken(color), Shader.TileMode.CLAMP)
+            canvas.drawPath(front, paint)
+            paint.shader = null
+            paint.color = lighten(color)
+            canvas.drawPath(topFace, paint)
+            paint.color = darken(color)
+            canvas.drawPath(sideFace, paint)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1f * resources.displayMetrics.density
+            paint.color = 0x99ffffff.toInt()
+            canvas.drawPath(front, paint)
+        }
+
+        private fun lighten(color: Int): Int {
+            val r = ((color shr 16) and 0xff)
+            val g = ((color shr 8) and 0xff)
+            val b = (color and 0xff)
+            return 0xff000000.toInt() or (minOf(255, r + 42) shl 16) or (minOf(255, g + 42) shl 8) or minOf(255, b + 42)
+        }
+
+        private fun darken(color: Int): Int {
+            val r = ((color shr 16) and 0xff)
+            val g = ((color shr 8) and 0xff)
+            val b = (color and 0xff)
+            return 0xff000000.toInt() or (maxOf(0, r - 52) shl 16) or (maxOf(0, g - 52) shl 8) or maxOf(0, b - 52)
+        }
+
+        private fun compactBytes(bytes: Long): String {
+            val units = arrayOf("B", "KiB", "MiB", "GiB")
+            var value = bytes.toDouble()
+            var unit = 0
+            while (value >= 1024.0 && unit < units.lastIndex) {
+                value /= 1024.0
+                unit++
+            }
+            return if (unit == 0) "$bytes B" else String.format("%.1f %s", value, units[unit])
+        }
+
+        private fun compactNs(ns: Long): String =
+            if (ns <= 0L) "-" else String.format("%.3f ms", ns / 1_000_000.0)
     }
 
     private fun tintedRoundDrawable(color: Int): GradientDrawable =

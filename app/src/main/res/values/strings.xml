@@ -44,6 +44,16 @@
     <string name="detail_debug_processes">Show app, daemon, executor, and container helper processes</string>
     <string name="action_debug_handles">Handle snapshot</string>
     <string name="detail_debug_handles">Show open file descriptors for pdocker-owned processes</string>
+    <string name="section_memory_layers">Memory layers</string>
+    <string name="action_debug_memory_layers">Memory layer details</string>
+    <string name="detail_debug_memory_layers">Show how Android-owned RAM/swap is wrapped by pdocker managed virtual memory</string>
+    <string name="action_run_memory_pager_selftest">Run pager self-test</string>
+    <string name="detail_run_memory_pager_selftest">Run managed and transparent SIGSEGV pager probes, then refresh this visualization</string>
+    <string name="memory_layers_os_summary_fmt">OS: RAM used %1$s / available %2$s, swap used %3$s / free %4$s</string>
+    <string name="memory_layers_pdocker_share_fmt">pdocker footprint inside OS: RSS %1$s (%2$s of RAM, %3$s of used RAM), swap %4$s (%5$s of used swap), processes %6$d</string>
+    <string name="memory_layers_app_summary_fmt">App: VmSize %1$s, RSS %2$s, Java heap %3$s / %4$s</string>
+    <string name="memory_layers_pager_summary_fmt">pdocker memory illusion: guest-visible reserve %2$s while Android resident window is %3$s; evicted pages are parked in %4$s backing, page in/out %5$d/%6$d (%1$s)</string>
+    <string name="memory_layers_perf_summary_fmt">Pager performance: %1$s, %2$s, SIGSEGV stops %3$d</string>
     <string name="debug_resource_app_files">App files</string>
     <string name="debug_resource_pdocker_home">pdocker home</string>
     <string name="debug_resource_projects">Projects</string>
