@@ -1,0 +1,16 @@
+$ python3 scripts/verify-input-validation.py --write-artifact docs/test/input-validation-latest.json
+ok: input validation ledger covers 3 categories and 11 cases
+ok: input grammar coverage records 7 BNF-like grammars
+ok: API validation rejects/handles as expected: malformed JSON request body
+ok: API validation rejects/handles as expected: non-object JSON request body
+ok: API validation rejects/handles as expected: missing required image names
+ok: API validation rejects/handles as expected: invalid diagnostics limit clamps
+ok: file grammar validation rejects as expected: unknown Dockerfile instruction
+ok: file grammar validation rejects as expected: pdocker-specific Dockerfile instruction
+ok: file grammar validation keeps the feature scenario ledger structurally complete
+ok: negative validation case fails as expected: negative storage byte count
+ok: negative validation case fails as expected: free bytes greater than total bytes
+ok: negative validation case fails as expected: double-counted image view bytes
+ok: value-range validation covers direct syscall boundary matrix
+ok: wrote input validation artifact: docs/test/input-validation-latest.json
+ok: input validation covers API arguments, input-file grammar, and value ranges

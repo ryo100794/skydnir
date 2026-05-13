@@ -9,7 +9,8 @@ APK="${APK:-$ROOT/app/build/outputs/apk/compat/debug/app-compat-debug.apk}"
 INSTALL_APK="${INSTALL_APK:-0}"
 POC_PAGES="${PDOCKER_MEMORY_PAGER_POC_PAGES:-32}"
 POC_RESIDENT_PAGES="${PDOCKER_MEMORY_PAGER_POC_RESIDENT_PAGES:-4}"
-DIRECT_CMD="TMPDIR=files PDOCKER_MEMORY_PAGER_POC_PAGES=$POC_PAGES PDOCKER_MEMORY_PAGER_POC_RESIDENT_PAGES=$POC_RESIDENT_PAGES files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-managed-poc"
+REMOTE_PREAMBLE="APP_DATA=\$(pwd); case \"\$APP_DATA\" in /data/*) ;; *) for d in /data/user/0/$PKG /data/data/$PKG; do if [ -d \"\$d/files\" ]; then APP_DATA=\"\$d\"; break; fi; done ;; esac; cd \"\$APP_DATA\" || exit 70; mkdir -p files/pdocker/tmp cache || exit 71; export TMPDIR=\"\$APP_DATA/files/pdocker/tmp\""
+DIRECT_CMD="$REMOTE_PREAMBLE; PDOCKER_MEMORY_PAGER_POC_PAGES=$POC_PAGES PDOCKER_MEMORY_PAGER_POC_RESIDENT_PAGES=$POC_RESIDENT_PAGES files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-managed-poc"
 
 ADB=(adb)
 if [[ -n "$SERIAL" ]]; then

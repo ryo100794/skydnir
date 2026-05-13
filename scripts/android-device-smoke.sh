@@ -1381,9 +1381,9 @@ if [[ "$FLAVOR" == "compat" ]]; then
   echo "[pdocker smoke] compat memory pager poc"
   run_as 'files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-poc | grep -q "pager-poc:result=ok"'
   echo "[pdocker smoke] compat managed anonymous pager poc"
-  run_as 'files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-managed-poc | grep -q "pager-managed-poc:result=ok"'
+  run_as 'APP_DATA=$(pwd); cd "$APP_DATA" && mkdir -p files/pdocker/tmp cache && TMPDIR="$APP_DATA/files/pdocker/tmp" files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-managed-poc | grep -q "pager-managed-poc:result=ok"'
   echo "[pdocker smoke] compat transparent managed pager poc"
-  run_as 'files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-transparent-poc | grep -q "pager-transparent-poc:result=ok"'
+  run_as 'APP_DATA=$(pwd); cd "$APP_DATA" && mkdir -p files/pdocker/tmp cache && TMPDIR="$APP_DATA/files/pdocker/tmp" files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-transparent-poc | grep -q "pager-transparent-poc:result=ok"'
   run_as '! test -e files/pdocker-runtime/docker-bin/proot'
 else
   run_as 'files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-direct-probe | grep -q "process-exec=0"'

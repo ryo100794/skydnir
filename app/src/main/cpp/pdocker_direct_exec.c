@@ -61,6 +61,10 @@ static int g_trace_stat_paths = 1;
 static int g_rootfs_fd = -1;
 static volatile sig_atomic_t g_trace_child_pgid = -1;
 static const char *g_managed_pager_init_stage = "none";
+static char g_managed_pager_backing_dir[PATH_MAX];
+static char g_managed_pager_backing_path[PATH_MAX];
+static char g_managed_pager_backing_op[32];
+static int g_managed_pager_backing_errno = 0;
 static unsigned long long g_syscall_counts[512];
 static unsigned long long g_stop_count = 0;
 static struct timespec g_stats_start;
@@ -403,27 +407,97 @@ typedef struct {
 static unsigned long long monotonic_now_ns(void);
 static void managed_pager_destroy(ManagedPagerPoc *pager);
 
+static void managed_pager_record_backing_attempt(const char *dir, const char *path,
+                                                 const char *op, int err) {
+    snprintf(g_managed_pager_backing_dir, sizeof(g_managed_pager_backing_dir),
+             "%s", dir ? dir : "");
+    snprintf(g_managed_pager_backing_path, sizeof(g_managed_pager_backing_path),
+             "%s", path ? path : "");
+    snprintf(g_managed_pager_backing_op, sizeof(g_managed_pager_backing_op),
+             "%s", op ? op : "");
+    g_managed_pager_backing_errno = err;
+}
+
+static int managed_pager_mkdir_p(const char *dir) {
+    if (!dir || !dir[0]) {
+        errno = EINVAL;
+        return -1;
+    }
+    char path[PATH_MAX];
+    if (snprintf(path, sizeof(path), "%s", dir) >= (int)sizeof(path)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    size_t len = strlen(path);
+    while (len > 1 && path[len - 1] == '/') path[--len] = '\0';
+    for (char *p = path + 1; *p; ++p) {
+        if (*p != '/') continue;
+        *p = '\0';
+        if (mkdir(path, 0700) != 0 && errno != EEXIST) {
+            *p = '/';
+            return -1;
+        }
+        *p = '/';
+    }
+    if (mkdir(path, 0700) != 0 && errno != EEXIST) return -1;
+    return 0;
+}
+
+static int managed_pager_should_create_dir(const char *dir) {
+    if (!dir || !dir[0]) return 0;
+    if (dir[0] == '/') return strstr(dir, "/pdocker/") != NULL;
+    return strncmp(dir, "files", 5) == 0 || strncmp(dir, "cache", 5) == 0;
+}
+
 static int managed_pager_open_backing_file(void) {
     const char *tmpdir = getenv("TMPDIR");
+    char cwd_tmp[PATH_MAX];
+    cwd_tmp[0] = '\0';
+    char cwd[PATH_MAX];
+    if (getcwd(cwd, sizeof(cwd)) && cwd[0]) {
+        snprintf(cwd_tmp, sizeof(cwd_tmp), "%s/files/pdocker/tmp", cwd);
+    }
     const char *candidates[] = {
-        tmpdir && tmpdir[0] ? tmpdir : NULL,
-        ".",
+        tmpdir && tmpdir[0] ? tmpdir : "",
+        cwd_tmp[0] ? cwd_tmp : "",
+        "files/pdocker/tmp",
+        "files/tmp",
         "files",
         "cache",
+        ".",
         "/data/local/tmp",
         "/tmp",
         NULL,
     };
+    managed_pager_record_backing_attempt("", "", "start", 0);
     for (size_t i = 0; candidates[i]; ++i) {
-        char tmpl[PATH_MAX];
-        int n = snprintf(tmpl, sizeof(tmpl), "%s/pdocker-managed-pager-XXXXXX", candidates[i]);
-        if (n <= 0 || (size_t)n >= sizeof(tmpl)) continue;
-        int fd = mkstemp(tmpl);
-        if (fd >= 0) {
-            unlink(tmpl);
-            return fd;
+        const char *dir = candidates[i];
+        if (!dir[0]) continue;
+        if (managed_pager_should_create_dir(dir) && managed_pager_mkdir_p(dir) != 0) {
+            managed_pager_record_backing_attempt(dir, "", "mkdir", errno);
+            continue;
+        }
+        for (unsigned attempt = 0; attempt < 64; ++attempt) {
+            char tmpl[PATH_MAX];
+            int n = snprintf(tmpl, sizeof(tmpl),
+                             "%s/pdocker-managed-pager-%ld-%llu-%u.tmp",
+                             dir, (long)getpid(), monotonic_now_ns(), attempt);
+            if (n <= 0 || (size_t)n >= sizeof(tmpl)) {
+                managed_pager_record_backing_attempt(dir, "", "format", ENAMETOOLONG);
+                break;
+            }
+            int fd = open(tmpl, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+            if (fd >= 0) {
+                unlink(tmpl);
+                managed_pager_record_backing_attempt(dir, tmpl, "open", 0);
+                return fd;
+            }
+            int saved = errno;
+            managed_pager_record_backing_attempt(dir, tmpl, "open", saved);
+            if (saved != EEXIST) break;
         }
     }
+    errno = g_managed_pager_backing_errno ? g_managed_pager_backing_errno : ENOENT;
     return -1;
 }
 
@@ -458,7 +532,12 @@ static int managed_pager_init(ManagedPagerPoc *pager, size_t page_count, size_t 
     pager->backing_fd = managed_pager_open_backing_file();
     if (pager->backing_fd < 0) goto fail;
     g_managed_pager_init_stage = "ftruncate";
-    if (ftruncate(pager->backing_fd, (off_t)total) != 0) goto fail;
+    if (ftruncate(pager->backing_fd, (off_t)total) != 0) {
+        managed_pager_record_backing_attempt(g_managed_pager_backing_dir,
+                                             g_managed_pager_backing_path,
+                                             "ftruncate", errno);
+        goto fail;
+    }
     g_managed_pager_init_stage = "mmap";
     void *addr = mmap(NULL, total, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (addr == MAP_FAILED) goto fail;
@@ -563,6 +642,10 @@ static int run_memory_pager_managed_poc(void) {
     if (managed_pager_init(&pager, pages, resident_limit) != 0) {
         printf("pager-managed-poc:init=fail errno=%d\n", errno);
         printf("pager-managed-poc:init_stage=%s\n", g_managed_pager_init_stage);
+        printf("pager-managed-poc:backing_errno=%d\n", g_managed_pager_backing_errno);
+        printf("pager-managed-poc:backing_op=%s\n", g_managed_pager_backing_op);
+        printf("pager-managed-poc:backing_dir=%s\n", g_managed_pager_backing_dir);
+        printf("pager-managed-poc:backing_path=%s\n", g_managed_pager_backing_path);
         return 1;
     }
     printf("pager-managed-poc:reserve_bytes=%llu\n",
@@ -2044,7 +2127,12 @@ static int register_managed_mmap_region(TraceeState *state,
     if (!region->resident || !region->ever_loaded) goto fail;
     region->backing_fd = managed_pager_open_backing_file();
     if (region->backing_fd < 0) goto fail;
-    if (ftruncate(region->backing_fd, (off_t)region->length) != 0) goto fail;
+    if (ftruncate(region->backing_fd, (off_t)region->length) != 0) {
+        managed_pager_record_backing_attempt(g_managed_pager_backing_dir,
+                                             g_managed_pager_backing_path,
+                                             "ftruncate", errno);
+        goto fail;
+    }
     region->active = 1;
     fprintf(stderr,
             "pdocker-direct-managed-pager: registered pid=%d base=0x%llx length=%llu pages=%zu resident_limit=%zu prot=0x%x\n",
@@ -2383,6 +2471,10 @@ static int run_memory_pager_transparent_poc(void) {
     printf("pager-transparent-poc:trap_good_stops=%d\n", trap_good_stops);
     printf("pager-transparent-poc:plain_trap_stops=%d\n", plain_trap_stops);
     printf("pager-transparent-poc:registered=%s\n", region && region->active ? "yes" : "no");
+    printf("pager-transparent-poc:backing_errno=%d\n", g_managed_pager_backing_errno);
+    printf("pager-transparent-poc:backing_op=%s\n", g_managed_pager_backing_op);
+    printf("pager-transparent-poc:backing_dir=%s\n", g_managed_pager_backing_dir);
+    printf("pager-transparent-poc:backing_path=%s\n", g_managed_pager_backing_path);
     printf("pager-transparent-poc:resident_limit_pages=%llu\n",
            (unsigned long long)resident_limit);
     printf("pager-transparent-poc:max_resident_pages=%llu\n",

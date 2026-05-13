@@ -1,0 +1,26 @@
+$ python3 scripts/verify_terminal_editor_contracts.py
+ok: compose does not fabricate inspection containers after build failure
+ok: host shell moved into diagnostics
+ok: terminal selection menu has all action buttons
+ok: terminal selection menu prevents click-through
+ok: selection markers are visible and refreshed
+ok: selection menu touch events stop propagation
+ok: pinch zoom updates term font size
+ok: terminal touch scroll uses viewport pixels
+ok: terminal body drag does not resize selection
+ok: terminal key toggles remain visible
+ok: modifier toggle state propagates
+ok: ime fallback suppresses duplicate terminal data
+ok: terminal selection suppresses ime
+ok: readonly selection actions keep ime suppressed
+ok: terminal starts bridge-owned initial command
+ok: readonly build logs preserve carriage-return progress lines
+ok: editor exposes visible whitespace transformer
+ok: editor supports indent mode toggle
+ok: editor supports line-aware indent/outdent
+ok: editor handles line numbering
+ok: editor has pinch zoom
+ok: bridge advertises no-proot fallback
+ok: daemon sets Docker tmp paths
+ok: host intent start path still gates daemon start
+ok: dockerfile/compose commands avoid host shell path

@@ -1,0 +1,305 @@
+$ python3 scripts/verify-ui-actions.py
+ok: upstream docker cli is not a normal apk ui path
+ok: default apk build targets process-exec compat flavor
+ok: fast audits default to compat apk flavor
+ok: fast apk flavor guard ignores stale modern artifacts
+ok: fast scripts reject unknown apk flavor
+ok: public intake labels modern as metadata-only
+ok: runtime flavors have distinct launcher labels
+ok: main header surfaces version and build time
+ok: app uses dedicated adaptive launcher icon
+ok: gradle syncs pdockerd asset before apk packaging
+ok: gradle rejects stale native payloads before apk packaging
+ok: gradle rejects stale backend payloads before apk packaging
+ok: test-staged docker terminal helper remains diagnostic only
+ok: diagnostic docker helper can wait for test-staged cli
+ok: docker build uses legacy builder env
+ok: terminal exports legacy builder env
+ok: compose up uses engine-native path
+ok: apk setting configures shared documents volume env
+ok: documents folder is project workspace root
+ok: documents project root falls back when sd path is not writable
+ok: fresh install does not write public documents without saf grant
+ok: documents storage classifies direct paths versus saf mediation
+ok: saf documents mediator exposes minimal document api
+ok: saf documents mediator has explicit sync api and ui actions
+ok: saf mediated mirror buffers near-real-time writes
+ok: saf mediated mirror has scan fallback for new directories
+ok: saf sidecar records unix-like metadata
+ok: saf synced export payloads are evicted from app mirror
+ok: saf sync-to-tree streams files instead of readBytes
+ok: saf sync-from-tree streams files instead of readBytes
+ok: saf sync-from-tree reports source counts from tree
+ok: saf sync report surfaces source counts success and errors
+ok: saf write failures are reported for ui json
+ok: documents status exposes persisted grant and access mode
+ok: sync to saf wording clarifies mediated mirror scope
+ok: docs define sd card metadata sidecar limits
+ok: documents env supports per-container and cross-project sharing
+ok: existing compose files migrate documents mounts
+ok: installed project compose files migrate on startup
+ok: llama template migration removes stale shader wrapper tuning
+ok: llama template migration installs KV offload guard
+ok: llama template defaults to validated one-layer Vulkan offload
+ok: llama template defaults to measured pipeline optimization path
+ok: device llama template verifier catches app-data update drift
+ok: documents volume requests legacy storage permission when useful
+ok: compose parser expands project env for documents volume
+ok: legacy docker-compose normalizer remains test-only
+ok: runtime omits upstream docker cli and compose plugin
+ok: runtime installs direct executor helper
+ok: runtime installs backend-neutral gpu executor helper
+ok: runtime installs media executor control socket helper
+ok: runtime installs glibc gpu shim for containers
+ok: runtime installs glibc Vulkan ICD for containers
+ok: vulkan icd bridge has reusable smoke test
+ok: vulkan icd exposes maintenance4 large-buffer diagnostics
+ok: vulkan icd descriptor limits match bridge capacity
+ok: vulkan descriptor VK_WHOLE_SIZE is clamped to VkBuffer not allocation tail
+ok: vulkan icd tracks descriptor arrays copies and dynamic offsets
+ok: vulkan icd advertises fragile features conservatively
+ok: vulkan icd lets transfer-only submits complete and forwards compute
+ok: vulkan icd replays all recorded command-buffer dispatches
+ok: vulkan icd has opt-in copy alias fast path
+ok: gpu executor supports default duplicate descriptor aliasing
+ok: gpu descriptor alias materialization option is propagated
+ok: gpu resident cache can be disabled from tests through icd and executor
+ok: q6k oracle writeback diagnostic is explicitly gated and propagated
+ok: q6k safe gpu kernel is explicitly gated and propagated
+ok: gpu executor exposes an audited driver pipeline optimization toggle
+ok: runtime installs glibc OpenCL ICD for containers
+ok: opencl bridge has reusable smoke test
+ok: gpu executor attempts Android OpenCL before GLES fallback
+ok: gpu executor has Android Vulkan same-api probe
+ok: gpu executor caches repeated Vulkan pipelines
+ok: gpu executor reuses mutable Vulkan buffers
+ok: opencl icd refuses unsupported kernels
+ok: opencl icd covers common object and buffer APIs
+ok: llama profile distinguishes ready OpenCL bridge from llama backend
+ok: pdockerd exposes bounded host environment diagnostics
+ok: ui renders host environment pane from engine api
+ok: pdockerd service starts gpu executor socket
+ok: pdockerd service starts media executor socket without capture readiness
+ok: direct runtime advertises implemented bind support
+ok: direct runtime rewrites unix socket paths
+ok: direct runtime suppresses noisy nscd socket rewrites
+ok: direct runtime treats blocked NUMA policy syscalls as unavailable
+ok: runtime removes stale docker-compose shim
+ok: runtime selects no-proot when proot absent
+ok: terminal exposes test cli config path without bundling cli
+ok: docker helper keeps absolute test cli config
+ok: one-shot docker commands leave an interactive shell
+ok: docker actions create native job cards
+ok: docker jobs persist state to json
+ok: docker jobs persist full log files
+ok: docker jobs capture terminal output
+ok: docker jobs record exit markers
+ok: docker jobs parse progress lines
+ok: docker jobs render logs through xterm
+ok: log panes are readonly and do not summon keyboard
+ok: readonly log terminals use compact font
+ok: docker jobs preserve carriage-return progress
+ok: engine job logs render terminal CRLF
+ok: job summaries tick while logs are quiet
+ok: job log ui batches expensive refreshes
+ok: activity rotation ignores sensors
+ok: notification permission is user-initiated
+ok: engine stream keeps terminal control characters
+ok: engine progress clears terminal line
+ok: dockerfile RUN streams output before process exit
+ok: docker build context streams to temp file
+ok: large engine request bodies stream to temp files
+ok: docker save response spools to temp file
+ok: pdockerd records python memory telemetry
+ok: build prune deletes unreferenced layers
+ok: build prune deletes stale build cache metadata
+ok: build prune covers archive temp prefixes
+ok: android rebuilds prune stale layers automatically
+ok: build rootfs prune skips active builds and runs on daemon startup
+ok: dockerfile RUN layers are cached by parent stack
+ok: build layers do not cache stale absolute symlink marker
+ok: existing image tags seed first rebuild cache
+ok: unchanged dockerfiles can skip full image rebuild
+ok: container stop reconciles orphan runtime pid
+ok: container runtime state tracks pid identity
+ok: container runtime tracks reparented workload pid set
+ok: container raw return code remains diagnosable
+ok: engine exec allocates tty pty
+ok: engine exec pty owns controlling terminal and sane enter mode
+ok: engine exec supports android python without forkpty
+ok: engine exec supports docker-compatible tty resize
+ok: engine exec tty output preserves raw pty bytes
+ok: engine exec tty ctrl-c forwards to traced foreground process
+ok: direct executor puts tracee in foreground pgrp for tty
+ok: direct executor maps container dev tty to tty stdin
+ok: direct executor maps container proc to synthetic proc
+ok: engine exec it falls back when pty is unavailable
+ok: engine exec pipe fallback maps terminal enter
+ok: engine exec stdin pump uses buffered hijack stream
+ok: direct executor getcwd reads tracee cwd
+ok: direct executor resolves initial argv from rootfs path
+ok: direct build run revalidates absolute symlinks
+ok: direct executor preserves shell bracket and long argv rewrite
+ok: engine api jobs are persisted
+ok: engine api jobs open fresh result tabs
+ok: engine api jobs refresh container truth after completion
+ok: streaming engine failures summarize instead of replaying full logs
+ok: engine jobs wait through slow daemon warmup
+ok: main activity restarts missing daemon
+ok: pdockerd service strongly restarts unless user stopped
+ok: ui binds pdockerd as important during foreground builds
+ok: pdockerd service is isolated from ui crashes
+ok: background daemon receivers avoid waking ui process
+ok: pdockerd service keeps heavy startup off lifecycle main thread
+ok: debug broadcast probes are bounded
+ok: ui file walks are bounded for anr safety
+ok: debug text snapshots render asynchronously and bounded
+ok: release signing is externalized
+ok: release apk closes exported debug receiver
+ok: docker jobs expose retry actions
+ok: engine job retry stays on engine api route
+ok: docker jobs expose stop and log actions
+ok: docker jobs recover after missing terminal
+ok: overview surfaces deduplicated storage metrics
+ok: overview surfaces daemon active operations
+ok: daemon operations can open job logs
+ok: pdockerd exposes active operations api
+ok: pdockerd accepts diagnostic operation updates
+ok: ui reconnects running engine jobs after restart
+ok: streaming build tolerates client reconnect loss
+ok: ui exposes build cache prune
+ok: docker ps renders ports without json leakage
+ok: docker ps surfaces health status
+ok: docker ps columns share one formatter
+ok: docker ps columns include separators
+ok: docker ps clipping stays monospace ascii
+ok: container order is stable across refreshes
+ok: container list skips storage sizing unless requested
+ok: container tab reconciles state from engine snapshot
+ok: compose containers are labelled for project identity
+ok: container ui resolves actions by engine id first
+ok: container ui avoids ambiguous duplicate-name snapshot lookup
+ok: project cards prefer engine id labels over unambiguous compose names
+ok: project cards count running state from engine truth helper
+ok: project running summary is derived only from engine container snapshots
+ok: project health summary is explicit compose healthcheck metadata
+ok: project service health requires matching running service
+ok: service health probes are scheduled only for running http services
+ok: service health wording never treats pending probes as healthy
+ok: project service health reports failed probes as down
+ok: container exposes explicit engine api it terminal
+ok: engine exec it uses docker hijack stdin without private stdin api
+ok: container terminal is only offered for running containers
+ok: engine exec terminal opens a fresh session tab
+ok: engine exec smoke rejects bracket argument noise
+ok: default dev workspace keeps runtime workspace out of build context
+ok: container terminal wording keeps logs separate
+ok: engine exec encodes container refs
+ok: container console avoids host shell fallback
+ok: host shell is diagnostic-only
+ok: android gpu bench writes cpu and gles reference artifacts
+ok: container cards surface network warnings
+ok: container port wording exposes requested inactive mapping semantics
+ok: docs define port mapping truth states
+ok: compat docs keep service health tied to engine container proof
+ok: container cards open compose-declared service ports
+ok: service actions distinguish VNC clients from browser URLs
+ok: raw VNC ports are not opened as HTTP
+ok: project library blender raw VNC opens as VNC while noVNC stays HTTP
+ok: non-http service actions skip HTTP health probes
+ok: explicit service metadata allows VNC URIs
+ok: ros2 rviz template exposes noVNC and raw VNC host ports
+ok: container cards expose lifecycle actions
+ok: container lifecycle avoids docker cli shell
+ok: image pull uses engine api with searchable refs
+ok: image pull stages layers and tags atomically
+ok: images tab can delete bad tagged images
+ok: images tab can clean build cache after image delete
+ok: images tab surfaces layer cache health and stale metadata
+ok: images tab renders reference graph with sizes
+ok: image reference graph owns details and actions
+ok: dockerfile builds use streaming engine api
+ok: dockerfile copy supports wildcard sources
+ok: compose up streams build output into ui jobs
+ok: compose up blocks start after any build stream failure
+ok: android build context honors dockerignore
+ok: compose up links header-declared services after successful start
+ok: container create allows slow rootfs materialization
+ok: compose up uses in-app orchestrator
+ok: compose gpu requests include docker capabilities
+ok: gpu bridge env migrates existing container state on start
+ok: compose resource memory keys feed engine metadata
+ok: compose memory pager is explicit pdocker opt-in
+ok: debug ui visualizes os and pdocker virtual memory layers
+ok: compose up never creates inspection containers after failed build
+ok: engine job output is deduplicated
+ok: android runtime preflight is enabled
+ok: debug smoke can start daemon through activity
+ok: device scripts resolve flavor activity class
+ok: llama gpu compare starts daemon without foregrounding ui
+ok: adb scripts avoid monkey rotation side effects
+ok: debug smoke can start compose through main ui route
+ok: debug smoke can run gpu bench
+ok: terminals label their origin
+ok: existing templates migrate service ports
+ok: template install reports copied and kept files
+ok: template install records version stamp
+ok: android device smoke script exists
+ok: android device smoke covers engine exec path
+ok: android device smoke covers single docker run gate
+ok: android device smoke covers engine api it stream
+ok: android device smoke covers ui bridge it self-test
+ok: android device smoke avoids orphan cleanup side effects
+ok: android device smoke does not force-stop by default
+ok: image browser accepts selected image extra
+ok: image browser accepts selected container extra
+ok: debug resources pane browses app-owned roots
+ok: debug resources pane exposes memory process and handle snapshots
+ok: debug root browser back exits instead of images fallback
+ok: selected image browser back returns to caller
+ok: file browser rows are explorer-style single rows
+ok: image rows deep-link to selected image
+ok: generic image browser action remains available
+ok: container rows deep-link to container files
+ok: image/container files copy into editable projects
+ok: container files expose writable overlay editing
+ok: container files expose merged lower upper view
+ok: editor tabs are keyed by canonical file path
+ok: same-name editors get parent-qualified titles
+ok: project files are surfaced as editor shortcuts
+ok: project dashboard summarizes compose/dockerfile/files
+ok: project dashboard opens primary files and actions
+ok: project dashboard tracks services jobs containers
+ok: project dashboard surfaces latest build job failure reason
+ok: project dashboard exposes compose-declared service URLs
+ok: project dashboard probes service health
+ok: project dashboard surfaces compose dependencies
+ok: project dashboard surfaces compose healthchecks
+ok: project dashboard surfaces llama model and gpu diagnostics
+ok: project dashboard surfaces runtime failure diagnostics
+ok: overview avoids duplicate daemon-linked job cards
+ok: default dev workspace migrates codex and claude code plugins
+ok: default dev workspace repairs placeholder dockerfile
+ok: default dockerfile editor fallback uses bundled workspace asset
+ok: default dev workspace installs hidden volume extensions at runtime
+ok: default dev workspace exposes codex task
+ok: interactive terminal font remains 12pt
+ok: terminal shortcut key palette is present
+ok: terminal input normalizes ime enter and releases one-shot modifiers
+ok: terminal supports pinch zoom
+ok: terminal touch scroll remains available
+ok: terminal shows touch selection markers
+ok: terminal select-all is wired
+ok: terminal selection menu touch does not steal button clicks
+ok: terminal copy uses android clipboard bridge
+ok: terminal selection handles drag independently
+ok: terminal selection accounts for scrollback viewport
+ok: terminal selection suppresses soft keyboard
+ok: readonly terminal selection actions keep ime suppressed
+ok: code editor exposes whitespace
+ok: code editor keeps indent/outdent actions
+ok: code editor supports search and replace
+ok: code editor supports pinch zoom
+ok: code editor syncs line numbers while scrolling
+ok: code editor supports forgiving horizontal drag scroll
+ok: localized terminal title formats exist

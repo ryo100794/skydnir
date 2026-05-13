@@ -1,0 +1,3 @@
+$ python3 scripts/verify_direct_syscall_contracts.py
+ok: direct syscall hook inventory has 69 active syscall hooks covered by 10 entries
+ok: direct syscall contract scaffold defines 14 heavy/local cases

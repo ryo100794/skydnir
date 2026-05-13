@@ -100,7 +100,17 @@ class MemoryPagerContractTest(unittest.TestCase):
     def test_backing_file_selection_is_apk_scoped_before_debug_paths(self):
         self.assertIn("managed_pager_open_backing_file", self.source)
         self.assertIn('getenv("TMPDIR")', self.source)
+        self.assertIn('tmpdir && tmpdir[0] ? tmpdir : ""', self.source)
+        self.assertIn('cwd_tmp[0] ? cwd_tmp : ""', self.source)
+        self.assertIn("if (!dir[0]) continue", self.source)
+        self.assertIn("managed_pager_mkdir_p", self.source)
+        self.assertIn('"files/pdocker/tmp"', self.source)
+        self.assertIn('"files/tmp"', self.source)
         self.assertIn('"."', self.source)
+        self.assertIn('"files"', self.source)
+        self.assertIn('"cache"', self.source)
+        self.assertIn("backing_errno", self.source)
+        self.assertIn("backing_dir", self.source)
         self.assertIn('"/data/local/tmp"', self.source)
         self.assertIn('"/tmp"', self.source)
         self.assertIn("unlink(tmpl)", self.source)
@@ -108,6 +118,9 @@ class MemoryPagerContractTest(unittest.TestCase):
     def test_device_smoke_and_manifest_include_managed_pager_gate(self):
         smoke = SMOKE.read_text()
         self.assertIn("compat managed anonymous pager poc", smoke)
+        self.assertIn("mkdir -p files/pdocker/tmp cache", smoke)
+        self.assertIn('TMPDIR="$APP_DATA/files/pdocker/tmp" files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-managed-poc', smoke)
+        self.assertIn('TMPDIR="$APP_DATA/files/pdocker/tmp" files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-transparent-poc', smoke)
         self.assertIn("pager-managed-poc:result=ok", smoke)
         self.assertIn("Managed Anonymous Pager PoC Command", PROBE_DOC.read_text())
 
@@ -116,6 +129,8 @@ class MemoryPagerContractTest(unittest.TestCase):
         self.assertIn("pdocker.apk-memory-pager-managed.v1", script)
         self.assertIn("--pdocker-memory-pager-managed-poc", script)
         self.assertIn("force_stops_app", script)
+        self.assertIn("REMOTE_PREAMBLE", script)
+        self.assertIn("files/pdocker/tmp", script)
         self.assertIn("page_ins", script)
         self.assertIn("apk-memory-pager-managed-latest.json", script)
 
@@ -124,6 +139,8 @@ class MemoryPagerContractTest(unittest.TestCase):
         self.assertIn("pdocker.apk-memory-pager-transparent.v1", script)
         self.assertIn("--pdocker-memory-pager-transparent-poc", script)
         self.assertIn("force_stops_app", script)
+        self.assertIn("REMOTE_PREAMBLE", script)
+        self.assertIn("files/pdocker/tmp", script)
         self.assertIn("page_ins", script)
         self.assertIn("apk-memory-pager-transparent-latest.json", script)
 
