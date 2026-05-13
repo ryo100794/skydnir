@@ -22,7 +22,7 @@ Current TODO counters:
 | State | Count |
 |---|---:|
 | done | 52 |
-| doing | 13 |
+| doing | 14 |
 | next | 39 |
 | blocked | 0 |
 
@@ -33,9 +33,9 @@ Current TODO counters:
 Keep the UI compose path truthful and visible while closing regressions that block demos.
 
 - Cross-project incomplete implementation audit: `docs/plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md` now tracks unfinished, partial, temporary, or insufficiently verified work across...
+- Execution timeline and delegated task control: `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged gates, current agent assignments, merge checklists, and...
 - [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from device discovery and...
 - Active port mapping: published ports now have an Engine-visible `PdockerNetwork.PortMappingStatus` scaffold for planned/inactive/active/ conflict states while the runtime remains...
-- Image pull UI must not hard-code `ubuntu:22.04`. It now needs a searchable selection dialog that combines local image refs, Compose `image:` refs, Dockerfile `FROM` refs, common defaults...
 
 ### Next: 2026-05-17 to 2026-05-23
 
