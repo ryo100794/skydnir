@@ -128,9 +128,10 @@ stable checkpoint.
 - [doing] Image pull crash safety. `pull_image` and layer extraction must stage
   into temporary directories and atomically publish completed layers/tags so an
   app or daemon kill cannot leave a partial layer/image that is later treated
-  as valid. Acceptance: local py_compile/static checks, daemon startup recovery
-  of `.pull-*`, `.old-*`, and `.tmp-*` residue, and an interrupted-pull device
-  scenario.
+  as valid. Static verifier added: `python3 scripts/verify-image-pull-crash-safety.py`
+  checks `.pull-*`, `.old-*`, layer `.tmp-*`, diff-id verification, atomic
+  publish ordering, and startup recovery. Remaining acceptance gap: run and
+  archive an interrupted-pull device kill/restart scenario.
 - [doing] Compose/build log progress rendering. The readonly log pane must
   preserve terminal carriage-return progress updates instead of deleting or
   fragmenting text-mode progress bars. Acceptance: xterm readonly log path keeps

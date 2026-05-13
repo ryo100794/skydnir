@@ -97,6 +97,182 @@ JSON" >/dev/null 2>&1 || true
   exit 2
 }
 
+runtime_teardown_acceptance_entrypoint() {
+  local target="$1"
+  local remote_script="/data/local/tmp/pdocker-runtime-teardown-smoke.sh"
+  local local_script
+  local_script="$(mktemp)"
+  cat > "$local_script" <<'REMOTE_RUNTIME_TEARDOWN'
+#!/system/bin/sh
+set +e
+TARGET="${1:-default-workspace}"
+cd files || exit 1
+export PATH="$PWD/pdocker-runtime/docker-bin:$PATH"
+export DOCKER_CONFIG="$PWD/pdocker-runtime/docker-bin"
+export DOCKER_HOST="unix://$PWD/pdocker/pdockerd.sock"
+export DOCKER_BUILDKIT=0 COMPOSE_DOCKER_CLI_BUILD=0 BUILDKIT_PROGRESS=plain COMPOSE_PROGRESS=plain COMPOSE_MENU=false
+
+DIAG="pdocker/diagnostics/runtime-teardown"
+LATEST="pdocker/diagnostics/runtime-teardown-latest.json"
+rm -rf "$DIAG"
+mkdir -p "$DIAG"
+STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"
+RUN_TAG="rt-$(date +%s 2>/dev/null || echo now)-$$"
+STOP_NAME="pdocker-runtime-teardown-stop-$RUN_TAG"
+KILL_NAME="pdocker-runtime-teardown-kill-$RUN_TAG"
+IMAGE="ubuntu:22.04"
+SOCKET="pdocker/pdockerd.sock"
+
+json_string() {
+  printf '%s' "$1" | awk 'BEGIN{printf "\""}{gsub(/\\/,"\\\\"); gsub(/\"/,"\\\""); gsub(/\t/,"\\t"); if (NR>1) printf "\\n"; printf "%s",$0}END{printf "\""}'
+}
+
+record_cmd() {
+  label="$1"
+  shift
+  out="$DIAG/$label.out"
+  err="$DIAG/$label.err"
+  "$@" >"$out" 2>"$err"
+  rc=$?
+  printf '%s' "$rc" >"$DIAG/$label.rc"
+  return 0
+}
+
+http_get() {
+  label="$1"
+  path="$2"
+  { printf 'GET %s HTTP/1.1\r\nHost: docker\r\nConnection: close\r\n\r\n' "$path"; } \
+    | nc -U -W 5 "$SOCKET" >"$DIAG/$label.http" 2>"$DIAG/$label.err"
+  rc=$?
+  printf '%s' "$rc" >"$DIAG/$label.rc"
+  sed -n '1s/\r$//p' "$DIAG/$label.http" >"$DIAG/$label.status" 2>/dev/null
+}
+
+snapshot_ps() {
+  label="$1"
+  (ps -A -o PID,PPID,USER,NAME,ARGS 2>/dev/null || ps -A -ef 2>/dev/null || ps 2>/dev/null) >"$DIAG/$label.txt" 2>"$DIAG/$label.err"
+}
+
+snapshot_state_json() {
+  label="$1"
+  out="$DIAG/$label.txt"
+  : >"$out"
+  find pdocker -name state.json -type f 2>/dev/null | sort | while IFS= read -r f; do
+    printf '\n--- %s ---\n' "$f" >>"$out"
+    cat "$f" >>"$out" 2>/dev/null
+    printf '\n' >>"$out"
+  done
+}
+
+container_id_from_out() {
+  tr -d '\r\n' < "$1" | sed 's/[^0-9a-f].*$//'
+}
+
+http_get engine-containers-before '/containers/json?all=1'
+snapshot_ps process-before
+snapshot_state_json persisted-state-before
+
+record_cmd create-stop docker create --name "$STOP_NAME" "$IMAGE" sh -lc 'trap "" TERM; while true; do sleep 30; done'
+STOP_CID="$(container_id_from_out "$DIAG/create-stop.out")"
+record_cmd start-stop docker start "$STOP_CID"
+http_get stop-inspect-before "/containers/$STOP_CID/json"
+record_cmd logs-stop-before docker logs "$STOP_CID"
+snapshot_ps process-after-stop-start
+snapshot_state_json persisted-state-after-stop-start
+record_cmd stop docker stop -t 1 "$STOP_CID"
+http_get stop-inspect-after "/containers/$STOP_CID/json"
+record_cmd logs-stop-after docker logs "$STOP_CID"
+snapshot_ps process-after-stop
+snapshot_state_json persisted-state-after-stop
+record_cmd rm-stopped docker rm "$STOP_CID"
+http_get stop-inspect-after-rm "/containers/$STOP_CID/json"
+snapshot_ps process-after-rm-stopped
+snapshot_state_json persisted-state-after-rm-stopped
+
+record_cmd create-kill docker create --name "$KILL_NAME" "$IMAGE" sh -lc 'while true; do sleep 30; done'
+KILL_CID="$(container_id_from_out "$DIAG/create-kill.out")"
+record_cmd start-kill docker start "$KILL_CID"
+http_get kill-inspect-before "/containers/$KILL_CID/json"
+record_cmd logs-kill-before docker logs "$KILL_CID"
+snapshot_ps process-after-kill-start
+snapshot_state_json persisted-state-after-kill-start
+record_cmd kill docker kill "$KILL_CID"
+http_get kill-inspect-after "/containers/$KILL_CID/json"
+record_cmd logs-kill-after docker logs "$KILL_CID"
+snapshot_ps process-after-kill
+snapshot_state_json persisted-state-after-kill
+record_cmd rm-killed docker rm "$KILL_CID"
+http_get kill-inspect-after-rm "/containers/$KILL_CID/json"
+snapshot_ps process-after-rm-killed
+snapshot_state_json persisted-state-after-rm-killed
+http_get engine-containers-after '/containers/json?all=1'
+
+# Keep the compatibility evidence above immutable, then clean up any test
+# residue best-effort so this planned-gap probe does not poison later smokes.
+: >"$DIAG/cleanup-leftovers.out"
+: >"$DIAG/cleanup-leftovers.err"
+CLEANUP_RC=0
+for cid in "$STOP_CID" "$KILL_CID"; do
+  if [ -n "$cid" ]; then
+    docker rm -f "$cid" >>"$DIAG/cleanup-leftovers.out" 2>>"$DIAG/cleanup-leftovers.err" || CLEANUP_RC=$?
+  fi
+done
+printf '%s' "$CLEANUP_RC" >"$DIAG/cleanup-leftovers.rc"
+
+STOP_RC="$(cat "$DIAG/stop.rc" 2>/dev/null)"
+KILL_RC="$(cat "$DIAG/kill.rc" 2>/dev/null)"
+RM_STOP_RC="$(cat "$DIAG/rm-stopped.rc" 2>/dev/null)"
+RM_KILL_RC="$(cat "$DIAG/rm-killed.rc" 2>/dev/null)"
+CLEANUP_RC="$(cat "$DIAG/cleanup-leftovers.rc" 2>/dev/null)"
+STOP_AFTER_STATUS="$(cat "$DIAG/stop-inspect-after.status" 2>/dev/null)"
+KILL_AFTER_STATUS="$(cat "$DIAG/kill-inspect-after.status" 2>/dev/null)"
+STOP_RM_STATUS="$(cat "$DIAG/stop-inspect-after-rm.status" 2>/dev/null)"
+KILL_RM_STATUS="$(cat "$DIAG/kill-inspect-after-rm.status" 2>/dev/null)"
+
+cat > "$LATEST" <<JSON
+{
+  "SchemaVersion": 1,
+  "Kind": "runtime-teardown",
+  "Status": "planned-gap",
+  "Success": false,
+  "Target": $(json_string "$TARGET"),
+  "StartedAt": $(json_string "$STARTED_AT"),
+  "CompletedAt": $(json_string "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"),
+  "ContainerIds": {
+    "StopRm": $(json_string "$STOP_CID"),
+    "KillRm": $(json_string "$KILL_CID")
+  },
+  "Operations": {
+    "Stop": {"CliExitCode": $(json_string "$STOP_RC"), "InspectAfterStatus": $(json_string "$STOP_AFTER_STATUS")},
+    "Kill": {"CliExitCode": $(json_string "$KILL_RC"), "InspectAfterStatus": $(json_string "$KILL_AFTER_STATUS")},
+    "RmStopped": {"CliExitCode": $(json_string "$RM_STOP_RC"), "InspectAfterStatus": $(json_string "$STOP_RM_STATUS")},
+    "RmKilled": {"CliExitCode": $(json_string "$RM_KILL_RC"), "InspectAfterStatus": $(json_string "$KILL_RM_STATUS")},
+    "CleanupLeftovers": {"CliExitCode": $(json_string "$CLEANUP_RC")}
+  },
+  "Evidence": {
+    "EngineApiContainersJson": ["files/$DIAG/engine-containers-before.http", "files/$DIAG/engine-containers-after.http"],
+    "EngineApiInspect": ["files/$DIAG/stop-inspect-before.http", "files/$DIAG/stop-inspect-after.http", "files/$DIAG/stop-inspect-after-rm.http", "files/$DIAG/kill-inspect-before.http", "files/$DIAG/kill-inspect-after.http", "files/$DIAG/kill-inspect-after-rm.http"],
+    "ProcessTable": ["files/$DIAG/process-before.txt", "files/$DIAG/process-after-stop-start.txt", "files/$DIAG/process-after-stop.txt", "files/$DIAG/process-after-rm-stopped.txt", "files/$DIAG/process-after-kill-start.txt", "files/$DIAG/process-after-kill.txt", "files/$DIAG/process-after-rm-killed.txt"],
+    "PersistedStateJson": ["files/$DIAG/persisted-state-before.txt", "files/$DIAG/persisted-state-after-stop.txt", "files/$DIAG/persisted-state-after-rm-stopped.txt", "files/$DIAG/persisted-state-after-kill.txt", "files/$DIAG/persisted-state-after-rm-killed.txt"],
+    "LifecycleLogs": ["files/$DIAG/stop.out", "files/$DIAG/stop.err", "files/$DIAG/kill.out", "files/$DIAG/kill.err", "files/$DIAG/rm-stopped.out", "files/$DIAG/rm-stopped.err", "files/$DIAG/rm-killed.out", "files/$DIAG/rm-killed.err", "files/$DIAG/cleanup-leftovers.out", "files/$DIAG/cleanup-leftovers.err"],
+    "ContainerLogs": ["files/$DIAG/logs-stop-before.out", "files/$DIAG/logs-stop-after.out", "files/$DIAG/logs-kill-before.out", "files/$DIAG/logs-kill-after.out"]
+  },
+  "Unresolved": [
+    "HTTP/CLI acknowledgement is recorded but not accepted as proof of teardown.",
+    "The smoke does not yet map every observed process back to the Engine container ID/process tree.",
+    "pdockerd implementation still needs strict stop/kill/rm verification before this can pass."
+  ]
+}
+JSON
+cat "$LATEST"
+exit 2
+REMOTE_RUNTIME_TEARDOWN
+  run_adb push "$local_script" "$remote_script" >/dev/null
+  rm -f "$local_script"
+  run_adb shell chmod 755 "$remote_script" >/dev/null 2>&1 || true
+  run_as "sh $remote_script $(remote_quote "$target")"
+}
+
 run_adb() {
   "$ADB" "$@"
 }
@@ -262,7 +438,7 @@ if [[ -n "$SERVICE_TRUTH_TARGET" ]]; then
   planned_gap_acceptance_entrypoint "service-truth" "$SERVICE_TRUTH_TARGET" "service-truth-latest.json"
 fi
 if [[ -n "$RUNTIME_TEARDOWN_TARGET" ]]; then
-  planned_gap_acceptance_entrypoint "runtime-teardown" "$RUNTIME_TEARDOWN_TARGET" "runtime-teardown-latest.json"
+  runtime_teardown_acceptance_entrypoint "$RUNTIME_TEARDOWN_TARGET"
 fi
 
 echo "[pdocker smoke] docker version"

@@ -143,6 +143,9 @@
     <string name="project_dashboard_urls_fmt">URL: %1$s</string>
     <string name="project_dashboard_service_health_fmt">サービスプローブ: %1$s</string>
     <string name="service_health_checking">HTTP プローブ待機中</string>
+    <string name="service_health_requested">要求済み; listener proof 待機中</string>
+    <string name="service_health_requested_with_http_fmt">要求済み; %1$s だが listener proof なし</string>
+    <string name="service_health_unknown">不明; Engine コンテナID証明なし</string>
     <string name="service_health_inactive">Engine コンテナ未実行</string>
     <string name="service_health_external_client">外部クライアント</string>
     <string name="project_dashboard_models_fmt">モデル: %1$s</string>

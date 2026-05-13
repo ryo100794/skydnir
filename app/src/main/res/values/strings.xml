@@ -143,6 +143,9 @@
     <string name="project_dashboard_urls_fmt">URLs: %1$s</string>
     <string name="project_dashboard_service_health_fmt">Service probe: %1$s</string>
     <string name="service_health_checking">HTTP probe pending</string>
+    <string name="service_health_requested">requested; listener proof pending</string>
+    <string name="service_health_requested_with_http_fmt">requested; %1$s but listener proof missing</string>
+    <string name="service_health_unknown">unknown; Engine container ID proof missing</string>
     <string name="service_health_inactive">Engine container not running</string>
     <string name="service_health_external_client">external client</string>
     <string name="project_dashboard_models_fmt">Models: %1$s</string>

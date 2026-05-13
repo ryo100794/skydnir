@@ -150,9 +150,15 @@ def validate_android_smoke_entrypoints() -> None:
             "--service-truth",
             "--runtime-teardown",
             "planned_gap_acceptance_entrypoint",
+            "runtime_teardown_acceptance_entrypoint",
             "service-truth-latest.json",
             "runtime-teardown-latest.json",
-            "planned-gap artifact",
+            "EngineApiContainersJson",
+            "ProcessTable",
+            "PersistedStateJson",
+            "LifecycleLogs",
+            "ContainerLogs",
+            "\"Success\": false",
         ],
     )
 

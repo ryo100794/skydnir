@@ -139,7 +139,7 @@ suite and should be recorded separately when it is run to completion.
 | Area | Current status | Notes |
 |---|---:|---|
 | Engine API negotiation | Good | `/_ping`, `/version`, `/info`, API prefix stripping, and `Api-Version` response headers are implemented. |
-| Image pull/list/inspect/delete | Good | Pull uses `crane export`; public registries work, private registry auth is not complete. |
+| Image pull/list/inspect/delete | Good | Pull uses content-addressed layer extraction with staged tag publish and startup cleanup for `.pull-*`, `.old-*`, and `.tmp-*` residue. `python3 scripts/verify-image-pull-crash-safety.py` covers the static contract. Private registry auth is not complete. Interrupted-pull device kill/restart evidence is still pending. |
 | Image save/load | Partial | Docker-style tar exchange works for the implemented flattened image format. Multi-platform indexes, zstd layers, and all OCI edge cases are not complete. |
 | Container create/start/stop/kill/wait/rm | Good | Implemented through the Android direct userspace runner and state files. No cgroups or namespaces. Project/UI reconciliation still needs to rely on Engine container IDs plus pdocker labels rather than container names. |
 | Logs/attach/exec | Partial | Raw stream and hijack paths exist. Non-TTY exec works, and Android smoke covers a basic Engine `exec` with `Tty=true`. Full Docker attach parity, `docker run -t`, detach-key behavior, resize propagation, and broad interactive terminal cases still need more coverage. |
@@ -199,10 +199,20 @@ Known gaps:
   process table, listener probe, and logs.
 - Runtime teardown is not yet a compatibility gate: stop/kill/rm must prove
   process-tree and executor cleanup rather than trusting an HTTP 204 response.
-  The required future artifact is `docs/test/runtime-teardown-latest.json`,
-  showing Engine API state, persisted state, process table, lifecycle/container
-  logs, listener absence, and no orphan `pdocker-direct`/service/GPU executor
-  residue for the stopped Engine container ID.
+  `scripts/android-device-smoke.sh --runtime-teardown <target>` now writes the
+  planned-gap device artifact `files/pdocker/diagnostics/runtime-teardown-latest.json`
+  plus raw files under `files/pdocker/diagnostics/runtime-teardown/`.  The
+  artifact schema records `Status: planned-gap`, `Success: false`, target,
+  stop/rm and kill/rm Engine container IDs, CLI exit codes, Engine API
+  `/containers/json` and inspect HTTP captures, process-table snapshots,
+  persisted `state.json` snapshots, lifecycle command logs, container logs, and
+  unresolved proof gaps.  The probe snapshots teardown state before a
+  best-effort `docker rm -f` cleanup so the planned-gap test does not
+  intentionally poison later smokes with its own residue.  The required
+  promoted evidence remains
+  `docs/test/runtime-teardown-latest.json`, including listener absence and no
+  orphan `pdocker-direct`/service/GPU executor residue for the stopped Engine
+  container ID before this can become a passing compatibility gate.
 - Active port publishing remains unimplemented; requested mappings are visible
   metadata until listener/proxy/rewrite state is recorded and verified.
 - Android storage metrics still need device verification for nonnegative values

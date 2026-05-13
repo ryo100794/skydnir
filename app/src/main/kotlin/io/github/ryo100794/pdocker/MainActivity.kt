@@ -391,6 +391,11 @@ class MainActivity : AppCompatActivity() {
         val url: String,
     )
 
+    private data class ServiceContainerProof(
+        val serviceName: String,
+        val engineContainerId: String,
+    )
+
     private enum class DocumentsWriteAccess(val envValue: String) {
         DirectPathWritable("direct-path-writable"),
         SafMediated("saf-mediated"),
@@ -1284,9 +1289,13 @@ class MainActivity : AppCompatActivity() {
             ?: state?.optString("Id")?.takeIf { it.isNotBlank() }
             ?: dir.name
 
+    @Suppress("UNUSED_PARAMETER")
     private fun containerIsRunning(snapshot: JSONObject?, state: JSONObject?): Boolean {
         if (snapshot != null) return containerSnapshotIsRunning(snapshot)
-        return state?.optJSONObject("State")?.optBoolean("Running", false) == true
+        // Persisted state is useful context, but is not current Engine truth.
+        // Do not expose running-only UI until /containers/json confirms this
+        // container by Engine ID/name in the current process table.
+        return false
     }
 
     private fun containerEngineIdKeys(dir: File, state: JSONObject?): List<String> =
@@ -6158,16 +6167,19 @@ class MainActivity : AppCompatActivity() {
     private fun projectServiceHealthSummary(urls: List<ProjectServiceUrl>, projectDir: File): String {
         if (urls.isEmpty()) return "-"
         val snapshots = projectContainerSnapshots(projectDir)
+        val runningProofs = projectRunningServiceProofs(projectDir, snapshots)
         val runningServices = projectRunningServiceNames(projectDir, snapshots)
         urls.filter { it.serviceName in runningServices && isHttpServiceUrl(it.url) }
             .forEach { scheduleServiceHealthProbe(it.url) }
         val inactive = getString(R.string.service_health_inactive)
         return urls.take(4).joinToString(", ") { serviceUrl ->
             val running = serviceUrl.serviceName in runningServices
+            val proof = runningProofs[serviceUrl.serviceName]
             val state = when {
                 !running -> inactive
+                proof == null -> getString(R.string.service_health_unknown)
                 !isHttpServiceUrl(serviceUrl.url) -> getString(R.string.service_health_external_client)
-                else -> serviceHealth[serviceUrl.url] ?: getString(R.string.service_health_checking)
+                else -> serviceHealth[serviceUrl.url] ?: getString(R.string.service_health_requested)
             }
             "${serviceUrl.label}:$state"
         }
@@ -6177,19 +6189,37 @@ class MainActivity : AppCompatActivity() {
         val serviceByContainerName = projectComposeContainerNames(projectDir)
         return snapshots
             .filter { containerSnapshotIsRunning(it) }
-            .mapNotNull { obj ->
-                val labels = obj.optJSONObject("Labels")
-                labels?.optString(PDOCKER_COMPOSE_SERVICE_LABEL)
-                    ?.takeIf { it.isNotBlank() }
-                    ?: labels?.optString("com.docker.compose.service")?.takeIf { it.isNotBlank() }
-                    ?: run {
-                        val names = obj.optJSONArray("Names") ?: return@run null
-                        (0 until names.length())
-                            .map { index -> names.optString(index).trim('/') }
-                            .firstNotNullOfOrNull { name -> serviceByContainerName[name] }
-                    }
-            }
+            .mapNotNull { projectSnapshotServiceName(it, serviceByContainerName) }
             .toSet()
+    }
+
+    private fun projectRunningServiceProofs(projectDir: File, snapshots: List<JSONObject>): Map<String, ServiceContainerProof> {
+        val serviceByContainerName = projectComposeContainerNames(projectDir)
+        val proofs = snapshots
+            .filter { containerSnapshotIsRunning(it) }
+            .mapNotNull { obj ->
+                val engineId = obj.optString("Id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val serviceName = projectSnapshotServiceName(obj, serviceByContainerName) ?: return@mapNotNull null
+                ServiceContainerProof(serviceName, engineId)
+            }
+        return proofs.groupBy { it.serviceName }
+            .mapNotNull { (service, matches) ->
+                matches.distinctBy { it.engineContainerId }.singleOrNull()?.let { service to it }
+            }
+            .toMap()
+    }
+
+    private fun projectSnapshotServiceName(obj: JSONObject, serviceByContainerName: Map<String, String>): String? {
+        val labels = obj.optJSONObject("Labels")
+        return labels?.optString(PDOCKER_COMPOSE_SERVICE_LABEL)
+            ?.takeIf { it.isNotBlank() }
+            ?: labels?.optString("com.docker.compose.service")?.takeIf { it.isNotBlank() }
+            ?: run {
+                val names = obj.optJSONArray("Names") ?: return@run null
+                (0 until names.length())
+                    .map { index -> names.optString(index).trim('/') }
+                    .firstNotNullOfOrNull { name -> serviceByContainerName[name] }
+            }
     }
 
     private fun scheduleServiceHealthProbe(url: String) {
@@ -6218,7 +6248,12 @@ class MainActivity : AppCompatActivity() {
             }
             try {
                 val code = conn.responseCode
-                if (code in 200..399) "HTTP $code" else "down HTTP $code"
+                val httpStatus = if (code in 200..399) "HTTP $code" else "down HTTP $code"
+                if (code in 200..399) {
+                    getString(R.string.service_health_requested_with_http_fmt, httpStatus)
+                } else {
+                    httpStatus
+                }
             } finally {
                 conn.disconnect()
             }
