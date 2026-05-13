@@ -21,6 +21,11 @@ or closes.
   and test ledgers.  Before claiming a feature is complete, reconcile it
   against that audit and either close it with implementation plus evidence or
   keep it visible as an explicit planned gap.
+- [doing] Execution timeline and delegated task control:
+  `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged
+  gates, current agent assignments, merge checklists, and decomposition rules.
+  Active T0 lanes are Android single-container smoke, memory-layer UI
+  source/age telemetry, and service-health executable acceptance criteria.
 - [doing] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
   llama GPU bridge ABI: keep llama.cpp unmodified while expanding the
   pdocker Vulkan/OpenCL bridge from device discovery and model-buffer
@@ -148,7 +153,9 @@ stable checkpoint.
   ID/PID, but project cards, `docker ps`, and service health have regressed in
   this area before. Acceptance: UI card, `/containers/json?all=1`, persisted
   `state.json`, process table, listener probe for `18080`, and job log all
-  agree on the same Engine container ID after compose up.
+  agree on the same Engine container ID after compose up. Static acceptance-plan
+  guard: `python3 scripts/verify-service-truth-plan.py`; future evidence:
+  `docs/test/service-truth-latest.json`.
 - [next] RUN changed-path/snapshot performance. `RUN chmod +x
   /usr/local/bin/pdocker-*` is functionally correct but still triggers an
   expensive broad snapshot in the default workspace build. Acceptance: profile
@@ -211,7 +218,9 @@ implementation change plus a focused verification artifact.
 - [next] Runtime freeze risk: one Engine stop returned HTTP 204 while
   `pdocker-direct`/child processes and the GPU executor stayed alive. Stop,
   cleanup, and UI state must prove process-tree and executor teardown, not just
-  API acknowledgement.
+  API acknowledgement. Static acceptance-plan guard:
+  `python3 scripts/verify-service-truth-plan.py`; future evidence:
+  `docs/test/runtime-teardown-latest.json`.
 - [next] llama GPU layer evidence: the old `--gpu-layers 1` /
   `--n-gpu-layers 1` probe offloaded only the output layer. The llama template
   and compare script now default to at least `--n-gpu-layers 2`; next device

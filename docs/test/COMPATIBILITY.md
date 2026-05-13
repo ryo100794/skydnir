@@ -53,6 +53,17 @@ Native UI action wiring only:
 python3 scripts/verify-ui-actions.py
 ```
 
+Service truth / teardown acceptance-plan gate:
+
+```sh
+python3 scripts/verify-service-truth-plan.py
+```
+
+This static gate does not claim the Android runtime behavior is implemented.
+It keeps the planned gap executable by requiring future device smokes and
+evidence artifacts before service health or runtime teardown can be marked
+complete.
+
 Full backend regression, including public image pulls and container runs:
 
 ```sh
@@ -181,6 +192,17 @@ Known gaps:
   prove the listener belongs to the current Engine container ID, not merely that
   a configured port or stale name exists, and UI cards must not display healthy
   from configured ports, compose metadata, or successful background jobs alone.
+  The executable acceptance plan is guarded by
+  `python3 scripts/verify-service-truth-plan.py`; implementation evidence must
+  be recorded as `docs/test/service-truth-latest.json` and show the same Engine
+  container ID across the UI card, `/containers/json`, persisted `state.json`,
+  process table, listener probe, and logs.
+- Runtime teardown is not yet a compatibility gate: stop/kill/rm must prove
+  process-tree and executor cleanup rather than trusting an HTTP 204 response.
+  The required future artifact is `docs/test/runtime-teardown-latest.json`,
+  showing Engine API state, persisted state, process table, lifecycle/container
+  logs, listener absence, and no orphan `pdocker-direct`/service/GPU executor
+  residue for the stopped Engine container ID.
 - Active port publishing remains unimplemented; requested mappings are visible
   metadata until listener/proxy/rewrite state is recorded and verified.
 - Android storage metrics still need device verification for nonnegative values

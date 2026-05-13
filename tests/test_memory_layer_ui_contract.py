@@ -84,6 +84,44 @@ class MemoryLayerUiContractTest(unittest.TestCase):
         ]:
             self.assertIn(needle, view)
 
+
+    def test_pager_artifact_is_labeled_as_past_selftest_with_age_and_status(self):
+        for needle in [
+            "past self-test",
+            "artifactCreatedAtEpoch",
+            "artifactStatus",
+            "artifactAgeSeconds",
+            "created_at_epoch",
+            "formatArtifactAge",
+            "memory_layers_artifact_summary_fmt",
+            "not live /proc",
+        ]:
+            self.assertIn(needle, self.main + self.strings)
+
+    def test_transparent_artifact_fields_flow_to_snapshot_summary_and_details(self):
+        for needle in [
+            "transparentLastMmapLen",
+            "transparentPendingAfterEntry",
+            "transparentMaxResidentPages",
+            "transparentBytesIn",
+            "transparentBytesOut",
+            "transparentDirtyPageOuts",
+            "last_mmap_len",
+            "pending_after_entry",
+            "max_resident_pages",
+            "bytes_in",
+            "bytes_out",
+            "dirty_page_outs",
+        ]:
+            self.assertIn(needle, self.main)
+        for needle in [
+            "transparent mmap",
+            "bytes in/out",
+            "dirty outs",
+            "max resident pages",
+        ]:
+            self.assertIn(needle, self.strings + self.strings_ja)
+
     def test_pager_selftest_action_and_artifact_fields_are_visible(self):
         for needle in [
             "runMemoryPagerSelfTest",

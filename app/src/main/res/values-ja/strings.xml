@@ -52,8 +52,9 @@
     <string name="memory_layers_os_summary_fmt">OS: RAM 使用 %1$s / 空き %2$s, swap 使用 %3$s / 空き %4$s</string>
     <string name="memory_layers_pdocker_share_fmt">OS 内で pdocker が占める量: RSS %1$s (RAM 全体の %2$s, 使用中 RAM の %3$s), swap %4$s (使用中 swap の %5$s), processes %6$d</string>
     <string name="memory_layers_app_summary_fmt">アプリ: VmSize %1$s, RSS %2$s, Java heap %3$s / %4$s</string>
-    <string name="memory_layers_pager_summary_fmt">pdocker のメモリ拡張: ゲストには %2$s の reserve を見せ、Android 上の resident 窓は %3$s に抑え、追い出しページは %4$s の backing に退避します。page in/out %5$d/%6$d (%1$s)</string>
-    <string name="memory_layers_perf_summary_fmt">Pager 性能: %1$s, %2$s, SIGSEGV stop %3$d</string>
+    <string name="memory_layers_artifact_summary_fmt">Pager データソース: %1$s、経過 %2$s、status %3$s (past self-test。live /proc ではありません)</string>
+    <string name="memory_layers_pager_summary_fmt">pdocker のメモリ拡張: ゲストには %2$s の reserve を見せ、Android 上の resident 窓は %3$s に抑え、追い出しページは %4$s の backing に退避します。page in/out %5$d/%6$d, bytes in/out %7$s/%8$s, dirty outs %9$d (%1$s)</string>
+    <string name="memory_layers_perf_summary_fmt">Pager 性能: %1$s, %2$s, SIGSEGV stop %3$d。transparent mmap %4$s, pending %5$s, max resident pages %6$d, bytes in/out %7$s/%8$s, dirty outs %9$d</string>
     <string name="debug_resource_app_files">App files</string>
     <string name="debug_resource_pdocker_home">pdocker home</string>
     <string name="debug_resource_projects">Projects</string>

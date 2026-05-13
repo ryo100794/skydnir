@@ -24,10 +24,14 @@ ACTION_PREFIX="io.github.ryo100794.pdocker"
 PROJECT="device-smoke"
 MODE="full"
 GPU_BENCH=0
+SERVICE_TRUTH_TARGET=""
+RUNTIME_TEARDOWN_TARGET=""
 
 usage() {
   cat <<EOF
 Usage: $0 [--quick] [--gpu-bench] [--no-install]
+       $0 --service-truth <default-workspace|llama>
+       $0 --runtime-teardown <default-workspace|llama>
 
 Runs a repeatable pdocker Android device smoke through adb + run-as.
 
@@ -49,6 +53,12 @@ Modes:
   --quick       only install/start pdockerd and run docker version
   --gpu-bench   also run debug-only android-gpu-bench and verify artifacts
   --no-install  skip adb install; useful when the same debug APK is present
+  --service-truth TARGET
+                planned acceptance entrypoint for future listener/container-ID
+                proof. Currently exits nonzero with a structured artifact.
+  --runtime-teardown TARGET
+                planned acceptance entrypoint for future stop/process-tree
+                proof. Currently exits nonzero with a structured artifact.
 EOF
 }
 
@@ -59,11 +69,33 @@ while [[ $# -gt 0 ]]; do
     --quick) MODE="quick" ;;
     --gpu-bench) GPU_BENCH=1 ;;
     --no-install) INSTALL=0 ;;
+    --service-truth)
+      [[ $# -ge 2 ]] || { echo "--service-truth requires a target" >&2; exit 2; }
+      SERVICE_TRUTH_TARGET="$2"
+      shift
+      ;;
+    --runtime-teardown)
+      [[ $# -ge 2 ]] || { echo "--runtime-teardown requires a target" >&2; exit 2; }
+      RUNTIME_TEARDOWN_TARGET="$2"
+      shift
+      ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
   shift
 done
+
+planned_gap_acceptance_entrypoint() {
+  local kind="$1"
+  local target="$2"
+  local artifact_name="$3"
+  echo "[pdocker smoke] $kind acceptance gate is still a planned gap for target=$target" >&2
+  run_as "mkdir -p files/pdocker/diagnostics && cat > files/pdocker/diagnostics/$artifact_name <<'JSON'
+{\"Status\":\"planned-gap\",\"Kind\":\"$kind\",\"Target\":\"$target\",\"Message\":\"Acceptance entrypoint exists, but device evidence collection is not implemented yet.\"}
+JSON" >/dev/null 2>&1 || true
+  echo "planned-gap artifact: files/pdocker/diagnostics/$artifact_name" >&2
+  exit 2
+}
 
 run_adb() {
   "$ADB" "$@"
@@ -181,6 +213,24 @@ run_gpu_executor_bench() {
   run_as 'files/pdocker-runtime/gpu/pdocker-gpu-executor --bench-opencl-vector-add 1 || true' | tee /tmp/pdocker-smoke-opencl-executor.json
 }
 
+docker_run_rm_smoke() {
+  echo "[pdocker smoke] docker run --rm ubuntu:22.04 echo hi"
+  docker_cmd 'mkdir -p pdocker/diagnostics
+run_log=pdocker/diagnostics/docker-run-rm-ubuntu-echo-hi.log
+run_json=pdocker/diagnostics/docker-run-rm-ubuntu-echo-hi.json
+rm -f "$run_log" "$run_json"
+set +e
+docker run --rm ubuntu:22.04 echo hi >"$run_log" 2>&1
+status=$?
+cat "$run_log"
+if grep -qx hi "$run_log"; then saw_hi=true; else saw_hi=false; fi
+printf "{\"Command\":\"docker run --rm ubuntu:22.04 echo hi\",\"ExitCode\":%s,\"SawHi\":%s,\"Log\":\"files/%s\"}\n" "$status" "$saw_hi" "$run_log" > "$run_json"
+if [ "$status" -ne 0 ] || [ "$saw_hi" != true ]; then
+  echo "docker run --rm ubuntu:22.04 echo hi failed; diagnostics: files/$run_log and files/$run_json" >&2
+  exit 1
+fi'
+}
+
 echo "[pdocker smoke] device: $(run_adb get-serialno)"
 
 if [[ "$INSTALL" -eq 1 ]]; then
@@ -208,6 +258,13 @@ run_adb shell am start \
 wait_for_socket
 stage_test_cli
 
+if [[ -n "$SERVICE_TRUTH_TARGET" ]]; then
+  planned_gap_acceptance_entrypoint "service-truth" "$SERVICE_TRUTH_TARGET" "service-truth-latest.json"
+fi
+if [[ -n "$RUNTIME_TEARDOWN_TARGET" ]]; then
+  planned_gap_acceptance_entrypoint "runtime-teardown" "$RUNTIME_TEARDOWN_TARGET" "runtime-teardown-latest.json"
+fi
+
 echo "[pdocker smoke] docker version"
 docker_cmd 'docker version'
 
@@ -221,6 +278,10 @@ if [[ "$FLAVOR" == "compat" ]]; then
   run_as 'files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-probe | grep -q "pager-probe:ptrace_path=ok"'
   echo "[pdocker smoke] compat memory pager poc"
   run_as 'files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-poc | grep -q "pager-poc:result=ok"'
+  echo "[pdocker smoke] compat managed anonymous pager poc"
+  run_as 'files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-managed-poc | grep -q "pager-managed-poc:result=ok"'
+  echo "[pdocker smoke] compat transparent managed pager poc"
+  run_as 'files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-memory-pager-transparent-poc | grep -q "pager-transparent-poc:result=ok"'
   run_as '! test -e files/pdocker-runtime/docker-bin/proot'
 else
   run_as 'files/pdocker-runtime/docker-bin/pdocker-direct --pdocker-direct-probe | grep -q "process-exec=0"'
@@ -257,6 +318,7 @@ run_as "rm -rf files/pdocker/projects/$PROJECT && mkdir -p files/pdocker/project
 
 echo "[pdocker smoke] docker build"
 docker_cmd "cd pdocker/projects/$PROJECT && docker build -t local/pdocker-device-smoke:latest ."
+docker_run_rm_smoke
 
 echo "[pdocker smoke] compose up/down"
 docker_cmd "cd pdocker/projects/$PROJECT && docker compose down >/dev/null 2>&1 || true && docker rm -f device-smoke-app-1 >/dev/null 2>&1 || true && docker compose up --detach --build && CID=\$(docker compose ps -q app) && test -n \"\$CID\" && printf '%s' \"\$CID\" > .smoke-cid && for i in \$(seq 1 10); do docker compose logs --tail=80 | grep -q pdocker-smoke-build && break; sleep 1; done && docker compose logs --tail=80 | grep -q pdocker-smoke-build && EXEC_OUT=\$(docker exec \"\$CID\" sh -lc 'echo pdocker-exec-ok' 2>&1) && echo \"\$EXEC_OUT\" && echo \"\$EXEC_OUT\" | grep -q pdocker-exec-ok && ! echo \"\$EXEC_OUT\" | grep -q '/vendor/xbin' && BRACKET_OUT=\$(docker exec \"\$CID\" sh -lc '[ \"x\" = \"x\" ]; /usr/bin/[ \"x\" = \"x\" ]; echo pdocker-bracket-ok' 2>&1) && echo \"\$BRACKET_OUT\" && echo \"\$BRACKET_OUT\" | grep -q pdocker-bracket-ok && LONG_ARGV_OUT=\$(docker exec \"\$CID\" sh -lc 'long=\"\"; i=0; while [ \$i -lt 320 ]; do long=\"\$long flash_attn.comp.cpp.o\"; i=\$((i+1)); done; test \${#long} -gt 4096; /bin/sh -lc '\\''case \"\$1\" in *flash_attn.comp.cpp.o*flash_attn.comp.cpp.o*) echo pdocker-long-argv-ok ;; *) echo \"bad long argv: \$1\"; exit 7 ;; esac'\\'' sh \"\$long\"' 2>&1) && echo \"\$LONG_ARGV_OUT\" && echo \"\$LONG_ARGV_OUT\" | grep -q pdocker-long-argv-ok && docker compose ps -a"

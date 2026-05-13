@@ -707,7 +707,34 @@
         "docs/plan/TODO.md",
         "docs/test/COMPATIBILITY.md"
       ],
-      "checks": "Real listener proof for 18080/18081, current Engine container ID, matching container logs, service health state, and UI/docker ps/card consistency."
+      "checks": "Executable acceptance plan for service truth: UI card, Engine API /containers/json, persisted state.json, process table, listener probe, and logs must all agree on the same current Engine container ID before healthy/running is allowed.",
+      "evidence_target": "docs/test/service-truth-latest.json",
+      "plan_gate": "python3 scripts/verify-service-truth-plan.py",
+      "smoke_commands": [
+        "bash scripts/android-device-smoke.sh --no-install --service-truth default-workspace",
+        "bash scripts/android-device-smoke.sh --no-install --service-truth llama"
+      ],
+      "required_truth_sources": [
+        "ui_card",
+        "engine_api_containers_json",
+        "persisted_state_json",
+        "process_table",
+        "listener_probe",
+        "container_logs"
+      ],
+      "negative_cases": [
+        "configured port without listener stays unhealthy",
+        "stale listener from a different PID/container stays unhealthy",
+        "stale exited duplicate name cannot satisfy the card",
+        "successful compose/build job metadata alone stays insufficient",
+        "logs from a previous Engine container ID are rejected"
+      ],
+      "exit_criteria": [
+        "Evidence artifact records package, device, build, timestamp, service name, port, Engine container ID, PID, and log marker.",
+        "UI card container ID equals Engine API ID, persisted state ID, process-table owner, listener owner, and log owner for 18080 and 18081.",
+        "Any mismatch among UI, Engine API, state.json, process table, listener probe, or logs reports unhealthy/not-running and exits nonzero.",
+        "Duplicate names are display-only; project/service labels plus Engine container ID are the relationship truth."
+      ]
     },
     {
       "id": "runtime.npm-self-update-rename-reify",
@@ -767,7 +794,32 @@
         "docs/plan/TODO.md",
         "docs/test/ANDROID_SELFDEBUG.md"
       ],
-      "checks": "Stop/kill process tree teardown, duplicate-name cleanup, Engine ID and label truth, lifecycle logs, stale pid rejection, and no orphan residue."
+      "checks": "Executable acceptance plan for runtime teardown: stop/kill/rm is accepted only when Engine state, persisted state, process table, lifecycle logs, and duplicate-name cleanup prove the current Engine container ID has no live process-tree residue.",
+      "evidence_target": "docs/test/runtime-teardown-latest.json",
+      "plan_gate": "python3 scripts/verify-service-truth-plan.py",
+      "smoke_commands": [
+        "bash scripts/android-device-smoke.sh --no-install --runtime-teardown default-workspace",
+        "bash scripts/android-device-smoke.sh --no-install --runtime-teardown llama"
+      ],
+      "required_truth_sources": [
+        "engine_api_containers_json",
+        "persisted_state_json",
+        "process_table",
+        "lifecycle_logs",
+        "container_logs"
+      ],
+      "negative_cases": [
+        "HTTP 204 stop response with live pdocker-direct child is failure",
+        "stale PID in state.json is rejected after process death or PID reuse",
+        "GPU executor or service child process orphan after stop is failure",
+        "stale exited duplicate name cannot hide the current running container"
+      ],
+      "exit_criteria": [
+        "Stop/kill/rm evidence records the Engine container ID before and after teardown, API status, persisted state, process-tree snapshot, and lifecycle log marker.",
+        "After stop, Engine API and state.json show exited/removed for that same ID and no pdocker-direct, service child, listener, or GPU executor process remains for it.",
+        "A 204/success API acknowledgement without process-tree teardown exits nonzero.",
+        "Restart after teardown creates a fresh Engine container ID or explicitly reconciles the previous ID without duplicate-name ambiguity."
+      ]
     },
     {
       "id": "runtime.oom-survival-large-workload",

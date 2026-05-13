@@ -1566,9 +1566,21 @@ class MainActivity : AppCompatActivity() {
         val managedBackingBytes: Long,
         val managedPageIns: Long,
         val managedPageOuts: Long,
+        val managedBytesIn: Long,
+        val managedBytesOut: Long,
+        val managedDirtyPageOuts: Long,
         val managedElapsedNs: Long,
         val transparentRegistered: Boolean,
         val transparentSigsegvStops: Long,
+        val transparentLastMmapLen: Long,
+        val transparentPendingAfterEntry: Long,
+        val transparentMaxResidentPages: Long,
+        val transparentBytesIn: Long,
+        val transparentBytesOut: Long,
+        val transparentDirtyPageOuts: Long,
+        val artifactCreatedAtEpoch: Long,
+        val artifactStatus: String,
+        val artifactAgeSeconds: Long,
         val source: String,
     )
 
@@ -1604,13 +1616,32 @@ class MainActivity : AppCompatActivity() {
         val proc = readProcStatus(File("/proc/${android.os.Process.myPid()}")).orEmpty()
         val runtime = Runtime.getRuntime()
         val pdockerFootprint = pdockerMemoryFootprint()
-        val managed = readLatestPagerMetrics("apk-memory-pager-managed-latest.json")
-        val transparent = readLatestPagerMetrics("apk-memory-pager-transparent-latest.json")
+        val managedArtifact = readLatestPagerArtifact("apk-memory-pager-managed-latest.json", "managed")
+        val transparentArtifact = readLatestPagerArtifact("apk-memory-pager-transparent-latest.json", "transparent")
+        val managed = managedArtifact.metrics
+        val transparent = transparentArtifact.metrics
         val managedReserve = managed.optLong("reserve_bytes", 0L)
-        val managedResidentPages = managed.optLong("resident_pages", managed.optLong("max_resident_pages", 0L))
-        val managedBytesOut = managed.optLong("bytes_out", 0L)
+        val transparentLastMmapLen = transparent.optLong("last_mmap_len", 0L)
+        val transparentPendingAfterEntry = transparent.optLong("pending_after_entry", 0L)
+        val transparentMaxResidentPages = transparent.optLong("max_resident_pages", 0L)
+        val managedResidentPages = maxOf(
+            managed.optLong("resident_pages", managed.optLong("max_resident_pages", 0L)),
+            transparentMaxResidentPages,
+        )
+        val managedBytesOut = maxOf(managed.optLong("bytes_out", 0L), transparent.optLong("bytes_out", 0L))
+        val managedBytesIn = maxOf(managed.optLong("bytes_in", 0L), transparent.optLong("bytes_in", 0L))
+        val managedDirtyPageOuts = maxOf(managed.optLong("dirty_page_outs", 0L), transparent.optLong("dirty_page_outs", 0L))
         val transparentRegistered = transparent.optString("registered").equals("yes", ignoreCase = true) ||
             transparent.optString("result").equals("ok", ignoreCase = true)
+        val displayArtifact = if (transparentArtifact.present) transparentArtifact else managedArtifact
+        val artifactAgeSeconds = if (displayArtifact.createdAtEpoch > 0L) {
+            (System.currentTimeMillis() / 1000L - displayArtifact.createdAtEpoch).coerceAtLeast(0L)
+        } else 0L
+        val artifactLabel = if (displayArtifact.present) {
+            "past self-test ${displayArtifact.kind} artifact"
+        } else {
+            "live /proc only"
+        }
         return MemoryLayerSnapshot(
             memTotal = mem["MemTotal"] ?: 0L,
             memAvailable = mem["MemAvailable"] ?: mem["MemFree"] ?: 0L,
@@ -1627,19 +1658,27 @@ class MainActivity : AppCompatActivity() {
             appVmSwap = procStatusBytes(proc, "VmSwap"),
             javaHeapMax = runtime.maxMemory(),
             javaHeapUsed = runtime.totalMemory() - runtime.freeMemory(),
-            managedReserveBytes = managedReserve,
+            managedReserveBytes = maxOf(managedReserve, transparentLastMmapLen, transparentPendingAfterEntry),
             managedResidentBytes = managedResidentPages * 4096L,
-            managedBackingBytes = maxOf(managedBytesOut, managedReserve),
-            managedPageIns = managed.optLong("page_ins", transparent.optLong("page_ins", 0L)),
-            managedPageOuts = managed.optLong("page_outs", transparent.optLong("page_outs", 0L)),
+            managedBackingBytes = maxOf(managedBytesOut, managedReserve, transparentLastMmapLen, transparentPendingAfterEntry),
+            managedPageIns = maxOf(managed.optLong("page_ins", 0L), transparent.optLong("page_ins", 0L)),
+            managedPageOuts = maxOf(managed.optLong("page_outs", 0L), transparent.optLong("page_outs", 0L)),
+            managedBytesIn = managedBytesIn,
+            managedBytesOut = managedBytesOut,
+            managedDirtyPageOuts = managedDirtyPageOuts,
             managedElapsedNs = maxOf(managed.optLong("elapsed_ns", 0L), transparent.optLong("elapsed_ns", 0L)),
             transparentRegistered = transparentRegistered,
             transparentSigsegvStops = transparent.optLong("sigsegv_stops", 0L),
-            source = when {
-                transparent.length() > 0 -> "transparent artifact"
-                managed.length() > 0 -> "managed artifact"
-                else -> "live /proc only"
-            },
+            transparentLastMmapLen = transparentLastMmapLen,
+            transparentPendingAfterEntry = transparentPendingAfterEntry,
+            transparentMaxResidentPages = transparentMaxResidentPages,
+            transparentBytesIn = transparent.optLong("bytes_in", 0L),
+            transparentBytesOut = transparent.optLong("bytes_out", 0L),
+            transparentDirtyPageOuts = transparent.optLong("dirty_page_outs", 0L),
+            artifactCreatedAtEpoch = displayArtifact.createdAtEpoch,
+            artifactStatus = displayArtifact.status,
+            artifactAgeSeconds = artifactAgeSeconds,
+            source = artifactLabel,
         )
     }
 
@@ -1669,6 +1708,12 @@ class MainActivity : AppCompatActivity() {
                 formatBytes(snapshot.javaHeapMax),
             ),
             getString(
+                R.string.memory_layers_artifact_summary_fmt,
+                snapshot.source,
+                formatArtifactAge(snapshot.artifactAgeSeconds, snapshot.artifactCreatedAtEpoch),
+                snapshot.artifactStatus.ifBlank { "unknown" },
+            ),
+            getString(
                 R.string.memory_layers_pager_summary_fmt,
                 if (snapshot.transparentRegistered) "transparent SIGSEGV" else "available / idle",
                 formatBytes(snapshot.managedReserveBytes),
@@ -1676,18 +1721,30 @@ class MainActivity : AppCompatActivity() {
                 formatBytes(snapshot.managedBackingBytes),
                 snapshot.managedPageIns,
                 snapshot.managedPageOuts,
+                formatBytes(snapshot.managedBytesIn),
+                formatBytes(snapshot.managedBytesOut),
+                snapshot.managedDirtyPageOuts,
             ),
             getString(
                 R.string.memory_layers_perf_summary_fmt,
                 formatDurationMs(snapshot.managedElapsedNs),
                 formatPagerRate(snapshot.managedPageIns + snapshot.managedPageOuts, snapshot.managedElapsedNs),
                 snapshot.transparentSigsegvStops,
+                formatBytes(snapshot.transparentLastMmapLen),
+                formatBytes(snapshot.transparentPendingAfterEntry),
+                snapshot.transparentMaxResidentPages,
+                formatBytes(snapshot.transparentBytesIn),
+                formatBytes(snapshot.transparentBytesOut),
+                snapshot.transparentDirtyPageOuts,
             ),
         ).joinToString("\n")
 
     private fun memoryLayerSnapshotText(snapshot: MemoryLayerSnapshot): String = buildString {
         appendLine("pdocker memory layer visualization")
         appendLine("source=${snapshot.source}")
+        appendLine("artifact.created_at_epoch=${snapshot.artifactCreatedAtEpoch}")
+        appendLine("artifact.age=${formatArtifactAge(snapshot.artifactAgeSeconds, snapshot.artifactCreatedAtEpoch)}")
+        appendLine("artifact.status=${snapshot.artifactStatus.ifBlank { "unknown" }}")
         appendLine()
         appendLine("== OS-governed memory ==")
         appendLine("physical.total=${formatBytes(snapshot.memTotal)}")
@@ -1720,6 +1777,15 @@ class MainActivity : AppCompatActivity() {
         appendLine("backing=${formatBytes(snapshot.managedBackingBytes)}")
         appendLine("page_ins=${snapshot.managedPageIns}")
         appendLine("page_outs=${snapshot.managedPageOuts}")
+        appendLine("bytes_in=${formatBytes(snapshot.managedBytesIn)}")
+        appendLine("bytes_out=${formatBytes(snapshot.managedBytesOut)}")
+        appendLine("dirty_page_outs=${snapshot.managedDirtyPageOuts}")
+        appendLine("transparent.last_mmap_len=${formatBytes(snapshot.transparentLastMmapLen)}")
+        appendLine("transparent.pending_after_entry=${formatBytes(snapshot.transparentPendingAfterEntry)}")
+        appendLine("transparent.max_resident_pages=${snapshot.transparentMaxResidentPages}")
+        appendLine("transparent.bytes_in=${formatBytes(snapshot.transparentBytesIn)}")
+        appendLine("transparent.bytes_out=${formatBytes(snapshot.transparentBytesOut)}")
+        appendLine("transparent.dirty_page_outs=${snapshot.transparentDirtyPageOuts}")
         appendLine("sigsegv_stops=${snapshot.transparentSigsegvStops}")
         appendLine("elapsed=${formatDurationMs(snapshot.managedElapsedNs)}")
         appendLine("page_ops_per_sec=${formatPagerRate(snapshot.managedPageIns + snapshot.managedPageOuts, snapshot.managedElapsedNs)}")
@@ -1778,17 +1844,46 @@ class MainActivity : AppCompatActivity() {
     private fun formatPercent(part: Long, total: Long): String =
         if (part <= 0L || total <= 0L) "0.0%" else String.format("%.1f%%", part * 100.0 / total)
 
-    private fun readLatestPagerMetrics(fileName: String): JSONObject {
+    private data class PagerMetricsArtifact(
+        val metrics: JSONObject,
+        val kind: String,
+        val createdAtEpoch: Long,
+        val status: String,
+        val present: Boolean,
+    )
+
+    private fun readLatestPagerArtifact(fileName: String, kind: String): PagerMetricsArtifact {
+        val empty = PagerMetricsArtifact(JSONObject(), kind, 0L, "", false)
         val candidates = listOf(
             File(pdockerHome, "docs/test/$fileName"),
             File(pdockerHome, "test/$fileName"),
             File(projectRoot, "default/docs/test/$fileName"),
             File(filesDir, "docs/test/$fileName"),
         )
-        val file = candidates.firstOrNull { it.isFile } ?: return JSONObject()
+        val file = candidates.firstOrNull { it.isFile } ?: return empty
         return runCatching {
-            JSONObject(file.readText()).optJSONObject("metrics") ?: JSONObject()
-        }.getOrDefault(JSONObject())
+            val root = JSONObject(file.readText())
+            PagerMetricsArtifact(
+                metrics = root.optJSONObject("metrics") ?: JSONObject(),
+                kind = kind,
+                createdAtEpoch = root.optLong("created_at_epoch", 0L),
+                status = root.optString("status"),
+                present = true,
+            )
+        }.getOrDefault(empty)
+    }
+
+    private fun formatArtifactAge(ageSeconds: Long, createdAtEpoch: Long): String {
+        if (createdAtEpoch <= 0L) return "unknown age"
+        val days = ageSeconds / 86_400L
+        val hours = (ageSeconds % 86_400L) / 3_600L
+        val minutes = (ageSeconds % 3_600L) / 60L
+        return when {
+            days > 0L -> "${days}d ${hours}h ago"
+            hours > 0L -> "${hours}h ${minutes}m ago"
+            minutes > 0L -> "${minutes}m ago"
+            else -> "${ageSeconds}s ago"
+        }
     }
 
     private fun runMemoryPagerSelfTest() {
@@ -4963,7 +5058,42 @@ class MainActivity : AppCompatActivity() {
             textSize = 10f * resources.displayMetrics.scaledDensity
         }
         private var snapshot = MemoryLayerSnapshot(
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, false, 0, "",
+            memTotal = 0,
+            memAvailable = 0,
+            swapTotal = 0,
+            swapFree = 0,
+            pdockerProcessCount = 0,
+            pdockerVmSize = 0,
+            pdockerRss = 0,
+            pdockerSwap = 0,
+            appVmSize = 0,
+            appVmRss = 0,
+            appVmData = 0,
+            appVmStk = 0,
+            appVmSwap = 0,
+            javaHeapMax = 0,
+            javaHeapUsed = 0,
+            managedReserveBytes = 0,
+            managedResidentBytes = 0,
+            managedBackingBytes = 0,
+            managedPageIns = 0,
+            managedPageOuts = 0,
+            managedBytesIn = 0,
+            managedBytesOut = 0,
+            managedDirtyPageOuts = 0,
+            managedElapsedNs = 0,
+            transparentRegistered = false,
+            transparentSigsegvStops = 0,
+            transparentLastMmapLen = 0,
+            transparentPendingAfterEntry = 0,
+            transparentMaxResidentPages = 0,
+            transparentBytesIn = 0,
+            transparentBytesOut = 0,
+            transparentDirtyPageOuts = 0,
+            artifactCreatedAtEpoch = 0,
+            artifactStatus = "",
+            artifactAgeSeconds = 0,
+            source = "live /proc only",
         )
 
         init {
@@ -5066,14 +5196,19 @@ class MainActivity : AppCompatActivity() {
             paint.setShadowLayer(10f, 0f, 0f, paint.color)
             canvas.drawLine(midX, (pagerBarTop - 6f * density).coerceAtLeast(pad), midX, footerY - 16f * density, paint)
             paint.clearShadowLayer()
+            val sourceLabel = if (snapshot.artifactCreatedAtEpoch > 0L) {
+                "past self-test: ${snapshot.source}, age ${formatAgeForChart(snapshot.artifactAgeSeconds, snapshot.artifactCreatedAtEpoch)}"
+            } else {
+                "source: ${snapshot.source}"
+            }
             canvas.drawText(
-                "perf: ${(snapshot.managedPageIns + snapshot.managedPageOuts)} page ops / ${compactNs(snapshot.managedElapsedNs)}",
+                "$sourceLabel; ${(snapshot.managedPageIns + snapshot.managedPageOuts)} page ops / ${compactNs(snapshot.managedElapsedNs)}",
                 barLeft,
                 footerY - 12f * density,
                 smallTextPaint,
             )
             canvas.drawText(
-                "wrapper: PROT_NONE → resident window → backing file",
+                "wrapper: PROT_NONE → resident window → backing file; transparent bytes in/out ${compactBytes(snapshot.transparentBytesIn)}/${compactBytes(snapshot.transparentBytesOut)}",
                 barLeft,
                 footerY + 2f * density,
                 smallTextPaint,
@@ -5169,6 +5304,19 @@ class MainActivity : AppCompatActivity() {
             val detail = segments.joinToString("  ") { "${it.label}: ${compactBytes(it.bytes)}" }
             canvas.drawText(ellipsizeForWidth(detail, right - left), left, bottom + 15f * density, smallTextPaint)
             return bottom + 17f * density
+        }
+
+        private fun formatAgeForChart(ageSeconds: Long, createdAtEpoch: Long): String {
+            if (createdAtEpoch <= 0L) return "unknown"
+            val days = ageSeconds / 86_400L
+            val hours = (ageSeconds % 86_400L) / 3_600L
+            val minutes = (ageSeconds % 3_600L) / 60L
+            return when {
+                days > 0L -> "${days}d ${hours}h"
+                hours > 0L -> "${hours}h ${minutes}m"
+                minutes > 0L -> "${minutes}m"
+                else -> "${ageSeconds}s"
+            }
         }
 
         private fun ellipsizeForWidth(text: String, maxWidth: Float): String {

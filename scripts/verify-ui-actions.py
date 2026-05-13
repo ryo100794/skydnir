@@ -334,6 +334,18 @@ def main() -> int:
     require("gpu bridge env migrates existing container state on start", "_merge_runtime_bridge_env(state)" in pdockerd_src and "PDOCKER_GPU_VIRTUAL_MEMORY" in pdockerd_src and "GGML_VK_SUBALLOCATION_BLOCK_SIZE" in pdockerd_src)
     require("compose resource memory keys feed engine metadata", '"mem_limit"' in main_src and '"memswap_limit"' in main_src and "deployMemoryLimit" in main_src and '"Memory"' in main_src and '"MemorySwap"' in main_src and "parseMemoryBytes" in main_src)
     require("compose memory pager is explicit pdocker opt-in", "PDOCKER_MEMORY_PAGER" in main_src and "PDOCKER_MEMORY_PAGER_MAX_BYTES" in main_src and "io.pdocker.memory-pager" in main_src and "io.pdocker.memory-pager.limit-bytes" in main_src)
+    require("debug ui visualizes os and pdocker virtual memory layers",
+            "MemoryLayerView" in main_src and
+            "renderMemoryLayerVisualization" in main_src and
+            "OS-governed allocation" in main_src and
+            "pdocker managed virtual-memory skin" in main_src and
+            "PROT_NONE" in main_src and
+            "page_ops_per_sec" in main_src and
+            "drawPrism" in main_src and
+            "LinearGradient" in main_src and
+            "runMemoryPagerSelfTest" in main_src and
+            "--pdocker-memory-pager-transparent-poc" in main_src and
+            "memory_layers_perf_summary_fmt" in string_src)
     require("compose up never creates inspection containers after failed build", "Prepared for inspection" not in main_src and "dockerfileBaseImage" not in main_src and "using materialized base image" not in main_src)
     require("engine job output is deduplicated", "appendUniqueLines" in main_src and "existing.add" in main_src)
     require("android runtime preflight is enabled", "PDOCKER_RUNTIME_PREFLIGHT" in pdockerd_bridge_src)
@@ -349,6 +361,7 @@ def main() -> int:
     require("template install records version stamp", ".pdocker-template-id" in main_src and ".pdocker-template-version" in main_src and "obj.optInt(\"version\", libraryVersion)" in main_src)
     require("android device smoke script exists", "docker compose up --detach --build" in android_smoke_src and "run-as" in android_smoke_src and "docker version" in android_smoke_src)
     require("android device smoke covers engine exec path", "docker exec \\\"\\$CID\\\" sh -lc" in android_smoke_src and "pdocker-exec-ok" in android_smoke_src and "'/vendor/xbin'" in android_smoke_src and "sleep 300" in android_smoke_src)
+    require("android device smoke covers single docker run gate", "docker_run_rm_smoke" in android_smoke_src and "docker run --rm ubuntu:22.04 echo hi" in android_smoke_src and "docker-run-rm-ubuntu-echo-hi.log" in android_smoke_src and "SawHi" in android_smoke_src)
     require("android device smoke covers engine api it stream", "engine_exec_it_smoke" in android_smoke_src and "/containers/$container_ref/exec" in android_smoke_src and "/exec/%s/start" in android_smoke_src and "pdocker-it-ok" in android_smoke_src)
     require("android device smoke covers ui bridge it self-test", "ACTION_SMOKE_UI_IT_SELFTEST" in main_src and "runUiItSelfTest" in main_src and "ui-it-selftest-latest.json" in main_src and "ui_engine_exec_it_selftest" in android_smoke_src and "SMOKE_UI_IT_SELFTEST" in android_smoke_src and "pdocker-ui-it-ok" in main_src and "pdocker-ui-it-bracket-ok" in main_src and "pdocker-ui-it-ctrlc-ok" in main_src and "pdocker-ui-it-term-ok" in main_src and "pdocker-ui-it-bash-ok" in main_src and "window.pdockerTestSendInput" in main_src)
     require("android device smoke avoids orphan cleanup side effects", "--remove-orphans" not in android_smoke_src)
