@@ -95,6 +95,8 @@ service_truth_acceptance_entrypoint() {
 set +e
 TARGET="${1:-default-workspace}"
 cd files || exit 1
+mkdir -p pdocker/tmp
+export TMPDIR="$PWD/pdocker/tmp"
 export PATH="$PWD/pdocker-runtime/docker-bin:$PATH"
 export DOCKER_CONFIG="$PWD/pdocker-runtime/docker-bin"
 export DOCKER_HOST="unix://$PWD/pdocker/pdockerd.sock"
@@ -163,7 +165,7 @@ collect_project_ports() {
   : >"$DIAG/configured-ports.txt"
   find pdocker/projects -maxdepth 4 \( -name compose.yaml -o -name docker-compose.yml \) -type f 2>/dev/null | sort | while IFS= read -r f; do
     sed -n 's/.*\([0-9][0-9][0-9][0-9][0-9]*\):[0-9][0-9]*/\1/p' "$f" 2>/dev/null
-  done | sort -u >>"$DIAG/configured-ports.txt"
+  done | tr -d '"' | sort -u >>"$DIAG/configured-ports.txt"
   printf '18080\n18081\n' >>"$DIAG/configured-ports.txt"
   sort -u "$DIAG/configured-ports.txt" -o "$DIAG/configured-ports.txt" 2>/dev/null || true
 }
@@ -428,6 +430,8 @@ runtime_teardown_acceptance_entrypoint() {
 set +e
 TARGET="${1:-default-workspace}"
 cd files || exit 1
+mkdir -p pdocker/tmp
+export TMPDIR="$PWD/pdocker/tmp"
 export PATH="$PWD/pdocker-runtime/docker-bin:$PATH"
 export DOCKER_CONFIG="$PWD/pdocker-runtime/docker-bin"
 export DOCKER_HOST="unix://$PWD/pdocker/pdockerd.sock"
