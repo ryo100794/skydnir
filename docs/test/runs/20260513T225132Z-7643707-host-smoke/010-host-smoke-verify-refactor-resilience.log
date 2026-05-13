@@ -1,0 +1,4 @@
+$ python3 scripts/verify-refactor-resilience.py --write-artifact docs/test/refactor-resilience-latest.json
+ok: refactor-resilience ledger records 6 cases across 6 axes
+ok: wrote refactor-resilience artifact: docs/test/refactor-resilience-latest.json
+ok: refactor-resilience external-contract test design is recorded

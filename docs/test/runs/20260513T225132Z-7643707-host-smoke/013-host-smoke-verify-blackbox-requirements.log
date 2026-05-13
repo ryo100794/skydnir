@@ -1,0 +1,7 @@
+$ python3 scripts/verify-blackbox-requirements.py
+ok: negative self-test fails as expected: missing negative scenario
+ok: negative self-test fails as expected: implementation leak in requirement text
+ok: negative self-test fails as expected: weak negative oracle
+ok: negative self-test fails as expected: corrupt storage metrics fixture
+ok: negative self-test fails as expected: non-standard Dockerfile instruction
+ok: blackbox requirements cover 10 externally observable requirements

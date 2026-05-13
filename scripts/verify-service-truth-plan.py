@@ -17,7 +17,11 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "tests" / "feature_scenarios.json"
-DOCS = [ROOT / "docs" / "test" / "COMPATIBILITY.md", ROOT / "docs" / "plan" / "TODO.md"]
+DOCS = [
+    ROOT / "docs" / "test" / "COMPATIBILITY.md",
+    ROOT / "docs" / "test" / "SERVICE_TRUTH_DEVICE_GATE.md",
+    ROOT / "docs" / "plan" / "TODO.md",
+]
 ANDROID_SMOKE = ROOT / "scripts" / "android-device-smoke.sh"
 
 SERVICE_ID = "service.health.listener-container-proof"
@@ -131,6 +135,8 @@ def validate_docs() -> None:
             "docs/test/service-truth-latest.json",
             "docs/test/runtime-teardown-latest.json",
             "UI card",
+            "DockerPs",
+            "docker ps",
             "/containers/json",
             "state.json",
             "process table",

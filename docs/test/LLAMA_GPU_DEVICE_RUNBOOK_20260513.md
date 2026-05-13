@@ -30,6 +30,8 @@ The immediate acceptance signal for `ngl=1` is:
   automated route.
 - Do not claim a speed result unless the correctness report passes.
 - Do not accept compare/correctness/benchmark claims unless the expected GPU executor marker is observed in the artifact.
+- Do not accept compare/correctness/benchmark claims when
+  `gpu.diagnostics.config_propagation.summary` is `fail`.
 - Do not start or accept a GPU run while readiness is `false`.
 - Do not allow a benchmark claim without a CPU comparison/baseline.
 
@@ -112,7 +114,9 @@ bash scripts/android-llama-gpu-compare.sh \
 
 First classify the artifact with the repository verifier.  The verifier blocks
 claiming success when readiness was false, when the expected executor build
-marker was not observed, or when a speedup appears without a CPU baseline:
+marker was not observed, when requested GPU diagnostic environment variables
+were not reflected by executor dispatch evidence, or when a speedup appears
+without a CPU baseline:
 
 ```bash
 python3 scripts/verify-llama-gpu-artifact.py \
@@ -154,6 +158,17 @@ A compare artifact must include the expected executor build marker under
 useful supporting evidence, but they are not a substitute for executor evidence
 when making compare, correctness, or benchmark claims.
 
+### Environment Propagation Guard
+
+Before interpreting Q6_K blocker evidence, inspect
+`gpu.diagnostics.config_propagation`.  If its `summary` is `fail`, or any check
+has `status` equal to `missing-evidence` or `mismatch`, the next action is to
+fix option transport across compare launch, pdockerd `_gpu_env(state)`, and
+executor dispatch reporting.  Do not infer that a Q6_K safe-kernel,
+strict-passthrough, specialization, descriptor-transfer, or subgroup
+experiment failed until the requested environment values are visible in the
+artifact.
+
 A benchmark claim additionally requires:
 
 - GPU correctness claim is allowed;
@@ -182,7 +197,9 @@ If:
 ```
 
 then the local-size hypothesis is cleared.  Continue with descriptor identity,
-memory residency/staging, synchronization, or Q6_K arithmetic interpretation.
+memory residency/staging/writeback, synchronization/device-execution, or Q6_K
+arithmetic/reduction interpretation.  The next artifact should narrow one of
+those classes rather than merely restating that the sampled oracle mismatches.
 
 ### Q6_K Matches
 

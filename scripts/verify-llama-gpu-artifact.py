@@ -87,6 +87,23 @@ def _cpu_comparison_available(data: dict[str, Any]) -> bool:
     return False
 
 
+def _config_propagation(data: dict[str, Any]) -> dict[str, Any]:
+    value = data.get("config_propagation") or nested(data, "gpu", "diagnostics", "config_propagation") or {}
+    return value if isinstance(value, dict) else {}
+
+
+def _config_propagation_failed(config_propagation: dict[str, Any]) -> bool:
+    if config_propagation.get("summary") == "fail":
+        return True
+    checks = config_propagation.get("checks") or []
+    if not isinstance(checks, list):
+        return False
+    for check in checks:
+        if isinstance(check, dict) and check.get("status") in {"missing-evidence", "mismatch"}:
+            return True
+    return False
+
+
 def _claim_base(
     classification: str,
     *,
@@ -142,6 +159,17 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             runtime_freshness=runtime_freshness,
         )
 
+    config_propagation = _config_propagation(data)
+    if _config_propagation_failed(config_propagation):
+        return _claim_base(
+            "config-propagation-mismatch",
+            next_action=(
+                data.get("next_action")
+                or "fix GPU diagnostic environment propagation before accepting compare, correctness, or benchmark claims"
+            ),
+            runtime_freshness=runtime_freshness,
+        ) | {"config_propagation": config_propagation}
+
     if not q6:
         classification = "q6-not-reached"
         next_action = data.get("next_action") or "collect an ngl=1 artifact with Q6_K oracle enabled"
@@ -178,6 +206,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "next_action": next_action,
         "q6_workgroup_diagnostics": q6,
         "runtime_freshness": runtime_freshness,
+        "config_propagation": config_propagation,
     }
 
 
@@ -211,6 +240,8 @@ def main(argv: list[str]) -> int:
         return 21
     if classification == "executor-marker-not-observed":
         return 34
+    if classification == "config-propagation-mismatch":
+        return 35
     if args.require_q6_match:
         return 0 if classification == "q6-workgroup-cleared-and-oracle-match" else 30
     if args.require_q6_workgroup_clear:

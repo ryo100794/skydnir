@@ -304,6 +304,16 @@ Pass criteria:
   reduce the shader execution model itself: specialize/materialize constants
   more completely, then force/disable shared-memory reduction variants or
   emulate the Q6_K shader as a bridge-owned kernel for this hash.
+- If a new artifact reports `config_propagation.summary == "fail"`, stop Q6_K
+  diagnosis and fix environment propagation first.  A missing diagnostic knob
+  can invalidate every Q6_K split, including safe-kernel, strict-passthrough,
+  specialization, descriptor-transfer, and subgroup experiments.
+- The next Q6_K action after environment propagation is trusted is to preserve
+  strict passthrough and collect a workgroup-cleared artifact that names one
+  precise blocker class: descriptor effective range/offset, memory
+  residency/staging/writeback, synchronization/device-execution, or Q6_K
+  arithmetic/reduction.  Do not treat another sampled mismatch as progress
+  unless it narrows one of those classes.
 
 Fail criteria:
 
@@ -344,6 +354,11 @@ is explicit rather than implicit:
 - Regression guard: `tests.test_gpu_abi_contract` checks both the
   UI/compose runtime defaults and the compare-only diagnostic list so future
   edits cannot silently drop one side of the bridge.
+- Artifact guard: `scripts/verify-llama-gpu-artifact.py` treats failed
+  `gpu.diagnostics.config_propagation` evidence as
+  `config-propagation-mismatch` and blocks correctness/benchmark claims.  This
+  catches cases where a compare command requested a diagnostic environment
+  variable but executor dispatch evidence did not reflect it.
 
 ### Stage 5: Correctness gate for `ngl=1`
 

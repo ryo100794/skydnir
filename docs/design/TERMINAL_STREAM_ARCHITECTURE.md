@@ -141,6 +141,15 @@ TTY type is a session capability, not a UI type.
 The terminal surface receives decoded display bytes. It does not decide how a
 Docker raw stream differs from a multiplexed stream.
 
+### Static Boundary Contract
+
+Docker exec/PTY semantics belong to the session/API layer. A static host test
+must fail if Engine endpoints, Docker exec command strings, PTY implementation
+names, smoke artifact policy, or container-specific routing are added to the
+generic `xterm/index.html` terminal surface. The surface may call generic bridge
+verbs such as `input`, `resize`, `readOnly`, `copyToClipboard`, and
+`startInitial`; it must not construct Docker sessions itself.
+
 ## Input and IME Rules
 
 Terminal input must preserve user intent without session-specific hacks:

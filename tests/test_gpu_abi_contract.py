@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import re
 import unittest
 from pathlib import Path
@@ -12,9 +13,11 @@ VULKAN_ICD = ROOT / "docker-proot-setup" / "src" / "gpu" / "pdocker_vulkan_icd.c
 LLAMA_COMPARE = ROOT / "scripts" / "android-llama-gpu-compare.sh"
 PDOCKERD = ROOT / "docker-proot-setup" / "bin" / "pdockerd"
 PDOCKERD_SERVICE = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "PdockerdService.kt"
+MAIN_ACTIVITY = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "MainActivity.kt"
 LLAMA_GPU_NEXT_STEPS = ROOT / "docs" / "plan" / "LLAMA_GPU_BRIDGE_NEXT_STEPS.md"
 LLAMA_GPU_CORRECTNESS = ROOT / "docs" / "test" / "LLAMA_GPU_CORRECTNESS_20260507.md"
 ROPE_YARN_ARTIFACT = ROOT / "docs" / "test" / "llama-gpu-ngl1-rope-yarn-oracle-20260509.json"
+LLAMA_GPU_ARTIFACT_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 
 
 def defines(path):
@@ -761,6 +764,7 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_gpu_env_propagation_parity_is_documented_and_guarded(self):
         compare = LLAMA_COMPARE.read_text()
         pdockerd = PDOCKERD.read_text()
+        main_activity = MAIN_ACTIVITY.read_text()
         next_steps = LLAMA_GPU_NEXT_STEPS.read_text()
         correctness = LLAMA_GPU_CORRECTNESS.read_text()
 
@@ -782,6 +786,16 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(f'"{key}": os.environ.get', pdockerd)
             self.assertIn(key, compare)
 
+        ui_compose_template_staleness_keys = [
+            "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
+            "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
+            "GGML_VK_FORCE_MAX_BUFFER_SIZE",
+            "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
+            "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
+        ]
+        for key in ui_compose_template_staleness_keys:
+            self.assertIn(key, main_activity)
+
         diagnostic_keys = [
             "PDOCKER_GPU_CPU_ORACLE",
             "PDOCKER_GPU_STRICT_PASSTHROUGH",
@@ -798,6 +812,49 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(key, next_steps)
         self.assertIn("UI/compose runtime defaults and compare-only diagnostics", next_steps)
         self.assertIn("Environment propagation parity", correctness)
+
+    def test_llama_gpu_artifact_verifier_blocks_env_reflection_misses(self):
+        spec = importlib.util.spec_from_file_location("llama_gpu_artifact_verifier", LLAMA_GPU_ARTIFACT_VERIFIER)
+        verifier = importlib.util.module_from_spec(spec)
+        self.assertIsNotNone(spec.loader)
+        spec.loader.exec_module(verifier)
+
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": {
+                        "summary": "pass",
+                        "expected_executor_marker": "gpu-executor-workgroup3d-20260513",
+                        "observed_executor_markers": ["gpu-executor-workgroup3d-20260513"],
+                    },
+                    "config_propagation": {
+                        "summary": "fail",
+                        "checks": [
+                            {
+                                "env": "PDOCKER_GPU_Q6K_SAFE_KERNEL",
+                                "executor_field": "q6k_safe_kernel",
+                                "expected": True,
+                                "observed_values": [],
+                                "status": "missing-evidence",
+                            }
+                        ],
+                    },
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                    },
+                },
+                "correctness": {"summary": {"correctness": "pass"}},
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            "comparison": {"speedup": 3.0, "target_met": True},
+        }
+        report = verifier.classify(payload)
+        self.assertEqual("config-propagation-mismatch", report["classification"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertIn("PDOCKER_GPU_Q6K_SAFE_KERNEL", json.dumps(report["config_propagation"]))
 
 
 if __name__ == "__main__":

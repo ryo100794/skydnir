@@ -201,6 +201,53 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('ui_engine_exec_it_selftest "" "${PDOCKER_UI_IT_SELFTEST_REQUIRE_CONTAINER:-0}"', self.android_smoke)
         self.assertNotIn('ui_engine_exec_it_selftest "$CID"\n', self.android_smoke)
 
+
+    def test_terminal_surface_stays_session_neutral_static_boundary(self):
+        # xterm/index.html is the generic terminal surface. It may talk to the
+        # bridge using byte-oriented UI verbs, but Docker/Engine/PTY semantics
+        # must stay in Kotlin session/API code so UI fixes cannot bypass exec -it.
+        forbidden_patterns = [
+            r"Bridge\.ENGINE_EXEC_PREFIX",
+            r"ENGINE_EXEC_PREFIX",
+            r"/containers/[^\n\r]*exec",
+            r"/exec/[^\n\r]*start",
+            r"/exec/[^\n\r]*resize",
+            r"docker\s+exec",
+            r"PtyNative",
+            r"createEngineExec",
+            r"startEngineExecStream",
+            r"ui-it-selftest-latest\.json",
+            r"engine-exec-input-latest\.jsonl",
+            r"PDOCKER_UI_IT_SELFTEST",
+        ]
+        for pattern in forbidden_patterns:
+            self.assertIsNone(re.search(pattern, self.xterm, flags=re.IGNORECASE), pattern)
+
+        bridge_calls = set(re.findall(r"PdockerBridge\.([A-Za-z_][A-Za-z0-9_]*)\(", self.xterm))
+        self.assertLessEqual(
+            bridge_calls,
+            {"readOnly", "copyToClipboard", "input", "resize", "startInitial"},
+        )
+        for generic_hook in [
+            "window.pdockerTestSendInput",
+            "window.pdockerTestCtrlInput",
+            "PdockerBridge.input(toB64(enc.encode(payload)))",
+            "PdockerBridge.resize(term.rows, term.cols)",
+        ]:
+            self.assertIn(generic_hook, self.xterm)
+
+    def test_design_doc_records_terminal_surface_and_session_api_boundary(self):
+        design = (ROOT / "docs" / "design" / "TERMINAL_STREAM_ARCHITECTURE.md").read_text()
+        for required in [
+            "The terminal UI is a generic byte terminal",
+            "The API/session layer owns session semantics",
+            "The surface must never branch on Docker container IDs",
+            "Docker-specific commands, container IDs, and Engine API endpoints must not",
+            "Docker exec/PTY semantics belong to the session/API layer",
+            "static host test",
+        ]:
+            self.assertIn(required, design)
+
     def test_terminal_exec_it_device_gate_doc_records_artifact_contract(self):
         doc = DEVICE_GATE_DOC.read_text()
         for required in [
@@ -212,6 +259,11 @@ class TerminalExecItContractTest(unittest.TestCase):
             "top-starts-on-tty",
             "q-quits-top",
             "resize-route-is-observable",
+            "top-repaint-remains-terminal-shaped",
+            "UI-driven reproduction route",
+            "Japanese IME",
+            "Layer separation contract",
+            "static host test",
             "ui-it-selftest-latest.json",
             "engine-exec-input-latest.jsonl",
         ]:

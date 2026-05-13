@@ -1,0 +1,4 @@
+$ python3 scripts/verify-abnormal-events.py --write-artifact docs/test/abnormal-events-latest.json
+ok: abnormal event ledger records 11 cases, 7 fast runnable, 1 device, 3 planned
+ok: wrote abnormal event artifact: docs/test/abnormal-events-latest.json
+ok: abnormal event cases have structured reproduction and evidence records

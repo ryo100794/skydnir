@@ -109,7 +109,7 @@
       "result": "pass"
     }
   ],
-  "git_commit": "3df026ee3376",
+  "git_commit": "76437075ee89",
   "kind": "input-validation",
   "ledgers": [
     "tests/input_validation_cases.json",
@@ -129,5 +129,5 @@
     "runnable_grammar_count": 6,
     "syntax_and_range_validation_recorded": true
   },
-  "timestamp_utc": "2026-05-13T22:16:11Z"
+  "timestamp_utc": "2026-05-13T22:52:14Z"
 }
