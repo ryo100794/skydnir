@@ -396,6 +396,21 @@ class MainActivity : AppCompatActivity() {
         val engineContainerId: String,
     )
 
+    private data class RenderedServiceTruthCard(
+        val kind: String,
+        val title: String,
+        val projectName: String?,
+        val serviceName: String?,
+        val containerName: String?,
+        val engineContainerId: String?,
+        val containerIdSource: String,
+        val truthState: String,
+        val statusText: String,
+        val detailText: String,
+        val renderedAtMs: Long,
+        val lastEngineSnapshotAtMs: Long,
+    )
+
     private enum class DocumentsWriteAccess(val envValue: String) {
         DirectPathWritable("direct-path-writable"),
         SafMediated("saf-mediated"),
@@ -510,6 +525,8 @@ class MainActivity : AppCompatActivity() {
     private var containerSnapshotFingerprint = ""
     private var containerSnapshotRefreshing = false
     private var lastContainerSnapshotAt = 0L
+    private val renderedServiceTruthCards = mutableListOf<RenderedServiceTruthCard>()
+    private var renderPassStartedAtMs = 0L
     private var hostEnvironment: JSONObject? = null
     private var hostEnvironmentRefreshing = false
     private var lastHostEnvironmentAt = 0L
@@ -805,6 +822,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderContent() {
         content.removeAllViews()
+        beginRenderedServiceTruthExport()
         when (currentTab) {
             Tab.Overview -> renderOverview()
             Tab.Library -> renderLibrary()
@@ -815,6 +833,148 @@ class MainActivity : AppCompatActivity() {
             Tab.Sessions -> renderSessions()
             Tab.Debug -> renderDebugResources()
         }
+        writeRenderedServiceTruthExport()
+    }
+
+    private fun beginRenderedServiceTruthExport() {
+        renderPassStartedAtMs = System.currentTimeMillis()
+        renderedServiceTruthCards.clear()
+    }
+
+    private fun recordRenderedContainerCard(
+        title: String,
+        statusText: String,
+        detailText: String,
+        dir: File,
+        state: JSONObject?,
+        snapshot: JSONObject?,
+    ) {
+        val engineId = snapshot?.optString("Id")?.takeIf { it.isNotBlank() }
+        val fallbackId = state?.optString("Id")?.takeIf { it.isNotBlank() }
+        val (source, truthState, exportedId) = when {
+            engineId != null -> Triple("EngineApiContainersJson", "current", engineId)
+            lastContainerSnapshotAt == 0L -> Triple("EngineSnapshotMissing", "unknown", null)
+            fallbackId != null -> Triple("PersistedStateJson", "stale", fallbackId)
+            else -> Triple("EngineApiContainersJson", "unknown", null)
+        }
+        renderedServiceTruthCards += RenderedServiceTruthCard(
+            kind = "container-card",
+            title = title,
+            projectName = null,
+            serviceName = null,
+            containerName = state?.optString("Name")?.trim('/')?.takeIf { it.isNotBlank() } ?: dir.name,
+            engineContainerId = exportedId,
+            containerIdSource = source,
+            truthState = truthState,
+            statusText = statusText,
+            detailText = detailText,
+            renderedAtMs = renderPassStartedAtMs,
+            lastEngineSnapshotAtMs = lastContainerSnapshotAt,
+        )
+    }
+
+    private fun recordRenderedProjectServiceCards(project: ProjectSummary, detailText: String) {
+        val snapshots = projectContainerSnapshots(project.dir)
+        val proofs = projectRunningServiceProofs(project.dir, snapshots)
+        val localStates = projectContainerStates(project.dir)
+        val composeNames = projectComposeContainerNames(project.dir)
+        renderedServiceTruthCards += RenderedServiceTruthCard(
+            kind = "project-card",
+            title = project.dir.name,
+            projectName = project.dir.name,
+            serviceName = null,
+            containerName = null,
+            engineContainerId = snapshots.singleOrNull()?.optString("Id")?.takeIf { it.isNotBlank() },
+            containerIdSource = when {
+                snapshots.isNotEmpty() -> "EngineApiContainersJson"
+                localStates.isNotEmpty() -> "PersistedStateJson"
+                lastContainerSnapshotAt == 0L -> "EngineSnapshotMissing"
+                else -> "EngineApiContainersJson"
+            },
+            truthState = when {
+                snapshots.size == 1 -> "current"
+                snapshots.size > 1 -> "ambiguous"
+                localStates.isNotEmpty() -> "stale"
+                else -> "unknown"
+            },
+            statusText = project.containerStatusSummary,
+            detailText = detailText,
+            renderedAtMs = renderPassStartedAtMs,
+            lastEngineSnapshotAtMs = lastContainerSnapshotAt,
+        )
+        project.services.distinctBy { it.name }.forEach { service ->
+            val containerName = service.containerName.ifBlank { "${project.dir.name}-${service.name}-1" }
+            val proof = proofs[service.name]
+            val localState = localStates.firstOrNull { state ->
+                val labels = containerLabels(state)
+                labels?.optString(PDOCKER_COMPOSE_SERVICE_LABEL).orEmpty() == service.name ||
+                    labels?.optString("com.docker.compose.service").orEmpty() == service.name ||
+                    state.optString("Name").trim('/') == containerName ||
+                    composeNames[state.optString("Name").trim('/')] == service.name
+            }
+            val staleId = localState?.optString("Id")?.takeIf { it.isNotBlank() }
+            val (source, truthState, exportedId) = when {
+                proof != null -> Triple("EngineApiContainersJson", "current", proof.engineContainerId)
+                lastContainerSnapshotAt == 0L -> Triple("EngineSnapshotMissing", "unknown", null)
+                staleId != null -> Triple("PersistedStateJson", "stale", staleId)
+                else -> Triple("EngineApiContainersJson", "unknown", null)
+            }
+            renderedServiceTruthCards += RenderedServiceTruthCard(
+                kind = "service-card",
+                title = "${project.dir.name}/${service.name}",
+                projectName = project.dir.name,
+                serviceName = service.name,
+                containerName = containerName,
+                engineContainerId = exportedId,
+                containerIdSource = source,
+                truthState = truthState,
+                statusText = project.serviceHealth,
+                detailText = detailText,
+                renderedAtMs = renderPassStartedAtMs,
+                lastEngineSnapshotAtMs = lastContainerSnapshotAt,
+            )
+        }
+    }
+
+    private fun writeRenderedServiceTruthExport() {
+        val diagnosticsDir = File(pdockerHome, "diagnostics").apply { mkdirs() }
+        val generatedAt = System.currentTimeMillis()
+        val cards = JSONArray()
+        renderedServiceTruthCards.forEach { card ->
+            cards.put(JSONObject()
+                .put("Kind", card.kind)
+                .put("Title", card.title)
+                .put("ProjectName", card.projectName ?: JSONObject.NULL)
+                .put("ServiceName", card.serviceName ?: JSONObject.NULL)
+                .put("ContainerName", card.containerName ?: JSONObject.NULL)
+                .put("EngineContainerId", card.engineContainerId ?: JSONObject.NULL)
+                .put("ContainerIdSource", card.containerIdSource)
+                .put("TruthState", card.truthState)
+                .put("StatusText", card.statusText)
+                .put("DetailText", card.detailText)
+                .put("RenderedAtUnixMs", card.renderedAtMs)
+                .put("LastEngineSnapshotAtUnixMs", card.lastEngineSnapshotAtMs))
+        }
+        val truthStates = renderedServiceTruthCards.map { it.truthState }.toSet()
+        val export = JSONObject()
+            .put("SchemaVersion", 1)
+            .put("Kind", "ui-rendered-service-truth")
+            .put("GeneratedAtUnixMs", generatedAt)
+            .put("CurrentTab", currentTab.name)
+            .put("EngineSnapshot", JSONObject()
+                .put("Fetched", lastContainerSnapshotAt > 0L)
+                .put("LastFetchedAtUnixMs", lastContainerSnapshotAt.takeIf { it > 0L } ?: JSONObject.NULL)
+                .put("ContainerCount", containerSnapshot.size))
+            .put("Summary", JSONObject()
+                .put("CardCount", renderedServiceTruthCards.size)
+                .put("CurrentCount", renderedServiceTruthCards.count { it.truthState == "current" })
+                .put("StaleCount", renderedServiceTruthCards.count { it.truthState == "stale" })
+                .put("UnknownCount", renderedServiceTruthCards.count { it.truthState == "unknown" })
+                .put("AmbiguousCount", renderedServiceTruthCards.count { it.truthState == "ambiguous" })
+                .put("HasUnknownOrStale", truthStates.any { it == "unknown" || it == "stale" || it == "ambiguous" }))
+            .put("Contract", "Rendered UI cards export the Engine container ID currently proven by /containers/json; if no current Engine snapshot exists or only persisted state matches, TruthState is unknown/stale and must not be treated as success.")
+            .put("RenderedCards", cards)
+        File(diagnosticsDir, "ui-rendered-service-truth-latest.json").writeText(export.toString(2) + "\n")
     }
 
     private fun tabLabel(tab: Tab): String = getString(when (tab) {
@@ -1209,8 +1369,10 @@ class MainActivity : AppCompatActivity() {
             val image = state?.optString("Image")?.ifBlank { getString(R.string.unknown_image) } ?: getString(R.string.unknown_image)
             val statusText = snapshot?.optString("Status")?.takeIf { it.isNotBlank() }
                 ?: containerCachedStatus(state)
+            val detailText = "$image\n${containerNetworkSummary(state)}\n${containerLogPreview(dir)}"
+            recordRenderedContainerCard(name, statusText, detailText, dir, state, snapshot)
             val running = containerIsRunning(snapshot, state)
-            addWidget(name, statusText, "$image\n${containerNetworkSummary(state)}\n${containerLogPreview(dir)}") {
+            addWidget(name, statusText, detailText) {
                 if (running) {
                     openDockerInteractiveTerminal(
                         getString(R.string.terminal_container_fmt, name),
@@ -5839,6 +6001,7 @@ class MainActivity : AppCompatActivity() {
                 getString(R.string.project_dashboard_runtime_fmt, project.runtimeDiagnosticSummary),
                 getString(R.string.project_dashboard_jobs_fmt, project.jobSummary),
             ).joinToString("\n")
+            recordRenderedProjectServiceCards(project, detail)
             addWidget(project.dir.name, getString(R.string.section_project_dashboard), detail, detailLines = 10) {
                 openProjectPrimaryFile(project)
             }

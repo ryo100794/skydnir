@@ -215,6 +215,17 @@ Known gaps:
   the current supported smoke paths, keep full ADB smoke as a release blocker,
   and add focused regressions for every syscall/runtime gap found by larger
   build and compose workloads.
+  The normal full device smoke now drives the hidden WebView terminal route
+  through `ACTION_PREFIX.action.SMOKE_UI_IT_SELFTEST` after compose has produced
+  a concrete Engine container ID, and it also accepts
+  `PDOCKER_UI_IT_SELFTEST_CONTAINER=<id-or-name>` for pre-existing containers.
+  The runner collects `files/pdocker/diagnostics/ui-it-selftest-latest.json`
+  and `engine-exec-input-latest.jsonl` into `PDOCKER_SMOKE_ARTIFACT_DIR` (or
+  `tmp/device-smoke-artifacts/<timestamp>`).  If quick mode or a caller has no
+  real container ID, the runner writes a `Status: planned-skip`,
+  `Success: false`, `DeviceProofAttempted: false` artifact instead of reporting
+  success; only a real container run whose artifact contains `Success: true`
+  can pass the UI exec-it self-test gate.
 - Real listener health is not yet a compatibility gate: service health must
   prove the listener belongs to the current Engine container ID, not merely that
   a configured port or stale name exists, and UI cards must not display healthy
@@ -223,7 +234,17 @@ Known gaps:
   `python3 scripts/verify-service-truth-plan.py`; implementation evidence must
   be recorded as `docs/test/service-truth-latest.json` and show the same Engine
   container ID across the UI card, `/containers/json`, persisted `state.json`,
-  process table, listener probe, and logs.  The device entrypoint
+  process table, listener probe, and logs.  The app UI now writes its
+  rendered-card side of the proof to the app-private
+  file `files/pdocker/diagnostics/ui-rendered-service-truth-latest.json`.
+  That export has `SchemaVersion: 1`, `Kind: ui-rendered-service-truth`,
+  `EngineSnapshot` metadata, and a `RenderedCards[]` array with `Kind`
+  (`project-card`, `service-card`, or `container-card`), `ProjectName`,
+  `ServiceName`, `ContainerName`, `EngineContainerId`, `ContainerIdSource`,
+  `TruthState` (`current`, `unknown`, `stale`, or `ambiguous`),
+  `RenderedAtUnixMs`, and `LastEngineSnapshotAtUnixMs`.  If the Engine snapshot
+  has not been fetched, the UI marks cards `unknown`; if only persisted
+  `state.json` can name an ID, it marks cards `stale`; neither state is success.
   `scripts/android-device-smoke.sh --service-truth <target>` now writes the
   planned-gap artifact `files/pdocker/diagnostics/service-truth-latest.json`
   plus raw files under `files/pdocker/diagnostics/service-truth/`.  Its schema
@@ -240,8 +261,12 @@ Known gaps:
   `state-id-comparison.json` compares the selected Engine candidate against
   IDs found in persisted `state.json`; and `listener-probe.json` records each
   probed listener port alongside `/proc/net/tcp` match counts and TCP connect
-  exit codes.  These fields improve device debugging but still cannot promote
-  `Success: false` while the rendered UI card container ID is unavailable.
+  exit codes, and the smoke copies the UI rendered-card export into
+  `files/pdocker/diagnostics/service-truth/ui-rendered-service-truth-latest.json`.
+  These fields improve device debugging but still cannot promote
+  `Success: false` until all truth sources agree on one current Engine
+  container ID; missing, `unknown`, `stale`, or `ambiguous` UI cards remain
+  explicit non-success evidence.
 - Runtime teardown is not yet a compatibility gate: stop/kill/rm must prove
   process-tree and executor cleanup rather than trusting an HTTP 204 response.
   `scripts/android-device-smoke.sh --runtime-teardown <target>` now writes the

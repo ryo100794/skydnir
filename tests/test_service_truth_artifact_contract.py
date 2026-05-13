@@ -31,11 +31,14 @@ def test_service_truth_device_artifact_is_non_passing_until_same_id_proof():
         "state-id-comparison.json",
         "listener-probe.json",
         "SelectedEngineContainerId",
+        "ui-rendered-service-truth-latest.json",
+        "ContainerIdSource",
+        "TruthState",
         "/proc/net/tcp",
     ]:
         assert term in body
     assert "fake success" not in body.lower()
-    assert "Rendered UI card container ID is not exported" in body
+    assert "missing or stale UI export is not success" in body
 
 
 def test_static_verifier_and_docs_require_concrete_service_truth_schema():
@@ -50,10 +53,12 @@ def test_static_verifier_and_docs_require_concrete_service_truth_schema():
         "engine-candidates.json",
         "state-id-comparison.json",
         "listener-probe.json",
+        "ui-rendered-service-truth-latest.json",
     ]:
         assert term in verifier
     for term in [
         "files/pdocker/diagnostics/service-truth-latest.json",
+        "files/pdocker/diagnostics/ui-rendered-service-truth-latest.json",
         "Status: planned-gap",
         "Success: false",
         "RequiredSameContainerId",
@@ -61,6 +66,9 @@ def test_static_verifier_and_docs_require_concrete_service_truth_schema():
         "engine-candidates.json",
         "state-id-comparison.json",
         "listener-probe.json",
+        "TruthState",
+        "unknown",
+        "stale",
         "/proc/net/tcp",
     ]:
         assert term in compat

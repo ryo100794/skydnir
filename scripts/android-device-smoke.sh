@@ -26,6 +26,7 @@ MODE="full"
 GPU_BENCH=0
 SERVICE_TRUTH_TARGET=""
 RUNTIME_TEARDOWN_TARGET=""
+SMOKE_ARTIFACT_DIR_RESOLVED=""
 
 usage() {
   cat <<EOF
@@ -48,6 +49,15 @@ Environment:
   PDOCKER_SMOKE_FORCE_STOP
                     force-stop the app before the smoke run. This kills any
                     running pdocker containers, so it is opt-in (default: 0)
+  PDOCKER_SMOKE_ARTIFACT_DIR
+                    host directory for collected device diagnostics (default:
+                    tmp/device-smoke-artifacts/<timestamp>)
+  PDOCKER_UI_IT_SELFTEST_CONTAINER
+                    optional existing container ID/name to drive through
+                    ACTION_PREFIX.action.SMOKE_UI_IT_SELFTEST before the full
+                    smoke project is created. When empty/no container is
+                    available, a planned-skip artifact is written with
+                    Success=false.
 
 Modes:
   --quick       only install/start pdockerd and run docker version
@@ -152,6 +162,7 @@ snapshot_state_json() {
 
 snapshot_ui_inputs() {
   cp pdocker/jobs.json "$DIAG/ui-jobs.json" 2>"$DIAG/ui-jobs.err" || : >"$DIAG/ui-jobs.missing"
+  cp pdocker/diagnostics/ui-rendered-service-truth-latest.json "$DIAG/ui-rendered-service-truth-latest.json" 2>"$DIAG/ui-rendered-service-truth-latest.err" || : >"$DIAG/ui-rendered-service-truth-latest.missing"
   : >"$DIAG/ui-project-files.txt"
   find pdocker/projects -maxdepth 4 \( -name compose.yaml -o -name docker-compose.yml -o -name .smoke-cid -o -name 'pdocker-*.json' \) -type f 2>/dev/null | sort >"$DIAG/ui-project-files.txt"
   : >"$DIAG/ui-project-snippets.txt"
@@ -315,6 +326,12 @@ PORTS="$(tr '\n' ' ' <"$DIAG/configured-ports.txt" 2>/dev/null | sed 's/[[:space
 STATE_MATCH="false"
 grep -q '"AnyStateIdMatchesSelected": true' "$DIAG/state-id-comparison.json" 2>/dev/null && STATE_MATCH="true"
 LISTENER_PROC_MATCH_PORTS="$(sed -n 's/^port=\([0-9][0-9]*\).*proc_net_tcp_matches=\([1-9][0-9]*\).*/\1/p' "$DIAG/listener-probe.txt" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+UI_RENDERED_EXPORT="files/$DIAG/ui-rendered-service-truth-latest.json"
+UI_CARD_CID="$(sed -n 's/.*"EngineContainerId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$DIAG/ui-rendered-service-truth-latest.json" 2>/dev/null | head -1)"
+UI_CARD_SOURCE="$(sed -n 's/.*"ContainerIdSource"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$DIAG/ui-rendered-service-truth-latest.json" 2>/dev/null | head -1)"
+UI_CARD_STATE="$(sed -n 's/.*"TruthState"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$DIAG/ui-rendered-service-truth-latest.json" 2>/dev/null | head -1)"
+UI_CARD_PROVEN=false
+[ "$UI_CARD_STATE" = current ] && [ -n "$UI_CARD_CID" ] && UI_CARD_PROVEN=true
 
 cat > "$LATEST" <<JSON
 {
@@ -356,10 +373,12 @@ cat > "$LATEST" <<JSON
   },
   "Sources": {
     "UICard": {
-      "ContainerId": null,
-      "Proven": false,
-      "Artifacts": ["files/$DIAG/ui-jobs.json", "files/$DIAG/ui-project-files.txt", "files/$DIAG/ui-project-snippets.txt"],
-      "Gap": "The shell smoke can collect UI input files but cannot yet export the rendered UI card service-health container ID."
+      "ContainerId": $( [ -n "$UI_CARD_CID" ] && json_string "$UI_CARD_CID" || printf null ),
+      "ContainerIdSource": $(json_string "${UI_CARD_SOURCE:-unknown}"),
+      "TruthState": $(json_string "${UI_CARD_STATE:-unknown}"),
+      "Proven": $(json_bool "$UI_CARD_PROVEN"),
+      "Artifacts": ["$UI_RENDERED_EXPORT", "files/$DIAG/ui-jobs.json", "files/$DIAG/ui-project-files.txt", "files/$DIAG/ui-project-snippets.txt"],
+      "Gap": "Rendered UI card export is collected when the app has rendered it, but success remains false until UI/Engine/state/process/listener/log sources agree on the same current Engine container ID."
     },
     "EngineApiContainersJson": {
       "ContainerId": $( [ -n "$SELECTED_ENGINE_CID" ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
@@ -398,7 +417,7 @@ cat > "$LATEST" <<JSON
     }
   },
   "Evidence": {
-    "UICard": ["files/$DIAG/ui-jobs.json", "files/$DIAG/ui-project-snippets.txt"],
+    "UICard": ["$UI_RENDERED_EXPORT", "files/$DIAG/ui-jobs.json", "files/$DIAG/ui-project-snippets.txt"],
     "EngineApiContainersJson": ["files/$DIAG/engine-containers-json.http", "files/$DIAG/engine-ps.out", "files/$DIAG/container-ids.txt", "files/$DIAG/engine-candidates.json"],
     "PersistedStateJson": ["files/$DIAG/persisted-state-json.txt", "files/$DIAG/state-id-comparison.json"],
     "ProcessTable": ["files/$DIAG/process-table.txt"],
@@ -406,7 +425,7 @@ cat > "$LATEST" <<JSON
     "ContainerLogs": ["files/$DIAG/logs-<container-id>.out"]
   },
   "Unresolved": [
-    "Rendered UI card container ID is not exported by this smoke entrypoint.",
+    "Rendered UI card container ID is exported as unknown/stale/current when the app has rendered files/pdocker/diagnostics/ui-rendered-service-truth-latest.json; missing or stale UI export is not success.",
     "Engine candidate selection, state.json ID comparison, and listener /proc/net/tcp evidence are recorded, but process/listener ownership and UI card agreement are not yet reduced to one same-container-ID proof.",
     "Negative cases for configured-port-only, stale listener/PID, duplicate name, and previous-container logs remain unproven on device."
   ]
@@ -666,9 +685,74 @@ printf '%s\n' \"\$exec_out\" | grep -q 'pdocker-it-ok'
 "
 }
 
+smoke_artifact_dir() {
+  if [[ -z "$SMOKE_ARTIFACT_DIR_RESOLVED" ]]; then
+    if [[ -n "${PDOCKER_SMOKE_ARTIFACT_DIR:-}" ]]; then
+      SMOKE_ARTIFACT_DIR_RESOLVED="$PDOCKER_SMOKE_ARTIFACT_DIR"
+    else
+      SMOKE_ARTIFACT_DIR_RESOLVED="$ROOT/tmp/device-smoke-artifacts/$(date -u +%Y%m%dT%H%M%SZ)"
+    fi
+  fi
+  printf '%s' "$SMOKE_ARTIFACT_DIR_RESOLVED"
+}
+
+collect_device_file() {
+  local device_path="$1"
+  local host_name="$2"
+  local dest_dir
+  dest_dir="$(smoke_artifact_dir)"
+  mkdir -p "$dest_dir"
+  if run_adb exec-out run-as "$PKG" cat "$device_path" >"$dest_dir/$host_name" 2>"$dest_dir/$host_name.err"; then
+    rm -f "$dest_dir/$host_name.err"
+    echo "[pdocker smoke] collected $device_path -> $dest_dir/$host_name"
+  else
+    echo "[pdocker smoke] could not collect $device_path; see $dest_dir/$host_name.err" >&2
+    return 1
+  fi
+}
+
+collect_ui_it_selftest_artifacts() {
+  collect_device_file "files/pdocker/diagnostics/ui-it-selftest-latest.json" "ui-it-selftest-latest.json" || true
+  collect_device_file "files/pdocker/diagnostics/engine-exec-input-latest.jsonl" "engine-exec-input-latest.jsonl" || true
+}
+
+json_escape_host() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+write_ui_it_selftest_skip_artifact() {
+  local reason="$1"
+  local tmp now escaped_reason
+  tmp="$(mktemp)"
+  now="$(date +%s000 2>/dev/null || printf '0')"
+  escaped_reason="$(json_escape_host "$reason")"
+  cat >"$tmp" <<JSON
+{
+  "Name": "ui-engine-exec-it",
+  "Status": "planned-skip",
+  "Success": false,
+  "Reason": "$escaped_reason",
+  "DeviceProofAttempted": false,
+  "RequiredContainerId": true,
+  "Contract": "ACTION_PREFIX.action.SMOKE_UI_IT_SELFTEST must only pass after a real requested/running Engine container is exercised; skip artifacts are non-success and must not be treated as fake success.",
+  "StartedAtMs": $now,
+  "CompletedAtMs": $now
+}
+JSON
+  run_adb push "$tmp" /data/local/tmp/pdocker-ui-it-selftest-skip.json >/dev/null
+  rm -f "$tmp"
+  run_as "mkdir -p files/pdocker/diagnostics && cp /data/local/tmp/pdocker-ui-it-selftest-skip.json files/pdocker/diagnostics/ui-it-selftest-latest.json" >/dev/null
+  collect_ui_it_selftest_artifacts
+}
+
 ui_engine_exec_it_selftest() {
   local container_ref="$1"
-  echo "[pdocker smoke] ui self-test engine exec -it"
+  if [[ -z "$container_ref" ]]; then
+    echo "[pdocker smoke] ui self-test engine exec -it planned-skip: no container id"
+    write_ui_it_selftest_skip_artifact "no container id was available for UI exec-it self-test"
+    return 0
+  fi
+  echo "[pdocker smoke] ui self-test engine exec -it container=$container_ref"
   run_as "rm -f files/pdocker/diagnostics/ui-it-selftest-latest.json" >/dev/null 2>&1 || true
   run_adb shell am start \
     -n "$PKG/$CLASS_PREFIX.MainActivity" \
@@ -678,12 +762,14 @@ ui_engine_exec_it_selftest() {
   for i in $(seq 1 30); do
     if run_as "test -f files/pdocker/diagnostics/ui-it-selftest-latest.json"; then
       run_as "cat files/pdocker/diagnostics/ui-it-selftest-latest.json"
+      collect_ui_it_selftest_artifacts
       run_as "grep -q '\"Success\": true' files/pdocker/diagnostics/ui-it-selftest-latest.json"
       return 0
     fi
     sleep 1
   done
   echo "UI exec -it self-test did not produce diagnostics" >&2
+  write_ui_it_selftest_skip_artifact "ACTION_SMOKE_UI_IT_SELFTEST did not produce diagnostics before timeout"
   return 1
 }
 
@@ -791,6 +877,12 @@ fi
 if [[ "$GPU_BENCH" -eq 1 ]]; then
   run_gpu_executor_bench
   run_gpu_bench
+fi
+
+if [[ -n "${PDOCKER_UI_IT_SELFTEST_CONTAINER:-}" ]]; then
+  ui_engine_exec_it_selftest "$PDOCKER_UI_IT_SELFTEST_CONTAINER"
+elif [[ "$MODE" == "quick" ]]; then
+  ui_engine_exec_it_selftest ""
 fi
 
 if [[ "$MODE" == "quick" ]]; then

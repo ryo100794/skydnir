@@ -7,7 +7,13 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "MainActivity.kt"
 BRIDGE = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "Bridge.kt"
 XTERM = ROOT / "app" / "src" / "main" / "assets" / "xterm" / "index.html"
+ANDROID_SMOKE = ROOT / "scripts" / "android-device-smoke.sh"
 
+
+def _shell_function_body(source: str, name: str) -> str:
+    start = source.index(f"{name}() {{")
+    end = source.index("\n}\n", start) + 3
+    return source[start:end]
 
 def _method_body(source: str, signature: str) -> str:
     start = source.index(signature)
@@ -29,6 +35,7 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.main = MAIN.read_text()
         self.bridge = BRIDGE.read_text()
         self.xterm = XTERM.read_text()
+        self.android_smoke = ANDROID_SMOKE.read_text()
 
     def test_container_terminal_uses_engine_exec_api_not_local_shell_or_logs(self):
         body = _method_body(self.main, "private fun openDockerInteractiveTerminal")
@@ -139,6 +146,34 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('"UI exec -it did not preserve terminal CRLF line control"', self.main)
         self.assertIn('"UI exec -it is not attached to a controlling tty"', self.main)
         self.assertIn('"EngineExecDiagnostics"', self.main)
+
+
+    def test_device_smoke_runs_ui_it_selftest_only_with_real_container_and_collects_artifacts(self):
+        self.assertIn("ACTION_PREFIX.action.SMOKE_UI_IT_SELFTEST", self.android_smoke)
+        self.assertIn("PDOCKER_UI_IT_SELFTEST_CONTAINER", self.android_smoke)
+        self.assertIn("PDOCKER_SMOKE_ARTIFACT_DIR", self.android_smoke)
+        self.assertIn("collect_ui_it_selftest_artifacts", self.android_smoke)
+        self.assertIn("files/pdocker/diagnostics/ui-it-selftest-latest.json", self.android_smoke)
+        self.assertIn("engine-exec-input-latest.jsonl", self.android_smoke)
+        self.assertIn('run_adb exec-out run-as "$PKG" cat "$device_path"', self.android_smoke)
+
+        body = _shell_function_body(self.android_smoke, "ui_engine_exec_it_selftest")
+        self.assertIn('if [[ -z "$container_ref" ]]', body)
+        self.assertIn('write_ui_it_selftest_skip_artifact "no container id was available', body)
+        self.assertIn('return 0', body)
+        self.assertIn('--es container "$container_ref"', body)
+        self.assertIn('collect_ui_it_selftest_artifacts', body)
+        self.assertIn('grep -q \'\\"Success\\": true\'', body)
+
+        skip_body = _shell_function_body(self.android_smoke, "write_ui_it_selftest_skip_artifact")
+        self.assertIn('"Status": "planned-skip"', skip_body)
+        self.assertIn('"Success": false', skip_body)
+        self.assertIn('"DeviceProofAttempted": false', skip_body)
+        self.assertIn('fake success', skip_body)
+
+        self.assertIn('ui_engine_exec_it_selftest "$PDOCKER_UI_IT_SELFTEST_CONTAINER"', self.android_smoke)
+        self.assertIn('ui_engine_exec_it_selftest "$CID"', self.android_smoke)
+        self.assertIn('ui_engine_exec_it_selftest ""', self.android_smoke)
 
     def test_resize_contract_supports_full_screen_programs(self):
         self.assertIn("private val lastTerminalSize", self.bridge)

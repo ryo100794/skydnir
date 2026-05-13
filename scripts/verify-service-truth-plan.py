@@ -140,6 +140,8 @@ def validate_docs() -> None:
             "engine-candidates.json",
             "state-id-comparison.json",
             "listener-probe.json",
+            "ui-rendered-service-truth-latest.json",
+            "TruthState",
             "/proc/net/tcp",
         ],
     )
@@ -168,6 +170,7 @@ def validate_android_smoke_entrypoints() -> None:
             "engine-candidates.json",
             "state-id-comparison.json",
             "listener-probe.json",
+            "ui-rendered-service-truth-latest.json",
             "/proc/net/tcp",
             "LifecycleLogs",
             "ContainerLogs",

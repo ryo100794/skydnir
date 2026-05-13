@@ -1,6 +1,6 @@
 # llama.cpp Runtime Benchmarks
 
-Snapshot date: 2026-05-05.
+Snapshot date: 2026-05-09.
 
 ## Purpose
 
@@ -43,6 +43,20 @@ the alternate GGUF to a separate model path:
 SMALL_GGUF_URL=https://.../small.gguf
 bash scripts/android-llama-gpu-compare.sh --model-path /models/small.gguf --model-url "$SMALL_GGUF_URL" --gpu-layers 1 --gpu-ctx 512 --predict 2 --repeat 1
 ```
+
+## 2026-05-09 llama API Smoke Result
+
+A local HTTP API smoke test showed the llama.cpp server was live on
+`http://127.0.0.1:18081`, `/health` returned ok, and `/v1/models` reported
+`model.gguf` with the expected 8.19B parameter metadata. The test produced the
+correct trivial arithmetic result, with prompt processing at 4 tokens in
+10709.614 ms and one predicted token. Server-side correctness signals for the
+Q6_K safe kernel, RoPE/Yarn, and RMS norm all reported zero mismatches.
+
+The original local note `docs/test/llama-api-prompt-20260509.md` intentionally
+remains untracked because it embeds the exact request prompt/body. Keep only
+this sanitized summary in versioned docs unless a review explicitly approves
+committing prompt-bearing artifacts.
 
 ## 2026-05-07 Write-Only Dirty Writeback Probe
 

@@ -24,3 +24,26 @@ def test_container_cards_do_not_trust_persisted_running_without_engine_snapshot(
     assert "current Engine truth" in body
     assert 'optBoolean("Running", false) == true' not in body
     assert "return false" in body
+
+
+def test_rendered_ui_service_truth_export_schema_is_explicit_unknown_or_stale():
+    main = MAIN.read_text()
+    for term in [
+        "RenderedServiceTruthCard",
+        "ui-rendered-service-truth-latest.json",
+        "Kind", "ui-rendered-service-truth",
+        "RenderedCards",
+        "EngineContainerId",
+        "ContainerIdSource",
+        "TruthState",
+        "RenderedAtUnixMs",
+        "LastEngineSnapshotAtUnixMs",
+        "EngineSnapshotMissing",
+        '"unknown"',
+        '"stale"',
+        '"current"',
+    ]:
+        assert term in main
+    assert "recordRenderedContainerCard(name, statusText, detailText, dir, state, snapshot)" in main
+    assert "recordRenderedProjectServiceCards(project, detail)" in main
+    assert "must not be treated as success" in main
