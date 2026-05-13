@@ -1459,6 +1459,35 @@ def _container_env(state, extra=None):
     return env
 
 
+def _apply_memory_pager_env(state, env):
+    labels = state.get("Labels") or {}
+    mode = (
+        labels.get("io.pdocker.memory-pager")
+        or labels.get("pdocker.memory-pager")
+        or env.get("PDOCKER_MEMORY_PAGER")
+        or ""
+    )
+    if str(mode).lower() != "managed":
+        return env
+    env.setdefault("PDOCKER_MEMORY_PAGER", "managed")
+    env.setdefault("PDOCKER_DIRECT_MEMORY_PAGER", "managed")
+    max_bytes = (
+        labels.get("io.pdocker.memory-pager.max-bytes")
+        or labels.get("io.pdocker.memory-pager.limit-bytes")
+        or env.get("PDOCKER_MEMORY_PAGER_MAX_BYTES")
+    )
+    if max_bytes:
+        env.setdefault("PDOCKER_DIRECT_MEMORY_PAGER_MAX_REGION", str(max_bytes))
+    min_request = labels.get("io.pdocker.memory-pager.min-request")
+    if min_request:
+        env.setdefault("PDOCKER_DIRECT_MEMORY_PAGER_MIN_REQUEST", str(min_request))
+    resident_pages = labels.get("io.pdocker.memory-pager.resident-pages")
+    if resident_pages:
+        env.setdefault("PDOCKER_DIRECT_MEMORY_PAGER_RESIDENT_PAGES", str(resident_pages))
+    env.setdefault("PDOCKER_DIRECT_TRACE_MEMORY", os.environ.get("PDOCKER_DIRECT_TRACE_MEMORY", "1"))
+    return env
+
+
 def _join_under(base, relpath):
     path = os.path.normpath(os.path.join(base, relpath.lstrip("/")))
     try:
@@ -5150,6 +5179,7 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
     if bridge_env_changed:
         save_container_state(cid, state)
     env = _container_env(state)
+    _apply_memory_pager_env(state, env)
 
     workdir = state.get("WorkingDir", "/") or "/"
 
@@ -5930,6 +5960,7 @@ def spawn_in_container(cid, cmd, env=None, workdir=None, tty=False,
     cdir, cow, rootfs = _container_runtime(state)
     wd = workdir or state.get("WorkingDir", "/")
     e = _container_env(state, env)
+    _apply_memory_pager_env(state, e)
     binds = _effective_binds(state) + _gpu_binds(state) + _media_binds(state)
     _ensure_bind_hosts(binds)
     fault = runtime_preflight(rootfs, e, workdir=wd, binds=binds, cow_bind=cow)
@@ -6051,6 +6082,7 @@ def exec_in_container(cid, cmd, env=None, workdir=None, tty=False):
     cdir, cow, rootfs = _container_runtime(state)
     wd = workdir or state.get("WorkingDir", "/")
     e = _container_env(state, env)
+    _apply_memory_pager_env(state, e)
     binds = _effective_binds(state) + _gpu_binds(state) + _media_binds(state)
     _ensure_bind_hosts(binds)
     fault = runtime_preflight(rootfs, e, workdir=wd, binds=binds, cow_bind=cow)

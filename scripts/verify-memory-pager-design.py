@@ -44,8 +44,29 @@ def main() -> int:
     require("probe gate covers android-blockable syscalls", "PTRACE_GETSIGINFO" in text and "process_vm_writev" in text and "mprotect(PROT_READ|PROT_WRITE)" in text)
     require("direct executor exposes apk memory pager probe", "--pdocker-memory-pager-probe" in direct and "pager-probe:ptrace_path" in direct)
     require("direct executor exposes apk memory pager poc", "--pdocker-memory-pager-poc" in direct and "resumed_fault_instruction" in direct)
+    require("direct executor exposes managed anonymous pager poc",
+            "--pdocker-memory-pager-managed-poc" in direct and
+            "ManagedPagerPoc" in direct and
+            "pager-managed-poc:result=%s" in direct and
+            "--pdocker-memory-pager-transparent-poc" in direct and
+            "pager-transparent-poc:result=%s" in direct and
+            "resident_limit_pages" in direct and
+            "pager-managed-poc:page_ins=%llu" in direct and
+            "pager-managed-poc:page_outs=%llu" in direct and
+            "pager-managed-poc:elapsed_ns=%llu" in direct)
+    require("direct executor has opt-in transparent managed mmap path",
+            "PDOCKER_DIRECT_MEMORY_PAGER" in direct and
+            "managed_trace_is_candidate_mmap" in direct and
+            "maybe_prepare_managed_mmap" in direct and
+            "maybe_finish_managed_mmap" in direct and
+            "handle_managed_memory_fault" in direct and
+            "sig == SIGSEGV && g_managed_memory_pager" in direct)
     require("device smoke checks compat memory pager probe", "--pdocker-memory-pager-probe" in smoke and "pager-probe:ptrace_path=ok" in smoke)
     require("device smoke checks compat memory pager poc", "--pdocker-memory-pager-poc" in smoke and "pager-poc:result=ok" in smoke)
+    require("device smoke checks managed anonymous pager poc",
+            "--pdocker-memory-pager-managed-poc" in smoke and "pager-managed-poc:result=ok" in smoke)
+    require("device smoke checks transparent managed pager poc",
+            "--pdocker-memory-pager-transparent-poc" in smoke and "pager-transparent-poc:result=ok" in smoke)
     require("latest apk memory pager probe result is recorded", "pager-probe:ptrace_path=ok" in probe and "pager-probe:userfaultfd=blocked" in probe and "exact_rc=0" in probe)
     require("latest apk memory pager poc result is recorded", "pager-poc:resumed_fault_instruction=ok" in probe and "pager-poc:inject_mprotect_syscall=ok" in probe and "pager-poc:result=ok" in probe)
     require("poc records generic syscall injection", "generic aarch64 syscall injection" in text and "svc; brk" in text and "earlier cooperative-trampoline limitation" in probe_flat)
@@ -59,6 +80,35 @@ def main() -> int:
     require("runtime oom survival defines large workload mode", "Large Workload Mode" in oom and "io.pdocker.large-workload=enabled" in oom and "managed-anonymous" in oom)
     require("runtime oom survival keeps fail-safe and run-large paths separate", "default memory guard" in oom_flat and "not the same" in oom_flat and "make it run even when it is too big" in oom_flat)
     require("runtime oom survival requires persisted telemetry evidence", "Memory Telemetry Ring" in oom and "last large allocation request" in oom and "owned by pdockerd" in oom)
+    require("pager diagnostics planned gap is explicit",
+            "OOM/LMK Diagnostics Contract" in text and
+            "Planned gap" in text and
+            "pdocker.memory-oom-lmk-diagnostics.v1" in probe)
+    require("pager diagnostics record allocation and system pressure",
+            "last large allocation request" in text and
+            "MemAvailable" in text and
+            "SwapFree" in text and
+            "last_large_allocation" in probe and
+            "requested bytes" in probe)
+    require("pager diagnostics record rss and pss",
+            "per-process RSS" in text and
+            "PSS" in text and
+            "pss_unavailable" in text and
+            "rss_bytes" in probe and
+            "pss_bytes" in probe)
+    require("pager diagnostics preserve progress and classify lmk",
+            "last known progress" in text and
+            "lmk_suspected=true" in text and
+            "interrupted-or-lmk-suspected" in text and
+            "lmk_suspected_classifier" in probe and
+            "not_lmk_suspected" in probe)
+    require("pager diagnostics define retention and stale-running ui guard",
+            "Artifact retention must be bounded" in text and
+            "must not show `running`, `Up`, or an active spinner solely" in flat and
+            "engine snapshot" in text and
+            "pid liveness" in text and
+            "artifact_retention_policy" in probe and
+            "UI is allowed to show a live running state" in probe)
     return 0
 
 

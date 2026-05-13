@@ -39,9 +39,13 @@ static int g_trace_memory = 0;
 static int g_trace_memory_verbose = 0;
 static unsigned long long g_trace_memory_threshold = 64ULL * 1024ULL * 1024ULL;
 static int g_memory_guard = 0;
+static int g_managed_memory_pager = 0;
 static unsigned long long g_memory_guard_min_request = 64ULL * 1024ULL * 1024ULL;
 static unsigned long long g_memory_guard_min_available = 512ULL * 1024ULL * 1024ULL;
 static unsigned long long g_memory_guard_min_swap = 256ULL * 1024ULL * 1024ULL;
+static unsigned long long g_managed_memory_pager_min_request = 128ULL * 1024ULL * 1024ULL;
+static unsigned long long g_managed_memory_pager_max_region = 1024ULL * 1024ULL * 1024ULL;
+static unsigned long long g_managed_memory_pager_resident_pages = 256ULL;
 static int g_memory_stats_printed = 0;
 static int g_sync_usec = 0;
 static int g_stats = 0;
@@ -56,6 +60,7 @@ static int g_validate_tracees = 0;
 static int g_trace_stat_paths = 1;
 static int g_rootfs_fd = -1;
 static volatile sig_atomic_t g_trace_child_pgid = -1;
+static const char *g_managed_pager_init_stage = "none";
 static unsigned long long g_syscall_counts[512];
 static unsigned long long g_stop_count = 0;
 static struct timespec g_stats_start;
@@ -376,6 +381,235 @@ static int run_memory_pager_poc(void) {
     return failures ? 1 : 0;
 }
 
+typedef struct {
+    unsigned char *base;
+    size_t page_size;
+    size_t page_count;
+    size_t resident_limit;
+    size_t resident_count;
+    size_t max_resident_count;
+    size_t clock_hand;
+    int backing_fd;
+    unsigned char *resident;
+    unsigned char *dirty;
+    unsigned char *writable;
+    unsigned long long page_ins;
+    unsigned long long page_outs;
+    unsigned long long dirty_page_outs;
+    unsigned long long bytes_in;
+    unsigned long long bytes_out;
+} ManagedPagerPoc;
+
+static unsigned long long monotonic_now_ns(void);
+static void managed_pager_destroy(ManagedPagerPoc *pager);
+
+static int managed_pager_open_backing_file(void) {
+    const char *tmpdir = getenv("TMPDIR");
+    const char *candidates[] = {
+        tmpdir && tmpdir[0] ? tmpdir : NULL,
+        ".",
+        "files",
+        "cache",
+        "/data/local/tmp",
+        "/tmp",
+        NULL,
+    };
+    for (size_t i = 0; candidates[i]; ++i) {
+        char tmpl[PATH_MAX];
+        int n = snprintf(tmpl, sizeof(tmpl), "%s/pdocker-managed-pager-XXXXXX", candidates[i]);
+        if (n <= 0 || (size_t)n >= sizeof(tmpl)) continue;
+        int fd = mkstemp(tmpl);
+        if (fd >= 0) {
+            unlink(tmpl);
+            return fd;
+        }
+    }
+    return -1;
+}
+
+static int managed_pager_init(ManagedPagerPoc *pager, size_t page_count, size_t resident_limit) {
+    g_managed_pager_init_stage = "start";
+    memset(pager, 0, sizeof(*pager));
+    pager->backing_fd = -1;
+    if (page_count == 0) {
+        errno = EINVAL;
+        g_managed_pager_init_stage = "page-count";
+        return -1;
+    }
+    long ps = sysconf(_SC_PAGESIZE);
+    pager->page_size = ps > 0 ? (size_t)ps : 4096u;
+    pager->page_count = page_count;
+    pager->resident_limit = resident_limit ? resident_limit : 1u;
+    if (pager->resident_limit > pager->page_count) pager->resident_limit = pager->page_count;
+    if (pager->page_count > SIZE_MAX / pager->page_size) {
+        errno = EOVERFLOW;
+        g_managed_pager_init_stage = "overflow";
+        return -1;
+    }
+    size_t total = pager->page_size * pager->page_count;
+    g_managed_pager_init_stage = "calloc-resident";
+    pager->resident = (unsigned char *)calloc(pager->page_count, 1);
+    g_managed_pager_init_stage = "calloc-dirty";
+    pager->dirty = (unsigned char *)calloc(pager->page_count, 1);
+    g_managed_pager_init_stage = "calloc-writable";
+    pager->writable = (unsigned char *)calloc(pager->page_count, 1);
+    if (!pager->resident || !pager->dirty || !pager->writable) goto fail;
+    g_managed_pager_init_stage = "open-backing";
+    pager->backing_fd = managed_pager_open_backing_file();
+    if (pager->backing_fd < 0) goto fail;
+    g_managed_pager_init_stage = "ftruncate";
+    if (ftruncate(pager->backing_fd, (off_t)total) != 0) goto fail;
+    g_managed_pager_init_stage = "mmap";
+    void *addr = mmap(NULL, total, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (addr == MAP_FAILED) goto fail;
+    pager->base = (unsigned char *)addr;
+    g_managed_pager_init_stage = "ok";
+    return 0;
+
+fail:
+    {
+        int saved_errno = errno ? errno : ENOMEM;
+        managed_pager_destroy(pager);
+        errno = saved_errno;
+    }
+    return -1;
+}
+
+static void managed_pager_destroy(ManagedPagerPoc *pager) {
+    if (!pager) return;
+    if (pager->base && pager->base != MAP_FAILED) {
+        munmap(pager->base, pager->page_size * pager->page_count);
+    }
+    if (pager->backing_fd >= 0) close(pager->backing_fd);
+    free(pager->resident);
+    free(pager->dirty);
+    free(pager->writable);
+    memset(pager, 0, sizeof(*pager));
+    pager->backing_fd = -1;
+}
+
+static int managed_pager_evict_one(ManagedPagerPoc *pager, size_t avoid_index) {
+    if (!pager || pager->resident_count == 0) return -1;
+    for (size_t scanned = 0; scanned < pager->page_count * 2u; ++scanned) {
+        size_t idx = pager->clock_hand++ % pager->page_count;
+        if (idx == avoid_index || !pager->resident[idx]) continue;
+        void *addr = pager->base + idx * pager->page_size;
+        if (pager->dirty[idx]) {
+            ssize_t written = pwrite(pager->backing_fd, addr, pager->page_size,
+                                     (off_t)(idx * pager->page_size));
+            if (written != (ssize_t)pager->page_size) return -1;
+            pager->dirty[idx] = 0;
+            pager->dirty_page_outs++;
+            pager->bytes_out += (unsigned long long)pager->page_size;
+        }
+        if (mprotect(addr, pager->page_size, PROT_NONE) != 0) return -1;
+        pager->resident[idx] = 0;
+        pager->writable[idx] = 0;
+        pager->resident_count--;
+        pager->page_outs++;
+        return 0;
+    }
+    return -1;
+}
+
+static void *managed_pager_get_page(ManagedPagerPoc *pager, size_t index, int writeable) {
+    if (!pager || index >= pager->page_count) {
+        errno = EINVAL;
+        return NULL;
+    }
+    if (!pager->resident[index]) {
+        while (pager->resident_count >= pager->resident_limit) {
+            if (managed_pager_evict_one(pager, index) != 0) return NULL;
+        }
+        void *addr = pager->base + index * pager->page_size;
+        if (mprotect(addr, pager->page_size, PROT_READ | PROT_WRITE) != 0) return NULL;
+        ssize_t read_bytes = pread(pager->backing_fd, addr, pager->page_size,
+                                   (off_t)(index * pager->page_size));
+        if (read_bytes < 0) return NULL;
+        if (read_bytes < (ssize_t)pager->page_size) {
+            memset((unsigned char *)addr + read_bytes, 0, pager->page_size - (size_t)read_bytes);
+        }
+        pager->resident[index] = 1;
+        pager->resident_count++;
+        if (pager->resident_count > pager->max_resident_count) {
+            pager->max_resident_count = pager->resident_count;
+        }
+        pager->writable[index] = 1;
+        pager->page_ins++;
+        pager->bytes_in += (unsigned long long)pager->page_size;
+    } else if (writeable && !pager->writable[index]) {
+        void *addr = pager->base + index * pager->page_size;
+        if (mprotect(addr, pager->page_size, PROT_READ | PROT_WRITE) != 0) return NULL;
+        pager->writable[index] = 1;
+    }
+    if (!writeable && pager->writable[index]) {
+        void *addr = pager->base + index * pager->page_size;
+        if (mprotect(addr, pager->page_size, PROT_READ) != 0) return NULL;
+        pager->writable[index] = 0;
+    }
+    if (writeable) pager->dirty[index] = 1;
+    return pager->base + index * pager->page_size;
+}
+
+static int run_memory_pager_managed_poc(void) {
+    ManagedPagerPoc pager;
+    int failures = 0;
+    size_t pages = (size_t)env_u64_or_default("PDOCKER_MEMORY_PAGER_POC_PAGES", 32ULL);
+    size_t resident_limit = (size_t)env_u64_or_default("PDOCKER_MEMORY_PAGER_POC_RESIDENT_PAGES", 4ULL);
+    if (pages == 0) pages = 1;
+    if (resident_limit == 0) resident_limit = 1;
+    if (resident_limit > pages) resident_limit = pages;
+    unsigned long long start_ns = monotonic_now_ns();
+    if (managed_pager_init(&pager, pages, resident_limit) != 0) {
+        printf("pager-managed-poc:init=fail errno=%d\n", errno);
+        printf("pager-managed-poc:init_stage=%s\n", g_managed_pager_init_stage);
+        return 1;
+    }
+    printf("pager-managed-poc:reserve_bytes=%llu\n",
+           (unsigned long long)(pager.page_size * pager.page_count));
+    printf("pager-managed-poc:resident_limit_pages=%llu\n",
+           (unsigned long long)pager.resident_limit);
+    for (size_t i = 0; i < pages; ++i) {
+        unsigned char *page = (unsigned char *)managed_pager_get_page(&pager, i, 1);
+        if (!page) {
+            failures++;
+            break;
+        }
+        page[0] = (unsigned char)(0x40u + (i & 0x3fu));
+        page[pager.page_size - 1u] = (unsigned char)(0x80u + (i & 0x3fu));
+        if (pager.resident_count > pager.resident_limit) failures++;
+    }
+    for (size_t round = 0; round < 3 && !failures; ++round) {
+        for (size_t i = pages; i > 0; --i) {
+            size_t idx = i - 1u;
+            unsigned char *page = (unsigned char *)managed_pager_get_page(&pager, idx, 0);
+            if (!page) {
+                failures++;
+                break;
+            }
+            if (page[0] != (unsigned char)(0x40u + (idx & 0x3fu)) ||
+                page[pager.page_size - 1u] != (unsigned char)(0x80u + (idx & 0x3fu))) {
+                failures++;
+                break;
+            }
+            if (pager.resident_count > pager.resident_limit) failures++;
+        }
+    }
+    printf("pager-managed-poc:resident_pages=%llu\n",
+           (unsigned long long)pager.resident_count);
+    printf("pager-managed-poc:max_resident_pages=%llu\n",
+           (unsigned long long)pager.max_resident_count);
+    printf("pager-managed-poc:page_ins=%llu\n", pager.page_ins);
+    printf("pager-managed-poc:page_outs=%llu\n", pager.page_outs);
+    printf("pager-managed-poc:dirty_page_outs=%llu\n", pager.dirty_page_outs);
+    printf("pager-managed-poc:bytes_in=%llu\n", pager.bytes_in);
+    printf("pager-managed-poc:bytes_out=%llu\n", pager.bytes_out);
+    printf("pager-managed-poc:elapsed_ns=%llu\n", monotonic_now_ns() - start_ns);
+    printf("pager-managed-poc:result=%s\n", failures ? "fail" : "ok");
+    managed_pager_destroy(&pager);
+    return failures ? 1 : 0;
+}
+
 static int run_memory_pager_probe(void) {
     int failures = 0;
     int optional_failures = 0;
@@ -669,6 +903,8 @@ static void usage(FILE *stream) {
             "usage: pdocker-direct --pdocker-direct-probe\n"
             "       pdocker-direct --pdocker-memory-pager-probe\n"
             "       pdocker-direct --pdocker-memory-pager-poc\n"
+            "       pdocker-direct --pdocker-memory-pager-managed-poc\n"
+            "       pdocker-direct --pdocker-memory-pager-transparent-poc\n"
             "       pdocker-direct run --mode MODE --rootfs PATH --workdir PATH [--env KEY=VAL] [--bind SPEC] -- ARGV...\n");
 }
 
@@ -1272,11 +1508,20 @@ struct TraceeState {
     unsigned long long sgid;
     unsigned long long last_args[6];
     unsigned long long last_brk;
+    unsigned long long managed_pending_len;
+    unsigned long long managed_pending_prot;
+    unsigned long long managed_pending_flags;
     int pending_path_cache_invalidation;
     char exec_guest_path[PATH_MAX];
     char guest_cwd[PATH_MAX];
     char pending_guest_cwd[PATH_MAX];
+    struct ManagedTraceRegion *managed_regions;
 };
+
+static void record_memory_syscall_exit(TraceeState *state, unsigned long long result);
+static int handle_syscall_entry(pid_t pid, struct user_pt_regs *regs, TraceeState *state,
+                                const char *rootfs, const char *loader, const char *libpath,
+                                int events, int *completed_in_userland);
 
 #define MAX_TRACEES 128
 
@@ -1409,6 +1654,8 @@ static unsigned long long prepare_emulated_result(pid_t pid, TraceeState *state,
     }
 }
 
+static void free_managed_trace_regions(TraceeState *state);
+
 static void remove_tracee(TraceeState *tracees, pid_t pid) {
     TraceeState *state = find_tracee(tracees, pid);
     if (state) {
@@ -1416,6 +1663,7 @@ static void remove_tracee(TraceeState *tracees, pid_t pid) {
             finish_path_cache_mutation(state);
             state->pending_path_cache_invalidation = 0;
         }
+        free_managed_trace_regions(state);
         memset(state, 0, sizeof(*state));
     }
 }
@@ -1673,6 +1921,499 @@ static int complete_emulated_syscall(pid_t pid, struct user_pt_regs *regs,
     if (set_syscall_number(pid, -1) != 0) return -1;
     maybe_advance_past_svc(pid, regs);
     return set_regs(pid, regs);
+}
+
+#define MAX_MANAGED_TRACE_REGIONS 8
+
+typedef struct ManagedTraceRegion {
+    int active;
+    unsigned long long base;
+    unsigned long long length;
+    int prot;
+    size_t page_size;
+    size_t page_count;
+    size_t resident_limit;
+    size_t resident_count;
+    size_t max_resident_count;
+    size_t clock_hand;
+    int backing_fd;
+    unsigned char *resident;
+    unsigned char *ever_loaded;
+    unsigned long long page_ins;
+    unsigned long long page_outs;
+    unsigned long long dirty_page_outs;
+    unsigned long long bytes_in;
+    unsigned long long bytes_out;
+} ManagedTraceRegion;
+
+static int managed_trace_is_candidate_mmap(const unsigned long long args[6]) {
+    unsigned long long addr = args[0];
+    unsigned long long length = args[1];
+    unsigned long long prot = args[2];
+    unsigned long long flags = args[3];
+    unsigned long long fd = args[4];
+    if (!g_managed_memory_pager) return 0;
+    if (addr != 0) return 0;
+    if (length < g_managed_memory_pager_min_request) return 0;
+    if (g_managed_memory_pager_max_region && length > g_managed_memory_pager_max_region) return 0;
+    if (!(flags & MAP_ANONYMOUS) || !(flags & MAP_PRIVATE) || (flags & MAP_FIXED)) return 0;
+    if (fd != 0xffffffffffffffffULL && fd != 0xffffffffULL) return 0;
+    if (!(prot & (PROT_READ | PROT_WRITE))) return 0;
+    return 1;
+}
+
+static void free_one_managed_region(ManagedTraceRegion *region) {
+    if (!region || !region->active) return;
+    if (region->backing_fd >= 0) close(region->backing_fd);
+    free(region->resident);
+    free(region->ever_loaded);
+    memset(region, 0, sizeof(*region));
+    region->backing_fd = -1;
+}
+
+static void free_managed_trace_regions(TraceeState *state) {
+    if (!state || !state->managed_regions) return;
+    for (size_t i = 0; i < MAX_MANAGED_TRACE_REGIONS; ++i) {
+        free_one_managed_region(&state->managed_regions[i]);
+    }
+    free(state->managed_regions);
+    state->managed_regions = NULL;
+}
+
+static ManagedTraceRegion *find_managed_region_for_addr(TraceeState *state,
+                                                        unsigned long long addr,
+                                                        size_t *page_index_out) {
+    if (!state || !state->managed_regions) return NULL;
+    for (size_t i = 0; i < MAX_MANAGED_TRACE_REGIONS; ++i) {
+        ManagedTraceRegion *region = &state->managed_regions[i];
+        if (!region->active) continue;
+        if (addr >= region->base && addr < region->base + region->length) {
+            size_t idx = (size_t)((addr - region->base) / region->page_size);
+            if (idx >= region->page_count) return NULL;
+            if (page_index_out) *page_index_out = idx;
+            return region;
+        }
+    }
+    return NULL;
+}
+
+static ManagedTraceRegion *alloc_managed_region_slot(TraceeState *state) {
+    if (!state->managed_regions) {
+        state->managed_regions = (ManagedTraceRegion *)calloc(MAX_MANAGED_TRACE_REGIONS,
+                                                              sizeof(ManagedTraceRegion));
+        if (!state->managed_regions) return NULL;
+        for (size_t i = 0; i < MAX_MANAGED_TRACE_REGIONS; ++i) {
+            state->managed_regions[i].backing_fd = -1;
+        }
+    }
+    for (size_t i = 0; i < MAX_MANAGED_TRACE_REGIONS; ++i) {
+        if (!state->managed_regions[i].active) return &state->managed_regions[i];
+    }
+    return NULL;
+}
+
+static int register_managed_mmap_region(TraceeState *state,
+                                        unsigned long long base,
+                                        unsigned long long length,
+                                        int prot) {
+    if (!state || syscall_failed_result(base) || !base || !length) return -1;
+    long ps = sysconf(_SC_PAGESIZE);
+    size_t page_size = ps > 0 ? (size_t)ps : 4096u;
+    unsigned long long pages64 = (length + page_size - 1ULL) / page_size;
+    if (!pages64 || pages64 > (unsigned long long)(SIZE_MAX / 2u)) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    ManagedTraceRegion *region = alloc_managed_region_slot(state);
+    if (!region) {
+        errno = ENOSPC;
+        return -1;
+    }
+    memset(region, 0, sizeof(*region));
+    region->backing_fd = -1;
+    region->base = base;
+    region->length = pages64 * page_size;
+    region->prot = prot ? prot : (PROT_READ | PROT_WRITE);
+    region->page_size = page_size;
+    region->page_count = (size_t)pages64;
+    region->resident_limit = (size_t)g_managed_memory_pager_resident_pages;
+    if (region->resident_limit == 0) region->resident_limit = 1;
+    if (region->resident_limit > region->page_count) region->resident_limit = region->page_count;
+    region->resident = (unsigned char *)calloc(region->page_count, 1);
+    region->ever_loaded = (unsigned char *)calloc(region->page_count, 1);
+    if (!region->resident || !region->ever_loaded) goto fail;
+    region->backing_fd = managed_pager_open_backing_file();
+    if (region->backing_fd < 0) goto fail;
+    if (ftruncate(region->backing_fd, (off_t)region->length) != 0) goto fail;
+    region->active = 1;
+    fprintf(stderr,
+            "pdocker-direct-managed-pager: registered pid=%d base=0x%llx length=%llu pages=%zu resident_limit=%zu prot=0x%x\n",
+            (int)state->pid, base, region->length, region->page_count,
+            region->resident_limit, region->prot);
+    return 0;
+fail:
+    {
+        int saved = errno ? errno : ENOMEM;
+        free_one_managed_region(region);
+        errno = saved;
+    }
+    return -1;
+}
+
+static int evict_one_managed_trace_page(pid_t pid, ManagedTraceRegion *region,
+                                        size_t avoid_index,
+                                        struct user_pt_regs *fault_regs) {
+    if (!region || region->resident_count == 0) return -1;
+    for (size_t scanned = 0; scanned < region->page_count * 2u; ++scanned) {
+        size_t idx = region->clock_hand++ % region->page_count;
+        if (idx == avoid_index || !region->resident[idx]) continue;
+        unsigned long long addr = region->base + (unsigned long long)idx * region->page_size;
+        unsigned char *buf = (unsigned char *)malloc(region->page_size);
+        if (!buf) return -1;
+        struct iovec local = {.iov_base = buf, .iov_len = region->page_size};
+        struct iovec remote = {.iov_base = (void *)(uintptr_t)addr, .iov_len = region->page_size};
+        ssize_t n = pdocker_process_vm_readv(pid, &local, 1, &remote, 1, 0);
+        if (n != (ssize_t)region->page_size) {
+            free(buf);
+            return -1;
+        }
+        ssize_t written = pwrite(region->backing_fd, buf, region->page_size,
+                                 (off_t)((unsigned long long)idx * region->page_size));
+        free(buf);
+        if (written != (ssize_t)region->page_size) return -1;
+        region->dirty_page_outs++;
+        region->bytes_out += (unsigned long long)region->page_size;
+        unsigned long long result = 0;
+        if (inject_tracee_syscall(pid, fault_regs, __NR_mprotect,
+                                  addr, (unsigned long long)region->page_size,
+                                  PROT_NONE, &result) != 0 || result != 0) {
+            return -1;
+        }
+        region->resident[idx] = 0;
+        region->resident_count--;
+        region->page_outs++;
+        return 0;
+    }
+    return -1;
+}
+
+static int handle_managed_memory_fault(pid_t pid, TraceeState *state,
+                                       struct user_pt_regs *fault_regs,
+                                       unsigned long long fault_addr) {
+    size_t idx = 0;
+    ManagedTraceRegion *region = find_managed_region_for_addr(state, fault_addr, &idx);
+    if (!region) return 0;
+    while (region->resident_count >= region->resident_limit) {
+        if (evict_one_managed_trace_page(pid, region, idx, fault_regs) != 0) {
+            fprintf(stderr,
+                    "pdocker-direct-managed-pager: evict failed pid=%d addr=0x%llx errno=%d\n",
+                    (int)pid, fault_addr, errno);
+            return -1;
+        }
+    }
+    unsigned long long page_addr = region->base + (unsigned long long)idx * region->page_size;
+    unsigned long long result = 0;
+    if (inject_tracee_syscall(pid, fault_regs, __NR_mprotect,
+                              page_addr, (unsigned long long)region->page_size,
+                              region->prot, &result) != 0 || result != 0) {
+        fprintf(stderr,
+                "pdocker-direct-managed-pager: mprotect-in failed pid=%d page=0x%llx result=%lld errno=%d\n",
+                (int)pid, page_addr, (long long)result, errno);
+        return -1;
+    }
+    if (!region->resident[idx]) {
+        unsigned char *buf = (unsigned char *)calloc(1, region->page_size);
+        if (!buf) return -1;
+        if (region->ever_loaded[idx]) {
+            ssize_t n = pread(region->backing_fd, buf, region->page_size,
+                              (off_t)((unsigned long long)idx * region->page_size));
+            if (n < 0) {
+                free(buf);
+                return -1;
+            }
+            if (n < (ssize_t)region->page_size) {
+                memset(buf + n, 0, region->page_size - (size_t)n);
+            }
+        }
+        struct iovec local = {.iov_base = buf, .iov_len = region->page_size};
+        struct iovec remote = {.iov_base = (void *)(uintptr_t)page_addr, .iov_len = region->page_size};
+        ssize_t written = pdocker_process_vm_writev(pid, &local, 1, &remote, 1, 0);
+        free(buf);
+        if (written != (ssize_t)region->page_size) return -1;
+        region->resident[idx] = 1;
+        region->ever_loaded[idx] = 1;
+        region->resident_count++;
+        if (region->resident_count > region->max_resident_count) {
+            region->max_resident_count = region->resident_count;
+        }
+        region->page_ins++;
+        region->bytes_in += (unsigned long long)region->page_size;
+    }
+    if (set_regs(pid, fault_regs) != 0) return -1;
+    return 1;
+}
+
+static int maybe_prepare_managed_mmap(pid_t pid, struct user_pt_regs *regs,
+                                      TraceeState *state) {
+    (void)pid;
+    if (!managed_trace_is_candidate_mmap(state->last_args)) {
+        state->managed_pending_len = 0;
+        return 0;
+    }
+    state->managed_pending_len = state->last_args[1];
+    state->managed_pending_prot = state->last_args[2];
+    state->managed_pending_flags = state->last_args[3];
+    regs->regs[2] = PROT_NONE;
+    if (set_regs(pid, regs) != 0) {
+        state->managed_pending_len = 0;
+        return -1;
+    }
+    fprintf(stderr,
+            "pdocker-direct-managed-pager: pending mmap pid=%d length=%llu prot=0x%llx flags=0x%llx\n",
+            (int)state->pid, state->managed_pending_len,
+            state->managed_pending_prot, state->managed_pending_flags);
+    return 1;
+}
+
+static void maybe_finish_managed_mmap(pid_t pid, struct user_pt_regs *regs,
+                                      TraceeState *state,
+                                      unsigned long long result) {
+    if (!state || !state->managed_pending_len) return;
+    unsigned long long len = state->managed_pending_len;
+    int prot = (int)state->managed_pending_prot;
+    state->managed_pending_len = 0;
+    if (syscall_failed_result(result) || !result) return;
+    if (register_managed_mmap_region(state, result, len, prot) == 0) return;
+    unsigned long long ignored = 0;
+    (void)inject_tracee_syscall(pid, regs, __NR_mprotect, result, len, prot, &ignored);
+    (void)set_regs(pid, regs);
+    fprintf(stderr,
+            "pdocker-direct-managed-pager: register failed pid=%d base=0x%llx length=%llu restored_prot=0x%x errno=%d\n",
+            (int)pid, result, len, prot, errno);
+}
+
+static int run_memory_pager_transparent_poc(void) {
+    int failures = 0;
+    long ps = sysconf(_SC_PAGESIZE);
+    size_t page_size = ps > 0 ? (size_t)ps : 4096u;
+    size_t pages = (size_t)env_u64_or_default("PDOCKER_MEMORY_PAGER_POC_PAGES", 32ULL);
+    size_t resident_limit = (size_t)env_u64_or_default("PDOCKER_MEMORY_PAGER_POC_RESIDENT_PAGES", 4ULL);
+    if (pages == 0) pages = 1;
+    if (resident_limit == 0) resident_limit = 1;
+    if (resident_limit > pages) resident_limit = pages;
+    size_t length = page_size * pages;
+    unsigned long long start_ns = monotonic_now_ns();
+
+    pid_t child = fork();
+    if (child == 0) {
+        if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) != 0) _exit(81);
+        raise(SIGSTOP);
+        volatile unsigned char *p = (volatile unsigned char *)mmap(
+                NULL, length, PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (p == MAP_FAILED) _exit(82);
+        for (size_t i = 0; i < pages; ++i) {
+            p[i * page_size] = (unsigned char)(0x11u + (i & 0x7fu));
+            p[i * page_size + page_size - 1u] = (unsigned char)(0x81u + (i & 0x7fu));
+        }
+        for (size_t round = 0; round < 3; ++round) {
+            for (size_t i = pages; i > 0; --i) {
+                size_t idx = i - 1u;
+                if (p[idx * page_size] != (unsigned char)(0x11u + (idx & 0x7fu))) _exit(83);
+                if (p[idx * page_size + page_size - 1u] !=
+                        (unsigned char)(0x81u + (idx & 0x7fu))) _exit(84);
+            }
+        }
+        munmap((void *)p, length);
+        _exit(0);
+    }
+    if (child < 0) {
+        printf("pager-transparent-poc:fork=fail errno=%d\n", errno);
+        return 1;
+    }
+
+    TraceeState state;
+    memset(&state, 0, sizeof(state));
+    state.pid = child;
+    state.active = 1;
+    state.last_nr = -1;
+    state.emulated_nr = -1;
+    state.last_emulated_nr = -1;
+    snprintf(state.guest_cwd, sizeof(state.guest_cwd), "/");
+
+    int saved_managed = g_managed_memory_pager;
+    int saved_trace_memory = g_trace_memory;
+    unsigned long long saved_min_request = g_managed_memory_pager_min_request;
+    unsigned long long saved_max_region = g_managed_memory_pager_max_region;
+    unsigned long long saved_resident_pages = g_managed_memory_pager_resident_pages;
+    g_managed_memory_pager = 1;
+    g_trace_memory = 1;
+    g_managed_memory_pager_min_request = length;
+    g_managed_memory_pager_max_region = length;
+    g_managed_memory_pager_resident_pages = resident_limit;
+
+    int status = 0;
+    pid_t waited = waitpid(child, &status, 0);
+    failures += pager_poc_ok("transparent_initial_stop",
+                             waited == child && WIFSTOPPED(status) && WSTOPSIG(status) == SIGSTOP,
+                             waited < 0 ? errno : EINVAL);
+    if (!failures) failures += pager_poc_ok("transparent_setopts", set_trace_options(child) == 0, errno);
+    if (!failures && ptrace(PTRACE_SYSCALL, child, NULL, NULL) != 0) {
+        failures += pager_poc_ok("transparent_start", 0, errno);
+    }
+
+    int exit_rc = 255;
+    int events = 0;
+    int mmap_entries = 0;
+    int mmap_exits = 0;
+    unsigned long long last_mmap_len = 0;
+    unsigned long long last_mmap_prot = 0;
+    unsigned long long last_mmap_flags = 0;
+    unsigned long long last_mmap_fd = 0;
+    unsigned long long last_mmap_result = 0;
+    unsigned long long pending_after_entry = 0;
+    int sigsegv_stops = 0;
+    int trap_good_stops = 0;
+    int plain_trap_stops = 0;
+    while (!failures) {
+        waited = waitpid(child, &status, __WALL);
+        if (waited < 0) {
+            failures += pager_poc_ok("transparent_wait", 0, errno);
+            break;
+        }
+        if (WIFEXITED(status)) {
+            exit_rc = WEXITSTATUS(status);
+            break;
+        }
+        if (WIFSIGNALED(status)) {
+            exit_rc = 128 + WTERMSIG(status);
+            break;
+        }
+        if (!WIFSTOPPED(status)) continue;
+        int sig = WSTOPSIG(status);
+        unsigned int event = (unsigned int)status >> 16;
+        events++;
+        if (sig == SIGSEGV) {
+            sigsegv_stops++;
+            siginfo_t info;
+            struct user_pt_regs fault_regs;
+            memset(&info, 0, sizeof(info));
+            memset(&fault_regs, 0, sizeof(fault_regs));
+            if (ptrace(PTRACE_GETSIGINFO, child, NULL, &info) != 0 ||
+                    get_regs(child, &fault_regs) != 0) {
+                failures += pager_poc_ok("transparent_fault_regs", 0, errno);
+                break;
+            }
+            int handled = handle_managed_memory_fault(
+                    child, &state, &fault_regs,
+                    (unsigned long long)(uintptr_t)info.si_addr);
+            if (handled <= 0) {
+                failures += pager_poc_ok("transparent_fault_handled", 0, errno ? errno : EINVAL);
+                break;
+            }
+            if (ptrace(PTRACE_SYSCALL, child, NULL, NULL) != 0) {
+                failures += pager_poc_ok("transparent_continue_fault", 0, errno);
+                break;
+            }
+            continue;
+        }
+        int syscall_stop = (sig == (SIGTRAP | 0x80)) || (sig == SIGTRAP && event == 0);
+        if (syscall_stop) {
+            trap_good_stops++;
+            struct user_pt_regs regs;
+            if (get_regs(child, &regs) != 0) {
+                failures += pager_poc_ok("transparent_syscall_regs", 0, errno);
+                break;
+            }
+            int completed_in_userland = 0;
+            if (!state.in_syscall) {
+                handle_syscall_entry(child, &regs, &state, "/", "", "", events,
+                                     &completed_in_userland);
+                if (state.last_nr == 222) {
+                    mmap_entries++;
+                    last_mmap_len = state.last_args[1];
+                    last_mmap_prot = state.last_args[2];
+                    last_mmap_flags = state.last_args[3];
+                    last_mmap_fd = state.last_args[4];
+                    pending_after_entry = state.managed_pending_len;
+                }
+            } else {
+                if (state.in_syscall && is_memory_trace_syscall(state.last_nr)) {
+                    record_memory_syscall_exit(&state, regs.regs[0]);
+                    if (state.last_nr == 222) {
+                        mmap_exits++;
+                        last_mmap_result = regs.regs[0];
+                        maybe_finish_managed_mmap(child, &regs, &state, regs.regs[0]);
+                    }
+                }
+            }
+            state.in_syscall = completed_in_userland ? 1 : !state.in_syscall;
+            if (ptrace(PTRACE_SYSCALL, child, NULL, NULL) != 0) {
+                failures += pager_poc_ok("transparent_continue_syscall", 0, errno);
+                break;
+            }
+            continue;
+        }
+        if (sig == SIGTRAP) {
+            plain_trap_stops++;
+            if (ptrace(PTRACE_SYSCALL, child, NULL, NULL) != 0) {
+                failures += pager_poc_ok("transparent_continue_trap", 0, errno);
+                break;
+            }
+            continue;
+        }
+        if (ptrace(PTRACE_SYSCALL, child, NULL, (void *)(long)sig) != 0) {
+            failures += pager_poc_ok("transparent_continue_signal", 0, errno);
+            break;
+        }
+    }
+
+    ManagedTraceRegion *region = state.managed_regions ? &state.managed_regions[0] : NULL;
+    printf("pager-transparent-poc:exit_rc=%d\n", exit_rc);
+    printf("pager-transparent-poc:events=%d\n", events);
+    printf("pager-transparent-poc:mmap_entries=%d\n", mmap_entries);
+    printf("pager-transparent-poc:mmap_exits=%d\n", mmap_exits);
+    printf("pager-transparent-poc:last_mmap_len=%llu\n", last_mmap_len);
+    printf("pager-transparent-poc:last_mmap_prot=%llu\n", last_mmap_prot);
+    printf("pager-transparent-poc:last_mmap_flags=%llu\n", last_mmap_flags);
+    printf("pager-transparent-poc:last_mmap_fd=%llu\n", last_mmap_fd);
+    printf("pager-transparent-poc:last_mmap_result=%llu\n", last_mmap_result);
+    printf("pager-transparent-poc:pending_after_entry=%llu\n", pending_after_entry);
+    printf("pager-transparent-poc:sigsegv_stops=%d\n", sigsegv_stops);
+    printf("pager-transparent-poc:trap_good_stops=%d\n", trap_good_stops);
+    printf("pager-transparent-poc:plain_trap_stops=%d\n", plain_trap_stops);
+    printf("pager-transparent-poc:registered=%s\n", region && region->active ? "yes" : "no");
+    printf("pager-transparent-poc:resident_limit_pages=%llu\n",
+           (unsigned long long)resident_limit);
+    printf("pager-transparent-poc:max_resident_pages=%llu\n",
+           (unsigned long long)(region ? region->max_resident_count : 0));
+    printf("pager-transparent-poc:page_ins=%llu\n",
+           (unsigned long long)(region ? region->page_ins : 0));
+    printf("pager-transparent-poc:page_outs=%llu\n",
+           (unsigned long long)(region ? region->page_outs : 0));
+    printf("pager-transparent-poc:dirty_page_outs=%llu\n",
+           (unsigned long long)(region ? region->dirty_page_outs : 0));
+    printf("pager-transparent-poc:bytes_in=%llu\n",
+           (unsigned long long)(region ? region->bytes_in : 0));
+    printf("pager-transparent-poc:bytes_out=%llu\n",
+           (unsigned long long)(region ? region->bytes_out : 0));
+    printf("pager-transparent-poc:elapsed_ns=%llu\n", monotonic_now_ns() - start_ns);
+    if (exit_rc != 0 || !region || !region->active || region->max_resident_count > resident_limit ||
+            region->page_ins == 0 || region->page_outs == 0 || region->dirty_page_outs == 0) {
+        failures++;
+    }
+    printf("pager-transparent-poc:result=%s\n", failures ? "fail" : "ok");
+    if (failures && exit_rc == 255) {
+        kill(child, SIGKILL);
+        waitpid(child, NULL, 0);
+    }
+    free_managed_trace_regions(&state);
+    g_managed_memory_pager = saved_managed;
+    g_trace_memory = saved_trace_memory;
+    g_managed_memory_pager_min_request = saved_min_request;
+    g_managed_memory_pager_max_region = saved_max_region;
+    g_managed_memory_pager_resident_pages = saved_resident_pages;
+    return failures ? 1 : 0;
 }
 
 static int should_rewrite_path(const char *rootfs, const char *path) {
@@ -3133,7 +3874,12 @@ static int handle_syscall_entry(pid_t pid, struct user_pt_regs *regs, TraceeStat
         begin_path_cache_mutation(state);
         state->pending_path_cache_invalidation = 1;
     }
-    if (maybe_guard_memory_syscall(pid, regs, state, completed_in_userland)) {
+    if (state->last_nr == 222 && maybe_prepare_managed_mmap(pid, regs, state) < 0) {
+        fprintf(stderr, "pdocker-direct-managed-pager: prepare mmap failed pid=%d: %s\n",
+                (int)pid, strerror(errno));
+    }
+    if (!state->managed_pending_len &&
+            maybe_guard_memory_syscall(pid, regs, state, completed_in_userland)) {
         forced_emulation = 1;
     } else if (state->last_nr == 17 &&
         emulate_getcwd(pid, regs, state, rootfs, &state->emulated_result)) {
@@ -3442,6 +4188,28 @@ static int trace_and_exec(char *const exec_argv[], const char *rootfs, const cha
         unsigned int event = (unsigned int)status >> 16;
         events++;
 
+        if (sig == SIGSEGV && g_managed_memory_pager) {
+            siginfo_t info;
+            struct user_pt_regs fault_regs;
+            memset(&info, 0, sizeof(info));
+            memset(&fault_regs, 0, sizeof(fault_regs));
+            if (ptrace(PTRACE_GETSIGINFO, got, NULL, &info) == 0 &&
+                    get_regs(got, &fault_regs) == 0) {
+                int handled = handle_managed_memory_fault(
+                        got, state, &fault_regs,
+                        (unsigned long long)(uintptr_t)info.si_addr);
+                if (handled > 0) {
+                    if (continue_tracee(got, 0) != 0) break;
+                    continue;
+                }
+                if (handled < 0) {
+                    fprintf(stderr,
+                            "pdocker-direct-managed-pager: fault handling failed pid=%d addr=%p\n",
+                            (int)got, info.si_addr);
+                }
+            }
+        }
+
         if (sig == (SIGTRAP | 0x80)) {
             struct user_pt_regs regs;
             if (get_regs(got, &regs) == 0) {
@@ -3469,6 +4237,9 @@ static int trace_and_exec(char *const exec_argv[], const char *rootfs, const cha
                     state->pending_guest_cwd[0] = '\0';
                 } else if (state->in_syscall && is_memory_trace_syscall(state->last_nr)) {
                     record_memory_syscall_exit(state, regs.regs[0]);
+                    if (state->last_nr == 222) {
+                        maybe_finish_managed_mmap(got, &regs, state, regs.regs[0]);
+                    }
                 }
                 if (state->in_syscall && state->pending_path_cache_invalidation) {
                     finish_path_cache_mutation(state);
@@ -3741,7 +4512,20 @@ static int run_command(int argc, char **argv) {
     g_memory_guard_min_swap = env_u64_or_default(
             "PDOCKER_DIRECT_MEMORY_GUARD_MIN_SWAP",
             256ULL * 1024ULL * 1024ULL);
-    if (g_memory_guard) g_trace_memory = 1;
+    const char *pager_env = getenv("PDOCKER_DIRECT_MEMORY_PAGER");
+    if (!pager_env || !pager_env[0]) pager_env = getenv("PDOCKER_MEMORY_PAGER");
+    g_managed_memory_pager = pager_env && strcmp(pager_env, "managed") == 0;
+    g_managed_memory_pager_min_request = env_u64_or_default(
+            "PDOCKER_DIRECT_MEMORY_PAGER_MIN_REQUEST",
+            128ULL * 1024ULL * 1024ULL);
+    g_managed_memory_pager_max_region = env_u64_or_default(
+            "PDOCKER_DIRECT_MEMORY_PAGER_MAX_REGION",
+            1024ULL * 1024ULL * 1024ULL);
+    g_managed_memory_pager_resident_pages = env_u64_or_default(
+            "PDOCKER_DIRECT_MEMORY_PAGER_RESIDENT_PAGES",
+            256ULL);
+    if (g_managed_memory_pager_resident_pages == 0) g_managed_memory_pager_resident_pages = 1;
+    if (g_memory_guard || g_managed_memory_pager) g_trace_memory = 1;
     memset(&g_memory_stats, 0, sizeof(g_memory_stats));
     g_memory_stats_printed = 0;
     g_stats = env_flag_enabled("PDOCKER_DIRECT_STATS");
@@ -4066,6 +4850,14 @@ int main(int argc, char **argv) {
 
     if (argc == 2 && strcmp(argv[1], "--pdocker-memory-pager-poc") == 0) {
         return run_memory_pager_poc();
+    }
+
+    if (argc == 2 && strcmp(argv[1], "--pdocker-memory-pager-managed-poc") == 0) {
+        return run_memory_pager_managed_poc();
+    }
+
+    if (argc == 2 && strcmp(argv[1], "--pdocker-memory-pager-transparent-poc") == 0) {
+        return run_memory_pager_transparent_poc();
     }
 
     if (argc >= 2 && strcmp(argv[1], "run") == 0) {

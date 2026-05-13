@@ -127,6 +127,35 @@ Managed region lifecycle:
 6. On memory pressure or aging, write dirty pages to backing storage and return
    them to `PROT_NONE`.
 
+Implementation slice:
+
+- `pdocker-direct --pdocker-memory-pager-managed-poc` now contains the first
+  APK-owned managed anonymous pager loop.  It reserves a multi-page
+  `PROT_NONE` virtual region, keeps only a fixed number of pages resident,
+  writes dirty pages to a sparse backing file on eviction, restores pages on
+  later access, and verifies that data survives multiple eviction rounds.
+- The PoC emits replayable counters (`page_ins`, `page_outs`,
+  `dirty_page_outs`, `bytes_in`, `bytes_out`, `max_resident_pages`, and
+  `elapsed_ns`).  `scripts/android-memory-pager-managed-poc.sh` records those
+  counters as `docs/test/apk-memory-pager-managed-latest.json` without
+  force-stopping the app, so low-memory experiments can be compared across
+  devices and builds.
+- This is a cooperative pager API, not yet a transparent allocator shim.  It
+  proves the core backing/eviction/reload mechanics without depending on
+  `userfaultfd`, external code, or a global SIGSEGV handler.
+- The direct executor now has the first opt-in transparent path for large
+  anonymous mappings.  When `PDOCKER_MEMORY_PAGER=managed` or
+  `PDOCKER_DIRECT_MEMORY_PAGER=managed` is set, suitable private anonymous
+  `mmap` calls are mapped as `PROT_NONE`, registered in a per-tracee managed
+  region table, and paged in by the ptrace SIGSEGV path.  Resident pages are
+  bounded by `PDOCKER_DIRECT_MEMORY_PAGER_RESIDENT_PAGES`; evicted pages are
+  copied to the backing file and protected back to `PROT_NONE`.
+- This first transparent path intentionally covers large anonymous `mmap`
+  regions only.  It does not rewrite `brk`, thread stacks, `MAP_SHARED`,
+  device shared buffers, or file-backed model mappings.  That keeps the feature safe
+  enough for opt-in large-workload experiments without changing normal Docker
+  semantics by default.
+
 ### C. Preferred Fault Catch: userfaultfd
 
 If a device allows unprivileged userfaultfd from the APK process:
@@ -201,12 +230,79 @@ buffers, not improving normal performance.
   removal.
 - Treat storage exhaustion as a hard failure with clear UI diagnostics.
 
+## OOM/LMK Diagnostics Contract
+
+The pager must also make low-memory failures diagnosable without ADB, root, or
+an attached debugger.  The runtime OOM policy document owns the daemon-wide
+survival strategy; this pager contract defines the memory-pager-specific
+evidence that must be persisted before a process disappears.
+
+Planned gap: the transparent pager PoC currently proves fault handling and
+replayable counters, but it does not yet write the full daemon/container memory
+diagnostic artifact described here.  Until that artifact exists, static checks
+must keep this section and the probe runbook in sync so UI and tests do not
+pretend that post-LMK diagnosis is already complete.
+
+For every pager-enabled operation or Large Workload Mode run, pdockerd/direct
+executor should retain a bounded JSONL ring plus a final summary under
+app-private operation or container state.  Each sample should include:
+
+- monotonic timestamp, wall-clock timestamp, operation id, container id, image,
+  command, tracee pid/process group, direct-executor pid, and whether the app is
+  foreground, background service, or recovered after restart;
+- `/proc/meminfo` `MemAvailable`, `MemFree`, `SwapFree`, `SwapTotal`, zram
+  fields when visible, and storage-free bytes for the pager backing directory;
+- per-process RSS and, when `/proc/<pid>/smaps_rollup` is readable, PSS,
+  Private_Dirty, Shared_Clean, and SwapPss; if PSS is blocked, record
+  `pss_unavailable` with errno rather than dropping the sample;
+- the last large allocation request (`mmap`, `mremap`, or `brk`) with requested
+  bytes, result, errno, guard threshold, MemAvailable/SwapFree at decision time,
+  region id, and whether it was denied, file-backed, or pager-managed;
+- pager counters: reserved bytes, resident bytes, backing bytes, page-ins,
+  page-outs, dirty page-outs, average/max page-in latency, and storage
+  exhaustion state;
+- last known progress: phase name, phase sequence number, human-readable step
+  such as model load/accelerator dispatch/build RUN, last successful progress marker,
+  and bytes/items completed when the workload exposes them.
+
+The post-restart classifier should emit `lmk_suspected=true` only when current
+engine truth and pid liveness are missing for a previously active operation and
+the persisted evidence is consistent with low memory.  Strong signals include a
+recent `SIGKILL`/exit 137 observed by the tracer, abrupt loss of the tracee or
+daemon while `MemAvailable` or `SwapFree` was below the configured danger
+threshold, or a stale active operation recovered after app/daemon restart with
+no live pid.  Weak signals such as user stop, normal nonzero exit, explicit
+guard `ENOMEM`, storage exhaustion, or an unrelated crash must classify as
+`not_lmk_suspected` or `unknown` with the reason recorded.
+
+Artifact retention must be bounded and user-safe:
+
+- keep the latest summary for each active/recent operation and at least the last
+  N ring samples needed to explain the final minute before failure;
+- redact environment values and arguments known to carry secrets before writing
+  artifacts;
+- cap total memory-diagnostic artifact bytes per container/app and delete
+  expired artifacts during normal container cleanup;
+- keep pager backing files separate from diagnostic artifacts so cleanup can
+  remove backing storage without erasing the failure explanation.
+
+UI contract: a memory-diagnostic artifact is past evidence, not live `/proc`
+state.  A UI card must not show `running`, `Up`, or an active spinner solely
+because a persisted operation or pager artifact says it was running earlier.
+It may show `interrupted-or-lmk-suspected` only after reconciling current engine
+snapshot, pid liveness, and container metadata; this engine snapshot must be
+fresh runtime truth, not only persisted container JSON.  If those disagree, the UI must
+prefer stale-safe wording and attach the last known progress, MemAvailable,
+SwapFree, RSS/PSS, and classifier reason.
+
 ## Interaction With llama.cpp
 
-The current llama GPU result shows the bridge is functional but slower than CPU
-because of upload/copy overhead. The memory pager is not the first performance
-fix for that path. The immediate GPU work remains persistent registered buffers
-and command-ring transport.
+The current llama GPU experiments show that the bridge path can produce
+diagnostics, but correctness and performance are not release-ready.  The memory
+pager is not the first performance fix for that path.  The immediate GPU work
+remains correctness-gated executor-marker evidence, persistent registered buffers,
+and command-ring transport.  This pager is not expected to make token generation
+faster by itself.
 
 The memory pager is useful for:
 
@@ -297,8 +393,10 @@ production guardrails are complete.
 1. Add a probe command that records userfaultfd availability, zram/swap
    visibility, `swapon` permission, and SDK28 compat syscall behavior into a
    device artifact.
-2. Add a host-only `libpdocker-mempager` prototype with a synthetic managed
-   region and fault counter.
+2. Add an APK-owned managed pager prototype with a synthetic managed region,
+   sparse backing file, bounded resident set, eviction counter, and reload
+   verification.  Current command:
+   `pdocker-direct --pdocker-memory-pager-managed-poc`.
 3. Add an Android direct-executor experiment for ptrace `SIGSEGV` interception:
    reserve one page as `PROT_NONE`, fault it, suppress the signal, map/write the
    page, and resume.
