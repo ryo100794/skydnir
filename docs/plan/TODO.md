@@ -18,26 +18,32 @@ The May 13 multi-agent audits promoted the following order as the current
 planning ledger truth.  Keep this order when assigning agents, updating GitHub
 issues, and deciding which planned gaps become hard gates.
 
-1. **Service truth same-container-ID** `[P0 doing]`: UI cards,
+1. **[#6](https://github.com/ryo100794/pdocker-android/issues/6)
+   Service truth same-container-ID** `[P0 doing]`: UI cards,
    `docker ps`, Engine `/containers/json`, persisted state, process table,
    listener probes, and logs must prove the same current Engine container ID.
    Persisted `state.json`, Compose metadata, names, completed jobs, and port
    declarations are hints only.
-2. **Runtime teardown** `[P0 next]`: stop/kill must prove direct children,
+2. **[#10](https://github.com/ryo100794/pdocker-android/issues/10)
+   Runtime teardown** `[P0 next]`: stop/kill must prove direct children,
    GPU executor helpers, listeners, logs, and stale PIDs are gone before the
    UI or API reports stopped.
-3. **llama GPU Q6_K and environment propagation** `[P0 doing]`: continue the
+3. **[#4](https://github.com/ryo100794/pdocker-android/issues/4)
+   llama GPU Q6_K and environment propagation** `[P0 doing]`: continue the
    Q6_K blocker without touching llama.cpp, Dockerfiles, models, or prompts.
    The compare script, pdockerd defaults, UI/compose path, and artifact
    verifier must use an audited GPU diagnostic environment so device results do
    not diverge by launch path.
-4. **Image-pull crash safety** `[P0 doing]`: partial pulls, `.pull-*`,
+4. **[#11](https://github.com/ryo100794/pdocker-android/issues/11)
+   Image-pull crash safety** `[P0 doing]`: partial pulls, `.pull-*`,
    `.tmp-*`, `.old-*`, interrupted layer extraction, tag publish, and startup
    recovery must be tested with an actual kill/restart device artifact.
-5. **COW/overlay mutation safety** `[P0 next]`: copy-up, whiteout, rename,
+5. **[#12](https://github.com/ryo100794/pdocker-android/issues/12)
+   COW/overlay mutation safety** `[P0 next]`: copy-up, whiteout, rename,
    archive PUT, hardlink metadata, low-space, and kill-at-step scenarios need
    fail-closed mutation tests plus startup repair/check evidence.
-6. **Terminal hard gate** `[P1 next]`: `exec -it` is not closed until an actual
+6. **[#5](https://github.com/ryo100794/pdocker-android/issues/5)
+   Terminal hard gate** `[P1 next]`: `exec -it` is not closed until an actual
    UI-driven container terminal passes Enter, Ctrl-C, cursor keys, `top`, `q`,
    resize, and IME regression checks. Static or skipped self-tests are not
    enough.
