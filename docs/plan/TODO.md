@@ -47,10 +47,12 @@ issues, and deciding which planned gaps become hard gates.
    UI-driven container terminal passes Enter, Ctrl-C, cursor keys, `top`, `q`,
    resize, and IME regression checks. Static or skipped self-tests are not
    enough.
-7. **VS Code health gate** `[P1 next]`: default workspace success requires
+7. **[#14](https://github.com/ryo100794/pdocker-android/issues/14)
+   VS Code health gate** `[P1 next]`: default workspace success requires
    compose/build/run, `pdocker-dev` current Engine state, port `18080` listener,
    code-server reachability, extension evidence, and UI card truth agreement.
-8. **SAF direct output** `[P1 next]`: `/documents` must be a SAF-backed UnixFS
+8. **[#15](https://github.com/ryo100794/pdocker-android/issues/15)
+   SAF direct output** `[P1 next]`: `/documents` must be a SAF-backed UnixFS
    exchange layer with sidecar metadata and direct-write evidence; app-private
    fallback is allowed only when explicitly recorded.
 
@@ -415,7 +417,8 @@ implementation change plus a focused verification artifact.
   Dockerfiles. The managed-region pager remains explicit and opt-in; ordinary
   toolchain heap allocations such as `cc1plus` are not yet under pdocker memory
   ownership.
-- [next] Implement Runtime OOM Survival and Large Workload Mode. The default
+- [next] [#13](https://github.com/ryo100794/pdocker-android/issues/13)
+  Implement Runtime OOM Survival and Large Workload Mode. The default
   path should keep using large-allocation guardrails to return `ENOMEM` before
   Android LMK kills the app, while the opt-in large-workload path should make
   oversized jobs run by combining file-backed mmap/streaming, managed anonymous
