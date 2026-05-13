@@ -28,7 +28,7 @@ Current TODO counters:
 
 ## Timeline
 
-### Now: 2026-05-12 to 2026-05-15
+### Now: 2026-05-13 to 2026-05-16
 
 Keep the UI compose path truthful and visible while closing regressions that block demos.
 
@@ -37,7 +37,7 @@ Keep the UI compose path truthful and visible while closing regressions that blo
 - Image pull UI must not hard-code `ubuntu:22.04`. It now needs a searchable selection dialog that combines local image refs, Compose `image:` refs, Dockerfile `FROM` refs, common defaults...
 - Image pull crash safety. `pull_image` and layer extraction must stage into temporary directories and atomically publish completed layers/tags so an app or daemon kill cannot leave a partial...
 
-### Next: 2026-05-16 to 2026-05-22
+### Next: 2026-05-17 to 2026-05-23
 
 Turn the remaining high-value TODOs into repeatable device checks and public artifacts.
 
@@ -47,7 +47,7 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 - [#9](https://github.com/ryo100794/pdocker-android/issues/9) First public release candidate gate: define and satisfy the minimum GitHub Release criteria for a build that is honest...
 - RUN changed-path/snapshot performance. `RUN chmod +x /usr/local/bin/pdocker-*` is functionally correct but still triggers an expensive broad snapshot in the default workspace build...
 
-### Then: 2026-05-23 to 2026-06-02
+### Then: 2026-05-24 to 2026-06-03
 
 Use benchmark evidence to harden compatibility and publish tester-ready releases.
 
