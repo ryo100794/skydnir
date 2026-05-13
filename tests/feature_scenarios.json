@@ -236,12 +236,13 @@
       "id": "cow.overlay.local",
       "area": "cow-overlay-storage",
       "lane": "fast-local",
-      "command": "bash docker-proot-setup/src/overlay/test_cow.sh",
+      "command": "python3 scripts/verify-cow-overlay-bench-recovery.py --run-local",
       "status": "runnable",
       "docs": [
-        "docs/design/COW_OVERLAY_STORAGE.md"
+        "docs/design/COW_OVERLAY_STORAGE.md",
+        "docs/test/COW_OVERLAY_BENCH_RECOVERY.md"
       ],
-      "checks": "COW copy-up, path metadata, fd lifecycle, xattr hooks, and overlay-like path operations."
+      "checks": "COW copy-up, path metadata, fd lifecycle, xattr hooks, JSON microbenchmarks, hardlink ring cache rebuild, and kill-at-step planned-gap evidence."
     },
     {
       "id": "archive.api.compatibility",

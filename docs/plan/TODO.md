@@ -169,8 +169,12 @@ stable checkpoint.
   app or daemon kill cannot leave a partial layer/image that is later treated
   as valid. Static verifier added: `python3 scripts/verify-image-pull-crash-safety.py`
   checks `.pull-*`, `.old-*`, layer `.tmp-*`, diff-id verification, atomic
-  publish ordering, and startup recovery. Remaining acceptance gap: run and
-  archive an interrupted-pull device kill/restart scenario.
+  publish ordering, and startup recovery. Device runner upgraded:
+  `python3 scripts/verify/runner/image_pull_crash_safety_device.py --execute-device`
+  now performs a safe scenario-owned residue kill/restart recovery lane with
+  `.pull-*`, `.old-*`, `.tmp-*`, malformed partial-layer, Engine inspect, and
+  scoped cleanup evidence. Remaining acceptance gap: add a timed live registry
+  pull interruption lane that cannot overwrite user images.
 - [doing] Compose/build log progress rendering. The readonly log pane must
   preserve terminal carriage-return progress updates instead of deleting or
   fragmenting text-mode progress bars. Acceptance: xterm readonly log path keeps

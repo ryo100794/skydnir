@@ -25,6 +25,7 @@ TODO = ROOT / "docs/plan/TODO.md"
 COMPAT = ROOT / "docs/test/COMPATIBILITY.md"
 DEVICE_RUNNER = ROOT / "scripts/verify/runner/image_pull_crash_safety_device.py"
 DEVICE_SIDE_RUNNER = ROOT / "scripts/verify/runner/image-pull-crash-safety-device.sh"
+DEVICE_GATE_DOC = ROOT / "docs/test/IMAGE_PULL_CRASH_SAFETY_DEVICE_GATE.md"
 
 
 def fail(message: str) -> None:
@@ -114,11 +115,22 @@ def check_device_scenario_runner() -> None:
     require("device scenario artifact never fakes success without evidence",
             data.get("status") == "planned-gap" and data.get("success") is False)
     require("device scenario records schema version and id",
-            data.get("schema_version") == 1 and data.get("scenario_id") == "image.pull.interrupted-kill-restart")
+            data.get("schema_version") == 2 and data.get("scenario_id") == "image.pull.interrupted-kill-restart")
     require("device scenario points back to static plan gate",
             data.get("plan_gate") == "python3 scripts/verify-image-pull-crash-safety.py")
     require("device scenario records command plan",
             isinstance(data.get("commands"), list) and len(data["commands"]) >= 8)
+    require("device scenario records concrete phases",
+            data.get("phases") == ["prepare-residue", "kill-daemon", "restart-and-probe", "cleanup"])
+    coverage = data.get("coverage") or {}
+    require("device scenario separates synthetic recovery from live network-pull coverage",
+            coverage.get("live_interrupted_network_pull") is False
+            and {"residue_recovery", "daemon_kill_restart", "engine_negative_probe"} <= set(coverage))
+    assertions = set((data.get("assertions") or {}).keys())
+    require("device scenario records crash-safety assertions",
+            {"old_tag_restored", "pull_stage_pruned", "tmp_layer_pruned",
+             "partial_layer_pruned", "never_published_tag_rejected",
+             "restored_tag_inspectable", "cleanup_removed_only_scenario_owned_paths"} <= assertions)
     for command in data["commands"]:
         tokens = shlex.split(command)
         require(f"device scenario command is tokenizable: {command}", bool(tokens))
@@ -126,12 +138,16 @@ def check_device_scenario_runner() -> None:
             if token.startswith(("scripts/", "tests/", "docs/", "docker-proot-setup/")):
                 require(f"device scenario command path exists: {token}", (ROOT / token).exists())
     required_evidence = {
-        "pull_log",
+        "prepare_summary",
+        "kill_summary",
+        "restart_summary",
+        "cleanup_summary",
         "daemon_log_before_kill",
         "daemon_log_after_restart",
+        "store_listing_before_kill",
         "store_listing_after_restart",
         "image_inspect_after_restart",
-        "container_run_after_restart",
+        "never_image_inspect_after_restart",
     }
     require("device scenario artifact schema records required evidence fields",
             required_evidence <= set(data.get("artifact_schema", {}).get("evidence", {}).keys()))
@@ -141,6 +157,33 @@ def check_device_scenario_runner() -> None:
     cleanup = "\n".join(data.get("cleanup_policy", []))
     require("device scenario records cleanup policy",
             all(term in cleanup.lower() for term in ["collect", "unrelated", "success=false"]))
+    remaining = "\n".join(data.get("remaining_gap", []))
+    require("device scenario records remaining live-pull gap",
+            "Live registry pull interruption" in remaining)
+
+    side = DEVICE_SIDE_RUNNER.read_text()
+    require("device-side runner prepares scenario-owned pull/old/tmp residues",
+            all(term in side for term in [".pull-$TOKEN", ".old-$TOKEN", ".tmp-$TOKEN", "prepare-residue"]))
+    require("device-side runner has kill and restart phases",
+            "kill-daemon" in side and "restart-and-probe" in side and "pkill -TERM -f pdockerd" in side)
+    require("device-side runner probes restored and never-published tags",
+            "inspect-restored.raw" in side and "inspect-never.raw" in side)
+    require("device-side cleanup is scenario-token scoped",
+            "rm -rf \\" in side and "$IMG_BASE" in side and "$NEVER_BASE" in side and "$TOKEN" in side)
+    forbidden_cleanup = [
+        "rm -rf files/pdocker",
+        "rm -rf pdocker/images",
+        "rm -rf pdocker/layers",
+        "rm -rf /data",
+        "rm -rf /sdcard",
+    ]
+    require("device-side runner avoids destructive broad cleanup",
+            not any(term in side for term in forbidden_cleanup))
+
+    require("image pull crash-safety device gate doc exists", DEVICE_GATE_DOC.exists())
+    doc = DEVICE_GATE_DOC.read_text()
+    require("device gate doc records concrete phases and remaining gap",
+            all(term in doc for term in ["prepare-residue", "kill-daemon", "restart-and-probe", "cleanup", "remaining gap"]))
 
 
 def main() -> int:

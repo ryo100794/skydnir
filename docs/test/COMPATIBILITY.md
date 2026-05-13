@@ -142,31 +142,37 @@ Host static gate:
 python3 scripts/verify-image-pull-crash-safety.py
 ```
 
-Interrupted-pull device kill/restart evidence remains a planned gap; it must
-not be marked passed unless a real Android device artifact records daemon kill,
-restart recovery, store inspection, and post-restart image/container probes.
-The executable ledger/driver is:
+Interrupted-pull device kill/restart evidence now has a concrete safe residue
+recovery lane. The runner creates only scenario-owned `.pull-*`, `.old-*`,
+layer `.tmp-*`, and malformed partial-layer paths, kills/restarts `pdockerd`,
+and records post-restart Engine API probes. It must not be marked passed unless
+the Android device artifact proves daemon restart recovery and all residue
+assertions are true. The executable driver is:
 
 ```sh
 python3 scripts/verify/runner/image_pull_crash_safety_device.py \
-  --artifact docs/test/image-pull-crash-safety-latest.json
+  --artifact docs/test/image-pull-crash-safety-latest.json \
+  --execute-device
 ```
 
 When ADB is absent, the driver writes `status=planned-gap` and
 `success=false` rather than faking success. The artifact schema includes the
-scenario id, device identity, command plan, evidence paths, negative expected
-conditions, and cleanup policy. Negative conditions include accepting `.pull-*`
-image stages, accepting `.tmp-*` layer directories, losing the old tag backup,
-or allowing `inspect`/`run` from a never-atomically-published interrupted pull.
-Cleanup must collect logs/listings first and remove only scenario-owned tags,
-containers, and artifacts, leaving unrelated worker data untouched.
+scenario id, device identity, command plan, phase results, evidence paths,
+negative expected conditions, assertions, remaining gap, and cleanup policy.
+Negative conditions include accepting `.pull-*` image stages, accepting
+`.tmp-*` layer directories, losing the old tag backup, or allowing `inspect`
+from a never-atomically-published interrupted pull. Cleanup must collect
+logs/listings first and remove only scenario-owned tags, containers, and
+artifacts, leaving unrelated worker data untouched. The remaining gap is a
+timed live registry-pull kill; the current device gate intentionally avoids
+overwriting user images while proving startup recovery.
 
 ## Current compatibility matrix
 
 | Area | Current status | Notes |
 |---|---:|---|
 | Engine API negotiation | Good | `/_ping`, `/version`, `/info`, API prefix stripping, and `Api-Version` response headers are implemented. |
-| Image pull/list/inspect/delete | Good | Pull uses content-addressed layer extraction with staged tag publish and startup cleanup for `.pull-*`, `.old-*`, and `.tmp-*` residue. `python3 scripts/verify-image-pull-crash-safety.py` covers the static contract. Private registry auth is not complete. Interrupted-pull device kill/restart evidence is still pending. |
+| Image pull/list/inspect/delete | Good | Pull uses content-addressed layer extraction with staged tag publish and startup cleanup for `.pull-*`, `.old-*`, and `.tmp-*` residue. `python3 scripts/verify-image-pull-crash-safety.py` covers the static contract. The Android device runner now covers safe synthetic residue kill/restart recovery; timed live registry-pull interruption remains open. Private registry auth is not complete. |
 | Image save/load | Partial | Docker-style tar exchange works for the implemented flattened image format. Multi-platform indexes, zstd layers, and all OCI edge cases are not complete. |
 | Container create/start/stop/kill/wait/rm | Good | Implemented through the Android direct userspace runner and state files. No cgroups or namespaces. Project/UI reconciliation still needs to rely on Engine container IDs plus pdocker labels rather than container names. |
 | Logs/attach/exec | Partial | Raw stream and hijack paths exist. Non-TTY exec works, and Android smoke covers a basic Engine `exec` with `Tty=true`. Full Docker attach parity, `docker run -t`, detach-key behavior, resize propagation, and broad interactive terminal cases still need more coverage. |

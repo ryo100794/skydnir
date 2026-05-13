@@ -106,6 +106,19 @@
         }
       ]
     },
+    "cow-overlay-bench-recovery": {
+      "description": "Local COW overlay benchmark and recovery scaffold for libcow fallback.",
+      "commands": [
+        {
+          "id": "cow-overlay-bench-recovery",
+          "argv": ["python3", "scripts/verify-cow-overlay-bench-recovery.py", "--run-local", "--output-dir", "docs/test"],
+          "artifacts": [
+            "docs/test/cow-overlay-bench-latest.json",
+            "docs/test/cow-overlay-recovery-latest.json"
+          ]
+        }
+      ]
+    },
     "android-test-suite": {
       "description": "Device route: stage compose project, compose up/build through the app, then Engine exec the test-suite.",
       "requires": ["adb", "installed-debug-apk"],
@@ -115,6 +128,17 @@
           "argv": ["bash", "scripts/android-test-suite-container-exec.sh"],
           "env": {"PDOCKER_TEST_SUITE_SCENARIO": "all"},
           "artifacts": ["docs/test/test-run-latest.json"]
+        }
+      ]
+    },
+    "android-documents": {
+      "description": "Device route: container /documents writes must prove direct SAF/Documents backend output, sidecar metadata, and explicit fallback evidence.",
+      "requires": ["adb", "installed-debug-apk"],
+      "commands": [
+        {
+          "id": "android-documents-saf-direct-output",
+          "argv": ["bash", "scripts/android-documents-mediator-smoke.sh"],
+          "artifacts": ["docs/test/saf-direct-output-latest.json"]
         }
       ]
     },

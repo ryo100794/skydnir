@@ -1,0 +1,117 @@
+{
+  "Config": {
+    "CopyUpBytes": 4096,
+    "CopyUpFiles": 4,
+    "LayerCount": 16,
+    "Libcow": "/root/tl/pdocker-android/docker-proot-setup/src/overlay/libcow.so",
+    "Ops": 20,
+    "Rounds": 1
+  },
+  "Kind": "cow-overlay-bench",
+  "Metrics": [
+    {
+      "metadata": {},
+      "name": "open_close",
+      "notes": [],
+      "ns_per_op": 175531.3,
+      "ops": 20,
+      "p50_ns": 176146,
+      "p95_ns": 297031,
+      "p99_ns": 364375,
+      "round": 1,
+      "total_ns": 3510626
+    },
+    {
+      "metadata": {},
+      "name": "stat",
+      "notes": [],
+      "ns_per_op": 189924.5,
+      "ops": 20,
+      "p50_ns": 196302,
+      "p95_ns": 285156,
+      "p99_ns": 361510,
+      "round": 1,
+      "total_ns": 3798489
+    },
+    {
+      "metadata": {},
+      "name": "create",
+      "notes": [],
+      "ns_per_op": 217414.2,
+      "ops": 20,
+      "p50_ns": 191823,
+      "p95_ns": 336459,
+      "p99_ns": 376563,
+      "round": 1,
+      "total_ns": 4348285
+    },
+    {
+      "metadata": {},
+      "name": "unlink",
+      "notes": [],
+      "ns_per_op": 222088.4,
+      "ops": 20,
+      "p50_ns": 196146,
+      "p95_ns": 332656,
+      "p99_ns": 516250,
+      "round": 1,
+      "total_ns": 4441768
+    },
+    {
+      "metadata": {},
+      "name": "rename",
+      "notes": [],
+      "ns_per_op": 227992.3,
+      "ops": 20,
+      "p50_ns": 240000,
+      "p95_ns": 302448,
+      "p99_ns": 314531,
+      "round": 1,
+      "total_ns": 4559846
+    },
+    {
+      "metadata": {
+        "bytes_per_file": 4096,
+        "files": 4,
+        "leaked_indices": [],
+        "status": "pass",
+        "still_hardlinked_indices": []
+      },
+      "name": "copy_up",
+      "notes": [
+        "mutates hardlinked upper files with libcow loaded",
+        "checks lower payload preservation and inode split"
+      ],
+      "ns_per_op": 3320625.0,
+      "ops": 4,
+      "p50_ns": 3177032,
+      "p95_ns": 5258698,
+      "p99_ns": 5258698,
+      "round": 1,
+      "total_ns": 13282500
+    },
+    {
+      "metadata": {
+        "layer_count": 16
+      },
+      "name": "layer_lookup",
+      "notes": [
+        "linear lower-layer lookup scaffold; future cache gate compares this"
+      ],
+      "ns_per_op": 1509940.1,
+      "ops": 20,
+      "p50_ns": 1682657,
+      "p95_ns": 2424062,
+      "p99_ns": 2432396,
+      "round": 1,
+      "total_ns": 30198801
+    }
+  ],
+  "Notes": [
+    "All timings are host-local microbenchmarks.",
+    "Container/device lanes should compare the same metric names.",
+    "copy_up is a correctness+timing metric; it fails if lower changes."
+  ],
+  "SchemaVersion": 1,
+  "Status": "pass"
+}

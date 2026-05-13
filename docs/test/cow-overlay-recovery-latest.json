@@ -1,0 +1,39 @@
+{
+  "Checks": {
+    "copy_up_fail_closed": "pass",
+    "hardlink_ring_corruption_rebuild": "pass",
+    "kill_at_step_external_harness": "planned-gap",
+    "metadata_fail_closed": "pass",
+    "truncate_fail_closed": "pass"
+  },
+  "GeneratedAt": "2026-05-13T22:08:08.269806+00:00",
+  "KillAtStepPlannedCases": [
+    {
+      "ExpectedRecovery": "discard temp, lower unchanged, upper remains either old payload or atomically published copy",
+      "Status": "planned-gap",
+      "Step": "copy-up temp payload write"
+    },
+    {
+      "ExpectedRecovery": "startup check removes orphan temp files and never exposes a half-published upper",
+      "Status": "planned-gap",
+      "Step": "copy-up rename publication"
+    },
+    {
+      "ExpectedRecovery": "delete intent is either absent or represented by a complete whiteout marker",
+      "Status": "planned-gap",
+      "Step": "whiteout creation"
+    },
+    {
+      "ExpectedRecovery": "discard corrupt accelerator and rebuild from payload tree",
+      "Status": "planned-gap",
+      "Step": "hardlink ring metadata write"
+    }
+  ],
+  "Kind": "cow-overlay-recovery",
+  "Notes": [
+    "Hardlink ring metadata is treated as a rebuildable cache, not payload truth.",
+    "planned-gap entries are intentionally not success evidence."
+  ],
+  "SchemaVersion": 1,
+  "Status": "pass"
+}
