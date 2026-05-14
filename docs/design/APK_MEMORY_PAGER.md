@@ -437,6 +437,27 @@ The UI/debug pane must consume a summary with these fields without needing ADB:
 - `ui_live_state_allowed=false` unless a fresh engine snapshot and pid liveness
   agree with the persisted state.
 
+The direct executor also emits an admission summary when the managed pager is
+enabled:
+
+- `schema=pdocker.memory-pager.admission.v1`, `considered`, `pending`,
+  `accepted`, `register_failed`, and rejection counters for below-threshold,
+  too-large, fixed-address, unsupported flags, file-backed, and unsupported
+  protection requests.
+- `last_decision`, `last_reason`, `last_request_bytes`, `threshold_bytes`,
+  `max_region_bytes`, and `last_errno` so a failed or skipped large allocation
+  can be explained without replaying verbose ptrace logs.
+- `backing_op`, `backing_errno`, and `backing_dir` so storage/admission failures
+  can be distinguished from normal pass-through decisions.
+
+If a candidate large anonymous mapping succeeds in the kernel but pdocker cannot
+register the managed region or reserve its backing store, the direct executor
+must fail closed: inject `munmap` for the just-created VMA where possible, return
+`-ENOMEM` to the tracee, and classify the event as
+`allocation_denied_enomem`.  It must not silently restore the original
+protection and continue with an unmanaged large mapping after the user opted
+into the pager.
+
 ### Fail-closed behavior
 
 Fail closed means correctness and diagnosability beat progress:

@@ -1,0 +1,74 @@
+$ python3 scripts/verify-image-pull-crash-safety.py
+wrote /tmp/tmpch8_mfe0/image-pull-crash-safety.json: status=planned-gap success=False
+ok: pdockerd: image pull uses .pull staging
+ok: pdockerd: existing tag is moved to .old backup before publish
+ok: pdockerd: failed replacement restores old tag
+ok: pdockerd: pull stage is removed on failure
+ok: pdockerd: layer diff_id is verified before extract
+ok: pdockerd: tag metadata is written before atomic publish
+ok: pdockerd: layer extraction short-circuits only complete layers
+ok: pdockerd: layer extraction uses .tmp staging
+ok: pdockerd: layer tree publishes atomically after meta.json
+ok: pdockerd: failed layer extraction removes tmp stage
+ok: pdockerd: startup/prune removes .pull image residue
+ok: pdockerd: startup/prune restores or discards .old image backups
+ok: pdockerd: startup/prune removes .tmp layer residue
+ok: pdockerd: startup/prune removes malformed partial layer dirs
+ok: pdockerd: tmp blob/load/save residue is covered
+ok: pdockerd: daemon startup invokes crash-residue recovery
+ok: asset pdockerd is synchronized with setup pdockerd
+ok: pdockerd: image pull uses .pull staging
+ok: pdockerd: existing tag is moved to .old backup before publish
+ok: pdockerd: failed replacement restores old tag
+ok: pdockerd: pull stage is removed on failure
+ok: pdockerd: layer diff_id is verified before extract
+ok: pdockerd: tag metadata is written before atomic publish
+ok: pdockerd: layer extraction short-circuits only complete layers
+ok: pdockerd: layer extraction uses .tmp staging
+ok: pdockerd: layer tree publishes atomically after meta.json
+ok: pdockerd: failed layer extraction removes tmp stage
+ok: pdockerd: startup/prune removes .pull image residue
+ok: pdockerd: startup/prune restores or discards .old image backups
+ok: pdockerd: startup/prune removes .tmp layer residue
+ok: pdockerd: startup/prune removes malformed partial layer dirs
+ok: pdockerd: tmp blob/load/save residue is covered
+ok: pdockerd: daemon startup invokes crash-residue recovery
+ok: TODO records image pull crash-safety verifier
+ok: compatibility doc records remaining interrupted-pull device gap
+ok: interrupted-pull device scenario runner exists
+ok: interrupted-pull device-side runner exists
+ok: device scenario artifact never fakes success without evidence
+ok: device scenario records schema version and id
+ok: device scenario points back to static plan gate
+ok: device scenario records command plan
+ok: device scenario records concrete phases
+ok: device scenario records gated timed live-pull interruption phase
+ok: device scenario requires explicit safe live-pull fixture flags
+ok: device scenario separates synthetic recovery from live network-pull coverage
+ok: device scenario records crash-safety assertions
+ok: device scenario command is tokenizable: python3 scripts/verify-image-pull-crash-safety.py
+ok: device scenario command path exists: scripts/verify-image-pull-crash-safety.py
+ok: device scenario command is tokenizable: __missing_adb_for_static_gate__ get-state
+ok: device scenario command is tokenizable: __missing_adb_for_static_gate__ shell getprop ro.build.fingerprint
+ok: device scenario command is tokenizable: __missing_adb_for_static_gate__ push scripts/verify/runner/image-pull-crash-safety-device.sh /data/local/tmp/pdocker-image-pull-crash-safety.sh
+ok: device scenario command path exists: scripts/verify/runner/image-pull-crash-safety-device.sh
+ok: device scenario command is tokenizable: __missing_adb_for_static_gate__ shell chmod 755 /data/local/tmp/pdocker-image-pull-crash-safety.sh
+ok: device scenario command is tokenizable: __missing_adb_for_static_gate__ shell sh /data/local/tmp/pdocker-image-pull-crash-safety.sh --package io.github.ryo100794.pdocker.compat --image busybox:latest --token 20260515034957-25483 --out-dir /data/local/tmp/pdocker-image-pull-crash-safety --phase prepare-residue
+ok: device scenario command is tokenizable: __missing_adb_for_static_gate__ shell sh /data/local/tmp/pdocker-image-pull-crash-safety.sh --package io.github.ryo100794.pdocker.compat --image busybox:latest --token 20260515034957-25483 --out-dir /data/local/tmp/pdocker-image-pull-crash-safety --phase kill-daemon
+ok: device scenario command is tokenizable: __missing_adb_for_static_gate__ shell sh /data/local/tmp/pdocker-image-pull-crash-safety.sh --package io.github.ryo100794.pdocker.compat --image busybox:latest --token 20260515034957-25483 --out-dir /data/local/tmp/pdocker-image-pull-crash-safety --phase restart-and-probe
+ok: device scenario command is tokenizable: __missing_adb_for_static_gate__ shell sh /data/local/tmp/pdocker-image-pull-crash-safety.sh --package io.github.ryo100794.pdocker.compat --image busybox:latest --token 20260515034957-25483 --out-dir /data/local/tmp/pdocker-image-pull-crash-safety --phase cleanup
+ok: device scenario command is tokenizable: __missing_adb_for_static_gate__ pull /data/local/tmp/pdocker-image-pull-crash-safety /tmp/tmpch8_mfe0/image-pull-crash-safety-device
+ok: device scenario command is tokenizable: python3 scripts/verify/runner/image_pull_crash_safety_device.py --execute-live-pull-interruption --live-image '<scenario-owned-or-isolated-fixture-ref>'
+ok: device scenario command path exists: scripts/verify/runner/image_pull_crash_safety_device.py
+ok: device scenario artifact schema records required evidence fields
+ok: device scenario records negative expected conditions
+ok: device scenario records cleanup policy
+ok: device scenario records remaining live-pull gap
+ok: device-side runner prepares scenario-owned pull/old/tmp residues
+ok: device-side runner has kill and restart phases
+ok: device-side runner probes restored and never-published tags
+ok: device-side cleanup is scenario-token scoped
+ok: device-side runner avoids destructive broad cleanup
+ok: image pull crash-safety device gate doc exists
+ok: device gate doc records concrete phases and remaining gap
+ok: device gate doc records opt-in live-pull safety gate

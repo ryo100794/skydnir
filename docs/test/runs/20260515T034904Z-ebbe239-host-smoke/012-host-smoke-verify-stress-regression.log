@@ -1,0 +1,6 @@
+$ python3 scripts/verify-stress-regression.py --write-artifact docs/test/stress-regression-latest.json
+ok: stress regression ledger covers 7 scenarios in 4 categories
+ok: seeded random API fuzz is repeatable across 2 runs
+ok: stress artifact shape is reproducible and tied to the build set
+ok: wrote stress regression artifact: docs/test/stress-regression-latest.json
+ok: random, monkey, stress, artifact, and variance process contracts are covered

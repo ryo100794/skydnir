@@ -9,14 +9,14 @@
         "artifact_exists": true,
         "artifact_path": "docs/test/input-validation-latest.json",
         "artifact_required_in_fast_lane": true,
-        "artifact_sha256": "eb27a18d3407a5ad47131e1e7ab76b14d75dd6e302ea34b7adfbbdbc188459b8"
+        "artifact_sha256": "bc63104b095e9b5a522a15581606b190b408d316db4a91c1ef8cc8f6e2df8fd4"
       },
       "evidence_source": "docs/test/input-validation-latest.json",
       "expected_exit_code": 0,
       "expected_signal": "HTTP 400 with a JSON error body",
       "failure_oracle": "The input validation verifier fails if the request is accepted or becomes HTTP 5xx.",
       "gap_reason": null,
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "python3 scripts/verify-input-validation.py --write-artifact docs/test/input-validation-latest.json",
@@ -25,7 +25,7 @@
       "severity": "error",
       "status": "runnable",
       "surface": "engine-api",
-      "timestamp_utc": "2026-05-13T23:30:13Z",
+      "timestamp_utc": "2026-05-15T03:50:04Z",
       "trigger": "POST /networks/create with malformed JSON"
     },
     {
@@ -36,14 +36,14 @@
         "artifact_exists": true,
         "artifact_path": "docs/test/input-validation-latest.json",
         "artifact_required_in_fast_lane": true,
-        "artifact_sha256": "eb27a18d3407a5ad47131e1e7ab76b14d75dd6e302ea34b7adfbbdbc188459b8"
+        "artifact_sha256": "bc63104b095e9b5a522a15581606b190b408d316db4a91c1ef8cc8f6e2df8fd4"
       },
       "evidence_source": "docs/test/input-validation-latest.json",
       "expected_exit_code": 0,
       "expected_signal": "HTTP 400 because JSON request bodies must be objects",
       "failure_oracle": "The input validation verifier fails if non-object JSON is accepted.",
       "gap_reason": null,
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "python3 scripts/verify-input-validation.py --write-artifact docs/test/input-validation-latest.json",
@@ -52,7 +52,7 @@
       "severity": "error",
       "status": "runnable",
       "surface": "engine-api",
-      "timestamp_utc": "2026-05-13T23:30:13Z",
+      "timestamp_utc": "2026-05-15T03:50:04Z",
       "trigger": "POST /networks/create with a JSON array body"
     },
     {
@@ -63,14 +63,14 @@
         "artifact_exists": true,
         "artifact_path": "docs/test/input-validation-latest.json",
         "artifact_required_in_fast_lane": true,
-        "artifact_sha256": "eb27a18d3407a5ad47131e1e7ab76b14d75dd6e302ea34b7adfbbdbc188459b8"
+        "artifact_sha256": "bc63104b095e9b5a522a15581606b190b408d316db4a91c1ef8cc8f6e2df8fd4"
       },
       "evidence_source": "docs/test/input-validation-latest.json",
       "expected_exit_code": 0,
       "expected_signal": "Storage metric validation errors",
       "failure_oracle": "The storage and input validation verifiers fail if impossible sizes pass.",
       "gap_reason": null,
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "python3 scripts/verify-input-validation.py --write-artifact docs/test/input-validation-latest.json",
@@ -79,7 +79,7 @@
       "severity": "error",
       "status": "runnable",
       "surface": "storage",
-      "timestamp_utc": "2026-05-13T23:30:13Z",
+      "timestamp_utc": "2026-05-15T03:50:04Z",
       "trigger": "Storage snapshots with negative bytes, free bytes greater than total, or double-counted image views"
     },
     {
@@ -90,14 +90,14 @@
         "artifact_exists": true,
         "artifact_path": "docs/test/abnormal-events-latest.json",
         "artifact_required_in_fast_lane": true,
-        "artifact_sha256": "48c26e281eeda107f7caf7acdf79e4d6e1e8eafa3006d4ac718cd9c1c2d596b3"
+        "artifact_sha256": "aec3fcda6fcd478a709766320af49beee3e6a94b270ad63ec616398bc8c14614"
       },
       "evidence_source": "docs/test/abnormal-events-latest.json",
       "expected_exit_code": 0,
       "expected_signal": "A pdocker runtime error is returned before RUN, exec, or compose service execution proceeds",
       "failure_oracle": "Runtime contract checks fail if the system silently falls back or records fake success.",
       "gap_reason": null,
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "python3 docker-proot-setup/scripts/verify_runtime_contract.py",
@@ -106,7 +106,7 @@
       "severity": "error",
       "status": "runnable",
       "surface": "direct-runtime",
-      "timestamp_utc": "2026-05-13T23:30:13Z",
+      "timestamp_utc": "2026-05-15T03:50:04Z",
       "trigger": "Configured direct executor is missing, not executable, or does not advertise process execution"
     },
     {
@@ -124,7 +124,7 @@
       "expected_signal": "The direct executor returns ENOMEM-like denial with memory diagnostics instead of letting LMK kill the app",
       "failure_oracle": "A containerized memory-guard probe must fail if the guard allows a known unsafe allocation.",
       "gap_reason": "The heavy container memory-guard probe is designed but not safe for every host-only fast run.",
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "bash scripts/container-direct-probe.sh --memory-guard",
@@ -133,7 +133,7 @@
       "severity": "error",
       "status": "planned-gap",
       "surface": "build",
-      "timestamp_utc": "2026-05-13T23:30:13Z",
+      "timestamp_utc": "2026-05-15T03:50:04Z",
       "trigger": "A large allocation would cross the configured Android low-memory guard threshold"
     },
     {
@@ -151,7 +151,7 @@
       "expected_signal": "pdocker records the last memory telemetry sample, classifies the operation as interrupted-or-lmk-suspected, and avoids stale Up/running UI state",
       "failure_oracle": "The OOM survival replay must fail if the operation disappears without evidence, leaves stale running state, or loses the container/operation identity.",
       "gap_reason": "The telemetry ring and LMK replay classifier are designed but not implemented as an executable device test yet.",
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "bash scripts/android-container-direct-probe.sh --memory-guard --large-mb 512",
@@ -160,7 +160,7 @@
       "severity": "blocker",
       "status": "planned-gap",
       "surface": "direct-runtime",
-      "timestamp_utc": "2026-05-13T23:30:13Z",
+      "timestamp_utc": "2026-05-15T03:50:04Z",
       "trigger": "Android kills a running build, container, or daemon process during low-memory pressure"
     },
     {
@@ -171,14 +171,14 @@
         "artifact_exists": true,
         "artifact_path": "docs/test/abnormal-events-latest.json",
         "artifact_required_in_fast_lane": true,
-        "artifact_sha256": "48c26e281eeda107f7caf7acdf79e4d6e1e8eafa3006d4ac718cd9c1c2d596b3"
+        "artifact_sha256": "aec3fcda6fcd478a709766320af49beee3e6a94b270ad63ec616398bc8c14614"
       },
       "evidence_source": "docs/test/abnormal-events-latest.json",
       "expected_exit_code": 0,
       "expected_signal": "The terminal remains readonly and does not summon the soft keyboard",
       "failure_oracle": "UI action checks fail if readonly terminal metadata or keyboard suppression is removed.",
       "gap_reason": null,
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "python3 scripts/verify-ui-actions.py",
@@ -187,7 +187,7 @@
       "severity": "warning",
       "status": "runnable",
       "surface": "terminal",
-      "timestamp_utc": "2026-05-13T23:30:13Z",
+      "timestamp_utc": "2026-05-15T03:50:04Z",
       "trigger": "A readonly build, daemon, or log terminal receives focus or text selection"
     },
     {
@@ -205,7 +205,7 @@
       "expected_signal": "The UI reports the missing grant or failed sync without pretending the path is a POSIX bind mount",
       "failure_oracle": "Documents mediator smoke and UI checks fail if missing grants are treated as writable.",
       "gap_reason": null,
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "bash scripts/android-documents-mediator-smoke.sh",
@@ -214,7 +214,7 @@
       "severity": "error",
       "status": "runnable-with-device",
       "surface": "documents",
-      "timestamp_utc": "2026-05-13T23:30:13Z",
+      "timestamp_utc": "2026-05-15T03:50:04Z",
       "trigger": "The user has not granted a Documents tree or the tree refuses writes"
     },
     {
@@ -225,14 +225,14 @@
         "artifact_exists": true,
         "artifact_path": "docs/test/abnormal-events-latest.json",
         "artifact_required_in_fast_lane": true,
-        "artifact_sha256": "48c26e281eeda107f7caf7acdf79e4d6e1e8eafa3006d4ac718cd9c1c2d596b3"
+        "artifact_sha256": "aec3fcda6fcd478a709766320af49beee3e6a94b270ad63ec616398bc8c14614"
       },
       "evidence_source": "docs/test/abnormal-events-latest.json",
       "expected_exit_code": 0,
       "expected_signal": "The bridge returns an explicit diagnostic instead of fake success or wrong CPU output",
       "failure_oracle": "GPU bridge smoke fails if unsupported work is accepted without a diagnostic.",
       "gap_reason": null,
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "bash scripts/smoke-vulkan-icd-bridge.sh",
@@ -241,7 +241,7 @@
       "severity": "error",
       "status": "runnable",
       "surface": "gpu",
-      "timestamp_utc": "2026-05-13T23:30:13Z",
+      "timestamp_utc": "2026-05-15T03:50:05Z",
       "trigger": "A GPU workload requests unsupported bridge behavior"
     },
     {
@@ -259,7 +259,7 @@
       "expected_signal": "The request is rejected or recorded with a compatibility warning before any misleading container state is created",
       "failure_oracle": "A network negative corpus must fail if unsupported modes are accepted silently.",
       "gap_reason": "A dedicated network negative corpus is not implemented yet.",
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "python3 scripts/verify-abnormal-events.py",
@@ -268,7 +268,7 @@
       "severity": "error",
       "status": "planned-gap",
       "surface": "engine-api",
-      "timestamp_utc": "2026-05-13T23:30:13Z",
+      "timestamp_utc": "2026-05-15T03:50:05Z",
       "trigger": "Compose or Engine API asks for a network mode outside default, bridge, host, or none"
     },
     {
@@ -286,7 +286,7 @@
       "expected_signal": "The operation fails closed with classification pager_storage_exhausted, keeps stale UI state disabled, and persists a bounded diagnostic artifact when possible",
       "failure_oracle": "The APK memory pager contract test fails if storage exhaustion is not documented as fail-closed or if UI telemetry lacks classification and storage fields.",
       "gap_reason": "The storage-pressure device replay is designed but the C/C++ pager implementation is not part of this contract-only slice.",
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "bash scripts/android-memory-pager-managed-poc.sh --storage-pressure",
@@ -295,7 +295,7 @@
       "severity": "blocker",
       "status": "planned-gap",
       "surface": "direct-runtime",
-      "timestamp_utc": "2026-05-13T23:30:14Z",
+      "timestamp_utc": "2026-05-15T03:50:05Z",
       "trigger": "A managed pager page-in/page-out or admission path cannot reserve or write app-private backing storage"
     },
     {
@@ -313,7 +313,7 @@
       "expected_signal": "Non-managed SIGSEGV is delivered unchanged; managed-but-unresolved faults fail closed with classification pager_fault_unhandled and region/page diagnostics when known",
       "failure_oracle": "The host contract test fails if the docs allow suppressing unrelated SIGSEGV or resuming after an unresolved managed fault.",
       "gap_reason": "The negative fault replay needs the implementation; this slice defines the fail-closed contract only.",
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "bash scripts/android-memory-pager-transparent-poc.sh --fault-contract",
@@ -322,7 +322,7 @@
       "severity": "blocker",
       "status": "planned-gap",
       "surface": "direct-runtime",
-      "timestamp_utc": "2026-05-13T23:30:14Z",
+      "timestamp_utc": "2026-05-15T03:50:05Z",
       "trigger": "A SIGSEGV or userfault event cannot be matched to a valid managed region table entry or cannot be resolved safely"
     },
     {
@@ -340,7 +340,7 @@
       "expected_signal": "The request passes through unmanaged when safe or is denied with ENOMEM-style diagnostics classified as allocation_denied_enomem; Docker memory keys alone never enable the pager",
       "failure_oracle": "The APK memory pager contract test fails if large allocation opt-in, mmap/mprotect/sigaction/munmap constraints, or fail-closed ENOMEM classification are missing.",
       "gap_reason": "Admission-negative device replay is planned after the transparent pager implementation; static contract coverage is mandatory now.",
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "bash scripts/android-memory-pager-transparent-poc.sh --admission-negative",
@@ -349,7 +349,7 @@
       "severity": "error",
       "status": "planned-gap",
       "surface": "direct-runtime",
-      "timestamp_utc": "2026-05-13T23:30:14Z",
+      "timestamp_utc": "2026-05-15T03:50:05Z",
       "trigger": "A large anonymous allocation opts into the pager but violates size caps, mapping constraints, executable/shared/stack/GPU exclusions, or region-table admission checks"
     },
     {
@@ -367,7 +367,7 @@
       "expected_signal": "The test-design verifier writes an artifact and exits nonzero",
       "failure_oracle": "The verifier must fail and must not pass while the literal ratio remains below the configured minimum.",
       "gap_reason": null,
-      "git_commit": "370a945a4747",
+      "git_commit": "ebbe239341f6",
       "kind": "abnormal-event-case",
       "observed_signal": null,
       "reproduction_command": "python3 scripts/verify-test-design-criteria.py --write-artifact docs/test/test-design-criteria-latest.json",
@@ -376,11 +376,11 @@
       "severity": "blocker",
       "status": "runnable",
       "surface": "validation",
-      "timestamp_utc": "2026-05-13T23:30:14Z",
+      "timestamp_utc": "2026-05-15T03:50:05Z",
       "trigger": "The selected semantic+C0+C1+C2 check count is below two times implementation token count"
     }
   ],
-  "git_commit": "370a945a4747",
+  "git_commit": "ebbe239341f6",
   "kind": "abnormal-events",
   "ledger": "tests/abnormal_event_cases.json",
   "observed_gate_failures": [
@@ -407,5 +407,5 @@
     ],
     "runnable_count": 7
   },
-  "timestamp_utc": "2026-05-13T23:30:14Z"
+  "timestamp_utc": "2026-05-15T03:50:05Z"
 }

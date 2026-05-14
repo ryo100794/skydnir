@@ -119,7 +119,31 @@ typedef struct {
     MemorySyscallStats madvise_;
 } MemoryTraceStats;
 
+typedef struct {
+    unsigned long long considered;
+    unsigned long long pending;
+    unsigned long long accepted;
+    unsigned long long denied_enomem;
+    unsigned long long cleanup_munmap_failed;
+    unsigned long long rejected_not_enabled;
+    unsigned long long rejected_below_threshold;
+    unsigned long long rejected_too_large;
+    unsigned long long rejected_fixed_address;
+    unsigned long long rejected_flags;
+    unsigned long long rejected_file_backed;
+    unsigned long long rejected_protection;
+    unsigned long long register_failed;
+    unsigned long long last_request_bytes;
+    unsigned long long last_threshold_bytes;
+    unsigned long long last_max_region_bytes;
+    unsigned long long last_errno;
+    char last_decision[48];
+    char last_reason[96];
+    char last_classification[64];
+} ManagedPagerAdmissionStats;
+
 static MemoryTraceStats g_memory_stats;
+static ManagedPagerAdmissionStats g_managed_pager_admission;
 static PathMicroStats g_path_stats;
 static int write_tracee_data(pid_t pid, unsigned long long addr, const void *value, size_t len);
 static const char *syscall_name(long nr);
@@ -911,6 +935,71 @@ static void print_one_memory_stat(const char *name, const MemorySyscallStats *st
             stats->large_calls, stats->largest);
 }
 
+static void record_managed_pager_admission(const char *decision,
+                                           const char *reason,
+                                           const char *classification,
+                                           unsigned long long bytes,
+                                           unsigned long long threshold,
+                                           unsigned long long max_region,
+                                           int err) {
+    snprintf(g_managed_pager_admission.last_decision,
+             sizeof(g_managed_pager_admission.last_decision), "%s",
+             decision ? decision : "");
+    snprintf(g_managed_pager_admission.last_reason,
+             sizeof(g_managed_pager_admission.last_reason), "%s",
+             reason ? reason : "");
+    snprintf(g_managed_pager_admission.last_classification,
+             sizeof(g_managed_pager_admission.last_classification), "%s",
+             classification ? classification : "");
+    g_managed_pager_admission.last_request_bytes = bytes;
+    g_managed_pager_admission.last_threshold_bytes = threshold;
+    g_managed_pager_admission.last_max_region_bytes = max_region;
+    g_managed_pager_admission.last_errno = err > 0 ? (unsigned long long)err : 0ULL;
+}
+
+static void print_managed_pager_admission_stats(void) {
+    if (!g_managed_pager_admission.considered &&
+            !g_managed_pager_admission.rejected_not_enabled) {
+        return;
+    }
+    fprintf(stderr,
+            "pdocker-direct-memory-pager: schema=pdocker.memory-pager.admission.v1 "
+            "considered=%llu pending=%llu accepted=%llu denied_enomem=%llu "
+            "register_failed=%llu cleanup_munmap_failed=%llu "
+            "rejected_not_enabled=%llu rejected_below_threshold=%llu "
+            "rejected_too_large=%llu rejected_fixed_address=%llu "
+            "rejected_flags=%llu rejected_file_backed=%llu rejected_protection=%llu "
+            "last_decision=%s last_reason=%s classification=%s last_request_bytes=%llu "
+            "threshold_bytes=%llu max_region_bytes=%llu last_errno=%llu "
+            "backing_op=%s backing_errno=%d backing_dir=%s\n",
+            g_managed_pager_admission.considered,
+            g_managed_pager_admission.pending,
+            g_managed_pager_admission.accepted,
+            g_managed_pager_admission.denied_enomem,
+            g_managed_pager_admission.register_failed,
+            g_managed_pager_admission.cleanup_munmap_failed,
+            g_managed_pager_admission.rejected_not_enabled,
+            g_managed_pager_admission.rejected_below_threshold,
+            g_managed_pager_admission.rejected_too_large,
+            g_managed_pager_admission.rejected_fixed_address,
+            g_managed_pager_admission.rejected_flags,
+            g_managed_pager_admission.rejected_file_backed,
+            g_managed_pager_admission.rejected_protection,
+            g_managed_pager_admission.last_decision[0]
+                    ? g_managed_pager_admission.last_decision : "none",
+            g_managed_pager_admission.last_reason[0]
+                    ? g_managed_pager_admission.last_reason : "none",
+            g_managed_pager_admission.last_classification[0]
+                    ? g_managed_pager_admission.last_classification : "none",
+            g_managed_pager_admission.last_request_bytes,
+            g_managed_pager_admission.last_threshold_bytes,
+            g_managed_pager_admission.last_max_region_bytes,
+            g_managed_pager_admission.last_errno,
+            g_managed_pager_backing_op,
+            g_managed_pager_backing_errno,
+            g_managed_pager_backing_dir);
+}
+
 static void print_memory_stats(const char *reason, int rc) {
     if (!g_trace_memory || g_memory_stats_printed) return;
     g_memory_stats_printed = 1;
@@ -926,6 +1015,7 @@ static void print_memory_stats(const char *reason, int rc) {
     print_one_memory_stat("munmap", &g_memory_stats.munmap_);
     print_one_memory_stat("mprotect", &g_memory_stats.mprotect_);
     print_one_memory_stat("madvise", &g_memory_stats.madvise_);
+    print_managed_pager_admission_stats();
 }
 
 static int read_meminfo_bytes(unsigned long long *available, unsigned long long *swap_free) {
@@ -2035,13 +2125,56 @@ static int managed_trace_is_candidate_mmap(const unsigned long long args[6]) {
     unsigned long long prot = args[2];
     unsigned long long flags = args[3];
     unsigned long long fd = args[4];
-    if (!g_managed_memory_pager) return 0;
-    if (addr != 0) return 0;
-    if (length < g_managed_memory_pager_min_request) return 0;
-    if (g_managed_memory_pager_max_region && length > g_managed_memory_pager_max_region) return 0;
-    if (!(flags & MAP_ANONYMOUS) || !(flags & MAP_PRIVATE) || (flags & MAP_FIXED)) return 0;
-    if (fd != 0xffffffffffffffffULL && fd != 0xffffffffULL) return 0;
-    if (!(prot & (PROT_READ | PROT_WRITE))) return 0;
+    if (!g_managed_memory_pager) {
+        g_managed_pager_admission.rejected_not_enabled++;
+        return 0;
+    }
+    g_managed_pager_admission.considered++;
+    if (addr != 0) {
+        g_managed_pager_admission.rejected_fixed_address++;
+        record_managed_pager_admission("pass-through", "fixed-address", "not_lmk_suspected", length,
+                                       g_managed_memory_pager_min_request,
+                                       g_managed_memory_pager_max_region, 0);
+        return 0;
+    }
+    if (length < g_managed_memory_pager_min_request) {
+        g_managed_pager_admission.rejected_below_threshold++;
+        record_managed_pager_admission("pass-through", "below-threshold", "not_lmk_suspected", length,
+                                       g_managed_memory_pager_min_request,
+                                       g_managed_memory_pager_max_region, 0);
+        return 0;
+    }
+    if (g_managed_memory_pager_max_region && length > g_managed_memory_pager_max_region) {
+        g_managed_pager_admission.rejected_too_large++;
+        record_managed_pager_admission("pass-through", "too-large", "not_lmk_suspected", length,
+                                       g_managed_memory_pager_min_request,
+                                       g_managed_memory_pager_max_region, 0);
+        return 0;
+    }
+    if (!(flags & MAP_ANONYMOUS) || !(flags & MAP_PRIVATE) || (flags & MAP_FIXED)) {
+        g_managed_pager_admission.rejected_flags++;
+        record_managed_pager_admission("pass-through", "unsupported-flags", "not_lmk_suspected", length,
+                                       g_managed_memory_pager_min_request,
+                                       g_managed_memory_pager_max_region, 0);
+        return 0;
+    }
+    if (fd != 0xffffffffffffffffULL && fd != 0xffffffffULL) {
+        g_managed_pager_admission.rejected_file_backed++;
+        record_managed_pager_admission("pass-through", "file-backed", "not_lmk_suspected", length,
+                                       g_managed_memory_pager_min_request,
+                                       g_managed_memory_pager_max_region, 0);
+        return 0;
+    }
+    if (!(prot & (PROT_READ | PROT_WRITE)) || (prot & PROT_EXEC)) {
+        g_managed_pager_admission.rejected_protection++;
+        record_managed_pager_admission("pass-through", "unsupported-protection", "not_lmk_suspected", length,
+                                       g_managed_memory_pager_min_request,
+                                       g_managed_memory_pager_max_region, 0);
+        return 0;
+    }
+    record_managed_pager_admission("pending", "candidate", "unknown", length,
+                                   g_managed_memory_pager_min_request,
+                                   g_managed_memory_pager_max_region, 0);
     return 1;
 }
 
@@ -2134,6 +2267,10 @@ static int register_managed_mmap_region(TraceeState *state,
         goto fail;
     }
     region->active = 1;
+    g_managed_pager_admission.accepted++;
+    record_managed_pager_admission("accepted", "registered", "not_lmk_suspected", region->length,
+                                   g_managed_memory_pager_min_request,
+                                   g_managed_memory_pager_max_region, 0);
     fprintf(stderr,
             "pdocker-direct-managed-pager: registered pid=%d base=0x%llx length=%llu pages=%zu resident_limit=%zu prot=0x%x\n",
             (int)state->pid, base, region->length, region->page_count,
@@ -2142,6 +2279,10 @@ static int register_managed_mmap_region(TraceeState *state,
 fail:
     {
         int saved = errno ? errno : ENOMEM;
+        g_managed_pager_admission.register_failed++;
+        record_managed_pager_admission("failed", "register-failed", "allocation_denied_enomem", length,
+                                       g_managed_memory_pager_min_request,
+                                       g_managed_memory_pager_max_region, saved);
         free_one_managed_region(region);
         errno = saved;
     }
@@ -2251,6 +2392,7 @@ static int maybe_prepare_managed_mmap(pid_t pid, struct user_pt_regs *regs,
     state->managed_pending_len = state->last_args[1];
     state->managed_pending_prot = state->last_args[2];
     state->managed_pending_flags = state->last_args[3];
+    g_managed_pager_admission.pending++;
     regs->regs[2] = PROT_NONE;
     if (set_regs(pid, regs) != 0) {
         state->managed_pending_len = 0;
@@ -2272,12 +2414,33 @@ static void maybe_finish_managed_mmap(pid_t pid, struct user_pt_regs *regs,
     state->managed_pending_len = 0;
     if (syscall_failed_result(result) || !result) return;
     if (register_managed_mmap_region(state, result, len, prot) == 0) return;
-    unsigned long long ignored = 0;
-    (void)inject_tracee_syscall(pid, regs, __NR_mprotect, result, len, prot, &ignored);
-    (void)set_regs(pid, regs);
+    int saved_errno = errno ? errno : ENOMEM;
+    unsigned long long cleanup_result = 0;
+    int cleanup_rc = inject_tracee_syscall(pid, regs, __NR_munmap, result, len, 0,
+                                           &cleanup_result);
+    if (cleanup_rc != 0 || cleanup_result != 0) {
+        g_managed_pager_admission.cleanup_munmap_failed++;
+        fprintf(stderr,
+                "pdocker-direct-managed-pager: fail-closed cleanup munmap failed pid=%d base=0x%llx length=%llu rc=%d result=%lld errno=%d\n",
+                (int)pid, result, len, cleanup_rc, (long long)cleanup_result, errno);
+    }
+    g_managed_pager_admission.denied_enomem++;
+    g_memory_stats.denied++;
+    g_memory_stats.last_denied_bytes = len;
+    regs->regs[0] = (unsigned long long)-ENOMEM;
+    if (set_regs(pid, regs) != 0) {
+        fprintf(stderr,
+                "pdocker-direct-managed-pager: fail-closed ENOMEM setregs failed pid=%d base=0x%llx length=%llu errno=%d\n",
+                (int)pid, result, len, errno);
+    }
+    record_managed_pager_admission("denied", "register-failed",
+                                   "allocation_denied_enomem", len,
+                                   g_managed_memory_pager_min_request,
+                                   g_managed_memory_pager_max_region,
+                                   saved_errno);
     fprintf(stderr,
-            "pdocker-direct-managed-pager: register failed pid=%d base=0x%llx length=%llu restored_prot=0x%x errno=%d\n",
-            (int)pid, result, len, prot, errno);
+            "pdocker-direct-managed-pager: register failed pid=%d base=0x%llx length=%llu denied=-ENOMEM classification=allocation_denied_enomem errno=%d cleanup_rc=%d cleanup_result=%lld\n",
+            (int)pid, result, len, saved_errno, cleanup_rc, (long long)cleanup_result);
 }
 
 static int run_memory_pager_transparent_poc(void) {

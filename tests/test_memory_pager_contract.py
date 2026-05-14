@@ -55,6 +55,7 @@ class MemoryPagerContractTest(unittest.TestCase):
             "PDOCKER_DIRECT_MEMORY_PAGER",
             "PDOCKER_MEMORY_PAGER",
             "g_managed_memory_pager",
+            "ManagedPagerAdmissionStats",
             "managed_trace_is_candidate_mmap",
             "maybe_prepare_managed_mmap",
             "maybe_finish_managed_mmap",
@@ -69,6 +70,45 @@ class MemoryPagerContractTest(unittest.TestCase):
             "__NR_mprotect",
         ]:
             self.assertIn(token, self.source)
+
+    def test_managed_pager_records_admission_and_backing_telemetry(self):
+        for token in [
+            "pdocker.memory-pager.admission.v1",
+            "record_managed_pager_admission",
+            "print_managed_pager_admission_stats",
+            "rejected_below_threshold",
+            "rejected_too_large",
+            "rejected_fixed_address",
+            "rejected_flags",
+            "rejected_file_backed",
+            "rejected_protection",
+            "register_failed",
+            "denied_enomem",
+            "cleanup_munmap_failed",
+            "allocation_denied_enomem",
+            "last_request_bytes",
+            "threshold_bytes",
+            "max_region_bytes",
+            "last_classification",
+            "backing_op",
+            "backing_errno",
+            '"unsupported-protection"',
+            "prot & PROT_EXEC",
+        ]:
+            self.assertIn(token, self.source)
+
+    def test_managed_pager_register_failure_fails_closed_as_enomem(self):
+        for token in [
+            "__NR_munmap",
+            'regs->regs[0] = (unsigned long long)-ENOMEM',
+            "fail-closed cleanup munmap failed",
+            "fail-closed ENOMEM setregs failed",
+            "denied=-ENOMEM classification=allocation_denied_enomem",
+            "g_memory_stats.denied++",
+            "g_memory_stats.last_denied_bytes = len",
+        ]:
+            self.assertIn(token, self.source)
+        self.assertNotIn("restored_prot=0x%x", self.source)
 
     def test_pdockerd_propagates_memory_pager_labels_to_direct_executor(self):
         pdockerd = (ROOT / "docker-proot-setup" / "bin" / "pdockerd").read_text()

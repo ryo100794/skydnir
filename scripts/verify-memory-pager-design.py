@@ -90,6 +90,18 @@ def main() -> int:
             "SwapFree" in text and
             "last_large_allocation" in probe and
             "requested bytes" in probe)
+    require("pager admission telemetry is implemented and documented",
+            "pdocker.memory-pager.admission.v1" in text and
+            "pdocker.memory-pager.admission.v1" in direct and
+            "record_managed_pager_admission" in direct and
+            "print_managed_pager_admission_stats" in direct and
+            "rejected_below_threshold" in direct and
+            "rejected_file_backed" in direct and
+            "unsupported-protection" in direct and
+            "backing_errno" in direct and
+            "classification=allocation_denied_enomem" in direct and
+            "__NR_munmap" in direct and
+            "(unsigned long long)-ENOMEM" in direct)
     require("pager diagnostics record rss and pss",
             "per-process RSS" in text and
             "PSS" in text and
