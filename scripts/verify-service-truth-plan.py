@@ -10,6 +10,7 @@ negative cases, and exit criteria before the gap may be closed.
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ DOCS = [
     ROOT / "docs" / "test" / "COMPATIBILITY.md",
     ROOT / "docs" / "test" / "SERVICE_TRUTH_DEVICE_GATE.md",
     ROOT / "docs" / "plan" / "TODO.md",
+    ROOT / "docs" / "plan" / "GOAL_EXECUTION_QUEUE_20260513.md",
 ]
 ANDROID_SMOKE = ROOT / "scripts" / "android-device-smoke.sh"
 
@@ -41,6 +43,27 @@ TEARDOWN_SOURCES = {
     "process_table",
     "lifecycle_logs",
     "container_logs",
+}
+
+
+SERVICE_ARTIFACT_SOURCES = [
+    "UICard",
+    "DockerPs",
+    "EngineApiContainersJson",
+    "PersistedStateJson",
+    "ProcessTable",
+    "ListenerProbe",
+    "ContainerLogs",
+]
+ENGINE_CONTAINER_ID_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+SOURCE_ARTIFACT_TERMS = {
+    "UICard": ["ui-rendered-service-truth-latest.json"],
+    "DockerPs": ["engine-ps"],
+    "EngineApiContainersJson": ["engine-containers-json", "inspect-selected"],
+    "PersistedStateJson": ["state-id-comparison"],
+    "ProcessTable": ["process-table", "inspect-selected"],
+    "ListenerProbe": ["configured-ports", "listener-probe", "listener-owner-map", "proc-net-tcp"],
+    "ContainerLogs": ["logs-selected"],
 }
 
 
@@ -125,6 +148,194 @@ def validate_planned_acceptance(scenario: dict[str, Any], *, required_sources: s
     )
 
 
+
+def artifact_error(message: str) -> ValueError:
+    return ValueError(f"service truth artifact contract violation: {message}")
+
+
+def require_artifact_paths(source_name: str, source: dict[str, Any]) -> list[str]:
+    artifacts = source.get("Artifacts")
+    if not isinstance(artifacts, list) or not artifacts or not all(isinstance(item, str) and item for item in artifacts):
+        raise artifact_error(f"{source_name} must name raw artifact paths")
+    joined = "\n".join(artifacts).lower()
+    for term in SOURCE_ARTIFACT_TERMS[source_name]:
+        if term.lower() not in joined:
+            raise artifact_error(f"{source_name} artifacts must include {term}")
+    if source_name != "UICard" and not any(path.startswith("files/pdocker/diagnostics/service-truth/") for path in artifacts):
+        raise artifact_error(f"{source_name} artifacts must be under files/pdocker/diagnostics/service-truth/")
+    if source_name == "UICard" and not any(path.startswith("files/pdocker/diagnostics/") for path in artifacts):
+        raise artifact_error("UICard artifacts must be under files/pdocker/diagnostics/")
+    return artifacts
+
+
+def validate_service_truth_artifact(artifact: dict[str, Any]) -> None:
+    """Validate the future device success shape for same-container-ID proof.
+
+    Planned-gap artifacts are allowed to carry partial diagnostics, but they are
+    never successful.  Any promoted success must prove one exact 64-hex Engine
+    container ID across UI card, Docker/Engine API, persisted state, process
+    table, listener/port ownership, and current logs.
+    """
+
+    if artifact.get("SchemaVersion") != 1:
+        raise artifact_error("SchemaVersion must be 1")
+    if artifact.get("Kind") != "service-truth":
+        raise artifact_error("Kind must be service-truth")
+
+    if artifact.get("Status") == "planned-gap":
+        if artifact.get("Success") is not False:
+            raise artifact_error("planned-gap artifacts must set Success false")
+        return
+
+    if artifact.get("Success") is not True:
+        raise artifact_error("non-planned service truth artifact is not a success")
+
+    proof = artifact.get("Proof")
+    if not isinstance(proof, dict):
+        raise artifact_error("Proof object is required")
+    expected = proof.get("EngineContainerId")
+    if not isinstance(expected, str) or not ENGINE_CONTAINER_ID_RE.fullmatch(expected):
+        raise artifact_error("Proof.EngineContainerId must be an exact 64-hex Engine container ID")
+    if proof.get("SameEngineContainerId") is not True:
+        raise artifact_error("Proof.SameEngineContainerId must be true")
+    if proof.get("MismatchedSources"):
+        raise artifact_error("success cannot include mismatched sources")
+    if proof.get("MissingSources"):
+        raise artifact_error("success cannot include missing sources")
+
+    contract_sources = artifact.get("TruthContract", {}).get("RequiredSameContainerId")
+    if not isinstance(contract_sources, list) or not set(SERVICE_ARTIFACT_SOURCES).issubset(set(contract_sources)):
+        raise artifact_error("TruthContract.RequiredSameContainerId is incomplete")
+
+    sources = artifact.get("Sources")
+    if not isinstance(sources, dict):
+        raise artifact_error("Sources object is required")
+
+    for source_name in SERVICE_ARTIFACT_SOURCES:
+        source = sources.get(source_name)
+        if not isinstance(source, dict):
+            raise artifact_error(f"missing source {source_name}")
+        if source.get("Proven") is not True:
+            raise artifact_error(f"{source_name} must be proven")
+        if source.get("ContainerId") != expected:
+            raise artifact_error(f"{source_name} must exactly match Proof.EngineContainerId")
+        require_artifact_paths(source_name, source)
+
+    ui = sources["UICard"]
+    if ui.get("TruthState") != "current":
+        raise artifact_error("UICard.TruthState must be current")
+    if str(ui.get("ContainerIdSource", "")).lower() in {"", "unknown", "state.json", "persistedstatejson"}:
+        raise artifact_error("UICard.ContainerIdSource must not be unknown or stale state-only")
+
+    listener = sources["ListenerProbe"]
+    if not listener.get("Ports") and not listener.get("ProcNetTcpMatchedPorts"):
+        raise artifact_error("ListenerProbe must bind at least one configured/listening port")
+    if listener.get("Pid") in (None, "", 0, "0"):
+        raise artifact_error("ListenerProbe must include a listener owner PID")
+
+    process = sources["ProcessTable"]
+    if process.get("Pid") in (None, "", 0, "0"):
+        raise artifact_error("ProcessTable must include selected container PID")
+    if str(process.get("Pid")) != str(listener.get("Pid")):
+        raise artifact_error("listener PID must map to the same selected container process")
+
+    logs = sources["ContainerLogs"]
+    if logs.get("CurrentServiceMarker") is not True:
+        raise artifact_error("ContainerLogs must include a current service log marker")
+
+
+def build_success_fixture() -> dict[str, Any]:
+    cid = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    pid = 4242
+    sources = {
+        "UICard": {
+            "ContainerId": cid,
+            "ContainerIdSource": "EngineApiContainersJson",
+            "TruthState": "current",
+            "Proven": True,
+            "Artifacts": ["files/pdocker/diagnostics/service-truth/ui-rendered-service-truth-latest.json"],
+        },
+        "DockerPs": {
+            "ContainerId": cid,
+            "Proven": True,
+            "Artifacts": ["files/pdocker/diagnostics/service-truth/engine-ps.out"],
+        },
+        "EngineApiContainersJson": {
+            "ContainerId": cid,
+            "Proven": True,
+            "Artifacts": [
+                "files/pdocker/diagnostics/service-truth/engine-containers-json.http",
+                "files/pdocker/diagnostics/service-truth/inspect-selected.http",
+            ],
+        },
+        "PersistedStateJson": {
+            "ContainerId": cid,
+            "Proven": True,
+            "Artifacts": ["files/pdocker/diagnostics/service-truth/state-id-comparison.json"],
+        },
+        "ProcessTable": {
+            "ContainerId": cid,
+            "Pid": pid,
+            "Proven": True,
+            "Artifacts": [
+                "files/pdocker/diagnostics/service-truth/process-table.txt",
+                "files/pdocker/diagnostics/service-truth/inspect-selected.http",
+            ],
+        },
+        "ListenerProbe": {
+            "ContainerId": cid,
+            "Pid": pid,
+            "Ports": [18080, 18081],
+            "Proven": True,
+            "Artifacts": [
+                "files/pdocker/diagnostics/service-truth/configured-ports.txt",
+                "files/pdocker/diagnostics/service-truth/listener-probe.json",
+                "files/pdocker/diagnostics/service-truth/listener-owner-map.json",
+                "files/pdocker/diagnostics/service-truth/proc-net-tcp.txt",
+            ],
+        },
+        "ContainerLogs": {
+            "ContainerId": cid,
+            "CurrentServiceMarker": True,
+            "Proven": True,
+            "Artifacts": ["files/pdocker/diagnostics/service-truth/logs-selected.out"],
+        },
+    }
+    return {
+        "SchemaVersion": 1,
+        "Kind": "service-truth",
+        "Status": "device-pass",
+        "Success": True,
+        "TruthContract": {"RequiredSameContainerId": SERVICE_ARTIFACT_SOURCES},
+        "Proof": {"EngineContainerId": cid, "SameEngineContainerId": True, "MismatchedSources": [], "MissingSources": []},
+        "Sources": sources,
+    }
+
+
+def validate_service_truth_fixture_contract() -> None:
+    fixture = build_success_fixture()
+    validate_service_truth_artifact(fixture)
+
+    mutations = [
+        lambda a: a.update({"Status": "planned-gap"}),
+        lambda a: a["Proof"].update({"EngineContainerId": a["Proof"]["EngineContainerId"][:12]}),
+        lambda a: a["Proof"].update({"SameEngineContainerId": False}),
+        lambda a: a["Sources"]["UICard"].update({"TruthState": "stale"}),
+        lambda a: a["Sources"]["PersistedStateJson"].update({"ContainerId": "f" * 64}),
+        lambda a: a["Sources"]["ListenerProbe"].update({"Ports": [], "ProcNetTcpMatchedPorts": ""}),
+        lambda a: a["Sources"]["ListenerProbe"].update({"Pid": 9999}),
+        lambda a: a["Sources"]["ContainerLogs"].update({"CurrentServiceMarker": False}),
+        lambda a: a["Sources"]["ContainerLogs"].update({"Artifacts": []}),
+    ]
+    for mutate in mutations:
+        candidate = json.loads(json.dumps(fixture))
+        mutate(candidate)
+        try:
+            validate_service_truth_artifact(candidate)
+        except ValueError:
+            continue
+        fail("service truth fixture self-check accepted a fake success")
+
 def validate_docs() -> None:
     combined = "\n".join(path.read_text() for path in DOCS)
     require_terms(
@@ -149,6 +360,9 @@ def validate_docs() -> None:
             "ui-rendered-service-truth-latest.json",
             "TruthState",
             "/proc/net/tcp",
+            "planned-gap/Success: false",
+            "same-container-ID",
+            "ContainerLogs.CurrentServiceMarker",
         ],
     )
 
@@ -193,6 +407,8 @@ def main() -> int:
     validate_planned_acceptance(teardown, required_sources=TEARDOWN_SOURCES, evidence_suffix="runtime-teardown-latest.json")
     validate_docs()
     validate_android_smoke_entrypoints()
+    validate_service_truth_fixture_contract()
+    ok("service truth fixture rejects fake success without listener/port/log/UI/state same-container-ID proof")
     ok("service truth planned gap has runnable commands, evidence contract, negative cases, and exit criteria")
     ok("runtime teardown planned gap has runnable commands, evidence contract, negative cases, and exit criteria")
     return 0

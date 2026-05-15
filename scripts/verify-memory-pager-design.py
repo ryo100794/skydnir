@@ -80,6 +80,29 @@ def main() -> int:
     require("runtime oom survival defines large workload mode", "Large Workload Mode" in oom and "io.pdocker.large-workload=enabled" in oom and "managed-anonymous" in oom)
     require("runtime oom survival keeps fail-safe and run-large paths separate", "default memory guard" in oom_flat and "not the same" in oom_flat and "make it run even when it is too big" in oom_flat)
     require("runtime oom survival requires persisted telemetry evidence", "Memory Telemetry Ring" in oom and "last large allocation request" in oom and "owned by pdockerd" in oom)
+    require("runtime oom survival gates bounded jsonl telemetry ring",
+            "pdocker.memory-telemetry-ring.v1" in oom and
+            "memory-ring.jsonl" in oom and
+            "ring_max_bytes=1048576" in oom and
+            "ring_max_samples=240" in oom and
+            "ring_max_line_bytes=16384" in oom and
+            "ring_max_age_seconds=900" in oom and
+            "rotate/drop oldest complete lines" in oom)
+    require("runtime oom survival gates mandatory final summary",
+            "pdocker.memory-telemetry-summary.v1" in oom and
+            "memory-summary.json" in oom and
+            "summary_seq" in oom and
+            "classification" in oom and
+            "classifier_reason" in oom and
+            "last_sample_seq" in oom and
+            "ring_truncated" in oom and
+            "ui_live_state_allowed" in oom and
+            "pid_liveness_checked" in oom)
+    require("runtime oom telemetry fails closed on persistence failure",
+            "telemetry_persistence_failed" in oom and
+            "summary_write_degraded=true" in oom and
+            "cannot be serialized, fsynced, or atomically renamed" in oom_flat and
+            "must not resume a managed pager operation with unknown page contents" in oom)
     require("pager diagnostics planned gap is explicit",
             "OOM/LMK Diagnostics Contract" in text and
             "Planned gap" in text and
@@ -121,6 +144,41 @@ def main() -> int:
             "pid liveness" in text and
             "artifact_retention_policy" in probe and
             "UI is allowed to show a live running state" in probe)
+    require("pager diagnostics require bounded jsonl ring limits",
+            "memory-ring.jsonl" in text and
+            "pdocker.memory-telemetry-ring.v1" in text and
+            "ring_max_bytes=1048576" in text and
+            "ring_max_samples=240" in text and
+            "ring_max_line_bytes=16384" in text and
+            "ring_max_age_seconds=900" in text and
+            "drop/rotate the oldest complete JSONL records" in flat and
+            "partial JSON records are invalid evidence" in flat)
+    require("pager diagnostics require sample fields",
+            "sample_seq" in text and
+            "sample_time_unix_ms" in text and
+            "sample_monotonic_ms" in text and
+            "oom_score_adj" in text and
+            "app_lifecycle" in text and
+            "mem_available_at_decision_bytes" in text and
+            "swap_free_at_decision_bytes" in text and
+            "guard_denial_count" in text and
+            "classifier_hint" in text and
+            "progress_marker" in text)
+    require("pager diagnostics require final summary fields and fail closed",
+            "memory-summary.json" in text and
+            "pdocker.memory-telemetry-summary.v1" in text and
+            "summary_seq" in text and
+            "started_unix_ms" in text and
+            "ended_unix_ms" in text and
+            "command_redacted" in text and
+            "final_phase" in text and
+            "ring_bytes" in text and
+            "ring_samples" in text and
+            "ring_truncated" in text and
+            "engine_snapshot_fresh" in text and
+            "pid_liveness_checked" in text and
+            "telemetry_persistence_failed" in text and
+            "summary_write_degraded=true" in text)
     return 0
 
 

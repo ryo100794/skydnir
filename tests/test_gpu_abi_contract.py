@@ -20,6 +20,14 @@ ROPE_YARN_ARTIFACT = ROOT / "docs" / "test" / "llama-gpu-ngl1-rope-yarn-oracle-2
 LLAMA_GPU_ARTIFACT_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 
 
+def load_llama_gpu_artifact_verifier():
+    spec = importlib.util.spec_from_file_location("llama_gpu_artifact_verifier", LLAMA_GPU_ARTIFACT_VERIFIER)
+    verifier = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(verifier)
+    return verifier
+
+
 def defines(path):
     result = {}
     for line in path.read_text().splitlines():
@@ -767,24 +775,13 @@ class GpuAbiContractTest(unittest.TestCase):
         main_activity = MAIN_ACTIVITY.read_text()
         next_steps = LLAMA_GPU_NEXT_STEPS.read_text()
         correctness = LLAMA_GPU_CORRECTNESS.read_text()
+        verifier = load_llama_gpu_artifact_verifier()
 
-        ui_compose_runtime_keys = [
-            "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE",
-            "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
-            "PDOCKER_GPU_RESIDENT_CACHE",
-            "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
-            "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
-            "PDOCKER_GPU_Q6K_SAFE_KERNEL",
-            "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
-            "PDOCKER_VULKAN_HEAP_BYTES",
-            "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
-            "GGML_VK_FORCE_MAX_BUFFER_SIZE",
-            "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
-            "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
-        ]
+        ui_compose_runtime_keys = verifier.LLAMA_GPU_UI_RUNTIME_ENV_KEYS
         for key in ui_compose_runtime_keys:
             self.assertIn(f'"{key}": os.environ.get', pdockerd)
             self.assertIn(key, compare)
+            self.assertIn(key, next_steps)
 
         ui_compose_template_staleness_keys = [
             "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
@@ -796,28 +793,28 @@ class GpuAbiContractTest(unittest.TestCase):
         for key in ui_compose_template_staleness_keys:
             self.assertIn(key, main_activity)
 
-        diagnostic_keys = [
-            "PDOCKER_GPU_CPU_ORACLE",
-            "PDOCKER_GPU_STRICT_PASSTHROUGH",
-            "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",
-            "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
-            "PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION",
-            "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
-            "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
-            "PDOCKER_VULKAN_DISABLE_16BIT_STORAGE",
-            "PDOCKER_VULKAN_SUBGROUP_SIZE",
-        ]
+        diagnostic_keys = verifier.LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS
         for key in diagnostic_keys:
             self.assertIn(key, compare)
             self.assertIn(key, next_steps)
+
+        for env_name, field_name in verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS:
+            self.assertIn(f'("{env_name}", "{field_name}")', compare)
+        compare_config_pairs = re.findall(
+            r'\("((?:PDOCKER_GPU|PDOCKER_VULKAN)_[A-Z0-9_]+)",\s*"([a-zA-Z0-9_.]+)"\)',
+            compare[compare.index("config_expectations = ["):compare.index("config_checks = []")],
+        )
+        self.assertEqual(list(verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS), compare_config_pairs)
+
+        self.assertIn("LLAMA_GPU_UI_RUNTIME_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
+        self.assertIn("LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
+        self.assertIn("LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         self.assertIn("UI/compose runtime defaults and compare-only diagnostics", next_steps)
+        self.assertIn("Artifact verifier manifest guard", next_steps)
         self.assertIn("Environment propagation parity", correctness)
 
     def test_llama_gpu_artifact_verifier_blocks_env_reflection_misses(self):
-        spec = importlib.util.spec_from_file_location("llama_gpu_artifact_verifier", LLAMA_GPU_ARTIFACT_VERIFIER)
-        verifier = importlib.util.module_from_spec(spec)
-        self.assertIsNotNone(spec.loader)
-        spec.loader.exec_module(verifier)
+        verifier = load_llama_gpu_artifact_verifier()
 
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",

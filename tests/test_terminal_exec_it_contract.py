@@ -163,6 +163,9 @@ class TerminalExecItContractTest(unittest.TestCase):
         body = _shell_function_body(self.android_smoke, "ui_engine_exec_it_selftest")
         self.assertIn('if [[ -z "$container_ref" ]]', body)
         self.assertIn('write_ui_it_selftest_skip_artifact "no container id was available', body)
+        no_container_block = body[body.index('if [[ -z "$container_ref" ]]') : body.index('echo "[pdocker smoke] ui self-test engine exec -it container=$container_ref"')]
+        self.assertIn('validate_ui_it_selftest_artifact "$require_container"', no_container_block)
+        self.assertLess(no_container_block.index('validate_ui_it_selftest_artifact "$require_container"'), no_container_block.index('return 0'))
         self.assertIn('if [[ "$require_container" == "1" ]]', body)
         self.assertIn('planned-skip is non-passing evidence', body)
         self.assertIn('return 1', body)
@@ -188,6 +191,9 @@ class TerminalExecItContractTest(unittest.TestCase):
 
         validate_body = _shell_function_body(self.android_smoke, "validate_ui_it_selftest_artifact")
         self.assertIn('status == "planned-skip"', validate_body)
+        self.assertIn('if success:', validate_body)
+        self.assertIn("planned-skip must never report Success=true", validate_body)
+        self.assertIn('artifact.get("DeviceProofAttempted") is True', validate_body)
         self.assertIn("hard gate requires a real container; planned-skip is not a pass", validate_body)
         self.assertIn('"enter-single-submit"', validate_body)
         self.assertIn('"ctrl-c-interrupts-without-literal-c"', validate_body)
@@ -195,11 +201,40 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('"top-starts-on-tty"', validate_body)
         self.assertIn('"q-quits-top"', validate_body)
         self.assertIn('"resize-route-is-observable"', validate_body)
+        self.assertIn('"/resize?h=" in diagnostics', validate_body)
+        self.assertIn('"event":"resize-failed"', validate_body)
+        self.assertNotRegex(
+            validate_body,
+            r'"resize-route-is-observable"[^\n]*stream-started',
+            'stream-started only proves exec stream startup and must not satisfy resize evidence',
+        )
 
         self.assertIn('ui_engine_exec_it_selftest "$PDOCKER_UI_IT_SELFTEST_CONTAINER" "${PDOCKER_UI_IT_SELFTEST_REQUIRE_CONTAINER:-1}"', self.android_smoke)
         self.assertIn('ui_engine_exec_it_selftest "$CID" 1', self.android_smoke)
         self.assertIn('ui_engine_exec_it_selftest "" "${PDOCKER_UI_IT_SELFTEST_REQUIRE_CONTAINER:-0}"', self.android_smoke)
         self.assertNotIn('ui_engine_exec_it_selftest "$CID"\n', self.android_smoke)
+
+    def test_ui_it_validator_rejects_fake_success_planned_skip_and_stream_started_resize(self):
+        validate_body = _shell_function_body(self.android_smoke, "validate_ui_it_selftest_artifact")
+
+        # A planned-skip artifact is useful diagnostic evidence, but even an
+        # accidental/fabricated Success=true must be rejected before optional
+        # non-required skips are accepted.
+        planned_skip_block = validate_body[
+            validate_body.index('if status == "planned-skip":') : validate_body.index('if require_container and not artifact.get("Container")')
+        ]
+        self.assertIn('if success:', planned_skip_block)
+        self.assertIn('planned-skip must never report Success=true', planned_skip_block)
+        self.assertIn('DeviceProofAttempted', planned_skip_block)
+        self.assertLess(planned_skip_block.index('if success:'), planned_skip_block.index('raise SystemExit(0)'))
+
+        resize_line = next(
+            line for line in validate_body.splitlines() if '"resize-route-is-observable"' in line
+        )
+        self.assertIn('"/resize?h=" in diagnostics', resize_line)
+        self.assertIn('resize-failed', resize_line)
+        self.assertNotIn('stream-started', resize_line)
+        self.assertIn('stream-started only proves the exec stream was opened', validate_body)
 
 
     def test_terminal_surface_stays_session_neutral_static_boundary(self):
@@ -245,6 +280,9 @@ class TerminalExecItContractTest(unittest.TestCase):
             "Docker-specific commands, container IDs, and Engine API endpoints must not",
             "Docker exec/PTY semantics belong to the session/API layer",
             "static host test",
+            "stream-started event",
+            "not resize evidence",
+            "must not count stream-started alone",
         ]:
             self.assertIn(required, design)
 

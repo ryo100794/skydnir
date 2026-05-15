@@ -14,6 +14,9 @@ without mixing unrelated dirty lanes.
   and UI-contract commits.
 - Device-only gates must fail safe: no fake success when ADB, service state, or
   evidence is unavailable.
+- Service truth promotion is blocked unless listener/ports/log/UI card/state
+  evidence all reduce to the same exact Engine container ID; otherwise the only
+  allowed device result is planned-gap/Success: false, never success.
 - Every adopted agent change needs a focused test command and a file list before
   commit.
 
@@ -58,6 +61,17 @@ These gates are intentionally not complete until a real Android device artifact
 is archived:
 
 - service truth: `files/pdocker/diagnostics/service-truth-latest.json`
+  - Same-container-ID proof must include `UICard`, `DockerPs`,
+    `EngineApiContainersJson`, `PersistedStateJson`, `ProcessTable`,
+    `ListenerProbe`, and `ContainerLogs`.
+  - `ListenerProbe` must bind configured/listening ports through
+    `listener-probe.json`, `listener-owner-map.json`, and `/proc/net/tcp` to the
+    same selected process/container ID.
+  - `ContainerLogs.CurrentServiceMarker` plus `logs-selected.out` must belong to
+    that same Engine container ID.
+  - UI card `TruthState: current` and persisted `state.json` comparison are
+    required; stale/unknown UI or state-only card IDs keep the artifact
+    planned-gap/Success: false.
 - runtime teardown: `files/pdocker/diagnostics/runtime-teardown-latest.json`
 - interrupted image pull: `docs/test/image-pull-crash-safety-latest.json`
 - OOM/LMK diagnostics: planned `pdocker.memory-oom-lmk-diagnostics.v1`

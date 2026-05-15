@@ -1,0 +1,38 @@
+$ python3 docker-proot-setup/scripts/verify_runtime_contract.py
+[pdockerd] "GET /containers/stale-name/logs HTTP/1.1" 200 -
+[pdockerd] "GET /containers/1111111111111111111111111111111111111111111111111111111111111111/logs HTTP/1.1" 200 -
+[pdockerd] "DELETE /containers/stale-name?force=1 HTTP/1.1" 204 -
+[pdockerd] "GET /system/df HTTP/1.1" 200 -
+[pdockerd] "GET /system/media HTTP/1.1" 200 -
+ok: runtime backend kind selects direct
+ok: runtime driver name is pdocker-direct
+ok: runtime info id is PDOCKER:DIRECT
+ok: runtime unavailable message is clear
+ok: direct backend reports process execution gap
+ok: runtime_preflight accepts direct backend
+ok: build_run_argv rejects direct execution without helper
+ok: direct executor probe alone does not enable process execution
+ok: direct executor process capability enables structured helper argv
+ok: direct backend rejects fake service start honestly
+ok: container start reconciles verified live pid without double-starting
+ok: container start rejects reused pid identity
+ok: no-proot request creates direct backend instance
+ok: duplicate container names resolve newest-first, keep log truth, and clean by name
+ok: network metadata records stable IDs, aliases, ports, IPs, and host-only warnings
+ok: port mapping status distinguishes planned, inactive, active, and conflict
+ok: Dockerfile parser rejects non-standard instructions
+ok: direct Dockerfile RUN fails instead of recording fake layers
+ok: existing tagged image can seed Dockerfile RUN cache
+ok: unchanged existing image skips full Dockerfile rebuild
+ok: Dockerfile RUN cache keys and layer validation work
+ok: storage summary separates shared layers, image views, and container upper bytes
+ok: daemon active operations are listed independently of UI jobs
+ok: daemon rejects duplicate running builds for the same tagged image
+ok: stale daemon operations are pruned from UI-visible state
+ok: host environment contract exposes bounded runtime diagnostics
+ok: media bridge scaffold exposes socket contract without capture
+ok: Android media manifest and bridge scaffold are statically guarded
+ok: GPU shim contract injects device-independent container ABI
+ok: Dockerfile RUN process-group isolation keeps build children away from pdockerd
+ok: Android build profile is injected without default build-tool rewriting
+ok: Vulkan ICD defaults to device-memory-aware advertised limits

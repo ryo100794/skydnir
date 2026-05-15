@@ -352,13 +352,21 @@ is explicit rather than implicit:
   forwarding it.  Do not leave correctness-critical behavior only in the
   ad-hoc compare script.
 - Regression guard: `tests.test_gpu_abi_contract` checks both the
-  UI/compose runtime defaults and the compare-only diagnostic list so future
-  edits cannot silently drop one side of the bridge.
+  UI/compose runtime defaults and the compare-only diagnostic list against the
+  verifier manifest constants `LLAMA_GPU_UI_RUNTIME_ENV_KEYS`,
+  `LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS`, and
+  `LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS`, so future edits cannot silently
+  drop one side of the bridge.
 - Artifact guard: `scripts/verify-llama-gpu-artifact.py` treats failed
   `gpu.diagnostics.config_propagation` evidence as
   `config-propagation-mismatch` and blocks correctness/benchmark claims.  This
   catches cases where a compare command requested a diagnostic environment
   variable but executor dispatch evidence did not reflect it.
+- Artifact verifier manifest guard: when compare emits config propagation
+  checks, the verifier requires those checks to cover every env/field pair in
+  `LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS`.  A stale compare script that omits
+  a diagnostic env from the artifact is classified as
+  `config-propagation-mismatch` even if the remaining checks say `pass`.
 
 ### Stage 5: Correctness gate for `ngl=1`
 

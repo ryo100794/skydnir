@@ -65,6 +65,57 @@ container state directory. Each sample should include:
 The UI can render the newest sample, but the file is owned by pdockerd so an app
 activity restart does not erase the evidence.
 
+#### Bounded JSONL ring and final summary gate
+
+The telemetry artifact is a bounded JSONL ring, not an unbounded log.  A runtime
+that claims `pdocker.memory-telemetry-ring.v1` must write samples to
+`memory-ring.jsonl` and publish `memory-summary.json` in the same operation or
+container directory.  The gate is intentionally strict so a diagnostic feature
+cannot become a new OOM source:
+
+- `ring_schema=pdocker.memory-telemetry-ring.v1` on every JSONL sample and
+  `summary_schema=pdocker.memory-telemetry-summary.v1` on the final summary.
+- Ring limit constants: `ring_max_bytes=1048576`, `ring_max_samples=240`,
+  `ring_max_line_bytes=16384`, and `ring_max_age_seconds=900`.  Writers must
+  rotate/drop oldest complete lines before appending when any limit would be
+  exceeded.
+- Required sample fields: `sample_seq`, `sample_time_unix_ms`,
+  `sample_monotonic_ms`, `operation_id`, `container_id`, `phase`, `tracee_pid`,
+  `process_group_id`, `direct_executor_pid`, `oom_score_adj`, `app_lifecycle`,
+  `mem_available_bytes`, `mem_free_bytes`, `swap_free_bytes`,
+  `swap_total_bytes`, `zram_bytes`, `storage_free_bytes`, `rss_bytes`,
+  `pss_bytes` or `pss_unavailable`, `last_large_allocation`,
+  `pager_counters`, `guard_denial_count`, `classifier_hint`, and
+  `progress_marker`.
+- `last_large_allocation` must contain `syscall`, `requested_bytes`,
+  `accepted`, `errno`, `threshold_bytes`, `mem_available_at_decision_bytes`,
+  `swap_free_at_decision_bytes`, `region_id`, and `classification`.
+- `pager_counters` must contain `reserved_bytes`, `resident_bytes`,
+  `backing_bytes`, `page_ins`, `page_outs`, `dirty_page_outs`,
+  `faults_handled`, `faults_delivered`, `storage_exhausted`, and
+  `dirty_precision`.
+
+The final summary is mandatory on normal exit, guard denial, pager failure,
+tracer-observed `SIGKILL`, restart reconciliation, and artifact-retention
+cleanup.  Required final summary fields are `summary_seq`, `started_unix_ms`,
+`ended_unix_ms`, `operation_id`, `container_id`, `image`, `command_redacted`,
+`final_phase`, `exit_code`, `signal`, `classification`, `classifier_reason`,
+`lmk_suspected`, `last_sample_seq`, `ring_path`, `ring_bytes`, `ring_samples`,
+`ring_truncated`, `final_mem_available_bytes`, `final_swap_free_bytes`,
+`final_rss_bytes`, `final_pss_bytes` or `pss_unavailable`,
+`last_large_allocation`, `pager_counters`, `progress_marker`,
+`ui_live_state_allowed`, `engine_snapshot_fresh`, `pid_liveness_checked`, and
+`artifact_retention_policy`.
+
+Telemetry must fail closed.  If a mandatory sample or final summary cannot be
+serialized, fsynced, or atomically renamed, the operation must be classified as
+`telemetry_persistence_failed` or a more specific fatal memory classification,
+and pdocker must not resume a managed pager operation with unknown page contents
+or allow the UI to show `running`/`Up` from stale persisted state.  The only
+permitted fallback is a smaller bounded final summary with
+`summary_write_degraded=true`, the write errno, and enough fields to explain the
+failure classification.
+
 ### 2. Early Allocation Denial
 
 The memory guard remains the default survival mechanism for unmodified Linux

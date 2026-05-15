@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import importlib.util
 from pathlib import Path
 import unittest
 
@@ -8,6 +9,11 @@ ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs/test/SERVICE_TRUTH_DEVICE_GATE.md"
 SMOKE = ROOT / "scripts/android-device-smoke.sh"
 VERIFIER = ROOT / "scripts/verify-service-truth-plan.py"
+
+_spec = importlib.util.spec_from_file_location("verify_service_truth_plan", VERIFIER)
+assert _spec and _spec.loader
+verify_service_truth_plan = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(verify_service_truth_plan)
 
 REQUIRED_SOURCES = [
     "UICard",
@@ -21,58 +27,20 @@ REQUIRED_SOURCES = [
 
 
 def validate_same_container_id_contract(artifact: dict) -> None:
-    """Small host-side contract for future device artifacts.
+    """Host-side contract for future device artifacts.
 
-    This deliberately rejects fake success.  Planned device work may collect
-    evidence, but planned-gap artifacts are never successful; future success
-    must prove exact same Engine container ID across every independent source.
+    This delegates to the static verifier so fixture tests and the executable
+    gate reject the same fake-success shapes.
     """
 
-    assert artifact.get("SchemaVersion") == 1
-    assert artifact.get("Kind") == "service-truth"
-    if artifact.get("Status") == "planned-gap":
-        assert artifact.get("Success") is False
-        return
-
-    assert artifact.get("Success") is True
-    proof = artifact.get("Proof") or {}
-    expected = proof.get("EngineContainerId")
-    assert isinstance(expected, str) and len(expected) >= 12
-    assert proof.get("SameEngineContainerId") is True
-
-    contract_sources = artifact.get("TruthContract", {}).get("RequiredSameContainerId")
-    assert set(REQUIRED_SOURCES).issubset(set(contract_sources or []))
-
-    sources = artifact.get("Sources") or {}
-    for source_name in REQUIRED_SOURCES:
-        source = sources.get(source_name)
-        assert isinstance(source, dict), source_name
-        assert source.get("Proven") is True, source_name
-        assert source.get("ContainerId") == expected, source_name
-        artifacts = source.get("Artifacts")
-        assert isinstance(artifacts, list) and artifacts, source_name
-
-    assert sources["UICard"].get("TruthState") == "current"
+    try:
+        verify_service_truth_plan.validate_service_truth_artifact(artifact)
+    except ValueError as exc:
+        raise AssertionError(str(exc)) from exc
 
 
 def passing_artifact() -> dict:
-    cid = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    return {
-        "SchemaVersion": 1,
-        "Kind": "service-truth",
-        "Status": "device-pass",
-        "Success": True,
-        "TruthContract": {"RequiredSameContainerId": REQUIRED_SOURCES},
-        "Proof": {"EngineContainerId": cid, "SameEngineContainerId": True},
-        "Sources": {
-            name: {
-                "ContainerId": cid,
-                "Proven": True,
-                "Artifacts": [f"files/pdocker/diagnostics/service-truth/{name}.json"],
-            }
-            for name in REQUIRED_SOURCES
-        },
-    }
+    return deepcopy(verify_service_truth_plan.build_success_fixture())
 
 
 class ServiceTruthDeviceGateTest(unittest.TestCase):
@@ -87,6 +55,7 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
             "RequiredSameContainerId",
             "Proof.SameEngineContainerId",
             "EngineContainerId",
+            "logs-selected.out",
             "docker ps --no-trunc",
             "/containers/json?all=1",
             "state.json",
@@ -125,7 +94,12 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
             lambda a: a["Sources"]["DockerPs"].update({"ContainerId": "different-container-id"}),
             lambda a: a["Sources"]["ListenerProbe"].update({"Proven": False}),
             lambda a: a["Sources"]["ContainerLogs"].update({"Artifacts": []}),
+            lambda a: a["Sources"]["ContainerLogs"].update({"CurrentServiceMarker": False}),
+            lambda a: a["Sources"]["ListenerProbe"].update({"Ports": [], "ProcNetTcpMatchedPorts": ""}),
+            lambda a: a["Sources"]["ListenerProbe"].update({"Pid": 9999}),
             lambda a: a["Sources"]["UICard"].update({"TruthState": "stale"}),
+            lambda a: a["Sources"]["UICard"].update({"ContainerIdSource": "state.json"}),
+            lambda a: a["Proof"].update({"EngineContainerId": a["Proof"]["EngineContainerId"][:12]}),
         ]
         for mutate in cases:
             with self.subTest(mutate=mutate):
@@ -174,8 +148,21 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
     def test_static_verifier_includes_service_truth_device_gate_doc(self):
         verifier = VERIFIER.read_text()
         self.assertIn("SERVICE_TRUTH_DEVICE_GATE.md", verifier)
+        self.assertIn("GOAL_EXECUTION_QUEUE_20260513.md", verifier)
         self.assertIn("DockerPs", verifier)
         self.assertIn("docker ps", verifier)
+        self.assertIn("ContainerLogs.CurrentServiceMarker", verifier)
+        self.assertIn("Proof.EngineContainerId must be an exact 64-hex", verifier)
+        self.assertIn("ListenerProbe must bind at least one configured/listening port", verifier)
+
+    def test_static_verifier_fixture_rejects_missing_same_id_edges(self):
+        verify_service_truth_plan.validate_service_truth_fixture_contract()
+        artifact = passing_artifact()
+        artifact["Sources"]["PersistedStateJson"]["Artifacts"] = [
+            "files/pdocker/diagnostics/service-truth/state.json"
+        ]
+        with self.assertRaises(AssertionError):
+            validate_same_container_id_contract(artifact)
 
 
 if __name__ == "__main__":

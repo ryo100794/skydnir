@@ -18,6 +18,54 @@ from typing import Any
 
 MEMORY_ERRORS = {"insufficient_memory", "runtime_memory_pressure"}
 
+# Shared llama GPU environment manifests.  Static contract tests keep the
+# compare driver, pdockerd container environment, this verifier, and the handoff
+# documentation aligned so diagnostic toggles cannot silently diverge.
+LLAMA_GPU_UI_RUNTIME_ENV_KEYS = (
+    "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE",
+    "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
+    "PDOCKER_GPU_RESIDENT_CACHE",
+    "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
+    "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
+    "PDOCKER_GPU_Q6K_SAFE_KERNEL",
+    "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
+    "PDOCKER_VULKAN_HEAP_BYTES",
+    "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
+    "GGML_VK_FORCE_MAX_BUFFER_SIZE",
+    "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
+    "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
+)
+
+LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS = (
+    "PDOCKER_GPU_CPU_ORACLE",
+    "PDOCKER_GPU_STRICT_PASSTHROUGH",
+    "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",
+    "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
+    "PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION",
+    "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
+    "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
+    "PDOCKER_VULKAN_DISABLE_16BIT_STORAGE",
+    "PDOCKER_VULKAN_SUBGROUP_SIZE",
+)
+
+LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS = (
+    ("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "duplicate_descriptor_rewrite"),
+    ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
+    ("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "disable_pipeline_optimization"),
+    ("PDOCKER_GPU_STRICT_PASSTHROUGH", "strict_passthrough"),
+    ("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", "skip_unused_descriptor_transfers"),
+    ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "spirv_descriptor_access"),
+    ("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", "disable_overlap_aliasing"),
+    ("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle_requested"),
+    ("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", "strict_object_graph.device_local_staging_requested"),
+    ("PDOCKER_GPU_Q6K_SAFE_KERNEL", "q6k_safe_kernel"),
+    ("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", "cpu_oracle.oracle_writeback"),
+    ("PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel"),
+    ("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization_materialized"),
+    ("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_buffer_cache.enabled"),
+)
+
+
 
 def load_json(path: Path) -> dict[str, Any]:
     try:
@@ -92,12 +140,26 @@ def _config_propagation(data: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _config_propagation_manifest_misses(config_propagation: dict[str, Any]) -> list[str]:
+    checks = config_propagation.get("checks") or []
+    if not isinstance(checks, list):
+        return []
+    observed = {str(check.get("env")) for check in checks if isinstance(check, dict)}
+    return sorted(
+        env_name
+        for env_name, _field_name in LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS
+        if env_name not in observed
+    )
+
+
 def _config_propagation_failed(config_propagation: dict[str, Any]) -> bool:
     if config_propagation.get("summary") == "fail":
         return True
     checks = config_propagation.get("checks") or []
     if not isinstance(checks, list):
         return False
+    if config_propagation and _config_propagation_manifest_misses(config_propagation):
+        return True
     for check in checks:
         if isinstance(check, dict) and check.get("status") in {"missing-evidence", "mismatch"}:
             return True
@@ -161,6 +223,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
 
     config_propagation = _config_propagation(data)
     if _config_propagation_failed(config_propagation):
+        manifest_misses = _config_propagation_manifest_misses(config_propagation)
         return _claim_base(
             "config-propagation-mismatch",
             next_action=(
@@ -168,7 +231,13 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 or "fix GPU diagnostic environment propagation before accepting compare, correctness, or benchmark claims"
             ),
             runtime_freshness=runtime_freshness,
-        ) | {"config_propagation": config_propagation}
+        ) | {
+            "config_propagation": config_propagation,
+            "config_propagation_manifest_misses": manifest_misses,
+            "required_config_propagation_envs": [
+                env_name for env_name, _field_name in LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS
+            ],
+        }
 
     if not q6:
         classification = "q6-not-reached"

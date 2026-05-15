@@ -1224,9 +1224,16 @@ status = artifact.get("Status", "")
 success = artifact.get("Success") is True
 
 if status == "planned-skip":
+    if success:
+        raise SystemExit("UI exec-it planned-skip must never report Success=true")
+    if artifact.get("DeviceProofAttempted") is True:
+        raise SystemExit("UI exec-it planned-skip must not claim device proof was attempted")
     if require_container:
         raise SystemExit("UI exec-it hard gate requires a real container; planned-skip is not a pass")
     raise SystemExit(0)
+
+if success and status == "planned-skip":
+    raise SystemExit("UI exec-it planned-skip must never be accepted as success")
 
 if require_container and not artifact.get("Container"):
     raise SystemExit("UI exec-it hard gate artifact is missing Container")
@@ -1246,7 +1253,9 @@ checks = {
     "arrow-up-reaches-readline-history": tail.count("pdocker-ui-it-arrow-seed") >= 2 and "\\e[A" not in tail,
     "top-starts-on-tty": "pdocker-ui-it-top-ok" in tail,
     "q-quits-top": "pdocker-ui-it-topq-ok" in tail,
-    "resize-route-is-observable": ("/resize?h=" in diagnostics) or ('"event":"resize-failed"' in diagnostics) or ('"event": "resize-failed"' in diagnostics) or ("stream-started" in diagnostics),
+    # stream-started only proves the exec stream was opened; resize evidence must
+    # show the Docker-compatible resize route or an explicit resize-failed event.
+    "resize-route-is-observable": ("/resize?h=" in diagnostics) or ('"event":"resize-failed"' in diagnostics) or ('"event": "resize-failed"' in diagnostics),
 }
 missing = [name for name, ok in checks.items() if not ok]
 if missing:
@@ -1260,6 +1269,12 @@ ui_engine_exec_it_selftest() {
   if [[ -z "$container_ref" ]]; then
     echo "[pdocker smoke] ui self-test engine exec -it planned-skip: no container id"
     write_ui_it_selftest_skip_artifact "no container id was available for UI exec-it self-test" "$require_container"
+    if ! validate_ui_it_selftest_artifact "$require_container"; then
+      if [[ "$require_container" == "1" ]]; then
+        echo "UI exec -it hard gate requires a real container; planned-skip is non-passing evidence" >&2
+      fi
+      return 1
+    fi
     if [[ "$require_container" == "1" ]]; then
       echo "UI exec -it hard gate requires a real container; planned-skip is non-passing evidence" >&2
       return 1

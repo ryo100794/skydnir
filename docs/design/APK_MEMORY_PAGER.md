@@ -488,8 +488,16 @@ must keep this section and the probe runbook in sync so UI and tests do not
 pretend that post-LMK diagnosis is already complete.
 
 For every pager-enabled operation or Large Workload Mode run, pdockerd/direct
-executor should retain a bounded JSONL ring plus a final summary under
-app-private operation or container state.  Each sample should include:
+executor must retain a bounded JSONL ring plus a final summary under
+app-private operation or container state.  The files are `memory-ring.jsonl` and
+`memory-summary.json`.  This contract mirrors `pdocker.memory-telemetry-ring.v1`
+and `pdocker.memory-telemetry-summary.v1` from the runtime OOM policy.  The ring
+limits are fixed for the v1 gate: `ring_max_bytes=1048576`,
+`ring_max_samples=240`, `ring_max_line_bytes=16384`, and
+`ring_max_age_seconds=900`.  Writers must drop/rotate the oldest complete JSONL
+records before appending a new record that would exceed a limit; partial JSON
+records are invalid evidence and must be discarded during recovery.  Each sample
+should include:
 
 - monotonic timestamp, wall-clock timestamp, operation id, container id, image,
   command, tracee pid/process group, direct-executor pid, and whether the app is
@@ -509,6 +517,35 @@ app-private operation or container state.  Each sample should include:
   such as model load/accelerator dispatch/build RUN, last successful progress marker,
   and bytes/items completed when the workload exposes them.
 
+Each JSONL sample must carry `ring_schema=pdocker.memory-telemetry-ring.v1`,
+`sample_seq`, `sample_time_unix_ms`, `sample_monotonic_ms`, `operation_id`,
+`container_id`, `phase`, `tracee_pid`, `process_group_id`,
+`direct_executor_pid`, `oom_score_adj`, `app_lifecycle`,
+`mem_available_bytes`, `mem_free_bytes`, `swap_free_bytes`,
+`swap_total_bytes`, `zram_bytes`, `storage_free_bytes`, `rss_bytes`, `pss_bytes`
+or `pss_unavailable`, `last_large_allocation`, `pager_counters`,
+`guard_denial_count`, `classifier_hint`, and `progress_marker`.
+`last_large_allocation` must include `syscall`, `requested_bytes`, `accepted`,
+`errno`, `threshold_bytes`, `mem_available_at_decision_bytes`,
+`swap_free_at_decision_bytes`, `region_id`, and `classification`.
+`pager_counters` must include `reserved_bytes`, `resident_bytes`,
+`backing_bytes`, `page_ins`, `page_outs`, `dirty_page_outs`, `faults_handled`,
+`faults_delivered`, `storage_exhausted`, and `dirty_precision`.
+
+The final `memory-summary.json` is mandatory for normal exit, guard denial,
+pager storage exhaustion, unresolved managed faults, tracer-observed `SIGKILL`,
+restart reconciliation, and retention cleanup.  It must carry
+`summary_schema=pdocker.memory-telemetry-summary.v1`, `summary_seq`,
+`started_unix_ms`, `ended_unix_ms`, `operation_id`, `container_id`, `image`,
+`command_redacted`, `final_phase`, `exit_code`, `signal`, `classification`,
+`classifier_reason`, `lmk_suspected`, `last_sample_seq`, `ring_path`,
+`ring_bytes`, `ring_samples`, `ring_truncated`,
+`final_mem_available_bytes`, `final_swap_free_bytes`, `final_rss_bytes`,
+`final_pss_bytes` or `pss_unavailable`, `last_large_allocation`,
+`pager_counters`, `progress_marker`, `ui_live_state_allowed`,
+`engine_snapshot_fresh`, `pid_liveness_checked`, and
+`artifact_retention_policy`.
+
 The post-restart classifier should emit `lmk_suspected=true` only when current
 engine truth and pid liveness are missing for a previously active operation and
 the persisted evidence is consistent with low memory.  Strong signals include a
@@ -517,7 +554,12 @@ daemon while `MemAvailable` or `SwapFree` was below the configured danger
 threshold, or a stale active operation recovered after app/daemon restart with
 no live pid.  Weak signals such as user stop, normal nonzero exit, explicit
 guard `ENOMEM`, storage exhaustion, or an unrelated crash must classify as
-`not_lmk_suspected` or `unknown` with the reason recorded.
+`not_lmk_suspected` or `unknown` with the reason recorded.  If the bounded ring
+or final summary cannot be serialized, fsynced, or atomically renamed, classify
+as `telemetry_persistence_failed` (or a stricter fatal memory classification),
+set `summary_write_degraded=true` only for a smaller bounded fallback summary,
+and fail closed: do not resume a managed pager operation with unknown page
+contents and do not allow stale artifacts to produce a live UI state.
 
 Artifact retention must be bounded and user-safe:
 

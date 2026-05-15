@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import subprocess
 import tempfile
@@ -16,6 +17,31 @@ def runtime_marker():
         "observed_executor_markers": ["gpu-executor-workgroup3d-20260513"],
         "observed_icd_markers": ["vulkan-icd-runtime-marker-20260510"],
         "executor_event_count": 1,
+    }
+
+
+def load_verifier_module():
+    spec = importlib.util.spec_from_file_location("llama_gpu_artifact_verifier", VERIFIER)
+    verifier = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(verifier)
+    return verifier
+
+
+def passing_config_propagation():
+    verifier = load_verifier_module()
+    return {
+        "summary": "pass",
+        "checks": [
+            {
+                "env": env_name,
+                "executor_field": field_name,
+                "expected": None,
+                "observed_values": [],
+                "status": "not-requested",
+            }
+            for env_name, field_name in verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS
+        ],
     }
 
 
@@ -143,6 +169,34 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["classification"], "q6-workgroup-cleared-but-oracle-mismatch")
         exact = self.run_verifier(payload, "--require-q6-match")
         self.assertEqual(exact.returncode, 30, exact.stdout)
+
+
+    def test_config_propagation_pass_must_cover_verifier_manifest(self):
+        config_propagation = passing_config_propagation()
+        omitted = config_propagation["checks"].pop()["env"]
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": config_propagation,
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                    },
+                },
+                "correctness": {"summary": {"correctness": "pass"}},
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            "comparison": {"speedup": 2.0, "target_met": True},
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 35, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "config-propagation-mismatch")
+        self.assertIn(omitted, report["config_propagation_manifest_misses"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
 
     def test_q6_workgroup_shape_blocker_fails_hard(self):
         payload = {

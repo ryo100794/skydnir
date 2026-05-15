@@ -232,6 +232,67 @@ class MemoryPagerContractTest(unittest.TestCase):
         ]:
             self.assertIn(token, probe)
 
+    def test_telemetry_ring_contract_is_bounded_and_has_required_sample_fields(self):
+        apk_doc = DOC.read_text()
+        oom_doc = (ROOT / "docs" / "design" / "RUNTIME_OOM_SURVIVAL.md").read_text()
+        for doc in [apk_doc, oom_doc]:
+            for token in [
+                "pdocker.memory-telemetry-ring.v1",
+                "memory-ring.jsonl",
+                "ring_max_bytes=1048576",
+                "ring_max_samples=240",
+                "ring_max_line_bytes=16384",
+                "ring_max_age_seconds=900",
+                "sample_seq",
+                "sample_time_unix_ms",
+                "sample_monotonic_ms",
+                "oom_score_adj",
+                "app_lifecycle",
+                "mem_available_bytes",
+                "swap_free_bytes",
+                "storage_free_bytes",
+                "rss_bytes",
+                "pss_unavailable",
+                "last_large_allocation",
+                "pager_counters",
+                "guard_denial_count",
+                "classifier_hint",
+                "progress_marker",
+                "mem_available_at_decision_bytes",
+                "swap_free_at_decision_bytes",
+            ]:
+                self.assertIn(token, doc)
+
+    def test_telemetry_final_summary_is_mandatory_and_fails_closed(self):
+        apk_doc = DOC.read_text()
+        oom_doc = (ROOT / "docs" / "design" / "RUNTIME_OOM_SURVIVAL.md").read_text()
+        for doc in [apk_doc, oom_doc]:
+            for token in [
+                "pdocker.memory-telemetry-summary.v1",
+                "memory-summary.json",
+                "summary_seq",
+                "started_unix_ms",
+                "ended_unix_ms",
+                "command_redacted",
+                "classification",
+                "classifier_reason",
+                "lmk_suspected",
+                "last_sample_seq",
+                "ring_path",
+                "ring_bytes",
+                "ring_samples",
+                "ring_truncated",
+                "ui_live_state_allowed",
+                "engine_snapshot_fresh",
+                "pid_liveness_checked",
+                "artifact_retention_policy",
+                "telemetry_persistence_failed",
+                "summary_write_degraded=true",
+                "fail closed",
+                "unknown page contents",
+            ]:
+                self.assertIn(token, doc)
+
 
 if __name__ == "__main__":
     unittest.main()

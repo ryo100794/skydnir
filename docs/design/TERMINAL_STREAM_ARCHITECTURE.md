@@ -121,7 +121,9 @@ Docker semantics remain in `pdockerd`:
 - `POST /exec/{id}/start` starts the stream using Docker's hijack behavior.
 - TTY mode returns raw bytes. Non-TTY mode returns Docker multiplex frames.
 - Resize should be implemented as the Docker-compatible exec resize route
-  instead of a UI-private API.
+  instead of a UI-private API. Diagnostics must prove the resize route was
+  requested (or record an explicit resize-failed event); a stream-started event
+  by itself only proves the exec stream opened and is not resize evidence.
 
 The UI can provide a shortcut button for "Terminal", but pressing it must create
 an `EngineExecSession` through the same Engine API route that a Docker client
@@ -252,7 +254,8 @@ The design follows three upstream contracts:
    semantics. `POST /exec/{id}/start` then starts the session. When TTY mode is
    enabled, Docker's stream is raw PTY data; when TTY mode is disabled, stdout
    and stderr are multiplexed frames. Resize is a Docker exec resize endpoint,
-   not a UI-private operation.
+   not a UI-private operation; diagnostics must not count stream-started alone
+   as resize proof.
 2. xterm.js is a terminal emulator surface. Its normal integration pattern is
    `pty.onData(data => terminal.write(data))` and
    `terminal.onData(data => pty.write(data))`. It also treats written raw bytes

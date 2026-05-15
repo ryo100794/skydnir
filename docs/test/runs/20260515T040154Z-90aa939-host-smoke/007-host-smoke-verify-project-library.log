@@ -1,0 +1,10 @@
+$ python3 scripts/verify-project-library.py
+ok: llama gpu 10x comparison scenario is recorded
+ok: required templates listed
+ok: all compose templates include shared Documents volume
+ok: pdocker-test-suite template centralizes exec-run scenarios and Documents evidence
+ok: dev-workspace includes code-server, Continue, Codex, Claude Code, and GPU request
+ok: dev-workspace exposes pdocker management helpers, paths, guarded Engine wrappers, and tasks
+ok: llama-cpp-gpu template has compose, Dockerfile, GPU profile, and server entrypoint
+ok: ros2-humble-rviz-novnc template has Compose, Dockerfile, RViz, Xvnc/noVNC, logs, and healthcheck
+ok: blender-xvnc-novnc template has Compose, Dockerfile, Blender, Xvnc/noVNC, logs, healthcheck, llvmpipe defaults, and future Zink/Vulkan switches
