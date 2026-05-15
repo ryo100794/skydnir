@@ -56,6 +56,9 @@ the resulting store through the Engine API.
      through Engine API.
    - Attempt container create for the existing scenario-owned partial image and
      require a non-201 response.
+   - Independently scan `store-after-restart.txt`; any scenario-owned `.pull-*`,
+     `.tmp-*`, `.old-*`, never-published tag, malformed layer, or partial-image
+     survivor fails the gate even if a summary boolean says it was rejected.
 
 4. `cleanup`
    - Remove only paths containing the scenario token and known scenario names.
@@ -77,8 +80,11 @@ The top-level artifact records these booleans:
 - `restored_tag_inspectable`
 - `daemon_restarted`
 - `cleanup_removed_only_scenario_owned_paths`
+- `no_partial_or_corrupt_image_cache_survivors`
 
-All must be true for the concrete residue-recovery lane to pass.
+All must be true for the concrete residue-recovery lane to pass. The survivor
+assertion is derived from the raw post-restart store listing on the host side,
+not only from the device-side summary JSON.
 
 ## Evidence files
 
@@ -101,6 +107,8 @@ The top-level artifact points at:
 - `inspect-partial.raw`
 - `create-partial.raw`
 - daemon process captures before kill and after restart
+- `post_restart_survivors` in the top-level artifact (must be an empty list for
+  a pass)
 
 ## Timed live-pull interruption design gate
 

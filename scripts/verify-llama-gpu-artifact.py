@@ -560,12 +560,13 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         next_action = "advance to ngl=2 or performance tuning"
     elif q6.get("latest_status") == "mismatch":
         classification = "q6-workgroup-cleared-but-oracle-mismatch"
-        next_action = "continue with descriptor identity, memory residency, synchronization, or Q6_K arithmetic interpretation"
+        q6_blocker_class = str(q6.get("blocker_class") or "descriptor-memory-synchronization-or-q6-arithmetic")
+        next_action = f"continue Q6_K strict-passthrough split at the {q6_blocker_class} boundary"
     else:
         classification = "q6-inconclusive"
         next_action = data.get("next_action") or "rerun with PDOCKER_GPU_CPU_ORACLE=1"
 
-    correctness_claim_allowed = correctness == "pass" and classification != "q6-workgroup-shape-blocker"
+    correctness_claim_allowed = correctness == "pass" and classification == "q6-workgroup-cleared-and-oracle-match"
     cpu_comparison_available = _cpu_comparison_available(data)
     benchmark_claim_allowed = (
         correctness_claim_allowed

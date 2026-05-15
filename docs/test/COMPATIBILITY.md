@@ -161,20 +161,25 @@ scenario id, device identity, command plan, phase results, evidence paths,
 negative expected conditions, assertions, remaining gap, and cleanup policy.
 Negative conditions include accepting `.pull-*` image stages, accepting
 `.tmp-*` or metadata-mismatched layer directories, losing the old tag backup,
-allowing `inspect` from a never-atomically-published interrupted pull, or
-allowing inspect/create from a partial local image that references incomplete
-layers. Cleanup must collect logs/listings first and remove only scenario-owned
-tags, containers, and artifacts, leaving unrelated worker data untouched. The
+allowing `inspect` from a never-atomically-published interrupted pull, allowing
+inspect/create from a partial local image that references incomplete layers, or
+leaving scenario-owned partial/corrupt image/cache residue in the raw
+post-restart store listing. Cleanup must collect logs/listings first and remove
+only scenario-owned tags, containers, and artifacts, leaving unrelated worker
+data untouched; the host evaluator attempts scoped cleanup after failed device
+phases and still reports `success=false` if evidence is incomplete. The
 remaining gap is a timed live registry-pull kill; the current device gate
 intentionally avoids overwriting user images while proving startup recovery and
-negative inspect/run behavior for partial image/layer residue.
+negative inspect/run behavior for partial image/layer residue. Host unit tests
+also cover startup pruning of invalid/stale/unreadable build cache entries and
+partial temporary blob/load/save files.
 
 ## Current compatibility matrix
 
 | Area | Current status | Notes |
 |---|---:|---|
 | Engine API negotiation | Good | `/_ping`, `/version`, `/info`, API prefix stripping, and `Api-Version` response headers are implemented. |
-| Image pull/list/inspect/delete | Good | Pull uses content-addressed layer extraction with staged tag publish, complete-layer cache validation (`tree/` plus matching `meta.json`), and startup cleanup for `.pull-*`, `.old-*`, `.tmp-*`, and malformed layer residue. `python3 scripts/verify-image-pull-crash-safety.py` covers the static contract. The Android device runner now covers safe synthetic residue kill/restart recovery plus negative inspect/create proof for partial images/layers; timed live registry-pull interruption remains open. Private registry auth is not complete. |
+| Image pull/list/inspect/delete | Good | Pull uses content-addressed layer extraction with staged tag publish, complete-layer cache validation (`tree/` plus matching `meta.json`), and startup cleanup for `.pull-*`, `.old-*`, `.tmp-*`, malformed layer residue, invalid/stale build-cache records, and partial tmp blob/load/save files. `python3 scripts/verify-image-pull-crash-safety.py` covers the static contract. The Android device runner now covers safe synthetic residue kill/restart recovery plus negative inspect/create proof for partial images/layers and host-side post-restart survivor scanning; timed live registry-pull interruption remains open. Private registry auth is not complete. |
 | Image save/load | Partial | Docker-style tar exchange works for the implemented flattened image format. Multi-platform indexes, zstd layers, and all OCI edge cases are not complete. |
 | Container create/start/stop/kill/wait/rm | Good | Implemented through the Android direct userspace runner and state files. No cgroups or namespaces. Project/UI reconciliation still needs to rely on Engine container IDs plus pdocker labels rather than container names. |
 | Logs/attach/exec | Partial | Raw stream and hijack paths exist. Non-TTY exec works, and Android smoke covers a basic Engine `exec` with `Tty=true`. Full Docker attach parity, `docker run -t`, detach-key behavior, resize propagation, and broad interactive terminal cases still need more coverage. |

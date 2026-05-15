@@ -501,6 +501,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "upload_offset_descriptor_or_hash_scope",
             "output_layout_or_shader_math",
             "numeric_layout_or_readback",
+            "q6_blocker_class",
+            "q6_shader_like_oracle_cleared",
+            "q6_first_mismatch",
+            "q6_writable_bindings",
+            "q6_readonly_upload_hash_mismatches",
+            "q6_readonly_dispatch_mutations",
+            "vulkan-device-execution-or-writeback",
+            "descriptor-effective-range-or-upload",
         ]:
             self.assertIn(marker, compare_and_manifest)
         source = GPU_EXECUTOR.read_text()

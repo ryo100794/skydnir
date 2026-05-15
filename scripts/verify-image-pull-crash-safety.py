@@ -115,6 +115,8 @@ def check_source(path: Path) -> None:
             'if ".tmp-" in name:' in prune and "layer-stage" in prune)
     require(f"{path.name}: startup/prune removes malformed partial layer dirs",
             "not _layer_exists(name)" in prune and "layer-partial" in prune)
+    require(f"{path.name}: stale/invalid build cache entries are pruned",
+            all(term in prune for term in ["BUILD_CACHE_DIR", "build-cache-invalid", "build-cache-stale", "build-cache-unreadable", "not _layer_exists(did)"]))
     require(f"{path.name}: tmp blob/load/save residue is covered",
             "pdblob_" in prune and "pdload_" in prune and "pdsave_" in prune)
     require(f"{path.name}: daemon startup invokes crash-residue recovery",
@@ -163,7 +165,8 @@ def check_device_scenario_runner() -> None:
              "partial_layer_pruned", "partial_image_pruned_or_rejected",
              "partial_image_inspect_rejected", "partial_image_create_rejected",
              "never_published_tag_rejected", "restored_tag_inspectable",
-             "cleanup_removed_only_scenario_owned_paths"} <= assertions)
+             "cleanup_removed_only_scenario_owned_paths",
+             "no_partial_or_corrupt_image_cache_survivors"} <= assertions)
     for command in data["commands"]:
         tokens = shlex.split(command)
         require(f"device scenario command is tokenizable: {command}", bool(tokens))
@@ -182,7 +185,7 @@ def check_device_scenario_runner() -> None:
         "image_inspect_after_restart",
         "never_image_inspect_after_restart",
     }
-    required_evidence.update({"partial_image_inspect_after_restart", "partial_image_create_after_restart"})
+    required_evidence.update({"partial_image_inspect_after_restart", "partial_image_create_after_restart", "post_restart_survivors"})
     require("device scenario artifact schema records required evidence fields",
             required_evidence <= set(data.get("artifact_schema", {}).get("evidence", {}).keys()))
     negative = "\n".join(data.get("negative_expected_conditions", []))
@@ -196,6 +199,12 @@ def check_device_scenario_runner() -> None:
             "Live registry pull interruption" in remaining
             and "--execute-live-pull-interruption" in remaining
             and "scenario-owned" in remaining)
+
+    runner_text = DEVICE_RUNNER.read_text()
+    require("host device-evidence evaluator scans post-restart store listings for residue survivors",
+            all(term in runner_text for term in ["post_restart_survivors", "store-after-restart.txt", "no_partial_or_corrupt_image_cache_survivors", ".pull-", ".tmp-", ".old-"]))
+    require("device execution attempts scoped cleanup after failed phases",
+            "cleanup-after-failure" in runner_text and "Scoped cleanup after failed" in runner_text)
 
     side = DEVICE_SIDE_RUNNER.read_text()
     require("device-side runner prepares scenario-owned pull/old/tmp residues",

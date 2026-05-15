@@ -3432,7 +3432,9 @@ class MainActivity : AppCompatActivity() {
             "enter-single-submit",
             "ctrl-c-interrupts-without-literal-c",
             "arrow-up-reaches-readline-history",
+            "ime-enter-ctrlc-regression-covered",
             "top-starts-on-tty",
+            "top-refresh-observed-before-q",
             "top-repaint-remains-terminal-shaped",
             "q-quits-top",
             "resize-route-is-observable",
@@ -3499,6 +3501,19 @@ class MainActivity : AppCompatActivity() {
                 }
                 markersReady
             }) { "UI exec -it did not echo initial expected markers" }
+            val imeEnterCommand = "printf '%s\\n' \"\$p-ime-enter-ok\""
+            ui.post {
+                webView?.evaluateJavascript(
+                    "window.pdockerTestSendInput && window.pdockerTestSendInput(${JSONObject.quote(imeEnterCommand)}, false); window.pdockerTestImeFallbackInput && window.pdockerTestImeFallbackInput('enter-beforeinput')",
+                    null,
+                )
+            }
+            var imeEnterOk = false
+            check(waitUntil(3_000) {
+                val count = Regex("pdocker-ui-it-ime-enter-ok").findAll(output.toString()).count()
+                imeEnterOk = count == 1
+                imeEnterOk
+            }) { "UI exec -it IME Enter fallback did not submit exactly one command" }
             ui.post {
                 webView?.evaluateJavascript(
                     "window.pdockerTestSendInput && window.pdockerTestSendInput('\\u001b[A\\r', true)",
@@ -3510,13 +3525,20 @@ class MainActivity : AppCompatActivity() {
                 if (reachedHistory) evidence.put("arrow-up-reaches-readline-history", true)
                 reachedHistory
             }) { "UI exec -it arrow key did not reach shell readline/history as an escape sequence" }
+            val topStartOffset = output.length
             ui.post {
                 webView?.evaluateJavascript(
                     "window.pdockerTestSendInput && window.pdockerTestSendInput('top\\n', false)",
                     null,
                 )
             }
-            Thread.sleep(1_200)
+            val topRefreshPattern = Regex("(?i)\\b(PID|Tasks?:|Mem:|CPU:|load average|Load Avg)\\b")
+            val topRefreshSeen = waitUntil(5_000) {
+                val slice = output.toString().drop(topStartOffset)
+                topRefreshPattern.containsMatchIn(slice)
+            }
+            if (topRefreshSeen) evidence.put("top-refresh-observed-before-q", true)
+            check(topRefreshSeen) { "UI exec -it fullscreen top did not render a refresh before q" }
             ui.post {
                 webView?.evaluateJavascript(
                     "window.pdockerTestSendInput && window.pdockerTestSendInput('q', true)",
@@ -3546,7 +3568,7 @@ class MainActivity : AppCompatActivity() {
             Thread.sleep(1_200)
             ui.post {
                 webView?.evaluateJavascript(
-                    "window.pdockerTestCtrlInput && window.pdockerTestCtrlInput('c')",
+                    "window.pdockerTestImeFallbackInput && window.pdockerTestImeFallbackInput('ctrl-beforeinput', 'c')",
                     null,
                 )
             }
@@ -3566,13 +3588,19 @@ class MainActivity : AppCompatActivity() {
             val diagnostics = File(pdockerHome, "diagnostics/engine-exec-input-latest.jsonl").readTextIfExists()
             val resizeObserved = diagnostics.contains("/resize?h=") || diagnostics.contains("\"event\":\"resize-failed\"") || diagnostics.contains("\"event\": \"resize-failed\"")
             if (passed) evidence.put("ctrl-c-interrupts-without-literal-c", true)
-            if (!bracketNoise && !arrowNoise && lineControlOk && evidence.optBoolean("top-starts-on-tty") && evidence.optBoolean("q-quits-top")) {
+            if (imeEnterOk && passed && !text.contains("sleep 15c")) {
+                evidence.put("ime-enter-ctrlc-regression-covered", true)
+            }
+            if (!bracketNoise && !arrowNoise && lineControlOk && evidence.optBoolean("top-starts-on-tty") && evidence.optBoolean("top-refresh-observed-before-q") && evidence.optBoolean("q-quits-top")) {
                 evidence.put("top-repaint-remains-terminal-shaped", true)
             }
             if (resizeObserved) evidence.put("resize-route-is-observable", true)
             check(passed) { "UI exec -it Ctrl+C did not interrupt sleep and return to the shell" }
             check(!bracketNoise) { "UI exec -it produced bracket argv noise" }
             check(!arrowNoise) { "UI exec -it printed arrow escape bytes instead of treating them as terminal input" }
+            check(evidence.optBoolean("ime-enter-ctrlc-regression-covered")) {
+                "UI exec -it did not cover IME Enter/Ctrl-C fallback without duplicate/literal input"
+            }
             check(lineControlOk) {
                 "UI exec -it did not preserve terminal CRLF line control"
             }

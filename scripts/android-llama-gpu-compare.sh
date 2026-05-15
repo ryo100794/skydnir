@@ -1581,6 +1581,95 @@ q6_latest_partial = (
     if isinstance(q6_latest_oracle.get("partial_diagnostic"), dict)
     else {}
 )
+def compact_q6_binding_detail(detail):
+    return {
+        "index": detail.get("index"),
+        "binding": detail.get("binding"),
+        "alias_rep": detail.get("alias_rep"),
+        "offset": detail.get("offset"),
+        "size": detail.get("size"),
+        "api_offset": detail.get("api_offset"),
+        "api_range": detail.get("api_range"),
+        "api_memory_offset": detail.get("api_memory_offset"),
+        "api_buffer_size": detail.get("api_buffer_size"),
+        "readable": detail.get("readable"),
+        "writable": detail.get("writable"),
+        "resident": detail.get("resident"),
+        "cache_hit": detail.get("cache_hit"),
+        "fd_before_hash": detail.get("fd_before_hash"),
+        "gpu_after_upload_hash": detail.get("gpu_after_upload_hash"),
+        "gpu_after_dispatch_hash": detail.get("gpu_after_dispatch_hash"),
+        "fd_after_hash": detail.get("fd_after_hash"),
+    }
+
+
+def numeric_close_to_zero(value, tolerance=1.0e-3):
+    try:
+        return abs(float(value)) <= tolerance
+    except (TypeError, ValueError):
+        return False
+
+
+q6_binding_details = [
+    detail
+    for detail in (q6_latest.get("binding_details") or [])
+    if isinstance(detail, dict)
+]
+q6_writable_binding_details = [
+    compact_q6_binding_detail(detail)
+    for detail in q6_binding_details
+    if detail.get("writable")
+]
+q6_readonly_upload_hash_mismatches = []
+q6_readonly_dispatch_mutations = []
+for detail in q6_binding_details:
+    if not detail.get("readable") or detail.get("writable"):
+        continue
+    before_hash = detail.get("fd_before_hash")
+    upload_hash = detail.get("gpu_after_upload_hash")
+    dispatch_hash = detail.get("gpu_after_dispatch_hash")
+    compact = compact_q6_binding_detail(detail)
+    if before_hash and upload_hash and before_hash != upload_hash:
+        q6_readonly_upload_hash_mismatches.append(compact)
+    elif upload_hash and dispatch_hash and upload_hash != dispatch_hash:
+        q6_readonly_dispatch_mutations.append(compact)
+q6_first_mismatch = (
+    q6_latest_oracle.get("first_mismatch")
+    if isinstance(q6_latest_oracle.get("first_mismatch"), dict)
+    else {}
+)
+q6_workgroup_shape_blocker = bool(
+    q6_latest
+    and (
+        q6_latest.get("spirv_local_size_consistent") is False
+        or (
+            isinstance(q6_latest_partial.get("q6_local_size"), list)
+            and q6_latest_partial.get("q6_local_size") != q6_latest.get("spirv_local_size_resolved")
+        )
+    )
+)
+q6_shader_like_oracle_cleared = (
+    q6_latest_oracle.get("status") == "mismatch"
+    and numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_abs_delta"))
+    and numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_64_abs_delta"))
+)
+q6_blocker_class = (
+    "not-reached"
+    if not q6_oracle_events
+    else "workgroup-shape"
+    if q6_workgroup_shape_blocker
+    else "cleared"
+    if q6_latest_oracle.get("status") == "match"
+    else "descriptor-effective-range-or-upload"
+    if q6_readonly_upload_hash_mismatches
+    else "shader-readonly-mutation-or-barrier-scope"
+    if q6_readonly_dispatch_mutations
+    else "vulkan-device-execution-or-writeback"
+    if q6_shader_like_oracle_cleared
+    else "q6-arithmetic-reduction-or-output-layout"
+    if q6_latest_oracle.get("status") == "mismatch"
+    else "inconclusive"
+)
 q6_workgroup_diagnostics = {
     "event_count": len(q6_oracle_events),
     "latest_spirv_hash": q6_latest.get("spirv_hash"),
@@ -1593,24 +1682,23 @@ q6_workgroup_diagnostics = {
     "q6_local_invocations": q6_latest_partial.get("q6_local_invocations"),
     "q6_shader_like_abs_delta": q6_latest_partial.get("q6_shader_like_abs_delta"),
     "q6_shader_like_64_abs_delta": q6_latest_partial.get("q6_shader_like_64_abs_delta"),
-    "workgroup_shape_blocker": bool(
-        q6_latest
-        and (
-            q6_latest.get("spirv_local_size_consistent") is False
-            or (
-                isinstance(q6_latest_partial.get("q6_local_size"), list)
-                and q6_latest_partial.get("q6_local_size") != q6_latest.get("spirv_local_size_resolved")
-            )
-        )
-    ),
+    "q6_shader_like_oracle_cleared": q6_shader_like_oracle_cleared,
+    "q6_first_mismatch": q6_first_mismatch,
+    "q6_writable_bindings": q6_writable_binding_details[:8],
+    "q6_readonly_upload_hash_mismatches": q6_readonly_upload_hash_mismatches[:8],
+    "q6_readonly_dispatch_mutations": q6_readonly_dispatch_mutations[:8],
+    "workgroup_shape_blocker": q6_workgroup_shape_blocker,
+    "blocker_class": q6_blocker_class,
     "diagnostic_interpretation": (
         "no-q6-oracle-event"
         if not q6_oracle_events
         else "workgroup-shape-inconsistent"
-        if q6_latest.get("spirv_local_size_consistent") is False
+        if q6_workgroup_shape_blocker
         else "q6-oracle-matches"
         if q6_latest_oracle.get("status") == "match"
-        else "q6-mismatch-after-workgroup-check"
+        else "q6-mismatch-at-%s-boundary" % q6_blocker_class
+        if q6_latest_oracle.get("status") == "mismatch"
+        else "q6-inconclusive"
     ),
 }
 diagnostic_bisection = {
@@ -1871,6 +1959,9 @@ next_action = (
     else
     "fix Q6_K three-dimensional workgroup shape propagation before interpreting numeric mismatch"
     if q6_workgroup_diagnostics["workgroup_shape_blocker"]
+    else
+    "continue Q6_K strict-passthrough split at the %s boundary" % q6_workgroup_diagnostics["blocker_class"]
+    if q6_workgroup_diagnostics["latest_status"] == "mismatch"
     else
     "fix Vulkan buffer base/range accounting for scheduler warmup"
     if evidence["buffer_range_assert_blocker"]

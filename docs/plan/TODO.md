@@ -206,11 +206,14 @@ stable checkpoint.
   `python3 scripts/verify/runner/image_pull_crash_safety_device.py --execute-device`
   now performs a safe scenario-owned residue kill/restart recovery lane with
   `.pull-*`, `.old-*`, `.tmp-*`, malformed partial-layer, partial-image
-  inspect/create rejection, Engine inspect, and scoped cleanup evidence. The
-  daemon now rejects incomplete local image directories before inspect/list/run
-  and treats layers as cache only when `tree/` and matching `meta.json` are
-  present. Remaining acceptance gap: add a timed live registry pull interruption
-  lane that cannot overwrite user images.
+  inspect/create rejection, Engine inspect, scoped cleanup evidence, and
+  host-side post-restart survivor scanning that fails on scenario-owned
+  partial/corrupt image/cache residue. Host unit coverage also verifies startup
+  cleanup of invalid/stale/unreadable build cache entries plus partial
+  blob/load/save tmp files. The daemon now rejects incomplete local image
+  directories before inspect/list/run and treats layers as cache only when
+  `tree/` and matching `meta.json` are present. Remaining acceptance gap: add a
+  timed live registry pull interruption lane that cannot overwrite user images.
 - [doing] Compose/build log progress rendering. The readonly log pane must
   preserve terminal carriage-return progress updates instead of deleting or
   fragmenting text-mode progress bars. Acceptance: xterm readonly log path keeps

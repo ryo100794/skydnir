@@ -45,6 +45,10 @@ checks pass.  The artifact has:
 - `KillAtStepPlannedCases`: remaining external daemon/helper process-kill
   checkpoints that stay `planned-gap` until a device/process-control harness
   exists.
+- `OOMForcedKillConsistencyCases`: restart/LMK/forced-kill consistency oracles.
+  These remain `planned-gap` in the host-local gate, but the verifier requires
+  explicit expected consistency, failure oracle, and gap reason so they cannot
+  be silently represented as success evidence.
 
 Required executable case ids are:
 
@@ -58,6 +62,7 @@ Required executable case ids are:
 - `rename.before_publish`
 - `archive_put.stage_failure`
 - `hardlink_metadata.corrupt_rebuild`
+- `hardlink_metadata.truncated_rebuild`
 - `low_space.copy_up_enospc`
 
 ## Recovery coverage
@@ -73,12 +78,30 @@ The executable host-local gate now records fail-closed evidence for:
 - rename/replace staging failure before destination publication;
 - archive PUT stage failure before live upperdir publication;
 - simulated low-space/`ENOSPC` during temp payload write;
-- corrupt hardlink ring metadata rebuild from the payload tree.
+- corrupt and truncated hardlink ring metadata rebuild from the payload tree.
 
 The hardlink ring metadata is treated as a rebuildable accelerator only.  The
 payload tree remains the source of truth.  If the accelerator is corrupt or
 stale after OOM, LMK, ENOSPC, or partial writes, startup repair must discard it
 and rebuild from the payload tree.
+
+## OOM and forced-kill consistency oracles
+
+The host-local gate does not create real Android LMK pressure or kill/restart
+`pdockerd`, but the recovery artifact now records the required external oracles:
+
+- `oom_or_lmk.restart_reconciliation`: after restart, a missing live pid must
+  classify the operation/container as `interrupted-or-lmk-suspected`, attach the
+  last memory evidence, and suppress stale `Up`/`running` UI state.
+- `forced_kill.daemon_during_overlay_mutation`: daemon death during copy-up,
+  whiteout, rename, or hardlink-cache publication must leave either old
+  committed state or a complete published upper entry after reconciliation.
+- `forced_kill.helper_during_archive_put`: helper death during archive PUT must
+  discard staged extraction and preserve the live upperdir.
+
+These entries are not pass evidence until an Android/device or process-control
+harness kills the correct process at deterministic checkpoints, restarts it,
+and validates the persisted operation/container identity plus merged-view state.
 
 ## Kill-at-step evidence requirements
 

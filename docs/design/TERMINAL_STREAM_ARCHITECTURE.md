@@ -125,8 +125,11 @@ Docker semantics remain in `pdockerd`:
 - `POST /exec/{id}/start` starts the stream using Docker's hijack behavior.
 - TTY mode returns raw bytes. Non-TTY mode returns Docker multiplex frames.
 - Resize should be implemented as the Docker-compatible exec resize route
-  instead of a UI-private API. Diagnostics must prove the resize route was
-  requested by recording the `/exec/{id}/resize?h={rows}&w={cols}` path on
+  instead of a UI-private API. Full-screen terminal programs such as `top` must
+  show a real refresh before quit evidence is accepted, so a shell prompt after a
+  failed launch cannot be mistaken for a passing terminal. Diagnostics must prove
+  the resize route was requested by recording the
+  `/exec/{id}/resize?h={rows}&w={cols}` path on
   success or by recording an explicit resize-failed event. A stream-started event
   by itself only proves the exec stream opened and is not resize evidence; tests
   must not count stream-started alone as resize proof.

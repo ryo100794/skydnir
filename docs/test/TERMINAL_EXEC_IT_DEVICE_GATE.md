@@ -27,7 +27,8 @@ The skip artifact and real-run artifact must include:
 - `DeviceProofAttempted: false` for planned skips
 - `HardGateRequired`
 - `RequiredEvidence`
-- `Evidence`, including `top-repaint-remains-terminal-shaped` and
+- `Evidence`, including `ime-enter-ctrlc-regression-covered`,
+  `top-refresh-observed-before-q`, `top-repaint-remains-terminal-shaped`, and
   `resize-route-is-observable` as first-class keys
 
 ## Required evidence names
@@ -44,7 +45,14 @@ The gate validates the following evidence names for a real-container run:
 - `arrow-up-reaches-readline-history`: Arrow-up reaches shell history/readline
   and does not print raw escape bytes as text. This covers the cursor-key route
   through the UI soft-key/test hook into the same terminal byte stream.
+- `ime-enter-ctrlc-regression-covered`: the WebView helper-textarea IME fallback
+  path dispatches an Enter `beforeinput` event to submit a command and a Ctrl-C
+  `beforeinput` event to interrupt `sleep` without injecting literal `c`. This
+  evidence is required in addition to the static IME normalizer tests.
 - `top-starts-on-tty`: `top` can start against a controlling TTY.
+- `top-refresh-observed-before-q`: the interactive `top` screen emits a refresh
+  containing terminal status/table text before `q` is sent; an immediate shell
+  echo after a failed `top` start is not enough.
 - `top-repaint-remains-terminal-shaped`: a full-screen `top` update must remain
   a terminal repaint, not collapse into log text, bracket argv noise, or broken
   carriage-return/line-control output. The device artifact records this as a
@@ -68,14 +76,16 @@ private test-only Engine endpoint. Required reproductions are:
    command submission.
 2. Start `sleep`, press the UI Ctrl-C control-byte path, then verify the shell
    accepts the next command and no literal `c` appears in the stream.
-3. Exercise the Japanese IME/Android WebView fallback path for Enter and Ctrl-C
-   so composition or `beforeinput` events cannot double-send Enter or inject
-   `c`.
+3. Exercise the Japanese IME/Android WebView fallback path by dispatching the
+   helper textarea `beforeinput` route for Enter and Ctrl-C, then require the
+   `ime-enter-ctrlc-regression-covered` evidence flag so composition or
+   `beforeinput` events cannot double-send Enter or inject `c`.
 4. Send the UI cursor-key path (`ArrowUp` / `\u001b[A`) and verify readline
    history replays the seeded command instead of printing escape text.
-5. Launch full-screen `top`, allow at least one update interval, verify the
-   display remains a TTY-shaped terminal repaint, press UI `q`, and verify the
-   shell accepts `echo pdocker-ui-it-topq-ok`.
+5. Launch full-screen `top`, require a visible refresh before `q` via
+   `top-refresh-observed-before-q`, verify the display remains a TTY-shaped
+   terminal repaint, press UI `q`, and verify the shell accepts
+   `echo pdocker-ui-it-topq-ok`.
 6. Trigger a terminal resize and verify the Engine exec resize route is
    observable in diagnostics.
 

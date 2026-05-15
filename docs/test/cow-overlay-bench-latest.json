@@ -13,61 +13,61 @@
       "metadata": {},
       "name": "open_close",
       "notes": [],
-      "ns_per_op": 175531.3,
+      "ns_per_op": 310864.5,
       "ops": 20,
-      "p50_ns": 176146,
-      "p95_ns": 297031,
-      "p99_ns": 364375,
+      "p50_ns": 220729,
+      "p95_ns": 271667,
+      "p99_ns": 1963645,
       "round": 1,
-      "total_ns": 3510626
+      "total_ns": 6217291
     },
     {
       "metadata": {},
       "name": "stat",
       "notes": [],
-      "ns_per_op": 189924.5,
+      "ns_per_op": 329599.0,
       "ops": 20,
-      "p50_ns": 196302,
-      "p95_ns": 285156,
-      "p99_ns": 361510,
+      "p50_ns": 202135,
+      "p95_ns": 499167,
+      "p99_ns": 2078490,
       "round": 1,
-      "total_ns": 3798489
+      "total_ns": 6591981
     },
     {
       "metadata": {},
       "name": "create",
       "notes": [],
-      "ns_per_op": 217414.2,
+      "ns_per_op": 324242.3,
       "ops": 20,
-      "p50_ns": 191823,
-      "p95_ns": 336459,
-      "p99_ns": 376563,
+      "p50_ns": 224375,
+      "p95_ns": 616667,
+      "p99_ns": 1609844,
       "round": 1,
-      "total_ns": 4348285
+      "total_ns": 6484846
     },
     {
       "metadata": {},
       "name": "unlink",
       "notes": [],
-      "ns_per_op": 222088.4,
+      "ns_per_op": 132432.1,
       "ops": 20,
-      "p50_ns": 196146,
-      "p95_ns": 332656,
-      "p99_ns": 516250,
+      "p50_ns": 123229,
+      "p95_ns": 168281,
+      "p99_ns": 272448,
       "round": 1,
-      "total_ns": 4441768
+      "total_ns": 2648643
     },
     {
       "metadata": {},
       "name": "rename",
       "notes": [],
-      "ns_per_op": 227992.3,
+      "ns_per_op": 516338.5,
       "ops": 20,
-      "p50_ns": 240000,
-      "p95_ns": 302448,
-      "p99_ns": 314531,
+      "p50_ns": 541250,
+      "p95_ns": 674323,
+      "p99_ns": 819062,
       "round": 1,
-      "total_ns": 4559846
+      "total_ns": 10326770
     },
     {
       "metadata": {
@@ -82,13 +82,13 @@
         "mutates hardlinked upper files with libcow loaded",
         "checks lower payload preservation and inode split"
       ],
-      "ns_per_op": 3320625.0,
+      "ns_per_op": 3430299.8,
       "ops": 4,
-      "p50_ns": 3177032,
-      "p95_ns": 5258698,
-      "p99_ns": 5258698,
+      "p50_ns": 2947969,
+      "p95_ns": 5334688,
+      "p99_ns": 5334688,
       "round": 1,
-      "total_ns": 13282500
+      "total_ns": 13721199
     },
     {
       "metadata": {
@@ -98,13 +98,13 @@
       "notes": [
         "linear lower-layer lookup scaffold; future cache gate compares this"
       ],
-      "ns_per_op": 1509940.1,
+      "ns_per_op": 2353773.4,
       "ops": 20,
-      "p50_ns": 1682657,
-      "p95_ns": 2424062,
-      "p99_ns": 2432396,
+      "p50_ns": 1636719,
+      "p95_ns": 5620000,
+      "p99_ns": 12837813,
       "round": 1,
-      "total_ns": 30198801
+      "total_ns": 47075468
     }
   ],
   "Notes": [

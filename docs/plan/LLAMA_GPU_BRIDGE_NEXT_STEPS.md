@@ -314,6 +314,13 @@ Pass criteria:
   residency/staging/writeback, synchronization/device-execution, or Q6_K
   arithmetic/reduction.  Do not treat another sampled mismatch as progress
   unless it narrows one of those classes.
+- As of 2026-05-15, the compare summarizer records that narrowed class in
+  `gpu.diagnostics.q6_workgroup_diagnostics.blocker_class`, plus bounded Q6_K
+  evidence (`q6_first_mismatch`, writable output binding hashes, read-only
+  upload/dispatch hash mismatches, and whether the shader-like 32/64-lane CPU
+  oracle matched the canonical sum).  The artifact verifier now blocks
+  correctness and benchmark claims unless Q6_K workgroup shape is clear *and*
+  the Q6_K oracle reports `latest_status == "match"`.
 
 Fail criteria:
 

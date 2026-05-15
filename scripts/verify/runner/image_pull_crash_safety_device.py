@@ -78,6 +78,7 @@ ARTIFACT_SCHEMA: dict[str, Any] = {
         "daemon_log_before_kill": "path|null",
         "daemon_log_after_restart": "path|null",
         "container_run_after_restart": "path|null",
+        "post_restart_survivors": "list of scenario-owned partial/corrupt image/cache paths still present after restart",
     },
     "assertions": {
         "old_tag_restored": "boolean|null",
@@ -90,6 +91,7 @@ ARTIFACT_SCHEMA: dict[str, Any] = {
         "never_published_tag_rejected": "boolean|null",
         "restored_tag_inspectable": "boolean|null",
         "cleanup_removed_only_scenario_owned_paths": "boolean|null",
+        "no_partial_or_corrupt_image_cache_survivors": "boolean|null",
     },
     "negative_expected_conditions": ["strings that must not appear in evidence"],
     "cleanup_policy": ["cleanup steps safe to run after pass/fail/interrupt"],
@@ -105,6 +107,7 @@ NEGATIVE_EXPECTED_CONDITIONS = [
     "docker image inspect succeeds for a never-published interrupted tag",
     "partial image directory with incomplete layers is inspectable after restart",
     "docker run/create succeeds from a partial image or layer cache entry after restart",
+    "scenario-owned partial/corrupt image or cache residue survives in the post-restart store listing",
     "cleanup deletes unrelated images, layers, containers, app data, or other workers' files",
 ]
 
@@ -293,9 +296,58 @@ def relative_or_none(path: Path | None) -> str | None:
         return str(path)
 
 
-def evaluate_device_evidence(local_dir: Path) -> tuple[dict[str, bool | None], list[str], dict[str, str | None]]:
+def post_restart_survivors(local_dir: Path) -> list[str]:
+    """Return scenario-owned partial/corrupt image/cache paths that survived restart.
+
+    The device shell writes boolean assertions, but the host evaluator also
+    checks the raw store listing so a buggy device-side summary cannot turn
+    stale ``.pull-*``, ``.tmp-*``, malformed layer, or partial-image residue
+    into a pass.  A restored base image is allowed; scenario-owned interrupted
+    stages, never-published tags, and incomplete image/cache entries are not.
+    """
+    context = read_json(local_dir / "context.json") or {}
+    listing_path = local_dir / "store-after-restart.txt"
+    try:
+        lines = [line.strip() for line in listing_path.read_text().splitlines() if line.strip()]
+    except OSError:
+        return ["missing:store-after-restart.txt"]
+
+    token = str(context.get("token") or "")
+    image_base = str(context.get("image_base") or "")
+    never_base = str(context.get("never_base") or "")
+    partial_base = str(context.get("partial_base") or "")
+    tmp_layer = str(context.get("tmp_layer") or "")
+    partial_layer = str(context.get("partial_layer") or "")
+
+    survivors: list[str] = []
+    for line in lines:
+        name = line.rsplit("/", 1)[-1]
+        token_owned = bool(token and token in name)
+        forbidden = False
+        if token_owned and (".pull-" in name or ".tmp-" in name or ".old-" in name):
+            forbidden = True
+        if never_base and name == never_base:
+            forbidden = True
+        if partial_base and name == partial_base:
+            forbidden = True
+        if tmp_layer and name.startswith(f"{tmp_layer}.tmp-"):
+            forbidden = True
+        if partial_layer and name == partial_layer:
+            forbidden = True
+        # Be conservative if context.json was missing or truncated: any
+        # scenario-token path that still advertises partial/crash-safety residue
+        # after restart should fail the device gate.
+        if token_owned and "pdocker-crash-safety-partial" in name:
+            forbidden = True
+        if forbidden:
+            survivors.append(line)
+    return survivors
+
+
+def evaluate_device_evidence(local_dir: Path) -> tuple[dict[str, bool | None], list[str], dict[str, Any]]:
     restart = read_json(local_dir / "restart-summary.json") or {}
     cleanup = read_json(local_dir / "cleanup-summary.json") or {}
+    survivors = post_restart_survivors(local_dir)
     assertions: dict[str, bool | None] = {
         "old_tag_restored": restart.get("old_tag_restored"),
         "pull_stage_pruned": restart.get("pull_stage_pruned"),
@@ -308,6 +360,7 @@ def evaluate_device_evidence(local_dir: Path) -> tuple[dict[str, bool | None], l
         "restored_tag_inspectable": restart.get("restored_tag_inspectable"),
         "daemon_restarted": restart.get("daemon_restarted"),
         "cleanup_removed_only_scenario_owned_paths": cleanup.get("cleanup_removed_only_scenario_owned_paths"),
+        "no_partial_or_corrupt_image_cache_survivors": not survivors,
     }
     failures = [name for name, value in assertions.items() if value is not True]
     evidence = {
@@ -325,6 +378,7 @@ def evaluate_device_evidence(local_dir: Path) -> tuple[dict[str, bool | None], l
         "daemon_log_before_kill": relative_or_none(local_dir / "ps-before-kill.txt"),
         "daemon_log_after_restart": relative_or_none(local_dir / "ps-after-restart.txt"),
         "container_run_after_restart": relative_or_none(local_dir / "create-partial.raw"),
+        "post_restart_survivors": survivors,
     }
     return assertions, failures, evidence
 
@@ -338,14 +392,23 @@ def execute_device(args: argparse.Namespace, artifact_path: Path, token: str) ->
         notes.append("Failed to push/chmod the device-side runner.")
         return "failed", False, {}, notes, phase_results
 
+    cleanup_attempted = False
     for phase in PHASES:
         cp = run_device_phase(args, phase, token)
         phase_results.append(phase_result(phase, cp))
+        cleanup_attempted = cleanup_attempted or phase == "cleanup"
         if cp.returncode != 0:
             notes.append(f"Device phase {phase} failed with rc={cp.returncode}.")
-            # Continue to pull evidence if possible; cleanup failures also need recording.
-            if phase != "cleanup":
-                break
+            # Always try scoped cleanup after evidence-producing phases fail so
+            # interrupted verification does not strand scenario-owned residue on
+            # shared devices.  Pull evidence afterward even if cleanup fails.
+            if phase != "cleanup" and not cleanup_attempted:
+                cleanup_cp = run_device_phase(args, "cleanup", token)
+                phase_results.append(phase_result("cleanup-after-failure", cleanup_cp))
+                cleanup_attempted = True
+                if cleanup_cp.returncode != 0:
+                    notes.append(f"Scoped cleanup after failed {phase} also failed with rc={cleanup_cp.returncode}.")
+            break
 
     evidence_dir = artifact_path.parent / "image-pull-crash-safety-device"
     pulled = pull_device_evidence(args, evidence_dir)
@@ -445,6 +508,7 @@ def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
         "restored_tag_inspectable": None,
         "daemon_restarted": None,
         "cleanup_removed_only_scenario_owned_paths": None,
+        "no_partial_or_corrupt_image_cache_survivors": None,
     }
     evidence = {
         "device_evidence_dir": None,
@@ -461,6 +525,7 @@ def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
         "daemon_log_before_kill": None,
         "daemon_log_after_restart": None,
         "container_run_after_restart": None,
+        "post_restart_survivors": [],
     }
 
     if args.execute_device and device.get("state") != "device":

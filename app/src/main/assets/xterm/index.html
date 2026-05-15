@@ -483,6 +483,60 @@
     return !!mods.ctrl;
   };
 
+  const dispatchSyntheticTerminalEvent = (target, type, init) => {
+    let event = null;
+    try {
+      if (type === 'beforeinput' && typeof InputEvent === 'function') {
+        event = new InputEvent('beforeinput', {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          inputType: init.inputType || '',
+          data: init.data == null ? null : String(init.data),
+        });
+      } else if (type === 'keydown' && typeof KeyboardEvent === 'function') {
+        event = new KeyboardEvent('keydown', {
+          bubbles: true,
+          cancelable: true,
+          key: init.key || '',
+          ctrlKey: !!mods.ctrl,
+          altKey: !!mods.alt,
+        });
+      }
+    } catch (_) {
+      event = null;
+    }
+    if (!event) {
+      event = document.createEvent('Event');
+      event.initEvent(type, true, true);
+      Object.keys(init || {}).forEach((key) => {
+        try { Object.defineProperty(event, key, { value: init[key] }); } catch (_) {}
+      });
+    }
+    const dispatched = target.dispatchEvent(event);
+    return event.defaultPrevented || dispatched === false;
+  };
+  window.pdockerTestImeFallbackInput = (kind, data = 'c') => {
+    if (readOnly) return false;
+    installHelperInputFallback();
+    const ta = helperTextarea();
+    if (!ta) return false;
+    if (kind === 'enter-beforeinput') {
+      return dispatchSyntheticTerminalEvent(ta, 'beforeinput', { inputType: 'insertLineBreak', data: null });
+    }
+    if (kind === 'ctrl-beforeinput') {
+      mods.ctrl = true;
+      refreshModifiers();
+      return dispatchSyntheticTerminalEvent(ta, 'beforeinput', { inputType: 'insertText', data: String(data || 'c').slice(0, 1) });
+    }
+    if (kind === 'ctrl-keydown') {
+      mods.ctrl = true;
+      refreshModifiers();
+      return dispatchSyntheticTerminalEvent(ta, 'keydown', { key: String(data || 'c').slice(0, 1) });
+    }
+    return false;
+  };
+
   if (!readOnly) {
     term.onData((data) => {
       if (consumeSuppressedTerminalData(data)) return;

@@ -219,6 +219,33 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         exact = self.run_verifier(payload, "--require-q6-match")
         self.assertEqual(exact.returncode, 30, exact.stdout)
 
+    def test_q6_oracle_mismatch_blocks_correctness_and_benchmark_claims(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "blocker_class": "vulkan-device-execution-or-writeback",
+                        "q6_shader_like_oracle_cleared": True,
+                    },
+                },
+                "correctness": gpu_correctness_report("pass", required_failures=0, passed=True, content="5"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=2.0, target_met=True),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-workgroup-cleared-but-oracle-mismatch")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertIn("vulkan-device-execution-or-writeback", report["next_action"])
+
 
     def test_compare_artifact_without_config_propagation_fails_closed(self):
         payload = {

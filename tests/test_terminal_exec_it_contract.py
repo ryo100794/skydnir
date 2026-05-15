@@ -126,11 +126,16 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn("lastCompositionTerminalData", self.xterm)
         self.assertIn("if (event.inputType === 'insertCompositionText') return;", self.xterm)
         self.assertIn("sendInput(data, true);", self.xterm)
+        self.assertIn("window.pdockerTestImeFallbackInput", self.xterm)
+        self.assertIn("enter-beforeinput", self.xterm)
+        self.assertIn("ctrl-beforeinput", self.xterm)
+        self.assertIn("dispatchSyntheticTerminalEvent", self.xterm)
 
     def test_ui_it_selftest_keeps_regression_symptoms_observable(self):
         self.assertIn('.put("Name", "ui-engine-exec-it")', self.main)
         self.assertIn("window.pdockerTestSendInput", self.main)
-        self.assertIn("window.pdockerTestCtrlInput('c')", self.main)
+        self.assertIn("window.pdockerTestImeFallbackInput('enter-beforeinput')", self.main)
+        self.assertIn("window.pdockerTestImeFallbackInput('ctrl-beforeinput', 'c')", self.main)
         for marker in [
             "pdocker-ui-it-bracket-ok",
             "pdocker-ui-it-tty-ok",
@@ -138,6 +143,7 @@ class TerminalExecItContractTest(unittest.TestCase):
             "pdocker-ui-it-bash-ok",
             "pdocker-ui-it-top-ok",
             "pdocker-ui-it-arrow-seed",
+            "pdocker-ui-it-ime-enter-ok",
             "pdocker-ui-it-topq-ok",
             "pdocker-ui-it-ctrlc-ok",
         ]:
@@ -148,13 +154,19 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn("window.pdockerTestSendInput('top\\\\n', false)", self.main)
         self.assertIn("window.pdockerTestSendInput('q', true)", self.main)
         self.assertIn(r"window.pdockerTestSendInput('echo \${p}-topq-ok\\n', false)", self.main)
+        self.assertIn('"UI exec -it fullscreen top did not render a refresh before q"', self.main)
         self.assertIn('"UI exec -it fullscreen top did not accept q', self.main)
+        self.assertIn('"ime-enter-ctrlc-regression-covered"', self.main)
+        self.assertIn('"top-refresh-observed-before-q"', self.main)
         self.assertIn('"top-repaint-remains-terminal-shaped"', self.main)
+        self.assertIn('evidence.put("top-refresh-observed-before-q", true)', self.main)
+        self.assertIn('evidence.put("ime-enter-ctrlc-regression-covered", true)', self.main)
         self.assertIn('evidence.put("top-repaint-remains-terminal-shaped", true)', self.main)
         self.assertIn('evidence.put("resize-route-is-observable", true)', self.main)
         self.assertIn('"UI exec -it did not observe Engine exec resize route in diagnostics"', self.main)
         self.assertIn('Regex("(/usr/bin/)?\\\\[: extra argument")', self.main)
         self.assertIn('"UI exec -it produced bracket argv noise"', self.main)
+        self.assertIn('"UI exec -it did not cover IME Enter/Ctrl-C fallback', self.main)
         self.assertIn('"UI exec -it did not preserve terminal CRLF line control"', self.main)
         self.assertIn('"UI exec -it is not attached to a controlling tty"', self.main)
         self.assertIn('"EngineExecDiagnostics"', self.main)
@@ -195,7 +207,10 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('"Enter": false', skip_body)
         self.assertIn('"CtrlC": false', skip_body)
         self.assertIn('"ArrowHistory": false', skip_body)
+        self.assertIn('"ImeEnterCtrlC": false', skip_body)
         self.assertIn('"Top": false', skip_body)
+        self.assertIn('"TopRefresh": false', skip_body)
+        self.assertIn('"TopRepaint": false', skip_body)
         self.assertIn('"TopQuit": false', skip_body)
         self.assertIn('"Resize": false', skip_body)
         self.assertIn('fake success', skip_body)
@@ -209,9 +224,15 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('"enter-single-submit"', validate_body)
         self.assertIn('"ctrl-c-interrupts-without-literal-c"', validate_body)
         self.assertIn('"arrow-up-reaches-readline-history"', validate_body)
+        self.assertIn('"ime-enter-ctrlc-regression-covered"', validate_body)
         self.assertIn('"top-starts-on-tty"', validate_body)
+        self.assertIn('"top-refresh-observed-before-q"', validate_body)
+        self.assertIn('"top-repaint-remains-terminal-shaped"', validate_body)
         self.assertIn('"q-quits-top"', validate_body)
         self.assertIn('"resize-route-is-observable"', validate_body)
+        self.assertIn('missing_evidence_flags', self.android_smoke)
+        self.assertIn('"pdocker-ui-it-ime-enter-ok" in tail', validate_body)
+        self.assertIn('any(marker in tail for marker in top_refresh_markers)', validate_body)
         self.assertIn('"/resize?h=" in diagnostics', validate_body)
         self.assertIn('"event":"resize-failed"', validate_body)
         self.assertNotRegex(
@@ -240,7 +261,7 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertLess(planned_skip_block.index('if success:'), planned_skip_block.index('raise SystemExit(0)'))
 
         resize_line = next(
-            line for line in validate_body.splitlines() if '"resize-route-is-observable"' in line
+            line for line in validate_body.splitlines() if '"resize-route-is-observable":' in line
         )
         self.assertIn('"/resize?h=" in diagnostics', resize_line)
         self.assertIn('resize-failed', resize_line)
@@ -305,6 +326,7 @@ class TerminalExecItContractTest(unittest.TestCase):
         for generic_hook in [
             "window.pdockerTestSendInput",
             "window.pdockerTestCtrlInput",
+            "window.pdockerTestImeFallbackInput",
             "PdockerBridge.input(toB64(enc.encode(payload)))",
             "PdockerBridge.resize(term.rows, term.cols)",
         ]:
@@ -334,9 +356,11 @@ class TerminalExecItContractTest(unittest.TestCase):
             "ctrl-c-interrupts-without-literal-c",
             "arrow-up-reaches-readline-history",
             "top-starts-on-tty",
+            "top-refresh-observed-before-q",
             "q-quits-top",
             "resize-route-is-observable",
             "top-repaint-remains-terminal-shaped",
+            "ime-enter-ctrlc-regression-covered",
             "UI-driven reproduction route",
             "Japanese IME",
             "Layer separation contract",

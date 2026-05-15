@@ -42,11 +42,18 @@ REQUIRED_RECOVERY_CASES = {
     "rename.before_publish",
     "archive_put.stage_failure",
     "hardlink_metadata.corrupt_rebuild",
+    "hardlink_metadata.truncated_rebuild",
     "low_space.copy_up_enospc",
 }
 
 REQUIRED_KILL_AT_STEP_CASES = {
     "copy_up.kill_before_rename_recovery",
+}
+
+REQUIRED_OOM_FORCED_KILL_CASES = {
+    "oom_or_lmk.restart_reconciliation",
+    "forced_kill.daemon_during_overlay_mutation",
+    "forced_kill.helper_during_archive_put",
 }
 
 COPYUP_BEFORE_RENAME_EVIDENCE_REQUIREMENTS = {
@@ -70,6 +77,7 @@ REQUIRED_RECOVERY_CHECKS = {
     "rename_fail_closed",
     "archive_put_fail_closed",
     "low_space_fail_closed",
+    "hardlink_ring_truncated_rebuild",
 }
 
 
@@ -185,6 +193,21 @@ def validate_recovery_artifact(path: Path) -> dict:
     cases = data.get("KillAtStepPlannedCases")
     require(isinstance(cases, list) and len(cases) >= 5, "external kill-at-step planned cases missing")
     require(all(case.get("Status") == "planned-gap" for case in cases), "external planned cases cannot be success")
+    oom_cases = data.get("OOMForcedKillConsistencyCases")
+    require(isinstance(oom_cases, list) and oom_cases, "OOM/forced-kill consistency cases missing")
+    oom_by_id = {case.get("Id"): case for case in oom_cases}
+    missing_oom = REQUIRED_OOM_FORCED_KILL_CASES - set(oom_by_id)
+    require(not missing_oom, f"OOM/forced-kill consistency cases missing: {sorted(missing_oom)}")
+    for cid in sorted(REQUIRED_OOM_FORCED_KILL_CASES):
+        case = oom_by_id[cid]
+        status = case.get("Status")
+        require(status in {"planned-gap", "pass"}, f"{cid} invalid status {status!r}")
+        require(case.get("ExpectedConsistency"), f"{cid} expected consistency missing")
+        require(case.get("FailureOracle"), f"{cid} failure oracle missing")
+        if status == "planned-gap":
+            require(case.get("GapReason"), f"{cid} planned-gap must explain gap reason")
+        else:
+            require(case.get("Evidence"), f"{cid} pass must include evidence")
     return data
 
 
@@ -207,6 +230,7 @@ def static_contract() -> None:
         require(case_id in recovery_text, f"recovery script lacks case {case_id}")
     require("KillAtStepConcreteCases" in recovery_text, "concrete kill-at-step cases missing")
     require("KillAtStepPlannedCases" in recovery_text, "external kill-at-step planned cases missing")
+    require("OOMForcedKillConsistencyCases" in recovery_text, "OOM/forced-kill consistency cases missing")
 
 
 def run_local(output_dir: Path | None = None) -> tuple[Path, Path]:

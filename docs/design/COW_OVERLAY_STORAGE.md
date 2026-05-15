@@ -86,6 +86,11 @@ Required rules:
 - If Android kills the app, daemon, direct runtime, or helper process during a
   mutation, startup reconciliation must classify the operation as interrupted
   before serving the affected path as healthy.
+- OOM/LMK and forced-kill consistency is a storage requirement, not only a
+  runtime requirement: after restart, COW/overlay state must be either the old
+  committed payload or a complete atomically published upper entry, never a
+  trusted temp file, staged archive extraction, partial whiteout, or corrupt
+  hardlink/ring accelerator.
 - User-facing APIs must not return success for a mutation unless the final
   visible state is present in the upperdir or volume and the operation evidence
   has been recorded.

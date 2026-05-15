@@ -13,6 +13,7 @@ trap 'rm -rf "$TMP"' EXIT
 LOWER="$TMP/lower"
 UPPER="$TMP/merged"
 HARDLINK_RING_STATUS="not-run"
+HARDLINK_TRUNCATED_STATUS="not-run"
 STATE_MACHINE_STATUS="not-run"
 KILL_CASES_STATUS="planned-gap"
 COPYUP_KILL_STATUS="not-run"
@@ -511,6 +512,7 @@ import os
 import sys
 
 root, index_path, rebuilt_path = sys.argv[1:4]
+partial_path = index_path + ".partial"
 
 
 def scan():
@@ -553,9 +555,25 @@ with open(rebuilt_path, "w", encoding="utf-8") as f:
 members = [set(group["Members"]) for group in good["Groups"]]
 if {"alpha.txt", "beta.txt"} not in members:
     raise SystemExit(f"hardlink pair was not reconstructed: {good}")
+
+with open(partial_path, "w", encoding="utf-8") as f:
+    f.write('{"SchemaVersion":1,"Kind":"cow-hardlink-ring-cache","Groups":[')
+
+try:
+    with open(partial_path, "r", encoding="utf-8") as f:
+        json.load(f)
+except json.JSONDecodeError:
+    truncated_rebuilt = scan()
+else:
+    raise SystemExit("truncated ring cache unexpectedly parsed as valid JSON")
+
+members = [set(group["Members"]) for group in truncated_rebuilt["Groups"]]
+if {"alpha.txt", "beta.txt"} not in members:
+    raise SystemExit(f"truncated-cache rebuild lost hardlink pair: {truncated_rebuilt}")
 PY
 HARDLINK_RING_STATUS="pass"
-echo "ok: corrupt hardlink ring cache is rebuildable from payload tree"
+HARDLINK_TRUNCATED_STATUS="pass"
+echo "ok: corrupt/truncated hardlink ring cache is rebuildable from payload tree"
 
 # ---- kill-at-step recovery cases are planned, not fake-passed ----
 # These are intentionally recorded as planned-gap until an external harness can
@@ -565,13 +583,13 @@ KILL_CASES_STATUS="planned-gap"
 echo "planned-gap: kill-at-step recovery harness not executed in local libcow test"
 
 mkdir -p "$(dirname "$COW_TEST_JSON")"
-python3 - "$COW_TEST_JSON" "$HARDLINK_RING_STATUS" "$STATE_MACHINE_STATUS" "$KILL_CASES_STATUS" "$STATE_MACHINE_RESULTS" "$COPYUP_KILL_STATUS" "$RENAME_DST_STATUS" <<'PY'
+python3 - "$COW_TEST_JSON" "$HARDLINK_RING_STATUS" "$HARDLINK_TRUNCATED_STATUS" "$STATE_MACHINE_STATUS" "$KILL_CASES_STATUS" "$STATE_MACHINE_RESULTS" "$COPYUP_KILL_STATUS" "$RENAME_DST_STATUS" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-out, hardlink_status, state_machine_status, kill_status, state_machine_path, copyup_kill_status, rename_dst_status = sys.argv[1:8]
+out, hardlink_status, hardlink_truncated_status, state_machine_status, kill_status, state_machine_path, copyup_kill_status, rename_dst_status = sys.argv[1:9]
 case_results = json.loads(Path(state_machine_path).read_text(encoding="utf-8"))
 case_results.extend([
     {
@@ -630,11 +648,20 @@ case_results.extend([
         "Status": hardlink_status,
         "Evidence": "rebuilt cache contains alpha.txt/beta.txt hardlink group",
     },
+    {
+        "Id": "hardlink_metadata.truncated_rebuild",
+        "Operation": "hardlink ring metadata rebuild",
+        "Fault": "truncated ring cache JSON after partial write or forced kill",
+        "ExpectedRecovery": "treat unparsable accelerator as absent and rebuild hardlink groups from payload inodes",
+        "Status": hardlink_truncated_status,
+        "Evidence": "truncated cache failed to parse; rebuilt scan still contains alpha.txt/beta.txt hardlink group",
+    },
 ])
 negative_cases = [case for case in case_results if case["Status"] == "pass" and case["Fault"]]
 all_executed_pass = (
     state_machine_status == "pass"
     and hardlink_status == "pass"
+    and hardlink_truncated_status == "pass"
     and copyup_kill_status == "pass"
     and rename_dst_status == "pass"
     and all(case.get("Status") == "pass" for case in case_results)
@@ -655,6 +682,7 @@ artifact = {
         "archive_put_fail_closed": "pass",
         "low_space_fail_closed": "pass",
         "hardlink_ring_corruption_rebuild": hardlink_status,
+        "hardlink_ring_truncated_rebuild": hardlink_truncated_status,
         "kill_at_step_external_harness": kill_status,
     },
     "CaseResults": case_results,
@@ -699,6 +727,29 @@ artifact = {
             "Step": "hardlink ring metadata write",
             "ExpectedRecovery": "discard corrupt accelerator and rebuild from payload tree",
             "Status": kill_status,
+        },
+    ],
+    "OOMForcedKillConsistencyCases": [
+        {
+            "Id": "oom_or_lmk.restart_reconciliation",
+            "Status": kill_status,
+            "ExpectedConsistency": "after restart, an operation/container with no live pid is classified as interrupted-or-lmk-suspected and is not shown as Up/running from stale state",
+            "FailureOracle": "fail if operation identity, last memory sample, or stale-running suppression is missing",
+            "GapReason": "requires Android low-memory or process-control harness to kill/restart the runtime and inspect persisted telemetry",
+        },
+        {
+            "Id": "forced_kill.daemon_during_overlay_mutation",
+            "Status": kill_status,
+            "ExpectedConsistency": "daemon death during a COW/overlay mutation leaves only old committed state or a complete published upper entry after startup reconciliation",
+            "FailureOracle": "fail if partial temp, whiteout, rename stage, or metadata cache is trusted as Docker-visible success",
+            "GapReason": "requires external daemon kill-at-step harness beyond local LD_PRELOAD process injection",
+        },
+        {
+            "Id": "forced_kill.helper_during_archive_put",
+            "Status": kill_status,
+            "ExpectedConsistency": "archive PUT helper death discards staged extraction and preserves live upperdir contents",
+            "FailureOracle": "fail if partially extracted files appear in the merged view or if the API reports success without a published stage",
+            "GapReason": "requires helper process kill/restart automation around archive PUT publication",
         },
     ],
     "Notes": [

@@ -48,6 +48,7 @@ class CowOverlayBenchRecoveryTests(unittest.TestCase):
             "rename.before_publish",
             "archive_put.stage_failure",
             "hardlink_metadata.corrupt_rebuild",
+            "hardlink_metadata.truncated_rebuild",
             "low_space.copy_up_enospc",
         ]
         cases = []
@@ -77,6 +78,7 @@ class CowOverlayBenchRecoveryTests(unittest.TestCase):
                 "archive_put_fail_closed": "pass",
                 "low_space_fail_closed": "pass",
                 "hardlink_ring_corruption_rebuild": "pass",
+                "hardlink_ring_truncated_rebuild": "pass",
                 "kill_at_step_external_harness": "planned-gap",
             },
             "CaseResults": cases,
@@ -97,6 +99,29 @@ class CowOverlayBenchRecoveryTests(unittest.TestCase):
                 {"Step": "whiteout creation", "ExpectedRecovery": "external harness recovery", "Status": "planned-gap"},
                 {"Step": "archive PUT stage publication", "ExpectedRecovery": "external harness recovery", "Status": "planned-gap"},
                 {"Step": "rename destination publication", "ExpectedRecovery": "external harness recovery", "Status": "planned-gap"},
+            ],
+            "OOMForcedKillConsistencyCases": [
+                {
+                    "Id": "oom_or_lmk.restart_reconciliation",
+                    "Status": "planned-gap",
+                    "ExpectedConsistency": "restart classifies missing live pid and avoids stale Up/running state",
+                    "FailureOracle": "fail if identity, telemetry, or stale-running suppression is missing",
+                    "GapReason": "requires Android LMK or restart harness",
+                },
+                {
+                    "Id": "forced_kill.daemon_during_overlay_mutation",
+                    "Status": "planned-gap",
+                    "ExpectedConsistency": "daemon kill leaves old committed state or complete published upper entry",
+                    "FailureOracle": "fail if partial overlay state is trusted as successful",
+                    "GapReason": "requires daemon kill-at-step harness",
+                },
+                {
+                    "Id": "forced_kill.helper_during_archive_put",
+                    "Status": "planned-gap",
+                    "ExpectedConsistency": "archive helper kill discards staged extraction",
+                    "FailureOracle": "fail if partial archive payload enters merged view",
+                    "GapReason": "requires helper process kill/restart automation",
+                },
             ],
         }
 
@@ -146,6 +171,13 @@ class CowOverlayBenchRecoveryTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("concrete kill-at-step cases missing", result.stderr)
 
+    def test_recovery_artifact_rejects_missing_oom_forced_kill_consistency_cases(self):
+        artifact = self.valid_recovery_artifact()
+        artifact["OOMForcedKillConsistencyCases"] = []
+        result = self.run_recovery_artifact_verifier(artifact)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("OOM/forced-kill consistency cases missing", result.stderr)
+
     def test_scripts_are_executable_and_shell_clean(self):
         for script in (BENCH, RECOVERY):
             self.assertTrue(os.access(script, os.X_OK), f"{script} must be executable")
@@ -193,6 +225,7 @@ class CowOverlayBenchRecoveryTests(unittest.TestCase):
             self.assertEqual(recovery["Checks"]["rename_fail_closed"], "pass")
             self.assertEqual(recovery["Checks"]["archive_put_fail_closed"], "pass")
             self.assertEqual(recovery["Checks"]["low_space_fail_closed"], "pass")
+            self.assertEqual(recovery["Checks"]["hardlink_ring_truncated_rebuild"], "pass")
             self.assertEqual(recovery["Checks"]["kill_at_step_external_harness"], "planned-gap")
             case_ids = {case["Id"] for case in recovery["CaseResults"]}
             for required in {
@@ -205,6 +238,7 @@ class CowOverlayBenchRecoveryTests(unittest.TestCase):
                 "rename.before_publish",
                 "archive_put.stage_failure",
                 "hardlink_metadata.corrupt_rebuild",
+                "hardlink_metadata.truncated_rebuild",
                 "low_space.copy_up_enospc",
             }:
                 self.assertIn(required, case_ids)
@@ -212,6 +246,15 @@ class CowOverlayBenchRecoveryTests(unittest.TestCase):
             self.assertIn("copy_up.kill_before_rename_recovery", concrete_ids)
             negative_ids = {case["Id"] for case in recovery["NegativeCases"]}
             self.assertGreaterEqual(negative_ids, case_ids)
+            oom_ids = {case["Id"] for case in recovery["OOMForcedKillConsistencyCases"]}
+            self.assertGreaterEqual(
+                oom_ids,
+                {
+                    "oom_or_lmk.restart_reconciliation",
+                    "forced_kill.daemon_during_overlay_mutation",
+                    "forced_kill.helper_during_archive_put",
+                },
+            )
 
 
 if __name__ == "__main__":

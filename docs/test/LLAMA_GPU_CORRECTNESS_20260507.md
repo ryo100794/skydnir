@@ -879,3 +879,24 @@ Environment propagation parity is now explicitly documented and guarded by
 - If one of those diagnostic knobs becomes required for ordinary correctness,
   it must be promoted into `_gpu_env(state)` rather than remaining only in the
   ad-hoc compare script.
+
+### Q6_K Oracle Claim Gate Tightening (2026-05-15)
+
+This synchronization pass changed only pdocker GPU bridge scripts, host tests,
+and documentation.  It did not modify llama.cpp, Dockerfiles, the model, prompt
+probes, native bridge kernels, or Android runtime binaries.
+
+The compare artifact now carries a bounded Q6_K boundary classification under
+`gpu.diagnostics.q6_workgroup_diagnostics.blocker_class`.  The classification
+is derived from existing dispatch evidence: Q6_K local-size consistency,
+read-only upload/dispatch hash stability, writable output binding hashes, the
+first sampled oracle mismatch, and whether the shader-like 32/64-lane CPU
+diagnostic agrees with the canonical Q6_K oracle.  This keeps the next strict
+passthrough run from reporting an undifferentiated sampled mismatch when the
+actual boundary is descriptor effective range/upload, read-only mutation or
+barrier scope, Vulkan device execution/writeback, or Q6_K arithmetic/reduction.
+
+The artifact verifier is also stricter: an HTTP prompt pass cannot by itself
+authorize a correctness or benchmark claim when the Q6_K oracle still reports
+`latest_status: "mismatch"`.  Correctness claims now require both the standard
+prompt evidence and a Q6_K workgroup-cleared oracle match.

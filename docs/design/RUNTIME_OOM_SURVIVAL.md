@@ -237,6 +237,11 @@ When Android still kills a process, pdocker should classify rather than guess:
   ring sample;
 - if the app/daemon restarts and finds an active operation without a live pid,
   mark it `interrupted-or-lmk-suspected` and attach the last sample;
+- if the interrupted operation was mutating COW/overlay storage, run the storage
+  reconciliation oracle before showing any container/image as healthy: partial
+  copy-up temps, staged archive PUT directories, partial whiteouts, rename
+  stages, and hardlink/ring accelerators must be discarded or rebuilt from the
+  payload tree instead of trusted as committed state;
 - if logcat or tombstone access is available, attach a bounded excerpt;
 - never leave a UI card saying `Up` when Engine state, pid liveness, and
   container metadata disagree.
