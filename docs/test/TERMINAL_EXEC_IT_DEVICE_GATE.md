@@ -10,6 +10,11 @@ ID or name is required by the caller.
 - If `HardGateRequired` is true, `Status: planned-skip` must fail the gate.
 - If a real container is required, the artifact must contain `Success: true`
   and a non-empty `Container` value.
+- A `Success: true` JSON file is not enough. The host-side verifier
+  `python3 scripts/verify-terminal-exec-it-artifact.py
+  ui-it-selftest-latest.json engine-exec-input-latest.jsonl
+  --require-container` must also pass against the raw Engine exec JSONL
+  collected from the device.
 - Quick smoke may still write a planned-skip artifact when no container exists,
   but that artifact is never counted as a hard-gate pass.
 
@@ -30,6 +35,23 @@ The skip artifact and real-run artifact must include:
 - `Evidence`, including `ime-enter-ctrlc-regression-covered`,
   `top-refresh-observed-before-q`, `top-repaint-remains-terminal-shaped`, and
   `resize-route-is-observable` as first-class keys
+
+For a real run, `engine-exec-input-latest.jsonl` must contain device-emitted
+EngineExecSession records, not reconstructed host text:
+
+- a `start` event whose `container` equals the artifact `Container`
+- `create-response`, `created`, `start-response`, and `stream-started` events
+  for one exec id, including a 2xx exec-create response and a 101 hijack start
+- `input` events that include the UI-driven script, ArrowUp+Enter
+  (`1b 5b 41 0d`), `top`, `q` (`71`), `sleep 15`, raw Ctrl-C (`03`), and the
+  post-interrupt recovery command
+- a Docker-compatible resize event with `/exec/{id}/resize?h={rows}&w={cols}`
+  or an explicit `resize-failed` event for the same exec id
+
+The verifier rejects fake success cases such as a planned-skip with
+`Success: true`, a success JSON without the raw JSONL sidecar, a `stream-started`
+event counted as resize evidence, mismatched container/exec ids, missing Ctrl-C
+byte proof, missing `q` for `top`, or literal `sleep 15c` input.
 
 ## Required evidence names
 

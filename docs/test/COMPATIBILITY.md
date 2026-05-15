@@ -53,6 +53,17 @@ Native UI action wiring only:
 python3 scripts/verify-ui-actions.py
 ```
 
+Archive API / `docker cp` host-only compatibility gate:
+
+```sh
+python3 scripts/verify-archive-api-compat.py
+```
+
+This gate intentionally avoids network, GPU, terminal, ADB, and container
+execution. It checks fail-closed tar extraction, lower/upper cow_bind merge
+for archive reads, whiteout hiding/recreation behavior, copied-file metadata
+preservation, and container/archive path traversal rejection.
+
 Service truth / teardown acceptance-plan gate:
 
 ```sh
@@ -187,7 +198,7 @@ tags such as `ubuntu:latest` are rejected even with the opt-in flag.
 | Image save/load | Partial | Docker-style tar exchange works for the implemented flattened image format. Multi-platform indexes, zstd layers, and all OCI edge cases are not complete. |
 | Container create/start/stop/kill/wait/rm | Good | Implemented through the Android direct userspace runner and state files. No cgroups or namespaces. Project/UI reconciliation still needs to rely on Engine container IDs plus pdocker labels rather than container names. |
 | Logs/attach/exec | Partial | Raw stream and hijack paths exist. Non-TTY exec works, and Android smoke covers a basic Engine `exec` with `Tty=true`. Full Docker attach parity, `docker run -t`, detach-key behavior, resize propagation, and broad interactive terminal cases still need more coverage. |
-| `docker cp` archive API | Partial | HEAD/GET/PUT support Docker tar and `X-Docker-Container-Path-Stat`. cow_bind reads prefer upper then lower, writes target upper. Directory merge of lower+upper entries is still incomplete. |
+| `docker cp` archive API | Partial+host-gated | HEAD/GET/PUT support Docker tar and `X-Docker-Container-Path-Stat`. cow_bind archive reads now merge lower-only, upper-only, and upper-overridden directory entries while hiding whiteouts; PUT targets upper, rejects traversal/reserved whiteout injection, clears a matching upper whiteout when recreating a file, and preserves mode/mtime through the Python data tar filter. `python3 scripts/verify-archive-api-compat.py` covers the host-only fail-closed gate. Remaining gaps are broader CLI/device parity and advanced archive edge cases. |
 | Stats | Partial | CPU/memory are approximated from `/proc`; network, blkio, and cgroup-limit counters are absent. Android storage metrics for layer, image-view, container-private, total, and free-space values need device refresh verification after build/prune/rebuild/edit flows. |
 | Networks | Compose-compatible host-network stub | List/create/connect/disconnect/inspect/delete satisfy common Compose flows. Synthetic identity fields, Docker-visible ports, and explicit port-publishing warnings are recorded, but no bridge IPs, DNS server, or iptables are claimed. `PdockerNetwork.PortMappingStatus` now separates requested mappings from active listener/proxy/rewrite evidence and reports peer/host-listener conflicts; real isolated forwarding remains incomplete. |
 | Volumes/binds | Partial | Named volumes map to host directories; bind mounts are represented in runtime metadata and direct-run argv. No kernel mount propagation or tmpfs semantics. |
@@ -310,8 +321,10 @@ Known gaps:
 - Android storage metrics still need device verification for nonnegative values
   and refresh behavior after build, prune, rebuild, and container edit/copy-up
   flows.
-- Full overlayfs semantics for deletions, rename, metadata operations, and
-  merged directory listings in cow_bind mode.
+- Full overlayfs semantics for runtime deletions, rename, and metadata
+  operations in cow_bind mode. Host-side archive directory listings now have a
+  focused lower/upper/whiteout gate, but broad CLI/device archive parity still
+  needs more evidence.
 - Strict libcow xattr preservation and fchmod/fchown on read-only file
   descriptors are opt-in performance/compatibility modes
   (`PDOCKER_COW_COPY_XATTRS=1`, `PDOCKER_COW_TRACK_READONLY_FDS=1`) rather than
@@ -324,8 +337,8 @@ Known gaps:
    - Copy-up and rewrite `rename`, `renameat`, `renameat2`.
    - Copy-up metadata syscalls: `chmod`, `chown`, `setxattr`, `removexattr`,
      and truncate variants.
-   - Implement merged directory view for host-side archive reads so `docker cp`
-     sees lower-only, upper-only, and upper-overridden entries together.
+   - Keep expanding host-side archive reads beyond the current lower/upper and
+     whiteout gate to cover broader Docker CLI/device edge cases.
 
 2. Improve protocol fidelity:
    - Add regression tests for chunked upload bodies and hijacked attach/exec
@@ -366,7 +379,7 @@ Known gaps:
 
 ## Refactoring status
 
-Completed in backend commit `d1906d3`:
+Completed in backend commit `d1906d3` and subsequent archive hardening:
 
 - Shared container runtime path resolution through `_container_runtime`.
 - Shared environment construction through `_container_env`.
@@ -375,10 +388,12 @@ Completed in backend commit `d1906d3`:
   side.
 - Removed duplicated env/rootfs/cow_bind setup from start, exec, and spawn
   paths.
+- Factored archive stat/tar/extract helpers away from the HTTP handler.
+- Added host-only archive API tests for tar extraction rejection, cow_bind
+  lower/upper merge, whiteouts, metadata preservation, and traversal rejection.
 
 Next cleanup candidates:
 
-- Factor archive tar creation/extraction away from the HTTP handler.
 - Split Dockerfile build execution from the daemon request handler.
 - Centralize Docker API error response shapes and headers.
 

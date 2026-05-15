@@ -3381,7 +3381,8 @@ static void write_vulkan_binding_report(
                 "\"fd_before_hash\":\"0x%016llx\","
                 "\"gpu_after_upload_hash\":\"0x%016llx\","
                 "\"gpu_after_dispatch_hash\":\"0x%016llx\","
-                "\"fd_after_hash\":\"0x%016llx\"}",
+                "\"fd_after_hash\":\"0x%016llx\","
+                "\"writeback_verified\":%s,\"writeback_mismatch\":%s}",
                 i ? "," : "",
                 i,
                 bindings[i].descriptor_set,
@@ -3415,7 +3416,15 @@ static void write_vulkan_binding_report(
                 (unsigned long long)(fd_before_hash ? fd_before_hash[i] : 0),
                 (unsigned long long)(gpu_after_upload_hash ? gpu_after_upload_hash[i] : 0),
                 (unsigned long long)(gpu_after_dispatch_hash ? gpu_after_dispatch_hash[i] : 0),
-                (unsigned long long)(fd_after_hash ? fd_after_hash[i] : 0));
+                (unsigned long long)(fd_after_hash ? fd_after_hash[i] : 0),
+                writable && writable[i] && gpu_after_dispatch_hash && fd_after_hash &&
+                        gpu_after_dispatch_hash[i] != 0 && fd_after_hash[i] != 0 &&
+                        gpu_after_dispatch_hash[i] == fd_after_hash[i]
+                    ? "true" : "false",
+                writable && writable[i] && gpu_after_dispatch_hash && fd_after_hash &&
+                        gpu_after_dispatch_hash[i] != 0 && fd_after_hash[i] != 0 &&
+                        gpu_after_dispatch_hash[i] != fd_after_hash[i]
+                    ? "true" : "false");
     }
     fprintf(out, "]");
 }

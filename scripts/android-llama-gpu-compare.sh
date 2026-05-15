@@ -1600,6 +1600,8 @@ def compact_q6_binding_detail(detail):
         "gpu_after_upload_hash": detail.get("gpu_after_upload_hash"),
         "gpu_after_dispatch_hash": detail.get("gpu_after_dispatch_hash"),
         "fd_after_hash": detail.get("fd_after_hash"),
+        "writeback_verified": detail.get("writeback_verified"),
+        "writeback_mismatch": detail.get("writeback_mismatch"),
     }
 
 
@@ -1608,6 +1610,10 @@ def numeric_close_to_zero(value, tolerance=1.0e-3):
         return abs(float(value)) <= tolerance
     except (TypeError, ValueError):
         return False
+
+
+def hash_evidence_present(value):
+    return bool(value) and value != "0x0000000000000000"
 
 
 q6_binding_details = [
@@ -1622,7 +1628,25 @@ q6_writable_binding_details = [
 ]
 q6_readonly_upload_hash_mismatches = []
 q6_readonly_dispatch_mutations = []
+q6_writable_writeback_mismatches = []
+q6_writable_writeback_unknown = []
 for detail in q6_binding_details:
+    if detail.get("writable"):
+        dispatch_hash = detail.get("gpu_after_dispatch_hash")
+        after_hash = detail.get("fd_after_hash")
+        compact = compact_q6_binding_detail(detail)
+        if detail.get("writeback_mismatch") is True or (
+            hash_evidence_present(dispatch_hash)
+            and hash_evidence_present(after_hash)
+            and dispatch_hash != after_hash
+        ):
+            q6_writable_writeback_mismatches.append(compact)
+        elif detail.get("writeback_verified") is not True and not (
+            hash_evidence_present(dispatch_hash)
+            and hash_evidence_present(after_hash)
+            and dispatch_hash == after_hash
+        ):
+            q6_writable_writeback_unknown.append(compact)
     if not detail.get("readable") or detail.get("writable"):
         continue
     before_hash = detail.get("fd_before_hash")
@@ -1633,6 +1657,7 @@ for detail in q6_binding_details:
         q6_readonly_upload_hash_mismatches.append(compact)
     elif upload_hash and dispatch_hash and upload_hash != dispatch_hash:
         q6_readonly_dispatch_mutations.append(compact)
+q6_writeback_verified_all = bool(q6_writable_binding_details) and not q6_writable_writeback_mismatches and not q6_writable_writeback_unknown
 q6_first_mismatch = (
     q6_latest_oracle.get("first_mismatch")
     if isinstance(q6_latest_oracle.get("first_mismatch"), dict)
@@ -1664,6 +1689,10 @@ q6_blocker_class = (
     if q6_readonly_upload_hash_mismatches
     else "shader-readonly-mutation-or-barrier-scope"
     if q6_readonly_dispatch_mutations
+    else "writeback"
+    if q6_writable_writeback_mismatches
+    else "vulkan-device-execution"
+    if q6_shader_like_oracle_cleared and q6_writeback_verified_all
     else "vulkan-device-execution-or-writeback"
     if q6_shader_like_oracle_cleared
     else "q6-arithmetic-reduction-or-output-layout"
@@ -1692,6 +1721,9 @@ q6_workgroup_diagnostics = {
     "q6_writable_bindings": q6_writable_binding_details[:8],
     "q6_readonly_upload_hash_mismatches": q6_readonly_upload_hash_mismatches[:8],
     "q6_readonly_dispatch_mutations": q6_readonly_dispatch_mutations[:8],
+    "q6_writable_writeback_mismatches": q6_writable_writeback_mismatches[:8],
+    "q6_writable_writeback_unknown": q6_writable_writeback_unknown[:8],
+    "q6_writeback_verified_all": q6_writeback_verified_all,
     "workgroup_shape_blocker": q6_workgroup_shape_blocker,
     "blocker_class": q6_blocker_class,
     "diagnostic_interpretation": (

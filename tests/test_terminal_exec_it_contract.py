@@ -9,6 +9,7 @@ BRIDGE = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794
 ENGINE_EXEC_SESSION = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "EngineExecSession.kt"
 XTERM = ROOT / "app" / "src" / "main" / "assets" / "xterm" / "index.html"
 ANDROID_SMOKE = ROOT / "scripts" / "android-device-smoke.sh"
+TERMINAL_EXEC_IT_VERIFIER = ROOT / "scripts" / "verify-terminal-exec-it-artifact.py"
 DEVICE_GATE_DOC = ROOT / "docs" / "test" / "TERMINAL_EXEC_IT_DEVICE_GATE.md"
 
 
@@ -39,6 +40,7 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.engine_exec_session = ENGINE_EXEC_SESSION.read_text()
         self.xterm = XTERM.read_text()
         self.android_smoke = ANDROID_SMOKE.read_text()
+        self.terminal_exec_it_verifier = TERMINAL_EXEC_IT_VERIFIER.read_text()
 
     def test_container_terminal_uses_engine_exec_api_not_local_shell_or_logs(self):
         body = _method_body(self.main, "private fun openDockerInteractiveTerminal")
@@ -216,27 +218,36 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('fake success', skip_body)
 
         validate_body = _shell_function_body(self.android_smoke, "validate_ui_it_selftest_artifact")
-        self.assertIn('status == "planned-skip"', validate_body)
-        self.assertIn('if success:', validate_body)
-        self.assertIn("planned-skip must never report Success=true", validate_body)
-        self.assertIn('artifact.get("DeviceProofAttempted") is True', validate_body)
-        self.assertIn("hard gate requires a real container; planned-skip is not a pass", validate_body)
-        self.assertIn('"enter-single-submit"', validate_body)
-        self.assertIn('"ctrl-c-interrupts-without-literal-c"', validate_body)
-        self.assertIn('"arrow-up-reaches-readline-history"', validate_body)
-        self.assertIn('"ime-enter-ctrlc-regression-covered"', validate_body)
-        self.assertIn('"top-starts-on-tty"', validate_body)
-        self.assertIn('"top-refresh-observed-before-q"', validate_body)
-        self.assertIn('"top-repaint-remains-terminal-shaped"', validate_body)
-        self.assertIn('"q-quits-top"', validate_body)
-        self.assertIn('"resize-route-is-observable"', validate_body)
-        self.assertIn('missing_evidence_flags', self.android_smoke)
-        self.assertIn('"pdocker-ui-it-ime-enter-ok" in tail', validate_body)
-        self.assertIn('any(marker in tail for marker in top_refresh_markers)', validate_body)
-        self.assertIn('"/resize?h=" in diagnostics', validate_body)
-        self.assertIn('"event":"resize-failed"', validate_body)
+        self.assertIn('python3 "$ROOT/scripts/verify-terminal-exec-it-artifact.py"', validate_body)
+        self.assertIn('"$dest_dir/ui-it-selftest-latest.json"', validate_body)
+        self.assertIn('"$dest_dir/engine-exec-input-latest.jsonl"', validate_body)
+        self.assertIn('require_flag=(--require-container)', validate_body)
+
+        verifier = self.terminal_exec_it_verifier
+        self.assertIn('status == "planned-skip"', verifier)
+        self.assertIn('artifact.get("Success") is not True', verifier)
+        self.assertIn("planned-skip must never report Success=true", verifier)
+        self.assertIn('artifact.get("DeviceProofAttempted") is not True', verifier)
+        self.assertIn("hard gate requires a real container; planned-skip is not a pass", verifier)
+        self.assertIn('REQUIRED_EVIDENCE = [', verifier)
+        self.assertIn('"enter-single-submit"', verifier)
+        self.assertIn('"ctrl-c-interrupts-without-literal-c"', verifier)
+        self.assertIn('"arrow-up-reaches-readline-history"', verifier)
+        self.assertIn('"ime-enter-ctrlc-regression-covered"', verifier)
+        self.assertIn('"top-starts-on-tty"', verifier)
+        self.assertIn('"top-refresh-observed-before-q"', verifier)
+        self.assertIn('"top-repaint-remains-terminal-shaped"', verifier)
+        self.assertIn('"q-quits-top"', verifier)
+        self.assertIn('"resize-route-is-observable"', verifier)
+        self.assertIn('missing_flags', verifier)
+        self.assertIn('"pdocker-ui-it-ime-enter-ok" in tail', verifier)
+        self.assertIn('any(marker in tail for marker in TOP_REFRESH_MARKERS)', verifier)
+        self.assertIn('"/resize?h=" in _event_body(event)', verifier)
+        self.assertIn('"resize-failed"', verifier)
+        self.assertIn('_read_jsonl(input_jsonl_path)', verifier)
+        self.assertIn('Engine exec input diagnostics missing Ctrl-C byte', verifier)
         self.assertNotRegex(
-            validate_body,
+            verifier,
             r'"resize-route-is-observable"[^\n]*stream-started',
             'stream-started only proves exec stream startup and must not satisfy resize evidence',
         )
@@ -247,26 +258,28 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertNotIn('ui_engine_exec_it_selftest "$CID"\n', self.android_smoke)
 
     def test_ui_it_validator_rejects_fake_success_planned_skip_and_stream_started_resize(self):
-        validate_body = _shell_function_body(self.android_smoke, "validate_ui_it_selftest_artifact")
+        verifier = self.terminal_exec_it_verifier
 
         # A planned-skip artifact is useful diagnostic evidence, but even an
         # accidental/fabricated Success=true must be rejected before optional
         # non-required skips are accepted.
-        planned_skip_block = validate_body[
-            validate_body.index('if status == "planned-skip":') : validate_body.index('if require_container and not artifact.get("Container")')
+        planned_skip_block = verifier[
+            verifier.index('def _verify_planned_skip') : verifier.index('def _verify_success_json')
         ]
-        self.assertIn('if success:', planned_skip_block)
+        self.assertIn('artifact.get("Success") is not True', planned_skip_block)
         self.assertIn('planned-skip must never report Success=true', planned_skip_block)
         self.assertIn('DeviceProofAttempted', planned_skip_block)
-        self.assertLess(planned_skip_block.index('if success:'), planned_skip_block.index('raise SystemExit(0)'))
+        self.assertLess(planned_skip_block.index('Success'), planned_skip_block.index('DeviceProofAttempted'))
 
         resize_line = next(
-            line for line in validate_body.splitlines() if '"resize-route-is-observable":' in line
+            line for line in verifier.splitlines() if 'resize proof must be a resize route' in line
         )
-        self.assertIn('"/resize?h=" in diagnostics', resize_line)
-        self.assertIn('resize-failed', resize_line)
-        self.assertNotIn('stream-started', resize_line)
-        self.assertIn('stream-started only proves the exec stream was opened', validate_body)
+        self.assertIn('not stream-started alone', resize_line)
+        self.assertIn('stream-started alone is not accepted', verifier)
+        self.assertIn('Engine exec diagnostics missing resize route event', verifier)
+        self.assertIn('Engine exec input diagnostics missing ArrowUp+Enter bytes', verifier)
+        self.assertIn('Engine exec input diagnostics missing Ctrl-C byte', verifier)
+        self.assertIn('Engine exec input diagnostics missing q byte', verifier)
 
 
     def test_engine_exec_path_is_centralized_in_named_session(self):

@@ -172,9 +172,10 @@
       "command": "bash scripts/android-device-smoke.sh --quick --no-install",
       "status": "runnable-with-device",
       "docs": [
-        "docs/test/ANDROID_SELFDEBUG.md"
+        "docs/test/ANDROID_SELFDEBUG.md",
+        "docs/test/TERMINAL_EXEC_IT_DEVICE_GATE.md"
       ],
-      "checks": "Engine exec -it path, PTY fallback, bracket argv regression, and Android smoke wiring."
+      "checks": "Engine exec -it path, PTY fallback, Enter, Ctrl-C, ArrowUp/history, top refresh/q, resize, IME fallback, host artifact verifier, bracket argv regression, and Android smoke wiring."
     },
     {
       "id": "project.library.templates",

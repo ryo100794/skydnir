@@ -644,6 +644,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q6_output_base_index", compare)
         self.assertIn("q6_weight_base_blocks", compare)
         self.assertIn("q6_shader_like_64_abs_delta", compare)
+        self.assertIn("q6_writable_writeback_mismatches", compare)
+        self.assertIn("q6_writeback_verified_all", compare)
+        self.assertIn("vulkan-device-execution\"", compare)
+        self.assertIn("writeback_verified", GPU_EXECUTOR.read_text())
+        self.assertIn("writeback_mismatch", GPU_EXECUTOR.read_text())
         forward_envs = set(load_llama_gpu_artifact_verifier().LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
         for key in [
             "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",

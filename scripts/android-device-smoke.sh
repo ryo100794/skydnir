@@ -1428,84 +1428,15 @@ JSON
 validate_ui_it_selftest_artifact() {
   local require_container="$1"
   local dest_dir
+  local require_flag=()
   dest_dir="$(smoke_artifact_dir)"
-  python3 - "$dest_dir/ui-it-selftest-latest.json" "$dest_dir/engine-exec-input-latest.jsonl" "$require_container" <<'PY'
-import json
-import pathlib
-import sys
-
-artifact_path = pathlib.Path(sys.argv[1])
-input_path = pathlib.Path(sys.argv[2])
-require_container = sys.argv[3] == "1"
-
-if not artifact_path.is_file():
-    raise SystemExit(f"missing UI exec-it artifact: {artifact_path}")
-
-artifact = json.loads(artifact_path.read_text())
-status = artifact.get("Status", "")
-success = artifact.get("Success") is True
-
-if status == "planned-skip":
-    if success:
-        raise SystemExit("UI exec-it planned-skip must never report Success=true")
-    if artifact.get("DeviceProofAttempted") is True:
-        raise SystemExit("UI exec-it planned-skip must not claim device proof was attempted")
-    if require_container:
-        raise SystemExit("UI exec-it hard gate requires a real container; planned-skip is not a pass")
-    raise SystemExit(0)
-
-if success and status == "planned-skip":
-    raise SystemExit("UI exec-it planned-skip must never be accepted as success")
-
-if require_container and not artifact.get("Container"):
-    raise SystemExit("UI exec-it hard gate artifact is missing Container")
-
-if not success:
-    raise SystemExit(f"UI exec-it self-test failed: {artifact.get('Error', artifact)}")
-
-tail = artifact.get("OutputTail", "")
-diagnostics = ""
-if input_path.is_file():
-    diagnostics = input_path.read_text(errors="replace")
-diagnostics += "\n" + artifact.get("EngineExecDiagnostics", "")
-
-top_refresh_markers = ("PID", "Tasks:", "Task:", "Mem:", "CPU:", "load average", "Load Avg")
-required_names = [
-    "enter-single-submit",
-    "ctrl-c-interrupts-without-literal-c",
-    "arrow-up-reaches-readline-history",
-    "ime-enter-ctrlc-regression-covered",
-    "top-starts-on-tty",
-    "top-refresh-observed-before-q",
-    "top-repaint-remains-terminal-shaped",
-    "q-quits-top",
-    "resize-route-is-observable",
-]
-artifact_required = set(artifact.get("RequiredEvidence") or [])
-artifact_evidence = artifact.get("Evidence") or {}
-checks = {
-    "enter-single-submit": "pdocker-ui-it-ok" in tail,
-    "ctrl-c-interrupts-without-literal-c": "pdocker-ui-it-ctrlc-ok" in tail and "sleep 15c" not in tail,
-    "arrow-up-reaches-readline-history": tail.count("pdocker-ui-it-arrow-seed") >= 2 and "\\e[A" not in tail,
-    "ime-enter-ctrlc-regression-covered": "pdocker-ui-it-ime-enter-ok" in tail and "pdocker-ui-it-ctrlc-ok" in tail and "sleep 15c" not in tail,
-    "top-starts-on-tty": "pdocker-ui-it-top-ok" in tail,
-    "top-refresh-observed-before-q": any(marker in tail for marker in top_refresh_markers),
-    "top-repaint-remains-terminal-shaped": artifact_evidence.get("top-repaint-remains-terminal-shaped") is True,
-    "q-quits-top": "pdocker-ui-it-topq-ok" in tail,
-    # stream-started only proves the exec stream was opened; resize evidence must
-    # show the Docker-compatible resize route or an explicit resize-failed event.
-    "resize-route-is-observable": ("/resize?h=" in diagnostics) or ('"event":"resize-failed"' in diagnostics) or ('"event": "resize-failed"' in diagnostics),
-}
-missing_required = [name for name in required_names if name not in artifact_required]
-if missing_required:
-    raise SystemExit("UI exec-it artifact RequiredEvidence missing: " + ", ".join(missing_required))
-missing_evidence_flags = [name for name in required_names if artifact_evidence.get(name) is not True]
-if missing_evidence_flags:
-    raise SystemExit("UI exec-it artifact Evidence flags not true: " + ", ".join(missing_evidence_flags))
-missing = [name for name, ok in checks.items() if not ok]
-if missing:
-    raise SystemExit("UI exec-it evidence missing: " + ", ".join(missing))
-PY
+  if [[ "$require_container" == "1" ]]; then
+    require_flag=(--require-container)
+  fi
+  python3 "$ROOT/scripts/verify-terminal-exec-it-artifact.py" \
+    "$dest_dir/ui-it-selftest-latest.json" \
+    "$dest_dir/engine-exec-input-latest.jsonl" \
+    "${require_flag[@]}"
 }
 
 ui_engine_exec_it_selftest() {

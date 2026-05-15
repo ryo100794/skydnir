@@ -37,6 +37,7 @@ run python3 -m py_compile \
   scripts/verify-refactor-resilience.py \
   scripts/verify-storage-metrics.py \
   scripts/verify-ui-actions.py \
+  scripts/verify-terminal-exec-it-artifact.py \
   scripts/verify_terminal_editor_contracts.py \
   scripts/update-showcase.py \
   docker-proot-setup/scripts/verify_runtime_contract.py
@@ -62,6 +63,7 @@ run python3 scripts/verify-project-library.py
 run python3 scripts/verify-storage-metrics.py
 run python3 scripts/verify-ui-actions.py
 run python3 scripts/verify_terminal_editor_contracts.py
+run python3 -m unittest tests.test_terminal_exec_it_contract tests.test_terminal_exec_it_artifact_verifier
 run bash scripts/smoke-vulkan-llama-init.sh
 run bash scripts/smoke-vulkan-icd-bridge.sh
 run python3 scripts/compat-audit.py

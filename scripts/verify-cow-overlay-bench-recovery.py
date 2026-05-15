@@ -20,6 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "docker-proot-setup" / "src" / "overlay"
 BENCH = OVERLAY / "bench_cow.sh"
 RECOVERY = OVERLAY / "test_cow.sh"
+DEVICE_KILL_AT_STEP_RUNNER = ROOT / "scripts" / "verify" / "runner" / "cow_overlay_kill_at_step_device.py"
+DEVICE_KILL_AT_STEP_SIDE = ROOT / "scripts" / "verify" / "runner" / "cow-overlay-kill-at-step-device.sh"
+DEVICE_KILL_AT_STEP_DOC = ROOT / "docs" / "test" / "COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md"
 
 REQUIRED_METRICS = {
     "open_close",
@@ -231,6 +234,34 @@ def static_contract() -> None:
     require("KillAtStepConcreteCases" in recovery_text, "concrete kill-at-step cases missing")
     require("KillAtStepPlannedCases" in recovery_text, "external kill-at-step planned cases missing")
     require("OOMForcedKillConsistencyCases" in recovery_text, "OOM/forced-kill consistency cases missing")
+    for path in (DEVICE_KILL_AT_STEP_RUNNER, DEVICE_KILL_AT_STEP_SIDE, DEVICE_KILL_AT_STEP_DOC):
+        require(path.exists(), f"missing external kill-at-step device gate file: {path}")
+    runner_text = DEVICE_KILL_AT_STEP_RUNNER.read_text(encoding="utf-8")
+    side_text = DEVICE_KILL_AT_STEP_SIDE.read_text(encoding="utf-8")
+    doc_text = DEVICE_KILL_AT_STEP_DOC.read_text(encoding="utf-8")
+    for token in (
+        "pdocker.cow-overlay-kill-at-step-device.v1",
+        "copy_up.daemon_kill_before_publish",
+        "rename.daemon_kill_before_destination_publish",
+        "metadata.daemon_kill_before_metadata_publish",
+        "whiteout.daemon_kill_before_marker_publish",
+        "hardlink_ring.daemon_kill_during_cache_publish",
+        "hardlink_ring.helper_kill_during_cache_rebuild",
+        "success",
+        "planned-gap",
+        "collected_via_adb_run_as",
+    ):
+        require(token in runner_text, f"device kill-at-step runner lacks {token}")
+    require("pkill" not in side_text and "killall" not in side_text, "device kill-at-step side runner must not kill by process name")
+    for token in ("Status: planned-gap", "success=false", "stable_checkpoint_eligible=false", "copy_up", "rename", "metadata", "whiteout", "hardlink_ring"):
+        require(token in doc_text, f"device kill-at-step doc lacks {token}")
+    with tempfile.TemporaryDirectory(prefix="cow-kill-at-step-static-") as td:
+        planned = Path(td) / "planned.json"
+        run([sys.executable, str(DEVICE_KILL_AT_STEP_RUNNER), "--adb", "__missing_adb_for_static_gate__", "--artifact", str(planned)])
+        planned_data = json.loads(planned.read_text(encoding="utf-8"))
+        require(planned_data.get("status") == "planned-gap", "missing-adb kill-at-step artifact must be planned-gap")
+        require(planned_data.get("success") is False, "missing-adb kill-at-step artifact must not report success")
+        require(planned_data.get("device_promotion_evidence") is False, "missing-adb artifact must not promote device evidence")
 
 
 def run_local(output_dir: Path | None = None) -> tuple[Path, Path]:

@@ -326,6 +326,15 @@ Pass criteria:
   output base, derived weight-row block base, and optional accumulator bindings
   3/4.  A nonzero accumulator mask with missing/unreadable accumulator inputs is
   a fail-closed oracle blocker, not a generic arithmetic mismatch.
+- The next host-side diagnostic split now records writable-binding writeback
+  hash evidence.  Executor binding details include `writeback_verified` and
+  `writeback_mismatch`; the compare summary includes
+  `q6_writable_writeback_mismatches`, `q6_writable_writeback_unknown`, and
+  `q6_writeback_verified_all`.  A strict-passthrough artifact can now narrow the
+  previous `vulkan-device-execution-or-writeback` class to `writeback` when the
+  fd hash disagrees with the post-dispatch GPU/staging hash, or to
+  `vulkan-device-execution` when shader-like Q6 arithmetic is cleared and all
+  writable writebacks are hash-verified.
 
 Fail criteria:
 

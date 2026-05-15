@@ -161,11 +161,18 @@ COW_TEST_JSON=docs/test/cow-overlay-recovery-latest.json \
   bash docker-proot-setup/src/overlay/test_cow.sh
 ```
 
+## Android external kill-at-step device gate
+
+The external daemon/helper kill-at-step proof is tracked separately in
+[`COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md`](COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md).
+That runner writes `docs/test/cow-overlay-kill-at-step-latest.json` and must stay
+`planned-gap`/`success=false` without adb/run-as checkpoint evidence.  It cannot
+promote host-local COW recovery into Android process-death proof unless copy-up,
+rename, metadata, whiteout, and daemon/helper hardlink-ring cases all pass with
+exact checkpoint, pid kill, restart, merged-view, residue, and rebuild evidence.
+
 ## Remaining gap
 
 This scaffold proves the host-local `copyup.before_rename` fail/kill evidence
 above, but it does not yet prove Android daemon/helper process death recovery
-at every mutation checkpoint.  The next gate must add device-side kill/restart
-automation and promote the remaining external `planned-gap` kill-at-step cases
-to executable evidence before release claims can be made for crash-safe overlay
-mutation.
+at every mutation checkpoint.  The next gate must implement the APK/daemon checkpoint protocol used by `cow_overlay_kill_at_step_device.py` and promote the remaining external `planned-gap` kill-at-step cases to executable Android evidence before release claims can be made for crash-safe overlay mutation.

@@ -133,6 +133,20 @@
         }
       ]
     },
+    "android-cow-overlay-kill-at-step": {
+      "description": "Device route for COW/overlay external daemon/helper kill-at-step recovery evidence. Without adb or the APK checkpoint helper it writes non-promoting planned-gap/blocked-device evidence only.",
+      "requires": ["adb", "installed-debug-apk", "pdocker-cow-kill-at-step-debug-helper"],
+      "checkpoint_class": "device-evidence-only",
+      "stable_checkpoint_eligible": false,
+      "promotion_condition": "Must satisfy docs/test/CI_GATE_LEDGER.md COW/overlay external kill-at-step promotion condition with status=pass and every required case proven by adb/run-as evidence.",
+      "commands": [
+        {
+          "id": "cow-overlay-kill-at-step-device",
+          "argv": ["python3", "scripts/verify/runner/cow_overlay_kill_at_step_device.py", "--execute-device", "--artifact", "docs/test/cow-overlay-kill-at-step-latest.json"],
+          "artifacts": ["docs/test/cow-overlay-kill-at-step-latest.json"]
+        }
+      ]
+    },
     "android-test-suite": {
       "description": "Device route: stage compose project, compose up/build through the app, then Engine exec the test-suite.",
       "requires": ["adb", "installed-debug-apk"],

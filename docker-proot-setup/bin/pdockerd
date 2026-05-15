@@ -1617,6 +1617,227 @@ def _container_host_path(state, cdir, ctr_path, for_write=False):
     return upper if os.path.lexists(upper) else lower
 
 
+def _container_archive_relpath(cow, ctr_path):
+    """Return a safe rootfs-relative archive path, or None on traversal.
+
+    The Engine archive API receives container paths from an HTTP query string.
+    Resolve them against the real lower/upper roots instead of normalizing
+    against "/" first; `../../host` must stay an escape attempt and fail
+    closed, not become `/host`.
+    """
+    if "\x00" in (ctr_path or ""):
+        return None
+    base = cow["upper"] if cow else os.path.sep
+    resolved = _join_under(base, (ctr_path or "/").lstrip("/"))
+    if resolved is None:
+        return None
+    rel = os.path.relpath(resolved, base)
+    return "" if rel == "." else rel
+
+
+def _archive_whiteout_name(name):
+    return f"{WHITEOUT_PREFIX}{name}"
+
+
+def _archive_rel_parts(rel):
+    if not rel:
+        return []
+    return [part for part in rel.split(os.sep) if part and part != "."]
+
+
+def _archive_is_internal_whiteout_path(rel):
+    return any(part.startswith(WHITEOUT_PREFIX) for part in _archive_rel_parts(rel))
+
+
+def _cow_path_hidden_by_whiteout(cow, rel):
+    """Return True when an upperdir whiteout/opaque marker hides `rel`.
+
+    This mirrors overlayfs visibility for host-side archive reads.  It handles
+    direct `.wh.<name>` markers plus opaque directories.  An opaque directory
+    hides lower-only descendants but still allows entries that exist in upper.
+    """
+    if not cow:
+        return False
+    parts = _archive_rel_parts(rel)
+    if not parts or _archive_is_internal_whiteout_path(rel):
+        return _archive_is_internal_whiteout_path(rel)
+    upper = cow["upper"]
+    for idx, part in enumerate(parts):
+        parent = os.path.join(upper, *parts[:idx]) if idx else upper
+        if os.path.lexists(os.path.join(parent, _archive_whiteout_name(part))):
+            return True
+        if os.path.lexists(os.path.join(parent, OPAQUE_MARKER)):
+            candidate = os.path.join(upper, *parts[:idx + 1])
+            if not os.path.lexists(candidate):
+                return True
+    return False
+
+
+def _cow_archive_source(cow, rel):
+    """Return the visible host source for a cow_bind archive path.
+
+    Directories may need a merged lower+upper traversal, so callers must still
+    use `_tar_add_cow_merged_path` when `source` is a directory.
+    """
+    if not cow:
+        return None
+    upper = os.path.join(cow["upper"], rel) if rel else cow["upper"]
+    lower = os.path.join(cow["lower"], rel) if rel else cow["lower"]
+    if _cow_path_hidden_by_whiteout(cow, rel):
+        return None
+    if os.path.lexists(upper):
+        return upper
+    if os.path.lexists(lower):
+        return lower
+    return None
+
+
+def _container_archive_source(state, cdir, ctr_path):
+    """Resolve a container archive path to `(rel, source)` or `(None, None)`.
+
+    Unlike `_container_host_path`, this is visibility-aware for cow_bind
+    whiteouts and opaque dirs, so Docker archive HEAD/GET do not leak deleted
+    lower-layer content.
+    """
+    cow = _container_cow_bind(state)
+    if cow:
+        rel = _container_archive_relpath(cow, ctr_path)
+        if rel is None:
+            return None, None
+        return rel, _cow_archive_source(cow, rel)
+    rootfs = os.path.join(cdir, "rootfs")
+    source = _join_under(rootfs, (ctr_path or "/").lstrip("/"))
+    if source is None:
+        return None, None
+    rel = os.path.relpath(source, rootfs)
+    return "" if rel == "." else rel, source if os.path.lexists(source) else None
+
+
+def _container_archive_stat(state, cdir, ctr_path):
+    rel, source = _container_archive_source(state, cdir, ctr_path)
+    if rel is None or source is None:
+        return None
+    st = os.lstat(source)
+    return {
+        "name": os.path.basename(ctr_path.rstrip("/")) or "/",
+        "size": st.st_size,
+        "mode": st.st_mode,
+        "mtime": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime)),
+        "linkTarget": os.readlink(source) if os.path.islink(source) else "",
+    }
+
+
+def _cow_merged_dir_entries(cow, rel):
+    """List visible child names for a merged cow_bind directory."""
+    upper_dir = os.path.join(cow["upper"], rel) if rel else cow["upper"]
+    lower_dir = os.path.join(cow["lower"], rel) if rel else cow["lower"]
+    names = set()
+    opaque = os.path.lexists(os.path.join(upper_dir, OPAQUE_MARKER))
+    if not opaque and os.path.isdir(lower_dir):
+        try:
+            names.update(os.listdir(lower_dir))
+        except OSError:
+            pass
+    if os.path.isdir(upper_dir):
+        try:
+            upper_names = os.listdir(upper_dir)
+        except OSError:
+            upper_names = []
+        for name in upper_names:
+            if name == OPAQUE_MARKER:
+                continue
+            if name.startswith(WHITEOUT_PREFIX):
+                names.discard(name[len(WHITEOUT_PREFIX):])
+                continue
+            names.add(name)
+    return sorted(n for n in names if not n.startswith(WHITEOUT_PREFIX))
+
+
+def _tar_child_arcname(parent, name):
+    parent = parent.rstrip("/")
+    if parent in ("", "."):
+        return name
+    return f"{parent}/{name}"
+
+
+def _tar_add_cow_merged_path(tf, cow, rel, arcname):
+    source = _cow_archive_source(cow, rel)
+    if source is None:
+        return
+    if not os.path.isdir(source) or os.path.islink(source):
+        tf.add(source, arcname=arcname, recursive=False)
+        return
+    info = tf.gettarinfo(source, arcname=arcname)
+    tf.addfile(info)
+    for name in _cow_merged_dir_entries(cow, rel):
+        child_rel = os.path.join(rel, name) if rel else name
+        _tar_add_cow_merged_path(tf, cow, child_rel, _tar_child_arcname(arcname, name))
+
+
+def write_container_path_archive(out_stream, state, cdir, ctr_path):
+    """Write Docker `GET /containers/{id}/archive` tar content to a stream."""
+    rel, source = _container_archive_source(state, cdir, ctr_path)
+    if rel is None:
+        raise BadRequest("path escapes rootfs")
+    if source is None:
+        raise FileNotFoundError(ctr_path)
+    arcname = os.path.basename((ctr_path or "/").rstrip("/")) or "."
+    cow = _container_cow_bind(state)
+    with tarfile.open(fileobj=out_stream, mode="w|") as tf:
+        if cow:
+            _tar_add_cow_merged_path(tf, cow, rel, arcname)
+        else:
+            tf.add(source, arcname=arcname)
+
+
+def _tar_member_path_is_safe(name):
+    if not name or "\x00" in name:
+        return False
+    # Docker archive members are POSIX-style names even on non-Windows hosts.
+    if name.startswith("/") or re.match(r"^[A-Za-z]:", name):
+        return False
+    if any(part == ".." for part in name.split("/")):
+        return False
+    norm = os.path.normpath(name)
+    return norm != "" and norm != ".." and not norm.startswith(".." + os.sep)
+
+
+def _remove_whiteout_for_archive_member(dest, member_name):
+    norm = os.path.normpath(member_name)
+    parts = [part for part in norm.split(os.sep) if part and part != "."]
+    if not parts:
+        return
+    marker = os.path.join(dest, *parts[:-1], _archive_whiteout_name(parts[-1]))
+    try:
+        if os.path.lexists(marker):
+            os.unlink(marker)
+    except OSError:
+        pass
+
+
+def safe_extract_container_archive(tar_path, dest):
+    """Fail-closed Docker archive PUT extractor.
+
+    It rejects traversal and overlay whiteout marker injection before extract,
+    then delegates final link/path validation to Python's `data` tar filter.
+    Existing upperdir whiteouts are removed when a copied member recreates that
+    path, matching Docker cp into an overlay upperdir.
+    """
+    with tarfile.open(tar_path, mode="r:*") as tf:
+        members = tf.getmembers()
+        for member in members:
+            if not _tar_member_path_is_safe(member.name):
+                raise BadRequest(f"archive member escapes target: {member.name!r}")
+            if any(part.startswith(WHITEOUT_PREFIX) for part in member.name.split("/")):
+                raise BadRequest(f"archive member uses reserved whiteout path: {member.name!r}")
+        for member in members:
+            _remove_whiteout_for_archive_member(dest, member.name)
+        try:
+            tf.extractall(dest, members=members, filter="data")
+        except tarfile.FilterError as exc:
+            raise BadRequest(f"archive member rejected: {exc}") from exc
+
+
 # ============================================================
 # Layer storage (OCI-style content-addressable layer pool)
 # ============================================================
@@ -8153,19 +8374,10 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 return
 
             if method == "HEAD":
-                if not os.path.lexists(host_target):
+                stat_info = _container_archive_stat(state, cdir, ctr_path)
+                if stat_info is None:
                     self._send_json(404, {"message": f"path not found: {ctr_path}"})
                     return
-                st = os.lstat(host_target)
-                stat_info = {
-                    "name": os.path.basename(ctr_path) or "/",
-                    "size": st.st_size,
-                    "mode": st.st_mode,
-                    "mtime": time.strftime(
-                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime)
-                    ),
-                    "linkTarget": os.readlink(host_target) if os.path.islink(host_target) else "",
-                }
                 import base64
                 self.send_response(200)
                 self.send_header(
@@ -8177,7 +8389,8 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 return
 
             if method == "GET":
-                if not os.path.lexists(host_target):
+                stat_info = _container_archive_stat(state, cdir, ctr_path)
+                if stat_info is None:
                     self._send_json(404, {"message": f"path not found: {ctr_path}"})
                     return
                 # Stream tar of host_target. Tar arcname uses basename so
@@ -8185,16 +8398,6 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 # GET also returns X-Docker-Container-Path-Stat (same as HEAD)
                 # — docker CLI requires it to validate the source.
                 import base64
-                st = os.lstat(host_target)
-                stat_info = {
-                    "name": os.path.basename(ctr_path) or "/",
-                    "size": st.st_size,
-                    "mode": st.st_mode,
-                    "mtime": time.strftime(
-                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime)
-                    ),
-                    "linkTarget": os.readlink(host_target) if os.path.islink(host_target) else "",
-                }
                 self.send_response(200)
                 self.send_header(
                     "X-Docker-Container-Path-Stat",
@@ -8203,10 +8406,11 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "application/x-tar")
                 self.end_headers()
                 try:
-                    with tarfile.open(fileobj=self.wfile, mode="w|") as tf:
-                        tf.add(host_target, arcname=os.path.basename(ctr_path) or ".")
+                    write_container_path_archive(self.wfile, state, cdir, ctr_path)
                 except BrokenPipeError:
                     pass
+                except BadRequest as e:
+                    log(f"archive GET rejected: {e}")
                 return
 
             if method == "PUT":
@@ -8219,8 +8423,10 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 body_path = None
                 try:
                     body_path = self._read_body_to_temp(prefix="pdarchiveput_")
-                    with tarfile.open(body_path, mode="r|*") as tf:
-                        tf.extractall(host_target, filter="data")
+                    safe_extract_container_archive(body_path, host_target)
+                except BadRequest as e:
+                    self._send_json(400, {"message": str(e)})
+                    return
                 except Exception as e:
                     self._send_json(500, {"message": f"extract failed: {e}"})
                     return

@@ -916,3 +916,17 @@ more closely instead of treating every mismatch as shader/device arithmetic:
 This does not claim Q6_K correctness.  It removes an oracle-side ambiguity so
 the next device artifact can distinguish a true Vulkan execution/writeback or
 Q6_K reduction mismatch from a stale push-constant interpretation.
+
+### Q6_K Writeback Boundary Diagnostic (2026-05-15)
+
+The executor binding report now emits `writeback_verified` and
+`writeback_mismatch` for writable bindings when profile hash evidence is
+available.  The compare summarizer folds those fields into
+`gpu.diagnostics.q6_workgroup_diagnostics` as
+`q6_writable_writeback_mismatches`, `q6_writable_writeback_unknown`, and
+`q6_writeback_verified_all`.
+
+This is diagnostic-only and still does not claim device correctness.  It
+narrows the existing `vulkan-device-execution-or-writeback` Q6_K blocker:
+hash-stable writable output writeback lets the next artifact name
+`vulkan-device-execution`; a writable hash mismatch names `writeback`.

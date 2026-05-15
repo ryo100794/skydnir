@@ -1,0 +1,249 @@
+{
+  "cleanup_policy": [
+    "collect evidence before cleanup",
+    "remove only token-scoped files under the device output directory",
+    "leave app payload stores and unrelated containers untouched"
+  ],
+  "collected_via_adb_run_as": false,
+  "commands": [
+    "python3 scripts/verify-cow-overlay-bench-recovery.py",
+    "__missing_adb_for_planned_gap_record__ get-state",
+    "__missing_adb_for_planned_gap_record__ shell run-as io.github.ryo100794.pdocker.compat sh -c 'cd files && test -S pdocker/pdockerd.sock'",
+    "__missing_adb_for_planned_gap_record__ push scripts/verify/runner/cow-overlay-kill-at-step-device.sh /data/local/tmp/pdocker-cow-overlay-kill-at-step-device.sh",
+    "__missing_adb_for_planned_gap_record__ shell chmod 755 /data/local/tmp/pdocker-cow-overlay-kill-at-step-device.sh",
+    "__missing_adb_for_planned_gap_record__ shell sh /data/local/tmp/pdocker-cow-overlay-kill-at-step-device.sh --phase preflight --package io.github.ryo100794.pdocker.compat --token cowkill-20260515121814-11416 --out-dir /data/local/tmp/pdocker-cow-overlay-kill-at-step",
+    "__missing_adb_for_planned_gap_record__ shell sh /data/local/tmp/pdocker-cow-overlay-kill-at-step-device.sh --phase execute --package io.github.ryo100794.pdocker.compat --token cowkill-20260515121814-11416 --out-dir /data/local/tmp/pdocker-cow-overlay-kill-at-step",
+    "__missing_adb_for_planned_gap_record__ pull /data/local/tmp/pdocker-cow-overlay-kill-at-step docs/test/device-evidence/cow-overlay-kill-at-step-cowkill-20260515121814-11416",
+    "__missing_adb_for_planned_gap_record__ shell sh /data/local/tmp/pdocker-cow-overlay-kill-at-step-device.sh --phase cleanup --package io.github.ryo100794.pdocker.compat --token cowkill-20260515121814-11416 --out-dir /data/local/tmp/pdocker-cow-overlay-kill-at-step"
+  ],
+  "coverage": {
+    "copy-up": false,
+    "hardlink-ring": false,
+    "metadata": false,
+    "rename": false,
+    "whiteout": false
+  },
+  "device": {
+    "adb_present": false,
+    "detection_error": "ADB executable '__missing_adb_for_planned_gap_record__' was not found",
+    "fingerprint": null,
+    "serial": null,
+    "state": null
+  },
+  "device_promotion_evidence": false,
+  "generated_at": "2026-05-15T12:18:14.812715Z",
+  "host_static_verifier_cannot_promote": true,
+  "inputs": {
+    "allowed_process_targets": [
+      "daemon",
+      "helper"
+    ],
+    "device_out_dir": "/data/local/tmp/pdocker-cow-overlay-kill-at-step",
+    "execute_device_requested": false,
+    "package": "io.github.ryo100794.pdocker.compat",
+    "token": "cowkill-20260515121814-11416"
+  },
+  "kill_at_step_cases": [
+    {
+      "EvidenceFiles": [],
+      "ExpectedRecovery": "old committed lower/upper view or a complete atomically published upper entry; no trusted .cow temp",
+      "FailureOracle": "fail if lower bytes change, a .cow temp is trusted, or upper shows a partial payload after restart",
+      "GapReason": "adb unavailable; external Android daemon/helper kill-at-step evidence remains planned-gap",
+      "Id": "copy_up.daemon_kill_before_publish",
+      "KillSignal": "TERM-or-KILL after checkpoint acknowledgement",
+      "Operation": "copy-up",
+      "ProcessTarget": "daemon",
+      "Proof": {
+        "LowerSha256Unchanged": false,
+        "MergedViewVerified": false,
+        "NoCowTempResidue": false
+      },
+      "Status": "planned-gap",
+      "Step": "copyup.before_publish_rename"
+    },
+    {
+      "EvidenceFiles": [],
+      "ExpectedRecovery": "destination is either the old committed file or the complete renamed file; no staged rename is trusted",
+      "FailureOracle": "fail if destination mixes old/new content or a staged rename is accepted as committed",
+      "GapReason": "adb unavailable; external Android daemon/helper kill-at-step evidence remains planned-gap",
+      "Id": "rename.daemon_kill_before_destination_publish",
+      "KillSignal": "TERM-or-KILL after checkpoint acknowledgement",
+      "Operation": "rename",
+      "ProcessTarget": "daemon",
+      "Proof": {
+        "DestinationStateAtomic": false,
+        "MergedViewVerified": false,
+        "NoRenameStageResidueTrusted": false
+      },
+      "Status": "planned-gap",
+      "Step": "rename.before_destination_publish"
+    },
+    {
+      "EvidenceFiles": [],
+      "ExpectedRecovery": "mode/metadata state is atomic with payload state; metadata-only commits are rejected",
+      "FailureOracle": "fail if mode/sidecar metadata is published without the matching payload state",
+      "GapReason": "adb unavailable; external Android daemon/helper kill-at-step evidence remains planned-gap",
+      "Id": "metadata.daemon_kill_before_metadata_publish",
+      "KillSignal": "TERM-or-KILL after checkpoint acknowledgement",
+      "Operation": "metadata",
+      "ProcessTarget": "daemon",
+      "Proof": {
+        "MergedViewVerified": false,
+        "MetadataStateAtomic": false,
+        "NoMetadataOnlyCommit": false
+      },
+      "Status": "planned-gap",
+      "Step": "metadata.before_chmod_or_sidecar_publish"
+    },
+    {
+      "EvidenceFiles": [],
+      "ExpectedRecovery": "lower entry remains visible unless a complete whiteout marker was published; partial markers are ignored",
+      "FailureOracle": "fail if a partial whiteout hides a lower entry or survives as trusted state",
+      "GapReason": "adb unavailable; external Android daemon/helper kill-at-step evidence remains planned-gap",
+      "Id": "whiteout.daemon_kill_before_marker_publish",
+      "KillSignal": "TERM-or-KILL after checkpoint acknowledgement",
+      "Operation": "whiteout",
+      "ProcessTarget": "daemon",
+      "Proof": {
+        "MergedViewVerified": false,
+        "NoPartialWhiteoutTrusted": false,
+        "WhiteoutStateAtomic": false
+      },
+      "Status": "planned-gap",
+      "Step": "whiteout.before_marker_publish"
+    },
+    {
+      "EvidenceFiles": [],
+      "ExpectedRecovery": "payload tree remains authoritative and hardlink-ring cache is discarded/rebuilt if interrupted",
+      "FailureOracle": "fail if corrupt/truncated ring cache is trusted instead of rebuilding from the payload tree",
+      "GapReason": "adb unavailable; external Android daemon/helper kill-at-step evidence remains planned-gap",
+      "Id": "hardlink_ring.daemon_kill_during_cache_publish",
+      "KillSignal": "TERM-or-KILL after checkpoint acknowledgement",
+      "Operation": "hardlink-ring",
+      "ProcessTarget": "daemon",
+      "Proof": {
+        "CorruptOrTruncatedCacheDiscarded": false,
+        "PayloadTreeAuthoritative": false,
+        "RingCacheRebuilt": false
+      },
+      "Status": "planned-gap",
+      "Step": "hardlink_ring.before_cache_publish"
+    },
+    {
+      "EvidenceFiles": [],
+      "ExpectedRecovery": "helper death cannot promote a partial hardlink-ring cache; restart rebuilds from payload tree",
+      "FailureOracle": "fail if corrupt/truncated ring cache is trusted instead of rebuilding from the payload tree",
+      "GapReason": "adb unavailable; external Android daemon/helper kill-at-step evidence remains planned-gap",
+      "Id": "hardlink_ring.helper_kill_during_cache_rebuild",
+      "KillSignal": "TERM-or-KILL after checkpoint acknowledgement",
+      "Operation": "hardlink-ring",
+      "ProcessTarget": "helper",
+      "Proof": {
+        "HelperStageDiscarded": false,
+        "PayloadTreeAuthoritative": false,
+        "RingCacheRebuilt": false
+      },
+      "Status": "planned-gap",
+      "Step": "hardlink_ring.helper_rebuild_before_publish"
+    }
+  ],
+  "negative_expected_conditions": [
+    "success=true without adb/run-as checkpoint and kill evidence",
+    "HTTP or CLI acknowledgement without post-restart merged-view verification",
+    "partial .cow payload trusted as complete copy-up",
+    "partial rename, metadata, or whiteout stage accepted as committed state",
+    "corrupt or truncated hardlink-ring cache trusted instead of rebuilt",
+    "helper exit status alone treated as recovery proof"
+  ],
+  "notes": [
+    "adb unavailable; external Android daemon/helper kill-at-step evidence remains planned-gap",
+    "Non-passing artifacts are non-promoting and must not be counted as stable checkpoint evidence."
+  ],
+  "phases": [
+    "preflight",
+    "execute",
+    "pull-evidence",
+    "cleanup"
+  ],
+  "plan_gate": "python3 scripts/verify-cow-overlay-bench-recovery.py",
+  "required_cases": [
+    {
+      "ExpectedRecovery": "old committed lower/upper view or a complete atomically published upper entry; no trusted .cow temp",
+      "Id": "copy_up.daemon_kill_before_publish",
+      "Operation": "copy-up",
+      "ProcessTarget": "daemon",
+      "ProofKeys": [
+        "LowerSha256Unchanged",
+        "NoCowTempResidue",
+        "MergedViewVerified"
+      ],
+      "Step": "copyup.before_publish_rename"
+    },
+    {
+      "ExpectedRecovery": "destination is either the old committed file or the complete renamed file; no staged rename is trusted",
+      "Id": "rename.daemon_kill_before_destination_publish",
+      "Operation": "rename",
+      "ProcessTarget": "daemon",
+      "ProofKeys": [
+        "DestinationStateAtomic",
+        "NoRenameStageResidueTrusted",
+        "MergedViewVerified"
+      ],
+      "Step": "rename.before_destination_publish"
+    },
+    {
+      "ExpectedRecovery": "mode/metadata state is atomic with payload state; metadata-only commits are rejected",
+      "Id": "metadata.daemon_kill_before_metadata_publish",
+      "Operation": "metadata",
+      "ProcessTarget": "daemon",
+      "ProofKeys": [
+        "MetadataStateAtomic",
+        "NoMetadataOnlyCommit",
+        "MergedViewVerified"
+      ],
+      "Step": "metadata.before_chmod_or_sidecar_publish"
+    },
+    {
+      "ExpectedRecovery": "lower entry remains visible unless a complete whiteout marker was published; partial markers are ignored",
+      "Id": "whiteout.daemon_kill_before_marker_publish",
+      "Operation": "whiteout",
+      "ProcessTarget": "daemon",
+      "ProofKeys": [
+        "WhiteoutStateAtomic",
+        "NoPartialWhiteoutTrusted",
+        "MergedViewVerified"
+      ],
+      "Step": "whiteout.before_marker_publish"
+    },
+    {
+      "ExpectedRecovery": "payload tree remains authoritative and hardlink-ring cache is discarded/rebuilt if interrupted",
+      "Id": "hardlink_ring.daemon_kill_during_cache_publish",
+      "Operation": "hardlink-ring",
+      "ProcessTarget": "daemon",
+      "ProofKeys": [
+        "PayloadTreeAuthoritative",
+        "RingCacheRebuilt",
+        "CorruptOrTruncatedCacheDiscarded"
+      ],
+      "Step": "hardlink_ring.before_cache_publish"
+    },
+    {
+      "ExpectedRecovery": "helper death cannot promote a partial hardlink-ring cache; restart rebuilds from payload tree",
+      "Id": "hardlink_ring.helper_kill_during_cache_rebuild",
+      "Operation": "hardlink-ring",
+      "ProcessTarget": "helper",
+      "ProofKeys": [
+        "PayloadTreeAuthoritative",
+        "RingCacheRebuilt",
+        "HelperStageDiscarded"
+      ],
+      "Step": "hardlink_ring.helper_rebuild_before_publish"
+    }
+  ],
+  "requires_adb": true,
+  "scenario_id": "cow.overlay.external-daemon-helper-kill-at-step",
+  "schema": "pdocker.cow-overlay-kill-at-step-device.v1",
+  "stable_checkpoint_eligible": false,
+  "status": "planned-gap",
+  "success": false
+}
