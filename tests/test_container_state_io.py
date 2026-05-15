@@ -38,6 +38,37 @@ class ContainerStateIoTest(unittest.TestCase):
         self.assertIn("os.replace(tmp, path)", source)
         self.assertEqual(source, ASSET_PDOCKERD.read_text())
 
+    def test_new_engine_container_ids_are_full_64_hex(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mod = load_pdockerd(root / "pdocker")
+            ids = {mod._new_container_id() for _ in range(16)}
+            self.assertEqual(len(ids), 16)
+            for cid in ids:
+                self.assertRegex(cid, r"^[0-9a-f]{64}$")
+
+        source = PDOCKERD.read_text()
+        self.assertIn("def _new_container_id", source)
+        self.assertIn("hashlib.sha256(seed).hexdigest()", source)
+        self.assertIn("cid = _new_container_id()", source)
+        self.assertNotIn("cid = uuid.uuid4().hex\n    image = config.get", source)
+
+    def test_service_truth_log_marker_contract_is_stable(self):
+        source = PDOCKERD.read_text()
+        for token in [
+            "def _append_container_log_marker",
+            "pdocker.service-truth-log-marker.v1",
+            "pdocker-service-truth-marker ",
+            '"container_id"',
+            '"project"',
+            '"service"',
+            '"pid"',
+            '_append_container_log_marker(state, "container-start", proc.pid)',
+            '_append_container_log_marker(state, "container-live-reconciled", live_pid)',
+        ]:
+            self.assertIn(token, source)
+        self.assertEqual(source, ASSET_PDOCKERD.read_text())
+
     def test_container_state_loader_repairs_trailing_stale_json(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

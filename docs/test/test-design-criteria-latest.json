@@ -1,19 +1,19 @@
 {
   "failures": [
-    "literal_check_count_to_code_token_multiplier below minimum: 0.17614731662637256 < 2.0"
+    "literal_check_count_to_code_token_multiplier below minimum: 0.1834216925623477 < 2.0"
   ],
-  "git_commit": "ee2e4e88d532",
+  "git_commit": "f111fcf13db2",
   "kind": "test-design-criteria",
   "metrics": {
-    "abnormal_event_cases": 11,
+    "abnormal_event_cases": 14,
     "advanced_method_scenarios": 10,
     "blackbox_requirements": 10,
-    "c0_statement_items": 17945,
-    "c1_branch_decisions": 6680,
-    "c1_branch_outcome_items": 13360,
-    "c2_condition_atoms": 7470,
-    "c2_condition_outcome_items": 14940,
-    "check_to_step_ratio": 992.34,
+    "c0_statement_items": 24432,
+    "c1_branch_decisions": 9397,
+    "c1_branch_outcome_items": 18794,
+    "c2_condition_atoms": 11636,
+    "c2_condition_outcome_items": 23272,
+    "check_to_step_ratio": 1398.44,
     "device_scenarios": 17,
     "direct_syscall_boundary_entries": 8,
     "direct_syscall_branch_entries": 9,
@@ -24,15 +24,15 @@
     "direct_syscall_path_variant_entries": 11,
     "direct_syscall_required_areas": 9,
     "fast_runnable_scenarios": 22,
-    "feature_check_phrases": 264,
+    "feature_check_phrases": 265,
     "feature_scenarios": 50,
     "implementation_code_files": 29,
-    "implementation_code_tokens": 281679,
+    "implementation_code_tokens": 381209,
     "implementation_steps_proxy": 50,
     "input_validation_cases": 11,
-    "literal_check_count_at_2x_token_target": 563358,
+    "literal_check_count_at_2x_token_target": 762418,
     "literal_check_count_at_2x_token_target_met": false,
-    "literal_check_count_to_token_multiplier": 0.176147,
+    "literal_check_count_to_token_multiplier": 0.183422,
     "python_coverage_evidence": {
       "coverage_items": 2487,
       "covered_branches": 574,
@@ -48,20 +48,20 @@
     "refactor_resilience_cases": 6,
     "required_design_axes": 27,
     "runtime_coverage_items": 2487,
-    "selected_check_count": 49617,
-    "semantic_check_count": 885,
-    "static_assertion_checks": 346,
+    "selected_check_count": 69922,
+    "semantic_check_count": 937,
+    "static_assertion_checks": 394,
     "stress_regression_scenarios": 7
   },
   "schema": 1,
   "structural_coverage_evidence": {
     "files": [
       {
-        "c0_statement_items": 3378,
-        "c1_branch_decisions": 1277,
-        "c1_branch_outcome_items": 2554,
-        "c2_condition_atoms": 1595,
-        "c2_condition_outcome_items": 3190,
+        "c0_statement_items": 4604,
+        "c1_branch_decisions": 1654,
+        "c1_branch_outcome_items": 3308,
+        "c2_condition_atoms": 2108,
+        "c2_condition_outcome_items": 4216,
         "path": "app/src/main/cpp/pdocker_direct_exec.c"
       },
       {
@@ -73,11 +73,11 @@
         "path": "app/src/main/cpp/pdocker_gpu_abi.h"
       },
       {
-        "c0_statement_items": 2556,
-        "c1_branch_decisions": 828,
-        "c1_branch_outcome_items": 1656,
-        "c2_condition_atoms": 1283,
-        "c2_condition_outcome_items": 2566,
+        "c0_statement_items": 6567,
+        "c1_branch_decisions": 2595,
+        "c1_branch_outcome_items": 5190,
+        "c2_condition_atoms": 4133,
+        "c2_condition_outcome_items": 8266,
         "path": "app/src/main/cpp/pdocker_gpu_executor.c"
       },
       {
@@ -137,11 +137,11 @@
         "path": "app/src/main/kotlin/io/github/ryo100794/pdocker/ImageFilesActivity.kt"
       },
       {
-        "c0_statement_items": 2782,
-        "c1_branch_decisions": 1113,
-        "c1_branch_outcome_items": 2226,
-        "c2_condition_atoms": 1066,
-        "c2_condition_outcome_items": 2132,
+        "c0_statement_items": 3182,
+        "c1_branch_decisions": 1314,
+        "c1_branch_outcome_items": 2628,
+        "c2_condition_atoms": 1294,
+        "c2_condition_outcome_items": 2588,
         "path": "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt"
       },
       {
@@ -169,11 +169,11 @@
         "path": "app/src/main/kotlin/io/github/ryo100794/pdocker/PdockerdRuntime.kt"
       },
       {
-        "c0_statement_items": 147,
-        "c1_branch_decisions": 57,
-        "c1_branch_outcome_items": 114,
-        "c2_condition_atoms": 45,
-        "c2_condition_outcome_items": 90,
+        "c0_statement_items": 154,
+        "c1_branch_decisions": 60,
+        "c1_branch_outcome_items": 120,
+        "c2_condition_atoms": 49,
+        "c2_condition_outcome_items": 98,
         "path": "app/src/main/kotlin/io/github/ryo100794/pdocker/PdockerdService.kt"
       },
       {
@@ -225,11 +225,11 @@
         "path": "app/src/main/python/pdockerd_bridge.py"
       },
       {
-        "c0_statement_items": 3530,
-        "c1_branch_decisions": 1675,
-        "c1_branch_outcome_items": 3350,
-        "c2_condition_atoms": 1232,
-        "c2_condition_outcome_items": 2464,
+        "c0_statement_items": 3616,
+        "c1_branch_decisions": 1718,
+        "c1_branch_outcome_items": 3436,
+        "c2_condition_atoms": 1269,
+        "c2_condition_outcome_items": 2538,
         "path": "docker-proot-setup/bin/pdockerd"
       },
       {
@@ -257,19 +257,19 @@
         "path": "docker-proot-setup/src/gpu/pdocker_opencl_icd.c"
       },
       {
-        "c0_statement_items": 1792,
-        "c1_branch_decisions": 467,
-        "c1_branch_outcome_items": 934,
-        "c2_condition_atoms": 905,
-        "c2_condition_outcome_items": 1810,
+        "c0_statement_items": 2416,
+        "c1_branch_decisions": 754,
+        "c1_branch_outcome_items": 1508,
+        "c2_condition_atoms": 1374,
+        "c2_condition_outcome_items": 2748,
         "path": "docker-proot-setup/src/gpu/pdocker_vulkan_icd.c"
       },
       {
-        "c0_statement_items": 28,
-        "c1_branch_decisions": 15,
-        "c1_branch_outcome_items": 30,
-        "c2_condition_atoms": 10,
-        "c2_condition_outcome_items": 20,
+        "c0_statement_items": 94,
+        "c1_branch_decisions": 27,
+        "c1_branch_outcome_items": 54,
+        "c2_condition_atoms": 19,
+        "c2_condition_outcome_items": 38,
         "path": "docker-proot-setup/src/overlay/bench_cow.sh"
       },
       {
@@ -281,11 +281,11 @@
         "path": "docker-proot-setup/src/overlay/libcow.c"
       },
       {
-        "c0_statement_items": 41,
-        "c1_branch_decisions": 43,
-        "c1_branch_outcome_items": 86,
-        "c2_condition_atoms": 74,
-        "c2_condition_outcome_items": 148,
+        "c0_statement_items": 108,
+        "c1_branch_decisions": 70,
+        "c1_branch_outcome_items": 140,
+        "c2_condition_atoms": 130,
+        "c2_condition_outcome_items": 260,
         "path": "docker-proot-setup/src/overlay/test_cow.sh"
       }
     ],
@@ -296,12 +296,12 @@
       "note": "This is structural design evidence, not runtime line/branch coverage from an instrumented runner."
     },
     "totals": {
-      "c0_statement_items": 17945,
-      "c1_branch_decisions": 6680,
-      "c1_branch_outcome_items": 13360,
-      "c2_condition_atoms": 7470,
-      "c2_condition_outcome_items": 14940
+      "c0_statement_items": 24432,
+      "c1_branch_decisions": 9397,
+      "c1_branch_outcome_items": 18794,
+      "c2_condition_atoms": 11636,
+      "c2_condition_outcome_items": 23272
     }
   },
-  "timestamp_utc": "2026-05-06T15:15:44Z"
+  "timestamp_utc": "2026-05-15T06:48:20Z"
 }

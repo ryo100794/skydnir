@@ -4151,6 +4151,40 @@ def _decode_event_filters(raw):
 
 # ---- Container management ----
 
+def _new_container_id():
+    seed = (
+        uuid.uuid4().bytes
+        + os.urandom(32)
+        + str(time.time_ns()).encode("ascii", "replace")
+        + str(os.getpid()).encode("ascii", "replace")
+    )
+    return hashlib.sha256(seed).hexdigest()
+
+
+def _append_container_log_marker(state, marker, pid=0):
+    cid = state.get("Id", "")
+    if not cid:
+        return
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    labels = state.get("Labels") or {}
+    payload = {
+        "pdocker_log_marker": marker,
+        "schema": "pdocker.service-truth-log-marker.v1",
+        "container_id": cid,
+        "container_name": state.get("Name", ""),
+        "project": labels.get("com.docker.compose.project", ""),
+        "service": labels.get("com.docker.compose.service", ""),
+        "pid": int(pid or 0),
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime()),
+    }
+    with open(os.path.join(LOGS_DIR, f"{cid}.log"), "ab") as log_file:
+        log_file.write(
+            ("pdocker-service-truth-marker " + json.dumps(payload, sort_keys=True) + "\n").encode(
+                "utf-8", "replace"
+            )
+        )
+
+
 def create_container(config, name=None):
     """Create a container (prepare rootfs, save config, don't start)."""
     if name:
@@ -4161,7 +4195,7 @@ def create_container(config, name=None):
                 f"container {existing[0]['Id']}. You have to remove or rename "
                 "that container to be able to reuse that name."
             )
-    cid = uuid.uuid4().hex
+    cid = _new_container_id()
     image = config.get("Image", "")
     norm_img = normalize_image(image)
 
@@ -5171,6 +5205,7 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
     bridge_env_changed = _merge_runtime_bridge_env(state)
     live_pid = _container_live_pid(state)
     if live_pid:
+        _append_container_log_marker(state, "container-live-reconciled", live_pid)
         state.setdefault("State", {})["Running"] = True
         state["State"]["Status"] = "running"
         state["State"]["Pid"] = live_pid
@@ -5292,6 +5327,7 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
         entry for entry in [_process_identity(proc.pid)] if entry
     ]
     state["State"]["StartedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
+    _append_container_log_marker(state, "container-start", proc.pid)
     if _container_healthcheck(state):
         state["State"]["Health"] = {
             "Status": "starting",

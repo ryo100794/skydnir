@@ -377,6 +377,8 @@ write_same_id_source_summary() {
   process_pid_present=false; process_has_pid "$selected_pid" && process_pid_present=true
   listener_pid_present=false; [ -n "$selected_pid" ] && awk -F '\t' -v pid="$selected_pid" '$3 == pid { found=1 } END{ exit found ? 0 : 1 }' "$DIAG/listener-owner-map.tsv" 2>/dev/null && listener_pid_present=true
   logs_present=false; [ -n "$selected_id" ] && [ -s "$DIAG/logs-selected.out" ] && logs_present=true
+  logs_marker_present=false
+  [ "$logs_present" = true ] && grep -F "pdocker-service-truth-marker " "$DIAG/logs-selected.out" 2>/dev/null | grep -F "$selected_id" >/dev/null 2>&1 && logs_marker_present=true
   same_id=false
   mismatched=""
   missing=""
@@ -387,9 +389,9 @@ write_same_id_source_summary() {
   [ "$state_match" = true ] || missing="$missing PersistedStateJson"
   [ "$process_pid_present" = true ] || missing="$missing ProcessTable"
   [ "$listener_pid_present" = true ] || missing="$missing ListenerProbe"
-  [ "$logs_present" = true ] || missing="$missing ContainerLogs"
+  [ "$logs_marker_present" = true ] || missing="$missing ContainerLogs"
   if [ -n "$selected_id" ] && [ -n "$ui_cid" ] && [ "$ui_cid" != "$selected_id" ]; then mismatched="$mismatched UICard"; fi
-  [ -n "$selected_id" ] && [ "$ui_cid" = "$selected_id" ] && [ "$ui_state" = current ] && [ "$docker_ps_present" = true ] && [ "$engine_api_present" = true ] && [ "$state_match" = true ] && [ "$process_pid_present" = true ] && [ "$listener_pid_present" = true ] && [ "$logs_present" = true ] && same_id=true
+  [ -n "$selected_id" ] && [ "$ui_cid" = "$selected_id" ] && [ "$ui_state" = current ] && [ "$docker_ps_present" = true ] && [ "$engine_api_present" = true ] && [ "$state_match" = true ] && [ "$process_pid_present" = true ] && [ "$listener_pid_present" = true ] && [ "$logs_marker_present" = true ] && same_id=true
   cat >"$DIAG/same-id-source-summary.json" <<JSON
 {
   "SelectedEngineContainerId": $(source_container_id_json "$selected_id"),
@@ -402,7 +404,7 @@ write_same_id_source_summary() {
     "PersistedStateJson": $( [ "$state_match" = true ] && source_container_id_json "$selected_id" || printf null ),
     "ProcessTable": $( [ "$process_pid_present" = true ] && source_container_id_json "$selected_id" || printf null ),
     "ListenerProbe": $( [ "$listener_pid_present" = true ] && source_container_id_json "$selected_id" || printf null ),
-    "ContainerLogs": $( [ "$logs_present" = true ] && source_container_id_json "$selected_id" || printf null )
+    "ContainerLogs": $( [ "$logs_marker_present" = true ] && source_container_id_json "$selected_id" || printf null )
   },
   "MissingSourcesText": $(json_string "$missing"),
   "MismatchedSourcesText": $(json_string "$mismatched"),
@@ -475,6 +477,10 @@ ENGINE_API_PROVEN=false; selected_in_engine_api "$SELECTED_ENGINE_CID" && ENGINE
 PROCESS_PROVEN=false; process_has_pid "$SELECTED_INSPECT_PID" && PROCESS_PROVEN=true
 LISTENER_PROVEN=false; [ -n "$SELECTED_INSPECT_PID" ] && awk -F '\t' -v pid="$SELECTED_INSPECT_PID" '$3 == pid { found=1 } END{ exit found ? 0 : 1 }' "$DIAG/listener-owner-map.tsv" 2>/dev/null && LISTENER_PROVEN=true
 LOGS_PROVEN=false; [ -n "$SELECTED_ENGINE_CID" ] && [ -s "$DIAG/logs-selected.out" ] && LOGS_PROVEN=true
+LOGS_CURRENT_MARKER=false
+[ "$LOGS_PROVEN" = true ] && grep -F "pdocker-service-truth-marker " "$DIAG/logs-selected.out" 2>/dev/null | grep -F "$SELECTED_ENGINE_CID" >/dev/null 2>&1 && LOGS_CURRENT_MARKER=true
+LOGS_PROVEN=false
+[ "$LOGS_CURRENT_MARKER" = true ] && LOGS_PROVEN=true
 write_same_id_source_summary "$SELECTED_ENGINE_CID" "$UI_CARD_CID" "$UI_CARD_STATE" "$STATE_MATCH" "$SELECTED_INSPECT_PID"
 
 cat > "$LATEST" <<JSON
@@ -569,8 +575,9 @@ cat > "$LATEST" <<JSON
     "ContainerLogs": {
       "ContainerId": $( [ "$LOGS_PROVEN" = true ] && [ -n "$SELECTED_ENGINE_CID" ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
       "Proven": $(json_bool "$LOGS_PROVEN"),
+      "CurrentServiceMarker": $(json_bool "$LOGS_CURRENT_MARKER"),
       "Artifacts": ["files/$DIAG/logs-selected.out", "files/$DIAG/logs-<container-id>.out"],
-      "Gap": "Logs are collected for the selected Engine container ID, but no current service log marker has been bound to the UI card/listener."
+      "Gap": "Logs are collected for the selected Engine container ID and checked for pdocker-service-truth-marker, but top-level success remains planned-gap until all seven sources are promoted together."
     }
   },
   "Evidence": {

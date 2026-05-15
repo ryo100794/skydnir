@@ -139,6 +139,8 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
             "inspect-selected.http",
             "docker-inspect-selected.out",
             "logs-selected.out",
+            "CurrentServiceMarker",
+            "pdocker-service-truth-marker",
             "ui-rendered-service-truth-latest.json",
             "/proc/net/tcp",
             "missing or stale UI export is not success",

@@ -187,6 +187,22 @@
         }
       ]
     },
+    "android-memory-pager": {
+      "description": "Device route for APK-scoped memory pager probes and bounded OOM/LMK telemetry artifacts.",
+      "requires": ["adb", "installed-debug-apk"],
+      "commands": [
+        {
+          "id": "android-memory-pager-managed-poc",
+          "argv": ["bash", "scripts/android-memory-pager-managed-poc.sh"],
+          "artifacts": ["docs/test/apk-memory-pager-managed-latest.json"]
+        },
+        {
+          "id": "android-memory-pager-transparent-poc",
+          "argv": ["bash", "scripts/android-memory-pager-transparent-poc.sh"],
+          "artifacts": ["docs/test/apk-memory-pager-transparent-latest.json"]
+        }
+      ]
+    },
     "governance": {
       "description": "Strict test-design gate. This lane is expected to fail until native/Kotlin coverage evidence and enough check items exist.",
       "commands": [

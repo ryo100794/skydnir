@@ -23,7 +23,10 @@ issues, and deciding which planned gaps become hard gates.
    `docker ps`, Engine `/containers/json`, persisted state, process table,
    listener probes, and logs must prove the same current Engine container ID.
    Persisted `state.json`, Compose metadata, names, completed jobs, and port
-   declarations are hints only.
+   declarations are hints only. Current slice in progress: new containers use
+   64-hex Engine IDs and container logs receive
+   `pdocker-service-truth-marker` entries so the log source can be bound to the
+   same exact ID before the device gate is promoted from `planned-gap`.
 2. **[#10](https://github.com/ryo100794/pdocker-android/issues/10)
    Runtime teardown** `[P0 next]`: stop/kill must prove direct children,
    GPU executor helpers, listeners, logs, and stale PIDs are gone before the
@@ -409,10 +412,14 @@ implementation change plus a focused verification artifact.
   page write, register restore, and original-instruction resume. Compose memory
   keys (`mem_limit`, `memswap_limit`, `deploy.resources.limits.memory`) now feed
   Engine metadata, while `PDOCKER_MEMORY_PAGER=managed` or
-  `io.pdocker.memory-pager=managed` remains the explicit pager opt-in. Next
-  slice: add managed-region tables, backing files, dirty tracking, thread/signal
-  guardrails, and synthetic fault-latency benchmarks before any llama/container
-  opt-in.
+  `io.pdocker.memory-pager=managed` remains the explicit pager opt-in. The
+  direct executor now writes bounded app-private memory telemetry artifacts
+  (`memory-ring.jsonl` and `memory-summary.json`) with operation/container IDs,
+  atomic rename publication, and partial-record rejection; the transparent APK
+  PoC script captures those artifacts and the canonical test driver has a
+  dedicated `android-memory-pager` lane. Next slice: fill the runtime counters
+  from the managed-region table, add thread/signal guardrails, and run
+  synthetic fault-latency/stress evidence before any llama/container opt-in.
 - [next] Revisit Dockerfile build memory pressure without changing upstream
   Dockerfiles. The managed-region pager remains explicit and opt-in; ordinary
   toolchain heap allocations such as `cc1plus` are not yet under pdocker memory
@@ -426,7 +433,9 @@ implementation change plus a focused verification artifact.
   memory telemetry rings, structured OOM/LMK evidence, UI/debug-pane memory
   status, synthetic guard-denial tests, controlled restart classification, and
   explicit labels/env such as `io.pdocker.large-workload=enabled` without
-  changing ordinary Dockerfile/Compose semantics.
+  changing ordinary Dockerfile/Compose semantics. The first bounded telemetry
+  ring/summary writer is in place; remaining work is device LMK replay,
+  stale-running UI rejection, and large-workload opt-in execution proof.
 - [doing] Profile remaining hot trapped syscalls after `newfstatat/openat` and
   decide which can be safely handled with fewer ptrace stops. Current tuning
   adds seccomp errno returns for probe syscalls and uses a blocking

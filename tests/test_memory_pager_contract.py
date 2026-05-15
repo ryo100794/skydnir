@@ -9,6 +9,7 @@ DOC = ROOT / "docs" / "design" / "APK_MEMORY_PAGER.md"
 PROBE_DOC = ROOT / "docs" / "test" / "APK_MEMORY_PAGER_PROBE.md"
 DEVICE_SCRIPT = ROOT / "scripts" / "android-memory-pager-managed-poc.sh"
 TRANSPARENT_DEVICE_SCRIPT = ROOT / "scripts" / "android-memory-pager-transparent-poc.sh"
+DRIVER_MANIFEST = ROOT / "tests" / "test_driver_manifest.json"
 
 
 class MemoryPagerContractTest(unittest.TestCase):
@@ -235,6 +236,19 @@ class MemoryPagerContractTest(unittest.TestCase):
         self.assertIn("__PDOCKER_MEMORY_RING_BEGIN__", script)
         self.assertIn("pdocker.memory-telemetry-ring.v1", script)
         self.assertIn("pdocker.memory-telemetry-summary.v1", script)
+
+    def test_canonical_driver_has_android_memory_pager_lane(self):
+        manifest = DRIVER_MANIFEST.read_text()
+        for token in [
+            '"android-memory-pager"',
+            '"android-memory-pager-managed-poc"',
+            '"android-memory-pager-transparent-poc"',
+            "scripts/android-memory-pager-managed-poc.sh",
+            "scripts/android-memory-pager-transparent-poc.sh",
+            "docs/test/apk-memory-pager-managed-latest.json",
+            "docs/test/apk-memory-pager-transparent-latest.json",
+        ]:
+            self.assertIn(token, manifest)
 
     def test_oom_lmk_diagnostics_contract_records_pressure_process_and_progress(self):
         doc = DOC.read_text()

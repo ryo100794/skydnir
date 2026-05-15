@@ -29,7 +29,7 @@ sources to the exact same Engine container ID:
 6. `ListenerProbe` - listener socket evidence, including `/proc/net/tcp`, for
    the service port owner.
 7. `ContainerLogs` - current logs from the same Engine container ID with a fresh
-   service marker.
+   `pdocker-service-truth-marker` entry containing the selected container ID.
 
 Names, labels, configured ports, and candidate scores are hints only.  They may
 select a candidate for debugging, but they are never sufficient acceptance
@@ -78,7 +78,7 @@ Required top-level shape:
     "PersistedStateJson": {"ContainerId": null, "Proven": false, "Artifacts": []},
     "ProcessTable": {"ContainerId": null, "Pid": null, "Proven": false, "Artifacts": []},
     "ListenerProbe": {"ContainerId": null, "Pid": null, "Proven": false, "Artifacts": []},
-    "ContainerLogs": {"ContainerId": null, "Proven": false, "Artifacts": []}
+    "ContainerLogs": {"ContainerId": null, "Proven": false, "CurrentServiceMarker": false, "Artifacts": []}
   },
   "Evidence": {
     "UICard": ["files/pdocker/diagnostics/service-truth/ui-rendered-service-truth-latest.json"],
