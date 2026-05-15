@@ -50,6 +50,9 @@ ARTIFACT_SCHEMA: dict[str, Any] = {
         "token": "scenario-owned suffix used for all device paths",
         "device_out_dir": "device artifact directory",
         "live_image": "scenario-owned registry reference or isolated fixture for timed live interruption|null",
+        "live_image_safe": "boolean safety classification for live_image",
+        "live_image_safety_reason": "why live_image is or is not safe for interruption",
+        "safe_image_requirements": "rules for accepting a live interruption image reference",
         "live_fixture_owned": "boolean operator assertion that live_image is safe to interrupt",
         "live_interrupt_after_seconds": "delay before daemon kill in the future timed live-pull phase",
         "live_timeout_seconds": "maximum duration for the future live-pull phase",
@@ -127,6 +130,45 @@ REMAINING_GAP = [
 
 PHASES = ["prepare-residue", "kill-daemon", "restart-and-probe", "cleanup"]
 LIVE_PULL_PHASE = "timed-live-pull-interruption"
+
+SAFE_LIVE_IMAGE_REQUIREMENTS = [
+    "The image reference must be scenario-owned, e.g. it contains pdocker-crash-safety or pdocker-live-pull-fixture.",
+    "Or the image reference must point at an isolated local fixture registry such as 127.0.0.1:<port>/...",
+    "Common public/user tags such as ubuntu:latest, busybox:latest, alpine:latest, or library/* are rejected.",
+    "The operator must also pass --live-fixture-owned before any future live interruption implementation may run.",
+]
+
+
+def classify_live_image_safety(ref: str | None) -> tuple[bool, str]:
+    """Return whether a live-pull reference is safe to interrupt.
+
+    The future timed live-pull lane will kill pdockerd while a registry transfer
+    is active.  That must never target a user's ordinary image/tag.  Keep this
+    classifier deliberately conservative: scenario markers or isolated local
+    fixture registries are accepted; broad public tags are not.
+    """
+    if not ref:
+        return False, "missing --live-image"
+    normalized = ref.strip().lower()
+    if not normalized:
+        return False, "empty --live-image"
+    unsafe_names = {
+        "ubuntu",
+        "ubuntu:latest",
+        "busybox",
+        "busybox:latest",
+        "alpine",
+        "alpine:latest",
+        "debian",
+        "debian:latest",
+    }
+    if normalized in unsafe_names or normalized.startswith("library/"):
+        return False, "common public/user image references are not scenario-owned"
+    if any(marker in normalized for marker in ("pdocker-crash-safety", "pdocker-live-pull-fixture", "pdocker-interrupt-fixture")):
+        return True, "scenario-owned fixture marker"
+    if re.match(r"^(127\.0\.0\.1|localhost|\[::1\])(?::[0-9]+)?/", normalized):
+        return True, "isolated local fixture registry"
+    return False, "image reference lacks a scenario-owned or isolated-fixture marker"
 
 
 def utc_now() -> str:
@@ -433,6 +475,7 @@ def live_pull_interruption_plan(args: argparse.Namespace) -> tuple[dict[str, Any
     later device-side implementation exists and the caller opts in with a
     scenario-owned reference or isolated registry fixture.
     """
+    live_image_safe, live_image_safety_reason = classify_live_image_safety(args.live_image)
     missing: list[str] = []
     if not args.execute_live_pull_interruption:
         missing.append("--execute-live-pull-interruption")
@@ -440,6 +483,8 @@ def live_pull_interruption_plan(args: argparse.Namespace) -> tuple[dict[str, Any
         missing.append("--live-image")
     if not args.live_fixture_owned:
         missing.append("--live-fixture-owned")
+    if args.live_image and not live_image_safe:
+        missing.append("safe scenario-owned --live-image")
 
     notes: list[str] = []
     if missing:
@@ -450,7 +495,7 @@ def live_pull_interruption_plan(args: argparse.Namespace) -> tuple[dict[str, Any
         )
     else:
         notes.append(
-            "Timed live registry pull interruption was explicitly requested with a scenario-owned/isolated fixture, "
+            "Timed live registry pull interruption was explicitly requested with a safe scenario-owned/isolated fixture, "
             "but remains a planned gap until a device-side live phase can safely issue /images/create and kill pdockerd mid-transfer."
         )
 
@@ -461,6 +506,9 @@ def live_pull_interruption_plan(args: argparse.Namespace) -> tuple[dict[str, Any
         "success": False,
         "status": "planned-gap",
         "live_image": args.live_image,
+        "live_image_safe": live_image_safe,
+        "live_image_safety_reason": live_image_safety_reason,
+        "safe_image_requirements": SAFE_LIVE_IMAGE_REQUIREMENTS,
         "fixture_owned_or_isolated": bool(args.live_fixture_owned),
         "interrupt_after_seconds": args.live_interrupt_after_seconds,
         "timeout_seconds": args.live_timeout_seconds,
@@ -472,6 +520,7 @@ def live_pull_interruption_plan(args: argparse.Namespace) -> tuple[dict[str, Any
         "safety_contract": [
             "Do not run against user images or shared mutable tags.",
             "Use a scenario-owned registry reference or an isolated disposable registry fixture.",
+            "Reject live_image unless live_image_safe is true.",
             "Capture pull stdout/stderr, daemon process evidence, post-restart store listings, and negative inspect probes before cleanup.",
             "Cleanup may remove only scenario-token-owned tags, stages, layer residues, and fixture artifacts.",
         ],
@@ -483,7 +532,11 @@ def live_pull_interruption_plan(args: argparse.Namespace) -> tuple[dict[str, Any
             "assert partial tag/layer residue is pruned and never published",
             "cleanup only scenario-owned fixture paths",
         ],
-        "blocked_reason": "device-side timed live pull interruption phase is not implemented in this safe-prep change",
+        "blocked_reason": (
+            "missing " + ", ".join(missing)
+            if missing else
+            "device-side timed live pull interruption phase is not implemented in this safe-prep change"
+        ),
     }
     return plan, notes
 
@@ -492,6 +545,8 @@ def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
     token = safe_token(args.token)
     device, notes = detect_device(args.adb, args.serial)
     live_plan, live_notes = live_pull_interruption_plan(args)
+    live_image_safe = bool(live_plan.get("live_image_safe"))
+    live_image_safety_reason = str(live_plan.get("live_image_safety_reason") or "")
     notes.extend(live_notes)
     status = "planned-gap"
     success = False
@@ -554,6 +609,9 @@ def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
             "token": token,
             "device_out_dir": args.device_out_dir,
             "live_image": args.live_image,
+            "live_image_safe": live_image_safe,
+            "live_image_safety_reason": live_image_safety_reason,
+            "safe_image_requirements": SAFE_LIVE_IMAGE_REQUIREMENTS,
             "live_fixture_owned": bool(args.live_fixture_owned),
             "live_interrupt_after_seconds": args.live_interrupt_after_seconds,
             "live_timeout_seconds": args.live_timeout_seconds,

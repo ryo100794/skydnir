@@ -321,6 +321,11 @@ Pass criteria:
   oracle matched the canonical sum).  The artifact verifier now blocks
   correctness and benchmark claims unless Q6_K workgroup shape is clear *and*
   the Q6_K oracle reports `latest_status == "match"`.
+- The Q6_K oracle also now decodes the observed push layout for accumulator
+  mask (`push_u32[7]`), base workgroup/batch offset (`push_u32[8]`), derived
+  output base, derived weight-row block base, and optional accumulator bindings
+  3/4.  A nonzero accumulator mask with missing/unreadable accumulator inputs is
+  a fail-closed oracle blocker, not a generic arithmetic mismatch.
 
 Fail criteria:
 

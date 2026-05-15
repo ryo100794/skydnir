@@ -806,7 +806,7 @@ assert mod._container_virtual_ip(cid) == "10.88.0.17"
 assert ports["80/tcp"][0]["HostPort"] == "18080", ports
 assert "443/tcp" in ports, ports
 assert any(r["ContainerPort"] == 80 and r["HostPort"] == 18080 for r in rewrite), rewrite
-assert warnings and "not active yet" in warnings[0], warnings
+assert any("not active yet" in w for w in warnings), warnings
 summary = mod._container_ports_summary({"NetworkSettings": {"Ports": ports}})
 assert any(p["PrivatePort"] == 80 and p["PublicPort"] == 18080 for p in summary), summary
 bad_ports, bad_rewrite = mod._network_port_plan(cid, {

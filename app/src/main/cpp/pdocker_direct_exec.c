@@ -123,6 +123,9 @@ typedef struct {
     unsigned long long last_denied_bytes;
     unsigned long long last_available;
     unsigned long long last_swap_free;
+    long last_denied_nr;
+    int last_denied_errno;
+    char last_denied_syscall[32];
     MemorySyscallStats mmap_;
     MemorySyscallStats mremap;
     MemorySyscallStats brk;
@@ -1147,7 +1150,7 @@ static void memory_telemetry_init_from_env(void) {
     g_memory_telemetry_max_line_bytes = env_u64_or_default("PDOCKER_MEMORY_TELEMETRY_MAX_LINE_BYTES", 16384ULL);
     if (g_memory_telemetry_max_bytes < 4096ULL) g_memory_telemetry_max_bytes = 4096ULL;
     if (g_memory_telemetry_max_lines == 0) g_memory_telemetry_max_lines = 1;
-    if (g_memory_telemetry_max_line_bytes < 1024ULL) g_memory_telemetry_max_line_bytes = 1024ULL;
+    if (g_memory_telemetry_max_line_bytes < 4096ULL) g_memory_telemetry_max_line_bytes = 4096ULL;
     g_memory_telemetry_started_unix_ms = wall_now_ms();
     memory_telemetry_derive_summary_path();
     (void)mkdir_parent_for_path(g_memory_telemetry_path);
@@ -1300,6 +1303,21 @@ static void memory_telemetry_append_sample(const char *phase,
     (void)read_meminfo_bytes(&available, &swap_free);
     unsigned long long rss = self_rss_bytes();
     unsigned long long storage_free = path_storage_free_bytes(g_memory_telemetry_path);
+    const char *classification = classifier_hint ? classifier_hint : "unknown";
+    const char *alloc_syscall = g_memory_stats.last_denied_syscall[0]
+            ? g_memory_stats.last_denied_syscall
+            : (g_managed_pager_admission.last_request_bytes ? "mmap" : "unknown");
+    unsigned long long requested = g_memory_stats.last_denied_bytes
+            ? g_memory_stats.last_denied_bytes
+            : g_managed_pager_admission.last_request_bytes;
+    unsigned long long threshold = g_memory_stats.last_denied_bytes
+            ? g_memory_guard_min_request
+            : g_managed_pager_admission.last_threshold_bytes;
+    unsigned long long alloc_errno = g_memory_stats.last_denied_errno
+            ? (unsigned long long)g_memory_stats.last_denied_errno
+            : g_managed_pager_admission.last_errno;
+    int accepted = g_memory_stats.last_denied_bytes ? 0
+            : (strcmp(g_managed_pager_admission.last_decision, "accepted") == 0);
     char line[16384];
     FILE *fp = fmemopen(line, sizeof(line), "w");
     if (!fp) return;
@@ -1307,7 +1325,7 @@ static void memory_telemetry_append_sample(const char *phase,
     fprintf(fp, "{\"ring_schema\":\"pdocker.memory-telemetry-ring.v1\"");
     fprintf(fp, ",\"sample_seq\":%llu", g_memory_telemetry_seq);
     fprintf(fp, ",\"sample_time_unix_ms\":%llu", wall_now_ms());
-    fprintf(fp, ",\"sample_monotonic_ms\":%llu", monotonic_now_ms());
+    fprintf(fp, ",\"sample_monotonic_ms\":%llu", monotonic_now_ns() / 1000000ULL);
     fprintf(fp, ",\"operation_id\":"); json_write_string(fp, g_memory_operation_id);
     fprintf(fp, ",\"container_id\":"); json_write_string(fp, g_memory_container_id);
     fprintf(fp, ",\"phase\":"); json_write_string(fp, phase ? phase : "direct-exec");
@@ -1317,19 +1335,22 @@ static void memory_telemetry_append_sample(const char *phase,
     fprintf(fp, ",\"mem_available_bytes\":%llu,\"mem_free_bytes\":0", available);
     fprintf(fp, ",\"swap_free_bytes\":%llu,\"swap_total_bytes\":0,\"zram_bytes\":0", swap_free);
     fprintf(fp, ",\"storage_free_bytes\":%llu,\"rss_bytes\":%llu,\"pss_unavailable\":true", storage_free, rss);
-    fprintf(fp, ",\"last_large_allocation\":{\"requested_bytes\":%llu,\"threshold_bytes\":%llu,\"decision\":",
-            g_managed_pager_admission.last_request_bytes,
-            g_managed_pager_admission.last_threshold_bytes);
-    json_write_string(fp, g_managed_pager_admission.last_decision);
+    fprintf(fp, ",\"last_large_allocation\":{\"syscall\":"); json_write_string(fp, alloc_syscall);
+    fprintf(fp, ",\"requested_bytes\":%llu,\"accepted\":%s,\"errno\":%llu,\"threshold_bytes\":%llu",
+            requested, accepted ? "true" : "false", alloc_errno, threshold);
+    fprintf(fp, ",\"mem_available_at_decision_bytes\":%llu,\"swap_free_at_decision_bytes\":%llu",
+            g_memory_stats.last_available, g_memory_stats.last_swap_free);
+    fprintf(fp, ",\"region_id\":0,\"classification\":"); json_write_string(fp, classification);
+    fprintf(fp, ",\"decision\":"); json_write_string(fp, g_managed_pager_admission.last_decision);
     fprintf(fp, ",\"reason\":"); json_write_string(fp, g_managed_pager_admission.last_reason);
     fprintf(fp, "}");
-    fprintf(fp, ",\"pager_counters\":{\"considered\":%llu,\"pending\":%llu,\"accepted\":%llu,\"register_failed\":%llu,\"faults_handled\":0,\"faults_delivered\":0,\"page_ins\":0,\"page_outs\":0,\"dirty_page_outs\":0}",
+    fprintf(fp, ",\"pager_counters\":{\"reserved_bytes\":0,\"resident_bytes\":0,\"backing_bytes\":0,\"considered\":%llu,\"pending\":%llu,\"accepted\":%llu,\"register_failed\":%llu,\"faults_handled\":0,\"faults_delivered\":0,\"page_ins\":0,\"page_outs\":0,\"dirty_page_outs\":0,\"storage_exhausted\":false,\"dirty_precision\":\"not-applicable\"}",
             g_managed_pager_admission.considered,
             g_managed_pager_admission.pending,
             g_managed_pager_admission.accepted,
             g_managed_pager_admission.register_failed);
     fprintf(fp, ",\"guard_denial_count\":%llu", g_memory_stats.denied);
-    fprintf(fp, ",\"classifier_hint\":"); json_write_string(fp, classifier_hint ? classifier_hint : "unknown");
+    fprintf(fp, ",\"classifier_hint\":"); json_write_string(fp, classification);
     fprintf(fp, ",\"progress_marker\":"); json_write_string(fp, progress_marker ? progress_marker : "memory-sample");
     fprintf(fp, ",\"mem_available_at_decision_bytes\":%llu,\"swap_free_at_decision_bytes\":%llu",
             g_memory_stats.last_available, g_memory_stats.last_swap_free);
@@ -1378,6 +1399,20 @@ static int memory_telemetry_atomic_write_summary(const char *reason, int rc,
     fprintf(fp, "  \"ring_path\": "); json_write_string(fp, g_memory_telemetry_path); fprintf(fp, ",\n");
     fprintf(fp, "  \"ring_bytes\": %llu,\n  \"ring_samples\": %llu,\n", ring_bytes, ring_lines);
     fprintf(fp, "  \"ring_truncated\": %s,\n", g_memory_telemetry_truncated ? "true" : "false");
+    unsigned long long final_available = 0, final_swap_free = 0;
+    (void)read_meminfo_bytes(&final_available, &final_swap_free);
+    fprintf(fp, "  \"final_mem_available_bytes\": %llu,\n  \"final_swap_free_bytes\": %llu,\n", final_available, final_swap_free);
+    fprintf(fp, "  \"final_rss_bytes\": %llu,\n  \"pss_unavailable\": true,\n", self_rss_bytes());
+    const char *summary_alloc_syscall = g_memory_stats.last_denied_syscall[0] ? g_memory_stats.last_denied_syscall : (g_managed_pager_admission.last_request_bytes ? "mmap" : "unknown");
+    unsigned long long summary_requested = g_memory_stats.last_denied_bytes ? g_memory_stats.last_denied_bytes : g_managed_pager_admission.last_request_bytes;
+    unsigned long long summary_threshold = g_memory_stats.last_denied_bytes ? g_memory_guard_min_request : g_managed_pager_admission.last_threshold_bytes;
+    unsigned long long summary_errno = g_memory_stats.last_denied_errno ? (unsigned long long)g_memory_stats.last_denied_errno : g_managed_pager_admission.last_errno;
+    int summary_accepted = g_memory_stats.last_denied_bytes ? 0 : (strcmp(g_managed_pager_admission.last_decision, "accepted") == 0);
+    fprintf(fp, "  \"last_large_allocation\": {\"syscall\": "); json_write_string(fp, summary_alloc_syscall);
+    fprintf(fp, ", \"requested_bytes\": %llu, \"accepted\": %s, \"errno\": %llu, \"threshold_bytes\": %llu, \"mem_available_at_decision_bytes\": %llu, \"swap_free_at_decision_bytes\": %llu, \"region_id\": 0, \"classification\": ", summary_requested, summary_accepted ? "true" : "false", summary_errno, summary_threshold, g_memory_stats.last_available, g_memory_stats.last_swap_free);
+    json_write_string(fp, classification ? classification : "unknown"); fprintf(fp, "},\n");
+    fprintf(fp, "  \"pager_counters\": {\"reserved_bytes\": 0, \"resident_bytes\": 0, \"backing_bytes\": 0, \"page_ins\": 0, \"page_outs\": 0, \"dirty_page_outs\": 0, \"faults_handled\": 0, \"faults_delivered\": 0, \"storage_exhausted\": false, \"dirty_precision\": \"not-applicable\"},\n");
+    fprintf(fp, "  \"progress_marker\": "); json_write_string(fp, reason ? reason : "trace-return"); fprintf(fp, ",\n");
     fprintf(fp, "  \"ui_live_state_allowed\": false,\n  \"engine_snapshot_fresh\": false,\n  \"pid_liveness_checked\": false,\n");
     fprintf(fp, "  \"artifact_retention_policy\": \"bounded-app-private\",\n");
     fprintf(fp, "  \"telemetry_persistence_failed\": %s,\n", g_memory_telemetry_failed ? "true" : "false");
@@ -4452,6 +4487,11 @@ static int maybe_guard_memory_syscall(pid_t pid, struct user_pt_regs *regs,
     g_memory_stats.last_denied_bytes = requested;
     g_memory_stats.last_available = available;
     g_memory_stats.last_swap_free = swap_free;
+    g_memory_stats.last_denied_nr = state->last_nr;
+    g_memory_stats.last_denied_errno = ENOMEM;
+    snprintf(g_memory_stats.last_denied_syscall,
+             sizeof(g_memory_stats.last_denied_syscall), "%s",
+             syscall_name(state->last_nr));
     if (state->last_nr == 214 && state->last_brk != 0) {
         state->emulated_result = state->last_brk;
     } else {

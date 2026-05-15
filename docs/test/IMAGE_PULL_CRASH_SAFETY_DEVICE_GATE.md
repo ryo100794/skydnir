@@ -137,6 +137,10 @@ Safety gates:
   `success=false` / `status=planned-gap` for live-pull coverage.
 - `--live-image` must be a scenario-owned reference or an isolated disposable
   registry fixture, never a user image or broad mutable tag.
+- The artifact records `live_image_safe`, `live_image_safety_reason`, and
+  `safe_image_requirements`. Common public refs such as `ubuntu:latest`,
+  `busybox:latest`, `alpine:latest`, `debian:latest`, and `library/*` are
+  rejected even if `--live-fixture-owned` is present.
 - `--live-fixture-owned` is the operator acknowledgement that the fixture is safe
   to interrupt and clean.
 - Until the device-side live phase exists, even the fully opted-in invocation

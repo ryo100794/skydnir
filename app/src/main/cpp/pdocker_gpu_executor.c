@@ -3695,6 +3695,11 @@ typedef struct {
     double q6_shader_like_abs_delta;
     uint64_t q6_local_size[3];
     uint64_t q6_local_invocations;
+    uint64_t q6_accum_mask;
+    uint64_t q6_base_work_group_y;
+    uint64_t q6_output_base_index;
+    uint64_t q6_weight_base_blocks;
+    double q6_accumulator_sum;
     double q6_shader_like_64_sum;
     double q6_shader_like_64_abs_delta;
     double partial_lanes[32];
@@ -3856,6 +3861,11 @@ static void write_cpu_oracle_report(
                 "\"q6_shader_like_abs_delta\":%.9g,"
                 "\"q6_local_size\":[%llu,%llu,%llu],"
                 "\"q6_local_invocations\":%llu,"
+                "\"q6_accum_mask\":%llu,"
+                "\"q6_base_work_group_y\":%llu,"
+                "\"q6_output_base_index\":%llu,"
+                "\"q6_weight_base_blocks\":%llu,"
+                "\"q6_accumulator_sum\":%.9g,"
                 "\"q6_shader_like_64_sum\":%.9g,"
                 "\"q6_shader_like_64_abs_delta\":%.9g",
                 report->partial_best_lane,
@@ -3874,6 +3884,11 @@ static void write_cpu_oracle_report(
                 (unsigned long long)report->q6_local_size[1],
                 (unsigned long long)report->q6_local_size[2],
                 (unsigned long long)report->q6_local_invocations,
+                (unsigned long long)report->q6_accum_mask,
+                (unsigned long long)report->q6_base_work_group_y,
+                (unsigned long long)report->q6_output_base_index,
+                (unsigned long long)report->q6_weight_base_blocks,
+                report->q6_accumulator_sum,
                 report->q6_shader_like_64_sum,
                 report->q6_shader_like_64_abs_delta);
         if (report->partial_lane_count > 0) {
@@ -4777,6 +4792,7 @@ static int q6k_accumulate_tid_partial_shader_like(
         uint32_t row,
         uint32_t tid,
         uint32_t ncols,
+        uint64_t weight_base_blocks,
         uint32_t batch_stride_b,
         uint32_t base_work_group_y,
         double *out_sum) {
@@ -4799,7 +4815,8 @@ static int q6k_accumulate_tid_partial_shader_like(
     for (uint32_t i = ix; i < num_blocks_per_row; i += it_size) {
         uint8_t block[210];
         off_t off = weight_binding->offset +
-                    (off_t)(((uint64_t)row * num_blocks_per_row + i) * 210ull);
+                    (off_t)((weight_base_blocks +
+                             (uint64_t)row * num_blocks_per_row + i) * 210ull);
         if (!q6k_read_block(weight_fd, off, block)) return 0;
         const uint32_t ql0_u32 = load_le_u32_unaligned(block + ql_offset);
         const uint32_t ql32_u32 = load_le_u32_unaligned(block + ql_offset + 32u);
@@ -4863,6 +4880,7 @@ static int q6k_accumulate_tid_partial(
         uint32_t row,
         uint32_t tid,
         uint32_t ncols,
+        uint64_t weight_base_blocks,
         uint32_t batch_stride_b,
         uint32_t base_work_group_y,
         double *out_sum) {
@@ -4880,7 +4898,8 @@ static int q6k_accumulate_tid_partial(
     for (uint32_t block_index = ix; block_index < num_blocks_per_row; block_index += 2u) {
         uint8_t block[210];
         off_t off = weight_binding->offset +
-                    (off_t)(((uint64_t)row * num_blocks_per_row + block_index) * 210ull);
+                    (off_t)((weight_base_blocks +
+                             (uint64_t)row * num_blocks_per_row + block_index) * 210ull);
         if (!q6k_read_block(weight_fd, off, block)) return 0;
         for (uint32_t l = 0; l < 4u; ++l) {
             const uint32_t elems[4] = {
@@ -4900,6 +4919,48 @@ static int q6k_accumulate_tid_partial(
         }
     }
     *out_sum = sum;
+    return 1;
+}
+
+static int q6k_decode_batch_index(
+        uint32_t base_work_group_y,
+        uint32_t ne11,
+        uint32_t ne12,
+        uint32_t ne1,
+        uint32_t ne10,
+        uint64_t *out_index) {
+    if (!out_index) return 0;
+    if (base_work_group_y == 0) {
+        *out_index = 0;
+        return 1;
+    }
+    if (ne11 == 0 || ne12 == 0 || ne1 == 0) return 0;
+    const uint32_t i13 = (base_work_group_y / ne11) / ne12;
+    const uint32_t i12 = (base_work_group_y % ne11) / ne1;
+    *out_index = (uint64_t)i13 * (uint64_t)ne10 + (uint64_t)i12;
+    return 1;
+}
+
+static int q6k_read_accumulator_value(
+        const int *buffer_fds,
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        const uint8_t *active,
+        uint32_t binding_number,
+        uint64_t dst_index,
+        double *sum) {
+    if (!buffer_fds || !bindings || !sum) return 0;
+    const int idx = binding_index_for_number(bindings, binding_count, binding_number);
+    if (idx < 0 || buffer_fds[idx] < 0 || (active && !active[idx])) return 0;
+    if ((dst_index + 1ull) > (uint64_t)SIZE_MAX / sizeof(float)) return 0;
+    const size_t byte_index = (size_t)dst_index * sizeof(float);
+    if (byte_index + sizeof(float) > bindings[idx].size) return 0;
+    float value = 0.0f;
+    const off_t off = bindings[idx].offset + (off_t)byte_index;
+    if (pread(buffer_fds[idx], &value, sizeof(value), off) != (ssize_t)sizeof(value)) {
+        return 0;
+    }
+    *sum += (double)value;
     return 1;
 }
 
@@ -4925,20 +4986,52 @@ static void run_cpu_oracle_q6k_matvec_sample(
     if (idx0 < 0 || idx1 < 0 || idx2 < 0 || !buffer_fds || buffer_fds[idx0] < 0 ||
         buffer_fds[idx1] < 0 || !vk_buffers || !vk_buffers[idx2] || !vk_buffers[idx2]->map ||
         !active || !active[idx0] || !active[idx1] || !active[idx2] ||
-        !writable || !writable[idx2] || !push || push_size < 8 * sizeof(uint32_t)) {
+        !writable || !writable[idx2] || !push || push_size < 13 * sizeof(uint32_t)) {
         report->skipped = 1;
         snprintf(report->status, sizeof(report->status), "%s", "missing-oracle-inputs");
         return;
     }
     const uint32_t ncols = load_le_u32(push, push_size, 0);
     const uint32_t stride_d = load_le_u32(push, push_size, 3);
+    const uint32_t weight_batch_stride_bytes = load_le_u32(push, push_size, 4);
     const uint32_t batch_stride_b = load_le_u32(push, push_size, 5);
-    const uint32_t base_work_group_y = load_le_u32(push, push_size, 7);
+    const uint32_t batch_stride_d = load_le_u32(push, push_size, 6);
+    const uint32_t accum_mask = load_le_u32(push, push_size, 7);
+    const uint32_t base_work_group_y = load_le_u32(push, push_size, 8);
+    const uint32_t ne10 = load_le_u32(push, push_size, 9);
+    const uint32_t ne11 = load_le_u32(push, push_size, 10);
+    const uint32_t ne1 = load_le_u32(push, push_size, 11);
+    const uint32_t ne12 = load_le_u32(push, push_size, 12);
     if (ncols == 0 || ncols > 16384 || (ncols % 256u) != 0 ||
         bindings[idx1].size < (size_t)ncols * sizeof(float) ||
-        bindings[idx2].size < sizeof(float)) {
+        bindings[idx2].size < sizeof(float) ||
+        batch_stride_b == 0 || batch_stride_d == 0 ||
+        (accum_mask & ~3u) != 0 ||
+        (weight_batch_stride_bytes % 256u) != 0) {
         report->skipped = 1;
         snprintf(report->status, sizeof(report->status), "%s", "unsupported-q6k-layout");
+        return;
+    }
+    uint64_t batch_index = 0;
+    if (!q6k_decode_batch_index(base_work_group_y, ne11, ne12, ne1, ne10, &batch_index)) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "unsupported-q6k-batch-layout");
+        return;
+    }
+    const uint64_t weight_base_blocks =
+        batch_index * (uint64_t)(weight_batch_stride_bytes / 256u);
+    const uint64_t output_base_index =
+        (uint64_t)base_work_group_y * (uint64_t)batch_stride_d;
+    if ((accum_mask & 1u) &&
+        binding_index_for_number(bindings, binding_count, 3) < 0) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "missing-q6k-accumulator-a");
+        return;
+    }
+    if ((accum_mask & 2u) &&
+        binding_index_for_number(bindings, binding_count, 4) < 0) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "missing-q6k-accumulator-b");
         return;
     }
     const uint32_t num_blocks_per_row = ncols / 256u;
@@ -4946,6 +5039,10 @@ static void run_cpu_oracle_q6k_matvec_sample(
     report->q6_local_size[0] = resolved_local_size ? resolved_local_size[0] : 1;
     report->q6_local_size[1] = resolved_local_size ? resolved_local_size[1] : 1;
     report->q6_local_size[2] = resolved_local_size ? resolved_local_size[2] : 1;
+    report->q6_accum_mask = accum_mask;
+    report->q6_base_work_group_y = base_work_group_y;
+    report->q6_output_base_index = output_base_index;
+    report->q6_weight_base_blocks = weight_base_blocks;
     if (!spirv_local_invocation_count(report->q6_local_size, &report->q6_local_invocations)) {
         report->skipped = 1;
         snprintf(report->status, sizeof(report->status), "%s", "invalid-q6-local-size");
@@ -4957,8 +5054,15 @@ static void run_cpu_oracle_q6k_matvec_sample(
     report->gpu_hash = 1469598103934665603ull;
     for (size_t si = 0; si < sizeof(sample_rows) / sizeof(sample_rows[0]); ++si) {
         const uint32_t row = sample_rows[si];
-        if (row >= stride_d || ((size_t)row + 1u) * sizeof(float) > bindings[idx2].size) continue;
+        const uint64_t dst_index = output_base_index + (uint64_t)row;
+        if (row >= stride_d ||
+            dst_index >= (uint64_t)stride_d + output_base_index ||
+            (dst_index + 1ull) > (uint64_t)SIZE_MAX / sizeof(float) ||
+            (size_t)(dst_index + 1ull) * sizeof(float) > bindings[idx2].size) {
+            continue;
+        }
         double sum = 0.0;
+        double accumulator_sum = 0.0;
         double variant_no_high = 0.0;
         double variant_unsigned_scales = 0.0;
         double variant_no_center = 0.0;
@@ -4975,7 +5079,9 @@ static void run_cpu_oracle_q6k_matvec_sample(
         for (uint32_t block_index = 0; block_index < num_blocks_per_row; ++block_index) {
             uint8_t block[210];
             off_t off = bindings[idx0].offset +
-                        (off_t)(((uint64_t)row * num_blocks_per_row + block_index) * block_bytes);
+                        (off_t)((weight_base_blocks +
+                                 (uint64_t)row * num_blocks_per_row + block_index) *
+                                block_bytes);
             if (!q6k_read_block(buffer_fds[idx0], off, block)) {
                 report->skipped = 1;
                 snprintf(report->status, sizeof(report->status), "%s", "oracle-weight-read-failed");
@@ -5001,6 +5107,20 @@ static void run_cpu_oracle_q6k_matvec_sample(
                 }
             }
         }
+        if ((accum_mask & 1u) &&
+            !q6k_read_accumulator_value(buffer_fds, bindings, binding_count, active,
+                                        3, dst_index, &accumulator_sum)) {
+            report->skipped = 1;
+            snprintf(report->status, sizeof(report->status), "%s", "oracle-accumulator-a-read-failed");
+            return;
+        }
+        if ((accum_mask & 2u) &&
+            !q6k_read_accumulator_value(buffer_fds, bindings, binding_count, active,
+                                        4, dst_index, &accumulator_sum)) {
+            report->skipped = 1;
+            snprintf(report->status, sizeof(report->status), "%s", "oracle-accumulator-b-read-failed");
+            return;
+        }
         for (uint32_t tid = 0; tid < 32u; ++tid) {
             if (!q6k_accumulate_tid_partial(buffer_fds[idx0],
                                            buffer_fds[idx1],
@@ -5009,6 +5129,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
                                            row,
                                            tid,
                                            ncols,
+                                           weight_base_blocks,
                                            batch_stride_b,
                                            base_work_group_y,
                                            &partials[tid])) {
@@ -5024,6 +5145,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
                                                        row,
                                                        tid,
                                                        ncols,
+                                                       weight_base_blocks,
                                                        batch_stride_b,
                                                        base_work_group_y,
                                                        &shader_like_partials[tid])) {
@@ -5050,6 +5172,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
                                                        row,
                                                        tid,
                                                        ncols,
+                                                       weight_base_blocks,
                                                        batch_stride_b,
                                                        base_work_group_y,
                                                        &shader_like_partials64[tid])) {
@@ -5060,16 +5183,16 @@ static void run_cpu_oracle_q6k_matvec_sample(
         int ok = 0;
         unsigned char *dst_base =
             (unsigned char *)vk_buffers[idx2]->map + binding_gpu_offset[idx2];
-        float gpu = load_f32_at_index(dst_base, bindings[idx2].size, row, &ok);
+        float gpu = load_f32_at_index(dst_base, bindings[idx2].size, (size_t)dst_index, &ok);
         if (!ok) {
             report->skipped = 1;
             snprintf(report->status, sizeof(report->status), "%s", "oracle-output-read-failed");
             return;
         }
-        float expected = (float)sum;
+        float expected = (float)(sum + accumulator_sum);
         if (q6k_oracle_writeback &&
-            (size_t)row * sizeof(float) + sizeof(float) <= bindings[idx2].size) {
-            memcpy(dst_base + (size_t)row * sizeof(float), &expected, sizeof(expected));
+            (size_t)dst_index * sizeof(float) + sizeof(float) <= bindings[idx2].size) {
+            memcpy(dst_base + (size_t)dst_index * sizeof(float), &expected, sizeof(expected));
             report->oracle_writeback = 1;
             report->oracle_writeback_rows++;
             gpu = expected;
@@ -5093,6 +5216,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
             report->q6_no_center_sum = variant_no_center;
             report->q6_packed16_view_sum = variant_packed16_view;
             report->q6_packed16_view_abs_delta = fabs(variant_packed16_view - sum);
+            report->q6_accumulator_sum = accumulator_sum;
             report->q6_shader_like_sum = 0.0;
             if (have_shader_like_partials) {
                 for (uint32_t tid = 0; tid < 32u; ++tid) {
@@ -5126,7 +5250,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
         }
         if (report->sample_count < sizeof(report->samples) / sizeof(report->samples[0])) {
             CpuOracleSample *sample = &report->samples[report->sample_count++];
-            sample->dst_index = row;
+            sample->dst_index = dst_index;
             sample->expected = expected;
             sample->gpu = gpu;
             sample->src0 = (float)row;
@@ -5136,7 +5260,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
         if (abs_error > 1e-3 && rel_error > 1e-4) {
             if (!report->has_first_mismatch) {
                 report->has_first_mismatch = 1;
-                report->first_mismatch.dst_index = row;
+                report->first_mismatch.dst_index = dst_index;
                 report->first_mismatch.expected = expected;
                 report->first_mismatch.gpu = gpu;
                 report->first_mismatch.src0 = (float)row;
@@ -5150,7 +5274,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
         report->compared_iter0++;
         if (report->row_window_count < sizeof(report->row_window) / sizeof(report->row_window[0])) {
             CpuOracleSample *window = &report->row_window[report->row_window_count++];
-            window->dst_index = row;
+            window->dst_index = dst_index;
             window->expected = expected;
             window->gpu = gpu;
             window->src0 = expected * 0.5f;

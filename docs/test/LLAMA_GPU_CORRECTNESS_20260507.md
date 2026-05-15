@@ -900,3 +900,19 @@ The artifact verifier is also stricter: an HTTP prompt pass cannot by itself
 authorize a correctness or benchmark claim when the Q6_K oracle still reports
 `latest_status: "mismatch"`.  Correctness claims now require both the standard
 prompt evidence and a Q6_K workgroup-cleared oracle match.
+
+### Q6_K Push-Layout Oracle Tightening (2026-05-15)
+
+The bounded Q6_K oracle now follows the observed `mul_mat_vec_q6_k` push layout
+more closely instead of treating every mismatch as shader/device arithmetic:
+
+- push constant index 7 is decoded as the accumulator mask;
+- push constant index 8 is decoded as the base workgroup/batch offset;
+- output samples use the derived output base index;
+- weight samples use the derived batch-row block base;
+- when accumulator bits are set, bindings 3 and/or 4 are included in the
+  expected value, or the oracle fails closed with a precise missing/read error.
+
+This does not claim Q6_K correctness.  It removes an oracle-side ambiguity so
+the next device artifact can distinguish a true Vulkan execution/writeback or
+Q6_K reduction mismatch from a stale push-constant interpretation.

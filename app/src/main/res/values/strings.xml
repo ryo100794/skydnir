@@ -243,7 +243,7 @@
     <string name="message_no_containers">No containers yet.</string>
     <string name="unknown_image">unknown image</string>
     <string name="unknown_status">unknown status</string>
-    <string name="container_ip_fmt">IP: %1$s</string>
+    <string name="container_ip_fmt">Network identity (synthetic): %1$s</string>
     <string name="container_ports_fmt">Requested ports: %1$s</string>
     <string name="container_ports_none">none</string>
     <string name="container_port_binding_fmt">%1$s:%2$s-&gt;%3$s</string>

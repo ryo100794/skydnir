@@ -172,7 +172,11 @@ remaining gap is a timed live registry-pull kill; the current device gate
 intentionally avoids overwriting user images while proving startup recovery and
 negative inspect/run behavior for partial image/layer residue. Host unit tests
 also cover startup pruning of invalid/stale/unreadable build cache entries and
-partial temporary blob/load/save files.
+partial temporary blob/load/save files. The timed live-pull lane is deliberately
+non-promoting until it has real interruption evidence and a safe image
+classifier accepts the reference. The artifact records `live_image_safe`,
+`live_image_safety_reason`, and `safe_image_requirements`; broad public/user
+tags such as `ubuntu:latest` are rejected even with the opt-in flag.
 
 ## Current compatibility matrix
 
@@ -185,7 +189,7 @@ partial temporary blob/load/save files.
 | Logs/attach/exec | Partial | Raw stream and hijack paths exist. Non-TTY exec works, and Android smoke covers a basic Engine `exec` with `Tty=true`. Full Docker attach parity, `docker run -t`, detach-key behavior, resize propagation, and broad interactive terminal cases still need more coverage. |
 | `docker cp` archive API | Partial | HEAD/GET/PUT support Docker tar and `X-Docker-Container-Path-Stat`. cow_bind reads prefer upper then lower, writes target upper. Directory merge of lower+upper entries is still incomplete. |
 | Stats | Partial | CPU/memory are approximated from `/proc`; network, blkio, and cgroup-limit counters are absent. Android storage metrics for layer, image-view, container-private, total, and free-space values need device refresh verification after build/prune/rebuild/edit flows. |
-| Networks | Compose-compatible stub | List/create/connect/disconnect/inspect/delete satisfy common Compose flows. Synthetic IPs, Docker-visible ports, and explicit port-publishing warnings are recorded, but no bridge IPs, DNS server, iptables, or active port forwarding. Next coverage must distinguish requested mappings from active listener/proxy state. |
+| Networks | Compose-compatible host-network stub | List/create/connect/disconnect/inspect/delete satisfy common Compose flows. Synthetic identity fields, Docker-visible ports, and explicit port-publishing warnings are recorded, but no bridge IPs, DNS server, or iptables are claimed. `PdockerNetwork.PortMappingStatus` now separates requested mappings from active listener/proxy/rewrite evidence and reports peer/host-listener conflicts; real isolated forwarding remains incomplete. |
 | Volumes/binds | Partial | Named volumes map to host directories; bind mounts are represented in runtime metadata and direct-run argv. No kernel mount propagation or tmpfs semantics. |
 | Dockerfile build | Partial | Dockerfiles use Docker's standard instruction surface only; pdocker-specific Dockerfile instructions are rejected instead of treated as extensions. Legacy builder supports common instructions and a practical `.dockerignore` subset on the backend host. On Android direct mode, real `RUN` works for the current supported subset. BuildKit, buildx, multi-stage edge cases, cache mounts, and advanced frontend syntax are not implemented. |
 | Compose | Partial | Product APK uses pdockerd/native orchestration rather than bundled upstream Docker Compose. Test suites may stage upstream Docker CLI/Compose separately to verify Engine API compatibility. Basic up/down flows work when the build/runtime path stays inside the supported subset; the default VS Code/Codex workspace has been built and started on-device through the direct runtime. |

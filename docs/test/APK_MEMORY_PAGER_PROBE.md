@@ -189,8 +189,11 @@ Acceptance criteria for the future managed contract probe:
 ## Planned OOM/LMK Diagnostics Artifact Probe
 
 Planned gap: no current device probe writes the complete runtime
-OOM/LMK-diagnostics artifact yet.  The executable/static verifier must keep this
-gap visible until a connected-device test can run a large-allocation scenario,
+OOM/LMK-diagnostics artifact yet.  The executable/static verifier
+`python3 scripts/verify-oom-lmk-survival-gate.py` must keep this gap visible,
+and its `--device-plan-artifact docs/test/oom-lmk-survival-latest.json` mode
+must remain `success=false` / `stable_checkpoint_eligible=false` until a
+connected-device test can run a large-allocation scenario, backend death or
 kill/restart reconciliation, and artifact-retention check from inside the APK.
 
 The future probe should run without ADB root, without an external debugger, and

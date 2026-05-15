@@ -274,7 +274,11 @@ APK-side executor.
 4. Add a synthetic container test that forces a guarded allocation and verifies
    `ENOMEM`, event shape, and UI/state reconciliation.
 5. Add a controlled LMK-suspected replay test that starts an operation, removes
-   the pid, restarts the app/daemon, and verifies classification.
+   the pid, restarts the app/daemon, and verifies classification.  Until that
+   device replay exists, `scripts/verify-oom-lmk-survival-gate.py` is the
+   host/static gate and its device-plan artifact is non-promoting
+   (`success=false`, `stable_checkpoint_eligible=false`) so a planned gap cannot
+   become a stable checkpoint.
 6. Add Large Workload Mode metadata and UI surfaces without changing ordinary
    Docker/Compose semantics.
 7. Prototype `libpdocker-mempager.so` only after the above diagnostics are

@@ -1,12 +1,12 @@
-# pdocker network visibility and port rewrite plan
+# pdocker network visibility and port truth
 
-Snapshot date: 2026-05-04.
+Snapshot date: 2026-05-15.
 
 pdockerd still executes containers in Android's app/user-space networking
 context. It does not yet create a kernel network namespace or a real bridge
 interface. The current work makes container network identity visible through
-Docker-compatible API fields and records the mapping needed by the future
-syscall-hook port rewriter.
+Docker-compatible API fields, records requested publish mappings, and separately
+reports whether a mapping has active listener/proxy/rewrite evidence.
 
 ## Docker-compatible surface
 
@@ -22,9 +22,10 @@ For each created container, pdockerd now stores:
 - `/networks`, `/networks/{name}`, `/networks/{name}/connect`, and
   `/networks/{name}/disconnect` metadata
 
-The IP address is a stable synthetic identity in `10.88.0.0/16`, derived from
-the container ID. It is intended for UI/API identity and for future hook lookup;
-it is not currently assigned by Android's kernel.
+The IP address fields are stable synthetic identities in `10.88.0.0/16`,
+derived from the container ID. They are intended for UI/API identity and future
+hook lookup; they are not assigned by Android's kernel, are not bridge
+addresses, and must not be treated as reachability proof.
 
 Example inspect shape:
 
@@ -85,10 +86,22 @@ responses and for the current `/etc/hosts` compatibility injection.
 }
 ```
 
-`PortRewrite` is deliberately explicit. The next runtime hook layer can use it
-to rewrite container `bind(2)` / related socket calls from a synthetic
-container address/port to the Android-host-visible port. For now, the entries
-are marked `planned`.
+`PortRewrite` is deliberately explicit. Runtime hook/proxy code can use it to
+rewrite container `bind(2)` / related socket calls from a synthetic container
+address/port to the Android-host-visible port. The entry's requested
+`Status`/legacy booleans are not proof that traffic is flowing.
+
+`PdockerNetwork.PortMappingStatus` is the truth surface for published ports:
+
+- `planned`: a stopped/created container has a requested mapping.
+- `inactive`: the container is running, but no pdocker-owned listener, proxy,
+  or rewrite evidence exists for the mapping.
+- `active`: pdockerd verified a live container-owned listener from `/proc/net`
+  or accepted explicit live runtime/proxy/rewrite evidence.
+- `conflict`: another container claims the same host port, or `/proc/net` shows
+  a matching host listener not owned by this container. Wildcard host binds
+  (`0.0.0.0`, `::`, empty) conflict with specific addresses for the same
+  protocol and port.
 
 ## Port source rules
 
@@ -102,8 +115,9 @@ are marked `planned`.
 - Container create responses and inspect payloads expose warnings whenever port
   publishing or named-network metadata is requested. Those warnings mean
   Docker-compatible metadata was recorded, but the Android runtime remains
-  host-network-only and the syscall rewrite layer has not started forwarding
-  traffic.
+  host-network-only. Use `PdockerNetwork.PortMappingStatus`, not
+  `NetworkSettings.Ports`, to decide whether traffic is actually backed by a
+  listener/proxy/rewrite.
 
 This keeps `docker ps`, `docker inspect`, UI widgets, and future syscall hook
 logic reading the same persisted state.
@@ -114,5 +128,7 @@ logic reading the same persisted state.
 identity + port plan`. `scripts/verify_runtime_contract.py` also imports
 `bin/pdockerd` directly and asserts stable network IDs, endpoint IDs,
 Compose/service aliases, `/etc/hosts` peer alias injection, Docker-style
-`Ports`, synthetic IP display, disconnect cleanup, and host-network-only
-warnings.
+`Ports`, synthetic identity display, disconnect cleanup, host-network-only
+warnings, active evidence handling, legacy metadata fallback, and host-port
+conflict behavior. `tests/test_network_port_mapping_status.py` covers the
+conflict corpus and verifies that metadata-only mappings never become active.

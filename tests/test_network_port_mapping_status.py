@@ -147,6 +147,48 @@ class NetworkPortMappingStatusTest(unittest.TestCase):
             self.assertEqual(status["Conflict"][0]["Type"], "host-listener")
             self.assertEqual(state["PdockerNetwork"]["PortMappingSummary"]["Conflict"], 1)
 
+    def test_foreign_listener_conflict_wins_over_declared_runtime_evidence(self):
+        with tempfile.TemporaryDirectory() as td:
+            mod = load_pdockerd(Path(td) / "pdocker")
+            port = free_port()
+            row = {
+                "Protocol": "tcp",
+                "Family": "4",
+                "LocalAddress": "127.0.0.1",
+                "LocalPort": port,
+                "State": "LISTEN",
+                "Inode": "6262",
+            }
+            ident = mod._process_identity(os.getpid())
+            state = state_for(
+                mod,
+                "foreign-active-claim",
+                port,
+                running=True,
+                known_pids=[],
+                rewrite_extra={
+                    "RuntimeEvidence": [{
+                        "Kind": "proxy",
+                        "Status": "active",
+                        "Pid": ident["Pid"],
+                        "StartTime": ident["StartTime"],
+                        "HostIp": "127.0.0.1",
+                        "HostPort": port,
+                        "Protocol": "tcp",
+                    }],
+                },
+            )
+
+            with mock.patch.object(mod, "_proc_net_socket_rows", return_value=[row]), \
+                    mock.patch.object(mod, "_socket_inodes_for_pids", return_value={}), \
+                    mock.patch.object(mod, "_pids_for_socket_inodes", return_value={"6262": {os.getpid()}}):
+                mod._refresh_port_mapping_status(state, peer_states=[])
+
+            status = state["PdockerNetwork"]["PortMappingStatus"][0]
+            self.assertEqual(status["State"], "conflict")
+            self.assertFalse(status["Active"])
+            self.assertEqual(status["Conflict"][0]["Type"], "host-listener")
+
     def test_peer_claim_conflict_wins_over_metadata(self):
         with tempfile.TemporaryDirectory() as td:
             mod = load_pdockerd(Path(td) / "pdocker")
@@ -160,6 +202,27 @@ class NetworkPortMappingStatusTest(unittest.TestCase):
             self.assertEqual(status["State"], "conflict")
             self.assertFalse(status["Active"])
             self.assertEqual(status["Conflict"][0]["ContainerId"], "peer")
+
+    def test_host_port_conflict_corpus_covers_wildcards_and_protocol(self):
+        with tempfile.TemporaryDirectory() as td:
+            mod = load_pdockerd(Path(td) / "pdocker")
+            base = {
+                "Protocol": "tcp",
+                "HostIp": "127.0.0.1",
+                "HostPort": 18080,
+            }
+            cases = [
+                ({"Protocol": "tcp", "HostIp": "127.0.0.1", "HostPort": 18080}, True),
+                ({"Protocol": "TCP", "HostIp": "127.0.0.1", "HostPort": 18080}, True),
+                ({"Protocol": "tcp", "HostIp": "0.0.0.0", "HostPort": 18080}, True),
+                ({"Protocol": "tcp", "HostIp": "::", "HostPort": 18080}, True),
+                ({"Protocol": "udp", "HostIp": "127.0.0.1", "HostPort": 18080}, False),
+                ({"Protocol": "tcp", "HostIp": "127.0.0.1", "HostPort": 18081}, False),
+                ({"Protocol": "tcp", "HostIp": "127.0.0.2", "HostPort": 18080}, False),
+            ]
+
+            for other, expected in cases:
+                self.assertEqual(mod._port_mapping_conflict(base, other), expected, other)
 
     def test_verified_runtime_rewrite_evidence_can_mark_active(self):
         with tempfile.TemporaryDirectory() as td:
@@ -190,6 +253,50 @@ class NetworkPortMappingStatusTest(unittest.TestCase):
             status = state["PdockerNetwork"]["PortMappingStatus"][0]
             self.assertEqual(status["State"], "active")
             self.assertEqual(status["Evidence"][0]["Kind"], "syscall-rewrite")
+
+    def test_live_proxy_evidence_can_mark_active(self):
+        with tempfile.TemporaryDirectory() as td:
+            mod = load_pdockerd(Path(td) / "pdocker")
+            port = free_port()
+            ident = mod._process_identity(os.getpid())
+            state = state_for(
+                mod,
+                "proxy",
+                port,
+                running=True,
+                rewrite_extra={
+                    "Proxy": {
+                        "Status": "active",
+                        "Pid": ident["Pid"],
+                        "StartTime": ident["StartTime"],
+                        "HostIp": "127.0.0.1",
+                        "HostPort": port,
+                        "Protocol": "tcp",
+                        "Target": "127.0.0.1:8080",
+                    },
+                },
+            )
+
+            mod._refresh_port_mapping_status(state, peer_states=[])
+
+            status = state["PdockerNetwork"]["PortMappingStatus"][0]
+            self.assertEqual(status["State"], "active")
+            self.assertEqual(status["Evidence"][0]["Kind"], "proxy")
+            self.assertEqual(status["Evidence"][0]["Target"], "127.0.0.1:8080")
+
+    def test_legacy_ports_without_rewrite_still_get_truth_status(self):
+        with tempfile.TemporaryDirectory() as td:
+            mod = load_pdockerd(Path(td) / "pdocker")
+            port = free_port()
+            state = state_for(mod, "legacy", port, running=True)
+            del state["PdockerNetwork"]["PortRewrite"]
+
+            mod._refresh_port_mapping_status(state, peer_states=[])
+
+            status = state["PdockerNetwork"]["PortMappingStatus"][0]
+            self.assertEqual(status["HostPort"], port)
+            self.assertEqual(status["ContainerPort"], 80)
+            self.assertEqual(status["State"], "inactive")
 
     def test_bare_active_flags_do_not_count_as_proof(self):
         with tempfile.TemporaryDirectory() as td:

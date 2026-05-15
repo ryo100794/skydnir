@@ -80,6 +80,9 @@ class ImagePullCrashSafetyVerifierTest(unittest.TestCase):
         self.assertEqual(data["live_pull_interruption"]["status"], "planned-gap")
         self.assertFalse(data["live_pull_interruption"]["success"])
         self.assertFalse(data["live_pull_interruption"]["runnable"])
+        self.assertFalse(data["live_pull_interruption"]["live_image_safe"])
+        self.assertIn("safe_image_requirements", data["live_pull_interruption"])
+        self.assertFalse(data["inputs"]["live_image_safe"])
         self.assertIn("--execute-live-pull-interruption", data["live_pull_interruption"]["required_cli"])
         self.assertIn("--live-fixture-owned", data["live_pull_interruption"]["required_cli"])
         self.assertTrue(any("--live-image" in item for item in data["live_pull_interruption"]["required_cli"]))
@@ -159,12 +162,49 @@ class ImagePullCrashSafetyVerifierTest(unittest.TestCase):
         live = data["live_pull_interruption"]
         self.assertTrue(live["requested"])
         self.assertEqual(live["live_image"], "127.0.0.1:5000/pdocker-crash-safety-fixture:test")
+        self.assertTrue(live["live_image_safe"])
+        self.assertEqual(live["live_image_safety_reason"], "scenario-owned fixture marker")
+        self.assertTrue(data["inputs"]["live_image_safe"])
         self.assertTrue(live["fixture_owned_or_isolated"])
         self.assertEqual(live["interrupt_after_seconds"], 1.5)
         self.assertFalse(live["runnable"])
         self.assertFalse(live["success"])
         self.assertEqual(live["status"], "planned-gap")
         self.assertIn("device-side timed live pull interruption phase is not implemented", live["blocked_reason"])
+
+    def test_unsafe_live_pull_reference_stays_non_promoting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "artifact.json"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(RUNNER),
+                    "--adb",
+                    "__missing_adb_for_unit_test__",
+                    "--artifact",
+                    str(artifact),
+                    "--execute-live-pull-interruption",
+                    "--live-image",
+                    "ubuntu:latest",
+                    "--live-fixture-owned",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            data = json.loads(artifact.read_text())
+
+        self.assertEqual(data["status"], "planned-gap")
+        self.assertFalse(data["success"])
+        self.assertFalse(data["coverage"]["live_interrupted_network_pull"])
+        live = data["live_pull_interruption"]
+        self.assertTrue(live["requested"])
+        self.assertFalse(live["live_image_safe"])
+        self.assertIn("public", live["live_image_safety_reason"])
+        self.assertIn("safe scenario-owned --live-image", live["blocked_reason"])
+        self.assertFalse(data["inputs"]["live_image_safe"])
 
     def test_device_side_runner_is_scenario_scoped(self):
         text = DEVICE_RUNNER.read_text()

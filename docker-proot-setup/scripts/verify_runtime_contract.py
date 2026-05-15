@@ -201,9 +201,10 @@ def test_direct_backend_rejects_fake_container_start() -> None:
         (rootfs / "workspace").mkdir(parents=True)
         (rootfs / "bin" / "sh").write_text("#!/bin/sh\n")
         (rootfs / "usr/local/bin" / "start-code-server").write_text("#!/bin/sh\n")
-        (img_dir / "config.json").write_text(
-            '{"config":{"Cmd":["/usr/local/bin/start-code-server"],"Env":[]}}'
-        )
+        image_config = {"config": {"Cmd": ["/usr/local/bin/start-code-server"], "Env": []}}
+        (img_dir / "config.json").write_text(json.dumps(image_config))
+        (img_dir / "image_ref").write_text(mod.normalize_image(image))
+        mod._save_image_manifest(str(img_dir), [], image_config)
         state = mod.create_container(
             {
                 "Image": image,
@@ -242,7 +243,10 @@ def test_start_container_reconciles_live_pid() -> None:
         rootfs = img_dir / "rootfs"
         (rootfs / "bin").mkdir(parents=True)
         (rootfs / "bin" / "sh").write_text("#!/bin/sh\n")
-        (img_dir / "config.json").write_text('{"config":{"Cmd":["/bin/sh"],"Env":[]}}')
+        image_config = {"config": {"Cmd": ["/bin/sh"], "Env": []}}
+        (img_dir / "config.json").write_text(json.dumps(image_config))
+        (img_dir / "image_ref").write_text(mod.normalize_image(image))
+        mod._save_image_manifest(str(img_dir), [], image_config)
         state = mod.create_container({"Image": image, "Cmd": ["/bin/sh"]}, name="live-pid")
         state["State"]["Running"] = False
         state["State"]["Status"] = "exited"
@@ -273,7 +277,10 @@ def test_start_container_rejects_reused_pid() -> None:
         rootfs = img_dir / "rootfs"
         (rootfs / "bin").mkdir(parents=True)
         (rootfs / "bin" / "sh").write_text("#!/bin/sh\n")
-        (img_dir / "config.json").write_text('{"config":{"Cmd":["/bin/sh"],"Env":[]}}')
+        image_config = {"config": {"Cmd": ["/bin/sh"], "Env": []}}
+        (img_dir / "config.json").write_text(json.dumps(image_config))
+        (img_dir / "image_ref").write_text(mod.normalize_image(image))
+        mod._save_image_manifest(str(img_dir), [], image_config)
         state = mod.create_container({"Image": image, "Cmd": ["/bin/sh"]}, name="reused-pid")
         state["State"]["Running"] = True
         state["State"]["Status"] = "running"
@@ -399,6 +406,8 @@ def seed_legacy_image(mod, image: str) -> None:
     (rootfs / "bin").mkdir(parents=True)
     (rootfs / "bin" / "sh").write_text("#!/bin/sh\n")
     (img_dir / "config.json").write_text('{"config":{"Env":[]}}')
+    (img_dir / "image_ref").write_text(mod.normalize_image(image))
+    mod._save_image_manifest(str(img_dir), [], {"config": {"Env": []}})
 
 
 def test_network_metadata_contract() -> None:
@@ -533,12 +542,23 @@ def test_port_mapping_status_contract() -> None:
         active = create_with_port("active-port", "18082")
         active["State"]["Running"] = True
         active["State"]["Status"] = "running"
-        active["PdockerNetwork"]["PortRewrite"][0]["RuntimeStatus"] = "active"
+        ident = mod._process_identity(os.getpid())
+        active["PdockerNetwork"]["PortRewrite"][0]["Proxy"] = {
+            "Status": "active",
+            "Pid": ident["Pid"],
+            "StartTime": ident["StartTime"],
+            "HostIp": "127.0.0.1",
+            "HostPort": 18082,
+            "Protocol": "tcp",
+            "Target": "127.0.0.1:8080",
+        }
         active["PdockerNetwork"]["PortRewrite"][0]["ProxyTarget"] = "127.0.0.1:8080"
         mod._refresh_port_mapping_status(active)
         active_status = active["PdockerNetwork"]["PortMappingStatus"][0]
         if active_status.get("State") != "active" or not active_status.get("Active"):
-            fail(f"runtime-marked mapping should be active: {active_status!r}")
+            fail(f"runtime-evidenced mapping should be active: {active_status!r}")
+        if not active_status.get("Evidence") or active_status["Evidence"][0].get("Kind") != "proxy":
+            fail(f"active mapping should include proxy evidence: {active_status!r}")
         if active_status.get("ProxyTarget") != "127.0.0.1:8080":
             fail(f"active mapping should expose proxy target: {active_status!r}")
 
@@ -757,6 +777,7 @@ def test_existing_tag_full_image_cache() -> None:
         }
         mod._save_image_manifest(str(dest), [base, run, copy], cfg)
         (dest / "config.json").write_text(json.dumps(cfg))
+        (dest / "image_ref").write_text(mod.normalize_image("local/full-cache:latest"))
         ctx = home_path / "ctx"
         ctx.mkdir()
         (ctx / "hello.txt").write_text("hello\n")

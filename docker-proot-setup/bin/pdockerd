@@ -1555,14 +1555,18 @@ def _classify_container_memory_exit(state, root_pid=None):
     classification = evidence.get("Classification") or "unknown"
     lmk_suspected = False
     reason = "summary-classification"
-    if classification == "allocation_denied_enomem":
-        st["OOMKilled"] = False
-        reason = "direct-executor-allocation-denied-enomem"
-    elif signal_no == 9 or raw == -9 or exit_code == 137:
+    if signal_no == 9 or raw == -9 or exit_code == 137:
+        # Actual backend/process death is stronger evidence than a stale or
+        # partial memory summary. Do not let an older guard-denial summary turn
+        # SIGKILL/137 into false success; keep UI liveness disabled until fresh
+        # engine state and pid liveness agree.
         classification = "sigkill-or-lmk-suspected"
         lmk_suspected = True
         st["OOMKilled"] = True
         reason = "sigkill-or-exit-137-without-kernel-prekill-notice"
+    elif classification == "allocation_denied_enomem":
+        st["OOMKilled"] = False
+        reason = "direct-executor-allocation-denied-enomem"
     elif classification in ("not_lmk_suspected", "unknown"):
         classification = "not_lmk_suspected" if exit_code == 0 else "unknown"
         st["OOMKilled"] = False
@@ -3124,7 +3128,8 @@ def _all_container_states():
 
 
 def _port_mapping_conflict(a, b):
-    if a["Protocol"] != b["Protocol"] or a["HostPort"] != b["HostPort"]:
+    if ((a.get("Protocol") or "tcp").lower() != (b.get("Protocol") or "tcp").lower()
+            or a["HostPort"] != b["HostPort"]):
         return False
     return _port_mapping_hosts_match(a.get("HostIp"), b.get("HostIp"))
 
@@ -3149,7 +3154,50 @@ def _port_mapping_claims(state):
             "HostIp": item.get("HostIp") or "127.0.0.1",
             "HostPort": host_port,
         })
+    if claims:
+        return claims
+    ports = ((state.get("PdockerNetwork") or {}).get("Ports")
+             or (state.get("NetworkSettings") or {}).get("Ports")
+             or {})
+    for key, bindings in ports.items():
+        cport, proto = _split_port_proto(key)
+        if not cport or not isinstance(bindings, list):
+            continue
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            try:
+                host_port = int(binding.get("HostPort") or 0)
+            except Exception:
+                continue
+            if host_port <= 0:
+                continue
+            claims.append({
+                "ContainerId": cid,
+                "ContainerName": pname,
+                "ContainerPort": cport,
+                "Protocol": proto,
+                "HostIp": binding.get("HostIp") or "127.0.0.1",
+                "HostPort": host_port,
+            })
     return claims
+
+
+def _port_rewrite_item_for_claim(rewrite, claim):
+    for item in rewrite:
+        try:
+            host_port = int(item.get("HostPort") or 0)
+            container_port = int(item.get("ContainerPort") or 0)
+        except Exception:
+            continue
+        if host_port != claim["HostPort"] or container_port != claim["ContainerPort"]:
+            continue
+        if (item.get("Protocol") or "tcp") != claim["Protocol"]:
+            continue
+        if not _port_mapping_hosts_match(claim.get("HostIp"), item.get("HostIp")):
+            continue
+        return item
+    return {}
 
 
 def _port_mapping_host_wildcard(host):
@@ -3445,7 +3493,7 @@ def _refresh_port_mapping_status(state, peer_states=None):
     rewrite = pn.get("PortRewrite") or []
     statuses = []
     counts = {"active": 0, "inactive": 0, "planned": 0, "conflict": 0}
-    for idx, claim in enumerate(claims):
+    for claim in claims:
         conflicts = [
             {
                 "ContainerId": peer["ContainerId"],
@@ -3457,13 +3505,13 @@ def _refresh_port_mapping_status(state, peer_states=None):
             for peer in peer_claims
             if _port_mapping_conflict(claim, peer)
         ]
-        item = rewrite[idx] if idx < len(rewrite) else {}
+        item = _port_rewrite_item_for_claim(rewrite, claim)
         listener_conflicts = _host_port_owner_conflicts(state, claim)
         evidence = _port_mapping_evidence(state, claim, item)
         if conflicts:
             state_name = "conflict"
             message = "requested host port is also claimed by another container"
-        elif listener_conflicts and not evidence:
+        elif listener_conflicts:
             state_name = "conflict"
             message = "requested host port already has a listener not owned by this container"
         elif evidence:

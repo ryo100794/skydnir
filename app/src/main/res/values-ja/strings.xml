@@ -243,7 +243,7 @@
     <string name="message_no_containers">コンテナはまだありません。</string>
     <string name="unknown_image">不明なイメージ</string>
     <string name="unknown_status">不明な状態</string>
-    <string name="container_ip_fmt">IP: %1$s</string>
+    <string name="container_ip_fmt">ネットワーク識別子（合成）: %1$s</string>
     <string name="container_ports_fmt">要求ポート: %1$s</string>
     <string name="container_ports_none">なし</string>
     <string name="container_port_binding_fmt">%1$s:%2$s-&gt;%3$s</string>

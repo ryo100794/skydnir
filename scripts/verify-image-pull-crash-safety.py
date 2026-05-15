@@ -154,7 +154,9 @@ def check_device_scenario_runner() -> None:
     require("device scenario requires explicit safe live-pull fixture flags",
             {"--execute-live-pull-interruption", "--live-fixture-owned"} <= set(live.get("required_cli") or [])
             and any("--live-image" in item and "scenario-owned" in item for item in (live.get("required_cli") or []))
-            and "scenario-owned" in "\n".join(live.get("safety_contract") or []))
+            and "scenario-owned" in "\n".join(live.get("safety_contract") or [])
+            and live.get("live_image_safe") is False
+            and "safe_image_requirements" in live)
     coverage = data.get("coverage") or {}
     require("device scenario separates synthetic recovery from live network-pull coverage",
             coverage.get("live_interrupted_network_pull") is False
@@ -199,6 +201,35 @@ def check_device_scenario_runner() -> None:
             "Live registry pull interruption" in remaining
             and "--execute-live-pull-interruption" in remaining
             and "scenario-owned" in remaining)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        unsafe_artifact = Path(tmp) / "unsafe-live.json"
+        subprocess.run(
+            [
+                sys.executable,
+                str(DEVICE_RUNNER),
+                "--adb",
+                "__missing_adb_for_static_gate__",
+                "--artifact",
+                str(unsafe_artifact),
+                "--execute-live-pull-interruption",
+                "--live-image",
+                "ubuntu:latest",
+                "--live-fixture-owned",
+            ],
+            cwd=ROOT,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        unsafe_data = json.loads(unsafe_artifact.read_text())
+    unsafe_live = unsafe_data.get("live_pull_interruption") or {}
+    require("unsafe public live-pull refs remain non-promoting",
+            unsafe_data.get("success") is False
+            and unsafe_data.get("status") == "planned-gap"
+            and unsafe_live.get("live_image_safe") is False
+            and "public" in str(unsafe_live.get("live_image_safety_reason", "")))
 
     runner_text = DEVICE_RUNNER.read_text()
     require("host device-evidence evaluator scans post-restart store listings for residue survivors",
