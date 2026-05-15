@@ -69,6 +69,52 @@ class ContainerStateIoTest(unittest.TestCase):
             self.assertIn(token, source)
         self.assertEqual(source, ASSET_PDOCKERD.read_text())
 
+    def test_container_memory_exit_classification_uses_summary_then_sigkill(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mod = load_pdockerd(root / "pdocker")
+            cid = "memexit"
+            cdir = Path(mod.CONTAINERS_DIR) / cid
+            cdir.mkdir(parents=True)
+            state = {
+                "Id": cid,
+                "Name": "/memexit",
+                "State": {
+                    "Running": False,
+                    "Status": "exited",
+                    "ExitCode": 12,
+                    "PdockerRawReturnCode": 12,
+                    "PdockerSignal": 0,
+                },
+                "Config": {"Env": []},
+                "NetworkSettings": {"Ports": {}},
+            }
+            (cdir / "memory-summary.json").write_text(json.dumps({
+                "summary_schema": "pdocker.memory-telemetry-summary.v1",
+                "classification": "allocation_denied_enomem",
+                "ring_path": str(cdir / "memory-ring.jsonl"),
+            }))
+
+            evidence = mod._classify_container_memory_exit(state)
+
+            self.assertEqual(evidence["ExitClassification"], "allocation_denied_enomem")
+            self.assertFalse(evidence["LmkSuspected"])
+            self.assertFalse(state["State"]["OOMKilled"])
+            self.assertIn("memory-summary.json", evidence["Artifacts"]["SummaryPath"])
+
+            state["State"].update({
+                "ExitCode": 137,
+                "PdockerRawReturnCode": -9,
+                "PdockerSignal": 9,
+            })
+            (cdir / "memory-summary.json").unlink()
+
+            evidence = mod._classify_container_memory_exit(state)
+
+            self.assertEqual(evidence["ExitClassification"], "sigkill-or-lmk-suspected")
+            self.assertTrue(evidence["LmkSuspected"])
+            self.assertTrue(state["State"]["OOMKilled"])
+
     def test_container_state_loader_repairs_trailing_stale_json(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

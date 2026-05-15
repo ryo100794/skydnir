@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
@@ -116,6 +117,40 @@ static const char *fdtab_get(int fd) {
 static int env_enabled(const char *name) {
     const char *v = getenv(name);
     return v && v[0] && strcmp(v, "0") != 0 && strcmp(v, "false") != 0;
+}
+
+static int env_fail_step_matches(const char *value, const char *step, int *kill_process) {
+    size_t step_len;
+    if (!value || !value[0] || !step || !step[0]) return 0;
+    if (kill_process) *kill_process = 0;
+    if (strcmp(value, step) == 0) return 1;
+    step_len = strlen(step);
+    if (strncmp(value, "fail:", 5) == 0 && strcmp(value + 5, step) == 0) return 1;
+    if (strncmp(value, "kill:", 5) == 0 && strcmp(value + 5, step) == 0) {
+        if (kill_process) *kill_process = 1;
+        return 1;
+    }
+    if (strncmp(value, step, step_len) == 0 && value[step_len] == ':') {
+        const char *action = value + step_len + 1;
+        if (strcmp(action, "fail") == 0) return 1;
+        if (strcmp(action, "kill") == 0) {
+            if (kill_process) *kill_process = 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int cow_fail_step(const char *step, int err) {
+    int kill_process = 0;
+    const char *value = getenv("PDOCKER_COW_FAIL_STEP");
+    if (!env_fail_step_matches(value, step, &kill_process)) return 0;
+    if (kill_process) {
+        raise(SIGKILL);
+        _exit(128 + SIGKILL);
+    }
+    errno = err;
+    return -1;
 }
 
 static void remember_open(int fd, const char *path) {
@@ -313,10 +348,10 @@ static int copy_file_fast(int sfd, int tfd, off_t size) {
  * rename over src. Returns 0 on success, -1 on failure (errno set).
  * No-op and returns 0 if file is not a regular file or has nlink<=1.
  */
-static int break_hardlink_copy(const char *path, int copy_data) {
+static int break_hardlink_copy_stat(const char *path, int copy_data, int follow_symlink) {
     struct stat st;
     if (!path) return 0;
-    if (stat(path, &st) < 0) {
+    if ((follow_symlink ? stat(path, &st) : lstat(path, &st)) < 0) {
         /* file doesn't exist yet — nothing to break */
         return 0;
     }
@@ -386,7 +421,8 @@ static int break_hardlink_copy(const char *path, int copy_data) {
         }
     }
 
-    if (env_enabled("PDOCKER_COW_FAIL_BEFORE_RENAME")) {
+    if (cow_fail_step("copyup.before_rename", ENOMEM) < 0 ||
+        env_enabled("PDOCKER_COW_FAIL_BEFORE_RENAME")) {
         int e = ENOMEM;
         unlink(tmp);
         errno = e;
@@ -397,6 +433,14 @@ static int break_hardlink_copy(const char *path, int copy_data) {
         int e = errno; unlink(tmp); errno = e; return -1;
     }
     return 0;
+}
+
+static int break_hardlink_copy(const char *path, int copy_data) {
+    return break_hardlink_copy_stat(path, copy_data, 1);
+}
+
+static int break_hardlink_copy_entry(const char *path, int copy_data) {
+    return break_hardlink_copy_stat(path, copy_data, 0);
 }
 
 static int break_hardlink(const char *path) {
@@ -564,18 +608,49 @@ FILE *freopen(const char *path, const char *mode, FILE *stream) {
     return real_freopen(path, mode, stream);
 }
 
-/*
- * rename(2) itself doesn't require copy-up for src (it's being
- * replaced anyway), but if dst exists with nlink>1, the rename will
- * unlink the shared inode — which is fine because unlink decrements
- * the shared inode's nlink without touching content. So no action
- * needed here; kept for future extension.
- */
+static int same_existing_entry(int sfd, const char *src, int dfd, const char *dst) {
+    struct stat ss;
+    struct stat ds;
+    if (!src || !dst) return 0;
+    if (fstatat(sfd, src, &ss, AT_SYMLINK_NOFOLLOW) < 0) return 0;
+    if (fstatat(dfd, dst, &ds, AT_SYMLINK_NOFOLLOW) < 0) return 0;
+    return ss.st_dev == ds.st_dev && ss.st_ino == ds.st_ino;
+}
+
+static int prepare_rename_destination(int sfd, const char *src,
+                                      int dfd, const char *dst,
+                                      const char *resolved_dst) {
+    /*
+     * Replacing a destination that is still hardlinked to the lower/image
+     * inode mutates that shared inode's link metadata.  Copy it up first so
+     * an injected copy-up failure stops before the visible rename can unlink
+     * the lower object.  If src and dst are already the same directory entry
+     * target, Linux rename(2) is a no-op; preserve that behavior and avoid an
+     * unnecessary copy-up.
+     */
+    if (!dst || !resolved_dst) return 0;
+    if (same_existing_entry(sfd, src, dfd, dst)) return 0;
+    return break_hardlink_copy_entry(resolved_dst, 1);
+}
+
 int rename(const char *src, const char *dst) {
+    if (prepare_rename_destination(AT_FDCWD, src, AT_FDCWD, dst, dst) < 0) {
+        return -1;
+    }
     return real_rename(src, dst);
 }
 
 int renameat(int sfd, const char *src, int dfd, const char *dst) {
+    char resolved_dst[PATH_MAX];
+    const char *cow_dst = dst;
+    if (dst && dst[0] != '/' && dfd != AT_FDCWD) {
+        cow_dst = resolve_at_path(dfd, dst, resolved_dst, sizeof(resolved_dst)) == 0
+            ? resolved_dst : NULL;
+    }
+    if (cow_dst &&
+        prepare_rename_destination(sfd, src, dfd, dst, cow_dst) < 0) {
+        return -1;
+    }
     return real_renameat(sfd, src, dfd, dst);
 }
 

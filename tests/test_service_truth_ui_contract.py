@@ -36,9 +36,19 @@ def test_rendered_ui_service_truth_export_schema_is_explicit_unknown_or_stale():
         "EngineContainerId",
         "ContainerIdSource",
         "TruthState",
+        "TruthReason",
+        "CurrentReason",
+        "StaleReason",
+        "UnknownReason",
+        "EngineSnapshotStatus",
+        "EngineSnapshotAgeMs",
+        "PersistedContainerId",
+        "EngineSnapshotIdMismatch",
         "RenderedAtUnixMs",
         "LastEngineSnapshotAtUnixMs",
         "EngineSnapshotMissing",
+        "EngineSnapshotOld",
+        "EngineContainerIdMismatch",
         '"unknown"',
         '"stale"',
         '"current"',
@@ -47,3 +57,4 @@ def test_rendered_ui_service_truth_export_schema_is_explicit_unknown_or_stale():
     assert "recordRenderedContainerCard(name, statusText, detailText, dir, state, snapshot)" in main
     assert "recordRenderedProjectServiceCards(project, detail)" in main
     assert "must not be treated as success" in main
+    assert "SERVICE_TRUTH_ENGINE_SNAPSHOT_CURRENT_MAX_AGE_MS" in main

@@ -44,8 +44,11 @@ checks pass.  The artifact has:
 Required executable case ids are:
 
 - `copy_up.before_rename`
+- `copy_up.kill_before_rename_recovery`
 - `copy_up.truncate_before_rename`
 - `metadata.chmod_before_rename`
+- `rename.destination_copyup_fail_closed`
+- `renameat.destination_copyup_fail_closed`
 - `whiteout.before_publish`
 - `rename.before_publish`
 - `archive_put.stage_failure`
@@ -57,7 +60,10 @@ Required executable case ids are:
 The executable host-local gate now records fail-closed evidence for:
 
 - copy-up write/truncate failures injected before rename publication;
+- local copy-up kill-step recovery with orphan `.cow*` cleanup;
 - hardlink metadata mutation failure for `chmod`;
+- `rename()`/`renameat()` destination copy-up fail-closed behavior before
+  replacing a hardlinked lower object;
 - whiteout marker creation failure before marker publication;
 - rename/replace staging failure before destination publication;
 - archive PUT stage failure before live upperdir publication;

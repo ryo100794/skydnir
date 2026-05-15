@@ -70,6 +70,8 @@ class CowOverlayBenchRecoveryTests(unittest.TestCase):
             self.assertIn("open_close", metric_names)
             self.assertIn("layer_lookup", metric_names)
             self.assertEqual(recovery["Checks"]["hardlink_ring_corruption_rebuild"], "pass")
+            self.assertEqual(recovery["Checks"]["copy_up_kill_step_recovery"], "pass")
+            self.assertEqual(recovery["Checks"]["rename_destination_copyup_fail_closed"], "pass")
             self.assertEqual(recovery["Checks"]["whiteout_fail_closed"], "pass")
             self.assertEqual(recovery["Checks"]["rename_fail_closed"], "pass")
             self.assertEqual(recovery["Checks"]["archive_put_fail_closed"], "pass")
@@ -78,7 +80,10 @@ class CowOverlayBenchRecoveryTests(unittest.TestCase):
             case_ids = {case["Id"] for case in recovery["CaseResults"]}
             for required in {
                 "copy_up.before_rename",
+                "copy_up.kill_before_rename_recovery",
                 "metadata.chmod_before_rename",
+                "rename.destination_copyup_fail_closed",
+                "renameat.destination_copyup_fail_closed",
                 "whiteout.before_publish",
                 "rename.before_publish",
                 "archive_put.stage_failure",

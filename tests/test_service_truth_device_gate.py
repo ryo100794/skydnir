@@ -66,6 +66,9 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
             "logs-<container-id>.out",
             "same-id-source-summary.json",
             "listener-owner-map.json",
+            "OwnerEngineContainerId",
+            "SelectedPidOwnsListener",
+            "ExactEngineContainerIdRequired",
             "inspect-selected.http",
             "logs-selected.out",
             "exact ID match",
@@ -73,6 +76,12 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
             "unknown",
             "stale",
             "ambiguous",
+            "CurrentReason",
+            "StaleReason",
+            "UnknownReason",
+            "EngineSnapshotMissing",
+            "EngineSnapshotOld",
+            "EngineContainerIdMismatch",
             "fake success",
         ]:
             self.assertIn(term, text)
@@ -82,6 +91,15 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
     def test_planned_gap_artifact_is_never_success_even_with_collected_evidence(self):
         artifact = passing_artifact()
         artifact["Status"] = "planned-gap"
+        artifact["Success"] = True
+        with self.assertRaises(AssertionError):
+            validate_same_container_id_contract(artifact)
+
+        artifact["Success"] = False
+        validate_same_container_id_contract(artifact)
+
+        artifact = passing_artifact()
+        artifact["Status"] = "skip"
         artifact["Success"] = True
         with self.assertRaises(AssertionError):
             validate_same_container_id_contract(artifact)
@@ -100,6 +118,8 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
             lambda a: a["Sources"]["ContainerLogs"].update({"CurrentServiceMarker": False}),
             lambda a: a["Sources"]["ListenerProbe"].update({"Ports": [], "ProcNetTcpMatchedPorts": ""}),
             lambda a: a["Sources"]["ListenerProbe"].update({"Pid": 9999}),
+            lambda a: a["Sources"]["ListenerProbe"].update({"OwnerEngineContainerId": a["Proof"]["EngineContainerId"][:12]}),
+            lambda a: a["Sources"]["ListenerProbe"].update({"SelectedPidOwnsListener": False}),
             lambda a: a["Sources"]["UICard"].update({"TruthState": "stale"}),
             lambda a: a["Sources"]["UICard"].update({"ContainerIdSource": "state.json"}),
             lambda a: a["Proof"].update({"EngineContainerId": a["Proof"]["EngineContainerId"][:12]}),
@@ -142,6 +162,9 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
             "state-id-comparison.json",
             "listener-probe.json",
             "listener-owner-map.json",
+            "OwnerEngineContainerId",
+            "SelectedPidOwnsListener",
+            "ExactEngineContainerIdRequired",
             "same-id-source-summary.json",
             "inspect-selected.http",
             "docker-inspect-selected.out",
@@ -163,6 +186,8 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
         self.assertIn("ContainerLogs.CurrentServiceMarker", verifier)
         self.assertIn("Proof.EngineContainerId must be an exact 64-hex", verifier)
         self.assertIn("ListenerProbe must bind at least one configured/listening port", verifier)
+        self.assertIn("ListenerProbe.OwnerEngineContainerId must be an exact 64-hex", verifier)
+        self.assertIn("planned-gap/skip artifacts must set Success false", verifier)
         self.assertIn("successful service truth artifact must set Status device-pass", verifier)
 
     def test_static_verifier_fixture_rejects_missing_same_id_edges(self):

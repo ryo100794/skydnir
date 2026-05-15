@@ -17,60 +17,69 @@ from typing import Any
 
 
 MEMORY_ERRORS = {"insufficient_memory", "runtime_memory_pressure"}
+ENV_MANIFEST_PATH = Path(__file__).resolve().with_name("llama-gpu-env-manifest.json")
 
-# Shared llama GPU environment manifests.  Static contract tests keep the
-# compare driver, pdockerd container environment, this verifier, and the handoff
-# documentation aligned so diagnostic toggles cannot silently diverge.
-LLAMA_GPU_UI_RUNTIME_ENV_KEYS = (
-    "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE",
-    "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
-    "PDOCKER_GPU_RESIDENT_CACHE",
-    "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
-    "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
-    "PDOCKER_GPU_Q6K_SAFE_KERNEL",
-    "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
-    "PDOCKER_VULKAN_HEAP_BYTES",
-    "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
-    "GGML_VK_FORCE_MAX_BUFFER_SIZE",
-    "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
-    "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
-)
 
-LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS = (
-    "PDOCKER_GPU_CPU_ORACLE",
-    "PDOCKER_GPU_STRICT_PASSTHROUGH",
-    "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",
-    "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
-    "PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION",
-    "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
-    "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
-    "PDOCKER_VULKAN_DISABLE_16BIT_STORAGE",
-    "PDOCKER_VULKAN_SUBGROUP_SIZE",
-)
+def _load_env_manifest() -> dict[str, Any]:
+    try:
+        manifest = json.loads(ENV_MANIFEST_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"llama GPU env manifest missing: {ENV_MANIFEST_PATH}") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"llama GPU env manifest is invalid JSON: {ENV_MANIFEST_PATH}: {exc}") from exc
+    if manifest.get("schema") != "pdocker.llama.gpu.env-manifest.v1":
+        raise RuntimeError(f"llama GPU env manifest has unsupported schema: {ENV_MANIFEST_PATH}")
+    return manifest
 
-LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS = (
-    ("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "duplicate_descriptor_rewrite"),
-    ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
-    ("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "disable_pipeline_optimization"),
-    ("PDOCKER_GPU_STRICT_PASSTHROUGH", "strict_passthrough"),
-    ("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", "skip_unused_descriptor_transfers"),
-    ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "spirv_descriptor_access"),
-    ("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", "disable_overlap_aliasing"),
-    ("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle_requested"),
-    ("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", "strict_object_graph.device_local_staging_requested"),
-    ("PDOCKER_GPU_Q6K_SAFE_KERNEL", "q6k_safe_kernel"),
-    ("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", "cpu_oracle.oracle_writeback"),
-    ("PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel"),
-    ("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization_materialized"),
-    ("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_buffer_cache.enabled"),
-)
 
-UNSUPPORTED_GPU_WORK_TOKENS = (
-    "unsupported",
-    "kernel-not-implemented-yet",
-    "not-implemented",
-    "unimplemented",
+def _manifest_string_tuple(manifest: dict[str, Any], key: str) -> tuple[str, ...]:
+    values = manifest.get(key)
+    if not isinstance(values, list) or not all(isinstance(value, str) and value for value in values):
+        raise RuntimeError(f"llama GPU env manifest field {key!r} must be a non-empty string list")
+    if len(set(values)) != len(values):
+        raise RuntimeError(f"llama GPU env manifest field {key!r} contains duplicate entries")
+    return tuple(values)
+
+
+def _manifest_env_field_tuple(manifest: dict[str, Any], key: str) -> tuple[tuple[str, str], ...]:
+    values = manifest.get(key)
+    if not isinstance(values, list) or not values:
+        raise RuntimeError(f"llama GPU env manifest field {key!r} must be a non-empty list")
+    fields: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for item in values:
+        if not isinstance(item, dict):
+            raise RuntimeError(f"llama GPU env manifest field {key!r} contains a non-object entry")
+        env_name = item.get("env")
+        executor_field = item.get("executor_field")
+        if not isinstance(env_name, str) or not env_name:
+            raise RuntimeError(f"llama GPU env manifest field {key!r} contains an invalid env")
+        if not isinstance(executor_field, str) or not executor_field:
+            raise RuntimeError(f"llama GPU env manifest field {key!r} contains an invalid executor_field")
+        if env_name in seen:
+            raise RuntimeError(f"llama GPU env manifest field {key!r} repeats env {env_name}")
+        seen.add(env_name)
+        fields.append((env_name, executor_field))
+    return tuple(fields)
+
+
+LLAMA_GPU_ENV_MANIFEST = _load_env_manifest()
+
+# Shared llama GPU environment manifest.  The compare driver and verifier both
+# load scripts/llama-gpu-env-manifest.json so diagnostic toggles cannot silently
+# diverge while still leaving the executor, Dockerfiles, llama.cpp, and UI
+# untouched.
+LLAMA_GPU_UI_RUNTIME_ENV_KEYS = _manifest_string_tuple(LLAMA_GPU_ENV_MANIFEST, "ui_runtime_env_keys")
+LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS = _manifest_string_tuple(
+    LLAMA_GPU_ENV_MANIFEST, "compare_diagnostic_env_keys"
 )
+LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS = _manifest_string_tuple(
+    LLAMA_GPU_ENV_MANIFEST, "compare_forward_env_keys"
+)
+LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS = _manifest_env_field_tuple(
+    LLAMA_GPU_ENV_MANIFEST, "config_propagation_env_fields"
+)
+UNSUPPORTED_GPU_WORK_TOKENS = _manifest_string_tuple(LLAMA_GPU_ENV_MANIFEST, "unsupported_gpu_work_tokens")
 
 
 def _is_compare_artifact(data: dict[str, Any]) -> bool:
@@ -179,8 +188,18 @@ def _config_propagation_failed(config_propagation: dict[str, Any]) -> bool:
     if config_propagation and _config_propagation_manifest_misses(config_propagation):
         return True
     for check in checks:
-        if isinstance(check, dict) and check.get("status") in {"missing-evidence", "mismatch"}:
+        if not isinstance(check, dict):
             return True
+        if not check.get("env") or not check.get("executor_field"):
+            return True
+        if check.get("status") in {"missing-evidence", "mismatch"}:
+            return True
+        if check.get("expected") is not None:
+            observed = check.get("observed_values")
+            if not isinstance(observed, list) or not observed:
+                return True
+            if check.get("status") != "pass":
+                return True
     return False
 
 

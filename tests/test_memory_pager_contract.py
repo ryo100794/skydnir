@@ -158,6 +158,25 @@ class MemoryPagerContractTest(unittest.TestCase):
             ]:
                 self.assertTrue(token in source, f"pdockerd missing telemetry propagation token {token}")
 
+    def test_pdockerd_exposes_memory_pressure_and_exit_classification_contract(self):
+        pdockerd = (ROOT / "docker-proot-setup" / "bin" / "pdockerd").read_text()
+        asset_path = ROOT / "app" / "src" / "main" / "assets" / "pdockerd" / "pdockerd"
+        sources = [pdockerd]
+        if asset_path.exists():
+            sources.append(asset_path.read_text())
+        for source in sources:
+            for token in [
+                '"/system/memory-pressure"',
+                '"pdocker.memory-pressure.v1"',
+                "def _container_memory_artifact_paths",
+                "def _classify_container_memory_exit",
+                '"pdocker.container-memory-exit.v1"',
+                '"sigkill-or-lmk-suspected"',
+                '"allocation_denied_enomem"',
+                '"UiLiveStateAllowed"',
+            ]:
+                self.assertIn(token, source)
+
     def test_pdockerd_propagates_memory_pager_labels_to_direct_executor(self):
         pdockerd = (ROOT / "docker-proot-setup" / "bin" / "pdockerd").read_text()
         asset_path = ROOT / "app" / "src" / "main" / "assets" / "pdockerd" / "pdockerd"

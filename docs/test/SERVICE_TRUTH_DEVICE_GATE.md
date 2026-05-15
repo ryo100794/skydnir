@@ -21,7 +21,10 @@ sources to the exact same Engine container ID:
 1. `UICard` - rendered card export from
    `files/pdocker/diagnostics/ui-rendered-service-truth-latest.json`; the card
    must have `TruthState: current` and `ContainerIdSource` from current Engine
-   truth, not stale `state.json` only.
+   truth, not stale `state.json` only. It must also expose explicit
+   `CurrentReason`, `StaleReason`, and `UnknownReason` fields so
+   `EngineSnapshotMissing`, `EngineSnapshotOld`, and
+   `EngineContainerIdMismatch` cases are machine-readable non-success reasons.
 2. `DockerPs` - `docker ps --no-trunc` / `docker ps -a --no-trunc` evidence for
    the running Engine container ID.
 3. `EngineApiContainersJson` - Engine API `/containers/json?all=1` evidence.
@@ -29,7 +32,9 @@ sources to the exact same Engine container ID:
 5. `ProcessTable` - process-table owner/PID evidence for the selected Engine
    container ID.
 6. `ListenerProbe` - listener socket evidence, including `/proc/net/tcp`, for
-   the service port owner.
+   the service port owner. A port declaration or prefix match is not proof;
+   `OwnerEngineContainerId` must be the exact same 64-hex ID as
+   `Proof.EngineContainerId`, and `SelectedPidOwnsListener` must be true.
 7. `ContainerLogs` - current logs from the same Engine container ID with a fresh
    `pdocker-service-truth-marker` entry containing the selected container ID.
 
@@ -75,12 +80,12 @@ Required top-level shape:
     "MissingSources": ["ProcessTable", "ListenerProbe", "ContainerLogs"]
   },
   "Sources": {
-    "UICard": {"ContainerId": null, "TruthState": "unknown", "Proven": false, "Artifacts": []},
+    "UICard": {"ContainerId": null, "TruthState": "unknown", "CurrentReason": null, "StaleReason": null, "UnknownReason": "EngineSnapshotMissing", "Proven": false, "Artifacts": []},
     "DockerPs": {"ContainerId": null, "Proven": false, "Artifacts": []},
     "EngineApiContainersJson": {"ContainerId": null, "Proven": false, "Artifacts": []},
     "PersistedStateJson": {"ContainerId": null, "Proven": false, "Artifacts": []},
     "ProcessTable": {"ContainerId": null, "Pid": null, "Proven": false, "Artifacts": []},
-    "ListenerProbe": {"ContainerId": null, "Pid": null, "Proven": false, "Artifacts": []},
+    "ListenerProbe": {"ContainerId": null, "OwnerEngineContainerId": null, "Pid": null, "SelectedPidOwnsListener": false, "ExactEngineContainerIdRequired": true, "Proven": false, "Artifacts": []},
     "ContainerLogs": {"ContainerId": null, "Proven": false, "CurrentServiceMarker": false, "Artifacts": []}
   },
   "Evidence": {
@@ -117,12 +122,20 @@ The passing form must set `Success: true` only when:
 - Every required `Sources.<name>.ContainerId` exactly equals
   `Proof.EngineContainerId`; prefix-only matches are not enough.
 - `UICard.TruthState` is `current`; `unknown`, `stale`, and `ambiguous` are
-  explicit non-success states.
+  explicit non-success states, with `CurrentReason`, `StaleReason`, and
+  `UnknownReason` carrying reason codes such as `EngineSnapshotMissing`,
+  `EngineSnapshotOld`, and `EngineContainerIdMismatch`.
+- `ListenerProbe.OwnerEngineContainerId` is an exact 64-hex match to
+  `Proof.EngineContainerId`, and `SelectedPidOwnsListener` is `true`;
+  `configured-ports.txt`, `/proc/net/tcp`, or a 12-character prefix alone is
+  never enough.
 - Every required source names at least one raw artifact path under
   `files/pdocker/diagnostics/service-truth/`.
 
 ## Negative cases that must not pass
 
+- Status is `planned-gap`, `skip`, or `skipped`; those states must keep
+  `Success: false` and are never counted as a pass.
 - Configured port exists in compose metadata, but there is no listener.
 - A listener exists, but its PID/process tree maps to a different Engine
   container ID.
@@ -151,7 +164,9 @@ The diagnostic collector attempts to reduce each source to the selected exact
 Engine container ID as follows:
 
 - UI card: copies `ui-rendered-service-truth-latest.json` and records
-  `EngineContainerId`, `ContainerIdSource`, and `TruthState`.
+  `EngineContainerId`, `ContainerIdSource`, `TruthState`, `CurrentReason`,
+  `StaleReason`, `UnknownReason`, `EngineSnapshotStatus`,
+  `EngineSnapshotAgeMs`, and `EngineSnapshotIdMismatch`.
 - Docker ps: records `engine-ps.out`, `engine-ps-running.out`,
   `engine-candidates.tsv`, and `engine-candidates.json`; the selected row must
   be an exact ID match, not a prefix match.
@@ -162,7 +177,9 @@ Engine container ID as follows:
 - Process table: extracts the selected container inspect PID and searches it in
   `process-table.txt`.
 - Listener: records `/proc/net/tcp`, `listener-probe.json`, and the best-effort
-  socket-inode-to-PID map `listener-owner-map.json` / `.tsv`.
+  socket-inode-to-PID map `listener-owner-map.json` / `.tsv`; pass promotion
+  requires `OwnerEngineContainerId` to equal the exact selected 64-hex Engine
+  ID and `SelectedPidOwnsListener` to be true, not merely a configured port.
 - Logs: records per-running-container logs and `logs-selected.out` for the
   selected Engine container ID.
 

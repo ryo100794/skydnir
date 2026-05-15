@@ -33,8 +33,11 @@ REQUIRED_METRICS = {
 
 REQUIRED_RECOVERY_CASES = {
     "copy_up.before_rename",
+    "copy_up.kill_before_rename_recovery",
     "copy_up.truncate_before_rename",
     "metadata.chmod_before_rename",
+    "rename.destination_copyup_fail_closed",
+    "renameat.destination_copyup_fail_closed",
     "whiteout.before_publish",
     "rename.before_publish",
     "archive_put.stage_failure",
@@ -44,8 +47,10 @@ REQUIRED_RECOVERY_CASES = {
 
 REQUIRED_RECOVERY_CHECKS = {
     "copy_up_fail_closed",
+    "copy_up_kill_step_recovery",
     "truncate_fail_closed",
     "metadata_fail_closed",
+    "rename_destination_copyup_fail_closed",
     "whiteout_fail_closed",
     "rename_fail_closed",
     "archive_put_fail_closed",

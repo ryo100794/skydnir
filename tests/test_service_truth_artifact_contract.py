@@ -34,6 +34,8 @@ def test_service_truth_device_artifact_pass_branch_requires_same_id_proof():
         "state-id-comparison.json",
         "listener-probe.json",
         "SelectedEngineContainerId",
+        "OwnerEngineContainerId",
+        "SelectedPidOwnsListener",
         "ui-rendered-service-truth-latest.json",
         "ContainerIdSource",
         "TruthState",

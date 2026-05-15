@@ -396,6 +396,20 @@ class MainActivity : AppCompatActivity() {
         val engineContainerId: String,
     )
 
+    private data class RenderedServiceTruthDecision(
+        val engineContainerId: String?,
+        val containerIdSource: String,
+        val truthState: String,
+        val truthReason: String,
+        val currentReason: String?,
+        val staleReason: String?,
+        val unknownReason: String?,
+        val engineSnapshotStatus: String,
+        val engineSnapshotAgeMs: Long?,
+        val persistedContainerId: String?,
+        val engineSnapshotIdMismatch: Boolean,
+    )
+
     private data class RenderedServiceTruthCard(
         val kind: String,
         val title: String,
@@ -405,6 +419,14 @@ class MainActivity : AppCompatActivity() {
         val engineContainerId: String?,
         val containerIdSource: String,
         val truthState: String,
+        val truthReason: String,
+        val currentReason: String?,
+        val staleReason: String?,
+        val unknownReason: String?,
+        val engineSnapshotStatus: String,
+        val engineSnapshotAgeMs: Long?,
+        val persistedContainerId: String?,
+        val engineSnapshotIdMismatch: Boolean,
         val statusText: String,
         val detailText: String,
         val renderedAtMs: Long,
@@ -446,6 +468,7 @@ class MainActivity : AppCompatActivity() {
         private const val PDOCKER_PROJECT_DIR_LABEL = "io.github.ryo100794.pdocker.project-dir"
         private const val PDOCKER_PROJECT_NAME_LABEL = "io.github.ryo100794.pdocker.project-name"
         private const val PDOCKER_COMPOSE_SERVICE_LABEL = "io.github.ryo100794.pdocker.compose-service"
+        private const val SERVICE_TRUTH_ENGINE_SNAPSHOT_CURRENT_MAX_AGE_MS = 30_000L
         private const val ACTION_SMOKE_START = "io.github.ryo100794.pdocker.action.SMOKE_START"
         private const val ACTION_SMOKE_GPU_BENCH = "io.github.ryo100794.pdocker.action.SMOKE_GPU_BENCH"
         private const val ACTION_SMOKE_COMPOSE_UP = "io.github.ryo100794.pdocker.action.SMOKE_COMPOSE_UP"
@@ -849,23 +872,27 @@ class MainActivity : AppCompatActivity() {
         state: JSONObject?,
         snapshot: JSONObject?,
     ) {
-        val engineId = snapshot?.optString("Id")?.takeIf { it.isNotBlank() }
-        val fallbackId = state?.optString("Id")?.takeIf { it.isNotBlank() }
-        val (source, truthState, exportedId) = when {
-            engineId != null -> Triple("EngineApiContainersJson", "current", engineId)
-            lastContainerSnapshotAt == 0L -> Triple("EngineSnapshotMissing", "unknown", null)
-            fallbackId != null -> Triple("PersistedStateJson", "stale", fallbackId)
-            else -> Triple("EngineApiContainersJson", "unknown", null)
-        }
+        val decision = renderedServiceTruthDecision(
+            engineId = snapshot?.optString("Id")?.takeIf { it.isNotBlank() },
+            persistedId = state?.optString("Id")?.takeIf { it.isNotBlank() },
+        )
         renderedServiceTruthCards += RenderedServiceTruthCard(
             kind = "container-card",
             title = title,
             projectName = null,
             serviceName = null,
             containerName = state?.optString("Name")?.trim('/')?.takeIf { it.isNotBlank() } ?: dir.name,
-            engineContainerId = exportedId,
-            containerIdSource = source,
-            truthState = truthState,
+            engineContainerId = decision.engineContainerId,
+            containerIdSource = decision.containerIdSource,
+            truthState = decision.truthState,
+            truthReason = decision.truthReason,
+            currentReason = decision.currentReason,
+            staleReason = decision.staleReason,
+            unknownReason = decision.unknownReason,
+            engineSnapshotStatus = decision.engineSnapshotStatus,
+            engineSnapshotAgeMs = decision.engineSnapshotAgeMs,
+            persistedContainerId = decision.persistedContainerId,
+            engineSnapshotIdMismatch = decision.engineSnapshotIdMismatch,
             statusText = statusText,
             detailText = detailText,
             renderedAtMs = renderPassStartedAtMs,
@@ -873,30 +900,92 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private fun renderedServiceTruthDecision(engineId: String?, persistedId: String?): RenderedServiceTruthDecision {
+        val snapshotAgeMs = lastContainerSnapshotAt
+            .takeIf { it > 0L }
+            ?.let { (renderPassStartedAtMs - it).coerceAtLeast(0L) }
+        val snapshotIsCurrent = snapshotAgeMs != null &&
+            snapshotAgeMs <= SERVICE_TRUTH_ENGINE_SNAPSHOT_CURRENT_MAX_AGE_MS
+        val engineSnapshotIdMismatch = engineId != null && persistedId != null &&
+            !engineId.equals(persistedId, ignoreCase = true)
+        val engineSnapshotStatus = when {
+            lastContainerSnapshotAt == 0L -> "missing"
+            snapshotIsCurrent -> "current"
+            else -> "old"
+        }
+        fun decision(
+            exportedId: String?,
+            source: String,
+            state: String,
+            reason: String,
+        ) = RenderedServiceTruthDecision(
+            engineContainerId = exportedId,
+            containerIdSource = source,
+            truthState = state,
+            truthReason = reason,
+            currentReason = reason.takeIf { state == "current" },
+            staleReason = reason.takeIf { state == "stale" },
+            unknownReason = reason.takeIf { state == "unknown" },
+            engineSnapshotStatus = engineSnapshotStatus,
+            engineSnapshotAgeMs = snapshotAgeMs,
+            persistedContainerId = persistedId,
+            engineSnapshotIdMismatch = engineSnapshotIdMismatch,
+        )
+        return when {
+            engineId != null && snapshotIsCurrent -> decision(
+                engineId,
+                "EngineApiContainersJson",
+                "current",
+                if (engineSnapshotIdMismatch) "EngineContainerIdMismatchCurrentEngineWins" else "EngineSnapshotCurrent",
+            )
+            engineId != null -> decision(null, "EngineSnapshotOld", "unknown", "EngineSnapshotOld")
+            lastContainerSnapshotAt == 0L -> decision(null, "EngineSnapshotMissing", "unknown", "EngineSnapshotMissing")
+            persistedId != null -> decision(
+                persistedId,
+                "PersistedStateJson",
+                "stale",
+                if (engineSnapshotIdMismatch) "EngineContainerIdMismatch" else "PersistedStateWithoutCurrentEngineMatch",
+            )
+            else -> decision(null, "EngineApiContainersJson", "unknown", "EngineContainerIdMissing")
+        }
+    }
+
     private fun recordRenderedProjectServiceCards(project: ProjectSummary, detailText: String) {
         val snapshots = projectContainerSnapshots(project.dir)
         val proofs = projectRunningServiceProofs(project.dir, snapshots)
         val localStates = projectContainerStates(project.dir)
         val composeNames = projectComposeContainerNames(project.dir)
+        val projectDecision = renderedServiceTruthDecision(
+            engineId = snapshots.singleOrNull()?.optString("Id")?.takeIf { it.isNotBlank() },
+            persistedId = localStates.singleOrNull()?.optString("Id")?.takeIf { it.isNotBlank() },
+        )
+        val projectTruthState = when {
+            snapshots.size > 1 && projectDecision.engineSnapshotStatus == "current" -> "ambiguous"
+            snapshots.size > 1 -> "unknown"
+            else -> projectDecision.truthState
+        }
+        val projectTruthReason = when {
+            snapshots.size > 1 && projectDecision.engineSnapshotStatus == "current" -> "EngineSnapshotAmbiguous"
+            snapshots.size > 1 -> "EngineSnapshotOld"
+            else -> projectDecision.truthReason
+        }
         renderedServiceTruthCards += RenderedServiceTruthCard(
             kind = "project-card",
             title = project.dir.name,
             projectName = project.dir.name,
             serviceName = null,
             containerName = null,
-            engineContainerId = snapshots.singleOrNull()?.optString("Id")?.takeIf { it.isNotBlank() },
-            containerIdSource = when {
-                snapshots.isNotEmpty() -> "EngineApiContainersJson"
-                localStates.isNotEmpty() -> "PersistedStateJson"
-                lastContainerSnapshotAt == 0L -> "EngineSnapshotMissing"
-                else -> "EngineApiContainersJson"
-            },
-            truthState = when {
-                snapshots.size == 1 -> "current"
-                snapshots.size > 1 -> "ambiguous"
-                localStates.isNotEmpty() -> "stale"
-                else -> "unknown"
-            },
+            engineContainerId = if (projectTruthState == "current") projectDecision.engineContainerId else null,
+            containerIdSource = projectDecision.containerIdSource,
+            truthState = projectTruthState,
+            truthReason = projectTruthReason,
+            currentReason = projectTruthReason.takeIf { projectTruthState == "current" },
+            staleReason = projectTruthReason.takeIf { projectTruthState == "stale" },
+            unknownReason = projectTruthReason.takeIf { projectTruthState == "unknown" },
+            engineSnapshotStatus = projectDecision.engineSnapshotStatus,
+            engineSnapshotAgeMs = projectDecision.engineSnapshotAgeMs,
+            persistedContainerId = projectDecision.persistedContainerId,
+            engineSnapshotIdMismatch = projectDecision.engineSnapshotIdMismatch,
             statusText = project.containerStatusSummary,
             detailText = detailText,
             renderedAtMs = renderPassStartedAtMs,
@@ -912,22 +1001,27 @@ class MainActivity : AppCompatActivity() {
                     state.optString("Name").trim('/') == containerName ||
                     composeNames[state.optString("Name").trim('/')] == service.name
             }
-            val staleId = localState?.optString("Id")?.takeIf { it.isNotBlank() }
-            val (source, truthState, exportedId) = when {
-                proof != null -> Triple("EngineApiContainersJson", "current", proof.engineContainerId)
-                lastContainerSnapshotAt == 0L -> Triple("EngineSnapshotMissing", "unknown", null)
-                staleId != null -> Triple("PersistedStateJson", "stale", staleId)
-                else -> Triple("EngineApiContainersJson", "unknown", null)
-            }
+            val serviceDecision = renderedServiceTruthDecision(
+                engineId = proof?.engineContainerId,
+                persistedId = localState?.optString("Id")?.takeIf { it.isNotBlank() },
+            )
             renderedServiceTruthCards += RenderedServiceTruthCard(
                 kind = "service-card",
                 title = "${project.dir.name}/${service.name}",
                 projectName = project.dir.name,
                 serviceName = service.name,
                 containerName = containerName,
-                engineContainerId = exportedId,
-                containerIdSource = source,
-                truthState = truthState,
+                engineContainerId = serviceDecision.engineContainerId,
+                containerIdSource = serviceDecision.containerIdSource,
+                truthState = serviceDecision.truthState,
+                truthReason = serviceDecision.truthReason,
+                currentReason = serviceDecision.currentReason,
+                staleReason = serviceDecision.staleReason,
+                unknownReason = serviceDecision.unknownReason,
+                engineSnapshotStatus = serviceDecision.engineSnapshotStatus,
+                engineSnapshotAgeMs = serviceDecision.engineSnapshotAgeMs,
+                persistedContainerId = serviceDecision.persistedContainerId,
+                engineSnapshotIdMismatch = serviceDecision.engineSnapshotIdMismatch,
                 statusText = project.serviceHealth,
                 detailText = detailText,
                 renderedAtMs = renderPassStartedAtMs,
@@ -950,6 +1044,14 @@ class MainActivity : AppCompatActivity() {
                 .put("EngineContainerId", card.engineContainerId ?: JSONObject.NULL)
                 .put("ContainerIdSource", card.containerIdSource)
                 .put("TruthState", card.truthState)
+                .put("TruthReason", card.truthReason)
+                .put("CurrentReason", card.currentReason ?: JSONObject.NULL)
+                .put("StaleReason", card.staleReason ?: JSONObject.NULL)
+                .put("UnknownReason", card.unknownReason ?: JSONObject.NULL)
+                .put("EngineSnapshotStatus", card.engineSnapshotStatus)
+                .put("EngineSnapshotAgeMs", card.engineSnapshotAgeMs ?: JSONObject.NULL)
+                .put("PersistedContainerId", card.persistedContainerId ?: JSONObject.NULL)
+                .put("EngineSnapshotIdMismatch", card.engineSnapshotIdMismatch)
                 .put("StatusText", card.statusText)
                 .put("DetailText", card.detailText)
                 .put("RenderedAtUnixMs", card.renderedAtMs)
@@ -972,7 +1074,7 @@ class MainActivity : AppCompatActivity() {
                 .put("UnknownCount", renderedServiceTruthCards.count { it.truthState == "unknown" })
                 .put("AmbiguousCount", renderedServiceTruthCards.count { it.truthState == "ambiguous" })
                 .put("HasUnknownOrStale", truthStates.any { it == "unknown" || it == "stale" || it == "ambiguous" }))
-            .put("Contract", "Rendered UI cards export the Engine container ID currently proven by /containers/json; if no current Engine snapshot exists or only persisted state matches, TruthState is unknown/stale and must not be treated as success.")
+            .put("Contract", "Rendered UI cards export the Engine container ID currently proven by a fresh /containers/json snapshot; explicit CurrentReason, StaleReason, and UnknownReason fields identify EngineSnapshotMissing, EngineSnapshotOld, and EngineContainerIdMismatch cases, and unknown/stale/ambiguous cards must not be treated as success.")
             .put("RenderedCards", cards)
         File(diagnosticsDir, "ui-rendered-service-truth-latest.json").writeText(export.toString(2) + "\n")
     }

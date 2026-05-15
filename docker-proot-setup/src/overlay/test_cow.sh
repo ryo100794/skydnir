@@ -15,6 +15,8 @@ UPPER="$TMP/merged"
 HARDLINK_RING_STATUS="not-run"
 STATE_MACHINE_STATUS="not-run"
 KILL_CASES_STATUS="planned-gap"
+COPYUP_KILL_STATUS="not-run"
+RENAME_DST_STATUS="not-run"
 
 # ---- prepare lower (image) ----
 mkdir -p "$LOWER"
@@ -225,6 +227,140 @@ fi
     || { echo "FAIL: injected chmod failure changed upper"; exit 1; }
 echo "ok: metadata copy-up failure fails closed"
 
+# PDOCKER_COW_FAIL_STEP can either return an error at a deterministic mutation
+# step or kill the mutating process at that step.  A kill after temp copy-up but
+# before atomic rename may leave a .cow* sibling; startup repair must be able to
+# discard that temp without treating it as authoritative payload.
+echo "kill-step-copyup" > "$LOWER/kill-copyup.txt"
+ln "$LOWER/kill-copyup.txt" "$UPPER/kill-copyup.txt"
+if PDOCKER_COW_FAIL_STEP=kill:copyup.before_rename LD_PRELOAD="$LIB" \
+    bash -c "echo killed > '$UPPER/kill-copyup.txt'" >/dev/null 2>&1; then
+    echo "FAIL: kill-step copy-up unexpectedly succeeded"; exit 1
+fi
+[ "$(cat "$LOWER/kill-copyup.txt")" = "kill-step-copyup" ] \
+    || { echo "FAIL: kill-step copy-up leaked to lower"; exit 1; }
+[ "$(cat "$UPPER/kill-copyup.txt")" = "kill-step-copyup" ] \
+    || { echo "FAIL: kill-step copy-up changed upper before publish"; exit 1; }
+KILL_TEMP_COUNT=$(find "$UPPER" -maxdepth 1 -name '.cow*' | wc -l)
+[ "$KILL_TEMP_COUNT" -ge 1 ] \
+    || { echo "FAIL: kill-step did not leave expected orphan .cow temp"; exit 1; }
+find "$UPPER" -maxdepth 1 -name '.cow*' -delete
+[ "$(find "$UPPER" -maxdepth 1 -name '.cow*' -print -quit)" = "" ] \
+    || { echo "FAIL: startup cleanup did not remove orphan .cow temp"; exit 1; }
+[ "$(cat "$LOWER/kill-copyup.txt")" = "kill-step-copyup" ] \
+    || { echo "FAIL: cleanup changed lower after kill-step"; exit 1; }
+[ "$(cat "$UPPER/kill-copyup.txt")" = "kill-step-copyup" ] \
+    || { echo "FAIL: cleanup changed upper after kill-step"; exit 1; }
+COPYUP_KILL_STATUS="pass"
+echo "ok: copy-up kill-step leaves recoverable temp and preserves payload"
+
+# ---- rename/renameat destination copy-up must fail closed ----
+# Replacing a destination that is still hardlinked to lower must first copy up
+# the destination.  If that copy-up fails, rename must not proceed and silently
+# unlink/corrupt lower hardlink metadata.
+echo "rename-dst-original" > "$LOWER/rename-dst.txt"
+ln "$LOWER/rename-dst.txt" "$LOWER/rename-dst-peer.txt"
+ln "$LOWER/rename-dst.txt" "$UPPER/rename-dst.txt"
+echo "rename-src-new" > "$UPPER/rename-src.txt"
+RENAME_DST_NLINK_BEFORE=$(stat -c %h "$LOWER/rename-dst.txt")
+RENAME_DST_INO_BEFORE=$(stat -c %i "$UPPER/rename-dst.txt")
+if PDOCKER_COW_FAIL_STEP=copyup.before_rename LD_PRELOAD="$LIB" python3 - "$UPPER/rename-src.txt" "$UPPER/rename-dst.txt" <<'PY' >/dev/null 2>&1
+import ctypes
+import os
+import sys
+
+libc = ctypes.CDLL(None, use_errno=True)
+rc = libc.rename(os.fsencode(sys.argv[1]), os.fsencode(sys.argv[2]))
+if rc != 0:
+    err = ctypes.get_errno()
+    raise OSError(err, os.strerror(err))
+PY
+then
+    echo "FAIL: rename over shared destination succeeded after injected copy-up failure"; exit 1
+fi
+[ -f "$UPPER/rename-src.txt" ] \
+    || { echo "FAIL: failed rename removed source"; exit 1; }
+[ "$(cat "$UPPER/rename-src.txt")" = "rename-src-new" ] \
+    || { echo "FAIL: failed rename changed source"; exit 1; }
+[ "$(cat "$UPPER/rename-dst.txt")" = "rename-dst-original" ] \
+    || { echo "FAIL: failed rename changed upper destination"; exit 1; }
+[ "$(cat "$LOWER/rename-dst.txt")" = "rename-dst-original" ] \
+    || { echo "FAIL: failed rename changed lower destination"; exit 1; }
+[ "$(cat "$LOWER/rename-dst-peer.txt")" = "rename-dst-original" ] \
+    || { echo "FAIL: failed rename changed lower hardlink peer"; exit 1; }
+[ "$(stat -c %h "$LOWER/rename-dst.txt")" = "$RENAME_DST_NLINK_BEFORE" ] \
+    || { echo "FAIL: failed rename changed lower destination nlink"; exit 1; }
+[ "$(stat -c %i "$UPPER/rename-dst.txt")" = "$RENAME_DST_INO_BEFORE" ] \
+    || { echo "FAIL: failed rename partially copied-up destination"; exit 1; }
+echo "ok: rename destination copy-up failure fails closed"
+
+echo "rename-dst-ok-original" > "$LOWER/rename-dst-ok.txt"
+ln "$LOWER/rename-dst-ok.txt" "$LOWER/rename-dst-ok-peer.txt"
+ln "$LOWER/rename-dst-ok.txt" "$UPPER/rename-dst-ok.txt"
+echo "rename-src-ok-new" > "$UPPER/rename-src-ok.txt"
+LD_PRELOAD="$LIB" python3 - "$UPPER/rename-src-ok.txt" "$UPPER/rename-dst-ok.txt" <<'PY' >/dev/null 2>&1
+import ctypes
+import os
+import sys
+
+libc = ctypes.CDLL(None, use_errno=True)
+rc = libc.rename(os.fsencode(sys.argv[1]), os.fsencode(sys.argv[2]))
+if rc != 0:
+    err = ctypes.get_errno()
+    raise OSError(err, os.strerror(err))
+PY
+[ ! -e "$UPPER/rename-src-ok.txt" ] \
+    || { echo "FAIL: successful rename left source"; exit 1; }
+[ "$(cat "$UPPER/rename-dst-ok.txt")" = "rename-src-ok-new" ] \
+    || { echo "FAIL: successful rename did not replace upper destination"; exit 1; }
+[ "$(cat "$LOWER/rename-dst-ok.txt")" = "rename-dst-ok-original" ] \
+    || { echo "FAIL: successful rename corrupted lower destination"; exit 1; }
+[ "$(cat "$LOWER/rename-dst-ok-peer.txt")" = "rename-dst-ok-original" ] \
+    || { echo "FAIL: successful rename corrupted lower hardlink peer"; exit 1; }
+[ "$(stat -c %i "$LOWER/rename-dst-ok.txt")" = "$(stat -c %i "$LOWER/rename-dst-ok-peer.txt")" ] \
+    || { echo "FAIL: successful rename broke lower hardlink peer relationship"; exit 1; }
+[ "$(stat -c %i "$UPPER/rename-dst-ok.txt")" != "$(stat -c %i "$LOWER/rename-dst-ok.txt")" ] \
+    || { echo "FAIL: successful rename left upper destination hardlinked to lower"; exit 1; }
+echo "ok: rename destination copy-up protects lower hardlink group"
+
+mkdir -p "$LOWER/renameat" "$UPPER/renameat"
+echo "renameat-dst-original" > "$LOWER/renameat/dst.txt"
+ln "$LOWER/renameat/dst.txt" "$LOWER/renameat/peer.txt"
+ln "$LOWER/renameat/dst.txt" "$UPPER/renameat/dst.txt"
+echo "renameat-src-new" > "$UPPER/renameat/src.txt"
+RENAMEAT_DST_NLINK_BEFORE=$(stat -c %h "$LOWER/renameat/dst.txt")
+if PDOCKER_COW_FAIL_STEP=copyup.before_rename LD_PRELOAD="$LIB" python3 - "$UPPER/renameat" <<'PY' >/dev/null 2>&1
+import ctypes
+import os
+import sys
+
+root = sys.argv[1]
+dfd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+try:
+    libc = ctypes.CDLL(None, use_errno=True)
+    rc = libc.renameat(dfd, b"src.txt", dfd, b"dst.txt")
+    if rc != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+finally:
+    os.close(dfd)
+PY
+then
+    echo "FAIL: renameat over shared destination succeeded after injected copy-up failure"; exit 1
+fi
+[ -f "$UPPER/renameat/src.txt" ] \
+    || { echo "FAIL: failed renameat removed source"; exit 1; }
+[ "$(cat "$UPPER/renameat/dst.txt")" = "renameat-dst-original" ] \
+    || { echo "FAIL: failed renameat changed upper destination"; exit 1; }
+[ "$(cat "$LOWER/renameat/dst.txt")" = "renameat-dst-original" ] \
+    || { echo "FAIL: failed renameat changed lower destination"; exit 1; }
+[ "$(cat "$LOWER/renameat/peer.txt")" = "renameat-dst-original" ] \
+    || { echo "FAIL: failed renameat changed lower hardlink peer"; exit 1; }
+[ "$(stat -c %h "$LOWER/renameat/dst.txt")" = "$RENAMEAT_DST_NLINK_BEFORE" ] \
+    || { echo "FAIL: failed renameat changed lower destination nlink"; exit 1; }
+RENAME_DST_STATUS="pass"
+echo "ok: renameat destination copy-up failure fails closed"
+
 
 # ---- recovery state-machine probes for non-libcow overlay mutations ----
 # These host-local probes model fail-closed publication rules used by the
@@ -429,13 +565,13 @@ KILL_CASES_STATUS="planned-gap"
 echo "planned-gap: kill-at-step recovery harness not executed in local libcow test"
 
 mkdir -p "$(dirname "$COW_TEST_JSON")"
-python3 - "$COW_TEST_JSON" "$HARDLINK_RING_STATUS" "$STATE_MACHINE_STATUS" "$KILL_CASES_STATUS" "$STATE_MACHINE_RESULTS" <<'PY'
+python3 - "$COW_TEST_JSON" "$HARDLINK_RING_STATUS" "$STATE_MACHINE_STATUS" "$KILL_CASES_STATUS" "$STATE_MACHINE_RESULTS" "$COPYUP_KILL_STATUS" "$RENAME_DST_STATUS" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-out, hardlink_status, state_machine_status, kill_status, state_machine_path = sys.argv[1:6]
+out, hardlink_status, state_machine_status, kill_status, state_machine_path, copyup_kill_status, rename_dst_status = sys.argv[1:8]
 case_results = json.loads(Path(state_machine_path).read_text(encoding="utf-8"))
 case_results.extend([
     {
@@ -463,6 +599,30 @@ case_results.extend([
         "Evidence": "metadata copy-up failure checks passed before artifact emission",
     },
     {
+        "Id": "copy_up.kill_before_rename_recovery",
+        "Operation": "copy-up write",
+        "Fault": "PDOCKER_COW_FAIL_STEP=kill:copyup.before_rename",
+        "ExpectedRecovery": "startup cleanup discards orphan .cow temp; lower and upper payload remain unchanged",
+        "Status": copyup_kill_status,
+        "Evidence": "killed copy-up left an orphan .cow temp that was removed without changing lower or upper payload",
+    },
+    {
+        "Id": "rename.destination_copyup_fail_closed",
+        "Operation": "rename over hardlinked destination",
+        "Fault": "PDOCKER_COW_FAIL_STEP=copyup.before_rename during destination copy-up",
+        "ExpectedRecovery": "rename returns failure before replacing destination; source, destination, lower content, and lower nlink remain unchanged",
+        "Status": rename_dst_status,
+        "Evidence": "rename failure preserved source, upper destination, lower hardlink peer, and lower nlink",
+    },
+    {
+        "Id": "renameat.destination_copyup_fail_closed",
+        "Operation": "renameat over hardlinked destination",
+        "Fault": "PDOCKER_COW_FAIL_STEP=copyup.before_rename during destination copy-up",
+        "ExpectedRecovery": "renameat returns failure before replacing destination; source, destination, lower content, and lower nlink remain unchanged",
+        "Status": rename_dst_status,
+        "Evidence": "renameat failure preserved source, upper destination, lower hardlink peer, and lower nlink",
+    },
+    {
         "Id": "hardlink_metadata.corrupt_rebuild",
         "Operation": "hardlink ring metadata rebuild",
         "Fault": "corrupt ring cache row",
@@ -472,7 +632,13 @@ case_results.extend([
     },
 ])
 negative_cases = [case for case in case_results if case["Status"] == "pass" and case["Fault"]]
-all_executed_pass = state_machine_status == "pass" and hardlink_status == "pass" and all(case.get("Status") == "pass" for case in case_results)
+all_executed_pass = (
+    state_machine_status == "pass"
+    and hardlink_status == "pass"
+    and copyup_kill_status == "pass"
+    and rename_dst_status == "pass"
+    and all(case.get("Status") == "pass" for case in case_results)
+)
 artifact = {
     "SchemaVersion": 1,
     "Kind": "cow-overlay-recovery",
@@ -480,8 +646,10 @@ artifact = {
     "Status": "pass" if all_executed_pass else "fail",
     "Checks": {
         "copy_up_fail_closed": "pass",
+        "copy_up_kill_step_recovery": copyup_kill_status,
         "truncate_fail_closed": "pass",
         "metadata_fail_closed": "pass",
+        "rename_destination_copyup_fail_closed": rename_dst_status,
         "whiteout_fail_closed": "pass",
         "rename_fail_closed": "pass",
         "archive_put_fail_closed": "pass",

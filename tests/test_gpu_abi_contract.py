@@ -18,6 +18,7 @@ LLAMA_GPU_NEXT_STEPS = ROOT / "docs" / "plan" / "LLAMA_GPU_BRIDGE_NEXT_STEPS.md"
 LLAMA_GPU_CORRECTNESS = ROOT / "docs" / "test" / "LLAMA_GPU_CORRECTNESS_20260507.md"
 ROPE_YARN_ARTIFACT = ROOT / "docs" / "test" / "llama-gpu-ngl1-rope-yarn-oracle-20260509.json"
 LLAMA_GPU_ARTIFACT_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
+LLAMA_GPU_ENV_MANIFEST = ROOT / "scripts" / "llama-gpu-env-manifest.json"
 
 
 def load_llama_gpu_artifact_verifier():
@@ -163,6 +164,9 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_llama_gpu_compare_tracks_critical_env_propagation(self):
         compare = LLAMA_COMPARE.read_text()
+        verifier = load_llama_gpu_artifact_verifier()
+        config_fields = dict(verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS)
+        forward_envs = set(verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
         for env_name, field_name in [
             ("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle_requested"),
             ("PDOCKER_GPU_STRICT_PASSTHROUGH", "strict_passthrough"),
@@ -175,8 +179,10 @@ class GpuAbiContractTest(unittest.TestCase):
             ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
             ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "spirv_descriptor_access"),
         ]:
-            self.assertIn(env_name, compare)
-            self.assertIn(field_name, compare)
+            self.assertEqual(field_name, config_fields[env_name])
+            self.assertIn(env_name, forward_envs)
+        self.assertIn("llama-gpu-env-manifest.json", compare)
+        self.assertIn("config_propagation_env_fields", compare)
         source = GPU_EXECUTOR.read_text()
         self.assertIn("strict_vulkan_passthrough_requested", source)
         self.assertIn("PDOCKER_GPU_STRICT_PASSTHROUGH", source)
@@ -455,6 +461,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_llama_compare_records_bisection_and_config_propagation(self):
         compare = LLAMA_COMPARE.read_text()
+        compare_and_manifest = compare + "\n" + LLAMA_GPU_ENV_MANIFEST.read_text()
         for marker in [
             "config_propagation",
             "config_expectations",
@@ -481,7 +488,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "output_layout_or_shader_math",
             "numeric_layout_or_readback",
         ]:
-            self.assertIn(marker, compare)
+            self.assertIn(marker, compare_and_manifest)
         source = GPU_EXECUTOR.read_text()
         self.assertIn('\\"disable_pipeline_optimization\\":%s', source)
         self.assertIn('\\"skip_unused_descriptor_transfers\\":%s', source)
@@ -577,6 +584,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("workgroup_shape_blocker", compare)
         self.assertIn("fix Q6_K three-dimensional workgroup shape propagation", compare)
         self.assertIn("q6_shader_like_64_abs_delta", compare)
+        forward_envs = set(load_llama_gpu_artifact_verifier().LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
         for key in [
             "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
             "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
@@ -604,7 +612,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_VULKAN_ICD_DEBUG",
             "PDOCKER_VULKAN_SUBGROUP_SIZE",
         ]:
-            self.assertIn(f'"{key}"', compare)
+            self.assertIn(key, forward_envs)
+        self.assertIn("compare_forward_env_keys", compare)
         self.assertIn("value = os.environ.get(key)", compare)
         self.assertIn("PDOCKER_LLAMA_MIN_FREE_MB", compare)
         self.assertIn("PDOCKER_LLAMA_MIN_SWAP_FREE_MB", compare)
@@ -729,6 +738,8 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_llama_gpu_compare_forwards_native_tuning_envs_by_default(self):
         compare = LLAMA_COMPARE.read_text()
+        verifier = load_llama_gpu_artifact_verifier()
+        forward_envs = set(verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
         native_sources = GPU_EXECUTOR.read_text() + "\n" + VULKAN_ICD.read_text()
         native_envs = set(re.findall(
             r'getenv\("((?:PDOCKER_GPU|PDOCKER_VULKAN|PDOCKER_ANDROID)_[A-Z0-9_]+)"\)',
@@ -744,7 +755,7 @@ class GpuAbiContractTest(unittest.TestCase):
         }
         missing = sorted(
             key for key in native_envs - internal_only
-            if f'"{key}"' not in compare and f"{key}=" not in compare
+            if key not in forward_envs and f"{key}=" not in compare
         )
         self.assertEqual([], missing)
 
@@ -755,7 +766,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("n-gpu-layers as an insufficient isolation knob", compare)
         self.assertIn("api_understanding", compare)
         self.assertIn("effective_offset_mismatch_count", compare)
-        self.assertIn('("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle_requested")', compare)
+        self.assertIn(("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle_requested"), verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS)
         self.assertIn("PDOCKER_LLAMA_BENCH_WARMUP_DISCARD", compare)
         self.assertIn("gpu_summary_scope", compare)
         for field in [
@@ -776,11 +787,17 @@ class GpuAbiContractTest(unittest.TestCase):
         next_steps = LLAMA_GPU_NEXT_STEPS.read_text()
         correctness = LLAMA_GPU_CORRECTNESS.read_text()
         verifier = load_llama_gpu_artifact_verifier()
+        manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
+
+        self.assertEqual("pdocker.llama.gpu.env-manifest.v1", manifest["schema"])
+        self.assertIn("llama-gpu-env-manifest.json", compare)
+        self.assertIn("compare_forward_env_keys", compare)
+        self.assertIn("config_propagation_env_fields", compare)
 
         ui_compose_runtime_keys = verifier.LLAMA_GPU_UI_RUNTIME_ENV_KEYS
         for key in ui_compose_runtime_keys:
             self.assertIn(f'"{key}": os.environ.get', pdockerd)
-            self.assertIn(key, compare)
+            self.assertIn(key, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
             self.assertIn(key, next_steps)
 
         ui_compose_template_staleness_keys = [
@@ -795,19 +812,20 @@ class GpuAbiContractTest(unittest.TestCase):
 
         diagnostic_keys = verifier.LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS
         for key in diagnostic_keys:
-            self.assertIn(key, compare)
+            self.assertIn(key, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
             self.assertIn(key, next_steps)
 
-        for env_name, field_name in verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS:
-            self.assertIn(f'("{env_name}", "{field_name}")', compare)
-        compare_config_pairs = re.findall(
-            r'\("((?:PDOCKER_GPU|PDOCKER_VULKAN)_[A-Z0-9_]+)",\s*"([a-zA-Z0-9_.]+)"\)',
-            compare[compare.index("config_expectations = ["):compare.index("config_checks = []")],
-        )
-        self.assertEqual(list(verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS), compare_config_pairs)
+        manifest_config_pairs = [
+            (item["env"], item["executor_field"])
+            for item in manifest["config_propagation_env_fields"]
+        ]
+        self.assertEqual(list(verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS), manifest_config_pairs)
+        for env_name, _field_name in verifier.LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS:
+            self.assertIn(env_name, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
 
         self.assertIn("LLAMA_GPU_UI_RUNTIME_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         self.assertIn("LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
+        self.assertIn("LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         self.assertIn("LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         self.assertIn("UNSUPPORTED_GPU_WORK_TOKENS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         self.assertIn("unsupported-gpu-work-accepted", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())

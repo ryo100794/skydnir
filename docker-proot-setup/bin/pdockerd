@@ -1506,6 +1506,78 @@ def _apply_memory_pager_env(state, env):
     return env
 
 
+def _container_memory_artifact_paths(state):
+    cid = (state or {}).get("Id") or (state or {}).get("ID") or "unknown"
+    memory_dir = os.path.join(CONTAINERS_DIR, cid)
+    return {
+        "RingPath": os.path.join(memory_dir, "memory-ring.jsonl"),
+        "SummaryPath": os.path.join(memory_dir, "memory-summary.json"),
+    }
+
+
+def _read_json_file_if_exists(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+
+
+def _container_memory_exit_summary(state, root_pid=None):
+    paths = _container_memory_artifact_paths(state)
+    summary = _read_json_file_if_exists(paths["SummaryPath"]) or {}
+    classification = str(summary.get("classification") or "").strip()
+    return {
+        "schema": "pdocker.container-memory-exit.v1",
+        "Artifacts": paths,
+        "SummaryPresent": bool(summary),
+        "Summary": summary,
+        "Classification": classification or "unknown",
+        "MemoryPressureSnapshot": _memory_pressure_snapshot(root_pid),
+    }
+
+
+def _classify_container_memory_exit(state, root_pid=None):
+    """Attach bounded memory evidence to an exited container state.
+
+    Android can kill the backend without a useful pre-kill callback.  The only
+    safe contract is evidence-first: record the direct-executor summary if it
+    exists, otherwise classify SIGKILL/137 as suspected LMK/SIGKILL instead of
+    pretending we know.  The UI must treat this metadata as diagnostic evidence,
+    not as liveness proof.
+    """
+    st = (state or {}).setdefault("State", {})
+    evidence = _container_memory_exit_summary(state, root_pid=root_pid)
+    raw = int(st.get("PdockerRawReturnCode", st.get("ExitCode", 0)) or 0)
+    exit_code = int(st.get("ExitCode", 0) or 0)
+    signal_no = int(st.get("PdockerSignal", 0) or 0)
+    classification = evidence.get("Classification") or "unknown"
+    lmk_suspected = False
+    reason = "summary-classification"
+    if classification == "allocation_denied_enomem":
+        st["OOMKilled"] = False
+        reason = "direct-executor-allocation-denied-enomem"
+    elif signal_no == 9 or raw == -9 or exit_code == 137:
+        classification = "sigkill-or-lmk-suspected"
+        lmk_suspected = True
+        st["OOMKilled"] = True
+        reason = "sigkill-or-exit-137-without-kernel-prekill-notice"
+    elif classification in ("not_lmk_suspected", "unknown"):
+        classification = "not_lmk_suspected" if exit_code == 0 else "unknown"
+        st["OOMKilled"] = False
+        reason = "normal-exit" if exit_code == 0 else "no-memory-specific-evidence"
+    evidence["Classification"] = classification
+    evidence["ExitClassification"] = classification
+    evidence["LmkSuspected"] = lmk_suspected
+    evidence["Reason"] = reason
+    evidence["ExitCode"] = exit_code
+    evidence["PdockerRawReturnCode"] = raw
+    evidence["PdockerSignal"] = signal_no
+    evidence["UiLiveStateAllowed"] = False
+    st["PdockerMemory"] = evidence
+    return evidence
+
+
 def _join_under(base, relpath):
     path = os.path.normpath(os.path.join(base, relpath.lstrip("/")))
     try:
@@ -5233,6 +5305,12 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
         save_container_state(cid, state)
     env = _container_env(state)
     _apply_memory_pager_env(state, env)
+    state["PdockerMemory"] = {
+        "schema": "pdocker.container-memory-runtime.v1",
+        **_container_memory_artifact_paths(state),
+        "Mode": env.get("PDOCKER_MEMORY_PAGER", "disabled"),
+        "UiLiveStateAllowed": False,
+    }
 
     workdir = state.get("WorkingDir", "/") or "/"
 
@@ -5368,6 +5446,7 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
             s["State"]["Running"] = False
             s["State"]["Status"] = "exited"
             _record_container_return_code(s["State"], rc)
+            _classify_container_memory_exit(s, root_pid=proc.pid)
             s["State"]["Pid"] = 0
             s["State"].pop("PidStartTime", None)
             s["State"]["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
@@ -5461,6 +5540,9 @@ def stop_container(cid, timeout=10):
         state["State"]["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
         if stopped and not state["State"].get("ExitCode"):
             state["State"]["ExitCode"] = 143
+            state["State"]["PdockerRawReturnCode"] = 143
+            state["State"]["PdockerSignal"] = 15
+        _classify_container_memory_exit(state, root_pid=pid)
         _mark_health_not_running(state["State"])
         save_container_state(cid, state)
     with running_lock:
@@ -6760,6 +6842,32 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
 
         if path == "/system/operations" and method == "GET":
             self._send_json(200, list_active_operations())
+            return
+
+        if path == "/system/memory-pressure" and method == "GET":
+            root_pid = None
+            cid = (query.get("container") or query.get("cid") or [""])[0]
+            if cid:
+                state = load_container_state(resolve_container(cid) or cid)
+                if state:
+                    root_pid = ((state.get("State") or {}).get("Pid") or None)
+            if root_pid is None:
+                try:
+                    root_pid = int((query.get("pid") or ["0"])[0]) or None
+                except (TypeError, ValueError):
+                    root_pid = None
+            snapshot = _memory_pressure_snapshot(root_pid)
+            snapshot["schema"] = "pdocker.memory-pressure.v1"
+            snapshot["ActiveOperations"] = list_active_operations()
+            if cid and state:
+                snapshot["Container"] = {
+                    "Id": state.get("Id"),
+                    "Name": state.get("Name"),
+                    "State": state.get("State") or {},
+                    "PdockerMemory": (state.get("State") or {}).get("PdockerMemory")
+                        or state.get("PdockerMemory"),
+                }
+            self._send_json(200, snapshot)
             return
 
         if path == "/system/df" and method == "GET":

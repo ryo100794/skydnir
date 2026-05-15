@@ -42,9 +42,12 @@ issues, and deciding which planned gaps become hard gates.
    `.tmp-*`, `.old-*`, interrupted layer extraction, tag publish, and startup
    recovery must be tested with an actual kill/restart device artifact.
 5. **[#12](https://github.com/ryo100794/pdocker-android/issues/12)
-   COW/overlay mutation safety** `[P0 next]`: copy-up, whiteout, rename,
-   archive PUT, hardlink metadata, low-space, and kill-at-step scenarios need
-   fail-closed mutation tests plus startup repair/check evidence.
+   COW/overlay mutation safety** `[P0 next]`: host-local `libcow` coverage now
+   fails closed for copy-up, metadata, `rename()`/`renameat()` over hardlinked
+   destinations, whiteout/rename/archive staging models, low-space, corrupt
+   hardlink-ring rebuild, and a local copy-up kill-step orphan-temp recovery.
+   Remaining release blocker: device daemon/helper kill-at-step restart
+   evidence for the same mutation checkpoints.
 6. **[#5](https://github.com/ryo100794/pdocker-android/issues/5)
    Terminal hard gate** `[P1 next]`: `exec -it` is not closed until an actual
    UI-driven container terminal passes Enter, Ctrl-C, cursor keys, `top`, `q`,

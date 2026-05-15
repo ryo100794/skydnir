@@ -182,9 +182,9 @@ def validate_service_truth_artifact(artifact: dict[str, Any]) -> None:
     if artifact.get("Kind") != "service-truth":
         raise artifact_error("Kind must be service-truth")
 
-    if artifact.get("Status") == "planned-gap":
+    if artifact.get("Status") in {"planned-gap", "skip", "skipped"}:
         if artifact.get("Success") is not False:
-            raise artifact_error("planned-gap artifacts must set Success false")
+            raise artifact_error("planned-gap/skip artifacts must set Success false and are never a pass")
         return
 
     if artifact.get("Status") != "device-pass":
@@ -234,6 +234,13 @@ def validate_service_truth_artifact(artifact: dict[str, Any]) -> None:
         raise artifact_error("ListenerProbe must bind at least one configured/listening port")
     if listener.get("Pid") in (None, "", 0, "0"):
         raise artifact_error("ListenerProbe must include a listener owner PID")
+    owner_id = listener.get("OwnerEngineContainerId") or listener.get("ListenerOwnerEngineContainerId")
+    if not isinstance(owner_id, str) or not ENGINE_CONTAINER_ID_RE.fullmatch(owner_id):
+        raise artifact_error("ListenerProbe.OwnerEngineContainerId must be an exact 64-hex Engine container ID, not a prefix or port declaration")
+    if owner_id != expected:
+        raise artifact_error("ListenerProbe owner must exactly match Proof.EngineContainerId")
+    if listener.get("SelectedPidOwnsListener") is not True:
+        raise artifact_error("ListenerProbe must prove the selected PID owns the listener, not only declare a port")
 
     process = sources["ProcessTable"]
     if process.get("Pid") in (None, "", 0, "0"):
@@ -286,8 +293,12 @@ def build_success_fixture() -> dict[str, Any]:
         },
         "ListenerProbe": {
             "ContainerId": cid,
+            "OwnerEngineContainerId": cid,
+            "SelectedEngineContainerId": cid,
             "Pid": pid,
             "Ports": [18080, 18081],
+            "SelectedPidOwnsListener": True,
+            "ExactEngineContainerIdRequired": True,
             "Proven": True,
             "Artifacts": [
                 "files/pdocker/diagnostics/service-truth/configured-ports.txt",
@@ -326,6 +337,8 @@ def validate_service_truth_fixture_contract() -> None:
         lambda a: a["Sources"]["PersistedStateJson"].update({"ContainerId": "f" * 64}),
         lambda a: a["Sources"]["ListenerProbe"].update({"Ports": [], "ProcNetTcpMatchedPorts": ""}),
         lambda a: a["Sources"]["ListenerProbe"].update({"Pid": 9999}),
+        lambda a: a["Sources"]["ListenerProbe"].update({"OwnerEngineContainerId": a["Proof"]["EngineContainerId"][:12]}),
+        lambda a: a["Sources"]["ListenerProbe"].update({"SelectedPidOwnsListener": False}),
         lambda a: a["Sources"]["ContainerLogs"].update({"CurrentServiceMarker": False}),
         lambda a: a["Sources"]["ContainerLogs"].update({"Artifacts": []}),
     ]

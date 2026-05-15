@@ -392,6 +392,7 @@ write_same_id_source_summary() {
   engine_api_present=false; selected_in_engine_api "$selected_id" && engine_api_present=true
   process_pid_present=false; process_has_pid "$selected_pid" && process_pid_present=true
   listener_pid_present=false; [ -n "$selected_pid" ] && awk -F '\t' -v pid="$selected_pid" '$3 == pid { found=1 } END{ exit found ? 0 : 1 }' "$DIAG/listener-owner-map.tsv" 2>/dev/null && listener_pid_present=true
+  listener_exact_engine_id=false; [ "$listener_pid_present" = true ] && is_engine_container_id "$selected_id" && listener_exact_engine_id=true
   logs_present=false; [ -n "$selected_id" ] && [ -s "$DIAG/logs-selected.out" ] && logs_present=true
   logs_marker_present=false
   [ "$logs_present" = true ] && grep -F "pdocker-service-truth-marker " "$DIAG/logs-selected.out" 2>/dev/null | grep -F "$selected_id" >/dev/null 2>&1 && logs_marker_present=true
@@ -404,10 +405,10 @@ write_same_id_source_summary() {
   [ "$engine_api_present" = true ] || missing="$missing EngineApiContainersJson"
   [ "$state_match" = true ] || missing="$missing PersistedStateJson"
   [ "$process_pid_present" = true ] || missing="$missing ProcessTable"
-  [ "$listener_pid_present" = true ] || missing="$missing ListenerProbe"
+  [ "$listener_exact_engine_id" = true ] || missing="$missing ListenerProbe"
   [ "$logs_marker_present" = true ] || missing="$missing ContainerLogs"
   if [ -n "$selected_id" ] && [ -n "$ui_cid" ] && [ "$ui_cid" != "$selected_id" ]; then mismatched="$mismatched UICard"; fi
-  [ -n "$selected_id" ] && is_engine_container_id "$selected_id" && [ "$ui_cid" = "$selected_id" ] && [ "$ui_state" = current ] && [ "$docker_ps_present" = true ] && [ "$engine_api_present" = true ] && [ "$state_match" = true ] && [ "$process_pid_present" = true ] && [ "$listener_pid_present" = true ] && [ "$logs_marker_present" = true ] && same_id=true
+  [ -n "$selected_id" ] && is_engine_container_id "$selected_id" && [ "$ui_cid" = "$selected_id" ] && [ "$ui_state" = current ] && [ "$docker_ps_present" = true ] && [ "$engine_api_present" = true ] && [ "$state_match" = true ] && [ "$process_pid_present" = true ] && [ "$listener_exact_engine_id" = true ] && [ "$logs_marker_present" = true ] && same_id=true
   cat >"$DIAG/same-id-source-summary.json" <<JSON
 {
   "SelectedEngineContainerId": $(source_container_id_json "$selected_id"),
@@ -419,7 +420,7 @@ write_same_id_source_summary() {
     "EngineApiContainersJson": $( [ "$engine_api_present" = true ] && source_container_id_json "$selected_id" || printf null ),
     "PersistedStateJson": $( [ "$state_match" = true ] && source_container_id_json "$selected_id" || printf null ),
     "ProcessTable": $( [ "$process_pid_present" = true ] && source_container_id_json "$selected_id" || printf null ),
-    "ListenerProbe": $( [ "$listener_pid_present" = true ] && source_container_id_json "$selected_id" || printf null ),
+    "ListenerProbe": $( [ "$listener_exact_engine_id" = true ] && source_container_id_json "$selected_id" || printf null ),
     "ContainerLogs": $( [ "$logs_marker_present" = true ] && source_container_id_json "$selected_id" || printf null )
   },
   "MissingSourcesText": $(json_string "$missing"),
@@ -448,6 +449,8 @@ snapshot_state_json persisted-state-json
 snapshot_listener_probe
 collect_engine_candidates
 SELECTED_ENGINE_CID="$(cat "$DIAG/engine-candidate-selected.txt" 2>/dev/null)"
+SELECTED_ID_EXACT=false
+is_engine_container_id "$SELECTED_ENGINE_CID" && SELECTED_ID_EXACT=true
 extract_state_ids_and_compare "$SELECTED_ENGINE_CID"
 SELECTED_SAFE="$(printf '%s' "$SELECTED_ENGINE_CID" | sed 's/[^0-9A-Za-z_.-]/_/g')"
 if [ -n "$SELECTED_ENGINE_CID" ]; then
@@ -491,7 +494,11 @@ UI_CARD_PROVEN=false
 DOCKER_PS_PROVEN=false; selected_in_docker_ps "$SELECTED_ENGINE_CID" && DOCKER_PS_PROVEN=true
 ENGINE_API_PROVEN=false; selected_in_engine_api "$SELECTED_ENGINE_CID" && ENGINE_API_PROVEN=true
 PROCESS_PROVEN=false; process_has_pid "$SELECTED_INSPECT_PID" && PROCESS_PROVEN=true
-LISTENER_PROVEN=false; [ -n "$SELECTED_INSPECT_PID" ] && awk -F '\t' -v pid="$SELECTED_INSPECT_PID" '$3 == pid { found=1 } END{ exit found ? 0 : 1 }' "$DIAG/listener-owner-map.tsv" 2>/dev/null && LISTENER_PROVEN=true
+LISTENER_PID_OWNS_CONFIGURED_PORT=false; [ -n "$SELECTED_INSPECT_PID" ] && awk -F '\t' -v pid="$SELECTED_INSPECT_PID" '$3 == pid { found=1 } END{ exit found ? 0 : 1 }' "$DIAG/listener-owner-map.tsv" 2>/dev/null && LISTENER_PID_OWNS_CONFIGURED_PORT=true
+LISTENER_PROVEN=false
+[ "$SELECTED_ID_EXACT" = true ] && [ "$LISTENER_PID_OWNS_CONFIGURED_PORT" = true ] && LISTENER_PROVEN=true
+LISTENER_OWNER_ENGINE_CID=""
+[ "$LISTENER_PROVEN" = true ] && LISTENER_OWNER_ENGINE_CID="$SELECTED_ENGINE_CID"
 LOGS_PROVEN=false; [ -n "$SELECTED_ENGINE_CID" ] && [ -s "$DIAG/logs-selected.out" ] && LOGS_PROVEN=true
 LOGS_CURRENT_MARKER=false
 [ "$LOGS_PROVEN" = true ] && grep -F "pdocker-service-truth-marker " "$DIAG/logs-selected.out" 2>/dev/null | grep -F "$SELECTED_ENGINE_CID" >/dev/null 2>&1 && LOGS_CURRENT_MARKER=true
@@ -499,8 +506,6 @@ LOGS_PROVEN=false
 [ "$LOGS_CURRENT_MARKER" = true ] && LOGS_PROVEN=true
 write_same_id_source_summary "$SELECTED_ENGINE_CID" "$UI_CARD_CID" "$UI_CARD_STATE" "$STATE_MATCH" "$SELECTED_INSPECT_PID"
 
-SELECTED_ID_EXACT=false
-is_engine_container_id "$SELECTED_ENGINE_CID" && SELECTED_ID_EXACT=true
 UI_SOURCE_CURRENT=false
 case "$(printf '%s' "$UI_CARD_SOURCE" | tr '[:upper:]' '[:lower:]')" in
   ''|unknown|state.json|persistedstatejson|persisted_state_json|stale|ambiguous) UI_SOURCE_CURRENT=false ;;
@@ -614,11 +619,15 @@ cat > "$LATEST" <<JSON
     },
     "ListenerProbe": {
       "ContainerId": $( [ "$LISTENER_PROVEN" = true ] && [ -n "$SELECTED_ENGINE_CID" ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+      "OwnerEngineContainerId": $( [ -n "$LISTENER_OWNER_ENGINE_CID" ] && json_string "$LISTENER_OWNER_ENGINE_CID" || printf null ),
+      "SelectedEngineContainerId": $( [ -n "$SELECTED_ENGINE_CID" ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
       "Pid": $(json_number_or_null "$SELECTED_INSPECT_PID"),
+      "SelectedPidOwnsListener": $(json_bool "$LISTENER_PID_OWNS_CONFIGURED_PORT"),
+      "ExactEngineContainerIdRequired": true,
       "Proven": $(json_bool "$LISTENER_PROVEN"),
       "Artifacts": ["files/$DIAG/configured-ports.txt", "files/$DIAG/listener-probe.json", "files/$DIAG/listener-owner-map.json", "files/$DIAG/listener-owner-map.tsv", "files/$DIAG/listener-probe.txt", "files/$DIAG/proc-net-tcp.txt", "files/$DIAG/listeners-tool.txt"],
       "ProcNetTcpMatchedPorts": $(json_string "$LISTENER_PROC_MATCH_PORTS"),
-      "Gap": "Listener port, /proc/net/tcp socket inode, and best-effort PID ownership evidence are collected for the selected container PID, but top-level success remains false until promoted."
+      "Gap": "Listener port declarations and /proc/net/tcp matches are not proof by themselves; the listener PID must map to the selected process and OwnerEngineContainerId must be the exact same 64-hex Engine container ID before top-level success can pass."
     },
     "ContainerLogs": {
       "ContainerId": $( [ "$LOGS_PROVEN" = true ] && [ -n "$SELECTED_ENGINE_CID" ] && json_string "$SELECTED_ENGINE_CID" || printf null ),

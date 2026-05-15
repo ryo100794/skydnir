@@ -500,12 +500,21 @@ container_payload() {
   local mode="$1"
   local ctx="$2"
   local gpu_layers="${3:-}"
-  python3 - "$IMAGE" "$DEVICE_PROJECT" "$DEVICE_MODEL_HOST" "$DEVICE_WORKSPACE_HOST" "$mode" "$ctx" "$gpu_layers" "$REMOTE_PORT" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" <<'PY'
+  python3 - "$IMAGE" "$DEVICE_PROJECT" "$DEVICE_MODEL_HOST" "$DEVICE_WORKSPACE_HOST" "$mode" "$ctx" "$gpu_layers" "$REMOTE_PORT" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" "$ROOT/scripts/llama-gpu-env-manifest.json" <<'PY'
 import json
 import os
 import sys
+from pathlib import Path
 
-image, project, model_host, workspace_host, mode, ctx, gpu_layers, port, trace_alloc, model_path, model_url = sys.argv[1:12]
+image, project, model_host, workspace_host, mode, ctx, gpu_layers, port, trace_alloc, model_path, model_url, manifest_path = sys.argv[1:13]
+
+manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+if manifest.get("schema") != "pdocker.llama.gpu.env-manifest.v1":
+    raise SystemExit(f"unsupported llama GPU env manifest schema: {manifest_path}")
+
+forward_env_keys = manifest.get("compare_forward_env_keys")
+if not isinstance(forward_env_keys, list) or not all(isinstance(key, str) and key for key in forward_env_keys):
+    raise SystemExit(f"invalid compare_forward_env_keys in llama GPU env manifest: {manifest_path}")
 
 def env_key(item):
     return item.split("=", 1)[0]
@@ -547,52 +556,7 @@ if mode == "vulkan-raw":
     if trace_alloc == "1":
         set_env(env, "PDOCKER_VULKAN_ICD_TRACE_ALLOC=1")
         set_env(env, "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1")
-for key in [
-    "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
-    "PDOCKER_GPU_STRICT_PASSTHROUGH",
-    "PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES",
-    "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
-    "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
-    "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
-    "PDOCKER_GPU_DISABLE_OVERLAP_ALIASING",
-    "PDOCKER_GPU_CPU_ORACLE",
-    "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
-    "PDOCKER_GPU_Q6K_SAFE_KERNEL",
-    "PDOCKER_GPU_Q4K_SAFE_KERNEL",
-    "PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION",
-    "PDOCKER_GPU_RESIDENT_CACHE",
-    "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
-    "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
-    "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
-    "PDOCKER_GPU_WRITEONLY_BUFFER_CACHE",
-    "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE",
-    "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
-    "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
-    "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
-    "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
-    "PDOCKER_GPU_FAILED_SPIRV_DIR",
-    "PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS",
-    "PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION",
-    "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
-    "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",
-    "PDOCKER_GPU_MUTABLE_BUFFER_CACHE",
-    "PDOCKER_GPU_VIRTUAL_MEMORY",
-    "PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES",
-    "PDOCKER_GPU_DISABLE_ANDROID_VULKAN",
-    "PDOCKER_GPU_DISABLE_ANDROID_OPENCL",
-    "PDOCKER_ANDROID_OPENCL_LIBRARY",
-    "PDOCKER_VULKAN_HEAP_BYTES",
-    "PDOCKER_VULKAN_ICD_DEBUG",
-    "PDOCKER_VULKAN_ALIAS_COPIES",
-    "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE",
-    "PDOCKER_VULKAN_DISABLE_16BIT_STORAGE",
-    "PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC",
-    "PDOCKER_VULKAN_ENABLE_8BIT_STORAGE",
-    "PDOCKER_VULKAN_ENABLE_16BIT_STORAGE",
-    "PDOCKER_VULKAN_ENABLE_INT64",
-    "PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC",
-    "PDOCKER_VULKAN_SUBGROUP_SIZE",
-]:
+for key in forward_env_keys:
     value = os.environ.get(key)
     if value is not None:
         set_env(env, f"{key}={value}")
@@ -926,7 +890,7 @@ container_state > "$GPU_STATE"
 container_logs > "$GPU_LOG"
 
 PDOCKER_LLAMA_RUNTIME_ABORT_JSON="$RUNTIME_ABORT_JSON" \
-python3 - "$CPU_JSON" "$CPU_CORRECTNESS_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$CORRECTNESS_JSON" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" <<'PY'
+python3 - "$CPU_JSON" "$CPU_CORRECTNESS_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$CORRECTNESS_JSON" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" "$ROOT/scripts/llama-gpu-env-manifest.json" <<'PY'
 import json
 import math
 import os
@@ -935,7 +899,10 @@ import sys
 import time
 from pathlib import Path
 
-cpu_path, cpu_correctness_path, gpu_path, gpu_log_path, gpu_state_path, correctness_path, out_path, gpu_served_s, gpu_layers, gpu_ctx, predict, repeat, warmup_discard, trace_alloc, model_path, model_url = sys.argv[1:17]
+cpu_path, cpu_correctness_path, gpu_path, gpu_log_path, gpu_state_path, correctness_path, out_path, gpu_served_s, gpu_layers, gpu_ctx, predict, repeat, warmup_discard, trace_alloc, model_path, model_url, manifest_path = sys.argv[1:18]
+env_manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+if env_manifest.get("schema") != "pdocker.llama.gpu.env-manifest.v1":
+    raise SystemExit(f"unsupported llama GPU env manifest schema: {manifest_path}")
 cpu = json.load(open(cpu_path, encoding="utf-8"))
 gpu = {}
 if Path(gpu_path).is_file() and Path(gpu_path).stat().st_size:
@@ -1218,22 +1185,14 @@ executor_events = extract_executor_json_events(log)
 executor_backends = sorted(set(executor_backends) | {e.get("backend_impl") for e in executor_events if e.get("backend_impl")})
 executor_errors = sorted(set(executor_errors) | {e.get("error") for e in executor_events if e.get("error")})
 spirv_hashes = sorted(set(spirv_hashes) | {e.get("spirv_hash") for e in executor_events if e.get("spirv_hash")})
-config_expectations = [
-    ("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "duplicate_descriptor_rewrite"),
-    ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
-    ("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "disable_pipeline_optimization"),
-    ("PDOCKER_GPU_STRICT_PASSTHROUGH", "strict_passthrough"),
-    ("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", "skip_unused_descriptor_transfers"),
-    ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "spirv_descriptor_access"),
-    ("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", "disable_overlap_aliasing"),
-    ("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle_requested"),
-    ("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", "strict_object_graph.device_local_staging_requested"),
-    ("PDOCKER_GPU_Q6K_SAFE_KERNEL", "q6k_safe_kernel"),
-    ("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", "cpu_oracle.oracle_writeback"),
-    ("PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel"),
-    ("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization_materialized"),
-    ("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_buffer_cache.enabled"),
-]
+config_expectations_raw = env_manifest.get("config_propagation_env_fields")
+if not isinstance(config_expectations_raw, list) or not config_expectations_raw:
+    raise SystemExit(f"invalid config_propagation_env_fields in llama GPU env manifest: {manifest_path}")
+config_expectations = []
+for item in config_expectations_raw:
+    if not isinstance(item, dict) or not item.get("env") or not item.get("executor_field"):
+        raise SystemExit(f"invalid config_propagation_env_fields entry in llama GPU env manifest: {manifest_path}")
+    config_expectations.append((str(item["env"]), str(item["executor_field"])))
 config_checks = []
 for env_name, event_field in config_expectations:
     expected = env_bool(env_name)

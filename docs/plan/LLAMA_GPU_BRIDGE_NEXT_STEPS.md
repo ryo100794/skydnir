@@ -351,11 +351,11 @@ is explicit rather than implicit:
   correctness, promote it into `_gpu_env(state)` and keep the compare driver
   forwarding it.  Do not leave correctness-critical behavior only in the
   ad-hoc compare script.
-- Regression guard: `tests.test_gpu_abi_contract` checks both the
-  UI/compose runtime defaults and the compare-only diagnostic list against the
-  verifier manifest constants `LLAMA_GPU_UI_RUNTIME_ENV_KEYS`,
-  `LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS`, and
-  `LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS`, so future edits cannot silently
+- Regression guard: `scripts/llama-gpu-env-manifest.json` is the single
+  manifest for UI/compose runtime defaults, compare-only diagnostic forwarding,
+  full compare env forwarding, and executor reflection fields.  The compare
+  driver and artifact verifier both load this file; `tests.test_gpu_abi_contract`
+  checks the verifier constants derived from it, so future edits cannot silently
   drop one side of the bridge.
 - Artifact guard: `scripts/verify-llama-gpu-artifact.py` treats failed
   `gpu.diagnostics.config_propagation` evidence as
