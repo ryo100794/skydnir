@@ -15,6 +15,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/mman.h>
+#include <sys/statvfs.h>
 #include <dirent.h>
 #include <linux/elf.h>
 #include <linux/audit.h>
@@ -47,6 +48,17 @@ static unsigned long long g_managed_memory_pager_min_request = 128ULL * 1024ULL 
 static unsigned long long g_managed_memory_pager_max_region = 1024ULL * 1024ULL * 1024ULL;
 static unsigned long long g_managed_memory_pager_resident_pages = 256ULL;
 static int g_memory_stats_printed = 0;
+static char g_memory_telemetry_path[PATH_MAX];
+static char g_memory_summary_path[PATH_MAX];
+static char g_memory_operation_id[128];
+static char g_memory_container_id[128];
+static unsigned long long g_memory_telemetry_max_bytes = 1048576ULL;
+static unsigned long long g_memory_telemetry_max_lines = 240ULL;
+static unsigned long long g_memory_telemetry_max_line_bytes = 16384ULL;
+static unsigned long long g_memory_telemetry_seq = 0;
+static unsigned long long g_memory_telemetry_started_unix_ms = 0;
+static int g_memory_telemetry_failed = 0;
+static int g_memory_telemetry_truncated = 0;
 static int g_sync_usec = 0;
 static int g_stats = 0;
 static int g_stats_top = 12;
@@ -145,6 +157,8 @@ typedef struct {
 static MemoryTraceStats g_memory_stats;
 static ManagedPagerAdmissionStats g_managed_pager_admission;
 static PathMicroStats g_path_stats;
+static int managed_pager_mkdir_p(const char *dir);
+static int read_meminfo_bytes(unsigned long long *available, unsigned long long *swap_free);
 static int write_tracee_data(pid_t pid, unsigned long long addr, const void *value, size_t len);
 static const char *syscall_name(long nr);
 static int get_regs(pid_t pid, struct user_pt_regs *regs);
@@ -230,6 +244,102 @@ static unsigned long long env_u64_or_default(const char *name, unsigned long lon
     else if (end && (*end == 'm' || *end == 'M')) parsed *= 1024ULL * 1024ULL;
     else if (end && (*end == 'g' || *end == 'G')) parsed *= 1024ULL * 1024ULL * 1024ULL;
     return parsed;
+}
+
+static unsigned long long wall_now_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) return 0;
+    return (unsigned long long)ts.tv_sec * 1000ULL +
+           (unsigned long long)ts.tv_nsec / 1000000ULL;
+}
+
+static unsigned long long monotonic_now_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (unsigned long long)ts.tv_sec * 1000ULL +
+           (unsigned long long)ts.tv_nsec / 1000000ULL;
+}
+
+static void json_write_string(FILE *fp, const char *value) {
+    fputc('"', fp);
+    const unsigned char *p = (const unsigned char *)(value ? value : "");
+    for (; *p; ++p) {
+        switch (*p) {
+            case '\\': fputs("\\\\", fp); break;
+            case '"': fputs("\\\"", fp); break;
+            case '\n': fputs("\\n", fp); break;
+            case '\r': fputs("\\r", fp); break;
+            case '\t': fputs("\\t", fp); break;
+            default:
+                if (*p < 0x20) fprintf(fp, "\\u%04x", (unsigned)*p);
+                else fputc(*p, fp);
+                break;
+        }
+    }
+    fputc('"', fp);
+}
+
+static int mkdir_parent_for_path(const char *path) {
+    if (!path || !path[0]) return -1;
+    char dir[PATH_MAX];
+    if (snprintf(dir, sizeof(dir), "%s", path) >= (int)sizeof(dir)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    char *slash = strrchr(dir, '/');
+    if (!slash) return 0;
+    if (slash == dir) return 0;
+    *slash = '\0';
+    return managed_pager_mkdir_p(dir);
+}
+
+static void fsync_parent_dir_for_path(const char *path) {
+    if (!path || !path[0]) return;
+    char dir[PATH_MAX];
+    if (snprintf(dir, sizeof(dir), "%s", path) >= (int)sizeof(dir)) return;
+    char *slash = strrchr(dir, '/');
+    if (!slash) {
+        snprintf(dir, sizeof(dir), ".");
+    } else if (slash == dir) {
+        slash[1] = '\0';
+    } else {
+        *slash = '\0';
+    }
+    int fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0) return;
+    (void)fsync(fd);
+    close(fd);
+}
+
+static unsigned long long path_storage_free_bytes(const char *path) {
+    char dir[PATH_MAX];
+    if (!path || !path[0]) return 0;
+    snprintf(dir, sizeof(dir), "%s", path);
+    char *slash = strrchr(dir, '/');
+    if (slash && slash != dir) *slash = '\0';
+    struct statvfs st;
+    if (statvfs(dir, &st) != 0) return 0;
+    return (unsigned long long)st.f_bavail * (unsigned long long)st.f_frsize;
+}
+
+static unsigned long long self_rss_bytes(void) {
+    FILE *fp = fopen("/proc/self/statm", "re");
+    if (!fp) return 0;
+    unsigned long long size_pages = 0, resident_pages = 0;
+    int ok = fscanf(fp, "%llu %llu", &size_pages, &resident_pages);
+    fclose(fp);
+    long ps = sysconf(_SC_PAGESIZE);
+    if (ok != 2 || ps <= 0) return 0;
+    return resident_pages * (unsigned long long)ps;
+}
+
+static int read_oom_score_adj(void) {
+    FILE *fp = fopen("/proc/self/oom_score_adj", "re");
+    if (!fp) return 0;
+    int value = 0;
+    (void)fscanf(fp, "%d", &value);
+    fclose(fp);
+    return value;
 }
 
 static int pager_probe_ok(const char *name, int ok, int err) {
@@ -1000,9 +1110,301 @@ static void print_managed_pager_admission_stats(void) {
             g_managed_pager_backing_dir);
 }
 
+static void memory_telemetry_derive_summary_path(void) {
+    const char *summary = getenv("PDOCKER_MEMORY_SUMMARY_PATH");
+    if (!summary || !summary[0]) summary = getenv("PDOCKER_MEMORY_TELEMETRY_SUMMARY_PATH");
+    if (summary && summary[0]) {
+        snprintf(g_memory_summary_path, sizeof(g_memory_summary_path), "%s", summary);
+        return;
+    }
+    if (!g_memory_telemetry_path[0]) return;
+    snprintf(g_memory_summary_path, sizeof(g_memory_summary_path), "%s", g_memory_telemetry_path);
+    char *slash = strrchr(g_memory_summary_path, '/');
+    if (slash) {
+        snprintf(slash + 1,
+                 sizeof(g_memory_summary_path) - (size_t)(slash + 1 - g_memory_summary_path),
+                 "memory-summary.json");
+    } else {
+        snprintf(g_memory_summary_path, sizeof(g_memory_summary_path), "memory-summary.json");
+    }
+}
+
+static void memory_telemetry_init_from_env(void) {
+    const char *path = getenv("PDOCKER_MEMORY_RING_PATH");
+    if (!path || !path[0]) path = getenv("PDOCKER_MEMORY_TELEMETRY_PATH");
+    if (!path || !path[0]) return;
+    snprintf(g_memory_telemetry_path, sizeof(g_memory_telemetry_path), "%s", path);
+    const char *op = getenv("PDOCKER_MEMORY_TELEMETRY_OPERATION_ID");
+    if (!op || !op[0]) op = getenv("PDOCKER_MEMORY_OPERATION_ID");
+    const char *cid = getenv("PDOCKER_MEMORY_TELEMETRY_CONTAINER_ID");
+    if (!cid || !cid[0]) cid = getenv("PDOCKER_MEMORY_CONTAINER_ID");
+    snprintf(g_memory_operation_id, sizeof(g_memory_operation_id), "%s", op ? op : "");
+    snprintf(g_memory_container_id, sizeof(g_memory_container_id), "%s", cid ? cid : "");
+    /* Contract tokens: memory-ring.jsonl, memory-summary.json,
+       ring_max_bytes, ring_max_lines, max_line_bytes, rotate oldest complete. */
+    g_memory_telemetry_max_bytes = env_u64_or_default("PDOCKER_MEMORY_TELEMETRY_MAX_BYTES", 1048576ULL);
+    g_memory_telemetry_max_lines = env_u64_or_default("PDOCKER_MEMORY_TELEMETRY_MAX_LINES", 240ULL);
+    g_memory_telemetry_max_line_bytes = env_u64_or_default("PDOCKER_MEMORY_TELEMETRY_MAX_LINE_BYTES", 16384ULL);
+    if (g_memory_telemetry_max_bytes < 4096ULL) g_memory_telemetry_max_bytes = 4096ULL;
+    if (g_memory_telemetry_max_lines == 0) g_memory_telemetry_max_lines = 1;
+    if (g_memory_telemetry_max_line_bytes < 1024ULL) g_memory_telemetry_max_line_bytes = 1024ULL;
+    g_memory_telemetry_started_unix_ms = wall_now_ms();
+    memory_telemetry_derive_summary_path();
+    (void)mkdir_parent_for_path(g_memory_telemetry_path);
+    (void)mkdir_parent_for_path(g_memory_summary_path);
+}
+
+static int memory_telemetry_count_lines_and_bytes(const char *path,
+                                                  unsigned long long *lines_out,
+                                                  unsigned long long *bytes_out) {
+    FILE *fp = fopen(path, "re");
+    if (!fp) {
+        if (errno == ENOENT) {
+            if (lines_out) *lines_out = 0;
+            if (bytes_out) *bytes_out = 0;
+            return 0;
+        }
+        return -1;
+    }
+    unsigned long long lines = 0, bytes = 0;
+    char buf[4096];
+    while (fgets(buf, sizeof(buf), fp)) {
+        bytes += (unsigned long long)strlen(buf);
+        if (strchr(buf, '\n')) lines++;
+    }
+    fclose(fp);
+    if (lines_out) *lines_out = lines;
+    if (bytes_out) *bytes_out = bytes;
+    return 0;
+}
+
+static int memory_telemetry_append_bounded_jsonl(const char *line) {
+    if (!g_memory_telemetry_path[0] || !line) return 0;
+    size_t line_len = strlen(line);
+    if (line_len + 1ULL > g_memory_telemetry_max_line_bytes ||
+            line_len + 1ULL > g_memory_telemetry_max_bytes) {
+        errno = EMSGSIZE;
+        g_memory_telemetry_failed = 1;
+        return -1;
+    }
+    if (mkdir_parent_for_path(g_memory_telemetry_path) != 0) {
+        g_memory_telemetry_failed = 1;
+        return -1;
+    }
+    char tmp[PATH_MAX];
+    if (snprintf(tmp, sizeof(tmp), "%s.tmp.%ld", g_memory_telemetry_path, (long)getpid()) >= (int)sizeof(tmp)) {
+        errno = ENAMETOOLONG;
+        g_memory_telemetry_failed = 1;
+        return -1;
+    }
+
+    char **kept = NULL;
+    size_t kept_count = 0;
+    size_t kept_cap = 0;
+    unsigned long long kept_bytes = 0;
+    FILE *in = fopen(g_memory_telemetry_path, "re");
+    if (in) {
+        char *buf = NULL;
+        size_t cap = 0;
+        ssize_t nread = 0;
+        while ((nread = getline(&buf, &cap, in)) >= 0) {
+            size_t len = (size_t)nread;
+            if (len == 0 || buf[len - 1] != '\n') {
+                g_memory_telemetry_truncated = 1;  /* partial JSON record is not evidence */
+                continue;
+            }
+            if ((unsigned long long)len > g_memory_telemetry_max_line_bytes) {
+                g_memory_telemetry_truncated = 1;
+                continue;
+            }
+            char *copy = malloc(len + 1);
+            if (!copy) {
+                free(buf);
+                fclose(in);
+                for (size_t i = 0; i < kept_count; i++) free(kept[i]);
+                free(kept);
+                g_memory_telemetry_failed = 1;
+                return -1;
+            }
+            memcpy(copy, buf, len + 1);
+            if (kept_count == kept_cap) {
+                size_t next_cap = kept_cap ? kept_cap * 2 : 16;
+                char **next = realloc(kept, next_cap * sizeof(char *));
+                if (!next) {
+                    free(copy);
+                    free(buf);
+                    fclose(in);
+                    for (size_t i = 0; i < kept_count; i++) free(kept[i]);
+                    free(kept);
+                    g_memory_telemetry_failed = 1;
+                    return -1;
+                }
+                kept = next;
+                kept_cap = next_cap;
+            }
+            kept[kept_count++] = copy;
+            kept_bytes += (unsigned long long)len;
+            while (kept_count + 1ULL > g_memory_telemetry_max_lines ||
+                   kept_bytes + (unsigned long long)line_len + 1ULL > g_memory_telemetry_max_bytes) {
+                size_t first_len = strlen(kept[0]);
+                free(kept[0]);
+                if (kept_count > 1) {
+                    memmove(kept, kept + 1, (kept_count - 1) * sizeof(char *));
+                }
+                kept_count--;
+                kept_bytes = kept_bytes > (unsigned long long)first_len
+                        ? kept_bytes - (unsigned long long)first_len : 0;
+                g_memory_telemetry_truncated = 1;
+                if (kept_count == 0) break;
+            }
+        }
+        free(buf);
+        fclose(in);
+    }
+
+    FILE *out = fopen(tmp, "we");
+    if (!out) {
+        for (size_t i = 0; i < kept_count; i++) free(kept[i]);
+        free(kept);
+        g_memory_telemetry_failed = 1;
+        return -1;
+    }
+    for (size_t i = 0; i < kept_count; i++) {
+        fputs(kept[i], out);
+        free(kept[i]);
+    }
+    free(kept);
+    fputs(line, out);
+    fputc('\n', out);
+    fflush(out);
+    fsync(fileno(out));
+    if (fclose(out) != 0) {
+        unlink(tmp);
+        g_memory_telemetry_failed = 1;
+        return -1;
+    }
+    if (rename(tmp, g_memory_telemetry_path) != 0) {
+        unlink(tmp);
+        g_memory_telemetry_failed = 1;
+        return -1;
+    }
+    fsync_parent_dir_for_path(g_memory_telemetry_path);
+    return 0;
+}
+
+static void memory_telemetry_append_sample(const char *phase,
+                                           const char *classifier_hint,
+                                           const char *progress_marker) {
+    if (!g_memory_telemetry_path[0]) return;
+    unsigned long long available = 0, swap_free = 0;
+    (void)read_meminfo_bytes(&available, &swap_free);
+    unsigned long long rss = self_rss_bytes();
+    unsigned long long storage_free = path_storage_free_bytes(g_memory_telemetry_path);
+    char line[16384];
+    FILE *fp = fmemopen(line, sizeof(line), "w");
+    if (!fp) return;
+    g_memory_telemetry_seq++;
+    fprintf(fp, "{\"ring_schema\":\"pdocker.memory-telemetry-ring.v1\"");
+    fprintf(fp, ",\"sample_seq\":%llu", g_memory_telemetry_seq);
+    fprintf(fp, ",\"sample_time_unix_ms\":%llu", wall_now_ms());
+    fprintf(fp, ",\"sample_monotonic_ms\":%llu", monotonic_now_ms());
+    fprintf(fp, ",\"operation_id\":"); json_write_string(fp, g_memory_operation_id);
+    fprintf(fp, ",\"container_id\":"); json_write_string(fp, g_memory_container_id);
+    fprintf(fp, ",\"phase\":"); json_write_string(fp, phase ? phase : "direct-exec");
+    fprintf(fp, ",\"tracee_pid\":0,\"process_group_id\":0,\"direct_executor_pid\":%ld", (long)getpid());
+    fprintf(fp, ",\"oom_score_adj\":%d", read_oom_score_adj());
+    fprintf(fp, ",\"app_lifecycle\":\"direct-executor\"");
+    fprintf(fp, ",\"mem_available_bytes\":%llu,\"mem_free_bytes\":0", available);
+    fprintf(fp, ",\"swap_free_bytes\":%llu,\"swap_total_bytes\":0,\"zram_bytes\":0", swap_free);
+    fprintf(fp, ",\"storage_free_bytes\":%llu,\"rss_bytes\":%llu,\"pss_unavailable\":true", storage_free, rss);
+    fprintf(fp, ",\"last_large_allocation\":{\"requested_bytes\":%llu,\"threshold_bytes\":%llu,\"decision\":",
+            g_managed_pager_admission.last_request_bytes,
+            g_managed_pager_admission.last_threshold_bytes);
+    json_write_string(fp, g_managed_pager_admission.last_decision);
+    fprintf(fp, ",\"reason\":"); json_write_string(fp, g_managed_pager_admission.last_reason);
+    fprintf(fp, "}");
+    fprintf(fp, ",\"pager_counters\":{\"considered\":%llu,\"pending\":%llu,\"accepted\":%llu,\"register_failed\":%llu,\"faults_handled\":0,\"faults_delivered\":0,\"page_ins\":0,\"page_outs\":0,\"dirty_page_outs\":0}",
+            g_managed_pager_admission.considered,
+            g_managed_pager_admission.pending,
+            g_managed_pager_admission.accepted,
+            g_managed_pager_admission.register_failed);
+    fprintf(fp, ",\"guard_denial_count\":%llu", g_memory_stats.denied);
+    fprintf(fp, ",\"classifier_hint\":"); json_write_string(fp, classifier_hint ? classifier_hint : "unknown");
+    fprintf(fp, ",\"progress_marker\":"); json_write_string(fp, progress_marker ? progress_marker : "memory-sample");
+    fprintf(fp, ",\"mem_available_at_decision_bytes\":%llu,\"swap_free_at_decision_bytes\":%llu",
+            g_memory_stats.last_available, g_memory_stats.last_swap_free);
+    fprintf(fp, "}");
+    long pos = ftell(fp);
+    fclose(fp);
+    if (pos <= 0 || (size_t)pos >= sizeof(line)) {
+        g_memory_telemetry_failed = 1;
+        return;
+    }
+    (void)memory_telemetry_append_bounded_jsonl(line);
+}
+
+static int memory_telemetry_atomic_write_summary(const char *reason, int rc,
+                                                 const char *classification) {
+    if (!g_memory_summary_path[0]) return 0;
+    if (mkdir_parent_for_path(g_memory_summary_path) != 0) {
+        g_memory_telemetry_failed = 1;
+        return -1;
+    }
+    unsigned long long ring_lines = 0, ring_bytes = 0;
+    (void)memory_telemetry_count_lines_and_bytes(g_memory_telemetry_path, &ring_lines, &ring_bytes);
+    char tmp[PATH_MAX];
+    if (snprintf(tmp, sizeof(tmp), "%s.tmp.%ld", g_memory_summary_path, (long)getpid()) >= (int)sizeof(tmp)) {
+        errno = ENAMETOOLONG;
+        g_memory_telemetry_failed = 1;
+        return -1;
+    }
+    FILE *fp = fopen(tmp, "we");
+    if (!fp) {
+        g_memory_telemetry_failed = 1;
+        return -1;
+    }
+    fprintf(fp, "{\n  \"summary_schema\": \"pdocker.memory-telemetry-summary.v1\",\n");
+    fprintf(fp, "  \"summary_seq\": %llu,\n", g_memory_telemetry_seq);
+    fprintf(fp, "  \"started_unix_ms\": %llu,\n", g_memory_telemetry_started_unix_ms);
+    fprintf(fp, "  \"ended_unix_ms\": %llu,\n", wall_now_ms());
+    fprintf(fp, "  \"operation_id\": "); json_write_string(fp, g_memory_operation_id); fprintf(fp, ",\n");
+    fprintf(fp, "  \"container_id\": "); json_write_string(fp, g_memory_container_id); fprintf(fp, ",\n");
+    fprintf(fp, "  \"final_phase\": "); json_write_string(fp, reason ? reason : "direct-exit"); fprintf(fp, ",\n");
+    fprintf(fp, "  \"exit_code\": %d,\n  \"signal\": %d,\n", rc, rc < 0 ? -rc : 0);
+    fprintf(fp, "  \"classification\": "); json_write_string(fp, classification ? classification : "unknown"); fprintf(fp, ",\n");
+    fprintf(fp, "  \"classifier_reason\": "); json_write_string(fp, reason ? reason : "trace-return"); fprintf(fp, ",\n");
+    fprintf(fp, "  \"lmk_suspected\": false,\n");
+    fprintf(fp, "  \"last_sample_seq\": %llu,\n", g_memory_telemetry_seq);
+    fprintf(fp, "  \"ring_path\": "); json_write_string(fp, g_memory_telemetry_path); fprintf(fp, ",\n");
+    fprintf(fp, "  \"ring_bytes\": %llu,\n  \"ring_samples\": %llu,\n", ring_bytes, ring_lines);
+    fprintf(fp, "  \"ring_truncated\": %s,\n", g_memory_telemetry_truncated ? "true" : "false");
+    fprintf(fp, "  \"ui_live_state_allowed\": false,\n  \"engine_snapshot_fresh\": false,\n  \"pid_liveness_checked\": false,\n");
+    fprintf(fp, "  \"artifact_retention_policy\": \"bounded-app-private\",\n");
+    fprintf(fp, "  \"telemetry_persistence_failed\": %s,\n", g_memory_telemetry_failed ? "true" : "false");
+    fprintf(fp, "  \"summary_write_degraded\": %s\n}\n", g_memory_telemetry_failed ? "true" : "false");
+    fflush(fp);
+    fsync(fileno(fp));
+    if (fclose(fp) != 0) {
+        unlink(tmp);
+        g_memory_telemetry_failed = 1;
+        return -1;
+    }
+    if (rename(tmp, g_memory_summary_path) != 0) {
+        unlink(tmp);
+        g_memory_telemetry_failed = 1;
+        return -1;
+    }
+    fsync_parent_dir_for_path(g_memory_summary_path);
+    return 0;
+}
+
 static void print_memory_stats(const char *reason, int rc) {
     if (!g_trace_memory || g_memory_stats_printed) return;
     g_memory_stats_printed = 1;
+    const char *classification = g_memory_stats.denied ? "allocation_denied_enomem" :
+            (g_managed_pager_admission.last_classification[0]
+             ? g_managed_pager_admission.last_classification : "not_lmk_suspected");
+    memory_telemetry_append_sample("trace-return", classification, reason);
     fprintf(stderr,
             "pdocker-direct-memory: reason=%s rc=%d threshold=%llu guard=%d guard_min_request=%llu denied=%llu last_denied=%llu last_available=%llu last_swap_free=%llu\n",
             reason, rc, g_trace_memory_threshold, g_memory_guard,
@@ -1016,6 +1418,7 @@ static void print_memory_stats(const char *reason, int rc) {
     print_one_memory_stat("mprotect", &g_memory_stats.mprotect_);
     print_one_memory_stat("madvise", &g_memory_stats.madvise_);
     print_managed_pager_admission_stats();
+    (void)memory_telemetry_atomic_write_summary(reason, rc, classification);
 }
 
 static int read_meminfo_bytes(unsigned long long *available, unsigned long long *swap_free) {
@@ -5012,6 +5415,7 @@ loader_found:
         setenv(key, eq + 1, 1);
         free(key);
     }
+    memory_telemetry_init_from_env();
 
     int is_script = file_starts_with(target, "#!");
     int is_static_elf = !is_script && elf_has_interp(target) == 0;
@@ -5108,11 +5512,23 @@ int main(int argc, char **argv) {
     }
 
     if (argc == 2 && strcmp(argv[1], "--pdocker-memory-pager-managed-poc") == 0) {
-        return run_memory_pager_managed_poc();
+        memory_telemetry_init_from_env();
+        int rc = run_memory_pager_managed_poc();
+        if (g_memory_telemetry_path[0]) {
+            memory_telemetry_append_sample("managed-poc", rc == 0 ? "not_lmk_suspected" : "unknown", "managed-poc");
+            (void)memory_telemetry_atomic_write_summary("managed-poc", rc, rc == 0 ? "not_lmk_suspected" : "unknown");
+        }
+        return rc;
     }
 
     if (argc == 2 && strcmp(argv[1], "--pdocker-memory-pager-transparent-poc") == 0) {
-        return run_memory_pager_transparent_poc();
+        memory_telemetry_init_from_env();
+        int rc = run_memory_pager_transparent_poc();
+        if (g_memory_telemetry_path[0]) {
+            memory_telemetry_append_sample("transparent-poc", rc == 0 ? "not_lmk_suspected" : "unknown", "transparent-poc");
+            (void)memory_telemetry_atomic_write_summary("transparent-poc", rc, rc == 0 ? "not_lmk_suspected" : "unknown");
+        }
+        return rc;
     }
 
     if (argc >= 2 && strcmp(argv[1], "run") == 0) {

@@ -75,10 +75,21 @@ cannot become a new OOM source:
 
 - `ring_schema=pdocker.memory-telemetry-ring.v1` on every JSONL sample and
   `summary_schema=pdocker.memory-telemetry-summary.v1` on the final summary.
+- pdockerd must pass, and the direct executor must consume,
+  `PDOCKER_MEMORY_TELEMETRY_PATH`, `PDOCKER_MEMORY_TELEMETRY_MAX_BYTES`,
+  `PDOCKER_MEMORY_TELEMETRY_MAX_LINES`,
+  `PDOCKER_MEMORY_TELEMETRY_OPERATION_ID`, and
+  `PDOCKER_MEMORY_TELEMETRY_CONTAINER_ID` so the process that observes memory
+  pressure writes the operation/container-scoped artifacts directly.
 - Ring limit constants: `ring_max_bytes=1048576`, `ring_max_samples=240`,
-  `ring_max_line_bytes=16384`, and `ring_max_age_seconds=900`.  Writers must
+  `ring_max_lines=240`, `ring_max_line_bytes=16384`, and
+  `ring_max_age_seconds=900`.  Writers must bound by bytes and lines,
   rotate/drop oldest complete lines before appending when any limit would be
-  exceeded.
+  exceeded, and reject or truncate records above `max_line_bytes`.
+- `memory-ring.jsonl` and `memory-summary.json` publication must be atomic and
+  durable: write bounded content to a same-directory `.tmp` file, flush/fsync
+  the file, fsync the containing directory where supported, and use `rename` as
+  the only publish step after the bounds check succeeds.
 - Required sample fields: `sample_seq`, `sample_time_unix_ms`,
   `sample_monotonic_ms`, `operation_id`, `container_id`, `phase`, `tracee_pid`,
   `process_group_id`, `direct_executor_pid`, `oom_score_adj`, `app_lifecycle`,

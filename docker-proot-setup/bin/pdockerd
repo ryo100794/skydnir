@@ -1469,8 +1469,26 @@ def _apply_memory_pager_env(state, env):
     )
     if str(mode).lower() != "managed":
         return env
+    cid = state.get("Id") or state.get("ID") or "unknown"
+    memory_dir = os.path.join(CONTAINERS_DIR, cid)
+    try:
+        os.makedirs(memory_dir, exist_ok=True)
+    except OSError:
+        pass
+    ring_path = os.path.join(memory_dir, "memory-ring.jsonl")
+    summary_path = os.path.join(memory_dir, "memory-summary.json")
     env.setdefault("PDOCKER_MEMORY_PAGER", "managed")
     env.setdefault("PDOCKER_DIRECT_MEMORY_PAGER", "managed")
+    env.setdefault("PDOCKER_MEMORY_TELEMETRY_PATH", ring_path)
+    env.setdefault("PDOCKER_MEMORY_RING_PATH", ring_path)
+    env.setdefault("PDOCKER_MEMORY_SUMMARY_PATH", summary_path)
+    env.setdefault("PDOCKER_MEMORY_TELEMETRY_MAX_BYTES", os.environ.get("PDOCKER_MEMORY_TELEMETRY_MAX_BYTES", "1048576"))
+    env.setdefault("PDOCKER_MEMORY_TELEMETRY_MAX_LINES", os.environ.get("PDOCKER_MEMORY_TELEMETRY_MAX_LINES", "240"))
+    env.setdefault("PDOCKER_MEMORY_TELEMETRY_MAX_LINE_BYTES", os.environ.get("PDOCKER_MEMORY_TELEMETRY_MAX_LINE_BYTES", "16384"))
+    env.setdefault("PDOCKER_MEMORY_TELEMETRY_OPERATION_ID", state.get("PdockerOperationId") or cid)
+    env.setdefault("PDOCKER_MEMORY_TELEMETRY_CONTAINER_ID", cid)
+    env.setdefault("PDOCKER_MEMORY_OPERATION_ID", state.get("PdockerOperationId") or cid)
+    env.setdefault("PDOCKER_MEMORY_CONTAINER_ID", cid)
     max_bytes = (
         labels.get("io.pdocker.memory-pager.max-bytes")
         or labels.get("io.pdocker.memory-pager.limit-bytes")

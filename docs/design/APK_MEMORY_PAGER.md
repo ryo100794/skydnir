@@ -491,13 +491,26 @@ For every pager-enabled operation or Large Workload Mode run, pdockerd/direct
 executor must retain a bounded JSONL ring plus a final summary under
 app-private operation or container state.  The files are `memory-ring.jsonl` and
 `memory-summary.json`.  This contract mirrors `pdocker.memory-telemetry-ring.v1`
-and `pdocker.memory-telemetry-summary.v1` from the runtime OOM policy.  The ring
-limits are fixed for the v1 gate: `ring_max_bytes=1048576`,
-`ring_max_samples=240`, `ring_max_line_bytes=16384`, and
-`ring_max_age_seconds=900`.  Writers must drop/rotate the oldest complete JSONL
-records before appending a new record that would exceed a limit; partial JSON
-records are invalid evidence and must be discarded during recovery.  Each sample
-should include:
+and `pdocker.memory-telemetry-summary.v1` from the runtime OOM policy.
+
+Direct-executor propagation is part of the v1 gate, not only daemon metadata:
+pdockerd must pass, and `pdocker-direct` must read,
+`PDOCKER_MEMORY_TELEMETRY_PATH`, `PDOCKER_MEMORY_TELEMETRY_MAX_BYTES`,
+`PDOCKER_MEMORY_TELEMETRY_MAX_LINES`, `PDOCKER_MEMORY_TELEMETRY_OPERATION_ID`,
+and `PDOCKER_MEMORY_TELEMETRY_CONTAINER_ID`.  The path names the app-private
+operation/container directory where the direct executor writes
+`memory-ring.jsonl` and `memory-summary.json`; operation and container ids from
+the environment must be copied into every ring sample and summary.
+
+The ring limits are fixed for the v1 gate: `ring_max_bytes=1048576`,
+`ring_max_samples=240`, `ring_max_lines=240`, `ring_max_line_bytes=16384`, and
+`ring_max_age_seconds=900`.  Writers must bound by both bytes and lines,
+drop/rotate the oldest complete JSONL records before appending a new record that
+would exceed a limit, and reject or truncate any sample above
+`max_line_bytes`.  partial JSON records are invalid evidence and must be
+discarded during recovery.  Both artifacts must be durable and atomic: write to
+a same-directory temporary path such as `.tmp`, flush file contents, fsync the parent directory where supported, and publish with
+`rename` only after the bounded bytes/lines checks pass.  Each sample should include:
 
 - monotonic timestamp, wall-clock timestamp, operation id, container id, image,
   command, tracee pid/process group, direct-executor pid, and whether the app is

@@ -110,6 +110,53 @@ class MemoryPagerContractTest(unittest.TestCase):
             self.assertIn(token, self.source)
         self.assertNotIn("restored_prot=0x%x", self.source)
 
+    def test_direct_executor_accepts_memory_telemetry_env_contract(self):
+        for token in [
+            "PDOCKER_MEMORY_TELEMETRY_PATH",
+            "PDOCKER_MEMORY_TELEMETRY_MAX_BYTES",
+            "PDOCKER_MEMORY_TELEMETRY_MAX_LINES",
+            "PDOCKER_MEMORY_TELEMETRY_OPERATION_ID",
+            "PDOCKER_MEMORY_TELEMETRY_CONTAINER_ID",
+            "memory-ring.jsonl",
+            "memory-summary.json",
+            "pdocker.memory-telemetry-ring.v1",
+            "pdocker.memory-telemetry-summary.v1",
+        ]:
+            self.assertTrue(token in self.source, f"direct executor missing {token}")
+
+    def test_direct_executor_writes_atomic_bounded_memory_telemetry_artifacts(self):
+        for token in [
+            "ring_max_bytes",
+            "ring_max_lines",
+            "max_line_bytes",
+            "rotate",
+            "oldest complete",
+            "fsync",
+            "rename",
+            ".tmp",
+            "summary_write_degraded",
+            "telemetry_persistence_failed",
+        ]:
+            self.assertTrue(token in self.source, f"direct executor missing atomic/bounded token {token}")
+
+    def test_pdockerd_propagates_memory_telemetry_env_to_direct_executor(self):
+        pdockerd = (ROOT / "docker-proot-setup" / "bin" / "pdockerd").read_text()
+        asset_path = ROOT / "app" / "src" / "main" / "assets" / "pdockerd" / "pdockerd"
+        sources = [pdockerd]
+        if asset_path.exists():
+            sources.append(asset_path.read_text())
+        for source in sources:
+            for token in [
+                "PDOCKER_MEMORY_TELEMETRY_PATH",
+                "PDOCKER_MEMORY_TELEMETRY_MAX_BYTES",
+                "PDOCKER_MEMORY_TELEMETRY_MAX_LINES",
+                "PDOCKER_MEMORY_TELEMETRY_OPERATION_ID",
+                "PDOCKER_MEMORY_TELEMETRY_CONTAINER_ID",
+                "memory-ring.jsonl",
+                "memory-summary.json",
+            ]:
+                self.assertTrue(token in source, f"pdockerd missing telemetry propagation token {token}")
+
     def test_pdockerd_propagates_memory_pager_labels_to_direct_executor(self):
         pdockerd = (ROOT / "docker-proot-setup" / "bin" / "pdockerd").read_text()
         asset_path = ROOT / "app" / "src" / "main" / "assets" / "pdockerd" / "pdockerd"
@@ -183,6 +230,11 @@ class MemoryPagerContractTest(unittest.TestCase):
         self.assertIn("files/pdocker/tmp", script)
         self.assertIn("page_ins", script)
         self.assertIn("apk-memory-pager-transparent-latest.json", script)
+        self.assertIn("memory-pager-transparent/memory-ring.jsonl", script)
+        self.assertIn("memory-pager-transparent/memory-summary.json", script)
+        self.assertIn("__PDOCKER_MEMORY_RING_BEGIN__", script)
+        self.assertIn("pdocker.memory-telemetry-ring.v1", script)
+        self.assertIn("pdocker.memory-telemetry-summary.v1", script)
 
     def test_oom_lmk_diagnostics_contract_records_pressure_process_and_progress(self):
         doc = DOC.read_text()

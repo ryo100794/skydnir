@@ -12,6 +12,7 @@ OOM_DOC = ROOT / "docs/design/RUNTIME_OOM_SURVIVAL.md"
 PROBE_DOC = ROOT / "docs/test/APK_MEMORY_PAGER_PROBE.md"
 DIRECT_EXEC = ROOT / "app/src/main/cpp/pdocker_direct_exec.c"
 ANDROID_SMOKE = ROOT / "scripts/android-device-smoke.sh"
+PDOCKERD = ROOT / "docker-proot-setup/bin/pdockerd"
 
 
 def fail(message: str) -> None:
@@ -30,6 +31,7 @@ def main() -> int:
     probe = PROBE_DOC.read_text()
     direct = DIRECT_EXEC.read_text()
     smoke = ANDROID_SMOKE.read_text()
+    pdockerd = PDOCKERD.read_text()
     flat = " ".join(text.split())
     oom_flat = " ".join(oom.split())
     probe_flat = " ".join(probe.split())
@@ -88,6 +90,21 @@ def main() -> int:
             "ring_max_line_bytes=16384" in oom and
             "ring_max_age_seconds=900" in oom and
             "rotate/drop oldest complete lines" in oom)
+
+    require("runtime oom telemetry env is documented for direct executor",
+            "PDOCKER_MEMORY_TELEMETRY_PATH" in oom and
+            "PDOCKER_MEMORY_TELEMETRY_MAX_BYTES" in oom and
+            "PDOCKER_MEMORY_TELEMETRY_MAX_LINES" in oom and
+            "PDOCKER_MEMORY_TELEMETRY_OPERATION_ID" in oom and
+            "PDOCKER_MEMORY_TELEMETRY_CONTAINER_ID" in oom and
+            "direct executor must consume" in oom_flat)
+    require("runtime oom telemetry artifacts are atomic and bounded",
+            "ring_max_lines=240" in oom and
+            "bound by bytes and lines" in oom and
+            "same-directory `.tmp` file" in oom and
+            "flush/fsync" in oom and
+            "fsync the containing directory" in oom and
+            "use `rename`" in oom)
     require("runtime oom survival gates mandatory final summary",
             "pdocker.memory-telemetry-summary.v1" in oom and
             "memory-summary.json" in oom and
@@ -144,6 +161,38 @@ def main() -> int:
             "pid liveness" in text and
             "artifact_retention_policy" in probe and
             "UI is allowed to show a live running state" in probe)
+
+    require("pager diagnostics document direct executor telemetry env",
+            "PDOCKER_MEMORY_TELEMETRY_PATH" in text and
+            "PDOCKER_MEMORY_TELEMETRY_MAX_BYTES" in text and
+            "PDOCKER_MEMORY_TELEMETRY_MAX_LINES" in text and
+            "PDOCKER_MEMORY_TELEMETRY_OPERATION_ID" in text and
+            "PDOCKER_MEMORY_TELEMETRY_CONTAINER_ID" in text and
+            "pdocker-direct` must read" in text)
+    require("pager diagnostics require atomic bounded direct artifacts",
+            "ring_max_lines=240" in text and
+            "bound by both bytes and lines" in text and
+            "same-directory temporary path" in text and
+            "fsync the parent directory" in text and
+            "publish with `rename`" in flat)
+    require("direct executor implements telemetry env and artifacts",
+            "PDOCKER_MEMORY_TELEMETRY_PATH" in direct and
+            "PDOCKER_MEMORY_TELEMETRY_MAX_BYTES" in direct and
+            "PDOCKER_MEMORY_TELEMETRY_MAX_LINES" in direct and
+            "PDOCKER_MEMORY_TELEMETRY_OPERATION_ID" in direct and
+            "PDOCKER_MEMORY_TELEMETRY_CONTAINER_ID" in direct and
+            "memory-ring.jsonl" in direct and
+            "memory-summary.json" in direct and
+            "fsync" in direct and
+            "rename" in direct)
+    require("pdockerd propagates telemetry env to direct executor",
+            "PDOCKER_MEMORY_TELEMETRY_PATH" in pdockerd and
+            "PDOCKER_MEMORY_TELEMETRY_MAX_BYTES" in pdockerd and
+            "PDOCKER_MEMORY_TELEMETRY_MAX_LINES" in pdockerd and
+            "PDOCKER_MEMORY_TELEMETRY_OPERATION_ID" in pdockerd and
+            "PDOCKER_MEMORY_TELEMETRY_CONTAINER_ID" in pdockerd and
+            "memory-ring.jsonl" in pdockerd and
+            "memory-summary.json" in pdockerd)
     require("pager diagnostics require bounded jsonl ring limits",
             "memory-ring.jsonl" in text and
             "pdocker.memory-telemetry-ring.v1" in text and
