@@ -46,6 +46,9 @@ issues, and deciding which planned gaps become hard gates.
    fails closed for copy-up, metadata, `rename()`/`renameat()` over hardlinked
    destinations, whiteout/rename/archive staging models, low-space, corrupt
    hardlink-ring rebuild, and a local copy-up kill-step orphan-temp recovery.
+   The artifact verifier now requires concrete `copyup.before_rename` fail and
+   kill evidence (`copy_up.before_rename` plus
+   `copy_up.kill_before_rename_recovery`) before accepting a recovery JSON.
    Remaining release blocker: device daemon/helper kill-at-step restart
    evidence for the same mutation checkpoints.
 6. **[#5](https://github.com/ryo100794/pdocker-android/issues/5)
@@ -125,6 +128,20 @@ issues, and deciding which planned gaps become hard gates.
   layer count, current blocker, thermal/device metadata, artifact paths, and
   the `pdocker-llama-correctness` result. Benchmark claims are blocked when the
   correctness report fails or is missing.
+- [next] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
+  MoE-aware GPU residency layer research and design: after the dense llama GPU
+  bridge is correct, evaluate a pdocker-owned residency layer for MoE models
+  without modifying llama.cpp, Dockerfiles, models, or prompts.  Prior art to
+  track: EdgeMoE external-storage expert loading, Cache-Conditional Experts
+  mobile routing/cache locality, MoE-Infinity activation-aware expert caching
+  and prefetch, HOBBIT mixed-precision expert offload, and llama.cpp/ik_llama
+  `--cpu-moe` / `--n-cpu-moe` / tensor override workflows.  pdocker-specific
+  goal: observe expert-like tensor/buffer access through the GPU bridge,
+  maintain hot expert buffers in a GPU-resident cache, back cold experts with
+  app-private mmap/virtual-memory storage or SAF exchange storage when
+  explicitly configured, expose cache hit/page-in/page-out/transfer metrics in
+  the UI, and fail closed rather than claiming acceleration when correctness or
+  residency evidence is missing.
 - [doing] Active port mapping: published ports now have an Engine-visible
   `PdockerNetwork.PortMappingStatus` scaffold for planned/inactive/active/
   conflict states while the runtime remains host-network-only. Next slice:
@@ -281,11 +298,13 @@ implementation change plus a focused verification artifact.
   local diagnostic PTY, and log panes per
   `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`, then gate fixes with real
   device Engine exec evidence plus generic terminal input tests.
-- [next] Runtime freeze risk: one Engine stop returned HTTP 204 while
-  `pdocker-direct`/child processes and the GPU executor stayed alive. Stop,
-  cleanup, and UI state must prove process-tree and executor teardown, not just
-  API acknowledgement. Static acceptance-plan guard:
-  `python3 scripts/verify-service-truth-plan.py`; future evidence:
+- [done] Runtime freeze risk: stop/kill/rm now treats teardown as a
+  no-orphan operation instead of trusting HTTP 204/API acknowledgement. The
+  daemon scans known PIDs, descendants, launcher PIDs, and
+  container-path-referencing runtime processes; it records
+  `PdockerTeardown.NoOrphanProcesses`, refuses to mark stop/kill complete while
+  survivors remain, clears stale active PID fields only after no survivors, and
+  keeps the device evidence contract in
   `docs/test/runtime-teardown-latest.json`.
 - [next] llama GPU layer evidence: the old `--gpu-layers 1` /
   `--n-gpu-layers 1` probe offloaded only the output layer. The llama template

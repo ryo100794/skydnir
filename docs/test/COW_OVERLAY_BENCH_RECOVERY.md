@@ -1,6 +1,6 @@
 # COW Overlay Bench and Recovery Gate
 
-Snapshot date: 2026-05-13.
+Snapshot date: 2026-05-15.
 
 This gate covers the materialized-rootfs `libcow` fallback.  It is deliberately
 separate from SAF direct mediator work and from GPU work.
@@ -38,8 +38,13 @@ checks pass.  The artifact has:
   `Fault`, `ExpectedRecovery`, `Status`, and `Evidence`.
 - `NegativeCases`: the same injected-fault cases, making explicit that these
   are negative paths where mutation must not continue after the fault.
-- `KillAtStepPlannedCases`: deterministic process-kill checkpoints that remain
-  `planned-gap` until a device/process-control harness exists.
+- `KillAtStepConcreteCases`: deterministic kill-at-step cases that now have
+  executable local evidence.  The current required concrete case is
+  `copy_up.kill_before_rename_recovery`; it must also appear in `CaseResults`
+  and `NegativeCases` with matching evidence.
+- `KillAtStepPlannedCases`: remaining external daemon/helper process-kill
+  checkpoints that stay `planned-gap` until a device/process-control harness
+  exists.
 
 Required executable case ids are:
 
@@ -75,10 +80,21 @@ payload tree remains the source of truth.  If the accelerator is corrupt or
 stale after OOM, LMK, ENOSPC, or partial writes, startup repair must discard it
 and rebuild from the payload tree.
 
-## Planned external kill-at-step cases
+## Kill-at-step evidence requirements
 
-The current local gate does not kill the daemon/helper process mid-mutation.
-Those cases are recorded as `planned-gap`, never as success:
+The local gate now promotes the `copyup.before_rename` kill path to concrete
+artifact evidence.  A valid recovery artifact must prove both:
+
+- `copy_up.before_rename`: deterministic fail injection before the copy-up
+  rename returns failure, leaves lower and upper payloads unchanged, and leaves
+  no `.cow` temp behind.
+- `copy_up.kill_before_rename_recovery`: deterministic kill injection at
+  `copyup.before_rename` leaves an orphan `.cow` temp that startup cleanup
+  removes while lower and upper payloads remain unchanged.
+
+The current local gate still does not kill the Android daemon/helper process
+mid-mutation.  Those external cases are recorded as `planned-gap`, never as
+success:
 
 - copy-up temp payload write;
 - copy-up rename publication;
@@ -124,7 +140,9 @@ COW_TEST_JSON=docs/test/cow-overlay-recovery-latest.json \
 
 ## Remaining gap
 
-This scaffold does not yet prove Android process death recovery at exact
-mutation checkpoints.  The next gate must add device-side kill/restart
-automation and promote the `planned-gap` kill-at-step cases to executable
-evidence before release claims can be made for crash-safe overlay mutation.
+This scaffold proves the host-local `copyup.before_rename` fail/kill evidence
+above, but it does not yet prove Android daemon/helper process death recovery
+at every mutation checkpoint.  The next gate must add device-side kill/restart
+automation and promote the remaining external `planned-gap` kill-at-step cases
+to executable evidence before release claims can be made for crash-safe overlay
+mutation.

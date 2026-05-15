@@ -902,7 +902,7 @@ write_same_id_evidence() {
     "LifecycleLogs": [$(json_string "files/$DIAG/$lifecycle_op.out"), $(json_string "files/$DIAG/$lifecycle_op.err"), $(json_string "files/$DIAG/$lifecycle_rm.out"), $(json_string "files/$DIAG/$lifecycle_rm.err")],
     "ContainerLogs": [$(json_string "files/$logs_before"), $(json_string "files/$logs_after")]
   },
-  "AcceptanceRule": "A device verifier may only pass this artifact when every before/after evidence source is tied to this exact Engine container ID and proves no surviving process tree, listener, stale PID, GPU/media executor residue, stale state reference, or misleading previous log remains after removal.",
+  "AcceptanceRule": "A device verifier may only pass this artifact when every before/after evidence source is tied to this exact Engine container ID and proves no surviving process tree, listener, stale PID, GPU/media executor residue, stale state reference, or misleading previous log remains after removal; persisted state after stop/kill must show PdockerTeardown.NoOrphanProcesses=true and empty PdockerTeardown.Survivors.",
   "Contract": "Same-container-ID teardown proof is collected, but this scaffold must remain non-passing until the device verifier proves process tree, listeners, stale PID references, GPU/media executor residue, persisted state, Engine inspect, and logs all agree for this exact container ID."
 }
 JSON
@@ -1073,9 +1073,10 @@ cat > "$LATEST" <<JSON
     "Listener absence from /proc/net/tcp, /proc/net/tcp6, ss -ltnp, and netstat -ltnp before/after",
     "Stale PID absence from inspect State.Pid and post-operation process tables",
     "GPU/media executor residue before/start/after operation/after remove",
-    "Persisted state.json before/start/after operation/after remove",
+    "Persisted state.json before/start/after operation/after remove, including PdockerTeardown.NoOrphanProcesses=true and an empty PdockerTeardown.Survivors list after successful stop/kill",
     "Lifecycle logs and container logs bound to the same Engine container ID"
   ],
+  "RuntimeTeardownStateContract": "After successful stop/kill, pdockerd must clear State.Pid, PidStartTime, PdockerKnownPids, PdockerLauncherPid, and PdockerLauncherPidStartTime; PdockerTeardown.NoOrphanProcesses must be true and PdockerTeardown.Survivors must be empty before remove is accepted.",
   "NegativeCases": {
     "Http204Only": "files/$DIAG/negative-http-204-only.json",
     "CliExitZeroOnly": "files/$DIAG/negative-cli-exit-zero-only.json",
@@ -1103,7 +1104,7 @@ cat > "$LATEST" <<JSON
     "The smoke does not yet map every observed process back to the Engine container ID/process tree.",
     "Listener absence, stale PID absence, and GPU/media executor residue are collected but not yet reduced by a device verifier into a passing proof.",
     "This planned-gap artifact is explicitly not fake success.",
-    "pdockerd implementation still needs strict stop/kill/rm verification before this can pass."
+    "Device verifier promotion still needs to reduce raw stop/kill/rm evidence into a passing proof before this can pass."
   ]
 }
 JSON

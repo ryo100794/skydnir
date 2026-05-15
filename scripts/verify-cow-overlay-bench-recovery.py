@@ -45,6 +45,21 @@ REQUIRED_RECOVERY_CASES = {
     "low_space.copy_up_enospc",
 }
 
+REQUIRED_KILL_AT_STEP_CASES = {
+    "copy_up.kill_before_rename_recovery",
+}
+
+COPYUP_BEFORE_RENAME_EVIDENCE_REQUIREMENTS = {
+    "copy_up.before_rename": {
+        "fault_any": ("PDOCKER_COW_FAIL_BEFORE_RENAME", "copyup.before_rename"),
+        "evidence_all": ("lower", "upper", ".cow", "unchanged"),
+    },
+    "copy_up.kill_before_rename_recovery": {
+        "fault_any": ("kill:copyup.before_rename", "copyup.before_rename:kill"),
+        "evidence_all": ("orphan", ".cow", "removed", "lower", "upper"),
+    },
+}
+
 REQUIRED_RECOVERY_CHECKS = {
     "copy_up_fail_closed",
     "copy_up_kill_step_recovery",
@@ -73,6 +88,17 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def require_text_any(text: str, needles: tuple[str, ...], message: str) -> None:
+    folded = text.lower()
+    require(any(needle.lower() in folded for needle in needles), message)
+
+
+def require_text_all(text: str, needles: tuple[str, ...], message: str) -> None:
+    folded = text.lower()
+    missing = [needle for needle in needles if needle.lower() not in folded]
+    require(not missing, f"{message}: missing {missing}")
 
 
 def validate_bench_artifact(path: Path) -> dict:
@@ -108,10 +134,14 @@ def validate_recovery_artifact(path: Path) -> dict:
     for check in sorted(REQUIRED_RECOVERY_CHECKS):
         require(checks.get(check) == "pass", f"{check} must pass")
     require(checks.get("hardlink_ring_corruption_rebuild") == "pass", "hardlink ring rebuild must pass")
-    require(checks.get("kill_at_step_external_harness") == "planned-gap", "kill-at-step must remain planned-gap")
+    require(
+        checks.get("kill_at_step_external_harness") == "planned-gap",
+        "external kill-at-step harness must remain planned-gap until device evidence exists",
+    )
     case_results = data.get("CaseResults")
     require(isinstance(case_results, list) and case_results, "recovery CaseResults missing")
-    case_ids = {case.get("Id") for case in case_results}
+    by_id = {case.get("Id"): case for case in case_results}
+    case_ids = set(by_id)
     missing = REQUIRED_RECOVERY_CASES - case_ids
     require(not missing, f"recovery cases missing: {sorted(missing)}")
     for case in case_results:
@@ -120,12 +150,41 @@ def validate_recovery_artifact(path: Path) -> dict:
         require(case.get("Fault"), f"{cid} fault description missing")
         require(case.get("ExpectedRecovery"), f"{cid} expected recovery missing")
         require(case.get("Evidence"), f"{cid} evidence missing")
+    for cid, requirements in COPYUP_BEFORE_RENAME_EVIDENCE_REQUIREMENTS.items():
+        case = by_id[cid]
+        require_text_any(
+            case.get("Fault", ""),
+            requirements["fault_any"],
+            f"{cid} fault must name the deterministic copyup.before_rename injection",
+        )
+        require_text_all(
+            case.get("Evidence", ""),
+            requirements["evidence_all"],
+            f"{cid} evidence must prove fail/kill copy-up recovery",
+        )
     negative = data.get("NegativeCases")
     require(isinstance(negative, list) and len(negative) >= len(REQUIRED_RECOVERY_CASES), "negative cases missing")
-    require({case.get("Id") for case in negative} >= REQUIRED_RECOVERY_CASES, "negative cases must cover required recovery cases")
+    negative_ids = {case.get("Id") for case in negative}
+    require(negative_ids >= REQUIRED_RECOVERY_CASES, "negative cases must cover required recovery cases")
+    require(negative_ids >= REQUIRED_KILL_AT_STEP_CASES, "negative cases must cover concrete kill-at-step cases")
+    concrete = data.get("KillAtStepConcreteCases")
+    require(isinstance(concrete, list) and concrete, "concrete kill-at-step cases missing")
+    concrete_ids = {case.get("Id") for case in concrete}
+    require(
+        concrete_ids >= REQUIRED_KILL_AT_STEP_CASES,
+        f"concrete kill-at-step cases missing: {sorted(REQUIRED_KILL_AT_STEP_CASES - concrete_ids)}",
+    )
+    for cid in sorted(REQUIRED_KILL_AT_STEP_CASES):
+        case = by_id[cid]
+        concrete_case = next(item for item in concrete if item.get("Id") == cid)
+        require(concrete_case.get("Status") == "pass", f"{cid} concrete kill-at-step status must pass")
+        require(
+            concrete_case.get("Evidence") == case.get("Evidence"),
+            f"{cid} concrete kill-at-step evidence must match CaseResults",
+        )
     cases = data.get("KillAtStepPlannedCases")
-    require(isinstance(cases, list) and len(cases) >= 5, "kill-at-step planned cases missing")
-    require(all(case.get("Status") == "planned-gap" for case in cases), "planned cases cannot be success")
+    require(isinstance(cases, list) and len(cases) >= 5, "external kill-at-step planned cases missing")
+    require(all(case.get("Status") == "planned-gap" for case in cases), "external planned cases cannot be success")
     return data
 
 
@@ -146,7 +205,8 @@ def static_contract() -> None:
     require("NegativeCases" in recovery_text, "recovery negative cases missing")
     for case_id in sorted(REQUIRED_RECOVERY_CASES):
         require(case_id in recovery_text, f"recovery script lacks case {case_id}")
-    require("KillAtStepPlannedCases" in recovery_text, "kill-at-step planned cases missing")
+    require("KillAtStepConcreteCases" in recovery_text, "concrete kill-at-step cases missing")
+    require("KillAtStepPlannedCases" in recovery_text, "external kill-at-step planned cases missing")
 
 
 def run_local(output_dir: Path | None = None) -> tuple[Path, Path]:

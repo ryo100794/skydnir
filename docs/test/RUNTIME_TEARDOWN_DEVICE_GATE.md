@@ -59,6 +59,10 @@ Required before/after evidence for that same ID:
 - GPU/media executor residue scans for pdocker GPU, Vulkan, media, camera,
   audio, and executor helper processes.
 - Persisted `state.json` snapshots before/start/after operation/after remove.
+  After successful stop/kill, `State.Pid`, `PidStartTime`,
+  `PdockerKnownPids`, `PdockerLauncherPid`, and
+  `PdockerLauncherPidStartTime` must be cleared; `PdockerTeardown` must record
+  `NoOrphanProcesses: true` and an empty `Survivors` list.
 - Container logs and lifecycle command logs. The verifier records these as
   container logs evidence, not as proof by themselves.
 
@@ -94,12 +98,19 @@ Success: false
 This is deliberate. The scaffold prevents fake success while making the
 remaining device proof explicit and repeatable.
 
-## Current remaining gap
+## Current implementation and remaining gap
 
-The smoke script now collects raw before/after evidence, same-container-ID proof
+`pdockerd` stop/kill/rm now treats teardown as a no-orphan operation: it scans
+known PIDs, descendants, launcher PIDs, and container-path-referencing runtime
+processes, signals those processes, refuses to mark the container stopped if
+survivors remain, and clears stale active PID fields only after the survivor
+set is empty.
+
+The smoke script collects raw before/after evidence, same-container-ID proof
 schemas, and negative-case artifacts for process tree, listener absence, stale
 PID, GPU/media executor residue, Engine inspect, logs, and persisted state. The
 remaining work is the device verifier that reads those files and proves that
 each stopped/killed/removed container has no surviving process tree, no
 surviving listener, no stale PID reference, no GPU/media executor residue, and
-no stale state/log confusion for that exact Engine container ID.
+no stale state/log confusion for that exact Engine container ID before
+promoting the artifact from planned-gap to device-pass.

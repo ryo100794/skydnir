@@ -15,6 +15,7 @@ PDOCKERD = ROOT / "docker-proot-setup" / "bin" / "pdockerd"
 PDOCKERD_SERVICE = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "PdockerdService.kt"
 MAIN_ACTIVITY = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "MainActivity.kt"
 LLAMA_GPU_NEXT_STEPS = ROOT / "docs" / "plan" / "LLAMA_GPU_BRIDGE_NEXT_STEPS.md"
+LLAMA_GPU_DEVICE_RUNBOOK = ROOT / "docs" / "test" / "LLAMA_GPU_DEVICE_RUNBOOK_20260513.md"
 LLAMA_GPU_CORRECTNESS = ROOT / "docs" / "test" / "LLAMA_GPU_CORRECTNESS_20260507.md"
 ROPE_YARN_ARTIFACT = ROOT / "docs" / "test" / "llama-gpu-ngl1-rope-yarn-oracle-20260509.json"
 LLAMA_GPU_ARTIFACT_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
@@ -552,6 +553,32 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_ACCESS_SHADER_WRITE_BIT", source)
         self.assertIn('\\"gpu_after_upload_hash\\":\\"0x%016llx\\"', source)
         self.assertIn("const int disable_pipeline_optimization =", source)
+
+    def test_llama_gpu_artifact_gate_decision_tree_is_documented(self):
+        verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
+        runbook = LLAMA_GPU_DEVICE_RUNBOOK.read_text()
+        next_steps = LLAMA_GPU_NEXT_STEPS.read_text()
+        for marker in [
+            "oracle-fail-closed",
+            "api-prompt-sanity-missing",
+            "speedup-fields-missing",
+            "REQUIRED_API_PROMPT_PROBES",
+            "oracle_fail_closed",
+            "cpu-oracle-required",
+            "comparison.target_tokens_per_second",
+            "bridge_overhead_phase",
+        ]:
+            self.assertIn(marker, verifier + "\n" + runbook + "\n" + next_steps)
+        for marker in [
+            "Artifact Gate Decision Tree",
+            "CPU baseline rule",
+            "Web/API prompt sanity",
+            "Speedup fields",
+            "37 oracle fail-closed",
+            "38 API prompt sanity missing",
+            "39 speedup fields missing",
+        ]:
+            self.assertIn(marker, runbook)
 
     def test_llama_gpu_compare_can_forward_bridge_tuning_env(self):
         compare = LLAMA_COMPARE.read_text()

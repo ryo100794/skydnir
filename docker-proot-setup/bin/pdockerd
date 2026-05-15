@@ -4881,6 +4881,8 @@ def _start_health_monitor(cid):
 def _pid_alive(pid):
     try:
         os.kill(pid, 0)
+        if _pid_proc_state(pid) == "Z":
+            return False
         return True
     except ProcessLookupError:
         return False
@@ -4888,6 +4890,18 @@ def _pid_alive(pid):
         return True
     except OSError:
         return False
+
+
+def _pid_proc_state(pid):
+    try:
+        with open(f"/proc/{int(pid)}/stat") as f:
+            stat = f.read()
+    except (OSError, ValueError):
+        return ""
+    try:
+        return stat.rsplit(") ", 1)[1].split()[0]
+    except (IndexError, ValueError):
+        return ""
 
 
 def _pid_start_time(pid):
@@ -5105,6 +5119,10 @@ def _normalize_container_exit_state(st):
     if st.get("PdockerKnownPids"):
         st["PdockerLastKnownPids"] = st.get("PdockerKnownPids")
     st["PdockerKnownPids"] = []
+    if st.get("PdockerLauncherPid"):
+        st["PdockerLastLauncherPid"] = st.get("PdockerLauncherPid")
+    st.pop("PdockerLauncherPid", None)
+    st.pop("PdockerLauncherPidStartTime", None)
     try:
         exit_code = int(st.get("ExitCode", 0))
     except (TypeError, ValueError):
@@ -5119,7 +5137,11 @@ def _normalize_container_exit_state(st):
 
 def _signal_pid_group(pid, sig):
     try:
-        os.killpg(os.getpgid(pid), sig)
+        pgid = os.getpgid(pid)
+        if pgid == os.getpgrp():
+            os.kill(pid, sig)
+        else:
+            os.killpg(pgid, sig)
         return True
     except ProcessLookupError:
         return False
@@ -5149,6 +5171,15 @@ def _process_ppid(pid):
         return int(rest[1])
     except ValueError:
         return 0
+
+
+def _process_text(pid, name):
+    try:
+        with open(f"/proc/{int(pid)}/{name}", "rb") as f:
+            data = f.read()
+    except (OSError, ValueError):
+        return ""
+    return data.replace(b"\x00", b" ").decode("utf-8", "replace")
 
 
 def _descendant_pids(root_pid):
@@ -5201,6 +5232,161 @@ def _signal_pid_tree(pid, sig):
     except OSError:
         pass
     return signalled
+
+
+def _unique_live_pids(pids):
+    out = []
+    seen = set()
+    for pid in pids or []:
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if pid <= 0 or pid in seen or pid == os.getpid():
+            continue
+        if not _pid_alive(pid):
+            continue
+        seen.add(pid)
+        out.append(pid)
+    return out
+
+
+def _container_reference_paths(state):
+    """Host paths that identify a container-owned runtime process.
+
+    The direct executor can outlive its short-lived launcher or leave a service
+    process reparented outside the original process tree.  Container teardown
+    therefore cannot trust only State.Pid: scan process metadata for paths
+    that are unique to this Engine container before claiming stop/kill/rm.
+    """
+    if not state or not state.get("Id"):
+        return []
+    cid = state["Id"]
+    paths = [
+        os.path.join(CONTAINERS_DIR, cid),
+        os.path.join(LOGS_DIR, f"{cid}.log"),
+    ]
+    try:
+        cdir, cow, rootfs = _container_runtime(state)
+        paths.extend([cdir, rootfs])
+        if cow:
+            paths.extend([cow.get("lower", ""), cow.get("upper", "")])
+    except Exception:
+        pass
+    out = []
+    seen = set()
+    for path in paths:
+        if not path:
+            continue
+        try:
+            real = os.path.realpath(path)
+        except OSError:
+            real = os.path.abspath(path)
+        if not real or real in ("/", os.path.expanduser("~")) or len(real) < 8:
+            continue
+        if real in seen:
+            continue
+        seen.add(real)
+        out.append(real)
+    return out
+
+
+def _path_contains_marker(path, markers):
+    if not path:
+        return False
+    try:
+        real = os.path.realpath(path)
+    except OSError:
+        real = str(path)
+    for marker in markers:
+        if real == marker or real.startswith(marker + os.sep):
+            return True
+    return False
+
+
+def _process_references_container(pid, state, markers=None):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0 or pid == os.getpid() or not _pid_alive(pid):
+        return False
+    markers = markers if markers is not None else _container_reference_paths(state)
+    needles = [m for m in markers if m]
+    joined = " ".join([
+        _process_text(pid, "cmdline"),
+        _process_text(pid, "environ"),
+    ])
+    if joined and any(needle and needle in joined for needle in needles):
+        return True
+    base = f"/proc/{pid}"
+    for link_name in ("cwd", "root", "exe"):
+        try:
+            target = os.readlink(os.path.join(base, link_name))
+        except OSError:
+            continue
+        if _path_contains_marker(target, markers):
+            return True
+    fd_dir = os.path.join(base, "fd")
+    try:
+        fds = os.listdir(fd_dir)
+    except OSError:
+        fds = []
+    for fd in fds:
+        try:
+            target = os.readlink(os.path.join(fd_dir, fd))
+        except OSError:
+            continue
+        if _path_contains_marker(target, markers):
+            return True
+    return False
+
+
+def _container_process_candidates(state, roots=None):
+    roots = _unique_live_pids(roots or [])
+    candidates = set(roots)
+    for entry in _live_container_process_entries(state):
+        candidates.add(int(entry["Pid"]))
+    for pid in list(candidates):
+        candidates.update(_descendant_pids(pid))
+    markers = _container_reference_paths(state)
+    if markers:
+        try:
+            proc_pids = [int(name) for name in os.listdir("/proc") if name.isdigit()]
+        except OSError:
+            proc_pids = []
+        for pid in proc_pids:
+            if _process_references_container(pid, state, markers):
+                candidates.add(pid)
+                candidates.update(_descendant_pids(pid))
+    for pid in list(candidates):
+        candidates.update(_descendant_pids(pid))
+    return _unique_live_pids(sorted(candidates))
+
+
+def _wait_process_identities_exit(identities, timeout):
+    deadline = time.time() + max(0, float(timeout or 0))
+    while time.time() < deadline:
+        if not any(_process_identity_alive(entry) for entry in identities):
+            return True
+        time.sleep(0.05)
+    return not any(_process_identity_alive(entry) for entry in identities)
+
+
+def _live_teardown_identities(state, roots=None):
+    return [
+        ident for ident in (_process_identity(pid) for pid in _container_process_candidates(state, roots))
+        if ident
+    ]
+
+
+def _signal_container_processes(state, sig, roots=None):
+    pids = _container_process_candidates(state, roots)
+    sent = False
+    for pid in reversed(pids):
+        sent = _signal_pid_tree(pid, sig) or sent
+    sent = _signal_pid_list(pids, sig) or sent
+    return sent, pids
 
 
 def _signal_descendant_groups(root_pid, sig):
@@ -5548,6 +5734,7 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
             s["State"]["Pid"] = 0
             s["State"].pop("PidStartTime", None)
             s["State"]["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
+            _normalize_container_exit_state(s["State"])
             _refresh_port_mapping_status(s)
             save_container_state(cid, s)
             attrs = _container_event_attrs(s)
@@ -5577,25 +5764,32 @@ def stop_container(cid, timeout=10):
         )
         state = load_container_state(cid) or state
     pid = int(((state or {}).get("State") or {}).get("Pid") or 0)
-    saved_pids = _container_known_pids(state)
+    root_pids = []
+    if proc is not None:
+        root_pids.append(proc.pid)
+    if pid > 0:
+        root_pids.append(pid)
+    saved_pids = _container_process_candidates(state, root_pids) if state else []
+    before_identities = _live_teardown_identities(state, saved_pids) if state else []
     stopped = False
     if proc and proc.poll() is None:
         known_pids = sorted(set([proc.pid] + saved_pids + _descendant_pids(proc.pid)))
         try:
-            _signal_pid_tree(proc.pid, signal.SIGTERM)
-            _signal_pid_list(known_pids, signal.SIGTERM)
+            _signal_container_processes(state, signal.SIGTERM, known_pids)
             try:
                 proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
-                _signal_pid_tree(proc.pid, signal.SIGKILL)
-                _signal_pid_list(known_pids, signal.SIGKILL)
-                proc.wait()
+                _signal_container_processes(state, signal.SIGKILL, known_pids)
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
                 if state:
                     record_event("container", "kill", cid,
                                  _container_event_attrs(state))
-            if _pid_tree_alive(proc.pid) or _pid_list_alive(known_pids):
-                _signal_pid_tree(proc.pid, signal.SIGKILL)
-                _signal_pid_list(known_pids, signal.SIGKILL)
+            if not _wait_process_identities_exit(before_identities, 0.2):
+                _signal_container_processes(state, signal.SIGKILL, known_pids)
+                _wait_process_identities_exit(before_identities, 2)
             stopped = True
             if state:
                 record_event("container", "stop", cid,
@@ -5608,18 +5802,11 @@ def stop_container(cid, timeout=10):
         for known in list(known_pids):
             known_pids.extend(_descendant_pids(known))
         known_pids = sorted(set(known_pids))
-        if pid > 0:
-            _signal_pid_tree(pid, signal.SIGTERM)
-        _signal_pid_list(known_pids, signal.SIGTERM)
-        deadline = time.time() + timeout
-        while time.time() < deadline and (
-            (pid > 0 and _pid_tree_alive(pid)) or _pid_list_alive(known_pids)
-        ):
-            time.sleep(0.05)
-        if (pid > 0 and _pid_tree_alive(pid)) or _pid_list_alive(known_pids):
-            if pid > 0:
-                _signal_pid_tree(pid, signal.SIGKILL)
-            _signal_pid_list(known_pids, signal.SIGKILL)
+        _signal_container_processes(state, signal.SIGTERM, known_pids)
+        _wait_process_identities_exit(before_identities, timeout)
+        if not _wait_process_identities_exit(before_identities, 0):
+            _signal_container_processes(state, signal.SIGKILL, known_pids)
+            _wait_process_identities_exit(before_identities, 2)
             if state:
                 record_event("container", "kill", cid,
                              _container_event_attrs(state))
@@ -5628,23 +5815,48 @@ def stop_container(cid, timeout=10):
             record_event("container", "stop", cid,
                          _container_event_attrs(state))
     if state:
-        state["State"]["Running"] = False
-        state["State"]["Status"] = "exited"
-        if state["State"].get("PdockerKnownPids"):
-            state["State"]["PdockerLastKnownPids"] = state["State"].get("PdockerKnownPids")
-        state["State"]["PdockerKnownPids"] = []
-        state["State"]["Pid"] = 0
-        state["State"].pop("PidStartTime", None)
-        state["State"]["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
-        if stopped and not state["State"].get("ExitCode"):
-            state["State"]["ExitCode"] = 143
-            state["State"]["PdockerRawReturnCode"] = 143
-            state["State"]["PdockerSignal"] = 15
+        survivors = _live_teardown_identities(state, saved_pids)
+        st = state["State"]
+        st["PdockerTeardown"] = {
+            "Schema": "pdocker.runtime-teardown.v1",
+            "AttemptedAt": time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime()),
+            "RootPids": saved_pids,
+            "Survivors": survivors,
+            "NoOrphanProcesses": not survivors,
+        }
+        if survivors:
+            st["Running"] = True
+            st["Status"] = "running"
+            st["Pid"] = survivors[0]["Pid"]
+            st["PidStartTime"] = survivors[0]["StartTime"]
+            st["PdockerKnownPids"] = survivors
+            st["Error"] = "container teardown incomplete; live pdocker runtime processes remain"
+            _refresh_port_mapping_status(state)
+            save_container_state(cid, state)
+            return False
+        st["Running"] = False
+        st["Status"] = "exited"
+        if st.get("PdockerKnownPids"):
+            st["PdockerLastKnownPids"] = st.get("PdockerKnownPids")
+        if st.get("PdockerLauncherPid"):
+            st["PdockerLastLauncherPid"] = st.get("PdockerLauncherPid")
+        st["PdockerKnownPids"] = []
+        st["Pid"] = 0
+        st.pop("PidStartTime", None)
+        st.pop("PdockerLauncherPid", None)
+        st.pop("PdockerLauncherPidStartTime", None)
+        st["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
+        if stopped and not st.get("ExitCode"):
+            st["ExitCode"] = 143
+            st["PdockerRawReturnCode"] = 143
+            st["PdockerSignal"] = 15
         _classify_container_memory_exit(state, root_pid=pid)
-        _mark_health_not_running(state["State"])
+        _mark_health_not_running(st)
+        _refresh_port_mapping_status(state)
         save_container_state(cid, state)
     with running_lock:
         running_containers.pop(cid, None)
+    return True
 
 
 def remove_container(cid, force=False):
@@ -5656,7 +5868,8 @@ def remove_container(cid, force=False):
     if state.get("State", {}).get("Running") or live_pids:
         if not force:
             return False
-        stop_container(cid)
+        if not stop_container(cid):
+            return False
     # Prune container from every network's membership roster so a
     # subsequent `network rm` doesn't see it as "still in use".
     if os.path.isdir(NETWORKS_DIR):
@@ -7371,7 +7584,9 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 self._send_json(404, {"message": f"No such container: {cid}"})
                 return
             timeout = int(query.get("t", ["10"])[0])
-            stop_container(state["Id"], timeout=timeout)
+            if not stop_container(state["Id"], timeout=timeout):
+                self._send_json(500, {"message": "container teardown incomplete; live runtime processes remain"})
+                return
             self.send_response(204)
             self.end_headers()
             return
@@ -7382,7 +7597,9 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             cid = m.group(1)
             state = find_container(cid)
             if state:
-                stop_container(state["Id"], timeout=0)
+                if not stop_container(state["Id"], timeout=0):
+                    self._send_json(500, {"message": "container teardown incomplete; live runtime processes remain"})
+                    return
             self.send_response(204)
             self.end_headers()
             return

@@ -32,6 +32,18 @@ The immediate acceptance signal for `ngl=1` is:
 - Do not accept compare/correctness/benchmark claims unless the expected GPU executor marker is observed in the artifact.
 - Do not accept compare/correctness/benchmark claims when
   `gpu.diagnostics.config_propagation.summary` is `fail`.
+- Do not accept compare/correctness/benchmark claims when any structured
+  executor event reports `oracle_fail_closed: true`,
+  `stage: "cpu-oracle-required"`, or an `*-oracle-pending` status.
+- Do not accept compare/correctness/benchmark claims when any structured
+  status/error/classification field still contains an unsupported or
+  not-implemented GPU/oracle marker.
+- Do not accept compare/correctness/benchmark claims unless the artifact proves
+  the standard `/completion` prompt sanity check ran against the unchanged
+  required prompt (`addition`, `2+3=`).
+- Do not accept compare/correctness/benchmark claims unless speedup accounting
+  fields are present, even when the CPU baseline is reused rather than freshly
+  measured.
 - Do not start or accept a GPU run while readiness is `false`.
 - Do not allow a benchmark claim without a CPU comparison/baseline.
 
@@ -115,8 +127,10 @@ bash scripts/android-llama-gpu-compare.sh \
 First classify the artifact with the repository verifier.  The verifier blocks
 claiming success when readiness was false, when the expected executor build
 marker was not observed, when requested GPU diagnostic environment variables
-were not reflected by executor dispatch evidence, or when a speedup appears
-without a CPU baseline:
+were not reflected by executor dispatch evidence, when an oracle fail-closed,
+when unsupported/not-implemented GPU work appears in structured evidence, when
+the `/completion` prompt sanity evidence is missing, when speedup fields are
+missing, or when a benchmark claim lacks a CPU baseline:
 
 ```bash
 python3 scripts/verify-llama-gpu-artifact.py \
@@ -132,6 +146,53 @@ python3 scripts/verify-llama-gpu-artifact.py \
   docs/test/llama-gpu-workgroup3d-ngl1-latest.json \
   --require-q6-workgroup-clear
 ```
+
+### Artifact Gate Decision Tree
+
+Treat this as the pass/fail tree for the next real-device llama GPU attempt:
+
+1. **Memory/readiness:** if `error` is `insufficient_memory` or
+   `runtime_memory_pressure`, or readiness has `ready: false`, stop.  This is a
+   device state blocker, not a GPU result.
+2. **Executor freshness:** if
+   `gpu.diagnostics.runtime_freshness.observed_executor_markers` does not
+   contain the expected marker, fail the artifact as stale/missing executor
+   evidence.
+3. **Config propagation:** if `gpu.diagnostics.config_propagation.checks` is
+   missing, incomplete relative to `scripts/llama-gpu-env-manifest.json`, or has
+   `summary: "fail"`, fail the artifact before reading Q6_K results.
+4. **Fail-closed oracle:** if any structured event has
+   `oracle_fail_closed: true`, `stage`/`fail_stage: "cpu-oracle-required"`, or
+   an `*-oracle-pending` status, fail the artifact.  Do not let a later served
+   HTTP response, Q6 summary, or speedup hide this.
+5. **Unsupported markers:** if any structured `status`, `latest_status`,
+   `error`, `blocker_class`, `classification`, or
+   `diagnostic_interpretation` contains `unsupported`, `not-implemented`, or
+   `kernel-not-implemented-yet`, fail the artifact.
+6. **Web/API prompt sanity:** the GPU `/completion` report must be present
+   under `gpu.correctness`, use schema
+   `pdocker.llama.correctness.v1.compare`, and include the unchanged required
+   `addition` probe with prompt `2+3=`, expected prefix `5`, HTTP 2xx status,
+   boolean `passed`, and string `content`.  A failed answer can still be useful
+   diagnostic evidence, but missing or mutated prompt evidence fails the
+   artifact.
+7. **Speedup fields:** `comparison.speedup`,
+   `comparison.target_tokens_per_second`, `comparison.target_met`, and the
+   matching `bridge_overhead_phase` CPU/GPU/speedup/target fields must exist.
+   They may be zero during failure triage, but missing fields fail the
+   artifact.
+8. **CPU baseline rule:** a fresh CPU run is optional during tight tuning when
+   the command uses `--gpu-only --cpu-tps ...` or reuses a prior baseline.
+   Without CPU baseline evidence, `correctness_claim_allowed` may be true but
+   `benchmark_claim_allowed` must remain false.
+9. **Q6_K gate:** only after the checks above pass, read
+   `q6_workgroup_diagnostics` and follow the Q6_K sections below.
+
+Verifier exit codes for these gates are stable for runbook use: 20 memory
+blocker, 21 readiness blocked, 34 executor marker missing, 35 config
+propagation mismatch, 36 unsupported GPU work accepted, 37 oracle fail-closed,
+38 API prompt sanity missing, 39 speedup fields missing, 32 Q6 workgroup shape
+blocker, 33 Q6 not reached/inconclusive.
 
 ### Memory Guard
 
@@ -172,7 +233,9 @@ artifact.
 A benchmark claim additionally requires:
 
 - GPU correctness claim is allowed;
-- `comparison.speedup` is present;
+- `comparison.speedup`, `comparison.target_tokens_per_second`,
+  `comparison.target_met`, and the `bridge_overhead_phase` speedup fields are
+  present;
 - CPU comparison/baseline evidence is present in the artifact.
 
 If CPU comparison is missing, keep the result as diagnostic only.

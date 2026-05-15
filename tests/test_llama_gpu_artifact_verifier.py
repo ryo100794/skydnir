@@ -45,6 +45,53 @@ def passing_config_propagation():
     }
 
 
+def gpu_correctness_report(correctness="pass", required_failures=0, passed=True, content="5"):
+    return {
+        "schema": "pdocker.llama.correctness.v1.compare",
+        "endpoint": "http://127.0.0.1:28081",
+        "mode": "vulkan-forced-ngl-1",
+        "gpu_layers": 1,
+        "model_path": "/models/model.gguf",
+        "probes": [
+            {
+                "name": "addition",
+                "prompt": "2+3=",
+                "expected": ["5"],
+                "required": True,
+                "passed": passed,
+                "content": content,
+                "error": None,
+                "duration_ms": 12.0,
+                "status_code": 200,
+            }
+        ],
+        "summary": {
+            "correctness": correctness,
+            "required_failures": required_failures,
+            "optional_failures": 0,
+            "benchmark_claim_allowed": required_failures == 0,
+        },
+    }
+
+
+def speedup_sections(speedup=2.0, target_met=True, cpu_tps=0.1, gpu_tps=0.2):
+    return {
+        "comparison": {
+            "speedup": speedup,
+            "target_tokens_per_second": cpu_tps * 10.0,
+            "target_met": target_met,
+        },
+        "bridge_overhead_phase": {
+            "cpu_tokens_per_second": cpu_tps,
+            "gpu_tokens_per_second": gpu_tps,
+            "speedup": speedup,
+            "target_speedup": 10.0,
+            "target_tokens_per_second": cpu_tps * 10.0,
+            "target_met": target_met,
+        },
+    }
+
+
 class LlamaGpuArtifactVerifierTest(unittest.TestCase):
     def run_verifier(self, payload, *args):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -131,9 +178,9 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "latest_status": "match",
                     },
                 },
-                "correctness": {"summary": {"correctness": "pass"}},
+                "correctness": gpu_correctness_report(),
             },
-            "comparison": {"speedup": 2.0, "target_met": True},
+            **speedup_sections(),
         }
         result = self.run_verifier(payload)
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -161,9 +208,9 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "q6_shader_like_64_abs_delta": 3.25,
                     },
                 },
-                "correctness": {"summary": {"correctness": "fail"}},
+                "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
             },
-            "comparison": {"speedup": 0.5, "target_met": False},
+            **speedup_sections(speedup=0.5, target_met=False, cpu_tps=0.1, gpu_tps=0.05),
         }
         clear = self.run_verifier(payload, "--require-q6-workgroup-clear")
         self.assertEqual(clear.returncode, 0, clear.stdout)
@@ -302,9 +349,9 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "latest_status": "mismatch",
                     },
                 },
-                "correctness": {"summary": {"correctness": "fail"}},
+                "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
             },
-            "comparison": {},
+            **speedup_sections(speedup=0.0, target_met=False, cpu_tps=0.1, gpu_tps=0.0),
         }
         result = self.run_verifier(payload)
         self.assertEqual(result.returncode, 32, result.stdout)
@@ -379,6 +426,93 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["classification"], "unsupported-gpu-work-accepted")
         self.assertIn("kernel-not-implemented-yet", json.dumps(report["unsupported_gpu_work_evidence"]))
+
+
+    def test_oracle_fail_closed_evidence_fails_closed(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "generic_spirv_dispatch": {
+                        "failed_events": [
+                            {
+                                "valid": False,
+                                "stage": "cpu-oracle-required",
+                                "oracle_fail_closed": True,
+                                "cpu_oracle": {"status": "fused-rms-rope-oracle-pending"},
+                            }
+                        ]
+                    },
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                    },
+                },
+                "correctness": gpu_correctness_report(),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 37, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "oracle-fail-closed")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertIn("oracle_fail_closed", json.dumps(report["oracle_fail_closed_evidence"]))
+
+    def test_compare_artifact_without_api_prompt_sanity_fails_closed(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                    },
+                },
+                "correctness": {"summary": {"correctness": "pass"}},
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 38, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "api-prompt-sanity-missing")
+        self.assertIn("gpu.correctness.schema", report["api_prompt_sanity"]["missing"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_compare_artifact_without_speedup_fields_fails_closed(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                    },
+                },
+                "correctness": gpu_correctness_report(),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            "comparison": {"speedup": 2.0},
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 39, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "speedup-fields-missing")
+        self.assertIn("comparison.target_tokens_per_second", report["speedup_fields"]["missing"])
+        self.assertIn("bridge_overhead_phase", report["speedup_fields"]["missing"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
 
 
 if __name__ == "__main__":

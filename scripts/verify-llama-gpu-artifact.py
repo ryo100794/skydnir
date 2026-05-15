@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,7 @@ LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS = _manifest_env_field_tuple(
     LLAMA_GPU_ENV_MANIFEST, "config_propagation_env_fields"
 )
 UNSUPPORTED_GPU_WORK_TOKENS = _manifest_string_tuple(LLAMA_GPU_ENV_MANIFEST, "unsupported_gpu_work_tokens")
+REQUIRED_API_PROMPT_PROBES = {"addition": {"prompt": "2+3=", "expected_prefixes": ("5",)}}
 
 
 def _is_compare_artifact(data: dict[str, Any]) -> bool:
@@ -247,6 +249,174 @@ def _unsupported_gpu_work_evidence(data: Any, path: str = "$") -> list[dict[str,
     return evidence
 
 
+def _oracle_fail_closed_evidence(data: Any, path: str = "$") -> list[dict[str, str]]:
+    """Return bounded evidence that the executor intentionally fail-closed an oracle.
+
+    A post-fail-closed artifact must not be treated as a valid correctness or
+    benchmark artifact if any known llama shader required an oracle but the
+    executor stopped at cpu-oracle-required.  Look only at structured JSON keys;
+    raw log excerpts are intentionally ignored to avoid prose false positives.
+    """
+
+    evidence: list[dict[str, str]] = []
+    interesting_string_keys = {
+        "status",
+        "latest_status",
+        "stage",
+        "fail_stage",
+        "error",
+        "blocker_class",
+        "classification",
+        "diagnostic_interpretation",
+    }
+    fail_closed_tokens = (
+        "cpu-oracle-required",
+        "oracle_fail_closed",
+        "oracle-fail-closed",
+        "oracle-pending",
+    )
+
+    def add(path: str, value: Any) -> None:
+        if len(evidence) < 16:
+            evidence.append({"path": path, "value": str(value)})
+
+    def visit(value: Any, value_path: str) -> None:
+        if len(evidence) >= 16:
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                child_path = f"{value_path}.{key}"
+                if key == "oracle_fail_closed" and child is True:
+                    add(child_path, child)
+                elif key in interesting_string_keys and isinstance(child, str):
+                    lowered = child.lower()
+                    if any(token in lowered for token in fail_closed_tokens):
+                        add(child_path, child)
+                if len(evidence) >= 16:
+                    return
+                visit(child, child_path)
+                if len(evidence) >= 16:
+                    return
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{value_path}[{index}]")
+                if len(evidence) >= 16:
+                    return
+
+    visit(data, path)
+    return evidence
+
+
+def _is_finite_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+
+
+def _speedup_field_status(data: dict[str, Any]) -> dict[str, Any]:
+    if not _is_compare_artifact(data):
+        return {"required": False, "summary": "not-required", "missing": []}
+    missing: list[str] = []
+    comparison = data.get("comparison")
+    if not isinstance(comparison, dict):
+        comparison = {}
+        missing.append("comparison")
+    for field in ("speedup", "target_tokens_per_second"):
+        if not _is_finite_number(comparison.get(field)):
+            missing.append(f"comparison.{field}")
+    if not isinstance(comparison.get("target_met"), bool):
+        missing.append("comparison.target_met")
+
+    bridge = data.get("bridge_overhead_phase")
+    if not isinstance(bridge, dict):
+        bridge = {}
+        missing.append("bridge_overhead_phase")
+    for field in ("cpu_tokens_per_second", "gpu_tokens_per_second", "speedup", "target_speedup"):
+        if not _is_finite_number(bridge.get(field)):
+            missing.append(f"bridge_overhead_phase.{field}")
+    if not isinstance(bridge.get("target_met"), bool):
+        missing.append("bridge_overhead_phase.target_met")
+
+    return {
+        "required": True,
+        "summary": "fail" if missing else "pass",
+        "missing": sorted(set(missing)),
+    }
+
+
+def _api_prompt_sanity(data: dict[str, Any]) -> dict[str, Any]:
+    if not _is_compare_artifact(data):
+        return {"required": False, "summary": "not-required", "missing": []}
+    missing: list[str] = []
+    correctness = nested(data, "gpu", "correctness")
+    if not isinstance(correctness, dict) or not correctness:
+        return {
+            "required": True,
+            "summary": "fail",
+            "missing": ["gpu.correctness"],
+            "required_probe_count": 0,
+        }
+    if correctness.get("schema") != "pdocker.llama.correctness.v1.compare":
+        missing.append("gpu.correctness.schema")
+    if not correctness.get("endpoint"):
+        missing.append("gpu.correctness.endpoint")
+    summary = correctness.get("summary")
+    if not isinstance(summary, dict):
+        missing.append("gpu.correctness.summary")
+        summary = {}
+    if summary.get("correctness") not in {"pass", "fail"}:
+        missing.append("gpu.correctness.summary.correctness")
+    if not isinstance(summary.get("required_failures"), int):
+        missing.append("gpu.correctness.summary.required_failures")
+
+    probes = correctness.get("probes")
+    if not isinstance(probes, list) or not probes:
+        return {
+            "required": True,
+            "summary": "fail",
+            "missing": sorted(set(missing + ["gpu.correctness.probes"])),
+            "required_probe_count": 0,
+        }
+    probe_by_name = {
+        str(probe.get("name")): probe
+        for probe in probes
+        if isinstance(probe, dict) and probe.get("name") is not None
+    }
+    required_probe_count = sum(1 for probe in probes if isinstance(probe, dict) and probe.get("required") is True)
+    if required_probe_count == 0:
+        missing.append("gpu.correctness.probes.required")
+
+    for name, expected in REQUIRED_API_PROMPT_PROBES.items():
+        probe = probe_by_name.get(name)
+        base = f"gpu.correctness.probes[{name}]"
+        if not isinstance(probe, dict):
+            missing.append(base)
+            continue
+        if probe.get("required") is not True:
+            missing.append(f"{base}.required")
+        if probe.get("prompt") != expected["prompt"]:
+            missing.append(f"{base}.prompt")
+        expected_prefixes = probe.get("expected")
+        if not isinstance(expected_prefixes, list) or not all(
+            prefix in expected_prefixes for prefix in expected["expected_prefixes"]
+        ):
+            missing.append(f"{base}.expected")
+        status_code = probe.get("status_code")
+        if not isinstance(status_code, int) or status_code < 200 or status_code >= 300:
+            missing.append(f"{base}.status_code")
+        if not isinstance(probe.get("passed"), bool):
+            missing.append(f"{base}.passed")
+        if not isinstance(probe.get("content"), str):
+            missing.append(f"{base}.content")
+
+    return {
+        "required": True,
+        "summary": "fail" if missing else "pass",
+        "missing": sorted(set(missing)),
+        "required_probe_count": required_probe_count,
+        "correctness": summary.get("correctness"),
+        "required_failures": summary.get("required_failures"),
+    }
+
+
 def _claim_base(
     classification: str,
     *,
@@ -322,6 +492,20 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             ],
         }
 
+    oracle_fail_closed_evidence = _oracle_fail_closed_evidence(data)
+    if oracle_fail_closed_evidence:
+        return _claim_base(
+            "oracle-fail-closed",
+            next_action=(
+                data.get("next_action")
+                or "fix the required CPU oracle coverage or disable the unsafe GPU work before accepting compare, correctness, or benchmark claims"
+            ),
+            runtime_freshness=runtime_freshness,
+        ) | {
+            "oracle_fail_closed_evidence": oracle_fail_closed_evidence,
+            "config_propagation": config_propagation,
+        }
+
     unsupported_evidence = _unsupported_gpu_work_evidence(data)
     if unsupported_evidence:
         return _claim_base(
@@ -333,6 +517,35 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             runtime_freshness=runtime_freshness,
         ) | {
             "unsupported_gpu_work_evidence": unsupported_evidence,
+            "config_propagation": config_propagation,
+        }
+
+    api_prompt_sanity = _api_prompt_sanity(data)
+    if api_prompt_sanity.get("summary") == "fail":
+        return _claim_base(
+            "api-prompt-sanity-missing",
+            next_action=(
+                data.get("next_action")
+                or "rerun the standard /completion prompt probes unchanged; do not accept GPU claims without HTTP/API prompt evidence"
+            ),
+            runtime_freshness=runtime_freshness,
+        ) | {
+            "api_prompt_sanity": api_prompt_sanity,
+            "config_propagation": config_propagation,
+        }
+
+    speedup_fields = _speedup_field_status(data)
+    if speedup_fields.get("summary") == "fail":
+        return _claim_base(
+            "speedup-fields-missing",
+            next_action=(
+                data.get("next_action")
+                or "rerun compare so comparison and bridge_overhead_phase speedup fields are present before claiming correctness or performance"
+            ),
+            runtime_freshness=runtime_freshness,
+        ) | {
+            "speedup_fields": speedup_fields,
+            "api_prompt_sanity": api_prompt_sanity,
             "config_propagation": config_propagation,
         }
 
@@ -373,6 +586,10 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_workgroup_diagnostics": q6,
         "runtime_freshness": runtime_freshness,
         "config_propagation": config_propagation,
+        "api_prompt_sanity": api_prompt_sanity,
+        "speedup_fields": speedup_fields,
+        "oracle_fail_closed_evidence": [],
+        "unsupported_gpu_work_evidence": [],
     }
 
 
@@ -410,6 +627,12 @@ def main(argv: list[str]) -> int:
         return 35
     if classification == "unsupported-gpu-work-accepted":
         return 36
+    if classification == "oracle-fail-closed":
+        return 37
+    if classification == "api-prompt-sanity-missing":
+        return 38
+    if classification == "speedup-fields-missing":
+        return 39
     if args.require_q6_match:
         return 0 if classification == "q6-workgroup-cleared-and-oracle-match" else 30
     if args.require_q6_workgroup_clear:

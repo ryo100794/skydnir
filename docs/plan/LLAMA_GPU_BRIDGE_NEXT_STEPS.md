@@ -384,6 +384,22 @@ is explicit rather than implicit:
   an attached `cpu_oracle` report.  This specifically prevents the known
   fused RMS/RoPE pending path (`fused-rms-rope-oracle-pending`) and unsupported
   Q4/Q6 layouts from being recorded as `valid=true` bridge work.
+- Artifact verifier fail-closed oracle gate: any structured artifact evidence
+  containing `oracle_fail_closed: true`, `cpu-oracle-required`, or an
+  `*-oracle-pending` status is classified as `oracle-fail-closed` and blocks
+  correctness and benchmark claims.  A later HTTP response, Q6 summary, or
+  speedup cannot override this.
+- Artifact verifier web/API gate: compare artifacts must include the unchanged
+  required `/completion` prompt sanity probe (`addition`, `2+3=`, expected
+  prefix `5`) with HTTP status and content evidence.  Missing or mutated prompt
+  evidence is classified as `api-prompt-sanity-missing`; a wrong answer can
+  remain diagnostic but cannot be hidden by performance fields.
+- Artifact verifier speedup-field gate: compare artifacts must carry
+  `comparison.speedup`, `comparison.target_tokens_per_second`,
+  `comparison.target_met`, plus the matching `bridge_overhead_phase` CPU/GPU
+  tokens-per-second and speedup fields.  The CPU run itself may be skipped or
+  reused during tuning, but without CPU baseline evidence the verifier keeps
+  `benchmark_claim_allowed=false`.
 
 ### Stage 5: Correctness gate for `ngl=1`
 

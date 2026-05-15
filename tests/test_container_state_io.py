@@ -2,6 +2,8 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
@@ -192,6 +194,83 @@ class ContainerStateIoTest(unittest.TestCase):
             self.assertEqual(health["Status"], "unhealthy")
             self.assertGreaterEqual(health["FailingStreak"], 1)
             self.assertTrue(health["PdockerStopped"])
+
+    def test_stop_container_kills_orphan_runtime_process_by_container_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mod = load_pdockerd(root / "pdocker")
+            cid = "orphanruntime"
+            cdir = Path(mod.CONTAINERS_DIR) / cid
+            rootfs = cdir / "rootfs"
+            rootfs.mkdir(parents=True)
+            state = {
+                "Id": cid,
+                "Name": "/orphanruntime",
+                "Config": {"Env": []},
+                "State": {
+                    "Running": True,
+                    "Status": "running",
+                    "Pid": 0,
+                    "PdockerKnownPids": [],
+                    "ExitCode": 0,
+                },
+                "NetworkSettings": {"Ports": {}},
+            }
+            mod.save_container_state(cid, state)
+            proc = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+                cwd=rootfs,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid,
+            )
+            try:
+                self.assertTrue(mod.stop_container(cid, timeout=0.2))
+                proc.wait(timeout=5)
+                loaded = mod.load_container_state(cid)
+                st = loaded["State"]
+                self.assertFalse(st["Running"])
+                self.assertEqual(st["Pid"], 0)
+                self.assertEqual(st["PdockerKnownPids"], [])
+                self.assertTrue(st["PdockerTeardown"]["NoOrphanProcesses"])
+                self.assertEqual(st["PdockerTeardown"]["Survivors"], [])
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+
+    def test_stopped_container_state_drops_stale_launcher_pid_references(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mod = load_pdockerd(root / "pdocker")
+            cid = "stalelauncher"
+            state = {
+                "Id": cid,
+                "Name": "/stalelauncher",
+                "Config": {"Env": []},
+                "State": {
+                    "Running": False,
+                    "Status": "exited",
+                    "Pid": 12345,
+                    "PidStartTime": "1",
+                    "PdockerLauncherPid": 12345,
+                    "PdockerLauncherPidStartTime": "1",
+                    "PdockerKnownPids": [{"Pid": 12345, "StartTime": "1"}],
+                    "ExitCode": 0,
+                },
+                "NetworkSettings": {"Ports": {}},
+            }
+            mod.save_container_state(cid, state)
+
+            reconciled = mod.reconcile_container_state(state)
+            st = reconciled["State"]
+
+            self.assertEqual(st["Pid"], 0)
+            self.assertNotIn("PidStartTime", st)
+            self.assertNotIn("PdockerLauncherPid", st)
+            self.assertNotIn("PdockerLauncherPidStartTime", st)
+            self.assertEqual(st["PdockerKnownPids"], [])
+            self.assertEqual(st["PdockerLastLauncherPid"], 12345)
 
 
 if __name__ == "__main__":

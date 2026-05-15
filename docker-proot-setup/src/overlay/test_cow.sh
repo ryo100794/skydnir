@@ -580,7 +580,7 @@ case_results.extend([
         "Fault": "PDOCKER_COW_FAIL_BEFORE_RENAME injection",
         "ExpectedRecovery": "mutating write returns failure; lower and upper remain unchanged; no .cow temp is left",
         "Status": "pass",
-        "Evidence": "write copy-up failure checks passed before artifact emission",
+        "Evidence": "write returned failure; lower and upper payload stayed unchanged; no .cow temp remained",
     },
     {
         "Id": "copy_up.truncate_before_rename",
@@ -604,7 +604,7 @@ case_results.extend([
         "Fault": "PDOCKER_COW_FAIL_STEP=kill:copyup.before_rename",
         "ExpectedRecovery": "startup cleanup discards orphan .cow temp; lower and upper payload remain unchanged",
         "Status": copyup_kill_status,
-        "Evidence": "killed copy-up left an orphan .cow temp that was removed without changing lower or upper payload",
+        "Evidence": "killed copy-up left an orphan .cow temp; startup cleanup removed it and lower/upper payload stayed unchanged",
     },
     {
         "Id": "rename.destination_copyup_fail_closed",
@@ -659,6 +659,16 @@ artifact = {
     },
     "CaseResults": case_results,
     "NegativeCases": negative_cases,
+    "KillAtStepConcreteCases": [
+        {
+            "Id": "copy_up.kill_before_rename_recovery",
+            "Step": "copyup.before_rename",
+            "Fault": "PDOCKER_COW_FAIL_STEP=kill:copyup.before_rename",
+            "ExpectedRecovery": "startup cleanup discards orphan .cow temp; lower and upper payload remain unchanged",
+            "Status": copyup_kill_status,
+            "Evidence": "killed copy-up left an orphan .cow temp; startup cleanup removed it and lower/upper payload stayed unchanged",
+        },
+    ],
     "KillAtStepPlannedCases": [
         {
             "Step": "copy-up temp payload write",

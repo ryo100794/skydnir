@@ -54,6 +54,9 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
             "PersistedStateJson",
             "LifecycleLogs",
             "ContainerLogs",
+            "PdockerTeardown",
+            "NoOrphanProcesses",
+            "Survivors",
         ]:
             self.assertIn(required, self.body)
 
@@ -154,6 +157,8 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
             "listener absence",
             "stale PID",
             "GPU/media executor residue",
+            "PdockerTeardown",
+            "NoOrphanProcesses",
             "Engine inspect",
             "container logs",
             "HTTP 204",
