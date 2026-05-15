@@ -42,13 +42,17 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
             "snapshot_executor_residue",
             "snapshot_state_json",
             "write_pid_evidence",
+            "write_process_tree_evidence",
+            "write_name_residue_evidence",
             "write_same_id_evidence",
             "EngineApiContainersJson",
             "EngineApiInspect",
             "ProcessTable",
             "ProcessTree",
+            "DirectChildAbsence",
             "ListenerAbsence",
             "StalePid",
+            "StaleName",
             "GpuMediaExecutorResidue",
             "SameContainerId",
             "PersistedStateJson",
@@ -76,6 +80,7 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
             "same-container-id-kill-rm.json",
             "RequiredSameContainerId",
             "StalePidAbsence",
+            "StaleNameAbsence",
         ]:
             self.assertIn(required, self.body)
 
@@ -87,6 +92,7 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
             '"SameContainerIdTeardownArtifacts"',
             '"BeforeAfterEvidence"',
             '"ProcessTreeBeforeAfter"',
+            '"DirectChildAbsence"',
             '"ListenerAbsenceBeforeAfter"',
             '"GpuMediaExecutorResidueBeforeAfter"',
             '"PersistedStateJsonBeforeAfter"',
@@ -116,6 +122,39 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
             "executor-residue-after-kill-start.txt",
             "executor-residue-after-rm-killed.txt",
             "pdocker.*(gpu|media|camera|audio|vulkan|executor)",
+        ]:
+            self.assertIn(required, self.body)
+
+    def test_runtime_teardown_requires_direct_child_and_stale_name_absence(self):
+        for required in [
+            '"Kind": "runtime-teardown-process-tree-proof"',
+            '"DirectChildrenArtifact"',
+            '"DirectChildrenPresent"',
+            "stop-process-tree-after-stop.json",
+            "stop-process-tree-after-rm.json",
+            "kill-process-tree-after-kill.json",
+            "kill-process-tree-after-rm.json",
+            "stop-process-tree-after-stop-direct-children.txt",
+            "kill-process-tree-after-kill-direct-children.txt",
+            '"Kind": "runtime-teardown-stale-name-proof"',
+            '"NameStillPresentAfterRemove"',
+            "stop-stale-name-after-rm.json",
+            "kill-stale-name-after-rm.json",
+            "duplicate-name",
+            "previous-container-log",
+            "no live State.Pid and no direct children",
+        ]:
+            self.assertIn(required, self.body)
+
+    def test_runtime_teardown_device_pass_is_adb_gated(self):
+        for required in [
+            '"DeviceGate"',
+            '"RequiresAdb": true',
+            '"CollectedViaAdbRunAs": true',
+            '"HostStaticVerifierCannotPromote": true',
+            '"DoNotClaimDevicePassWithoutAdb": true',
+            "adb device serial and package run-as context",
+            "no pdocker-direct, service child, listener, GPU executor, media executor",
         ]:
             self.assertIn(required, self.body)
 

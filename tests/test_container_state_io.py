@@ -2,9 +2,11 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -239,6 +241,111 @@ class ContainerStateIoTest(unittest.TestCase):
                     proc.kill()
                     proc.wait(timeout=5)
 
+    def test_stop_container_kills_late_direct_child_in_launcher_process_group(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mod = load_pdockerd(root / "pdocker")
+            cid = "latedirectchild"
+            cdir = Path(mod.CONTAINERS_DIR) / cid
+            rootfs = cdir / "rootfs"
+            rootfs.mkdir(parents=True)
+            marker = root / "late-child.pid"
+            parent_marker = root / "late-parent.pid"
+            parent_script = root / "spawn_late_child.py"
+            parent_script.write_text(
+                """
+import os
+import signal
+import subprocess
+import sys
+import time
+
+marker = sys.argv[1]
+parent_marker = sys.argv[2]
+
+def on_term(signum, frame):
+    subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import os, sys, time; open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(60)",
+            marker,
+        ],
+        cwd="/",
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    time.sleep(0.2)
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, on_term)
+open(parent_marker, "w").write(str(os.getpid()))
+while True:
+    time.sleep(1)
+""".strip()
+            )
+            proc = subprocess.Popen(
+                [sys.executable, str(parent_script), str(marker), str(parent_marker)],
+                cwd=rootfs,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid,
+            )
+            try:
+                for _ in range(50):
+                    if parent_marker.exists():
+                        break
+                    time.sleep(0.05)
+                self.assertTrue(parent_marker.exists())
+                launcher_start = mod._pid_start_time(proc.pid)
+                launcher_pgid = os.getpgid(proc.pid)
+                state = {
+                    "Id": cid,
+                    "Name": "/latedirectchild",
+                    "Config": {"Env": []},
+                    "State": {
+                        "Running": True,
+                        "Status": "running",
+                        "Pid": proc.pid,
+                        "PidStartTime": launcher_start,
+                        "PdockerLauncherPid": proc.pid,
+                        "PdockerLauncherPidStartTime": launcher_start,
+                        "PdockerLauncherPgid": launcher_pgid,
+                        "PdockerProcessGroupId": launcher_pgid,
+                        "PdockerKnownPids": [{"Pid": proc.pid, "StartTime": launcher_start}],
+                        "ExitCode": 0,
+                    },
+                    "NetworkSettings": {"Ports": {}},
+                }
+                mod.save_container_state(cid, state)
+                with mod.running_lock:
+                    mod.running_containers[cid] = proc
+
+                self.assertTrue(mod.stop_container(cid, timeout=0.2))
+                proc.wait(timeout=5)
+
+                for _ in range(50):
+                    child_pid = int(marker.read_text()) if marker.exists() else 0
+                    if child_pid and not mod._pid_alive(child_pid):
+                        break
+                    time.sleep(0.05)
+                self.assertTrue(marker.exists(), "late direct child marker was not written")
+                child_pid = int(marker.read_text())
+                self.assertFalse(mod._pid_alive(child_pid), f"late direct child {child_pid} survived")
+                loaded = mod.load_container_state(cid)
+                st = loaded["State"]
+                self.assertFalse(st["Running"])
+                self.assertEqual(st["Pid"], 0)
+                self.assertEqual(st["PdockerKnownPids"], [])
+                self.assertNotIn("PdockerProcessGroupId", st)
+                self.assertEqual(st["PdockerLastProcessGroupId"], launcher_pgid)
+                self.assertTrue(st["PdockerTeardown"]["NoOrphanProcesses"])
+                self.assertEqual(st["PdockerTeardown"]["Survivors"], [])
+            finally:
+                if proc.poll() is None:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    proc.wait(timeout=5)
+
     def test_stopped_container_state_drops_stale_launcher_pid_references(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -255,6 +362,8 @@ class ContainerStateIoTest(unittest.TestCase):
                     "PidStartTime": "1",
                     "PdockerLauncherPid": 12345,
                     "PdockerLauncherPidStartTime": "1",
+                    "PdockerLauncherPgid": 12345,
+                    "PdockerProcessGroupId": 12345,
                     "PdockerKnownPids": [{"Pid": 12345, "StartTime": "1"}],
                     "ExitCode": 0,
                 },
@@ -269,8 +378,11 @@ class ContainerStateIoTest(unittest.TestCase):
             self.assertNotIn("PidStartTime", st)
             self.assertNotIn("PdockerLauncherPid", st)
             self.assertNotIn("PdockerLauncherPidStartTime", st)
+            self.assertNotIn("PdockerLauncherPgid", st)
+            self.assertNotIn("PdockerProcessGroupId", st)
             self.assertEqual(st["PdockerKnownPids"], [])
             self.assertEqual(st["PdockerLastLauncherPid"], 12345)
+            self.assertEqual(st["PdockerLastProcessGroupId"], 12345)
 
 
 if __name__ == "__main__":

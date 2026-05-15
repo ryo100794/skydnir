@@ -1,6 +1,6 @@
 # Release Readiness Checklist
 
-Snapshot date: 2026-05-13.
+Snapshot date: 2026-05-15.
 
 This page is the GitHub-facing release gate. It keeps the public README and
 showcase copy aligned with the current P0 blockers from
@@ -64,9 +64,30 @@ documentation remains.
     execution actions with explicit runtime capability UI.
 - **Build/test checkpoint truth — blocked for stable label**
   - Why it blocks: some records include failing gates or scoped PASS results;
-    Kotlin/native coverage is still incomplete.
+    Kotlin/native coverage is still incomplete, and host-only planned-gap
+    verifier passes can otherwise look stronger than the evidence supports.
   - Required evidence: release notes and build records separate passed Android
-    APK evidence from known failing/scoped gates.
+    APK evidence from known failing/scoped gates. `status=planned-gap`,
+    `success=false`, skipped device gates, and manifest lanes marked
+    `stable_checkpoint_eligible=false` are not counted as stable checkpoints.
+
+## Stable checkpoint exclusion rule
+
+`tests/test_driver_manifest.json` and `docs/test/CI_GATE_LEDGER.md` now carry
+the release honesty rule: a run manifest is stable-checkpoint eligible only
+after in-scope P0 blockers are closed or explicitly scoped out, and every
+device-gated artifact required by the gate ledger is passing with the named
+proof. Host-only checks such as `host-smoke` and `release-honesty` are useful
+regression/hygiene evidence, but they are non-promoting while they only prove
+that planned gaps remain visible.
+
+For release notes and build records, treat these as blockers or scoped-out
+limitations, not passes:
+
+- `status=planned-gap`, `blocked`, `failed`, `skip`, or `skipped`;
+- `success=false`;
+- a device lane that was not run on the required installed APK/device;
+- a host-only verifier pass whose purpose is to keep a planned gap explicit.
 
 ## Release readiness checklist
 
@@ -125,7 +146,9 @@ A release candidate can be proposed only when:
 3. README, showcase, status, and TODO wording agree on what is complete,
    preview-only, blocked, or unsupported;
 4. build/test records do not present known failing gates as green;
-5. signing and distribution steps follow [`../build/FDROID_RELEASE_PROCESS.md`](../build/FDROID_RELEASE_PROCESS.md)
+5. test-driver lanes and scenario entries marked non-promoting are not counted
+   as stable checkpoint evidence;
+6. signing and distribution steps follow [`../build/FDROID_RELEASE_PROCESS.md`](../build/FDROID_RELEASE_PROCESS.md)
    and keep signing material outside Git.
 
 ## Suggested GitHub release framing

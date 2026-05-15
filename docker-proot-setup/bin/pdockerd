@@ -2296,6 +2296,56 @@ def _build_layer_index(diff_ids, skip_paths=None, profile=None):
     return index
 
 
+def _dockerfile_run_changed_paths(command, rootfs=None):
+    """Return a conservative changed-path manifest for simple Dockerfile RUNs.
+
+    This is intentionally narrow.  It lets metadata-only commands such as
+    ``RUN chmod +x /usr/local/bin/pdocker-*`` avoid a full rootfs diff walk,
+    while any command with shell expansion, relative paths, or unmatched globs
+    falls back to the broad scanner so Dockerfile semantics are preserved.
+    """
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    if len(tokens) < 3 or tokens[0] != "chmod":
+        return None
+    changed = []
+    seen = set()
+
+    def add_rel(rel):
+        rel = os.path.normpath(rel.strip("/"))
+        if not rel or rel == "." or rel in seen:
+            return
+        seen.add(rel)
+        changed.append(rel)
+
+    for token in tokens[1:]:
+        if token == "--":
+            continue
+        if token.startswith("-") or re.fullmatch(r"[ugoa]*[=+-][rwxXstugo,=+-]+", token) or re.fullmatch(r"[0-7]{3,4}", token):
+            continue
+        if not token.startswith("/") or any(ch in token for ch in "$`;&|<>"):
+            return None
+        has_glob = any(ch in token for ch in "*?[]")
+        if has_glob:
+            if not rootfs:
+                return None
+            pattern = os.path.join(rootfs, token.lstrip("/"))
+            matches = sorted(glob.glob(pattern))
+            if not matches:
+                return None
+            root_abs = os.path.abspath(rootfs)
+            for match in matches:
+                match_abs = os.path.abspath(match)
+                if match_abs != root_abs and not match_abs.startswith(root_abs + os.sep):
+                    return None
+                add_rel(os.path.relpath(match_abs, root_abs))
+        else:
+            add_rel(token)
+    return changed or None
+
+
 def _snapshot_tree_as_layer(src_tree, prev_diff_ids=None, skip_paths=None,
                             profile=None, changed_paths=None,
                             deleted_paths=None):
@@ -5384,8 +5434,12 @@ def _normalize_container_exit_state(st):
     st["PdockerKnownPids"] = []
     if st.get("PdockerLauncherPid"):
         st["PdockerLastLauncherPid"] = st.get("PdockerLauncherPid")
+    if st.get("PdockerProcessGroupId"):
+        st["PdockerLastProcessGroupId"] = st.get("PdockerProcessGroupId")
     st.pop("PdockerLauncherPid", None)
     st.pop("PdockerLauncherPidStartTime", None)
+    st.pop("PdockerLauncherPgid", None)
+    st.pop("PdockerProcessGroupId", None)
     try:
         exit_code = int(st.get("ExitCode", 0))
     except (TypeError, ValueError):
@@ -5418,7 +5472,7 @@ def _signal_pid_group(pid, sig):
             return False
 
 
-def _process_ppid(pid):
+def _process_stat_field(pid, index_after_comm):
     try:
         with open(f"/proc/{int(pid)}/stat", "r", encoding="utf-8", errors="replace") as f:
             stat_line = f.read()
@@ -5428,12 +5482,34 @@ def _process_ppid(pid):
     if rparen < 0:
         return 0
     rest = stat_line[rparen + 2:].split()
-    if len(rest) < 2:
+    if len(rest) <= index_after_comm:
         return 0
     try:
-        return int(rest[1])
+        return int(rest[index_after_comm])
     except ValueError:
         return 0
+
+
+def _process_ppid(pid):
+    return _process_stat_field(pid, 1)
+
+
+def _process_pgid(pid):
+    return _process_stat_field(pid, 2)
+
+
+def _pids_in_process_group(pgid):
+    try:
+        pgid = int(pgid)
+    except (TypeError, ValueError):
+        return []
+    if pgid <= 0 or pgid == os.getpgrp():
+        return []
+    try:
+        pids = [int(name) for name in os.listdir("/proc") if name.isdigit()]
+    except OSError:
+        return []
+    return [pid for pid in pids if pid != os.getpid() and _process_pgid(pid) == pgid]
 
 
 def _process_text(pid, name):
@@ -5608,8 +5684,25 @@ def _process_references_container(pid, state, markers=None):
 def _container_process_candidates(state, roots=None):
     roots = _unique_live_pids(roots or [])
     candidates = set(roots)
+    state_obj = state or {}
+    st = state_obj.get("State") or {}
     for entry in _live_container_process_entries(state):
         candidates.add(int(entry["Pid"]))
+    launcher_pgids = set()
+    for key in ("PdockerProcessGroupId", "PdockerLauncherPgid"):
+        try:
+            pgid = int(st.get(key) or 0)
+        except (TypeError, ValueError):
+            pgid = 0
+        if pgid > 0:
+            launcher_pgids.add(pgid)
+    for pid in list(candidates):
+        pgid = _process_pgid(pid)
+        if pgid > 0:
+            launcher_pgids.add(pgid)
+        candidates.update(_descendant_pids(pid))
+    for pgid in sorted(launcher_pgids):
+        candidates.update(_pids_in_process_group(pgid))
     for pid in list(candidates):
         candidates.update(_descendant_pids(pid))
     markers = _container_reference_paths(state)
@@ -5948,6 +6041,10 @@ def start_container(cid, stdout_stream=None, stderr_stream=None, attach=False):
         state["State"]["PidStartTime"] = start_time
         state["State"]["PdockerLauncherPid"] = proc.pid
         state["State"]["PdockerLauncherPidStartTime"] = start_time
+    launcher_pgid = _process_pgid(proc.pid)
+    if launcher_pgid > 0:
+        state["State"]["PdockerLauncherPgid"] = launcher_pgid
+        state["State"]["PdockerProcessGroupId"] = launcher_pgid
     state["State"]["PdockerKnownPids"] = [
         entry for entry in [_process_identity(proc.pid)] if entry
     ]
@@ -6078,6 +6175,14 @@ def stop_container(cid, timeout=10):
             record_event("container", "stop", cid,
                          _container_event_attrs(state))
     if state:
+        late_survivors = _live_teardown_identities(state, saved_pids)
+        if late_survivors:
+            late_pids = [entry["Pid"] for entry in late_survivors]
+            _signal_container_processes(state, signal.SIGTERM, late_pids)
+            if not _wait_process_identities_exit(late_survivors, min(float(timeout or 0), 1.0)):
+                _signal_container_processes(state, signal.SIGKILL, late_pids)
+                _wait_process_identities_exit(late_survivors, 2)
+                record_event("container", "kill", cid, _container_event_attrs(state))
         survivors = _live_teardown_identities(state, saved_pids)
         st = state["State"]
         st["PdockerTeardown"] = {
@@ -6103,11 +6208,15 @@ def stop_container(cid, timeout=10):
             st["PdockerLastKnownPids"] = st.get("PdockerKnownPids")
         if st.get("PdockerLauncherPid"):
             st["PdockerLastLauncherPid"] = st.get("PdockerLauncherPid")
+        if st.get("PdockerProcessGroupId"):
+            st["PdockerLastProcessGroupId"] = st.get("PdockerProcessGroupId")
         st["PdockerKnownPids"] = []
         st["Pid"] = 0
         st.pop("PidStartTime", None)
         st.pop("PdockerLauncherPid", None)
         st.pop("PdockerLauncherPidStartTime", None)
+        st.pop("PdockerLauncherPgid", None)
+        st.pop("PdockerProcessGroupId", None)
         st["FinishedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000000Z", time.gmtime())
         if stopped and not st.get("ExitCode"):
             st["ExitCode"] = 143
@@ -8885,32 +8994,6 @@ def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit,
             state.update(extra)
         return state
 
-    def run_changed_paths(command):
-        """Detect simple metadata-only RUN commands.
-
-        A command such as `RUN chmod +x /usr/local/bin/foo` changes one inode's
-        metadata. Treating it as an unknown RUN forces a full rootfs diff scan,
-        which is brutally expensive for the dev workspace image. Keep this
-        conservative: if parsing sees shell operators, env expansion, or
-        relative paths, fall back to a full scan.
-        """
-        try:
-            tokens = shlex.split(command)
-        except ValueError:
-            return None
-        if len(tokens) < 3 or tokens[0] != "chmod":
-            return None
-        changed = []
-        for token in tokens[1:]:
-            if token == "--":
-                continue
-            if token.startswith("-") or re.fullmatch(r"[ugoa]*[=+-][rwxXstugo,=+-]+", token) or re.fullmatch(r"[0-7]{3,4}", token):
-                continue
-            if not token.startswith("/") or any(ch in token for ch in "$`*?[];&|<>"):
-                return None
-            changed.append(token.lstrip("/"))
-        return changed or None
-
     def prior_tag_layer(created_by, parent_diff_ids):
         """Reuse a layer from the image currently stored at the same tag.
 
@@ -9301,7 +9384,7 @@ def execute_dockerfile_build(dockerfile_path, context_dir, tag, buildargs, emit,
                 return fail_build()
             new_did = snapshot_layer(
                 "RUN", prev_diff_ids=diff_ids,
-                changed_paths=run_changed_paths(args),
+                changed_paths=_dockerfile_run_changed_paths(args, rootfs=rootfs),
             )
             store_build_cache_entry(cache_key, {
                 "diff_id": new_did,

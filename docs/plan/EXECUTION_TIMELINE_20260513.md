@@ -5,6 +5,11 @@ into small, delegable execution lanes.  It is intentionally evidence-driven:
 work is not complete until implementation, test evidence, documentation, and
 truthful UI/API behavior agree.
 
+Update note (2026-05-15): the evidence-honesty gate is now explicit. Planned
+gaps, skipped/unrun device lanes, non-passing artifacts, and host-only checks
+that merely prove a gap remains visible are non-promoting evidence for stable
+checkpoint purposes.
+
 Primary sources:
 
 - [`TODO.md`](TODO.md)
@@ -34,7 +39,7 @@ Primary sources:
 | G3: storage crash safety | Image pull and COW/overlay mutation survive interruption, low-space, and startup recovery. | Image/library workflows. |
 | G4: interactive and workspace hard gates | UI `exec -it` and default VS Code workspace health pass real device gates, not skipped/static checks. | Demo-ready APKs. |
 | G5: SAF direct output | `/documents` writes prove SAF-backed payload plus UnixFS sidecar metadata, or record a truthful fallback. | SD-card/Documents workflows. |
-| G6: test density honesty | Planned gaps stay visible; build records do not claim stronger evidence than tests provide. | Release candidate tagging. |
+| G6: test density honesty | Planned gaps stay visible; build records do not claim stronger evidence than tests provide, and non-promoting manifest lanes cannot be counted as stable checkpoint evidence. | Release candidate tagging. |
 
 ## Timeline
 
@@ -46,6 +51,7 @@ Primary sources:
 | T0-B | agent: Android smoke | Add a single-container `docker run --rm ubuntu:22.04 echo hi` route to Android smoke, or make its failure explicit. | Smoke script contains the route, records stdout/exit code, and does not fake success. |
 | T0-C | agent: memory UI | Show pager artifact source/age/status and transparent metrics without confusing them with live `/proc`. | Static contract test covers source/age and transparent metrics. |
 | T0-D | agent: service truth plan | Convert service health/runtime teardown planned gaps into executable acceptance checks. | Feature scenario entries contain concrete commands, evidence, and exit criteria. |
+| T0-E | manager | Align TODO, CI gate ledger, scenario ledger, and test driver manifest so planned-gap/device-gated items are non-promoting. | `release-honesty` lane exists, manifest lanes declare stable-checkpoint exclusion, and release docs link residual blockers instead of counting them as stable. |
 
 ### T1 - P0 Truth, Recovery, and GPU Correctness
 
@@ -98,6 +104,7 @@ Primary sources:
 | T6-A Coverage honesty | Kotlin/native coverage or explicit release blocker. | Coverage artifact or documented non-release status. |
 | T6-B Reproducible build | Pinned build process and source-built native payload policy. | Release script, artifact manifest, source/license audit. |
 | T6-C Public docs | Showcase, README, compatibility, and known-limits stay synchronized with actual gates. | Generated dashboard/timeline from TODO and audit. |
+| T6-D Stable checkpoint honesty | Release notes classify planned-gap, blocked, skipped, and device-unrun evidence as residual gaps. | No stable label until CI gate ledger promotion conditions and release-readiness blocker closures agree. |
 
 ## Current Agent Assignments
 
@@ -142,6 +149,8 @@ assignment:
 - [ ] Focused tests run.
 - [ ] APK build run when Android/Kotlin/native payload changed.
 - [ ] TODO/audit/timeline updated.
+- [ ] Planned-gap/device-gated artifacts are not counted as stable checkpoint
+      evidence unless their promotion condition is satisfied.
 - [ ] Commit excludes unrelated dirty GPU/runtime artifacts unless explicitly
       part of the lane.
 - [ ] Push only after rebase/autostash if remote moved.

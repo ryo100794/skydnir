@@ -16,6 +16,7 @@ LIBCOW = ROOT / "docker-proot-setup" / "src" / "overlay" / "libcow.c"
 COW_TEST = ROOT / "docker-proot-setup" / "src" / "overlay" / "test_cow.sh"
 RUNTIME_CONTRACT = ROOT / "docker-proot-setup" / "scripts" / "verify_runtime_contract.py"
 COVERAGE = ROOT / "tests" / "direct_syscall_coverage.json"
+TODO_LEDGER = ROOT / "docs" / "plan" / "TODO.md"
 
 REQUIRED_PATH_VARIANTS = {
     "path.absolute-rootfs-rewrite",
@@ -40,6 +41,15 @@ REQUIRED_BOUNDARY_VALUES = {
     "boundary.memory-guard-threshold",
     "boundary.uid-gid-minus-one",
     "boundary.wait-exit-signal-code",
+}
+
+REQUIRED_PHASE2_CONTRACTS = {
+    "attach-pty-signals",
+    "syscall-errno-parity",
+    "path-mediation-binds-volumes",
+    "linkat-hardlink-semantics",
+    "proc-self-exe-no-mutation",
+    "run-changed-path-manifest",
 }
 
 REQUIRED_BRANCH_DECISIONS = {
@@ -264,6 +274,69 @@ def validate_required_areas(manifest: dict[str, object]) -> None:
     missing = sorted(required - seen)
     if missing:
         fail(f"required direct syscall areas missing coverage: {', '.join(missing)}")
+
+
+def validate_phase2_contracts(manifest: dict[str, object]) -> None:
+    raw = manifest.get("phase2_contracts")
+    if not isinstance(raw, list) or not raw:
+        fail("manifest must define phase2_contracts for the open Direct syscall Phase 2 TODOs")
+    todo = read(TODO_LEDGER)
+    heavy_ids = {str(case.get("id")) for case in manifest.get("heavy_cases", []) if isinstance(case, dict)}
+    required_areas = {str(area) for area in manifest.get("required_areas", [])}
+    entries = {str(entry.get("id")): entry for entry in raw if isinstance(entry, dict)}
+    missing = sorted(REQUIRED_PHASE2_CONTRACTS - set(entries))
+    if missing:
+        fail("phase2_contracts missing required entries: " + ", ".join(missing))
+    for contract_id in sorted(REQUIRED_PHASE2_CONTRACTS):
+        entry = entries[contract_id]
+        status = str(entry.get("status") or "")
+        cases = entry.get("cases")
+        areas = entry.get("areas")
+        markers = entry.get("todo_markers")
+        if not status or status == "closed":
+            fail(f"phase2 contract {contract_id} must remain explicit until closure evidence is added")
+        if not isinstance(cases, list) or not cases:
+            fail(f"phase2 contract {contract_id} must reference scenario cases")
+        case_missing = sorted(str(case) for case in cases if str(case) not in heavy_ids)
+        if case_missing:
+            fail(f"phase2 contract {contract_id} references missing case(s): {', '.join(case_missing)}")
+        if not isinstance(areas, list) or not areas:
+            fail(f"phase2 contract {contract_id} must reference required areas")
+        area_missing = sorted(str(area) for area in areas if str(area) not in required_areas)
+        if area_missing:
+            fail(f"phase2 contract {contract_id} references unknown area(s): {', '.join(area_missing)}")
+        if not isinstance(markers, list) or not markers:
+            fail(f"phase2 contract {contract_id} must link back to TODO markers")
+        todo_missing = sorted(str(marker) for marker in markers if str(marker) not in todo)
+        if todo_missing:
+            fail(f"phase2 contract {contract_id} TODO marker(s) missing from ledger: {', '.join(todo_missing)}")
+        if len(str(entry.get("close_requires") or "")) < 48:
+            fail(f"phase2 contract {contract_id} must state close_requires evidence")
+        if not entry.get("fast_gate"):
+            fail(f"phase2 contract {contract_id} must name a fast/static gate")
+    known_gaps = manifest.get("known_gaps", [])
+    if not isinstance(known_gaps, list):
+        fail("known_gaps must be a list")
+    known_refs = set()
+    for gap in known_gaps:
+        if not isinstance(gap, dict):
+            fail("known_gaps entries must be objects")
+        ref = str(gap.get("phase2_contract") or "")
+        if ref:
+            if ref not in entries:
+                fail(f"known gap {gap.get('id')} references missing phase2 contract {ref}")
+            known_refs.add(ref)
+        if len(str(gap.get("reason") or "")) < 24:
+            fail(f"known gap {gap.get('id')} must explain the residual gap")
+    required_known = {
+        "attach-pty-signals",
+        "linkat-hardlink-semantics",
+        "proc-self-exe-no-mutation",
+        "run-changed-path-manifest",
+    }
+    missing_known = sorted(required_known - known_refs)
+    if missing_known:
+        fail("known_gaps must track residual implementation gaps: " + ", ".join(missing_known))
 
 
 def require_contains(label: str, source: str, needles: list[str]) -> None:
@@ -493,6 +566,7 @@ def main() -> None:
     validate_manifest_links(manifest)
     validate_path_and_boundary_matrices(manifest)
     validate_required_areas(manifest)
+    validate_phase2_contracts(manifest)
     validate_static_contract_markers(source)
     validate_known_gaps(manifest, source)
 

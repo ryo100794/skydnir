@@ -209,6 +209,20 @@ Required outcomes:
 - grant revocation degrades the backend to unavailable without deleting payload
   records.
 
+Phase 2 fail-closed gate:
+
+- every backend entry point validates logical relative paths before resolving a
+  SAF document or app-private mirror path;
+- validation rejects `..`, absolute paths, backslashes, empty segments, dot
+  segments, and NUL bytes instead of normalizing them into a different target;
+- app-private fallback is not attempted after validation failure and must always
+  carry explicit `fallbackRecorded` and `fallbackReason` evidence when used for
+  provider-write failures;
+- sidecars for published payloads record provider evidence plus optional
+  `sha256`, and mediated writes compare that evidence before overwrite;
+- provider deletion or changed hash/size records `conflictState =
+  external-provider-change` and causes the write to fail closed until repair.
+
 Conflict resolution is user intent and is not safely rebuildable. Once a user
 chooses a winner or keep-both result, record that decision before destructive
 cleanup.

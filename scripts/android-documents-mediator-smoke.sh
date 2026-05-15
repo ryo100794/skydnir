@@ -29,6 +29,7 @@ WRITE_RELATIVE="pdocker-exports/$CASE_NAME/nested/latest.log"
 RENAME_SOURCE_RELATIVE="pdocker-exports/$CASE_NAME/nested/rename-source.log"
 RENAME_TARGET_RELATIVE="pdocker-exports/$CASE_NAME/nested/renamed.log"
 UNLINK_RELATIVE="pdocker-exports/$CASE_NAME/nested/unlink-target.log"
+INVALID_DIRECT_WRITE_TARGET="../escape-phase2.txt"
 
 mkdir -p "$EVIDENCE_DIR" "$(dirname "$OUT")"
 
@@ -230,6 +231,28 @@ cat /proc/net/unix > $remote_diag/proc-net-unix.txt 2>$remote_diag/proc-net-unix
   tar -xf "$WORKDIR/device-saf-direct-output.tar" -C "$EVIDENCE_DIR" >/dev/null 2>&1 || true
 }
 
+run_invalid_direct_write_case() {
+  local src="/data/data/$PKG/files/pdocker/diagnostics/saf-direct-output/invalid-direct-write-source.txt"
+  run_as "mkdir -p files/pdocker/diagnostics/saf-direct-output
+printf '%s\n' 'invalid-direct-write-source' > files/pdocker/diagnostics/saf-direct-output/invalid-direct-write-source.txt
+rm -f files/pdocker/diagnostics/saf-write-latest.json" >/dev/null 2>&1 || true
+  run_adb shell am start \
+    -n "$PKG/$CLASS_PREFIX.MainActivity" \
+    -a "$ACTION_PREFIX.action.SMOKE_DOCUMENTS_WRITE_FILE" \
+    --es source "$src" \
+    --es target "$INVALID_DIRECT_WRITE_TARGET" \
+    --es mimeType "text/plain" >/dev/null || true
+  local i
+  for i in $(seq 1 30); do
+    run_as "cat files/pdocker/diagnostics/saf-write-latest.json 2>/dev/null || true" >"$EVIDENCE_DIR/saf-write-invalid-target.json" 2>"$EVIDENCE_DIR/saf-write-invalid-target.err" || true
+    if grep -q '"PathValidationPolicy"' "$EVIDENCE_DIR/saf-write-invalid-target.json" 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 write_artifact() {
   local selected_host="$1"
   local flow_rc="$2"
@@ -243,9 +266,11 @@ write_artifact() {
   SAF_DIRECT_CASE="$CASE_NAME" \
   SAF_DIRECT_PAYLOAD="$PAYLOAD" \
   SAF_DIRECT_FLOW_RC="$flow_rc" \
+  SAF_DIRECT_VALIDATION_RC="${3:-0}" \
   SAF_DIRECT_WRITE_RELATIVE="$WRITE_RELATIVE" \
   SAF_DIRECT_RENAME_TARGET_RELATIVE="$RENAME_TARGET_RELATIVE" \
   SAF_DIRECT_UNLINK_RELATIVE="$UNLINK_RELATIVE" \
+  SAF_DIRECT_INVALID_TARGET="$INVALID_DIRECT_WRITE_TARGET" \
   python3 <<'PY'
 import json
 import os
@@ -258,6 +283,7 @@ selected_host = os.environ["SAF_DIRECT_SELECTED_HOST"]
 container = os.environ["SAF_DIRECT_CONTAINER"]
 require_container = os.environ["SAF_DIRECT_REQUIRE_CONTAINER"] == "1"
 flow_rc = int(os.environ["SAF_DIRECT_FLOW_RC"])
+validation_rc = int(os.environ["SAF_DIRECT_VALIDATION_RC"])
 
 def text(name):
     p = evidence / name
@@ -280,7 +306,9 @@ rename_payload = text("pdocker/diagnostics/saf-direct-output/rename.payload")
 unlink_absent_rc = text("pdocker/diagnostics/saf-direct-output/unlink-absent.rc")
 write_sidecar = j("pdocker/diagnostics/saf-direct-output/write.sidecar.json")
 rename_sidecar = j("pdocker/diagnostics/saf-direct-output/rename.sidecar.json")
+unlink_sidecar = j("pdocker/diagnostics/saf-direct-output/unlink.sidecar.json")
 mirror_exists_rc = text("pdocker/diagnostics/saf-direct-output/write-mirror-exists.rc")
+invalid_direct_write = j("saf-write-invalid-target.json")
 
 container_attempted = bool(container)
 container_ok = container_attempted and exec_rc == 0 and "container-documents-cases-ok" in text("container-documents-cases.out")
@@ -294,6 +322,12 @@ fallback_recorded = write_state in fallback_states or rename_state in fallback_s
 mirror_present = mirror_exists_rc == "0"
 mirror_evicted = mirror_exists_rc == "1"
 mirror_only_not_direct = mirror_present and not direct_write_ok
+invalid_direct_write_rejected = (
+    invalid_direct_write.get("Success") is False
+    and invalid_direct_write.get("Fallback") is False
+    and invalid_direct_write.get("PathValidationPolicy") == "fail-closed"
+    and "invalid target path" in (invalid_direct_write.get("Error") or "")
+)
 
 path_traversal = {
     "Name": "path-traversal-validation",
@@ -350,6 +384,14 @@ cases = {
         "Attempted": container_attempted,
         "Success": unlink_ok,
         "RelativePath": os.environ["SAF_DIRECT_UNLINK_RELATIVE"],
+        "UnlinkSidecar": unlink_sidecar,
+    },
+    "direct_write_path_validation": {
+        "Attempted": validation_rc == 0 or bool(invalid_direct_write),
+        "Success": invalid_direct_write_rejected,
+        "RejectedTarget": os.environ["SAF_DIRECT_INVALID_TARGET"],
+        "PathValidationPolicy": "fail-closed",
+        "Result": invalid_direct_write,
     },
     "path_traversal": path_traversal,
     "read_only_grant": read_only,
@@ -378,8 +420,10 @@ if write_state and write_state not in {"saf-synced-mirror-evicted", "mirror-pres
     failures.append(f"unexpected write payloadState: {write_state}")
 if not cases["sidecar_metadata"]["Success"]:
     failures.append("sidecar metadata for write payload is missing or malformed")
+if not invalid_direct_write_rejected:
+    failures.append("unsafe direct-write target was not rejected fail-closed")
 
-success = flow_rc == 0 and not failures
+success = flow_rc == 0 and validation_rc == 0 and not failures
 artifact = {
     "SchemaVersion": 1,
     "Kind": "saf-direct-output-gate",
@@ -417,7 +461,7 @@ PY
 }
 
 main() {
-  local selected_host flow_rc=0
+  local selected_host flow_rc=0 validation_rc=0
   for rel in "$WRITE_RELATIVE" "$RENAME_SOURCE_RELATIVE" "$RENAME_TARGET_RELATIVE" "$UNLINK_RELATIVE"; do
     if ! validate_relative_path "$rel"; then
       echo "invalid relative test path: $rel" >&2
@@ -433,6 +477,7 @@ main() {
   collect_settings
   collect_engine_documents_status
   selected_host="$(cat "$EVIDENCE_DIR/selected-host-path.txt" 2>/dev/null | tr -d '\r' || true)"
+  run_invalid_direct_write_case || validation_rc=1
 
   if [[ "$flow_rc" -eq 0 && -n "$CONTAINER" ]]; then
     run_container_documents_cases "$CONTAINER" || flow_rc=1
@@ -451,7 +496,7 @@ main() {
     done
   fi
 
-  write_artifact "$selected_host" "$flow_rc"
+  write_artifact "$selected_host" "$flow_rc" "$validation_rc"
 }
 
 main "$@"

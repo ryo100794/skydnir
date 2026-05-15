@@ -295,7 +295,12 @@ Known gaps:
   promoted evidence remains
   `docs/test/runtime-teardown-latest.json`, including listener absence and no
   orphan `pdocker-direct`/service/GPU executor residue for the stopped Engine
-  container ID before this can become a passing compatibility gate.
+  container ID before this can become a passing compatibility gate.  The
+  artifact is device-gated with `RequiresAdb: true` and
+  `DoNotClaimDevicePassWithoutAdb: true`; host checks can only verify the
+  schema.  New raw requirements include direct-child absence for inspect
+  `State.Pid`, stale/duplicate container-name absence after `rm`, and cleared
+  `PdockerLauncherPgid` / `PdockerProcessGroupId` fields in persisted state.
 - Active port publishing remains unimplemented; requested mappings are visible
   metadata until listener/proxy/rewrite state is recorded and verified.
 - Android storage metrics still need device verification for nonnegative values

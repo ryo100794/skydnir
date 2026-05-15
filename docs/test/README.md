@@ -1,6 +1,6 @@
 # Test Documents
 
-Snapshot date: 2026-05-04.
+Snapshot date: 2026-05-15.
 
 ## Purpose
 
@@ -37,6 +37,9 @@ run it, and where the latest result is stored.
   compatibility procedure and matrix.
 - Use [`CI_GATE_LEDGER.md`](CI_GATE_LEDGER.md) as the compact P0/P1 gate
   classification table for planned gaps, lightweight gates, and device gates.
+  Planned-gap and device-gated artifacts are non-promoting for stable
+  checkpoints until their ledger promotion condition passes with device
+  evidence.
 - Use [`SCENARIOS.md`](SCENARIOS.md) and `tests/feature_scenarios.json` as the
   feature-level test ledger.
 - Use [`TEST_DESIGN_STANDARD.md`](TEST_DESIGN_STANDARD.md) and
@@ -56,5 +59,8 @@ run it, and where the latest result is stored.
 - Keep generated or recorded results in this category, but register every
   automated result through the test driver run manifest. Do not introduce a new
   standalone test launcher with its own artifact convention.
+- Do not describe a host-only planned-gap verifier pass, `release-honesty` pass,
+  skipped device lane, or `status=planned-gap` / `success=false` artifact as a
+  stable checkpoint. Link the residual blocker instead.
 - Move product boundary decisions to [`../design/README.md`](../design/README.md).
 - Move active implementation tasks to [`../plan/TODO.md`](../plan/TODO.md).

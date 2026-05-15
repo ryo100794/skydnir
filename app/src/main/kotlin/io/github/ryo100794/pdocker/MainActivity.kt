@@ -3683,7 +3683,22 @@ class MainActivity : AppCompatActivity() {
         val mediator = safDocumentsMediator()
         val grants = mediator.persistedGrantState()
         val source = File(sourcePath)
-        val normalizedTarget = targetPath.replace('\\', '/').trimStart('/')
+        val normalizedTarget = runCatching {
+            SafDocumentsMediator.normalizeRelativePathOrThrow(targetPath)
+        }.getOrElse {
+            return JSONObject()
+                .put("Source", sourcePath)
+                .put("Target", targetPath)
+                .put("MimeType", mimeType)
+                .put("Access", metadata.writeAccess.envValue)
+                .put("PersistedWriteGrant", grants.write)
+                .put("SelectedHostPath", metadata.selectedHostPath)
+                .put("ActiveHostPath", metadata.activeHostPath)
+                .put("Success", false)
+                .put("Fallback", false)
+                .put("PathValidationPolicy", "fail-closed")
+                .put("Error", "invalid target path: ${it.message ?: it.toString()}")
+        }
         val attempts = JSONArray()
         val out = JSONObject()
             .put("Source", sourcePath)
@@ -3693,12 +3708,18 @@ class MainActivity : AppCompatActivity() {
             .put("PersistedWriteGrant", grants.write)
             .put("SelectedHostPath", metadata.selectedHostPath)
             .put("ActiveHostPath", metadata.activeHostPath)
+            .put("PathValidationPolicy", "fail-closed")
         if (!source.isFile) {
             return out.put("Success", false).put("Error", "source file is missing")
         }
         val primary = if (metadata.writeAccess == DocumentsWriteAccess.DirectPathWritable) {
             runCatching {
                 val target = File(metadata.directHostPath, normalizedTarget)
+                val root = File(metadata.directHostPath).canonicalFile
+                val canonicalTarget = target.canonicalFile
+                if (canonicalTarget != root && !canonicalTarget.path.startsWith(root.path + File.separator)) {
+                    error("target escaped Documents root")
+                }
                 target.parentFile?.mkdirs()
                 source.inputStream().use { input ->
                     target.outputStream().use { output -> input.copyTo(output) }
@@ -3709,12 +3730,14 @@ class MainActivity : AppCompatActivity() {
                     .put("RelativePath", normalizedTarget)
                     .put("HostPath", target.absolutePath)
                     .put("Bytes", source.length())
+                    .put("PathValidationPolicy", "fail-closed")
             }.getOrElse {
                 JSONObject()
                     .put("Success", false)
                     .put("Mode", "direct-path")
                     .put("RelativePath", normalizedTarget)
                     .put("Bytes", 0L)
+                    .put("PathValidationPolicy", "fail-closed")
                     .put("Error", it.message ?: it.toString())
             }
         } else {

@@ -8,6 +8,7 @@ import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.URLConnection
+import java.security.MessageDigest
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -30,6 +31,49 @@ class SafDocumentsMediator(
     private val treeUri: Uri? = treeUriText.takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
     private val treeDocumentId: String? = treeUri?.let {
         runCatching { DocumentsContract.getTreeDocumentId(it) }.getOrNull()
+    }
+
+    companion object {
+        private val unsafeRelativePathExamples = listOf(
+            "../escape",
+            "/absolute",
+            "nested/../../escape",
+            "nested\\escape",
+            "nested//escape",
+        )
+
+        fun normalizeRelativePathOrThrow(path: String, allowRoot: Boolean = false): String {
+            if (path.indexOf('\u0000') >= 0) {
+                throw IllegalArgumentException("Invalid SAF/Documents relative path: NUL byte is not allowed")
+            }
+            if (path.indexOf('\\') >= 0) {
+                throw IllegalArgumentException(
+                    "Invalid SAF/Documents relative path: backslash separators are not allowed; " +
+                        "rejected examples=$unsafeRelativePathExamples",
+                )
+            }
+            val raw = path
+            if (raw.isBlank()) {
+                if (allowRoot) return ""
+                throw IllegalArgumentException("Invalid SAF/Documents relative path: empty path is not allowed")
+            }
+            if (raw.startsWith('/')) {
+                throw IllegalArgumentException("Invalid SAF/Documents relative path: absolute paths are not allowed")
+            }
+            if (raw.contains("//")) {
+                throw IllegalArgumentException("Invalid SAF/Documents relative path: empty path segments are not allowed")
+            }
+            val parts = raw.split('/')
+            parts.forEach { part ->
+                if (part.isBlank() || part == "." || part == "..") {
+                    throw IllegalArgumentException(
+                        "Invalid SAF/Documents relative path: traversal and dot segments are not allowed; " +
+                            "rejected examples=$unsafeRelativePathExamples",
+                    )
+                }
+            }
+            return parts.joinToString("/")
+        }
     }
 
     data class GrantState(
@@ -172,8 +216,18 @@ class SafDocumentsMediator(
 
     fun syncPathToTree(relativePath: String, evictMirrorPayload: Boolean = false): JSONObject {
         initializeContract()
-        val normalized = normalizeRelativePath(relativePath)
         val errors = JSONArray()
+        val normalized = runCatching { normalizeRelativePath(relativePath, allowRoot = true) }.getOrElse {
+            errors.put(errorJson(relativePath, it.message ?: it.toString()))
+            return syncReport(
+                direction = "sync-path-to-tree",
+                available = available(),
+                sourceExists = mirrorRoot.exists(),
+                sourceFiles = countFiles(mirrorRoot),
+                sourceBytes = countBytes(mirrorRoot),
+                errors = errors,
+            )
+        }
         if (!available()) {
             errors.put(errorJson(normalized, "SAF tree is not available; persisted read/write grant is missing"))
             return syncReport(
@@ -318,7 +372,7 @@ class SafDocumentsMediator(
     }
 
     fun exists(relativePath: String): Boolean =
-        available() && resolveDocumentUri(relativePath, createDirs = false) != null
+        available() && runCatching { resolveDocumentUri(relativePath, createDirs = false) != null }.getOrDefault(false)
 
     fun list(relativePath: String = ""): List<Entry> {
         if (!available()) return emptyList()
@@ -365,7 +419,9 @@ class SafDocumentsMediator(
 
     fun writeBytes(relativePath: String, bytes: ByteArray, mimeType: String = "application/octet-stream"): Boolean {
         if (!available()) return false
-        val uri = resolveDocumentUri(relativePath, createDirs = true, directory = false, leafMimeType = mimeType)
+        val normalized = runCatching { normalizeRelativePathOrThrow(relativePath) }.getOrElse { return false }
+        checkNoProviderConflict(normalized)?.let { return false }
+        val uri = resolveDocumentUri(normalized, createDirs = true, directory = false, leafMimeType = mimeType)
             ?: return false
         return runCatching {
             resolver.openOutputStream(uri, "wt")?.use { out ->
@@ -373,7 +429,7 @@ class SafDocumentsMediator(
                 true
             } ?: error("openOutputStream returned null")
         }.onSuccess {
-            recordPayloadSidecar(relativePath, bytes.size.toLong(), mimeType)
+            recordPayloadSidecar(normalized, bytes.size.toLong(), mimeType, contentSha256 = sha256Hex(bytes))
         }.getOrElse {
             false
         }
@@ -383,13 +439,22 @@ class SafDocumentsMediator(
         writeBytes(relativePath, text.toByteArray(Charsets.UTF_8), mimeType)
 
     fun writeFile(relativePath: String, source: File, mimeType: String = "application/octet-stream"): JSONObject {
-        val normalized = normalizeRelativePath(relativePath)
+        val normalized = runCatching { normalizeRelativePathOrThrow(relativePath) }.getOrElse {
+            return JSONObject()
+                .put("Success", false)
+                .put("Mode", "saf-unixfs-provider")
+                .put("RelativePath", relativePath)
+                .put("Bytes", 0L)
+                .put("PathValidationPolicy", "fail-closed")
+                .put("Error", it.message ?: it.toString())
+        }
         val result = copyFileToTree(normalized, source, mimeType, evictMirrorPayload = false)
         return JSONObject()
             .put("Success", result.success)
             .put("Mode", "saf-unixfs-provider")
             .put("RelativePath", normalized)
             .put("Bytes", result.bytes)
+            .put("PathValidationPolicy", "fail-closed")
             .put("Error", result.error)
     }
 
@@ -399,7 +464,17 @@ class SafDocumentsMediator(
         mimeType: String = "application/octet-stream",
         reason: String = "",
     ): JSONObject {
-        val normalized = normalizeRelativePath(relativePath)
+        val normalized = runCatching { normalizeRelativePathOrThrow(relativePath) }.getOrElse {
+            return JSONObject()
+                .put("Success", false)
+                .put("Mode", "saf-unixfs-mirror-fallback")
+                .put("RelativePath", relativePath)
+                .put("MirrorPath", "")
+                .put("Bytes", 0L)
+                .put("PathValidationPolicy", "fail-closed")
+                .put("Fallback", false)
+                .put("Error", it.message ?: it.toString())
+        }
         val target = File(mirrorRoot, normalized)
         return runCatching {
             target.parentFile?.mkdirs()
@@ -420,6 +495,8 @@ class SafDocumentsMediator(
                 .put("RelativePath", normalized)
                 .put("MirrorPath", target.absolutePath)
                 .put("Bytes", bytes)
+                .put("PathValidationPolicy", "fail-closed")
+                .put("Fallback", true)
                 .put("Reason", reason)
         }.getOrElse {
             JSONObject()
@@ -428,6 +505,8 @@ class SafDocumentsMediator(
                 .put("RelativePath", normalized)
                 .put("MirrorPath", target.absolutePath)
                 .put("Bytes", 0L)
+                .put("PathValidationPolicy", "fail-closed")
+                .put("Fallback", false)
                 .put("Reason", reason)
                 .put("Error", it.message ?: it.toString())
         }
@@ -443,7 +522,7 @@ class SafDocumentsMediator(
         val rootId = treeDocumentId ?: return null
         var currentId = rootId
         var currentUri = DocumentsContract.buildDocumentUriUsingTree(baseTreeUri, currentId)
-        val parts = normalizeRelativePath(relativePath).split('/').filter { it.isNotBlank() }
+        val parts = normalizeRelativePath(relativePath, allowRoot = true).split('/').filter { it.isNotBlank() }
         if (parts.isEmpty()) return currentUri
         parts.forEachIndexed { index, part ->
             val leaf = index == parts.lastIndex
@@ -491,11 +570,8 @@ class SafDocumentsMediator(
     private fun requireTreeUri(): Uri =
         treeUri ?: error("Documents SAF tree URI is not configured")
 
-    private fun normalizeRelativePath(path: String): String =
-        path.replace('\\', '/')
-            .split('/')
-            .filter { it.isNotBlank() && it != "." && it != ".." }
-            .joinToString("/")
+    private fun normalizeRelativePath(path: String, allowRoot: Boolean = true): String =
+        normalizeRelativePathOrThrow(path, allowRoot = allowRoot)
 
     private fun recordPayloadSidecar(
         relativePath: String,
@@ -506,12 +582,19 @@ class SafDocumentsMediator(
         mode: String? = null,
         modifiedAt: Long? = null,
         fallbackReason: String? = null,
+        contentSha256: String? = source?.takeIf { it.isFile }?.let { sha256Hex(it) },
     ) {
-        val normalized = normalizeRelativePath(relativePath)
-        val sidecarName = normalized.replace('/', '_').ifBlank { "root" } + ".json"
+        val normalized = normalizeRelativePath(relativePath, allowRoot = false)
+        val sidecarName = sidecarNameForNormalized(normalized)
         val directSafPublished = payloadState != "mirror-fallback-after-saf-error"
         val payloadLocation = if (directSafPublished) "saf-tree" else "app-private-mirror"
+        val providerEvidence = if (directSafPublished) {
+            providerEvidenceJson(normalized, includeHash = contentSha256 != null)
+        } else {
+            JSONObject().put("exists", false)
+        }
         val json = JSONObject()
+            .put("schemaVersion", 2)
             .put("relativePath", normalized)
             .put("size", size)
             .put("mimeType", mimeType)
@@ -523,6 +606,11 @@ class SafDocumentsMediator(
             .put("payloadLocation", payloadLocation)
             .put("directSafPublished", directSafPublished)
             .put("mirrorPath", File(mirrorRoot, normalized).absolutePath)
+            .put("pathValidationPolicy", "fail-closed")
+            .put("conflictState", "clean")
+            .put("providerEvidence", providerEvidence)
+            .put("lastVerifiedAt", System.currentTimeMillis())
+        contentSha256?.let { json.put("sha256", it) }
         if (!directSafPublished) {
             json.put("fallbackRecorded", true)
             json.put("fallbackReason", fallbackReason.orEmpty())
@@ -534,11 +622,12 @@ class SafDocumentsMediator(
     }
 
     private fun recordDirectorySidecar(relativePath: String, source: File? = null) {
-        val normalized = normalizeRelativePath(relativePath)
-        val sidecarName = normalized.replace('/', '_').ifBlank { "root" } + ".json"
+        val normalized = normalizeRelativePath(relativePath, allowRoot = false)
+        val sidecarName = sidecarNameForNormalized(normalized)
         writeSidecar(
             sidecarName,
             JSONObject()
+                .put("schemaVersion", 2)
                 .put("relativePath", normalized)
                 .put("size", 0L)
                 .put("mimeType", DocumentsContract.Document.MIME_TYPE_DIR)
@@ -546,8 +635,37 @@ class SafDocumentsMediator(
                 .put("mode", source?.let { unixMode(it) } ?: "040755")
                 .put("modifiedAt", source?.lastModified() ?: 0L)
                 .put("unixMetadata", "sidecar")
+                .put("pathValidationPolicy", "fail-closed")
+                .put("conflictState", "clean")
+                .put("providerEvidence", providerEvidenceJson(normalized, includeHash = false))
+                .put("lastVerifiedAt", System.currentTimeMillis())
                 .toString(2) + "\n",
         )
+    }
+
+    private fun recordConflictSidecar(
+        relativePath: String,
+        reason: String,
+        previousSidecar: JSONObject,
+        providerEvidence: JSONObject,
+    ) {
+        val normalized = normalizeRelativePath(relativePath, allowRoot = false)
+        val json = JSONObject()
+            .put("schemaVersion", 2)
+            .put("relativePath", normalized)
+            .put("type", previousSidecar.optString("type", "file"))
+            .put("unixMetadata", "sidecar")
+            .put("payloadState", "conflict-quarantined")
+            .put("payloadLocation", "conflict")
+            .put("directSafPublished", false)
+            .put("fallbackRecorded", false)
+            .put("pathValidationPolicy", "fail-closed")
+            .put("conflictState", "external-provider-change")
+            .put("conflictReason", reason)
+            .put("previousSidecar", previousSidecar)
+            .put("providerEvidence", providerEvidence)
+            .put("lastVerifiedAt", System.currentTimeMillis())
+        writeSidecar(sidecarNameForNormalized(normalized), json.toString(2) + "\n")
     }
 
     private fun writeSidecar(name: String, text: String) {
@@ -562,8 +680,14 @@ class SafDocumentsMediator(
         source: File,
         mimeType: String,
         evictMirrorPayload: Boolean = false,
-    ): CopyResult =
-        writeStream(relativePath, mimeType) { output ->
+    ): CopyResult {
+        val normalized = runCatching { normalizeRelativePath(relativePath, allowRoot = false) }.getOrElse {
+            return CopyResult(false, error = it.message ?: it.toString())
+        }
+        checkNoProviderConflict(normalized)?.let { conflict ->
+            return CopyResult(false, error = conflict)
+        }
+        return writeStream(normalized, mimeType) { output ->
             source.inputStream().use { input ->
                 input.copyCountingTo(output)
             }
@@ -577,7 +701,7 @@ class SafDocumentsMediator(
                 false
             }
             recordPayloadSidecar(
-                relativePath = relativePath,
+                relativePath = normalized,
                 size = result.bytes,
                 mimeType = mimeType,
                 source = source.takeUnless { evicted },
@@ -587,6 +711,7 @@ class SafDocumentsMediator(
             )
             result.copy(evicted = evicted)
         }
+    }
 
     private fun copyFileFromTree(relativePath: String, target: File, mimeType: String): CopyResult {
         if (!available()) return CopyResult(false, error = "SAF tree is not available")
@@ -617,8 +742,11 @@ class SafDocumentsMediator(
         writer: (OutputStream) -> Long,
     ): CopyResult {
         if (!available()) return CopyResult(false, error = "SAF tree is not available")
+        val normalized = runCatching { normalizeRelativePath(relativePath, allowRoot = false) }.getOrElse {
+            return CopyResult(false, error = it.message ?: it.toString())
+        }
         val uri = runCatching {
-            resolveDocumentUri(relativePath, createDirs = true, directory = false, leafMimeType = mimeType)
+            resolveDocumentUri(normalized, createDirs = true, directory = false, leafMimeType = mimeType)
         }.getOrElse {
             return CopyResult(false, error = it.message ?: it.toString())
         } ?: return CopyResult(false, error = "Failed to resolve or create document")
@@ -633,9 +761,97 @@ class SafDocumentsMediator(
     }
 
     private fun evictableMirrorPayload(relativePath: String): Boolean {
-        val normalized = normalizeRelativePath(relativePath)
+        val normalized = normalizeRelativePath(relativePath, allowRoot = false)
         return normalized == "pdocker-exports" || normalized.startsWith("pdocker-exports/")
     }
+
+    private fun checkNoProviderConflict(normalizedRelativePath: String): String? {
+        val sidecar = readSidecar(normalizedRelativePath) ?: return null
+        val existingConflict = sidecar.optString("conflictState")
+        if (existingConflict.isNotBlank() && existingConflict != "clean") {
+            return "SAF/Documents conflict detected: $existingConflict; refusing to overwrite without repair"
+        }
+        if (!sidecar.optBoolean("directSafPublished", false)) return null
+        val expectedSha = sidecar.optString("sha256", "")
+        val providerEvidence = providerEvidenceJson(normalizedRelativePath, includeHash = expectedSha.isNotBlank())
+        val reason = when {
+            !providerEvidence.optBoolean("exists", false) -> "provider-payload-missing"
+            expectedSha.isNotBlank() &&
+                providerEvidence.optString("sha256", "").isNotBlank() &&
+                providerEvidence.optString("sha256") != expectedSha -> "provider-payload-hash-changed"
+            expectedSha.isBlank() &&
+                sidecar.has("size") &&
+                providerEvidence.has("size") &&
+                providerEvidence.optLong("size", -1L) != sidecar.optLong("size", -1L) -> "provider-payload-size-changed"
+            else -> ""
+        }
+        if (reason.isBlank()) return null
+        recordConflictSidecar(normalizedRelativePath, reason, sidecar, providerEvidence)
+        return "SAF/Documents conflict detected: $reason; refusing to overwrite without repair"
+    }
+
+    private fun providerEvidenceJson(relativePath: String, includeHash: Boolean): JSONObject {
+        val normalized = normalizeRelativePath(relativePath, allowRoot = false)
+        val uri = runCatching { resolveDocumentUri(normalized, createDirs = false) }.getOrNull()
+            ?: return JSONObject()
+                .put("exists", false)
+                .put("relativePath", normalized)
+        val json = JSONObject()
+            .put("exists", true)
+            .put("relativePath", normalized)
+            .put("documentId", runCatching { DocumentsContract.getDocumentId(uri) }.getOrDefault(""))
+        query(
+            uri,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+            ),
+        ) { cursor ->
+            json
+                .put("displayName", cursor.getStringOrEmpty(0))
+                .put("mimeType", cursor.getStringOrEmpty(1))
+                .put("size", cursor.getLongOrDefault(2, -1L))
+                .put("modifiedAt", cursor.getLongOrDefault(3, 0L))
+        }
+        if (includeHash) {
+            runCatching {
+                resolver.openInputStream(uri)?.use { input -> sha256Hex(input) }
+            }.getOrNull()?.let { json.put("sha256", it) }
+        }
+        return json
+    }
+
+    private fun readSidecar(relativePath: String): JSONObject? =
+        runCatching {
+            val normalized = normalizeRelativePath(relativePath, allowRoot = false)
+            val file = File(sidecarRoot, sidecarNameForNormalized(normalized))
+            if (file.isFile) JSONObject(file.readText()) else null
+        }.getOrNull()
+
+    private fun sidecarNameForNormalized(normalizedRelativePath: String): String =
+        normalizedRelativePath.replace('/', '_').ifBlank { "root" } + ".json"
+
+    private fun sha256Hex(file: File): String =
+        file.inputStream().use { sha256Hex(it) }
+
+    private fun sha256Hex(bytes: ByteArray): String =
+        sha256Digest().digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+    private fun sha256Hex(input: InputStream): String {
+        val digest = sha256Digest()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            digest.update(buffer, 0, read)
+        }
+        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
+    private fun sha256Digest(): MessageDigest =
+        MessageDigest.getInstance("SHA-256")
 
     private fun InputStream.copyCountingTo(output: OutputStream): Long {
         var total = 0L

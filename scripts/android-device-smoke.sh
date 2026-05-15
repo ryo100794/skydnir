@@ -837,6 +837,67 @@ write_pid_evidence() {
 JSON
 }
 
+write_process_tree_evidence() {
+  label="$1"
+  cid="$2"
+  inspect_http="$3"
+  process_snapshot="$4"
+  pid="$(inspect_pid_from_http "$inspect_http")"
+  children="$DIAG/$label-direct-children.txt"
+  : >"$children"
+  if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+    awk -v p="$pid" 'NR > 1 && $2 == p {print}' "$process_snapshot" >"$children" 2>/dev/null || true
+  fi
+  if [ -s "$children" ]; then
+    direct_children_present="true"
+  elif [ -z "$pid" ] || [ "$pid" = "0" ]; then
+    direct_children_present="unknown"
+  else
+    direct_children_present="false"
+  fi
+  cat >"$DIAG/$label.json" <<JSON
+{
+  "SchemaVersion": 1,
+  "Kind": "runtime-teardown-process-tree-proof",
+  "ContainerId": $(json_string "$cid"),
+  "InspectHttp": $(json_string "files/$inspect_http"),
+  "ProcessSnapshot": $(json_string "files/$process_snapshot"),
+  "InspectPid": $(json_string "$pid"),
+  "DirectChildrenArtifact": $(json_string "files/$children"),
+  "DirectChildrenPresent": $(json_string "$direct_children_present"),
+  "RequiredForDevicePass": true,
+  "Contract": "No device-pass may be claimed until the stopped/killed/removed Engine container ID has no live State.Pid and no direct children in the post-operation process table; HTTP 204 or CLI exit 0 is not direct-child proof."
+}
+JSON
+}
+
+write_name_residue_evidence() {
+  label="$1"
+  cid="$2"
+  name="$3"
+  containers_http="$4"
+  matches="$DIAG/$label-name-matches.txt"
+  grep -F "$name" "$containers_http" >"$matches" 2>/dev/null || true
+  if [ -s "$matches" ]; then
+    name_present="true"
+  else
+    name_present="false"
+  fi
+  cat >"$DIAG/$label.json" <<JSON
+{
+  "SchemaVersion": 1,
+  "Kind": "runtime-teardown-stale-name-proof",
+  "ContainerId": $(json_string "$cid"),
+  "Name": $(json_string "$name"),
+  "ContainersHttp": $(json_string "files/$containers_http"),
+  "NameMatchesArtifact": $(json_string "files/$matches"),
+  "NameStillPresentAfterRemove": $(json_string "$name_present"),
+  "RequiredForDevicePass": true,
+  "Contract": "A removed container name, duplicate name, or previous-container log may not be accepted unless the current Engine container ID is absent from /containers/json after rm and all evidence is bound to the same ID."
+}
+JSON
+}
+
 write_same_id_evidence() {
   label="$1"
   cid="$2"
@@ -866,9 +927,21 @@ write_same_id_evidence() {
   logs_before="${26}"
   logs_after="${27}"
   case "$operation" in
-    stop-rm) lifecycle_op="stop"; lifecycle_rm="rm-stopped" ;;
-    kill-rm) lifecycle_op="kill"; lifecycle_rm="rm-killed" ;;
-    *) lifecycle_op="$operation"; lifecycle_rm="rm" ;;
+    stop-rm)
+      lifecycle_op="stop"; lifecycle_rm="rm-stopped"
+      direct_children_after_operation="$DIAG/stop-process-tree-after-stop.json"
+      direct_children_after_rm="$DIAG/stop-process-tree-after-rm.json"
+      ;;
+    kill-rm)
+      lifecycle_op="kill"; lifecycle_rm="rm-killed"
+      direct_children_after_operation="$DIAG/kill-process-tree-after-kill.json"
+      direct_children_after_rm="$DIAG/kill-process-tree-after-rm.json"
+      ;;
+    *)
+      lifecycle_op="$operation"; lifecycle_rm="rm"
+      direct_children_after_operation=""
+      direct_children_after_rm=""
+      ;;
   esac
   cat >"$DIAG/$label.json" <<JSON
 {
@@ -884,6 +957,7 @@ write_same_id_evidence() {
     "EngineInspectAfterOperation",
     "EngineInspectAfterRemove",
     "ProcessTreeBeforeAfter",
+    "DirectChildAbsence",
     "ListenerAbsenceBeforeAfter",
     "StalePidAbsence",
     "GpuMediaExecutorResidueBeforeAfter",
@@ -925,6 +999,10 @@ write_same_id_evidence() {
       "AfterOperation": $(json_string "files/$stale_pid_after_operation"),
       "AfterRemove": $(json_string "files/$stale_pid_after_rm")
     },
+    "DirectChildAbsence": {
+      "AfterOperation": $(json_string "files/$direct_children_after_operation"),
+      "AfterRemove": $(json_string "files/$direct_children_after_rm")
+    },
     "ContainerLogs": {
       "BeforeOperation": $(json_string "files/$logs_before"),
       "AfterOperation": $(json_string "files/$logs_after")
@@ -946,10 +1024,11 @@ write_same_id_evidence() {
     "GpuMediaExecutorResidueBeforeAfter": [$(json_string "files/$residue_before"), $(json_string "files/$residue_after_start"), $(json_string "files/$residue_after_operation"), $(json_string "files/$residue_after_rm")],
     "PersistedStateJsonBeforeAfter": [$(json_string "files/$state_before"), $(json_string "files/$state_after_start"), $(json_string "files/$state_after_operation"), $(json_string "files/$state_after_rm")],
     "StalePidAbsence": [$(json_string "files/$stale_pid_after_operation"), $(json_string "files/$stale_pid_after_rm")],
+    "DirectChildAbsence": [$(json_string "files/$direct_children_after_operation"), $(json_string "files/$direct_children_after_rm")],
     "LifecycleLogs": [$(json_string "files/$DIAG/$lifecycle_op.out"), $(json_string "files/$DIAG/$lifecycle_op.err"), $(json_string "files/$DIAG/$lifecycle_rm.out"), $(json_string "files/$DIAG/$lifecycle_rm.err")],
     "ContainerLogs": [$(json_string "files/$logs_before"), $(json_string "files/$logs_after")]
   },
-  "AcceptanceRule": "A device verifier may only pass this artifact when every before/after evidence source is tied to this exact Engine container ID and proves no surviving process tree, listener, stale PID, GPU/media executor residue, stale state reference, or misleading previous log remains after removal; persisted state after stop/kill must show PdockerTeardown.NoOrphanProcesses=true and empty PdockerTeardown.Survivors.",
+  "AcceptanceRule": "A device verifier may only pass this artifact when every before/after evidence source is tied to this exact Engine container ID and proves no surviving process tree, no direct children of State.Pid, listener absence, stale PID absence, GPU/media executor residue absence, stale state/name absence, and no misleading previous log remains after removal; persisted state after stop/kill must show PdockerTeardown.NoOrphanProcesses=true and empty PdockerTeardown.Survivors.",
   "Contract": "Same-container-ID teardown proof is collected, but this scaffold must remain non-passing until the device verifier proves process tree, listeners, stale PID references, GPU/media executor residue, persisted state, Engine inspect, and logs all agree for this exact container ID."
 }
 JSON
@@ -995,6 +1074,7 @@ snapshot_ps process-after-stop
 snapshot_listeners listeners-after-stop
 snapshot_executor_residue executor-residue-after-stop
 write_pid_evidence stop-stale-pid-after-stop "$STOP_CID" "$DIAG/stop-inspect-after.http" "$DIAG/process-after-stop.txt"
+write_process_tree_evidence stop-process-tree-after-stop "$STOP_CID" "$DIAG/stop-inspect-after.http" "$DIAG/process-after-stop.txt"
 snapshot_state_json persisted-state-after-stop
 record_cmd rm-stopped docker rm "$STOP_CID"
 http_get stop-inspect-after-rm "/containers/$STOP_CID/json"
@@ -1002,6 +1082,7 @@ snapshot_ps process-after-rm-stopped
 snapshot_listeners listeners-after-rm-stopped
 snapshot_executor_residue executor-residue-after-rm-stopped
 write_pid_evidence stop-stale-pid-after-rm "$STOP_CID" "$DIAG/stop-inspect-after-rm.http" "$DIAG/process-after-rm-stopped.txt"
+write_process_tree_evidence stop-process-tree-after-rm "$STOP_CID" "$DIAG/stop-inspect-after-rm.http" "$DIAG/process-after-rm-stopped.txt"
 snapshot_state_json persisted-state-after-rm-stopped
 write_same_id_evidence same-container-id-stop-rm "$STOP_CID" "stop-rm" "$DIAG/create-stop.out" "$DIAG/stop-inspect-before.http" "$DIAG/stop-inspect-after.http" "$DIAG/stop-inspect-after-rm.http" "$DIAG/process-before.txt" "$DIAG/process-after-stop-start.txt" "$DIAG/process-after-stop.txt" "$DIAG/process-after-rm-stopped.txt" "$DIAG/listeners-before.txt" "$DIAG/listeners-after-stop-start.txt" "$DIAG/listeners-after-stop.txt" "$DIAG/listeners-after-rm-stopped.txt" "$DIAG/executor-residue-before.txt" "$DIAG/executor-residue-after-stop-start.txt" "$DIAG/executor-residue-after-stop.txt" "$DIAG/executor-residue-after-rm-stopped.txt" "$DIAG/persisted-state-before.txt" "$DIAG/persisted-state-after-stop-start.txt" "$DIAG/persisted-state-after-stop.txt" "$DIAG/persisted-state-after-rm-stopped.txt" "$DIAG/stop-stale-pid-after-stop.json" "$DIAG/stop-stale-pid-after-rm.json" "$DIAG/logs-stop-before.out" "$DIAG/logs-stop-after.out"
 
@@ -1021,6 +1102,7 @@ snapshot_ps process-after-kill
 snapshot_listeners listeners-after-kill
 snapshot_executor_residue executor-residue-after-kill
 write_pid_evidence kill-stale-pid-after-kill "$KILL_CID" "$DIAG/kill-inspect-after.http" "$DIAG/process-after-kill.txt"
+write_process_tree_evidence kill-process-tree-after-kill "$KILL_CID" "$DIAG/kill-inspect-after.http" "$DIAG/process-after-kill.txt"
 snapshot_state_json persisted-state-after-kill
 record_cmd rm-killed docker rm "$KILL_CID"
 http_get kill-inspect-after-rm "/containers/$KILL_CID/json"
@@ -1028,9 +1110,12 @@ snapshot_ps process-after-rm-killed
 snapshot_listeners listeners-after-rm-killed
 snapshot_executor_residue executor-residue-after-rm-killed
 write_pid_evidence kill-stale-pid-after-rm "$KILL_CID" "$DIAG/kill-inspect-after-rm.http" "$DIAG/process-after-rm-killed.txt"
+write_process_tree_evidence kill-process-tree-after-rm "$KILL_CID" "$DIAG/kill-inspect-after-rm.http" "$DIAG/process-after-rm-killed.txt"
 snapshot_state_json persisted-state-after-rm-killed
 write_same_id_evidence same-container-id-kill-rm "$KILL_CID" "kill-rm" "$DIAG/create-kill.out" "$DIAG/kill-inspect-before.http" "$DIAG/kill-inspect-after.http" "$DIAG/kill-inspect-after-rm.http" "$DIAG/process-before.txt" "$DIAG/process-after-kill-start.txt" "$DIAG/process-after-kill.txt" "$DIAG/process-after-rm-killed.txt" "$DIAG/listeners-before.txt" "$DIAG/listeners-after-kill-start.txt" "$DIAG/listeners-after-kill.txt" "$DIAG/listeners-after-rm-killed.txt" "$DIAG/executor-residue-before.txt" "$DIAG/executor-residue-after-kill-start.txt" "$DIAG/executor-residue-after-kill.txt" "$DIAG/executor-residue-after-rm-killed.txt" "$DIAG/persisted-state-before.txt" "$DIAG/persisted-state-after-kill-start.txt" "$DIAG/persisted-state-after-kill.txt" "$DIAG/persisted-state-after-rm-killed.txt" "$DIAG/kill-stale-pid-after-kill.json" "$DIAG/kill-stale-pid-after-rm.json" "$DIAG/logs-kill-before.out" "$DIAG/logs-kill-after.out"
 http_get engine-containers-after '/containers/json?all=1'
+write_name_residue_evidence stop-stale-name-after-rm "$STOP_CID" "$STOP_NAME" "$DIAG/engine-containers-after.http"
+write_name_residue_evidence kill-stale-name-after-rm "$KILL_CID" "$KILL_NAME" "$DIAG/engine-containers-after.http"
 
 write_negative_case_evidence negative-http-204-only "HTTP 204 or Engine API acknowledgement alone" "Reject API acknowledgement without same-container-ID before/after process tree, listener, stale PID, GPU executor, state, and log proof."
 write_negative_case_evidence negative-cli-exit-zero-only "CLI exit 0 alone" "Reject successful docker stop/kill/rm command output without matching Engine inspect and absence evidence for the same container ID."
@@ -1087,14 +1172,29 @@ cat > "$LATEST" <<JSON
     "EngineApiContainersJson": ["files/$DIAG/engine-containers-before.http", "files/$DIAG/engine-containers-after.http"],
     "EngineApiInspect": ["files/$DIAG/stop-inspect-before.http", "files/$DIAG/stop-inspect-after.http", "files/$DIAG/stop-inspect-after-rm.http", "files/$DIAG/kill-inspect-before.http", "files/$DIAG/kill-inspect-after.http", "files/$DIAG/kill-inspect-after-rm.http"],
     "ProcessTable": ["files/$DIAG/process-before.txt", "files/$DIAG/process-after-stop-start.txt", "files/$DIAG/process-after-stop.txt", "files/$DIAG/process-after-rm-stopped.txt", "files/$DIAG/process-after-kill-start.txt", "files/$DIAG/process-after-kill.txt", "files/$DIAG/process-after-rm-killed.txt"],
-    "ProcessTree": ["files/$DIAG/same-container-id-stop-rm.json", "files/$DIAG/same-container-id-kill-rm.json"],
+    "ProcessTree": ["files/$DIAG/same-container-id-stop-rm.json", "files/$DIAG/same-container-id-kill-rm.json", "files/$DIAG/stop-process-tree-after-stop.json", "files/$DIAG/stop-process-tree-after-rm.json", "files/$DIAG/kill-process-tree-after-kill.json", "files/$DIAG/kill-process-tree-after-rm.json"],
+    "DirectChildAbsence": ["files/$DIAG/stop-process-tree-after-stop.json", "files/$DIAG/stop-process-tree-after-rm.json", "files/$DIAG/kill-process-tree-after-kill.json", "files/$DIAG/kill-process-tree-after-rm.json", "files/$DIAG/stop-process-tree-after-stop-direct-children.txt", "files/$DIAG/kill-process-tree-after-kill-direct-children.txt"],
     "ListenerAbsence": ["files/$DIAG/listeners-before.txt", "files/$DIAG/listeners-after-stop.txt", "files/$DIAG/listeners-after-rm-stopped.txt", "files/$DIAG/listeners-after-kill.txt", "files/$DIAG/listeners-after-rm-killed.txt"],
     "StalePid": ["files/$DIAG/stop-stale-pid-after-stop.json", "files/$DIAG/stop-stale-pid-after-rm.json", "files/$DIAG/kill-stale-pid-after-kill.json", "files/$DIAG/kill-stale-pid-after-rm.json"],
-    "GpuMediaExecutorResidue": ["files/$DIAG/executor-residue-before.txt", "files/$DIAG/executor-residue-after-rm-stopped.txt", "files/$DIAG/executor-residue-after-rm-killed.txt"],
+    "StaleName": ["files/$DIAG/stop-stale-name-after-rm.json", "files/$DIAG/kill-stale-name-after-rm.json", "files/$DIAG/stop-stale-name-after-rm-name-matches.txt", "files/$DIAG/kill-stale-name-after-rm-name-matches.txt"],
+    "GpuMediaExecutorResidue": ["files/$DIAG/executor-residue-before.txt", "files/$DIAG/executor-residue-after-stop.txt", "files/$DIAG/executor-residue-after-rm-stopped.txt", "files/$DIAG/executor-residue-after-kill.txt", "files/$DIAG/executor-residue-after-rm-killed.txt"],
     "SameContainerId": ["files/$DIAG/same-container-id-stop-rm.json", "files/$DIAG/same-container-id-kill-rm.json"],
     "PersistedStateJson": ["files/$DIAG/persisted-state-before.txt", "files/$DIAG/persisted-state-after-stop.txt", "files/$DIAG/persisted-state-after-rm-stopped.txt", "files/$DIAG/persisted-state-after-kill.txt", "files/$DIAG/persisted-state-after-rm-killed.txt"],
     "LifecycleLogs": ["files/$DIAG/stop.out", "files/$DIAG/stop.err", "files/$DIAG/kill.out", "files/$DIAG/kill.err", "files/$DIAG/rm-stopped.out", "files/$DIAG/rm-stopped.err", "files/$DIAG/rm-killed.out", "files/$DIAG/rm-killed.err", "files/$DIAG/cleanup-leftovers.out", "files/$DIAG/cleanup-leftovers.err"],
     "ContainerLogs": ["files/$DIAG/logs-stop-before.out", "files/$DIAG/logs-stop-after.out", "files/$DIAG/logs-kill-before.out", "files/$DIAG/logs-kill-after.out"]
+  },
+  "DeviceGate": {
+    "RequiresAdb": true,
+    "CollectedViaAdbRunAs": true,
+    "HostStaticVerifierCannotPromote": true,
+    "DoNotClaimDevicePassWithoutAdb": true,
+    "DevicePassStatusRequires": [
+      "adb device serial and package run-as context",
+      "same Engine container ID across create/inspect/stop-or-kill/rm/logs",
+      "no live State.Pid and no direct children after stop/kill/rm",
+      "no pdocker-direct, service child, listener, GPU executor, media executor, camera/audio/Vulkan helper residue for that container",
+      "no stale PID, stale state.json, stale name, duplicate-name, or previous-container-log ambiguity"
+    ]
   },
   "TeardownProofSchema": {
     "Name": "same-container-id-teardown-artifact",
@@ -1119,11 +1219,13 @@ cat > "$LATEST" <<JSON
     "Process tree before/start/after operation/after remove for the same Engine container ID",
     "Listener absence from /proc/net/tcp, /proc/net/tcp6, ss -ltnp, and netstat -ltnp before/after",
     "Stale PID absence from inspect State.Pid and post-operation process tables",
+    "Direct child absence for the inspect State.Pid in post-operation process tables",
     "GPU/media executor residue before/start/after operation/after remove",
+    "Stale container-name and duplicate-name absence from /containers/json after rm",
     "Persisted state.json before/start/after operation/after remove, including PdockerTeardown.NoOrphanProcesses=true and an empty PdockerTeardown.Survivors list after successful stop/kill",
     "Lifecycle logs and container logs bound to the same Engine container ID"
   ],
-  "RuntimeTeardownStateContract": "After successful stop/kill, pdockerd must clear State.Pid, PidStartTime, PdockerKnownPids, PdockerLauncherPid, and PdockerLauncherPidStartTime; PdockerTeardown.NoOrphanProcesses must be true and PdockerTeardown.Survivors must be empty before remove is accepted.",
+  "RuntimeTeardownStateContract": "After successful stop/kill, pdockerd must clear State.Pid, PidStartTime, PdockerKnownPids, PdockerLauncherPid, PdockerLauncherPidStartTime, PdockerLauncherPgid, and PdockerProcessGroupId; PdockerTeardown.NoOrphanProcesses must be true and PdockerTeardown.Survivors must be empty before remove is accepted.",
   "NegativeCases": {
     "Http204Only": "files/$DIAG/negative-http-204-only.json",
     "CliExitZeroOnly": "files/$DIAG/negative-cli-exit-zero-only.json",
@@ -1138,8 +1240,10 @@ cat > "$LATEST" <<JSON
     "EngineCreateOutput",
     "EngineInspect",
     "ProcessTreeBeforeAfter",
+    "DirectChildAbsence",
     "ListenerAbsenceBeforeAfter",
     "StalePidAbsence",
+    "StaleNameAbsence",
     "GpuMediaExecutorResidueBeforeAfter",
     "PersistedStateJsonBeforeAfter",
     "LifecycleLogs",

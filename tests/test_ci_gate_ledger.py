@@ -49,6 +49,32 @@ class CiGateLedgerTest(unittest.TestCase):
             self.assertIn(artifact, self.ledger)
         self.assertIn("must not silently pass", self.ledger)
 
+    def test_planned_gap_lanes_are_non_promoting_for_stable_checkpoint(self):
+        policy = self.manifest["policy"]
+        self.assertIn("stable-checkpoint eligible only", policy["stable_checkpoint_rule"])
+        self.assertIn("planned-gap", policy["non_promoting_statuses"])
+        self.assertIn("success=false", self.ledger)
+        self.assertIn("stable checkpoint", self.ledger)
+
+        for lane_name in [
+            "host-smoke",
+            "cow-overlay-bench-recovery",
+            "android-test-suite",
+            "android-documents",
+            "android-dev-workspace",
+            "android-memory-pager",
+            "governance",
+            "release-honesty",
+        ]:
+            self.assertFalse(
+                self.manifest["lanes"][lane_name]["stable_checkpoint_eligible"],
+                lane_name,
+            )
+
+        release_lane = self.manifest["lanes"]["release-honesty"]
+        self.assertEqual(release_lane["checkpoint_class"], "release-blocker-ledger-only")
+        self.assertEqual(release_lane["commands"][0]["id"], "verify-release-readiness-honesty")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "android-documents-mediator-smoke.sh"
 MANIFEST = ROOT / "tests" / "test_driver_manifest.json"
 DOC = ROOT / "docs" / "test" / "SAF_DIRECT_OUTPUT_GATE.md"
+MEDIATOR = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "SafDocumentsMediator.kt"
+MAIN = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "MainActivity.kt"
 
 
 class SafDirectOutputContractTest(unittest.TestCase):
@@ -15,6 +17,8 @@ class SafDirectOutputContractTest(unittest.TestCase):
         self.script = SCRIPT.read_text()
         self.manifest = json.loads(MANIFEST.read_text())
         self.doc = DOC.read_text()
+        self.mediator = MEDIATOR.read_text()
+        self.main = MAIN.read_text()
 
     def test_script_is_executable_and_targets_container_documents_mount(self):
         self.assertTrue(SCRIPT.stat().st_mode & stat.S_IXUSR)
@@ -73,6 +77,11 @@ class SafDirectOutputContractTest(unittest.TestCase):
             "read_only_grant",
             "RejectedExamples",
             "ObservedPersistedWriteGrant",
+            "ACTION_PREFIX.action.SMOKE_DOCUMENTS_WRITE_FILE",
+            "saf-write-invalid-target.json",
+            "direct_write_path_validation",
+            "PathValidationPolicy",
+            "../escape-phase2.txt",
         ]:
             self.assertIn(token, self.script)
 
@@ -92,8 +101,41 @@ class SafDirectOutputContractTest(unittest.TestCase):
             "must not bypass",
             "path traversal",
             "read-only grant",
+            "fail-closed",
+            "conflict evidence",
         ]:
             self.assertIn(token, self.doc)
+
+    def test_mediator_rejects_unsafe_paths_and_records_conflicts(self):
+        for token in [
+            "normalizeRelativePathOrThrow",
+            "Invalid SAF/Documents relative path",
+            "unsafeRelativePathExamples",
+            "PathValidationPolicy",
+            "fail-closed",
+            "checkNoProviderConflict",
+            "recordConflictSidecar",
+            "conflictState",
+            "external-provider-change",
+            "provider-payload-hash-changed",
+            "providerEvidence",
+            "sha256",
+            "fallbackRecorded",
+            "mirror-fallback-after-saf-error",
+        ]:
+            self.assertIn(token, self.mediator)
+        for bad in ['path.replace', 'filter { it.isNotBlank() && it != "." && it != ".." }']:
+            self.assertNotIn(bad, self.mediator)
+
+    def test_direct_write_automation_fails_closed_before_fallback(self):
+        for token in [
+            "SafDocumentsMediator.normalizeRelativePathOrThrow(targetPath)",
+            'put("PathValidationPolicy", "fail-closed")',
+            'put("Fallback", false)',
+            "invalid target path",
+            "canonicalTarget.path.startsWith(root.path + File.separator)",
+        ]:
+            self.assertIn(token, self.main)
 
     def test_manifest_has_android_documents_lane(self):
         lane = self.manifest["lanes"].get("android-documents")

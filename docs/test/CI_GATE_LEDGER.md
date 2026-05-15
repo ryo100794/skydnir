@@ -1,11 +1,22 @@
 # P0/P1 CI Gate Ledger
 
-Snapshot date: 2026-05-13.
+Snapshot date: 2026-05-15.
 
 This page is the single lightweight ledger for the current P0/P1 planned gaps.
 It separates **fast/static gates** from **heavy or Android-device gates** and
 keeps planned gaps visible as either verifier failures, non-passing artifacts
 (`success=false` / `status=planned-gap`), or explicitly blocked evidence.
+
+## Stable-checkpoint exclusion
+
+Passing `host-smoke`, `release-honesty`, or any single device lane is not a
+stable checkpoint while a row below is still `planned-gap`, `blocked`, or
+missing promoted device evidence.  `tests/test_driver_manifest.json` mirrors
+this rule with `stable_checkpoint_rule`, `non_promoting_statuses`, and
+per-lane `stable_checkpoint_eligible=false` metadata.  A device-gated lane may
+contribute evidence only after the artifact named in this ledger satisfies its
+promotion condition; until then it is non-promoting evidence, even if the
+driver command exits zero because it produced the expected planned-gap record.
 
 ## Gate table
 
@@ -17,6 +28,7 @@ keeps planned gaps visible as either verifier failures, non-passing artifacts
 | OOM/LMK and large-workload diagnostics: memory pressure must be classified and persisted instead of disappearing as stale running state. | P0 | **Unmet planned gap for LMK replay.** Design/static verifier passes; probe doc records diagnostic schema as planned gap. Device pager PoCs are separate evidence, not full LMK survival proof. | `python3 scripts/verify-memory-pager-design.py` and `python3 -m unittest tests.test_memory_pager_contract tests.test_service_truth_artifact_contract` | `bash scripts/android-memory-pager-managed-poc.sh`, `bash scripts/android-memory-pager-transparent-poc.sh`, plus future controlled LMK replay | `docs/test/apk-memory-pager-managed-latest.json`, `docs/test/apk-memory-pager-transparent-latest.json`, future OOM/LMK diagnostic artifact | Persisted telemetry includes large allocation, RSS/PSS, pressure snapshot, progress marker, and `lmk_suspected` classification; UI must not show running from stale metadata alone. |
 | Terminal `-it`: Engine exec terminal must use TTY/stdin raw stream with resize and control-byte behavior. | P1 | Host unittest makes regressions visible; broader attach/detach and `docker run -t` parity are still heavy/device coverage. | `python3 -m unittest tests.test_terminal_exec_it_contract` | `bash scripts/verify-heavy.sh --android-full --no-install` or focused UI self-test on installed APK | Android smoke log / `docs/test/test-run-latest.json` | Engine `exec -it` self-test shows tty, bash/sh interactive mode, CR/LF control, Ctrl-C, and resize without bracket-argv noise. |
 | llama GPU correctness: GPU offload cannot be claimed until Q6/Q4 correctness artifacts clear, and memory blockers remain explicit. | P1 | Current fast gate accepts a memory-blocker artifact only as blocked evidence; strict correctness gates fail unless Q6 workgroup and oracle match. | `python3 scripts/verify-llama-gpu-artifact.py docs/test/llama-gpu-workgroup3d-preflight-20260513.json --allow-memory-blocker`; strict: add `--require-q6-match` to fail until correctness is proven. | `python3 scripts/android-llama-gpu-q6k-run.py` or `bash scripts/android-llama-gpu-compare.sh` on target device | `docs/test/llama-gpu-q6k-workflow-latest.json`, `docs/test/llama-gpu-device-readiness-latest.json`, `docs/test/llama-gpu-workgroup3d-ngl1-latest.json` | Device artifact reports Q6 workgroup clear and oracle match; only then may correctness/performance claims be promoted beyond blocker/readiness status. |
+| Build/test checkpoint honesty: release records must not present planned-gap, skipped, blocked, or device-unrun evidence as stable. | P0 | **Blocked for stable label.** The release-honesty lane verifies host publication hygiene and wording only; it is explicitly non-promoting until P0 device gates close or are scoped out. | `python3 scripts/verify-release-readiness.py`; `scripts/pdocker-test-driver.py --lane release-honesty` | Full release cut must include the promoted device artifacts for every in-scope P0 row above. | `docs/plan/RELEASE_READINESS.md`, `docs/test/CI_GATE_LEDGER.md`, `docs/test/test-run-latest.json` | Release notes/build records classify each row as passed, planned-gap, blocked, scoped-out experimental, or unsupported; no `status=planned-gap` / `success=false` artifact is counted as a stable checkpoint. |
 
 ## Lightweight lane mapping
 
@@ -33,6 +45,10 @@ static/contract verifiers only. The P0/P1 entries represented in host smoke are:
   pager, image-pull, and llama artifact unit contracts.
 - `verify-llama-gpu-memory-blocker-artifact` for explicit llama GPU blocked
   evidence without claiming correctness.
+- `release-honesty` is available as a separate driver lane for host-only
+  release wording/payload hygiene. Its manifest metadata is
+  `stable_checkpoint_eligible=false`; it cannot turn the planned-gap/device
+  rows above into a stable checkpoint.
 
 ## Heavy / device policy
 
@@ -40,3 +56,7 @@ Heavy and Android-device gates must not silently pass when the device or runtime
 evidence is absent. They should either produce a passing artifact with the proof
 listed above, or a non-passing artifact with `status=planned-gap`, `blocked`, or
 `failed` and `success=false`.
+
+If a driver run contains any non-promoting status or only host-side planned-gap
+contract checks, the release note may call it a regression/checkpoint run, but
+not a stable release checkpoint.

@@ -5,7 +5,10 @@
   "policy": {
     "canonical_driver": "scripts/pdocker-test-driver.py",
     "artifact_rule": "Every automated lane writes one run manifest. Individual generated files remain in their canonical locations and are referenced with sha256, size, and producer command.",
-    "wrapper_rule": "Legacy shell entrypoints may exist only as compatibility wrappers around the canonical driver."
+    "wrapper_rule": "Legacy shell entrypoints may exist only as compatibility wrappers around the canonical driver.",
+    "stable_checkpoint_rule": "A run manifest is stable-checkpoint eligible only when release blockers in docs/plan/RELEASE_READINESS.md are closed or explicitly scoped, and every device-gated artifact named by docs/test/CI_GATE_LEDGER.md is passing with the required proof. Host-only planned-gap verifiers, non-passing artifacts, and device-gated lanes without promotion artifacts are non-promoting evidence.",
+    "non_promoting_statuses": ["planned-gap", "blocked", "failed", "skip", "skipped"],
+    "device_gate_rule": "Lanes that require adb/installed APKs provide device evidence only; they do not promote a stable checkpoint unless the corresponding CI gate ledger promotion condition is satisfied and the artifact status is passing."
   },
   "lanes": {
     "host-smoke": {
@@ -85,7 +88,10 @@
           "id": "verify-terminal-editor",
           "argv": ["python3", "scripts/verify_terminal_editor_contracts.py"]
         }
-      ]
+      ],
+      "checkpoint_class": "development-regression-only",
+      "stable_checkpoint_eligible": false,
+      "planned_gap_contracts": ["service-truth", "runtime-teardown", "image-pull-crash-safety", "OOM/LMK", "llama GPU correctness"]
     },
     "python-coverage": {
       "description": "Instrumented Python line/branch coverage evidence.",
@@ -108,6 +114,9 @@
     },
     "cow-overlay-bench-recovery": {
       "description": "Local COW overlay benchmark and recovery scaffold for libcow fallback.",
+      "checkpoint_class": "local-recovery-scaffold",
+      "stable_checkpoint_eligible": false,
+      "planned_gap_contracts": ["COW/overlay external kill-at-step device evidence"],
       "commands": [
         {
           "id": "cow-overlay-bench-recovery",
@@ -122,6 +131,9 @@
     "android-test-suite": {
       "description": "Device route: stage compose project, compose up/build through the app, then Engine exec the test-suite.",
       "requires": ["adb", "installed-debug-apk"],
+      "checkpoint_class": "device-evidence-only",
+      "stable_checkpoint_eligible": false,
+      "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-test-suite-compose-exec",
@@ -134,6 +146,9 @@
     "android-documents": {
       "description": "Device route: container /documents writes must prove direct SAF/Documents backend output, sidecar metadata, and explicit fallback evidence.",
       "requires": ["adb", "installed-debug-apk"],
+      "checkpoint_class": "device-evidence-only",
+      "stable_checkpoint_eligible": false,
+      "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-documents-saf-direct-output",
@@ -145,6 +160,9 @@
     "android-dev-workspace": {
       "description": "Device route: UI-triggered default dev-workspace compose up with build/run, current pdocker-dev Engine state, port 18080 listener, code-server HTTP, configured extension, and UI service-truth evidence.",
       "requires": ["adb", "installed-debug-apk"],
+      "checkpoint_class": "device-evidence-only",
+      "stable_checkpoint_eligible": false,
+      "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-dev-workspace-compose-smoke",
@@ -156,6 +174,9 @@
     "android-blas-cmake-build": {
       "description": "Device build route for apt-installed OpenBLAS visibility across Dockerfile RUN layers and standard CMake FindBLAS.",
       "requires": ["adb", "installed-debug-apk"],
+      "checkpoint_class": "device-evidence-only",
+      "stable_checkpoint_eligible": false,
+      "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-blas-cmake-build-smoke",
@@ -170,6 +191,9 @@
     "android-file-io-microbench": {
       "description": "Device benchmark route for native/container file-I/O overhead, including Documents/SD mirror paths when configured.",
       "requires": ["adb", "installed-debug-apk", "aarch64-linux-gnu-gcc"],
+      "checkpoint_class": "device-evidence-only",
+      "stable_checkpoint_eligible": false,
+      "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-file-io-microbench",
@@ -190,6 +214,9 @@
     "android-memory-pager": {
       "description": "Device route for APK-scoped memory pager probes and bounded OOM/LMK telemetry artifacts.",
       "requires": ["adb", "installed-debug-apk"],
+      "checkpoint_class": "device-evidence-only",
+      "stable_checkpoint_eligible": false,
+      "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-memory-pager-managed-poc",
@@ -205,11 +232,27 @@
     },
     "governance": {
       "description": "Strict test-design gate. This lane is expected to fail until native/Kotlin coverage evidence and enough check items exist.",
+      "checkpoint_class": "strict-governance-known-failing",
+      "stable_checkpoint_eligible": false,
+      "planned_gap_contracts": ["native/Kotlin coverage and check-density closure"],
       "commands": [
         {
           "id": "verify-test-design-criteria",
           "argv": ["python3", "scripts/verify-test-design-criteria.py", "--write-artifact", "docs/test/test-design-criteria-latest.json"],
           "artifacts": ["docs/test/test-design-criteria-latest.json", "tests/test_design_criteria.json"]
+        }
+      ]
+    },
+    "release-honesty": {
+      "description": "Host-only release-blocker honesty check. Passing means publication hygiene and metadata wording are sane; it does not promote a stable checkpoint while P0 device gates remain open.",
+      "checkpoint_class": "release-blocker-ledger-only",
+      "stable_checkpoint_eligible": false,
+      "promotion_condition": "All P0 rows in docs/plan/RELEASE_READINESS.md must be closed or explicitly scoped, and device-gated artifacts in docs/test/CI_GATE_LEDGER.md must satisfy their promotion conditions.",
+      "commands": [
+        {
+          "id": "verify-release-readiness-honesty",
+          "argv": ["python3", "scripts/verify-release-readiness.py"],
+          "artifacts": ["docs/plan/RELEASE_READINESS.md", "docs/test/CI_GATE_LEDGER.md", "tests/test_driver_manifest.json"]
         }
       ]
     }

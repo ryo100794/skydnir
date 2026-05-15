@@ -9,12 +9,23 @@
     "pid_identity_reconcile",
     "tty_pty_exec",
     "wait_exit_signal_raw_code",
-    "cow_path_operations"
+    "cow_path_operations",
+    "attach_pty_signal_semantics",
+    "syscall_errno_parity",
+    "bind_volume_path_mediation",
+    "linkat_hardlink_semantics",
+    "proc_self_exe_no_mutation",
+    "run_changed_path_manifest"
   ],
   "path_variant_matrix": [
     {
       "id": "path.absolute-rootfs-rewrite",
-      "applies_to": ["rewrite_path_arg", "rewrite_at_path_arg", "rewrite_at_path_args", "rewrite_execve_arg"],
+      "applies_to": [
+        "rewrite_path_arg",
+        "rewrite_at_path_arg",
+        "rewrite_at_path_args",
+        "rewrite_execve_arg"
+      ],
       "cases": [
         "android.direct.path-open-stat-access-cwd",
         "android.direct.path-mutation",
@@ -24,112 +35,209 @@
     },
     {
       "id": "path.relative-dirfd-preserve",
-      "applies_to": ["rewrite_at_path_arg", "rewrite_at_path_args"],
-      "cases": ["android.direct.path-open-stat-access-cwd", "android.direct.path-mutation"],
+      "applies_to": [
+        "rewrite_at_path_arg",
+        "rewrite_at_path_args"
+      ],
+      "cases": [
+        "android.direct.path-open-stat-access-cwd",
+        "android.direct.path-mutation"
+      ],
       "contract": "Relative dirfd paths remain relative to the tracee context after the traced dirfd/cwd is validated as an allowed rootfs or bind host path."
     },
     {
       "id": "path.relative-dirfd-escape-deny",
-      "applies_to": ["rewrite_at_path_arg", "validate_relative_tracee_path", "deny_path_syscall"],
-      "cases": ["android.direct.path-boundary-matrix", "container.direct.runtime-probe"],
+      "applies_to": [
+        "rewrite_at_path_arg",
+        "validate_relative_tracee_path",
+        "deny_path_syscall"
+      ],
+      "cases": [
+        "android.direct.path-boundary-matrix",
+        "container.direct.runtime-probe"
+      ],
       "contract": "Relative paths whose dirfd/cwd, parent traversal, or symlink resolution would escape the rootfs or declared bind hosts are completed with a deterministic errno instead of being silently passed through."
     },
     {
       "id": "path.rootfs-already-host-path",
-      "applies_to": ["should_rewrite_path", "rewrite_execve_arg"],
-      "cases": ["android.direct.path-open-stat-access-cwd", "android.direct.exec-argv-rootfs"],
+      "applies_to": [
+        "should_rewrite_path",
+        "rewrite_execve_arg"
+      ],
+      "cases": [
+        "android.direct.path-open-stat-access-cwd",
+        "android.direct.exec-argv-rootfs"
+      ],
       "contract": "Paths that already point inside the rootfs are not double-prefixed."
     },
     {
       "id": "path.proc-dev-sys-no-rewrite",
-      "applies_to": ["should_rewrite_path", "rewrite_proc_self_exe_readlinkat"],
-      "cases": ["android.direct.path-open-stat-access-cwd", "android.direct.proc-exe-and-links"],
+      "applies_to": [
+        "should_rewrite_path",
+        "rewrite_proc_self_exe_readlinkat"
+      ],
+      "cases": [
+        "android.direct.path-open-stat-access-cwd",
+        "android.direct.proc-exe-and-links"
+      ],
       "contract": "/proc, /dev, and /sys stay on their controlled host/pseudo-filesystem routes; /proc/self/exe is explicitly emulated."
     },
     {
       "id": "path.parent-segment-scratch-fallback",
-      "applies_to": ["rewrite_at_path_arg", "path_has_parent_segment"],
-      "cases": ["android.direct.path-boundary-matrix"],
+      "applies_to": [
+        "rewrite_at_path_arg",
+        "path_has_parent_segment"
+      ],
+      "cases": [
+        "android.direct.path-boundary-matrix"
+      ],
       "contract": "Absolute paths containing .. do not use the rootfs-fd fast path; they are rewritten through scratch storage or rejected as too long."
     },
     {
       "id": "path.bind-resolution",
-      "applies_to": ["resolve_bind_path", "resolve_guest_host_path"],
-      "cases": ["android.direct.path-boundary-matrix"],
+      "applies_to": [
+        "resolve_bind_path",
+        "resolve_guest_host_path"
+      ],
+      "cases": [
+        "android.direct.path-boundary-matrix"
+      ],
       "contract": "Declared bind paths take precedence over rootfs prefixing while preserving guest-visible path semantics."
     },
     {
       "id": "path.dual-path-operations",
-      "applies_to": ["rewrite_at_path_args"],
-      "cases": ["android.direct.path-mutation", "android.direct.proc-exe-and-links"],
+      "applies_to": [
+        "rewrite_at_path_args"
+      ],
+      "cases": [
+        "android.direct.path-mutation",
+        "android.direct.proc-exe-and-links"
+      ],
       "contract": "linkat, renameat, and renameat2 rewrite old and new path operands independently."
     },
     {
       "id": "path.af-unix-socket",
-      "applies_to": ["rewrite_unix_sockaddr_arg", "should_skip_unix_socket_rewrite"],
-      "cases": ["android.direct.unix-socket-connect", "android.direct.path-boundary-matrix"],
+      "applies_to": [
+        "rewrite_unix_sockaddr_arg",
+        "should_skip_unix_socket_rewrite"
+      ],
+      "cases": [
+        "android.direct.unix-socket-connect",
+        "android.direct.path-boundary-matrix"
+      ],
       "contract": "AF_UNIX bind/connect paths are rewritten when safe, nscd probes are skipped, and overlong rewritten paths do not corrupt sockaddr_un."
     },
     {
       "id": "path.exec-script-and-long-argv",
-      "applies_to": ["rewrite_execve_arg", "parse_shebang"],
-      "cases": ["android.direct.exec-argv-rootfs", "container.direct.runtime-probe"],
+      "applies_to": [
+        "rewrite_execve_arg",
+        "parse_shebang"
+      ],
+      "cases": [
+        "android.direct.exec-argv-rootfs",
+        "container.direct.runtime-probe"
+      ],
       "contract": "Script shebangs, interpreter arguments, bracket argv, standard CMake BLAS option argv, and long linker argv lists with many separate flash_attn object arguments are preserved when routed through the bundled loader."
     },
     {
       "id": "path.rootfs-fd-lifecycle",
-      "applies_to": ["close", "g_rootfs_fd"],
-      "cases": ["android.direct.path-open-stat-access-cwd", "android.direct.path-boundary-matrix"],
+      "applies_to": [
+        "close",
+        "g_rootfs_fd"
+      ],
+      "cases": [
+        "android.direct.path-open-stat-access-cwd",
+        "android.direct.path-boundary-matrix"
+      ],
       "contract": "The internal rootfs fd cannot be closed by the tracee and remains available for rootfs-fd rewrites."
     }
   ],
   "boundary_value_matrix": [
     {
       "id": "boundary.read-tracee-string-null-and-cap",
-      "applies_to": ["read_tracee_string"],
-      "cases": ["android.direct.path-boundary-matrix"],
+      "applies_to": [
+        "read_tracee_string"
+      ],
+      "cases": [
+        "android.direct.path-boundary-matrix"
+      ],
       "contract": "Null pointers and zero-capacity reads fail closed; unterminated strings are capped and NUL-terminated."
     },
     {
       "id": "boundary.path-max-and-enametoolong",
-      "applies_to": ["resolve_guest_host_path", "rewrite_execve_arg"],
-      "cases": ["android.direct.path-boundary-matrix"],
+      "applies_to": [
+        "resolve_guest_host_path",
+        "rewrite_execve_arg"
+      ],
+      "cases": [
+        "android.direct.path-boundary-matrix"
+      ],
       "contract": "PATH_MAX-1 paths remain representable and rootfs-prefixed overflow returns ENAMETOOLONG or leaves the original syscall path untouched with a diagnostic."
     },
     {
       "id": "boundary.getcwd-erange",
-      "applies_to": ["emulate_getcwd"],
-      "cases": ["android.direct.path-open-stat-access-cwd"],
+      "applies_to": [
+        "emulate_getcwd"
+      ],
+      "cases": [
+        "android.direct.path-open-stat-access-cwd"
+      ],
       "contract": "A too-small getcwd buffer returns ERANGE without truncating guest cwd state."
     },
     {
       "id": "boundary.sockaddr-min-and-sun-path-limit",
-      "applies_to": ["rewrite_unix_sockaddr_arg"],
-      "cases": ["android.direct.unix-socket-connect", "android.direct.path-boundary-matrix"],
+      "applies_to": [
+        "rewrite_unix_sockaddr_arg"
+      ],
+      "cases": [
+        "android.direct.unix-socket-connect",
+        "android.direct.path-boundary-matrix"
+      ],
       "contract": "Short sockaddr lengths, non-AF_UNIX sockets, abstract/relative socket paths, and rewritten paths at or beyond sun_path capacity are handled deterministically."
     },
     {
       "id": "boundary.exec-argc-and-scratch-limit",
-      "applies_to": ["rewrite_execve_arg"],
-      "cases": ["android.direct.exec-argv-rootfs", "container.direct.runtime-probe"],
+      "applies_to": [
+        "rewrite_execve_arg"
+      ],
+      "cases": [
+        "android.direct.exec-argv-rootfs",
+        "container.direct.runtime-probe"
+      ],
       "contract": "EXEC_REWRITE_MAX_ARGC and EXEC_REWRITE_MAX_SCRATCH prevent stack corruption while preserving normal long linker commands with many separate object path arguments."
     },
     {
       "id": "boundary.memory-guard-threshold",
-      "applies_to": ["memory_request_bytes", "maybe_guard_memory_syscall"],
-      "cases": ["android.direct.memory-guard"],
+      "applies_to": [
+        "memory_request_bytes",
+        "maybe_guard_memory_syscall"
+      ],
+      "cases": [
+        "android.direct.memory-guard"
+      ],
       "contract": "mmap/mremap/brk requests at, below, and above the configured guard threshold produce traceable allow/deny decisions."
     },
     {
       "id": "boundary.uid-gid-minus-one",
-      "applies_to": ["prepare_emulated_result", "is_minus_one_arg"],
-      "cases": ["android.direct.pid-and-credentials"],
+      "applies_to": [
+        "prepare_emulated_result",
+        "is_minus_one_arg"
+      ],
+      "cases": [
+        "android.direct.pid-and-credentials"
+      ],
       "contract": "setreuid/setregid/setresuid/setresgid preserve fields passed as -1 and update only requested container credential slots."
     },
     {
       "id": "boundary.wait-exit-signal-code",
-      "applies_to": ["trace_and_exec", "pty_exec"],
-      "cases": ["android.direct.tty-pty-exec", "android.direct.pid-and-credentials"],
+      "applies_to": [
+        "trace_and_exec",
+        "pty_exec"
+      ],
+      "cases": [
+        "android.direct.tty-pty-exec",
+        "android.direct.pid-and-credentials"
+      ],
       "contract": "Normal exits return the raw exit code and signaled processes report 128+signal for direct runtime and PTY routes."
     }
   ],
@@ -143,7 +251,10 @@
         "proc-dev-sys -> no generic rewrite",
         "guest-absolute -> rewrite"
       ],
-      "cases": ["android.direct.path-open-stat-access-cwd", "android.direct.path-boundary-matrix"],
+      "cases": [
+        "android.direct.path-open-stat-access-cwd",
+        "android.direct.path-boundary-matrix"
+      ],
       "contract": "Every should_rewrite_path return branch is represented by either a runnable path probe or an explicit pseudo-filesystem probe."
     },
     {
@@ -156,7 +267,9 @@
         "rootfs-prefix-overflow -> ENAMETOOLONG",
         "rootfs-prefix-success -> rewritten host path"
       ],
-      "cases": ["android.direct.path-boundary-matrix"],
+      "cases": [
+        "android.direct.path-boundary-matrix"
+      ],
       "contract": "Bind precedence, no-op paths, successful rootfs prefixing, and overflow are tracked as separate test obligations."
     },
     {
@@ -173,7 +286,10 @@
         "parent-segment-or-bind -> scratch rewrite",
         "scratch-write-fails -> no rewrite"
       ],
-      "cases": ["android.direct.path-open-stat-access-cwd", "android.direct.path-boundary-matrix"],
+      "cases": [
+        "android.direct.path-open-stat-access-cwd",
+        "android.direct.path-boundary-matrix"
+      ],
       "contract": "The fd-relative fast path, validated relative pass-through, scratch fallback, and explicit unsafe-path errno completion are split so parent segments, binds, symlinks, and overflow cannot hide behind the same success case."
     },
     {
@@ -188,7 +304,10 @@
         "resolved-too-long -> diagnostic no rewrite",
         "success -> sockaddr path and length updated"
       ],
-      "cases": ["android.direct.unix-socket-connect", "android.direct.path-boundary-matrix"],
+      "cases": [
+        "android.direct.unix-socket-connect",
+        "android.direct.path-boundary-matrix"
+      ],
       "contract": "AF_UNIX rewriting is decomposed by sockaddr validity, socket namespace, nscd skip, length overflow, and success."
     },
     {
@@ -206,7 +325,10 @@
         "scratch-limit -> no rewrite",
         "success -> loader argv rebuilt"
       ],
-      "cases": ["android.direct.exec-argv-rootfs", "container.direct.runtime-probe"],
+      "cases": [
+        "android.direct.exec-argv-rootfs",
+        "container.direct.runtime-probe"
+      ],
       "contract": "Exec routing is tested as a branch matrix because this path owns bracket argv, standard CMake option argv, many-argument linker argv, scripts, and loader recursion safety."
     },
     {
@@ -219,7 +341,9 @@
         "below-threshold -> allow",
         "would-deny -> ENOMEM"
       ],
-      "cases": ["android.direct.memory-guard"],
+      "cases": [
+        "android.direct.memory-guard"
+      ],
       "contract": "Large allocation diagnostics separate tracing from active ENOMEM denial."
     },
     {
@@ -231,7 +355,9 @@
         "preserve-minus-one-fields",
         "fork-inherits-emulated-state"
       ],
-      "cases": ["android.direct.pid-and-credentials"],
+      "cases": [
+        "android.direct.pid-and-credentials"
+      ],
       "contract": "Credential emulation covers reads, writes, sentinel preservation, and child inheritance."
     },
     {
@@ -243,7 +369,9 @@
         "rootfs-fallback",
         "too-small-buffer -> ERANGE"
       ],
-      "cases": ["android.direct.path-open-stat-access-cwd"],
+      "cases": [
+        "android.direct.path-open-stat-access-cwd"
+      ],
       "contract": "Guest cwd reporting is split from host cwd recovery and short-buffer handling."
     },
     {
@@ -258,7 +386,10 @@
         "seccomp-event",
         "tracee-reuse-prune"
       ],
-      "cases": ["android.direct.tty-pty-exec", "android.direct.pid-and-credentials"],
+      "cases": [
+        "android.direct.tty-pty-exec",
+        "android.direct.pid-and-credentials"
+      ],
       "contract": "Tracee lifecycle coverage records exit status, signal status, child trace events, seccomp events, and stale pid pruning."
     }
   ],
@@ -266,7 +397,10 @@
     {
       "id": "direct.path.xattr-rootfs-rewrite",
       "tier": "fast-static",
-      "areas": ["file_path_open_stat_access_getcwd", "cow_path_operations"],
+      "areas": [
+        "file_path_open_stat_access_getcwd",
+        "cow_path_operations"
+      ],
       "syscalls": [
         "setxattr",
         "lsetxattr",
@@ -284,8 +418,17 @@
     {
       "id": "direct.path.create-remove-rename",
       "tier": "fast-static",
-      "areas": ["file_path_open_stat_access_getcwd", "cow_path_operations"],
-      "syscalls": ["mknodat", "mkdirat", "unlinkat", "renameat", "renameat2"],
+      "areas": [
+        "file_path_open_stat_access_getcwd",
+        "cow_path_operations"
+      ],
+      "syscalls": [
+        "mknodat",
+        "mkdirat",
+        "unlinkat",
+        "renameat",
+        "renameat2"
+      ],
       "contract": "Create, remove, and rename path arguments are rewritten from guest absolute paths to rootfs or bind host paths before the kernel sees them.",
       "fast_check": "Static verifier checks path-rewrite coverage entries.",
       "heavy_case": "android.direct.path-mutation"
@@ -293,16 +436,32 @@
     {
       "id": "direct.path.link-symlink-readlink",
       "tier": "fast-static",
-      "areas": ["file_path_open_stat_access_getcwd", "cow_path_operations", "exec_argv_rootfs_resolution"],
-      "syscalls": ["symlinkat", "linkat", "readlinkat"],
-      "contract": "Symlink/link paths are mediated; linkat can copy regular files across Android boundaries, apt runtime symlink creation is emulated, and /proc/self/exe readlink reports the guest exec path.",
+      "areas": [
+        "file_path_open_stat_access_getcwd",
+        "cow_path_operations",
+        "exec_argv_rootfs_resolution",
+        "linkat_hardlink_semantics",
+        "proc_self_exe_no_mutation"
+      ],
+      "syscalls": [
+        "symlinkat",
+        "linkat",
+        "readlinkat"
+      ],
+      "contract": "Link/symlink/readlink paths preserve guest-visible behavior; linkat copy fallback remains an explicit gap until inode/hardlink semantics are implemented, and /proc/self/exe must ultimately be satisfied by readlink emulation without mutating rootfs tmp state.",
       "fast_check": "Static verifier checks linkat/symlinkat emulation and /proc/self/exe handling.",
       "heavy_case": "android.direct.proc-exe-and-links"
     },
     {
       "id": "direct.path.open-stat-access-cwd",
       "tier": "fast-static",
-      "areas": ["file_path_open_stat_access_getcwd", "cwd_length", "cow_path_operations"],
+      "areas": [
+        "file_path_open_stat_access_getcwd",
+        "cwd_length",
+        "cow_path_operations",
+        "syscall_errno_parity",
+        "bind_volume_path_mediation"
+      ],
       "syscalls": [
         "getcwd",
         "statfs",
@@ -327,8 +486,13 @@
     {
       "id": "direct.exec.loader-argv-rootfs",
       "tier": "fast-static",
-      "areas": ["exec_argv_rootfs_resolution"],
-      "syscalls": ["execve", "execveat"],
+      "areas": [
+        "exec_argv_rootfs_resolution"
+      ],
+      "syscalls": [
+        "execve",
+        "execveat"
+      ],
       "contract": "Exec paths resolve under rootfs or PATH, scripts route through their interpreter, argv is rebuilt for the bundled loader, and state tracks the guest executable path.",
       "fast_check": "Static verifier checks loader argv rebuild markers and rootfs exec path tracking.",
       "heavy_case": "android.direct.exec-argv-rootfs"
@@ -336,8 +500,14 @@
     {
       "id": "direct.socket.unix-bind-connect-rewrite",
       "tier": "fast-static",
-      "areas": ["socket_unix_path_rewrite"],
-      "syscalls": ["bind", "connect"],
+      "areas": [
+        "socket_unix_path_rewrite",
+        "bind_volume_path_mediation"
+      ],
+      "syscalls": [
+        "bind",
+        "connect"
+      ],
       "contract": "AF_UNIX bind/connect sockaddr paths that name guest absolute paths are rewritten to rootfs or bind host paths, with sockaddr length updated. This keeps code-server, Codex, and GPU bridge control sockets inside the container-visible rootfs instead of Android host /tmp.",
       "fast_check": "Static verifier checks rewrite_unix_sockaddr_arg plus bind/connect syscall table coverage.",
       "heavy_case": "android.direct.unix-socket-connect"
@@ -345,7 +515,9 @@
     {
       "id": "direct.credentials.identity-emulation",
       "tier": "fast-static",
-      "areas": ["pid_identity_reconcile"],
+      "areas": [
+        "pid_identity_reconcile"
+      ],
       "syscalls": [
         "setregid",
         "setgid",
@@ -370,7 +542,10 @@
     {
       "id": "direct.blocked-startup-fallbacks",
       "tier": "fast-static",
-      "areas": ["numa_policy_fallbacks"],
+      "areas": [
+        "numa_policy_fallbacks",
+        "syscall_errno_parity"
+      ],
       "syscalls": [
         "set_robust_list",
         "rseq",
@@ -387,7 +562,9 @@
     {
       "id": "direct.numa-policy-enosys",
       "tier": "fast-static",
-      "areas": ["numa_policy_fallbacks"],
+      "areas": [
+        "numa_policy_fallbacks"
+      ],
       "syscalls": [
         "mbind",
         "get_mempolicy",
@@ -403,8 +580,17 @@
     {
       "id": "direct.memory-trace-and-guard",
       "tier": "fast-static",
-      "areas": ["memory_allocation_trace"],
-      "syscalls": ["brk", "munmap", "mremap", "mmap", "mprotect", "madvise"],
+      "areas": [
+        "memory_allocation_trace"
+      ],
+      "syscalls": [
+        "brk",
+        "munmap",
+        "mremap",
+        "mmap",
+        "mprotect",
+        "madvise"
+      ],
       "contract": "Build diagnostics can trace memory-growth syscalls, summarize large/failed allocation requests, and optionally return ENOMEM before Android LMK pressure kills pdockerd or the UI.",
       "fast_check": "Static verifier checks that memory syscalls are explicitly traced and covered by the direct syscall inventory.",
       "heavy_case": "android.direct.memory-guard"
@@ -414,26 +600,71 @@
     {
       "id": "direct.pty.exec-wait-status",
       "tier": "fast-static",
-      "areas": ["tty_pty_exec", "wait_exit_signal_raw_code"],
-      "sources": ["app/src/main/cpp/pty.c", "app/src/main/cpp/pdocker_direct_exec.c"],
+      "areas": [
+        "tty_pty_exec",
+        "wait_exit_signal_raw_code"
+      ],
+      "sources": [
+        "app/src/main/cpp/pty.c",
+        "app/src/main/cpp/pdocker_direct_exec.c"
+      ],
       "contract": "PTY sessions use forkpty plus execve, expose resize/read/write, and return either WEXITSTATUS or negative WTERMSIG; the direct tracer returns 128+signal for signaled root tracees.",
       "heavy_case": "android.direct.tty-pty-exec"
     },
     {
       "id": "direct.pid.reconcile-runtime-state",
       "tier": "fast-static",
-      "areas": ["pid_identity_reconcile"],
-      "sources": ["docker-proot-setup/scripts/verify_runtime_contract.py"],
+      "areas": [
+        "pid_identity_reconcile"
+      ],
+      "sources": [
+        "docker-proot-setup/scripts/verify_runtime_contract.py"
+      ],
       "contract": "Container start reconciles a verified live pid and rejects stale pid reuse using recorded process start time.",
       "heavy_case": "android.direct.pid-and-credentials"
     },
     {
       "id": "direct.cow.copy-up-path-ops",
       "tier": "fast-local",
-      "areas": ["cow_path_operations"],
-      "sources": ["docker-proot-setup/src/overlay/libcow.c", "docker-proot-setup/src/overlay/test_cow.sh"],
+      "areas": [
+        "cow_path_operations"
+      ],
+      "sources": [
+        "docker-proot-setup/src/overlay/libcow.c",
+        "docker-proot-setup/src/overlay/test_cow.sh"
+      ],
       "contract": "libcow covers open/openat/creat/truncate/fopen, chmod/chown/utime/xattr, fd metadata, close, and dup lifecycle copy-up behavior.",
       "heavy_case": "host.local.libcow"
+    },
+    {
+      "id": "direct.attach-pty-signal-contract",
+      "tier": "fast-static",
+      "areas": [
+        "attach_pty_signal_semantics",
+        "tty_pty_exec",
+        "wait_exit_signal_raw_code"
+      ],
+      "sources": [
+        "docker-proot-setup/bin/pdockerd",
+        "app/src/main/cpp/pty.c",
+        "app/src/main/cpp/pdocker_direct_exec.c"
+      ],
+      "contract": "Docker attach/exec PTY sessions must preserve stdin/stdout attachment, resize propagation, Ctrl-C/SIGINT delivery to descendant process groups, and Docker-compatible exit or signal-coded status; current coverage is a planned device gate, not a closure claim.",
+      "heavy_case": "android.direct.attach-pty-signals"
+    },
+    {
+      "id": "direct.run-changed-path-manifest-contract",
+      "tier": "fast-local",
+      "areas": [
+        "run_changed_path_manifest"
+      ],
+      "sources": [
+        "docker-proot-setup/bin/pdockerd",
+        "app/src/main/assets/pdockerd/pdockerd",
+        "tests/test_dockerfile_run_changed_paths.py"
+      ],
+      "contract": "Dockerfile RUN snapshotting must consume a conservative changed-path manifest for traced or statically-known filesystem mutations; current fast coverage locks down chmod wildcard path manifests while broader traced mutation manifests remain open.",
+      "heavy_case": "host.local.run-changed-path-parser"
     }
   ],
   "heavy_cases": [
@@ -477,7 +708,7 @@
       "tier": "heavy-android",
       "command": "Create AF_UNIX server/client probes under guest absolute socket paths, then run them through pdocker-direct with rootfs and declared bind path coverage.",
       "runnable": false,
-      "checks": "bind(AF_UNIX) creates the socket under the rewritten host path/rootfs path, connect(AF_UNIX) reaches it through the same mapping, and sockaddr lengths match the rewritten path."
+      "checks": "bind(AF_UNIX) creates the socket under the rewritten host path/rootfs path, connect(AF_UNIX) reaches it through the same mapping, and sockaddr lengths match the rewritten path. This remains planned until a device artifact proves bind/connect through the direct executor."
     },
     {
       "id": "android.direct.pid-and-credentials",
@@ -524,9 +755,9 @@
     {
       "id": "android.direct.tty-pty-exec",
       "tier": "heavy-android",
-      "command": "Run docker exec -it or the APK terminal PTY path, resize, exit 7, then terminate by signal.",
+      "command": "Run docker exec -it through the Engine API and the native PTY helper: verify stdin echo, resize/SIGWINCH, exit 7, and a SIGTERM-killed command.",
       "runnable": false,
-      "checks": "PTY read/write/resize works; normal exits return raw code; signaled processes report the documented signal-coded result."
+      "checks": "PTY read/write/resize works; normal exits return raw code; signaled processes report the documented signal-coded result; this is a planned device gate until an adb script captures artifact evidence."
     },
     {
       "id": "host.local.libcow",
@@ -534,7 +765,169 @@
       "command": "make -C docker-proot-setup/src/overlay && bash docker-proot-setup/src/overlay/test_cow.sh",
       "runnable": true,
       "checks": "Hardlink copy-up protects lower files across writes, metadata, fd operations, and optional xattrs."
+    },
+    {
+      "id": "android.direct.attach-pty-signals",
+      "tier": "heavy-android",
+      "command": "Start a container with attach-before-start, then exercise docker attach plus docker exec -it over the Engine hijack path: send Enter, Ctrl-C/SIGINT, SIGTERM, window resize, and EOF while collecting Engine status/log artifacts.",
+      "runnable": false,
+      "checks": "Attach does not race start; stdin/stdout streams remain connected; Ctrl-C reaches the foreground descendant process group without killing pdockerd; resize triggers SIGWINCH; EOF drains logs; inspect/wait records Docker-compatible exit or 128+signal status."
+    },
+    {
+      "id": "android.direct.syscall-errno-parity",
+      "tier": "heavy-android",
+      "command": "PDOCKER_PACKAGE=\"${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}\"; ROOTFS=\"${ROOTFS:?set ROOTFS to the app-visible rootfs path}\"; adb shell \"run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \\\"python3 - <<PY\nimport ctypes, errno, os\nlibc=ctypes.CDLL(None, use_errno=True)\nAT_FDCWD=-100\ndef call(n,*a):\n    ctypes.set_errno(0); rc=libc.syscall(n,*a); return rc, ctypes.get_errno()\n# openat2/name_to_handle_at/linkat/readlinkat/faccessat2 parity probes stay explicit.\nprint(\\\"errno_parity_probe_planned\\\")\nPY\\\"'\"",
+      "runnable": true,
+      "checks": "Unsupported or denied syscalls return syscall-specific Linux errno values instead of permissive success; probes include startup fallbacks, path boundary denial, linkat invalid flags, readlinkat short buffers, and openat2/name_to_handle_at behavior."
+    },
+    {
+      "id": "android.direct.bind-volume-path-mediation",
+      "tier": "heavy-android",
+      "command": "Create one bind mount, one project volume, and one named volume, then run direct open/stat/rename/linkat plus AF_UNIX bind/connect probes under each mount path with PDOCKER_DIRECT_TRACE_PATHS=1.",
+      "runnable": false,
+      "checks": "Every filesystem syscall and AF_UNIX socket path resolves through the same mediation table; guest paths cannot escape via relative dirfd, symlink, parent segments, or mixed bind/rootfs dual-path operations. This remains planned until a device artifact captures the bind/project-volume/named-volume evidence."
+    },
+    {
+      "id": "host.local.run-changed-path-parser",
+      "tier": "fast-local",
+      "command": "python3 -m unittest tests.test_dockerfile_run_changed_paths",
+      "runnable": true,
+      "checks": "Static chmod RUN changed-path manifests include wildcard-expanded rootfs paths for /usr/local/bin/pdocker-* and fall back to full snapshots for unsafe, relative, env-expanded, or unmatched patterns."
+    },
+    {
+      "id": "android.direct.run-changed-path-manifest",
+      "tier": "heavy-android",
+      "command": "Build a Dockerfile whose RUN creates, chmods, renames, links, symlinks, and deletes files while PDOCKER_DIRECT_TRACE_PATHS=1 records a changed-path manifest artifact consumed by snapshot_layer.",
+      "runnable": false,
+      "checks": "The post-RUN snapshot reports mode=paths, includes changed paths and whiteouts from traced mutations, avoids a broad rootfs walk, and preserves Dockerfile semantics for unmatched globs or shell-expanded commands by falling back to scan mode."
     }
   ],
-  "known_gaps": []
+  "known_gaps": [
+    {
+      "id": "direct.attach-pty-signals-device-evidence",
+      "phase2_contract": "attach-pty-signals",
+      "reason": "No executable device artifact yet for attach-before-start, PTY resize, Ctrl-C, EOF drain, and signal-coded wait status."
+    },
+    {
+      "id": "direct.linkat-copy-fallback",
+      "phase2_contract": "linkat-hardlink-semantics",
+      "reason": "Current linkat emulation copies regular file bytes and does not preserve hardlink inode identity."
+    },
+    {
+      "id": "direct.proc-self-exe-temp-symlink",
+      "phase2_contract": "proc-self-exe-no-mutation",
+      "reason": "Entry-side readlinkat rewrite still creates a tmp rootfs symlink before the exit-side direct readlink emulation path."
+    },
+    {
+      "id": "direct.run-traced-changed-path-manifest",
+      "phase2_contract": "run-changed-path-manifest",
+      "reason": "Fast chmod wildcard manifests exist, but general RUN mutation manifests from direct syscall tracing are not implemented."
+    }
+  ],
+  "phase2_contracts": [
+    {
+      "id": "attach-pty-signals",
+      "status": "planned-device-gap",
+      "areas": [
+        "attach_pty_signal_semantics"
+      ],
+      "todo_markers": [
+        "finish attach/PTY/signals semantics",
+        "Terminal `-it` interactive path"
+      ],
+      "cases": [
+        "android.direct.attach-pty-signals",
+        "android.direct.tty-pty-exec"
+      ],
+      "fast_gate": "python3 scripts/run_direct_syscall_scenarios.py --lane local",
+      "close_requires": "Device artifact covering attach-before-start, exec -it, PTY resize, Ctrl-C/SIGINT, SIGTERM, EOF drain, and Docker-compatible wait/inspect status. The status assertion must explicitly cover 128+signal for signaled roots."
+    },
+    {
+      "id": "syscall-errno-parity",
+      "status": "partial-runnable-gap",
+      "areas": [
+        "syscall_errno_parity"
+      ],
+      "todo_markers": [
+        "Replace permissive syscall answers",
+        "Linux errno parity tests"
+      ],
+      "cases": [
+        "android.direct.syscall-errno-parity",
+        "android.direct.startup-fallbacks",
+        "android.direct.numa-fallback",
+        "android.direct.path-boundary-matrix"
+      ],
+      "fast_gate": "python3 scripts/verify_direct_syscall_contracts.py",
+      "close_requires": "A syscall-specific parity matrix for every emulated success/errno path with Linux-compatible errno assertions, not generic allow/deny checks. The parity matrix must include ENOSYS fallbacks and openat2 probes."
+    },
+    {
+      "id": "path-mediation-binds-volumes",
+      "status": "planned-device-gap",
+      "areas": [
+        "bind_volume_path_mediation"
+      ],
+      "todo_markers": [
+        "harden bind, project volume, and named volume path rewrite",
+        "AF_UNIX socket paths"
+      ],
+      "cases": [
+        "android.direct.bind-volume-path-mediation",
+        "android.direct.path-boundary-matrix",
+        "android.direct.unix-socket-connect"
+      ],
+      "fast_gate": "python3 scripts/verify_direct_syscall_contracts.py",
+      "close_requires": "One device scenario proving filesystem syscalls and AF_UNIX socket paths use identical mediation for bind, project volume, named volume, and rootfs paths."
+    },
+    {
+      "id": "linkat-hardlink-semantics",
+      "status": "known-implementation-gap",
+      "areas": [
+        "linkat_hardlink_semantics"
+      ],
+      "todo_markers": [
+        "Replace `linkat` copy fallback"
+      ],
+      "cases": [
+        "android.direct.proc-exe-and-links",
+        "android.direct.syscall-errno-parity"
+      ],
+      "fast_gate": "python3 scripts/verify_direct_syscall_contracts.py",
+      "close_requires": "linkat creates guest-visible hardlink/inode semantics or documented CoW-equivalent behavior instead of copying regular file bytes."
+    },
+    {
+      "id": "proc-self-exe-no-mutation",
+      "status": "known-implementation-gap",
+      "areas": [
+        "proc_self_exe_no_mutation"
+      ],
+      "todo_markers": [
+        "/proc/self/exe` rootfs temporary symlink mediation",
+        "readlink emulation"
+      ],
+      "cases": [
+        "android.direct.proc-exe-and-links",
+        "android.direct.path-boundary-matrix"
+      ],
+      "fast_gate": "python3 scripts/verify_direct_syscall_contracts.py",
+      "close_requires": "readlinkat(/proc/self/exe), /proc/thread-self/exe, and /proc/<pid>/exe complete from tracee memory/register emulation without creating tmp symlinks in the rootfs. Closing this requires no mutating helper symlink for any proc exe readlink path."
+    },
+    {
+      "id": "run-changed-path-manifest",
+      "status": "partial-fast-gap",
+      "areas": [
+        "run_changed_path_manifest"
+      ],
+      "todo_markers": [
+        "RUN changed-path/snapshot performance",
+        "direct-runtime changed-path manifest"
+      ],
+      "cases": [
+        "host.local.run-changed-path-parser",
+        "android.direct.run-changed-path-manifest"
+      ],
+      "fast_gate": "python3 -m unittest tests.test_dockerfile_run_changed_paths",
+      "close_requires": "Direct executor emits a traced filesystem mutation manifest for RUN create/metadata/rename/link/delete operations and snapshot_layer consumes it without broad rootfs walking."
+    }
+  ]
 }

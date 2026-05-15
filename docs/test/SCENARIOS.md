@@ -1,6 +1,6 @@
 # Feature Test Scenarios
 
-Snapshot date: 2026-05-05.
+Snapshot date: 2026-05-15.
 
 `tests/feature_scenarios.json` is the machine-readable ledger for feature-level
 test coverage. It records the feature area, execution lane, command, status,
@@ -41,6 +41,20 @@ Each run writes the single machine-readable artifact manifest at
 compatibility wrappers or narrow helper scripts; new automation should be added
 to `tests/test_driver_manifest.json` first.
 
+## Stable checkpoint policy
+
+The scenario ledger separates "the check is wired" from "the feature is stable."
+`planned-gap`, `blocked`, `failed`, `skip`, `skipped`, and device-gated entries
+without promoted artifacts are **non-complete** for release purposes. A host
+verifier may pass because it confirmed that an item is still an explicit
+planned gap; that pass must not be counted as a stable checkpoint.
+
+The driver manifest records this with `stable_checkpoint_rule`,
+`non_promoting_statuses`, and per-lane `stable_checkpoint_eligible=false`
+metadata. The `release-honesty` lane runs host-only release hygiene checks; it
+does not promote a build until the release blocker checklist and CI gate ledger
+show passing device evidence or an explicit scoped-out/unsupported decision.
+
 ## Lanes
 
 | Lane | Purpose |
@@ -53,7 +67,7 @@ to `tests/test_driver_manifest.json` first.
 | `android-documents` | SAF Documents mediator tests. |
 | `android-gpu` | GPU executor and bridge measurements. |
 | `android-llama` | llama.cpp container and benchmark measurements. |
-| `release` | Publication, payload, and secret-readiness checks. |
+| `release` | Publication, payload, secret-readiness, and checkpoint-honesty checks. Host-only release hygiene is non-promoting while P0 planned-gap/device gates remain open. |
 
 ## Required Areas
 

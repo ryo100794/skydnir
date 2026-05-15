@@ -21,6 +21,7 @@ LEDGER = ROOT / "tests" / "feature_scenarios.json"
 DOCS = [
     ROOT / "docs" / "test" / "COMPATIBILITY.md",
     ROOT / "docs" / "test" / "SERVICE_TRUTH_DEVICE_GATE.md",
+    ROOT / "docs" / "test" / "RUNTIME_TEARDOWN_DEVICE_GATE.md",
     ROOT / "docs" / "plan" / "TODO.md",
     ROOT / "docs" / "plan" / "GOAL_EXECUTION_QUEUE_20260513.md",
 ]
@@ -424,6 +425,10 @@ def validate_docs() -> None:
             "ProcessTable.SelectedPidPresent",
             "ContainerLogs.MarkerEngineContainerId",
             "device-pass",
+            "RequiresAdb",
+            "DoNotClaimDevicePassWithoutAdb",
+            "DirectChildAbsence",
+            "StaleName",
         ],
     )
 
@@ -455,6 +460,13 @@ def validate_android_smoke_entrypoints() -> None:
             "/proc/net/tcp",
             "LifecycleLogs",
             "ContainerLogs",
+            "DeviceGate",
+            "RequiresAdb",
+            "DoNotClaimDevicePassWithoutAdb",
+            "DirectChildAbsence",
+            "StaleName",
+            "write_process_tree_evidence",
+            "write_name_residue_evidence",
             "ExactEngineContainerIdRequired",
             "CurrentContainerFound",
             "InspectStateRunning",

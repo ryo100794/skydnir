@@ -56,15 +56,29 @@ Required before/after evidence for that same ID:
   `netstat -ltnp` snapshots.
 - Stale PID checks based on inspect `State.Pid` and the post-operation process
   table.
+- `DirectChildAbsence` checks for inspect `State.Pid` in the post-operation
+  and post-remove process tables. A clean parent PID is not enough if any
+  direct child spawned by the runtime launcher remains alive.
 - GPU/media executor residue scans for pdocker GPU, Vulkan, media, camera,
   audio, and executor helper processes.
+- `StaleName` and duplicate-name checks against `/containers/json?all=1` after
+  remove. Reused names and previous-container logs cannot stand in for the
+  current Engine container ID.
 - Persisted `state.json` snapshots before/start/after operation/after remove.
   After successful stop/kill, `State.Pid`, `PidStartTime`,
   `PdockerKnownPids`, `PdockerLauncherPid`, and
-  `PdockerLauncherPidStartTime` must be cleared; `PdockerTeardown` must record
+  `PdockerLauncherPidStartTime`, `PdockerLauncherPgid`, and
+  `PdockerProcessGroupId` must be cleared; `PdockerTeardown` must record
   `NoOrphanProcesses: true` and an empty `Survivors` list.
 - Container logs and lifecycle command logs. The verifier records these as
   container logs evidence, not as proof by themselves.
+
+## Device-pass guard
+
+The artifact includes a `DeviceGate` object with `RequiresAdb: true`,
+`CollectedViaAdbRunAs: true`, `HostStaticVerifierCannotPromote: true`, and
+`DoNotClaimDevicePassWithoutAdb: true`. Host/static tests may verify schema and
+negative cases, but they must not promote the artifact to `device-pass`.
 
 ## Negative cases that must remain non-success
 
@@ -102,9 +116,10 @@ remaining device proof explicit and repeatable.
 
 `pdockerd` stop/kill/rm now treats teardown as a no-orphan operation: it scans
 known PIDs, descendants, launcher PIDs, and container-path-referencing runtime
-processes, signals those processes, refuses to mark the container stopped if
-survivors remain, and clears stale active PID fields only after the survivor
-set is empty.
+processes, tracks the runtime launcher's process group for late direct children
+that no longer reference the container path, signals those processes, refuses to
+mark the container stopped if survivors remain, and clears stale active PID and
+process-group fields only after the survivor set is empty.
 
 The smoke script collects raw before/after evidence, same-container-ID proof
 schemas, and negative-case artifacts for process tree, listener absence, stale

@@ -1,6 +1,6 @@
 # pdocker TODO ledger
 
-Snapshot date: 2026-05-13.
+Snapshot date: 2026-05-15.
 
 This is the working TODO list for unfinished items and deliberate temporary
 accommodations. Keep this file current whenever a workaround is added so it
@@ -66,6 +66,13 @@ issues, and deciding which planned gaps become hard gates.
    SAF direct output** `[P1 next]`: `/documents` must be a SAF-backed UnixFS
    exchange layer with sidecar metadata and direct-write evidence; app-private
    fallback is allowed only when explicitly recorded.
+9. **[#9](https://github.com/ryo100794/pdocker-android/issues/9)
+   Release evidence honesty gate** `[P0 doing]`: planned-gap artifacts,
+   skipped or unrun device lanes, and host-only checks that merely prove a gap
+   is still visible are non-promoting. `tests/test_driver_manifest.json`,
+   `docs/test/CI_GATE_LEDGER.md`, `docs/test/SCENARIOS.md`, this TODO, and the
+   execution timeline must agree before any build/test run is described as a
+   stable checkpoint.
 
 ### Next Queue Generated 2026-05-04
 
@@ -157,10 +164,16 @@ issues, and deciding which planned gaps become hard gates.
   into a broader pinned CI/release process with source-built native payloads,
   no silent APK self-extension, signing outside Git, license/source audit, and
   explicit user-directed runtime container download policy.
-- [next] [#9](https://github.com/ryo100794/pdocker-android/issues/9)
+- [doing] [#9](https://github.com/ryo100794/pdocker-android/issues/9)
   First public release candidate gate: define and satisfy the minimum GitHub
   Release criteria for a build that is honest, repeatable, recoverable, and
-  safe to test.
+  safe to test. Current evidence-honesty slice: classify host-only planned-gap
+  verifiers, non-passing artifacts, and device-gated lanes without promoted
+  artifacts as non-promoting evidence in the test driver manifest and ledgers. A
+  `release-honesty` pass proves publication hygiene only; stable checkpoint
+  credit still requires the P0 device artifacts listed in
+  `docs/test/CI_GATE_LEDGER.md` and the blocker closures in
+  `docs/plan/RELEASE_READINESS.md`.
 - [done] Agent recovery process is recorded in
   `docs/plan/AGENT_COORDINATION.md`: recovered agent results must be moved into
   implementation, focused docs, or TODO before they are considered durable, and
@@ -187,7 +200,9 @@ issues, and deciding which planned gaps become hard gates.
 
 These items were raised after the last fixed build record and must be closed
 with implementation plus verification before the next build is treated as a
-stable checkpoint.
+stable checkpoint. Planned-gap artifacts, skipped/unrun device gates, and
+host-only verifier passes that only preserve a gap are evidence of residual
+risk, not stable checkpoint credit.
 
 - [doing] Image pull UI must not hard-code `ubuntu:22.04`. It now needs a
   searchable selection dialog that combines local image refs, Compose

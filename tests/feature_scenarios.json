@@ -844,9 +844,13 @@
       "status": "runnable",
       "docs": [
         "docs/build/FDROID_RELEASE_PROCESS.md",
-        "docs/test/SECRET_AUDIT.md"
+        "docs/test/SECRET_AUDIT.md",
+        "docs/plan/RELEASE_READINESS.md",
+        "docs/test/CI_GATE_LEDGER.md",
+        "tests/test_driver_manifest.json"
       ],
-      "checks": "Signing material exclusion, secret scan, payload inventory, F-Droid readiness language, and publication safety."
+      "checks": "Host-only signing material exclusion, secret scan, payload inventory, F-Droid readiness language, publication safety, and checkpoint-honesty wording. This is non-promoting: planned-gap or device-gated blockers remain release/stable blockers until their device artifacts pass the CI gate ledger promotion conditions.",
+      "checkpoint_credit": "non-promoting host hygiene only"
     },
     {
       "id": "android.device.full-smoke",
