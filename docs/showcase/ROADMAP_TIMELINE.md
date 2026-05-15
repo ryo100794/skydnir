@@ -28,7 +28,7 @@ Current TODO counters:
 
 ## Timeline
 
-### Now: 2026-05-14 to 2026-05-17
+### Now: 2026-05-15 to 2026-05-18
 
 Keep the UI compose path truthful and visible while closing regressions that block demos.
 
@@ -37,7 +37,7 @@ Keep the UI compose path truthful and visible while closing regressions that blo
 - [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from device discovery and...
 - Active port mapping: published ports now have an Engine-visible `PdockerNetwork.PortMappingStatus` scaffold for planned/inactive/active/ conflict states while the runtime remains...
 
-### Next: 2026-05-18 to 2026-05-24
+### Next: 2026-05-19 to 2026-05-25
 
 Turn the remaining high-value TODOs into repeatable device checks and public artifacts.
 
@@ -47,7 +47,7 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 - [#9](https://github.com/ryo100794/pdocker-android/issues/9) First public release candidate gate: define and satisfy the minimum GitHub Release criteria for a build that is honest...
 - RUN changed-path/snapshot performance. `RUN chmod +x /usr/local/bin/pdocker-*` is functionally correct but still triggers an expensive broad snapshot in the default workspace build...
 
-### Then: 2026-05-25 to 2026-06-04
+### Then: 2026-05-26 to 2026-06-05
 
 Use benchmark evidence to harden compatibility and publish tester-ready releases.
 
