@@ -22,7 +22,7 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 | Signal | Value |
 |---|---:|
 | Project-library templates | 6 |
-| TODO done entries | 52 |
+| TODO done entries | 53 |
 | TODO doing entries | 14 |
 | TODO next entries | 39 |
 | Compatibility audit PASS | 69 |
@@ -50,9 +50,9 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 | next | [#6](https://github.com/ryo100794/pdocker-android/issues/6) Real listener service health: probe the actual device listener for default workspace `18080` and llama `18081`, correlate it with... |
 | next | [#6](https://github.com/ryo100794/pdocker-android/issues/6) ID/label-based container truth: reconcile project cards, logs, lifecycle actions, and duplicate-name cleanup from Engine... |
 | next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU performance workflow after Vulkan clamp: keep CPU fallback hiding Vulkan devices, force Vulkan only for measured GPU... |
+| next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) MoE-aware GPU residency layer research and design: after the dense llama GPU bridge is correct, evaluate a pdocker-owned... |
 | doing | Active port mapping: published ports now have an Engine-visible `PdockerNetwork.PortMappingStatus` scaffold for planned/inactive/active/ conflict states while the runtime remains... |
 | next | [#7](https://github.com/ryo100794/pdocker-android/issues/7) Android storage metrics verification: add device smoke/manual coverage that layer, image-view, container-private, total, and... |
-| next | [#8](https://github.com/ryo100794/pdocker-android/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built... |
 
 ## Timeline
 
