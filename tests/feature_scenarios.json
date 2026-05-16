@@ -246,8 +246,23 @@
         "docs/plan/RELEASE_READINESS.md",
         "tests/blackbox_requirements.json"
       ],
-      "checks": "Non-promoting UI contract for storage/layer maintenance: image reference rows and build-cache references stay visually distinct, unique/shared/stale sizes remain visible, reference-tree rows expose details/files/delete+clean-cache actions, and stale build-cache or unreferenced-layer garbage cleanup evidence remains surfaced.",
-      "checkpoint_credit": "non-promoting host UI/static manifest gate only; requires future device artifact before storage/layer maintenance release credit"
+      "checks": "App-code-backed UI contract for storage/layer maintenance: MainActivity renderImages, renderImageCacheHealth/imageCacheHealth, renderImageReferenceTree/imageParentMap, ImageGraphLayout connector drawing, imageDetail/imageReferenceInfos, and ImageGraphAction now provide distinct image/cache rows, unique/shared/stale size evidence, tree details/files/delete+clean-cache actions, and stale build-cache or unreferenced-layer garbage surfacing.",
+      "checkpoint_credit": "app-code evidence plus host static verifier; release credit still requires a future device screenshot/manual visual artifact for continuous connectors and tap actions",
+      "implementation_evidence": [
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:ImageReferenceInfo",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:ImageCacheHealth",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:ImageGraphLayout.dispatchDraw",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:renderImages",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:renderImageCacheHealth",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:imageCacheHealth",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:imageReferenceInfos",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:imageDetail",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:renderImageReferenceTree",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:imageParentMap",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:appendImageReferenceGraphRows",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:addImageReferenceGraph",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:addImageGraphRow"
+      ]
     },
     {
       "id": "image.pull.live-registry-interruption",

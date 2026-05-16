@@ -1,11 +1,13 @@
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERIFIER_PATH = ROOT / "scripts" / "verify-terminal-exec-it-artifact.py"
+SMOKE_SCRIPT_PATH = ROOT / "scripts" / "android-device-smoke.sh"
 
 spec = importlib.util.spec_from_file_location("terminal_exec_it_verifier", VERIFIER_PATH)
 verifier = importlib.util.module_from_spec(spec)
@@ -120,6 +122,72 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
         with tmp:
             with self.assertRaisesRegex(verifier.VerificationError, "missing Ctrl-C byte"):
                 verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_literal_c_appended_to_sleep_even_with_etx(self):
+        events = [dict(event) for event in good_events()]
+        for event in events:
+            if "sleep 15" in event.get("text", ""):
+                event["text"] = "sleep 15c\r"
+                event["hex"] = "73 6c 65 65 70 20 31 35 63 0d"
+        artifact = good_artifact()
+        artifact["OutputTail"] = artifact["OutputTail"].replace(
+            "pdocker-ui-it-ctrlc-ok",
+            "sleep 15c\npdocker-ui-it-ctrlc-ok",
+        )
+        tmp, artifact_path, input_path = self.write_case(artifact=artifact, events=events)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "ctrl-c-interrupts|ime-enter"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_raw_arrow_escape_in_output_tail(self):
+        artifact = good_artifact()
+        artifact["OutputTail"] = artifact["OutputTail"].replace(
+            "pdocker-ui-it-arrow-seed\npdocker-ui-it-arrow-seed",
+            "pdocker-ui-it-arrow-seed\n\u001b[A",
+        )
+        tmp, artifact_path, input_path = self.write_case(artifact=artifact, events=good_events())
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "arrow-up-reaches-readline-history"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_top_without_refresh_marker_before_q_recovery(self):
+        artifact = good_artifact()
+        artifact["OutputTail"] = artifact["OutputTail"].replace(
+            "PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND\n",
+            "",
+        )
+        tmp, artifact_path, input_path = self.write_case(artifact=artifact, events=good_events())
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "top-refresh-observed-before-q"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_missing_q_byte_even_when_top_recovery_marker_exists(self):
+        events = [event for event in good_events() if event.get("hex") != "71"]
+        tmp, artifact_path, input_path = self.write_case(events=events)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "missing q byte"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_missing_first_class_evidence_flag(self):
+        artifact = good_artifact()
+        artifact["Evidence"]["ime-enter-ctrlc-regression-covered"] = False
+        tmp, artifact_path, input_path = self.write_case(artifact=artifact, events=good_events())
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "Evidence flags not true"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_smoke_skip_artifact_uses_same_required_evidence_names_and_scrubs_stale_jsonl(self):
+        script = SMOKE_SCRIPT_PATH.read_text()
+        skip_function = script[script.index("write_ui_it_selftest_skip_artifact()") :]
+        skip_function = skip_function[: skip_function.index("validate_ui_it_selftest_artifact()")]
+        evidence_block = re.search(r'"Evidence": \{(?P<body>.*?)\n  \},', skip_function, re.S)
+        self.assertIsNotNone(evidence_block)
+        for name in REQUIRED:
+            self.assertIn(f'"{name}": false', evidence_block.group("body"))
+        self.assertIn("clear_ui_it_selftest_artifacts", skip_function)
+        self.assertIn("engine-exec-input-latest.jsonl", script)
+        self.assertIn("Ctrl-C must be an isolated ETX byte", script)
+        self.assertIn("IME Enter must be proven by exactly one Enter byte", script)
 
 
 if __name__ == "__main__":

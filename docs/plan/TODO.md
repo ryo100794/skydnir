@@ -63,8 +63,11 @@ issues, and deciding which planned gaps become hard gates.
    UI-driven container terminal passes Enter, Ctrl-C, cursor keys, `top`, `q`,
    resize, and IME regression checks. Static or skipped self-tests are not
    enough; the host artifact verifier must be paired with device
-   `ui-it-selftest-latest.json` and `engine-exec-input-latest.jsonl` before the
-   gate can promote.
+   `ui-it-selftest-latest.json` and a fresh
+   `engine-exec-input-latest.jsonl` before the gate can promote. The JSONL must
+   prove single-Enter submission, isolated ETX with no injected `c` for JP/EN
+   IME Ctrl-C, ArrowUp reaching shell history instead of raw escape text, a
+   stable `top` refresh, and `q` returning to a usable shell.
 7. **[#14](https://github.com/ryo100794/pdocker-android/issues/14)
    VS Code health gate** `[P1 next]`: default workspace success requires
    compose/build/run, `pdocker-dev` current Engine state, port `18080` listener,
@@ -128,7 +131,11 @@ issues, and deciding which planned gaps become hard gates.
   Terminal `-it` interactive path: refactor the terminal stack according to
   `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`. The UI must remain a generic
   terminal surface, while Docker exec/attach, local diagnostic PTY, daemon log,
-  and job log streams become explicit session types with shared tests.
+  and job log streams become explicit session types with shared tests. Closure
+  still requires the non-promoting device gate in
+  `docs/test/TERMINAL_EXEC_IT_DEVICE_GATE.md`: fresh UI artifact plus raw
+  Engine exec JSONL proving Enter once, isolated Ctrl-C ETX with no literal
+  `c`, cursor-key history, stable `top` repaint, `q` exit, and resize route.
 - [doing] [#6](https://github.com/ryo100794/pdocker-android/issues/6)
   Service truth same-container-ID device gate: the listener health and
   ID/label truth work are one gate. Probe default workspace `18080` and llama
@@ -280,10 +287,19 @@ risk, not stable checkpoint credit.
   the changed-path detection, add regression coverage for wildcard RUN paths,
   and reduce the final no-op-style metadata snapshot without changing Dockerfile
   semantics.
-- [next] Image reference graph visual polish. The tree must render continuous
-  connector lines, include image detail/version/storage information on the tree
-  nodes, and expose image operations from the tree itself. Acceptance: static
-  check plus device screenshot/manual visual pass.
+- [doing] Image reference graph visual polish. Task G reconnaissance on
+  2026-05-16 found actual app-code evidence rather than a planned-only gap:
+  `MainActivity.kt` now wires `renderImages()` into
+  `renderImageCacheHealth()`/`imageCacheHealth()` and
+  `renderImageReferenceTree()`/`imageParentMap()`; `ImageGraphLayout.dispatchDraw`
+  draws continuous connector lines; `imageDetail()` and
+  `imageReferenceInfos()` add version plus view/unique/shared storage detail;
+  and `appendImageReferenceGraphRows()` attaches Files/Delete/Clean
+  `ImageGraphAction`s to image nodes while surfacing shared-cache, compose, and
+  container references. Host/static coverage is `python3
+  scripts/verify-ui-actions.py` plus the `image.layer.maintenance-ui.contract`
+  scenario. Remaining acceptance gap: device screenshot/manual visual pass for
+  connector rendering and tap actions before release credit.
 - [next] Pull/update operation semantics. "Pull image" is an Engine API
   operation, not "open docker pull shell"; if the ref already exists, treat it
   as update/re-pull with old tag preserved until success. Acceptance: wording,
@@ -510,6 +526,16 @@ implementation change plus a focused verification artifact.
     plus opt-in labels/env. Unsupported mappings, executable/shared/stack/GPU
     exclusions, unresolved faults, or missing kernel support must pass through
     unmanaged when safe or fail closed with non-promoting diagnostics.
+  - Task H virtual memory feasibility gate: app-level virtual memory and pager
+    claims remain a planned-gap/non-promoting result unless a host/static
+    verifier plus future connected-device artifact proves every required
+    syscall capability: mmap fixed mapping or equivalent same-address replay,
+    mprotect on exact managed pages, SIGSEGV handler or userfaultfd fault-event
+    availability, file-backed spill/writeback/restore, and safe fallback on unsupported Android kernels.
+    `scripts/verify-memory-pager-contract.py`
+    rejects promotion artifacts missing any of those proofs; dry-run,
+    planned-gap, or host-only artifacts must set `success=false` and
+    `stable_checkpoint_eligible=false`. No native pager code is promoted by this gate.
   Next slice: fill the runtime counters from the managed-region table, add
   thread/signal guardrails, and run synthetic fault-latency/stress evidence
   before any llama/container opt-in.

@@ -1,4 +1,7 @@
 import json
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,6 +11,8 @@ PAGER_DOC = ROOT / "docs" / "design" / "APK_MEMORY_PAGER.md"
 OOM_DOC = ROOT / "docs" / "design" / "RUNTIME_OOM_SURVIVAL.md"
 PROBE_DOC = ROOT / "docs" / "test" / "APK_MEMORY_PAGER_PROBE.md"
 ABNORMAL_CASES = ROOT / "tests" / "abnormal_event_cases.json"
+FEASIBILITY_SCRIPT = ROOT / "scripts" / "verify-memory-pager-contract.py"
+TODO = ROOT / "docs" / "plan" / "TODO.md"
 
 
 class ApkMemoryPagerImplementationContractTest(unittest.TestCase):
@@ -190,6 +195,91 @@ class ApkMemoryPagerImplementationContractTest(unittest.TestCase):
             "allocation_denied_enomem",
         ]:
             self.assertIn(token, self.abnormal_blob)
+
+    def test_virtual_memory_feasibility_gate_runs_as_non_promoting_static_check(self):
+        result = subprocess.run(
+            [sys.executable, str(FEASIBILITY_SCRIPT)],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("non-promoting planned-gap feasibility gate", result.stdout)
+        self.assertIn("mmap_fixed_mapping", result.stdout)
+        self.assertIn("file_backed_spill", result.stdout)
+        self.assertIn("unsupported_kernel_fallback", result.stdout)
+
+    def test_virtual_memory_feasibility_gate_rejects_incomplete_promotion(self):
+        artifact = {
+            "schema": "pdocker.memory-pager.feasibility-gate.v1",
+            "status": "pass",
+            "success": True,
+            "stable_checkpoint_eligible": True,
+            "promotes_app_virtual_memory": True,
+            "syscall_capability_evidence": {
+                "mprotect": {"result": "ok"},
+                "sigsegv_handler": {"supported": True},
+            },
+            "fallback": {"unsupported_android_kernel": {"safe": True}},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "incomplete-feasibility.json"
+            path.write_text(json.dumps(artifact), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(FEASIBILITY_SCRIPT), "--validate-artifact", str(path)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+            )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("mmap_fixed_mapping", result.stdout + result.stderr)
+        self.assertIn("file_backed_spill", result.stdout + result.stderr)
+
+    def test_virtual_memory_feasibility_gate_accepts_only_complete_promotion_fixture(self):
+        artifact = {
+            "schema": "pdocker.memory-pager.feasibility-gate.v1",
+            "status": "pass",
+            "success": True,
+            "stable_checkpoint_eligible": True,
+            "promotes_app_virtual_memory": True,
+            "syscall_capability_evidence": {
+                "mmap_fixed_mapping": {"result": "ok", "method": "MAP_FIXED_NOREPLACE"},
+                "mprotect": {"result": "ok"},
+                "sigsegv_handler": {"supported": True, "source": "ptrace SIGSEGV stop"},
+                "file_backed_spill": {"result": "ok", "storage": "app-private"},
+                "unsupported_kernel_fallback": {"result": "ok", "mode": "disabled-or-ENOMEM"},
+            },
+            "fallback": {"unsupported_android_kernel": {"safe": True}},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "complete-feasibility.json"
+            path.write_text(json.dumps(artifact), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(FEASIBILITY_SCRIPT), "--validate-artifact", str(path)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+            )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_todo_keeps_task_h_as_planned_gap_no_native_code(self):
+        todo = TODO.read_text()
+        self.assertDocHasAll(todo, [
+            "Task H virtual memory feasibility gate",
+            "planned-gap/non-promoting",
+            "mmap fixed mapping",
+            "mprotect on exact managed pages",
+            "SIGSEGV handler or userfaultfd",
+            "file-backed spill",
+            "safe fallback on unsupported Android kernels",
+            "No native pager code is promoted by this gate",
+        ])
 
 
 if __name__ == "__main__":

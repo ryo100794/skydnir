@@ -57,6 +57,7 @@
 #define PDOCKER_GPU_RESIDENT_CACHE_DEFAULT_THRESHOLD (64u * 1024u * 1024u)
 #define PDOCKER_GPU_MUTABLE_BUFFER_CACHE_DEFAULT_MAX_BYTES (32u * 1024u * 1024u)
 #define PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_DEFAULT_MIN_BYTES (16u * 1024u * 1024u)
+#define PDOCKER_GPU_WRITEBACK_FULL_HASH_DEFAULT_MAX_BYTES (64u * 1024u * 1024u)
 #define PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_SENTINEL 0xA5u
 
 #ifndef GL_COMPUTE_SHADER
@@ -1982,6 +1983,16 @@ static size_t writeonly_dirty_probe_min_bytes(void) {
     return PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_DEFAULT_MIN_BYTES;
 }
 
+static size_t writeback_full_hash_max_bytes(void) {
+    const char *value = getenv("PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES");
+    if (value && value[0]) {
+        char *end = NULL;
+        unsigned long long parsed = strtoull(value, &end, 10);
+        if (end && *end == '\0') return (size_t)parsed;
+    }
+    return PDOCKER_GPU_WRITEBACK_FULL_HASH_DEFAULT_MAX_BYTES;
+}
+
 static size_t dirty_probe_page_size(void) {
     long page_size = sysconf(_SC_PAGESIZE);
     if (page_size <= 0) return 4096;
@@ -3272,6 +3283,28 @@ static uint64_t sample_memory_hash(const void *data, size_t size) {
     return hash;
 }
 
+static uint64_t full_memory_hash(const void *data, size_t size) {
+    if (!data && size > 0) return 0;
+    uint64_t hash = 1469598103934665603ull;
+    return fnv1a64_update(hash, data, size);
+}
+
+static uint64_t full_fd_hash(int fd, off_t offset, size_t size) {
+    if (fd < 0) return 0;
+    uint64_t hash = 1469598103934665603ull;
+    unsigned char buf[16384];
+    size_t done = 0;
+    while (done < size) {
+        size_t chunk = size - done;
+        if (chunk > sizeof(buf)) chunk = sizeof(buf);
+        ssize_t r = pread(fd, buf, chunk, offset + (off_t)done);
+        if (r != (ssize_t)chunk) return 0;
+        hash = fnv1a64_update(hash, buf, chunk);
+        done += chunk;
+    }
+    return hash;
+}
+
 static uint64_t sample_fd_hash(int fd, off_t offset, size_t size) {
     if (fd < 0 || size == 0) return 0;
     unsigned char buf[64];
@@ -3294,6 +3327,16 @@ static uint64_t sample_fd_hash(int fd, off_t offset, size_t size) {
         if (r > 0) hash = fnv1a64_update(hash, buf, (size_t)r);
     }
     return hash;
+}
+
+static uint64_t diagnostic_memory_hash(const void *data, size_t size, size_t full_hash_max_bytes) {
+    if (size > 0 && size <= full_hash_max_bytes) return full_memory_hash(data, size);
+    return sample_memory_hash(data, size);
+}
+
+static uint64_t diagnostic_fd_hash(int fd, off_t offset, size_t size, size_t full_hash_max_bytes) {
+    if (size > 0 && size <= full_hash_max_bytes) return full_fd_hash(fd, offset, size);
+    return sample_fd_hash(fd, offset, size);
 }
 
 static float sample_f32_at(const void *data, size_t size, size_t index) {
@@ -7010,6 +7053,7 @@ static int run_vulkan_dispatch_fd(
     const int profile_response = options && options->has_profile_response
         ? options->profile_response
         : env_truthy("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", 0);
+    const size_t profile_full_hash_max_bytes = writeback_full_hash_max_bytes();
     const int materialize_descriptor_aliases =
         strict_passthrough ? 0 :
         options && options->has_materialize_descriptor_aliases
@@ -7468,13 +7512,16 @@ static int run_vulkan_dispatch_fd(
                 goto cleanup;
             }
             if (profile_response) {
-                binding_fd_before_hash[i] = sample_fd_hash(
-                    buffer_fds[i], bindings[i].offset, bindings[i].size);
+                binding_fd_before_hash[i] = diagnostic_fd_hash(
+                    buffer_fds[i], bindings[i].offset, bindings[i].size,
+                    profile_full_hash_max_bytes);
             }
             if (profile_response && vk_buffers[i] && vk_buffers[i]->map) {
                 binding_gpu_after_upload_hash[i] =
-                    sample_memory_hash((const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
-                                       bindings[i].size);
+                    diagnostic_memory_hash(
+                        (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
+                        bindings[i].size,
+                        profile_full_hash_max_bytes);
             }
         }
     } else {
@@ -7484,8 +7531,9 @@ static int run_vulkan_dispatch_fd(
             fail_stage = "create-dispatch-buffer";
             double binding_start = now_ms();
             if (profile_response) {
-                binding_fd_before_hash[i] = sample_fd_hash(
-                    buffer_fds[i], bindings[i].offset, bindings[i].size);
+                binding_fd_before_hash[i] = diagnostic_fd_hash(
+                    buffer_fds[i], bindings[i].offset, bindings[i].size,
+                    profile_full_hash_max_bytes);
             }
             if (binding_alias_rep[i] != i && binding_alias_rep[i] < i &&
                 vk_buffers[binding_alias_rep[i]]) {
@@ -7497,8 +7545,10 @@ static int run_vulkan_dispatch_fd(
                 binding_upload_ms[i] = now_ms() - binding_start;
                 if (profile_response && vk_buffers[i]->map) {
                     binding_gpu_after_upload_hash[i] =
-                        sample_memory_hash((const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
-                                           bindings[i].size);
+                        diagnostic_memory_hash(
+                            (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
+                            bindings[i].size,
+                            profile_full_hash_max_bytes);
                 }
                 continue;
             }
@@ -7526,8 +7576,10 @@ static int run_vulkan_dispatch_fd(
             if (!vk_buffers[i]) goto cleanup;
             if (profile_response && vk_buffers[i]->map) {
                 binding_gpu_after_upload_hash[i] =
-                    sample_memory_hash((const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
-                                       bindings[i].size);
+                    diagnostic_memory_hash(
+                        (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
+                        bindings[i].size,
+                        profile_full_hash_max_bytes);
             }
             if ((dirty_probe_enabled || dirty_writeback_enabled) &&
                 binding_write_needed[i] &&
@@ -8078,8 +8130,10 @@ static int run_vulkan_dispatch_fd(
         for (size_t i = 0; i < binding_count; ++i) {
             if (!active_bindings[i] || !vk_buffers[i] || !vk_buffers[i]->map) continue;
             binding_gpu_after_dispatch_hash[i] =
-                sample_memory_hash((const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
-                                   bindings[i].size);
+                diagnostic_memory_hash(
+                    (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
+                    bindings[i].size,
+                    profile_full_hash_max_bytes);
         }
     }
     if (spirv_summary.hash == 0xac41e8033a67af4aull) {
@@ -8301,8 +8355,9 @@ static int run_vulkan_dispatch_fd(
     if (profile_response) {
         for (size_t i = 0; i < binding_count; ++i) {
             if (!active_bindings[i]) continue;
-            binding_fd_after_hash[i] = sample_fd_hash(
-                buffer_fds[i], bindings[i].offset, bindings[i].size);
+            binding_fd_after_hash[i] = diagnostic_fd_hash(
+                buffer_fds[i], bindings[i].offset, bindings[i].size,
+                profile_full_hash_max_bytes);
         }
     }
     fail_binding = -1;

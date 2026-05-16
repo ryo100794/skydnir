@@ -1420,6 +1420,17 @@ collect_ui_it_selftest_artifacts() {
   collect_device_file "files/pdocker/diagnostics/engine-exec-input-latest.jsonl" "engine-exec-input-latest.jsonl" || true
 }
 
+clear_ui_it_selftest_artifacts() {
+  local dest_dir
+  dest_dir="$(smoke_artifact_dir)"
+  mkdir -p "$dest_dir"
+  rm -f "$dest_dir/ui-it-selftest-latest.json" \
+    "$dest_dir/engine-exec-input-latest.jsonl" \
+    "$dest_dir/ui-it-selftest-latest.json.err" \
+    "$dest_dir/engine-exec-input-latest.jsonl.err"
+  run_as "rm -f files/pdocker/diagnostics/ui-it-selftest-latest.json files/pdocker/diagnostics/engine-exec-input-latest.jsonl" >/dev/null 2>&1 || true
+}
+
 json_escape_host() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
@@ -1446,15 +1457,15 @@ write_ui_it_selftest_skip_artifact() {
   "RequiredContainerId": true,
   "HardGateRequired": $hard_gate_json,
   "Evidence": {
-    "Enter": false,
-    "CtrlC": false,
-    "ArrowHistory": false,
-    "ImeEnterCtrlC": false,
-    "Top": false,
-    "TopRefresh": false,
-    "TopRepaint": false,
-    "TopQuit": false,
-    "Resize": false
+    "enter-single-submit": false,
+    "ctrl-c-interrupts-without-literal-c": false,
+    "arrow-up-reaches-readline-history": false,
+    "ime-enter-ctrlc-regression-covered": false,
+    "top-starts-on-tty": false,
+    "top-refresh-observed-before-q": false,
+    "top-repaint-remains-terminal-shaped": false,
+    "q-quits-top": false,
+    "resize-route-is-observable": false
   },
   "RequiredEvidence": [
     "enter-single-submit",
@@ -1472,6 +1483,7 @@ write_ui_it_selftest_skip_artifact() {
   "CompletedAtMs": $now
 }
 JSON
+  clear_ui_it_selftest_artifacts
   run_adb push "$tmp" /data/local/tmp/pdocker-ui-it-selftest-skip.json >/dev/null
   rm -f "$tmp"
   run_as "mkdir -p files/pdocker/diagnostics && cp /data/local/tmp/pdocker-ui-it-selftest-skip.json files/pdocker/diagnostics/ui-it-selftest-latest.json" >/dev/null
@@ -1490,6 +1502,83 @@ validate_ui_it_selftest_artifact() {
     "$dest_dir/ui-it-selftest-latest.json" \
     "$dest_dir/engine-exec-input-latest.jsonl" \
     "${require_flag[@]}"
+  python3 - "$dest_dir/ui-it-selftest-latest.json" "$dest_dir/engine-exec-input-latest.jsonl" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+artifact_path = Path(sys.argv[1])
+jsonl_path = Path(sys.argv[2])
+
+def fail(message: str) -> None:
+    raise SystemExit(message)
+
+artifact = json.loads(artifact_path.read_text())
+if artifact.get("Status") == "planned-skip":
+    sys.exit(0)
+
+tail = str(artifact.get("OutputTail", ""))
+if tail.count("pdocker-ui-it-ok") != 1:
+    fail("UI exec-it Enter evidence must show exactly one pdocker-ui-it-ok marker")
+if "sleep 15c" in tail:
+    fail("UI exec-it Ctrl-C evidence contains literal c appended to sleep")
+if "\x1b[A" in tail or "^[[A" in tail:
+    fail("UI exec-it arrow evidence leaked raw ArrowUp escape text")
+if "pdocker-ui-it-topq-ok" not in tail:
+    fail("UI exec-it top/q evidence missing shell recovery marker")
+
+events = []
+for line in jsonl_path.read_text(errors="replace").splitlines():
+    if line.strip():
+        events.append(json.loads(line))
+inputs = [event for event in events if event.get("event") == "input"]
+hex_tokens = [
+    [token.lower() for token in str(event.get("hex", "")).split()]
+    for event in inputs
+]
+texts = [str(event.get("text", "")) for event in inputs]
+
+ime_indexes = [index for index, text in enumerate(texts) if "ime-enter-ok" in text]
+if not ime_indexes:
+    fail("UI exec-it IME Enter command input is missing")
+ime_index = ime_indexes[0]
+if ime_index + 1 >= len(hex_tokens) or hex_tokens[ime_index + 1] != ["0d"]:
+    fail("UI exec-it IME Enter must be proven by exactly one Enter byte after the command")
+if ime_index + 2 < len(hex_tokens) and hex_tokens[ime_index + 2] == ["0d"]:
+    fail("UI exec-it IME Enter evidence shows a double Enter")
+
+sleep_indexes = [index for index, text in enumerate(texts) if "sleep 15" in text]
+if not sleep_indexes:
+    fail("UI exec-it Ctrl-C sleep command input is missing")
+sleep_index = sleep_indexes[0]
+ctrl_indexes = [
+    index for index in range(sleep_index + 1, len(hex_tokens))
+    if "03" in hex_tokens[index]
+]
+if not ctrl_indexes:
+    fail("UI exec-it Ctrl-C evidence is missing ETX after sleep")
+ctrl_index = ctrl_indexes[0]
+if hex_tokens[ctrl_index] != ["03"]:
+    fail("UI exec-it Ctrl-C must be an isolated ETX byte with no injected literal c")
+recovery_indexes = [
+    index for index in range(ctrl_index + 1, len(texts))
+    if "ctrlc-ok" in texts[index]
+]
+if not recovery_indexes:
+    fail("UI exec-it Ctrl-C recovery command input is missing")
+for index in range(sleep_index, recovery_indexes[0] + 1):
+    if "sleep 15c" in texts[index]:
+        fail("UI exec-it Ctrl-C evidence contains literal c appended to sleep")
+    if hex_tokens[index] == ["63"] or ("03" in hex_tokens[index] and "63" in hex_tokens[index]):
+        fail("UI exec-it Ctrl-C evidence contains an injected literal c around ETX")
+
+arrow_indexes = [
+    index for index, tokens in enumerate(hex_tokens)
+    if tokens == ["1b", "5b", "41", "0d"]
+]
+if not arrow_indexes:
+    fail("UI exec-it ArrowUp+Enter byte evidence is missing")
+PY
 }
 
 ui_engine_exec_it_selftest() {
@@ -1511,7 +1600,7 @@ ui_engine_exec_it_selftest() {
     return 0
   fi
   echo "[pdocker smoke] ui self-test engine exec -it container=$container_ref"
-  run_as "rm -f files/pdocker/diagnostics/ui-it-selftest-latest.json" >/dev/null 2>&1 || true
+  clear_ui_it_selftest_artifacts
   run_adb shell am start \
     -n "$PKG/$CLASS_PREFIX.MainActivity" \
     -a "$ACTION_PREFIX.action.SMOKE_UI_IT_SELFTEST" \

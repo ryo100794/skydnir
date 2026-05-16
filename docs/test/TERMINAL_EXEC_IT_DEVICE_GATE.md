@@ -45,6 +45,12 @@ EngineExecSession records, not reconstructed host text:
 - `input` events that include the UI-driven script, ArrowUp+Enter
   (`1b 5b 41 0d`), `top`, `q` (`71`), `sleep 15`, raw Ctrl-C (`03`), and the
   post-interrupt recovery command
+- for the IME Enter regression, the command containing
+  `pdocker-ui-it-ime-enter-ok` followed by exactly one Enter byte (`0d`), with
+  no immediate second Enter event
+- for the JP/EN IME Ctrl-C regression, an isolated ETX byte (`03`) after
+  `sleep 15`; `03 63`, a standalone `63` before recovery, or `sleep 15c` is
+  failure evidence, not a pass
 - a Docker-compatible resize event with `/exec/{id}/resize?h={rows}&w={cols}`
   or an explicit `resize-failed` event for the same exec id
 
@@ -52,6 +58,12 @@ The verifier rejects fake success cases such as a planned-skip with
 `Success: true`, a success JSON without the raw JSONL sidecar, a `stream-started`
 event counted as resize evidence, mismatched container/exec ids, missing Ctrl-C
 byte proof, missing `q` for `top`, or literal `sleep 15c` input.
+`scripts/android-device-smoke.sh` also clears any stale
+`ui-it-selftest-latest.json` and `engine-exec-input-latest.jsonl` before each
+UI self-test and before writing planned-skip evidence, then applies stricter
+host checks for exactly-one IME Enter, isolated ETX, ArrowUp history evidence,
+and `top`/`q` shell recovery. A stale JSONL from an earlier run must never be
+allowed to promote a later artifact.
 
 ## Required evidence names
 
@@ -101,7 +113,9 @@ private test-only Engine endpoint. Required reproductions are:
 3. Exercise the Japanese IME/Android WebView fallback path by dispatching the
    helper textarea `beforeinput` route for Enter and Ctrl-C, then require the
    `ime-enter-ctrlc-regression-covered` evidence flag so composition or
-   `beforeinput` events cannot double-send Enter or inject `c`.
+   `beforeinput` events cannot double-send Enter or inject `c`. The artifact
+   evidence must prove the IME Enter path with one `0d` byte and the Ctrl-C path
+   with one isolated `03` byte for both Japanese and English IME routes.
 4. Send the UI cursor-key path (`ArrowUp` / `\u001b[A`) and verify readline
    history replays the seeded command instead of printing escape text.
 5. Launch full-screen `top`, require a visible refresh before `q` via

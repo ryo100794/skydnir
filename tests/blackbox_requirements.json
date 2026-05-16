@@ -98,19 +98,26 @@
       ],
       "positive": {
         "given": "The app has image references, reused layers, build-cache entries, and possible stale or unreferenced storage.",
-        "when": "The image and storage maintenance UI is validated from the repository-owned contract.",
-        "then": "The UI exposes distinct image and cache references, visible unique/shared/stale sizes, reference-tree actions for details/files/delete with cache cleanup, and cleanup evidence for stale metadata or garbage layers.",
+        "when": "The image and storage maintenance UI is validated from app code and the repository-owned contract.",
+        "then": "The UI exposes distinct image and cache references, visible unique/shared/stale sizes, continuous reference-tree rows with details/files/delete/clean actions, and cleanup evidence for stale metadata or garbage layers.",
         "evidence": [
           "python3 scripts/verify-ui-actions.py",
           "python3 scripts/verify-feature-scenarios.py"
         ]
       },
       "negative": {
-        "given": "A maintenance screen hides cache-only entries, omits sizes, removes tree actions, or lacks stale or garbage cleanup evidence.",
+        "given": "A maintenance screen hides cache-only entries, omits sizes, breaks tree connectors or actions, or lacks stale or garbage cleanup evidence.",
         "when": "A user tries to decide whether deleting an image or pruning cache is safe.",
         "then": "The gate fails because the screen could lead to deleting the wrong reference or trusting unproven cleanup.",
-        "failure_oracle": "The UI/static verifier fails if image refs and cache refs collapse together, size labels disappear, tree actions are absent, or stale/garbage cleanup evidence is removed."
-      }
+        "failure_oracle": "The UI/static verifier fails if image refs and cache refs collapse together, size labels disappear, tree connectors or actions are absent, or stale/garbage cleanup evidence is removed."
+      },
+      "implementation_evidence": [
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:renderImages",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:renderImageReferenceTree",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:ImageGraphLayout.dispatchDraw",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:renderImageCacheHealth",
+        "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt:imageCacheHealth"
+      ]
     },
     {
       "id": "BB-TERMINAL-001",
