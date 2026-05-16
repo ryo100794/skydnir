@@ -1600,8 +1600,13 @@ def compact_q6_binding_detail(detail):
         "gpu_after_upload_hash": detail.get("gpu_after_upload_hash"),
         "gpu_after_dispatch_hash": detail.get("gpu_after_dispatch_hash"),
         "fd_after_hash": detail.get("fd_after_hash"),
+        "writeback_offset": detail.get("writeback_offset"),
+        "writeback_bytes": detail.get("writeback_bytes"),
+        "device_local_staged": detail.get("device_local_staged"),
         "writeback_verified": detail.get("writeback_verified"),
         "writeback_mismatch": detail.get("writeback_mismatch"),
+        "q6_row_indexed": detail.get("q6_row_indexed"),
+        "q6_sample_indices": detail.get("q6_sample_indices"),
         "f32_after_dispatch": detail.get("f32_after_dispatch"),
         "f32_after_writeback": detail.get("f32_after_writeback"),
     }
@@ -1629,6 +1634,50 @@ def f32_sample_values(samples):
     return values
 
 
+def q6_oracle_sample_indices(oracle):
+    indices = []
+
+    def add(value):
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            return
+        if value not in indices:
+            indices.append(value)
+
+    first_mismatch = oracle.get("first_mismatch") if isinstance(oracle.get("first_mismatch"), dict) else {}
+    add(first_mismatch.get("dst_index"))
+    for section in ("row_window", "samples"):
+        rows = oracle.get(section)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, dict):
+                add(row.get("dst_index"))
+    return indices
+
+
+def q6_row_indexed_samples_match_oracle(detail, oracle_indices):
+    if detail.get("q6_row_indexed") is not True:
+        return False
+    detail_indices = detail.get("q6_sample_indices")
+    if not isinstance(detail_indices, list) or not detail_indices:
+        return False
+    try:
+        detail_indices = [int(v) for v in detail_indices]
+    except (TypeError, ValueError):
+        return False
+    if oracle_indices and not set(detail_indices).intersection(set(oracle_indices)):
+        return False
+    dispatch_values = f32_sample_values(detail.get("f32_after_dispatch"))
+    writeback_values = f32_sample_values(detail.get("f32_after_writeback"))
+    return dispatch_values is not None and writeback_values is not None
+
+
+q6_oracle_row_indexed_sample_indices = q6_oracle_sample_indices(q6_latest_oracle)
+q6_row_indexed_writeback_evidence = []
+
+
 q6_binding_details = [
     detail
     for detail in (q6_latest.get("binding_details") or [])
@@ -1650,6 +1699,14 @@ for detail in q6_binding_details:
         compact = compact_q6_binding_detail(detail)
         dispatch_f32 = f32_sample_values(detail.get("f32_after_dispatch"))
         writeback_f32 = f32_sample_values(detail.get("f32_after_writeback"))
+        is_q6_output_binding = detail.get("binding") == 2
+        has_q6_row_indexed_evidence = q6_row_indexed_samples_match_oracle(
+            detail, q6_oracle_row_indexed_sample_indices
+        )
+        if is_q6_output_binding:
+            evidence = dict(compact)
+            evidence["row_indexed_samples_match_oracle"] = has_q6_row_indexed_evidence
+            q6_row_indexed_writeback_evidence.append(evidence)
         if detail.get("writeback_mismatch") is True or (
             hash_evidence_present(dispatch_hash)
             and hash_evidence_present(after_hash)
@@ -1660,6 +1717,15 @@ for detail in q6_binding_details:
             and dispatch_f32 != writeback_f32
         ):
             q6_writable_writeback_mismatches.append(compact)
+        elif (
+            is_q6_output_binding
+            and q6_oracle_row_indexed_sample_indices
+            and not has_q6_row_indexed_evidence
+        ):
+            # Fail closed: a Q6 writeback correctness claim needs exact
+            # row-indexed post-dispatch/post-writeback samples at oracle
+            # row_window/q6_first_mismatch dst indices, not generic samples.
+            q6_writable_writeback_unknown.append(compact)
         elif detail.get("writeback_verified") is not True and not (
             hash_evidence_present(dispatch_hash)
             and hash_evidence_present(after_hash)
@@ -1680,7 +1746,16 @@ for detail in q6_binding_details:
         q6_readonly_upload_hash_mismatches.append(compact)
     elif upload_hash and dispatch_hash and upload_hash != dispatch_hash:
         q6_readonly_dispatch_mutations.append(compact)
-q6_writeback_verified_all = bool(q6_writable_binding_details) and not q6_writable_writeback_mismatches and not q6_writable_writeback_unknown
+q6_row_indexed_writeback_verified = bool(q6_row_indexed_writeback_evidence) and all(
+    item.get("row_indexed_samples_match_oracle") is True
+    for item in q6_row_indexed_writeback_evidence
+)
+q6_writeback_verified_all = (
+    bool(q6_writable_binding_details)
+    and not q6_writable_writeback_mismatches
+    and not q6_writable_writeback_unknown
+    and (not q6_oracle_row_indexed_sample_indices or q6_row_indexed_writeback_verified)
+)
 q6_first_mismatch = (
     q6_latest_oracle.get("first_mismatch")
     if isinstance(q6_latest_oracle.get("first_mismatch"), dict)
@@ -1741,6 +1816,9 @@ q6_workgroup_diagnostics = {
     "q6_shader_like_64_abs_delta": q6_latest_partial.get("q6_shader_like_64_abs_delta"),
     "q6_shader_like_oracle_cleared": q6_shader_like_oracle_cleared,
     "q6_first_mismatch": q6_first_mismatch,
+    "q6_row_indexed_sample_indices": q6_oracle_row_indexed_sample_indices[:48],
+    "q6_row_indexed_writeback_evidence": q6_row_indexed_writeback_evidence[:8],
+    "q6_row_indexed_writeback_verified": q6_row_indexed_writeback_verified,
     "q6_writable_bindings": q6_writable_binding_details[:8],
     "q6_readonly_upload_hash_mismatches": q6_readonly_upload_hash_mismatches[:8],
     "q6_readonly_dispatch_mutations": q6_readonly_dispatch_mutations[:8],

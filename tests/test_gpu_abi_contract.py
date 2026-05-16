@@ -78,6 +78,9 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"dirty_probe_ms\\":%.4f',
             '\\"dirty_writeback_cached\\":%s',
             '\\"dirty_writeback_bytes\\":%zu',
+            '\\"writeback_offset\\":%lld',
+            '\\"writeback_bytes\\":%zu',
+            '\\"device_local_staged\\":%s',
             '\\"fd_before_hash\\":\\"0x%016llx\\"',
             '\\"gpu_after_upload_hash\\":\\"0x%016llx\\"',
             '\\"gpu_after_dispatch_hash\\":\\"0x%016llx\\"',
@@ -101,8 +104,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("write_vulkan_binding_compact_report", source)
         self.assertIn('\\"f32_after_dispatch\\":', source)
         self.assertIn('\\"f32_after_writeback\\":', source)
+        self.assertIn('\\"q6_row_indexed\\":true', source)
+        self.assertIn('\\"q6_sample_indices\\":[', source)
+        self.assertIn("collect_q6_row_indexed_sample_indices", source)
+        self.assertIn("write_q6_row_indexed_f32_evidence", source)
+        self.assertIn("q6_first_mismatch", source)
+        self.assertIn("row_window", source)
         self.assertIn("write_f32_sample_array", source)
         self.assertIn("write_f32_fd_sample_array", source)
+        self.assertIn("write_f32_sample_array_at_indices", source)
+        self.assertIn("write_f32_fd_sample_array_at_indices", source)
         self.assertIn('\\"compact_summary\\":true', source)
         self.assertIn("write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);", source)
         self.assertIn("write_spirv_execution_report(json_out(),", source)
@@ -506,9 +517,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "q6_blocker_class",
             "q6_shader_like_oracle_cleared",
             "q6_first_mismatch",
+            "q6_row_indexed_sample_indices",
+            "q6_row_indexed_writeback_evidence",
+            "q6_row_indexed_writeback_verified",
+            "row_indexed_samples_match_oracle",
             "q6_writable_bindings",
             "q6_readonly_upload_hash_mismatches",
             "q6_readonly_dispatch_mutations",
+            "writeback_offset",
+            "writeback_bytes",
+            "device_local_staged",
             "vulkan-device-execution-or-writeback",
             "descriptor-effective-range-or-upload",
         ]:
@@ -649,6 +667,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q6_writable_writeback_mismatches", compare)
         self.assertIn("f32_after_writeback", compare)
         self.assertIn("f32_sample_values", compare)
+        self.assertIn("q6_oracle_sample_indices", compare)
+        self.assertIn("q6_row_indexed_samples_match_oracle", compare)
+        self.assertIn("row_window/q6_first_mismatch dst indices", compare)
         self.assertIn("q6_writeback_verified_all", compare)
         self.assertIn("vulkan-device-execution\"", compare)
         self.assertIn("writeback_verified", GPU_EXECUTOR.read_text())

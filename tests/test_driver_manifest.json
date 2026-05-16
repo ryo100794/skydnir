@@ -6,7 +6,7 @@
     "canonical_driver": "scripts/pdocker-test-driver.py",
     "artifact_rule": "Every automated lane writes one run manifest. Individual generated files remain in their canonical locations and are referenced with sha256, size, and producer command.",
     "wrapper_rule": "Legacy shell entrypoints may exist only as compatibility wrappers around the canonical driver.",
-    "stable_checkpoint_rule": "A run manifest is stable-checkpoint eligible only when release blockers in docs/plan/RELEASE_READINESS.md are closed or explicitly scoped, and every device-gated artifact named by docs/test/CI_GATE_LEDGER.md is passing with the required proof. Host-only planned-gap verifiers, non-passing artifacts, and device-gated lanes without promotion artifacts are non-promoting evidence.",
+    "stable_checkpoint_rule": "A run manifest is stable-checkpoint eligible only when release blockers in docs/plan/RELEASE_READINESS.md are closed or explicitly scoped, and every device-gated artifact named by docs/test/CI_GATE_LEDGER.md is passing with the required proof. Host-only planned-gap verifiers, non-passing artifacts, device-gated lanes without promotion artifacts, and planned-gap artifacts with success=false are non-promoting evidence.",
     "non_promoting_statuses": [
       "planned-gap",
       "blocked",
@@ -14,7 +14,7 @@
       "skip",
       "skipped"
     ],
-    "device_gate_rule": "Lanes that require adb/installed APKs provide device evidence only; they do not promote a stable checkpoint unless the corresponding CI gate ledger promotion condition is satisfied and the artifact status is passing."
+    "device_gate_rule": "Lanes that require adb/installed APKs provide device evidence only; they do not promote a stable checkpoint unless the corresponding CI gate ledger promotion condition is satisfied, the artifact status is passing, and success/stable_checkpoint_eligible are true."
   },
   "lanes": {
     "host-smoke": {
@@ -212,13 +212,44 @@
         "service-truth",
         "runtime-teardown",
         "image-pull-crash-safety",
-        "OOM/LMK",
-        "OOM/LMK survival device replay",
-        "llama GPU correctness",
+        "llama GPU Q6_K correctness/workgroup/writeback device evidence",
+        "terminal exec-it raw Engine JSONL device evidence",
+        "APK memory pager and OOM/LMK device replay",
+        "storage graph/layer maintenance device evidence",
+        "linkat hardlink semantics device evidence",
+        "Docker CLI docker cp end-to-end device evidence",
         "COW/overlay external kill-at-step device evidence",
-        "terminal exec-it device artifact verifier",
         "image live-pull interruption device replay",
         "archive API device mutation promotion"
+      ]
+    },
+    "android-llama-gpu-q6k": {
+      "description": "Device route for llama GPU Q6_K workgroup/writeback correctness evidence. Local checks and blocked-memory/readiness artifacts are non-promoting; no benchmark or inference claim is allowed until the verifier reports a Q6_K oracle match on device.",
+      "requires": [
+        "adb",
+        "installed-debug-apk",
+        "gpu-capable-device",
+        "llama-model-fixture"
+      ],
+      "checkpoint_class": "device-evidence-only",
+      "stable_checkpoint_eligible": false,
+      "planned_gap_contracts": [
+        "llama GPU Q6_K correctness/workgroup/writeback device evidence"
+      ],
+      "promotion_condition": "Must satisfy docs/test/CI_GATE_LEDGER.md llama GPU correctness promotion condition with status=pass, benchmark_claim_allowed=true, Q6_K local-size/writeback diagnostics present, and a matching Q6_K oracle; blocked-memory, readiness-blocked, or oracle-mismatch artifacts remain non-promoting.",
+      "commands": [
+        {
+          "id": "android-llama-gpu-q6k-workflow",
+          "argv": [
+            "python3",
+            "scripts/android-llama-gpu-q6k-run.py"
+          ],
+          "artifacts": [
+            "docs/test/llama-gpu-device-readiness-latest.json",
+            "docs/test/llama-gpu-workgroup3d-ngl1-latest.json",
+            "docs/test/llama-gpu-q6k-workflow-latest.json"
+          ]
+        }
       ]
     },
     "python-coverage": {
@@ -246,13 +277,13 @@
       ]
     },
     "storage-layer-maintenance-ui": {
-      "description": "Host-only, non-promoting storage/layer maintenance UI contract. It keeps cache references distinct from image references, requires size and reference-tree actions, and records stale/garbage cleanup evidence without claiming device promotion.",
+      "description": "Host-only, non-promoting storage graph/layer maintenance UI contract. It keeps cache references distinct from image references, requires size and reference-tree actions, and records stale/garbage cleanup evidence without claiming device promotion.",
       "checkpoint_class": "host-ui-contract-non-promoting",
       "stable_checkpoint_eligible": false,
       "planned_gap_contracts": [
-        "storage/layer maintenance device evidence for cache-vs-image refs, sizes, tree actions, and stale/garbage cleanup"
+        "storage graph/layer maintenance device evidence for cache-vs-image refs, sizes, tree actions, and stale/garbage cleanup"
       ],
-      "promotion_condition": "Non-promoting manifest gate only. Stable/release credit still requires a device artifact proving the UI flow, Engine storage state, and cleanup evidence agree after build, prune, rebuild, image delete, and stale-cache cleanup.",
+      "promotion_condition": "Non-promoting manifest gate only. Stable/release credit still requires a device artifact proving the UI flow, Engine storage state, storage graph rendering, and cleanup evidence agree after build, prune, rebuild, image delete, and stale-cache cleanup.",
       "commands": [
         {
           "id": "storage-layer-maintenance-ui-actions",
@@ -534,14 +565,14 @@
       ]
     },
     "android-memory-pager": {
-      "description": "Device route for APK-scoped memory pager probes and bounded OOM/LMK telemetry artifacts.",
+      "description": "Device route for APK-scoped memory pager probes and bounded OOM/LMK telemetry artifacts. Planned-gap, blocked-device, and host-only artifacts are non-promoting until connected-device pager plus LMK replay evidence passes.",
       "requires": [
         "adb",
         "installed-debug-apk"
       ],
       "checkpoint_class": "device-evidence-only",
       "stable_checkpoint_eligible": false,
-      "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
+      "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with passing managed/transparent pager artifacts plus controlled OOM/LMK replay before release/stable credit.",
       "commands": [
         {
           "id": "android-memory-pager-managed-poc",
@@ -575,6 +606,58 @@
             "docs/test/oom-lmk-survival-latest.json",
             "docs/test/apk-memory-pager-managed-latest.json",
             "docs/test/apk-memory-pager-transparent-latest.json"
+          ]
+        }
+      ],
+      "planned_gap_contracts": [
+        "APK memory pager promotion device evidence and controlled OOM/LMK replay"
+      ]
+    },
+    "linkat-hardlink-semantics-plan": {
+      "description": "Host/static verifier for the planned Android linkat hardlink semantics gate. It keeps the current copy fallback fail-closed and non-promoting until device evidence proves inode identity, link counts, write-through, errno parity, and restart recovery.",
+      "checkpoint_class": "host-contract-non-promoting",
+      "stable_checkpoint_eligible": false,
+      "planned_gap_contracts": [
+        "linkat hardlink semantics device evidence"
+      ],
+      "promotion_condition": "Must satisfy the planned Android direct-syscall linkat gate with identical st_dev/st_ino, st_nlink growth/decrement, write-through behavior, Linux errno parity, and restart recovery; the file-copy fallback cannot promote.",
+      "commands": [
+        {
+          "id": "linkat-hardlink-planned-gap",
+          "argv": [
+            "python3",
+            "scripts/verify_direct_syscall_contracts.py"
+          ],
+          "artifacts": [
+            "tests/direct_syscall_coverage.json"
+          ]
+        }
+      ]
+    },
+    "android-docker-cp-e2e": {
+      "description": "Planned device route for Docker CLI docker cp end-to-end proof against the same current Engine container. Host archive API compatibility is non-promoting until this gate proves copy and metadata behavior on device.",
+      "requires": [
+        "adb",
+        "installed-debug-apk",
+        "running-container",
+        "docker-cp-e2e-diagnostics"
+      ],
+      "checkpoint_class": "device-evidence-planned-gap",
+      "stable_checkpoint_eligible": false,
+      "planned_gap_contracts": [
+        "Docker CLI docker cp end-to-end device evidence"
+      ],
+      "promotion_condition": "Must produce a passing docker-cp-e2e device artifact with same Engine container ID, host-to-container and container-to-host copy, archive HEAD/GET/PUT, X-Docker-Container-Path-Stat, byte/sha256 equality, hardlink/symlink and metadata policy, xattr, whiteout rejection, and escape-negative cases.",
+      "commands": [
+        {
+          "id": "android-docker-cp-e2e",
+          "argv": [
+            "bash",
+            "scripts/android-device-smoke.sh",
+            "--docker-cp-e2e"
+          ],
+          "artifacts": [
+            "files/pdocker/diagnostics/docker-cp-e2e-latest.json"
           ]
         }
       ]

@@ -3479,7 +3479,7 @@ class MainActivity : AppCompatActivity() {
                 "UI exec -it is not attached to a controlling tty"
             }
 
-            val script = "p=pdocker-ui-it\necho \${p}-ok\n/usr/bin/[ \"x\" = \"x\" ] && echo \${p}-bracket-ok\npwd\n[ -t 0 ] && echo \${p}-tty-ok\n[ \"\$TERM\" = \"xterm-256color\" ] && echo \${p}-term-ok\n[ -n \"\$BASH_VERSION\" ] && echo \${p}-bash-ok\ntop -b -n 1 >/dev/null && echo \${p}-top-ok\necho \${p}-arrow-seed\n"
+            val script = "p=pdocker-ui-it\necho \${p}-ok\n/usr/bin/[ \"x\" = \"x\" ] && echo \${p}-bracket-ok\npwd\n[ -t 0 ] && echo \${p}-tty-ok\n[ \"\$TERM\" = \"xterm-256color\" ] && echo \${p}-term-ok\n[ -n \"\$BASH_VERSION\" ] && echo \${p}-bash-ok\ntop -b -n 1 >/dev/null && echo \${p}-top-batch-ok\necho \${p}-arrow-seed\n"
             ui.post {
                 webView?.evaluateJavascript(
                     "window.pdockerTestSendInput && window.pdockerTestSendInput(${JSONObject.quote(script)}, false)",
@@ -3493,11 +3493,10 @@ class MainActivity : AppCompatActivity() {
                     text.contains("pdocker-ui-it-tty-ok") &&
                     text.contains("pdocker-ui-it-term-ok") &&
                     text.contains("pdocker-ui-it-bash-ok") &&
-                    text.contains("pdocker-ui-it-top-ok") &&
+                    text.contains("pdocker-ui-it-top-batch-ok") &&
                     text.contains("pdocker-ui-it-arrow-seed")
                 if (markersReady) {
                     evidence.put("enter-single-submit", true)
-                    evidence.put("top-starts-on-tty", true)
                 }
                 markersReady
             }) { "UI exec -it did not echo initial expected markers" }
@@ -3537,7 +3536,10 @@ class MainActivity : AppCompatActivity() {
                 val slice = output.toString().drop(topStartOffset)
                 topRefreshPattern.containsMatchIn(slice)
             }
-            if (topRefreshSeen) evidence.put("top-refresh-observed-before-q", true)
+            if (topRefreshSeen) {
+                evidence.put("top-starts-on-tty", true)
+                evidence.put("top-refresh-observed-before-q", true)
+            }
             check(topRefreshSeen) { "UI exec -it fullscreen top did not render a refresh before q" }
             ui.post {
                 webView?.evaluateJavascript(
@@ -3548,12 +3550,14 @@ class MainActivity : AppCompatActivity() {
             Thread.sleep(500)
             ui.post {
                 webView?.evaluateJavascript(
-                    "window.pdockerTestSendInput && window.pdockerTestSendInput('echo \${p}-topq-ok\\n', false)",
+                    "window.pdockerTestSendInput && window.pdockerTestSendInput('echo \${p}-top-ok\\necho \${p}-topq-ok\\n', false)",
                     null,
                 )
             }
             check(waitUntil(5_000) {
-                val topQuit = output.toString().contains("pdocker-ui-it-topq-ok")
+                val topText = output.toString()
+                val topQuit = topText.contains("pdocker-ui-it-top-ok") &&
+                    topText.contains("pdocker-ui-it-topq-ok")
                 if (topQuit) evidence.put("q-quits-top", true)
                 topQuit
             }) {
@@ -3585,10 +3589,11 @@ class MainActivity : AppCompatActivity() {
             val bracketNoise = Regex("(/usr/bin/)?\\[: extra argument").containsMatchIn(text)
             val arrowNoise = text.contains("\u001b[A")
             val lineControlOk = text.contains("pdocker-ui-it-ok\r\n") || text.contains("pdocker-ui-it-ok\n")
+            val finalImeEnterCount = Regex("pdocker-ui-it-ime-enter-ok").findAll(text).count()
             val diagnostics = File(pdockerHome, "diagnostics/engine-exec-input-latest.jsonl").readTextIfExists()
             val resizeObserved = diagnostics.contains("/resize?h=") || diagnostics.contains("\"event\":\"resize-failed\"") || diagnostics.contains("\"event\": \"resize-failed\"")
             if (passed) evidence.put("ctrl-c-interrupts-without-literal-c", true)
-            if (imeEnterOk && passed && !text.contains("sleep 15c")) {
+            if (imeEnterOk && finalImeEnterCount == 1 && passed && !text.contains("sleep 15c")) {
                 evidence.put("ime-enter-ctrlc-regression-covered", true)
             }
             if (!bracketNoise && !arrowNoise && lineControlOk && evidence.optBoolean("top-starts-on-tty") && evidence.optBoolean("top-refresh-observed-before-q") && evidence.optBoolean("q-quits-top")) {
@@ -3598,6 +3603,9 @@ class MainActivity : AppCompatActivity() {
             check(passed) { "UI exec -it Ctrl+C did not interrupt sleep and return to the shell" }
             check(!bracketNoise) { "UI exec -it produced bracket argv noise" }
             check(!arrowNoise) { "UI exec -it printed arrow escape bytes instead of treating them as terminal input" }
+            check(finalImeEnterCount == 1) {
+                "UI exec -it IME Enter fallback submitted $finalImeEnterCount commands"
+            }
             check(evidence.optBoolean("ime-enter-ctrlc-regression-covered")) {
                 "UI exec -it did not cover IME Enter/Ctrl-C fallback without duplicate/literal input"
             }

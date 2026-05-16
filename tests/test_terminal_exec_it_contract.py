@@ -155,15 +155,21 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('UI exec -it printed arrow escape bytes', self.main)
         self.assertIn("window.pdockerTestSendInput('top\\\\n', false)", self.main)
         self.assertIn("window.pdockerTestSendInput('q', true)", self.main)
-        self.assertIn(r"window.pdockerTestSendInput('echo \${p}-topq-ok\\n', false)", self.main)
+        self.assertIn(r"window.pdockerTestSendInput('echo \${p}-top-ok\\necho \${p}-topq-ok\\n', false)", self.main)
         self.assertIn('"UI exec -it fullscreen top did not render a refresh before q"', self.main)
         self.assertIn('"UI exec -it fullscreen top did not accept q', self.main)
         self.assertIn('"ime-enter-ctrlc-regression-covered"', self.main)
         self.assertIn('"top-refresh-observed-before-q"', self.main)
         self.assertIn('"top-repaint-remains-terminal-shaped"', self.main)
+        self.assertIn("pdocker-ui-it-top-batch-ok", self.main)
+        self.assertIn('evidence.put("top-starts-on-tty", true)', self.main)
         self.assertIn('evidence.put("top-refresh-observed-before-q", true)', self.main)
         self.assertIn('evidence.put("ime-enter-ctrlc-regression-covered", true)', self.main)
         self.assertIn('evidence.put("top-repaint-remains-terminal-shaped", true)', self.main)
+        self.assertIn('val finalImeEnterCount = Regex("pdocker-ui-it-ime-enter-ok").findAll(text).count()', self.main)
+        self.assertIn('check(finalImeEnterCount == 1)', self.main)
+        initial_script = self.main[self.main.index('val script = "p=pdocker-ui-it') : self.main.index('ui.post {', self.main.index('val script = "p=pdocker-ui-it'))]
+        self.assertNotIn('echo \\${p}-top-ok', initial_script)
         self.assertIn('evidence.put("resize-route-is-observable", true)', self.main)
         self.assertIn('"UI exec -it did not observe Engine exec resize route in diagnostics"', self.main)
         self.assertIn('Regex("(/usr/bin/)?\\\\[: extra argument")', self.main)
@@ -206,15 +212,18 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('"DeviceProofAttempted": false', skip_body)
         self.assertIn('"HardGateRequired": $hard_gate_json', skip_body)
         self.assertIn('"RequiredEvidence"', skip_body)
-        self.assertIn('"Enter": false', skip_body)
-        self.assertIn('"CtrlC": false', skip_body)
-        self.assertIn('"ArrowHistory": false', skip_body)
-        self.assertIn('"ImeEnterCtrlC": false', skip_body)
-        self.assertIn('"Top": false', skip_body)
-        self.assertIn('"TopRefresh": false', skip_body)
-        self.assertIn('"TopRepaint": false', skip_body)
-        self.assertIn('"TopQuit": false', skip_body)
-        self.assertIn('"Resize": false', skip_body)
+        for evidence_name in [
+            "enter-single-submit",
+            "ctrl-c-interrupts-without-literal-c",
+            "arrow-up-reaches-readline-history",
+            "ime-enter-ctrlc-regression-covered",
+            "top-starts-on-tty",
+            "top-refresh-observed-before-q",
+            "top-repaint-remains-terminal-shaped",
+            "q-quits-top",
+            "resize-route-is-observable",
+        ]:
+            self.assertIn(f'"{evidence_name}": false', skip_body)
         self.assertIn('fake success', skip_body)
 
         validate_body = _shell_function_body(self.android_smoke, "validate_ui_it_selftest_artifact")

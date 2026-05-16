@@ -1,6 +1,6 @@
 # pdocker TODO ledger
 
-Snapshot date: 2026-05-15.
+Snapshot date: 2026-05-16.
 
 This is the working TODO list for unfinished items and deliberate temporary
 accommodations. Keep this file current whenever a workaround is added so it
@@ -82,9 +82,12 @@ issues, and deciding which planned gaps become hard gates.
    is still visible are non-promoting. `tests/test_driver_manifest.json`,
    `docs/test/CI_GATE_LEDGER.md`, `docs/test/SCENARIOS.md`, this TODO, and the
    execution timeline must agree before any build/test run is described as a
-   stable checkpoint. The current sync list includes archive API compatibility,
-   terminal artifact verification, COW kill-at-step, OOM/LMK survival, and
-   image live-pull interruption gates.
+   stable checkpoint. The current sync list includes llama GPU Q6_K
+   workgroup/writeback correctness, terminal exec-it, APK memory pager/OOM-LMK,
+   storage graph/layer maintenance UI, `linkat` hardlink semantics, Docker CLI
+   `docker cp`/archive API, COW kill-at-step, and image live-pull interruption
+   gates. Each gate stays planned-gap or otherwise non-promoting until its
+   named device promotion condition produces a passing artifact.
 
 ### Next Queue Generated 2026-05-04
 
@@ -123,7 +126,10 @@ issues, and deciding which planned gaps become hard gates.
   device results are not interpreted ad hoc. Environment propagation is now a
   first-class blocker: diagnostic flags used by the compare script, pdockerd
   defaults, UI/compose launches, and artifact verification must remain
-  synchronized before a GPU result can be compared. Device-side validation steps are maintained in
+  synchronized before a GPU result can be compared. The Q6_K workgroup and
+  writable-output writeback diagnostics are non-promoting blocker evidence until
+  the Q6_K oracle matches; they must not be used for benchmark or inference
+  claims by themselves. Device-side validation steps are maintained in
   `docs/test/LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`.
   Stage gates and compact-model handoff are maintained in
   `docs/plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`.
@@ -298,8 +304,9 @@ risk, not stable checkpoint credit.
   `ImageGraphAction`s to image nodes while surfacing shared-cache, compose, and
   container references. Host/static coverage is `python3
   scripts/verify-ui-actions.py` plus the `image.layer.maintenance-ui.contract`
-  scenario. Remaining acceptance gap: device screenshot/manual visual pass for
-  connector rendering and tap actions before release credit.
+  scenario. This is no longer a planned-only source gap, but it remains
+  non-promoting release evidence until a connected-device screenshot/manual
+  visual pass proves connector rendering and tap actions.
 - [next] Pull/update operation semantics. "Pull image" is an Engine API
   operation, not "open docker pull shell"; if the ref already exists, treat it
   as update/re-pull with old tag preserved until success. Acceptance: wording,
@@ -377,9 +384,14 @@ implementation change plus a focused verification artifact.
   API in `docs/design/DOCKER_COMPAT_SCOPE.md`.
 - [done] Add the host archive API compatibility gate:
   `python3 scripts/verify-archive-api-compat.py` compiles the daemon mirror and
-  runs the Docker archive/copy compatibility unit corpus. This is regression
-  evidence only; device-gated COW/archive mutation safety remains blocked until
-  the kill-at-step artifact promotes.
+  runs the Docker archive/copy compatibility unit corpus, including the static
+  Docker CLI `docker cp` end-to-end plan. This is regression evidence only;
+  device-gated COW/archive mutation safety and `docker cp` same-container-ID
+  proof remain planned-gap/non-promoting until their device artifacts promote.
+  Current host coverage proves pdockerd can observe and serialize already-
+  materialized COW hardlinks, including merged lower/upper hardlink peers and
+  whiteouted hardlink-source paths, but this is not evidence that the direct
+  runtime can create true `linkat` hardlinks.
 - [done] Tiny SDK28 compat smoke: `docker build`, `docker compose up`, logs,
   exit code, and `compose down` pass with the scratch direct executor.
 - [done] Ubuntu `apt-get update` signature verification works under direct
@@ -503,9 +515,11 @@ implementation change plus a focused verification artifact.
   (`memory-ring.jsonl` and `memory-summary.json`) with operation/container IDs,
   atomic rename publication, and partial-record rejection; the transparent APK
   PoC script captures those artifacts and the canonical test driver has a
-  dedicated `android-memory-pager` lane. Remaining app-level virtual
-  memory/low-memory audit items stay TODO/test-plan only until promoted by
-  device evidence:
+  dedicated `android-memory-pager` lane. Canonical status: this lane is
+  device-evidence-only but non-promoting for stable/release credit until managed
+  pager probes and controlled OOM/LMK replay both pass on a connected device.
+  Remaining app-level virtual memory/low-memory audit items stay TODO/test-plan
+  only until promoted by device evidence:
   - Large allocation guard: define the admission threshold from requested bytes,
     Android low-memory headroom, container/operation identity, and explicit
     large-workload or pager opt-in; unsafe allocations must return an
@@ -653,7 +667,10 @@ implementation change plus a focused verification artifact.
   `unlink`, writes through either name are visible through the other, invalid
   flags/mediated escapes return Linux-compatible errno, and restart recovery
   does not promote partial hardlink/CoW metadata or divergent copy-fallback
-  artifacts.
+  artifacts. The May 16 host slice found reusable pdockerd/archive inode
+  evidence for existing hardlinks, but no daemon-side sidecar/index is promoted
+  as a source of truth; true creation, mediation, and recovery still require
+  direct-runtime C work and device evidence.
 - [done] Replace `/proc/self/exe` rootfs temporary symlink mediation with direct
   readlink emulation that does not mutate image state; remaining work is
   Android device evidence for `/proc/self/exe`, `/proc/thread-self/exe`, and
@@ -768,11 +785,12 @@ Temporary behavior:
 - `linkat` currently uses a file-copy fallback, including a dpkg
   `/var/lib/dpkg/status-old` replace case, because Android app data rejects the
   hardlink behavior dpkg expects. This is content-only compatibility, not a
-  closable hardlink implementation: planned tests must fail closed until a
-  device artifact proves shared `st_dev/st_ino`, `st_nlink` growth/decrement,
-  write-through behavior, Linux errno parity for invalid/escaped operations,
-  and restart recovery that leaves no partial hardlink index or divergent copy
-  promoted. Replace this with a real inode/hardlink/CoW storage model.
+  closable hardlink implementation: the planned Android device gate is
+  non-promoting and must fail closed until an artifact proves shared
+  `st_dev/st_ino`, `st_nlink` growth/decrement, write-through behavior, Linux
+  errno parity for invalid/escaped operations, and restart recovery that leaves
+  no partial hardlink index or divergent copy promoted. Replace this with a real
+  inode/hardlink/CoW storage model.
 - apt archive staging currently has a narrow `/var/cache/apt/archives/*.deb` to
   `/tmp/apt-dpkg-install-*` symlink mediation path. The earlier
   `DPkg::Go (14: Bad address)` blocker is past the current test point, but the
@@ -993,13 +1011,19 @@ Real implementation needed:
 2. Implement rename, deletion, chmod/chown/xattr, hardlink, symlink, and merged
    directory semantics.
 3. Make `docker cp` and UI edits share one storage contract.
-4. Add tests for lower read, upper write, whiteout delete, and copy-back edit.
+4. Promote Docker CLI `docker cp` only after a non-promoting device gate proves
+   the same Engine container ID, archive HEAD/GET/PUT behavior,
+   `X-Docker-Container-Path-Stat`, byte/sha256 equality, hardlink and symlink
+   policy, metadata, xattr, whiteout rejection, and escape-negative cases.
+5. Add tests for lower read, upper write, whiteout delete, and copy-back edit.
 
 Acceptance:
 
 - Editing a copied-up lower file affects only that container.
 - Deletes create correct whiteout behavior in image/container browse and export.
-- `docker cp` preserves expected Docker archive behavior.
+- `docker cp` preserves expected Docker archive behavior only after the
+  same-container-ID device gate passes; host archive unit tests remain
+  non-promoting compatibility evidence.
 
 ## P1: VS Code Server and Dev Workspace
 

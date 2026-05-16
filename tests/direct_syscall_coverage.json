@@ -818,7 +818,7 @@
     {
       "id": "direct.linkat-copy-fallback",
       "phase2_contract": "linkat-hardlink-semantics",
-      "reason": "Current linkat emulation copies regular file bytes, so hardlink paths do not share st_dev/st_ino, st_nlink stays 1, later writes can diverge, and crash/restart recovery for any future hardlink index or CoW metadata is not evidenced."
+      "reason": "Current linkat emulation copies regular file bytes, so hardlink paths do not share st_dev/st_ino, st_nlink stays 1, later writes can diverge, and crash/restart recovery for any future hardlink index or CoW metadata is not evidenced. Host archive/COW tests only prove already-materialized hardlinks can be observed and serialized; they are non-promoting for direct runtime linkat until C-side creation, mediation, errno, and recovery evidence exists."
     },
     {
       "id": "direct.proc-self-exe-temp-symlink",
@@ -901,7 +901,7 @@
         "android.direct.syscall-errno-parity"
       ],
       "fast_gate": "python3 scripts/verify_direct_syscall_contracts.py && python3 -m unittest tests.direct_syscall.test_phase2_contracts",
-      "close_requires": "Non-promoting until an Android device artifact proves true linkat hardlink semantics versus the current copy fallback: both names must report the same st_dev/st_ino, st_nlink must increase after linkat and decrement after unlink, writes through either name must be visible through the other, invalid flags and mediated escapes must return Linux-compatible errno, and restart recovery evidence must prove partial hardlink/CoW metadata updates fail closed without promoting divergent copies."
+      "close_requires": "Non-promoting until an Android device artifact proves true linkat hardlink semantics versus the current copy fallback: both names must report the same st_dev/st_ino, st_nlink must increase after linkat and decrement after unlink, writes through either name must be visible through the other, invalid flags and mediated escapes must return Linux-compatible errno, and restart recovery evidence must prove partial hardlink/CoW metadata updates fail closed without promoting divergent copies. Existing host archive hardlink preservation is regression evidence only and cannot close direct linkat semantics."
     },
     {
       "id": "proc-self-exe-no-mutation",

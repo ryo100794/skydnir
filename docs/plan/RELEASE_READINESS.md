@@ -1,6 +1,6 @@
 # Release Readiness Checklist
 
-Snapshot date: 2026-05-15.
+Snapshot date: 2026-05-16.
 
 This page is the GitHub-facing release gate. It keeps the public README and
 showcase copy aligned with the current P0 blockers from
@@ -56,12 +56,14 @@ documentation remains.
   - Required evidence: fault-injection or replayable recovery artifact plus
     startup repair/check behavior, including archive PUT/whiteout/rename
     coverage and adb/run-as proof for every required kill checkpoint.
-- **OOM/LMK survival — blocked**
-  - Why it blocks: Android may kill backend work while UI state survives;
-    host/static classification exists, but controlled connected-device
-    LMK/backend-death replay is still non-promoting planned-gap evidence.
-  - Required evidence: structured memory/OOM events and replayable LMK suspected
-    device test.
+- **APK memory pager and OOM/LMK survival — blocked**
+  - Why it blocks: Android may kill backend work while UI state survives; the
+    managed/transparent pager scripts and host/static classification exist, but
+    controlled connected-device pager plus LMK/backend-death replay remains
+    non-promoting planned-gap evidence.
+  - Required evidence: managed pager and telemetry artifacts from the installed
+    APK plus structured memory/OOM events and a replayable LMK suspected device
+    test.
 - **Terminal `exec -it` device verifier — blocked for demo-ready terminal claims**
   - Why it blocks: host-side verifier logic exists, but a real UI container
     terminal must be paired with raw Engine exec input JSONL before static or
@@ -75,6 +77,21 @@ documentation remains.
     direct execution is incomplete.
   - Required evidence: either complete the no-PRoot executor or hard-disable
     execution actions with explicit runtime capability UI.
+- **Direct `linkat` hardlink semantics — blocked for hardlink compatibility claims**
+  - Why it blocks: the current Android fallback copies file bytes, so it cannot
+    prove shared inode identity, link-count behavior, write-through semantics,
+    or recovery from interrupted hardlink/CoW metadata updates.
+  - Required evidence: non-promoting Android `linkat` device gate promotes only
+    after identical `st_dev/st_ino`, `st_nlink` growth/decrement, write-through,
+    Linux errno parity, and restart recovery are all proven.
+- **Docker CLI `docker cp` end-to-end — planned-gap / non-promoting**
+  - Why it blocks: host archive API unit coverage exists, but it does not prove
+    Docker CLI copy behavior against the same current Engine container on a
+    device.
+  - Required evidence: planned device gate proving same Engine container ID,
+    host-to-container and container-to-host copy, archive HEAD/GET/PUT,
+    `X-Docker-Container-Path-Stat`, byte/sha256 equality, hardlink/symlink and
+    metadata policy, xattr, whiteout rejection, and escape-negative cases.
 - **Build/test checkpoint truth — blocked for stable label**
   - Why it blocks: some records include failing gates or scoped PASS results;
     Kotlin/native coverage is still incomplete, and host-only planned-gap
@@ -94,11 +111,13 @@ proof. Host-only checks such as `host-smoke` and `release-honesty` are useful
 regression/hygiene evidence, but they are non-promoting while they only prove
 that planned gaps remain visible.
 
-Current non-promoting gate representations include the archive API host
-compatibility check, the terminal exec-it artifact verifier, COW kill-at-step
-device lane, OOM/LMK survival lane, image live-pull interruption plan, and the
-storage/layer maintenance UI manifest gate. They are release-blocker evidence
-until their device-gated promotion conditions produce passing artifacts.
+Current non-promoting gate representations include the llama GPU Q6_K
+workgroup/writeback correctness workflow, the terminal exec-it artifact
+verifier, APK memory pager plus OOM/LMK survival, storage graph/layer
+maintenance UI evidence, direct `linkat` hardlink semantics, Docker CLI
+`docker cp` end-to-end/archive API evidence, COW kill-at-step, and image
+live-pull interruption. They are release-blocker evidence until their
+device-gated promotion conditions produce passing artifacts.
 
 For release notes and build records, treat these as blockers or scoped-out
 limitations, not passes:
@@ -144,10 +163,15 @@ limitations, not passes:
   input evidence for a real container session.
 - [ ] Storage metrics device sequence covers build, prune, rebuild, and
   edit/copy-up without double-counting shared layers.
-- [ ] Storage/layer maintenance UI evidence proves cache-only references remain
-  distinct from image references, unique/shared/stale sizes are visible, tree
-  rows expose detail/file/delete-with-cache-cleanup actions, and stale
+- [ ] Storage graph/layer maintenance UI evidence proves cache-only references
+  remain distinct from image references, unique/shared/stale sizes are visible,
+  tree rows expose detail/file/delete-with-cache-cleanup actions, and stale
   build-cache or unreferenced-layer garbage cleanup is shown.
+- [ ] Direct `linkat` hardlink artifact proves inode identity, link-count
+  preservation, write-through behavior, errno parity, and restart recovery.
+- [ ] Docker CLI `docker cp` end-to-end artifact proves same-container-ID
+  archive HEAD/GET/PUT behavior, byte/sha256 equality, metadata policy,
+  hardlink/symlink handling, xattr, and escape/whiteout negative cases.
 
 ### llama GPU release gate
 
@@ -157,6 +181,8 @@ limitations, not passes:
 - [ ] `ngl=1` passes CPU-vs-GPU deterministic correctness.
 - [ ] Q6_K-like blocker `0x274f68a67dfef210` is resolved or replaced by a newer
   documented blocker with artifact evidence.
+- [ ] Q6_K workgroup/writeback diagnostics are paired with a matching Q6_K
+  oracle before any benchmark or inference claim.
 - [ ] Any speedup claim is paired with a passing correctness artifact and device
   metadata.
 
@@ -199,4 +225,6 @@ Avoid these claims for now:
 - "crash safe" for image/layer/COW mutations without the device recovery
   artifacts listed above.
 - "storage cleanup is complete" or "safe to delete cache/images" without the
-  storage/layer maintenance UI and device cleanup evidence listed above.
+  storage graph/layer maintenance UI and device cleanup evidence listed above.
+- "`linkat` hardlinks work" or "`docker cp` is complete" without their
+  specific non-promoting device gates promoting.

@@ -102,6 +102,8 @@ typedef struct {
     double abs_error;
 } CpuOracleSample;
 
+typedef struct CpuOracleReport CpuOracleReport;
+
 typedef struct {
     void *lib;
     ocl_platform_id platform;
@@ -3347,6 +3349,14 @@ static float sample_f32_at(const void *data, size_t size, size_t index) {
     return value;
 }
 
+static int sample_f32_at_u64(const void *data, size_t size, uint64_t index, float *out) {
+    if (!data || !out || index > (uint64_t)(SIZE_MAX / sizeof(float))) return 0;
+    const size_t offset = (size_t)index * sizeof(float);
+    if (offset + sizeof(*out) > size) return 0;
+    memcpy(out, (const unsigned char *)data + offset, sizeof(*out));
+    return 1;
+}
+
 static void write_f32_sample_array(FILE *out, const void *data, size_t size) {
     fprintf(out, "[");
     const size_t count = size / sizeof(float);
@@ -3420,6 +3430,74 @@ static void write_f32_fd_sample_array(FILE *out, int fd, off_t offset, size_t si
     fprintf(out, "]");
 }
 
+static void write_f32_sample_array_at_indices(
+        FILE *out,
+        const void *data,
+        size_t size,
+        const uint64_t *indices,
+        size_t index_count) {
+    fprintf(out, "[");
+    for (size_t i = 0; i < index_count; ++i) {
+        float value = 0.0f;
+        const int ok = sample_f32_at_u64(data, size, indices[i], &value);
+        fprintf(out, "%s{\"index\":%llu,\"value\":",
+                i ? "," : "",
+                (unsigned long long)indices[i]);
+        if (ok && isfinite(value)) {
+            fprintf(out, "%.9g", (double)value);
+        } else {
+            fprintf(out, "null");
+        }
+        fprintf(out, "}");
+    }
+    fprintf(out, "]");
+}
+
+static void write_f32_fd_sample_array_at_indices(
+        FILE *out,
+        int fd,
+        off_t offset,
+        const uint64_t *indices,
+        size_t index_count) {
+    fprintf(out, "[");
+    for (size_t i = 0; i < index_count; ++i) {
+        float value = 0.0f;
+        int ok = 0;
+        if (fd >= 0 && indices[i] <= (uint64_t)(LLONG_MAX / (long long)sizeof(value))) {
+            const off_t f_off = offset + (off_t)(indices[i] * sizeof(value));
+            if (pread(fd, &value, sizeof(value), f_off) == (ssize_t)sizeof(value)) {
+                ok = 1;
+            }
+        }
+        fprintf(out, "%s{\"index\":%llu,\"value\":",
+                i ? "," : "",
+                (unsigned long long)indices[i]);
+        if (ok && isfinite(value)) {
+            fprintf(out, "%.9g", (double)value);
+        } else {
+            fprintf(out, "null");
+        }
+        fprintf(out, "}");
+    }
+    fprintf(out, "]");
+}
+
+static size_t collect_q6_row_indexed_sample_indices(
+        const CpuOracleReport *report,
+        uint64_t *indices,
+        size_t capacity);
+
+static void write_q6_row_indexed_f32_evidence(
+        FILE *out,
+        const char *field_name,
+        const void *data,
+        size_t size,
+        int fd,
+        off_t fd_offset,
+        int sample_fd,
+        const uint64_t *indices,
+        size_t index_count);
+
 static void write_vulkan_binding_report(
         FILE *out,
         const VulkanDispatchBinding *bindings,
@@ -3442,8 +3520,16 @@ static void write_vulkan_binding_report(
         const uint64_t *gpu_after_upload_hash,
         const uint64_t *gpu_after_dispatch_hash,
         const uint64_t *fd_after_hash,
-        const size_t *alias_rep) {
+        const size_t *alias_rep,
+        VulkanVectorBuffer * const *vk_buffers,
+        const size_t *binding_gpu_offset,
+        const int *buffer_fds,
+        const CpuOracleReport *cpu_oracle_report) {
     fprintf(out, "\"binding_details\":[");
+    uint64_t q6_sample_indices[48];
+    const size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
+        cpu_oracle_report, q6_sample_indices,
+        sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]));
     for (size_t i = 0; i < binding_count; ++i) {
         fprintf(out,
                 "%s{\"index\":%zu,\"set\":%u,\"binding\":%u,\"offset\":%lld,"
@@ -3464,7 +3550,9 @@ static void write_vulkan_binding_report(
                 "\"gpu_after_upload_hash\":\"0x%016llx\","
                 "\"gpu_after_dispatch_hash\":\"0x%016llx\","
                 "\"fd_after_hash\":\"0x%016llx\","
-                "\"writeback_verified\":%s,\"writeback_mismatch\":%s}",
+                "\"writeback_offset\":%lld,\"writeback_bytes\":%zu,"
+                "\"device_local_staged\":%s,"
+                "\"writeback_verified\":%s,\"writeback_mismatch\":%s",
                 i ? "," : "",
                 i,
                 bindings[i].descriptor_set,
@@ -3499,6 +3587,9 @@ static void write_vulkan_binding_report(
                 (unsigned long long)(gpu_after_upload_hash ? gpu_after_upload_hash[i] : 0),
                 (unsigned long long)(gpu_after_dispatch_hash ? gpu_after_dispatch_hash[i] : 0),
                 (unsigned long long)(fd_after_hash ? fd_after_hash[i] : 0),
+                (long long)bindings[i].offset,
+                dirty_writeback_bytes ? dirty_writeback_bytes[i] : (size_t)0,
+                vk_buffers && vk_buffers[i] && vk_buffers[i]->device_local_staged ? "true" : "false",
                 writable && writable[i] && gpu_after_dispatch_hash && fd_after_hash &&
                         gpu_after_dispatch_hash[i] != 0 && fd_after_hash[i] != 0 &&
                         gpu_after_dispatch_hash[i] == fd_after_hash[i]
@@ -3507,6 +3598,33 @@ static void write_vulkan_binding_report(
                         gpu_after_dispatch_hash[i] != 0 && fd_after_hash[i] != 0 &&
                         gpu_after_dispatch_hash[i] != fd_after_hash[i]
                     ? "true" : "false");
+        if (q6_sample_count > 0 && bindings[i].binding == 2 &&
+            active && active[i] && writable && writable[i] &&
+            vk_buffers && vk_buffers[i] && vk_buffers[i]->map &&
+            binding_gpu_offset && binding_gpu_offset[i] < vk_buffers[i]->size) {
+            size_t local_size = vk_buffers[i]->size - binding_gpu_offset[i];
+            if (local_size > bindings[i].size) local_size = bindings[i].size;
+            fprintf(out, ",\"q6_row_indexed\":true,\"q6_sample_indices\":[");
+            for (size_t qi = 0; qi < q6_sample_count; ++qi) {
+                fprintf(out, "%s%llu", qi ? "," : "",
+                        (unsigned long long)q6_sample_indices[qi]);
+            }
+            fprintf(out, "]");
+            write_q6_row_indexed_f32_evidence(
+                out, "f32_after_dispatch",
+                (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
+                local_size,
+                -1, 0, 0,
+                q6_sample_indices, q6_sample_count);
+            if (buffer_fds && buffer_fds[i] >= 0) {
+                write_q6_row_indexed_f32_evidence(
+                    out, "f32_after_writeback",
+                    NULL, 0,
+                    buffer_fds[i], bindings[i].offset, 1,
+                    q6_sample_indices, q6_sample_count);
+            }
+        }
+        fprintf(out, "}");
     }
     fprintf(out, "]");
 }
@@ -3752,7 +3870,7 @@ static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
     return "unknown";
 }
 
-typedef struct {
+struct CpuOracleReport {
     int requested;
     int candidate;
     int executed;
@@ -3803,7 +3921,7 @@ typedef struct {
     CpuOracleSample first_mismatch;
     CpuOracleSample samples[8];
     size_t sample_count;
-} CpuOracleReport;
+};
 
 static uint32_t load_le_u32(const uint8_t *bytes, size_t size, size_t index) {
     size_t offset = index * sizeof(uint32_t);
@@ -3895,6 +4013,67 @@ static void init_cpu_oracle_report(CpuOracleReport *report, int requested, uint6
                 ? (report->candidate ? "scaffold-ready-needs-kernel-implementation"
                                      : "unsupported-shader-hash")
                 : "not-requested");
+}
+
+static int cpu_oracle_report_is_q6(const CpuOracleReport *report) {
+    return report && strcmp(report->kernel_hint, "mul-mat-vec-q6-k-large") == 0;
+}
+
+static void append_unique_q6_sample_index(
+        uint64_t *indices,
+        size_t *index_count,
+        size_t capacity,
+        uint64_t value) {
+    if (!indices || !index_count || *index_count >= capacity) return;
+    for (size_t i = 0; i < *index_count; ++i) {
+        if (indices[i] == value) return;
+    }
+    indices[(*index_count)++] = value;
+}
+
+static size_t collect_q6_row_indexed_sample_indices(
+        const CpuOracleReport *report,
+        uint64_t *indices,
+        size_t capacity) {
+    size_t index_count = 0;
+    if (!cpu_oracle_report_is_q6(report) || !indices || capacity == 0) return 0;
+    /*
+     * Diagnostic-only Q6 evidence: prefer the CPU oracle's q6_first_mismatch
+     * coordinate, then the oracle row_window.  These are row-indexed dst
+     * coordinates into the Q6_K output binding, not generic head/mid/tail
+     * samples, so they can bisect post-dispatch vs post-writeback failures.
+     */
+    if (report->has_first_mismatch) {
+        append_unique_q6_sample_index(indices, &index_count, capacity,
+                                      report->first_mismatch.dst_index);
+    }
+    for (size_t i = 0; i < report->row_window_count; ++i) {
+        append_unique_q6_sample_index(indices, &index_count, capacity,
+                                      report->row_window[i].dst_index);
+    }
+    for (size_t i = 0; i < report->sample_count; ++i) {
+        append_unique_q6_sample_index(indices, &index_count, capacity,
+                                      report->samples[i].dst_index);
+    }
+    return index_count;
+}
+
+static void write_q6_row_indexed_f32_evidence(
+        FILE *out,
+        const char *field_name,
+        const void *data,
+        size_t size,
+        int fd,
+        off_t fd_offset,
+        int sample_fd,
+        const uint64_t *indices,
+        size_t index_count) {
+    fprintf(out, ",\"%s\":", field_name);
+    if (sample_fd) {
+        write_f32_fd_sample_array_at_indices(out, fd, fd_offset, indices, index_count);
+    } else {
+        write_f32_sample_array_at_indices(out, data, size, indices, index_count);
+    }
 }
 
 static void write_cpu_oracle_report(
@@ -5765,6 +5944,7 @@ static void write_vulkan_binding_compact_report(
         const int *buffer_fds,
         VulkanVectorBuffer * const *vk_buffers,
         const size_t *binding_gpu_offset,
+        const size_t *dirty_writeback_bytes,
         const uint8_t *active,
         const uint8_t *readable,
         const uint8_t *writable,
@@ -5774,8 +5954,13 @@ static void write_vulkan_binding_compact_report(
         const uint64_t *gpu_after_upload_hash,
         const uint64_t *gpu_after_dispatch_hash,
         const uint64_t *fd_after_hash,
-        const size_t *alias_rep) {
+        const size_t *alias_rep,
+        const CpuOracleReport *cpu_oracle_report) {
     fprintf(out, "\"binding_details\":[");
+    uint64_t q6_sample_indices[48];
+    const size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
+        cpu_oracle_report, q6_sample_indices,
+        sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]));
     for (size_t i = 0; i < binding_count; ++i) {
         fprintf(out,
                 "%s{\"index\":%zu,\"set\":%u,\"binding\":%u,\"offset\":%lld,"
@@ -5791,6 +5976,8 @@ static void write_vulkan_binding_compact_report(
                 "\"gpu_after_upload_hash\":\"0x%016llx\","
                 "\"gpu_after_dispatch_hash\":\"0x%016llx\","
                 "\"fd_after_hash\":\"0x%016llx\","
+                "\"writeback_offset\":%lld,\"writeback_bytes\":%zu,"
+                "\"device_local_staged\":%s,"
                 "\"writeback_verified\":%s,\"writeback_mismatch\":%s",
                 i ? "," : "",
                 i,
@@ -5817,6 +6004,9 @@ static void write_vulkan_binding_compact_report(
                 (unsigned long long)(gpu_after_upload_hash ? gpu_after_upload_hash[i] : 0),
                 (unsigned long long)(gpu_after_dispatch_hash ? gpu_after_dispatch_hash[i] : 0),
                 (unsigned long long)(fd_after_hash ? fd_after_hash[i] : 0),
+                (long long)bindings[i].offset,
+                dirty_writeback_bytes ? dirty_writeback_bytes[i] : (size_t)0,
+                vk_buffers && vk_buffers[i] && vk_buffers[i]->device_local_staged ? "true" : "false",
                 writable && writable[i] && gpu_after_dispatch_hash && fd_after_hash &&
                         gpu_after_dispatch_hash[i] != 0 && fd_after_hash[i] != 0 &&
                         gpu_after_dispatch_hash[i] == fd_after_hash[i]
@@ -5830,14 +6020,36 @@ static void write_vulkan_binding_compact_report(
             binding_gpu_offset && binding_gpu_offset[i] < vk_buffers[i]->size) {
             size_t local_size = vk_buffers[i]->size - binding_gpu_offset[i];
             if (local_size > bindings[i].size) local_size = bindings[i].size;
-            fprintf(out, ",\"f32_after_dispatch\":");
-            write_f32_sample_array(
-                out,
-                (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
-                local_size);
-            if (buffer_fds && buffer_fds[i] >= 0 && fd_after_hash && fd_after_hash[i] != 0) {
-                fprintf(out, ",\"f32_after_writeback\":");
-                write_f32_fd_sample_array(out, buffer_fds[i], bindings[i].offset, local_size);
+            if (q6_sample_count > 0 && bindings[i].binding == 2) {
+                fprintf(out, ",\"q6_row_indexed\":true,\"q6_sample_indices\":[");
+                for (size_t qi = 0; qi < q6_sample_count; ++qi) {
+                    fprintf(out, "%s%llu", qi ? "," : "",
+                            (unsigned long long)q6_sample_indices[qi]);
+                }
+                fprintf(out, "]");
+                write_q6_row_indexed_f32_evidence(
+                    out, "f32_after_dispatch",
+                    (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
+                    local_size,
+                    -1, 0, 0,
+                    q6_sample_indices, q6_sample_count);
+                if (buffer_fds && buffer_fds[i] >= 0) {
+                    write_q6_row_indexed_f32_evidence(
+                        out, "f32_after_writeback",
+                        NULL, 0,
+                        buffer_fds[i], bindings[i].offset, 1,
+                        q6_sample_indices, q6_sample_count);
+                }
+            } else {
+                fprintf(out, ",\"f32_after_dispatch\":");
+                write_f32_sample_array(
+                    out,
+                    (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
+                    local_size);
+                if (buffer_fds && buffer_fds[i] >= 0 && fd_after_hash && fd_after_hash[i] != 0) {
+                    fprintf(out, ",\"f32_after_writeback\":");
+                    write_f32_fd_sample_array(out, buffer_fds[i], bindings[i].offset, local_size);
+                }
             }
         }
         fprintf(out, "}");
@@ -8490,6 +8702,7 @@ static int run_vulkan_dispatch_fd(
                                             buffer_fds,
                                             vk_buffers,
                                             binding_gpu_offset,
+                                            binding_dirty_writeback_bytes,
                                             active_bindings,
                                             binding_read_needed, binding_write_needed,
                                             cache_resident, cache_hits,
@@ -8497,7 +8710,8 @@ static int run_vulkan_dispatch_fd(
                                             binding_gpu_after_upload_hash,
                                             binding_gpu_after_dispatch_hash,
                                             binding_fd_after_hash,
-                                            binding_alias_rep);
+                                            binding_alias_rep,
+                                            &cpu_oracle_report);
         fprintf(json_out(), ",");
         write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);
         fprintf(json_out(), ",");
@@ -8680,7 +8894,11 @@ static int run_vulkan_dispatch_fd(
                                     binding_gpu_after_upload_hash,
                                     binding_gpu_after_dispatch_hash,
                                     binding_fd_after_hash,
-                                    binding_alias_rep);
+                                    binding_alias_rep,
+                                    vk_buffers,
+                                    binding_gpu_offset,
+                                    buffer_fds,
+                                    &cpu_oracle_report);
         fprintf(json_out(), ",");
         write_vulkan_descriptor_write_report(json_out(),
                                              descriptor_write_dst_bindings,
@@ -8851,7 +9069,11 @@ cleanup:
                                     binding_gpu_after_upload_hash,
                                     binding_gpu_after_dispatch_hash,
                                     binding_fd_after_hash,
-                                    binding_alias_rep);
+                                    binding_alias_rep,
+                                    vk_buffers,
+                                    binding_gpu_offset,
+                                    buffer_fds,
+                                    &cpu_oracle_report);
         fprintf(json_out(), ",");
         write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);
         fprintf(json_out(), ",");

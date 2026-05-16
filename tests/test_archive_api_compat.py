@@ -216,6 +216,61 @@ class ArchiveApiCompatibilityTest(unittest.TestCase):
         if xattrs_supported(self.root):
             self.assertEqual(members["work/original.txt"].pax_headers.get("SCHILY.xattr.user.pdocker_archive"), "value")
 
+    def test_archive_get_preserves_cow_lower_hardlinks_across_merged_tree(self):
+        state, cdir, lower, upper = self._cow_state()
+        (lower / "work" / "sub").mkdir(parents=True)
+        (upper / "work").mkdir()
+        original = lower / "work" / "original.txt"
+        twin = lower / "work" / "sub" / "twin.txt"
+        original.write_text("lower shared inode")
+        os.link(original, twin)
+        (upper / "work" / "upper.txt").write_text("upper still merges")
+
+        self.assertEqual(original.stat().st_ino, twin.stat().st_ino)
+        self.assertGreaterEqual(original.stat().st_nlink, 2)
+
+        out = io.BytesIO()
+        self.mod.write_container_path_archive(out, state, str(cdir), "/work")
+        out.seek(0)
+
+        with tarfile.open(fileobj=out, mode="r:*") as tf:
+            members = {m.name: m for m in tf.getmembers()}
+            contents = {
+                name: tf.extractfile(member).read().decode()
+                for name, member in members.items()
+                if member.isfile()
+            }
+
+        self.assertIn("work/upper.txt", members)
+        self.assertEqual(contents["work/original.txt"], "lower shared inode")
+        hardlink = members["work/sub/twin.txt"]
+        self.assertTrue(hardlink.islnk())
+        self.assertEqual(hardlink.linkname, "work/original.txt")
+
+    def test_archive_get_whiteouted_hardlink_source_emits_remaining_peer_as_file(self):
+        state, cdir, lower, upper = self._cow_state()
+        (lower / "work").mkdir()
+        (upper / "work").mkdir()
+        hidden = lower / "work" / "hidden.txt"
+        visible = lower / "work" / "visible.txt"
+        hidden.write_text("payload survives through visible peer")
+        os.link(hidden, visible)
+        (upper / "work" / ".wh.hidden.txt").write_text("")
+
+        out = io.BytesIO()
+        self.mod.write_container_path_archive(out, state, str(cdir), "/work")
+        out.seek(0)
+
+        with tarfile.open(fileobj=out, mode="r:*") as tf:
+            members = {m.name: m for m in tf.getmembers()}
+            visible_member = members["work/visible.txt"]
+            visible_data = tf.extractfile(visible_member).read().decode()
+
+        self.assertNotIn("work/hidden.txt", members)
+        self.assertTrue(visible_member.isfile())
+        self.assertFalse(visible_member.islnk())
+        self.assertEqual(visible_data, "payload survives through visible peer")
+
     def test_archive_put_link_policy_ownership_xattrs_and_chunked_reader(self):
         dest = self.root / "dest"
         dest.mkdir()
