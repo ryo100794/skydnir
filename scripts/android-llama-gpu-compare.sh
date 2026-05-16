@@ -1602,6 +1602,8 @@ def compact_q6_binding_detail(detail):
         "fd_after_hash": detail.get("fd_after_hash"),
         "writeback_verified": detail.get("writeback_verified"),
         "writeback_mismatch": detail.get("writeback_mismatch"),
+        "f32_after_dispatch": detail.get("f32_after_dispatch"),
+        "f32_after_writeback": detail.get("f32_after_writeback"),
     }
 
 
@@ -1614,6 +1616,17 @@ def numeric_close_to_zero(value, tolerance=1.0e-3):
 
 def hash_evidence_present(value):
     return bool(value) and value != "0x0000000000000000"
+
+
+def f32_sample_values(samples):
+    if not isinstance(samples, list):
+        return None
+    values = []
+    for sample in samples:
+        if not isinstance(sample, dict):
+            return None
+        values.append((sample.get("index"), sample.get("value")))
+    return values
 
 
 q6_binding_details = [
@@ -1635,16 +1648,26 @@ for detail in q6_binding_details:
         dispatch_hash = detail.get("gpu_after_dispatch_hash")
         after_hash = detail.get("fd_after_hash")
         compact = compact_q6_binding_detail(detail)
+        dispatch_f32 = f32_sample_values(detail.get("f32_after_dispatch"))
+        writeback_f32 = f32_sample_values(detail.get("f32_after_writeback"))
         if detail.get("writeback_mismatch") is True or (
             hash_evidence_present(dispatch_hash)
             and hash_evidence_present(after_hash)
             and dispatch_hash != after_hash
+        ) or (
+            dispatch_f32 is not None
+            and writeback_f32 is not None
+            and dispatch_f32 != writeback_f32
         ):
             q6_writable_writeback_mismatches.append(compact)
         elif detail.get("writeback_verified") is not True and not (
             hash_evidence_present(dispatch_hash)
             and hash_evidence_present(after_hash)
             and dispatch_hash == after_hash
+        ) and not (
+            dispatch_f32 is not None
+            and writeback_f32 is not None
+            and dispatch_f32 == writeback_f32
         ):
             q6_writable_writeback_unknown.append(compact)
     if not detail.get("readable") or detail.get("writable"):

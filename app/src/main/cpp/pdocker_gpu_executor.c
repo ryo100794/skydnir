@@ -3338,6 +3338,45 @@ static void write_f32_sample_array(FILE *out, const void *data, size_t size) {
     fprintf(out, "]");
 }
 
+static void write_f32_fd_sample_array(FILE *out, int fd, off_t offset, size_t size) {
+    fprintf(out, "[");
+    const size_t count = size / sizeof(float);
+    size_t positions[8];
+    size_t position_count = 0;
+    if (count > 0) {
+        positions[position_count++] = 0;
+        if (count > 1) positions[position_count++] = 1;
+        if (count > 2) positions[position_count++] = 2;
+        if (count > 3) positions[position_count++] = 3;
+        if (count > 8) {
+            size_t mid = count / 2;
+            positions[position_count++] = mid > 1 ? mid - 1 : mid;
+            positions[position_count++] = mid;
+            positions[position_count++] = count - 2;
+            positions[position_count++] = count - 1;
+        }
+    }
+    for (size_t i = 0; i < position_count; ++i) {
+        float value = 0.0f;
+        int ok = 0;
+        const off_t f_off = offset + (off_t)(positions[i] * sizeof(value));
+        if (pread(fd, &value, sizeof(value), f_off) == (ssize_t)sizeof(value)) {
+            ok = 1;
+        }
+        fprintf(out,
+                "%s{\"index\":%zu,\"value\":",
+                i ? "," : "",
+                positions[i]);
+        if (ok && isfinite(value)) {
+            fprintf(out, "%.9g", (double)value);
+        } else {
+            fprintf(out, "null");
+        }
+        fprintf(out, "}");
+    }
+    fprintf(out, "]");
+}
+
 static void write_vulkan_binding_report(
         FILE *out,
         const VulkanDispatchBinding *bindings,
@@ -5680,6 +5719,7 @@ static void write_vulkan_binding_compact_report(
         FILE *out,
         const VulkanDispatchBinding *bindings,
         size_t binding_count,
+        const int *buffer_fds,
         VulkanVectorBuffer * const *vk_buffers,
         const size_t *binding_gpu_offset,
         const uint8_t *active,
@@ -5752,6 +5792,10 @@ static void write_vulkan_binding_compact_report(
                 out,
                 (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
                 local_size);
+            if (buffer_fds && buffer_fds[i] >= 0 && fd_after_hash && fd_after_hash[i] != 0) {
+                fprintf(out, ",\"f32_after_writeback\":");
+                write_f32_fd_sample_array(out, buffer_fds[i], bindings[i].offset, local_size);
+            }
         }
         fprintf(out, "}");
     }
@@ -8388,6 +8432,7 @@ static int run_vulkan_dispatch_fd(
                 pre_barrier_count,
                 post_barrier_count);
         write_vulkan_binding_compact_report(json_out(), bindings, binding_count,
+                                            buffer_fds,
                                             vk_buffers,
                                             binding_gpu_offset,
                                             active_bindings,
