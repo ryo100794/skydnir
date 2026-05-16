@@ -338,6 +338,60 @@ def validate_phase2_contracts(manifest: dict[str, object]) -> None:
         fail("known_gaps must track residual implementation gaps: " + ", ".join(missing_known))
 
 
+def validate_linkat_hardlink_planned_gap(manifest: dict[str, object]) -> None:
+    phase2 = {
+        str(entry.get("id")): entry
+        for entry in manifest.get("phase2_contracts", [])
+        if isinstance(entry, dict)
+    }
+    cases = {
+        str(case.get("id")): case
+        for case in manifest.get("heavy_cases", [])
+        if isinstance(case, dict)
+    }
+    gaps = {
+        str(gap.get("id")): gap
+        for gap in manifest.get("known_gaps", [])
+        if isinstance(gap, dict)
+    }
+    entry = phase2.get("linkat-hardlink-semantics")
+    if not entry:
+        fail("linkat hardlink phase2 contract is missing")
+    planned_case_id = "android.direct.linkat-hardlink-semantics"
+    if planned_case_id not in entry.get("cases", []):
+        fail("linkat hardlink contract must reference the non-promoting planned device case")
+    planned_case = cases.get(planned_case_id)
+    if not planned_case:
+        fail("linkat hardlink planned device case is missing")
+    if planned_case.get("runnable") is not False:
+        fail("linkat hardlink semantics must remain a non-runnable planned gap until C runtime support lands")
+    status = str(entry.get("status") or "").lower()
+    if "gap" not in status or "closed" in status:
+        fail("linkat hardlink contract must stay fail-closed as an open gap")
+    gap = gaps.get("direct.linkat-copy-fallback")
+    if not gap:
+        fail("linkat copy fallback known gap must remain tracked")
+    text = json.dumps(
+        {"phase2": entry, "case": planned_case, "known_gap": gap},
+        sort_keys=True,
+    ).lower()
+    normalized = text.replace("-", " ")
+    for marker in [
+        "fail closed",
+        "non promoting",
+        "copy fallback",
+        "st_dev/st_ino",
+        "st_nlink",
+        "write",
+        "unlink",
+        "errno",
+        "artifact",
+        "recovery",
+    ]:
+        if marker not in normalized:
+            fail(f"linkat hardlink planned gap missing marker {marker!r}")
+
+
 def require_contains(label: str, source: str, needles: list[str]) -> None:
     missing = [needle for needle in needles if needle not in source]
     if missing:
@@ -581,6 +635,7 @@ def main() -> None:
     validate_path_and_boundary_matrices(manifest)
     validate_required_areas(manifest)
     validate_phase2_contracts(manifest)
+    validate_linkat_hardlink_planned_gap(manifest)
     validate_static_contract_markers(source)
     validate_known_gaps(manifest, source)
 

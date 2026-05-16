@@ -51,7 +51,7 @@ Primary sources:
 | --- | --- | --- | --- |
 | T0-A | manager | Keep this execution timeline and TODO synchronized. | New work appears in this file or `TODO.md`; stale claims are removed. |
 | T0-B | agent: Android smoke | Add a single-container `docker run --rm ubuntu:22.04 echo hi` route to Android smoke, or make its failure explicit. | Smoke script contains the route, records stdout/exit code, and does not fake success. |
-| T0-C | agent: memory UI | Show pager artifact source/age/status and transparent metrics without confusing them with live `/proc`. | Static contract test covers source/age and transparent metrics. |
+| T0-C | agent: memory UI | Show pager artifact source/age/status, transparent metrics, and stale/planned-gap state without confusing them with live `/proc` or success. | Static contract test covers source/age, transparent metrics, and no live-success wording without an artifact. |
 | T0-D | agent: service truth plan | Convert service health/runtime teardown planned gaps into executable acceptance checks. | Feature scenario entries contain concrete commands, evidence, and exit criteria. |
 | T0-E | manager | Align TODO, CI gate ledger, scenario ledger, and test driver manifest so planned-gap/device-gated items are non-promoting. | `release-honesty` lane exists, manifest lanes declare stable-checkpoint exclusion, and release docs link residual blockers instead of counting them as stable. |
 
@@ -64,7 +64,7 @@ Primary sources:
 | T1-C llama GPU Q6_K/env propagation | Resolve or isolate the Q6_K blocker and prevent compare-script-only environment behavior. | CPU/oracle or pass-through evidence, synchronized env contract, artifact verifier rejection of divergent launch paths. |
 | T1-D Image pull crash safety | Atomic layer/tag publish and startup recovery for `.pull-*`, `.tmp-*`, `.old-*`, plus timed live-pull interruption only against scenario-owned/isolated fixtures. | Local recovery verifier, synthetic interrupted-pull kill/restart device scenario, and a non-promoting live-pull plan until the live artifact passes. |
 | T1-E COW/overlay mutation safety | Prove copy-up, whiteout, rename, archive PUT, hardlink metadata, low-space, and kill-at-step behavior fail closed. | Host archive/COW verifier, startup repair/check, recovery artifact, and adb/run-as COW kill-at-step evidence before promotion. |
-| T1-F OOM/LMK evidence | Structured memory/down events and classifier. | Reproducible LMK/OOM artifact; host/static OOM evidence remains non-promoting until controlled device replay proves stale UI is rejected after backend death. |
+| T1-F OOM/LMK evidence | Structured large-allocation guard decisions, memory/down events, backend death identity, and classifier. | Reproducible LMK/OOM artifact; host/static OOM evidence remains non-promoting until controlled device replay proves unsafe allocations return diagnostic `ENOMEM`, backend death is classified without fake success, and stale UI/memory cards are rejected after backend death. |
 
 ### T2 - User-Facing Hard Gates
 
@@ -141,8 +141,12 @@ assignment:
    -> syscall rewrite experiment.
 10. **Compose parser**: unsupported syntax detector -> golden subset -> parser
    replacement/delegation -> upstream differential.
-11. **Memory pager**: artifact source display -> telemetry API -> region table
-   -> dirty precision -> multi-thread/signal stress -> container opt-in.
+11. **Memory pager / app-level virtual memory**: artifact source display ->
+   large-allocation guard thresholds -> OOM/LMK ring/classifier -> telemetry API
+   -> region table -> `mmap`/`mprotect`/`sigaction`/`munmap` admission negatives
+   -> userfaultfd/capability gate -> dirty precision -> multi-thread/signal
+   stress -> container opt-in. Every step is non-promoting until hardware
+   evidence proves no unsafe fake success.
 
 ## Manager Checklist Per Merge
 

@@ -87,6 +87,32 @@
       }
     },
     {
+      "id": "BB-STORAGE-002",
+      "area": "image-and-layer-storage",
+      "status": "runnable",
+      "user_story": "A user maintaining images, layers, and build cache can tell which references are real images versus cache-only entries before taking cleanup actions.",
+      "observable_surface": [
+        "storage",
+        "ui",
+        "engine-api"
+      ],
+      "positive": {
+        "given": "The app has image references, reused layers, build-cache entries, and possible stale or unreferenced storage.",
+        "when": "The image and storage maintenance UI is validated from the repository-owned contract.",
+        "then": "The UI exposes distinct image and cache references, visible unique/shared/stale sizes, reference-tree actions for details/files/delete with cache cleanup, and cleanup evidence for stale metadata or garbage layers.",
+        "evidence": [
+          "python3 scripts/verify-ui-actions.py",
+          "python3 scripts/verify-feature-scenarios.py"
+        ]
+      },
+      "negative": {
+        "given": "A maintenance screen hides cache-only entries, omits sizes, removes tree actions, or lacks stale or garbage cleanup evidence.",
+        "when": "A user tries to decide whether deleting an image or pruning cache is safe.",
+        "then": "The gate fails because the screen could lead to deleting the wrong reference or trusting unproven cleanup.",
+        "failure_oracle": "The UI/static verifier fails if image refs and cache refs collapse together, size labels disappear, tree actions are absent, or stale/garbage cleanup evidence is removed."
+      }
+    },
+    {
       "id": "BB-TERMINAL-001",
       "area": "tty-exec",
       "status": "runnable-with-device",

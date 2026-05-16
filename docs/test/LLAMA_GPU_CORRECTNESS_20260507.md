@@ -936,3 +936,33 @@ The artifact verifier also consumes this split fail-closed.  A future
 benchmark claim unless `q6_writeback_verified_all` is true.  Writable
 `q6_writable_writeback_mismatches` classify as `q6-writeback-mismatch`; missing
 or unknown writable writeback hashes classify as `q6-writeback-unverified`.
+
+### Q6_K Compact Writeback Evidence Gate (2026-05-16)
+
+The artifact verifier now parses the compact Q6_K writable-binding diagnostics
+instead of trusting only the folded summary boolean.  For a `latest_status:
+"match"` Q6_K oracle to allow a correctness claim, the artifact must provide
+all of the following under `gpu.diagnostics.q6_workgroup_diagnostics`:
+
+- `q6_writeback_verified_all: true`;
+- non-empty `q6_writable_bindings`;
+- for each writable output binding entry:
+  - `index`;
+  - `binding`;
+  - `writable: true`;
+  - `gpu_after_dispatch_hash` as a non-zero `0x` + 16-hex hash, representing
+    the output buffer after GPU dispatch and before writeback;
+  - `fd_after_hash` as the same non-zero `0x` + 16-hex hash, representing the
+    host/container view after writeback;
+  - `writeback_verified: true`;
+  - `writeback_mismatch: false`;
+- empty `q6_writable_writeback_mismatches`;
+- empty `q6_writable_writeback_unknown`.
+
+The verifier fails closed when that evidence is absent, incomplete, zero, or
+malformed (`q6-writeback-unverified`, exit 41).  If both hashes are present but
+do not match, or any compact entry reports `writeback_mismatch: true`, it
+classifies the artifact as `q6-writeback-mismatch` (exit 40).  This makes the
+next device run actionable: a Q6_K match with stable compact writeback hashes
+can move on to `ngl=2`, while missing or differing output hashes remain a
+writeback/device-boundary blocker rather than a correctness pass.

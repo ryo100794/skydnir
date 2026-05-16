@@ -487,9 +487,32 @@ implementation change plus a focused verification artifact.
   (`memory-ring.jsonl` and `memory-summary.json`) with operation/container IDs,
   atomic rename publication, and partial-record rejection; the transparent APK
   PoC script captures those artifacts and the canonical test driver has a
-  dedicated `android-memory-pager` lane. Next slice: fill the runtime counters
-  from the managed-region table, add thread/signal guardrails, and run
-  synthetic fault-latency/stress evidence before any llama/container opt-in.
+  dedicated `android-memory-pager` lane. Remaining app-level virtual
+  memory/low-memory audit items stay TODO/test-plan only until promoted by
+  device evidence:
+  - Large allocation guard: define the admission threshold from requested bytes,
+    Android low-memory headroom, container/operation identity, and explicit
+    large-workload or pager opt-in; unsafe allocations must return an
+    `ENOMEM`-style error with `allocation_denied_enomem` diagnostics rather than
+    starting work that Android LMK is likely to kill. Docker/Compose memory keys
+    remain budgets only and must not imply host swap or pager success.
+  - OOM/LMK diagnostics: every suspected backend death must retain the last
+    RSS/PSS/swap/headroom sample, last progress marker, pid/exit status or
+    signal, classifier reason (`lmk_suspected`, `not_lmk_suspected`, `unknown`),
+    and bounded ring/summary paths; UI/API state must fail closed instead of
+    showing stale `Up` or successful completion.
+  - UI memory visualization evidence: memory cards must display artifact
+    source, creation age, status, and whether data came from a past self-test vs
+    live `/proc`; promotion needs a replayable artifact/screenshot pair proving
+    stale, missing, or planned-gap evidence is not rendered as live success.
+  - Future mmap/userfault pager gate: keep `mmap`/`mprotect`/`sigaction`/`munmap`
+    interception and any `userfaultfd` backend behind explicit capability checks
+    plus opt-in labels/env. Unsupported mappings, executable/shared/stack/GPU
+    exclusions, unresolved faults, or missing kernel support must pass through
+    unmanaged when safe or fail closed with non-promoting diagnostics.
+  Next slice: fill the runtime counters from the managed-region table, add
+  thread/signal guardrails, and run synthetic fault-latency/stress evidence
+  before any llama/container opt-in.
 - [next] Revisit Dockerfile build memory pressure without changing upstream
   Dockerfiles. The managed-region pager remains explicit and opt-in; ordinary
   toolchain heap allocations such as `cc1plus` are not yet under pdocker memory
@@ -505,7 +528,11 @@ implementation change plus a focused verification artifact.
   explicit labels/env such as `io.pdocker.large-workload=enabled` without
   changing ordinary Dockerfile/Compose semantics. The first bounded telemetry
   ring/summary writer is in place; remaining work is device LMK replay,
-  stale-running UI rejection, and large-workload opt-in execution proof.
+  stale-running UI rejection, and large-workload opt-in execution proof. Do not
+  promote host/static artifacts until a connected-device replay proves: unsafe
+  large allocations fail with diagnostics instead of fake success, backend death
+  is classified without losing operation identity, and UI memory visualization
+  visibly marks stale or planned-gap evidence as non-live.
 - [doing] Profile remaining hot trapped syscalls after `newfstatat/openat` and
   decide which can be safely handled with fewer ptrace stops. Current tuning
   adds seccomp errno returns for probe syscalls and uses a blocking
@@ -594,7 +621,13 @@ implementation change plus a focused verification artifact.
   `npm install -g npm@latest` works without temporarily relying on the
   NodeSource-bundled npm.
 - [next] Replace `linkat` copy fallback with an inode/hardlink/CoW storage
-  model.
+  model. The current compatibility copy remains a fail-closed, non-promoting
+  Phase 2 gap: closure requires Android device evidence that linked paths share
+  `st_dev/st_ino`, `st_nlink` increases after `linkat` and decrements after
+  `unlink`, writes through either name are visible through the other, invalid
+  flags/mediated escapes return Linux-compatible errno, and restart recovery
+  does not promote partial hardlink/CoW metadata or divergent copy-fallback
+  artifacts.
 - [done] Replace `/proc/self/exe` rootfs temporary symlink mediation with direct
   readlink emulation that does not mutate image state; remaining work is
   Android device evidence for `/proc/self/exe`, `/proc/thread-self/exe`, and
@@ -609,6 +642,10 @@ implementation change plus a focused verification artifact.
     snapshots do not require a full post-RUN rootfs walk;
   - harden bind, project volume, and named volume path rewrite as one contract
     across filesystem syscalls and AF_UNIX socket paths;
+  - keep `linkat` hardlink semantics fail-closed until the non-promoting
+    Android artifact proves inode identity, link-count preservation, write-through
+    behavior, errno parity, and recovery from interrupted hardlink/CoW metadata
+    updates;
   - collect Android device evidence that `/proc/self/exe`,
     `/proc/thread-self/exe`, and `/proc/<pid>/exe` readlink emulation reports
     the guest executable without mutating image state.
@@ -704,8 +741,12 @@ Temporary behavior:
   current minimal path probing with full flags/errno parity.
 - `linkat` currently uses a file-copy fallback, including a dpkg
   `/var/lib/dpkg/status-old` replace case, because Android app data rejects the
-  hardlink behavior dpkg expects. Replace this with a real inode/hardlink/CoW
-  storage model.
+  hardlink behavior dpkg expects. This is content-only compatibility, not a
+  closable hardlink implementation: planned tests must fail closed until a
+  device artifact proves shared `st_dev/st_ino`, `st_nlink` growth/decrement,
+  write-through behavior, Linux errno parity for invalid/escaped operations,
+  and restart recovery that leaves no partial hardlink index or divergent copy
+  promoted. Replace this with a real inode/hardlink/CoW storage model.
 - apt archive staging currently has a narrow `/var/cache/apt/archives/*.deb` to
   `/tmp/apt-dpkg-install-*` symlink mediation path. The earlier
   `DPkg::Go (14: Bad address)` blocker is past the current test point, but the

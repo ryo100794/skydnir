@@ -92,6 +92,29 @@ def speedup_sections(speedup=2.0, target_met=True, cpu_tps=0.1, gpu_tps=0.2):
     }
 
 
+def q6_verified_writeback(hash_value="0x1111111111111111"):
+    return {
+        "q6_writeback_verified_all": True,
+        "q6_writable_bindings": [
+            {
+                "index": 2,
+                "binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "size": 607744,
+                "readable": True,
+                "writable": True,
+                "gpu_after_dispatch_hash": hash_value,
+                "fd_after_hash": hash_value,
+                "writeback_verified": True,
+                "writeback_mismatch": False,
+            }
+        ],
+        "q6_writable_writeback_mismatches": [],
+        "q6_writable_writeback_unknown": [],
+    }
+
+
 class LlamaGpuArtifactVerifierTest(unittest.TestCase):
     def run_verifier(self, payload, *args):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -177,7 +200,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
-                        "q6_writeback_verified_all": True,
+                        **q6_verified_writeback(),
                     },
                 },
                 "correctness": gpu_correctness_report(),
@@ -311,6 +334,88 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertFalse(report["correctness_claim_allowed"])
         self.assertFalse(report["benchmark_claim_allowed"])
         self.assertIn("writeback", report["next_action"])
+
+    def test_q6_match_fails_closed_when_compact_writable_binding_hashes_are_absent(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        "q6_writeback_verified_all": True,
+                    },
+                },
+                "correctness": gpu_correctness_report(),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=2.0, target_met=True),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 41, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-writeback-unverified")
+        self.assertIn("q6_writable_bindings", json.dumps(report["q6_writeback_evidence"]["missing"]))
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_q6_match_fails_closed_when_compact_before_after_hashes_mismatch(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report(),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=2.0, target_met=True),
+        }
+        writable = payload["gpu"]["diagnostics"]["q6_workgroup_diagnostics"]["q6_writable_bindings"][0]
+        writable["fd_after_hash"] = "0x2222222222222222"
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 40, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-writeback-mismatch")
+        self.assertIn("0x2222222222222222", json.dumps(report["q6_writeback_evidence"]["mismatches"]))
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_q6_match_fails_closed_when_compact_writeback_hash_is_invalid(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report(),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=2.0, target_met=True),
+        }
+        writable = payload["gpu"]["diagnostics"]["q6_workgroup_diagnostics"]["q6_writable_bindings"][0]
+        writable["gpu_after_dispatch_hash"] = "0x0000000000000000"
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 41, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-writeback-unverified")
+        self.assertIn("gpu_after_dispatch_hash", json.dumps(report["q6_writeback_evidence"]["missing"]))
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
 
 
     def test_compare_artifact_without_config_propagation_fails_closed(self):

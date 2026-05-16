@@ -31,7 +31,7 @@ without mixing unrelated dirty lanes.
 | P0-A service truth | UI cards, Engine API, persisted state, process table, listener, and logs agree on the same Engine container ID. | Goodall output awaiting integration | `service-truth artifact gate` | `bash -n scripts/android-device-smoke.sh`; `python3 scripts/verify-service-truth-plan.py`; service truth contract tests. |
 | P0-B runtime teardown | Stop/kill/rm records process-tree cleanup evidence and never trusts HTTP 204 alone. | integrated T1 baseline | already committed `1c9558a` | Device artifact still planned-gap until real no-orphan evidence is captured. |
 | P0-C terminal `exec -it` | UI route uses Engine exec/HTTP upgrade raw stream, not local shell/log path; regressions remain test-visible. | verifier represented; device proof pending | `terminal exec-it contract gate` | `python3 -m unittest tests.test_terminal_exec_it_contract tests.test_terminal_exec_it_artifact_verifier`; Android verifier promotes only with `ui-it-selftest-latest.json` plus `engine-exec-input-latest.jsonl` and `--require-container`. |
-| P0-D OOM/LMK diagnostics | Large allocation, system pressure, RSS/PSS, last progress, LMK classifier, retention, and stale UI guard are recorded. | static gate integrated; device replay pending | `oom-lmk diagnostic contract` | `python3 scripts/verify-oom-lmk-survival-gate.py`; memory pager contract tests. Device plan artifacts are non-promoting until controlled LMK/backend-death replay passes. |
+| P0-D OOM/LMK diagnostics | Large allocation guard, system pressure, RSS/PSS/swap/headroom, last progress, backend death/exit status, LMK classifier, UI memory artifact source/age/status, retention, and stale UI guard are recorded without fake success. | TODO/test audit sharpened; static gate integrated; device replay pending | `oom-lmk diagnostic contract` | `python3 scripts/verify-oom-lmk-survival-gate.py`; memory pager/UI contract tests; abnormal/stress JSON validators. Device plan artifacts stay non-promoting until controlled LMK/backend-death replay proves unsafe allocation denial, classifier evidence, and stale UI rejection on hardware. |
 | P0-E image pull crash safety | Interrupted pull never publishes a partial image/layer as valid after restart. | synthetic residue runner integrated; live pull pending | `image-pull device scenario ledger` | `python3 scripts/verify-image-pull-crash-safety.py`; image pull crash-safety tests. The live registry interruption lane stays planned-gap/non-promoting until run against a scenario-owned fixture. |
 | P0-F llama GPU correctness | GPU-backed llama response is correct before performance claims; CPU comparison is retained as evidence. | Bohr audit pending | separate GPU dirty-lane commit only | `tests.test_gpu_abi_contract`; GPU artifact verifier; device runbook evidence. |
 | P0-G COW/archive kill-at-step | COW copy-up, rename, whiteout, metadata, and archive PUT fail closed across daemon/helper interruption. | device lane represented; promotion pending | `cow-overlay kill-at-step gate` | `python3 -m unittest tests.test_cow_overlay_kill_at_step_device`; `python3 scripts/verify-cow-overlay-bench-recovery.py --run-local`; adb/run-as artifact required for promotion. |
@@ -84,6 +84,15 @@ is archived:
   `docs/test/image-pull-crash-safety-live-latest.json`; must use a
   scenario-owned/isolated fixture and remain non-promoting until implemented.
 - OOM/LMK diagnostics: planned `pdocker.memory-oom-lmk-diagnostics.v1`
+  - Required before promotion: large allocation guard decision with requested
+    bytes/headroom/operation ID, last RSS/PSS/swap sample, last progress marker,
+    backend pid/exit status or signal, classifier reason, memory ring/summary
+    retention paths, and UI artifact source/age/status. Missing ADB, missing
+    service evidence, missing ring data, or a planned-gap artifact is
+    `success=false` and non-promoting; never synthesize a healthy/running card.
+- Future mmap/userfault pager: planned non-promoting gate for explicit opt-in,
+  kernel capability detection, unsupported mapping pass-through/`ENOMEM`, and
+  unresolved-fault fail-closed diagnostics before any large-workload promotion.
 - terminal exec-it: `docs/test/ui-it-selftest-latest.json` plus
   `docs/test/engine-exec-input-latest.jsonl`, verified with
   `scripts/verify-terminal-exec-it-artifact.py --require-container`.

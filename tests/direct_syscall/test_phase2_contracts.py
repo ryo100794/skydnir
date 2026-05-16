@@ -12,7 +12,15 @@ REQUIRED_PHASE2 = {
     "attach-pty-signals": ["attach", "PTY", "SIGINT", "128+signal"],
     "syscall-errno-parity": ["errno", "ENOSYS", "openat2"],
     "path-mediation-binds-volumes": ["bind", "named volume", "AF_UNIX"],
-    "linkat-hardlink-semantics": ["linkat", "hardlink"],
+    "linkat-hardlink-semantics": [
+        "linkat",
+        "hardlink",
+        "copy fallback",
+        "st_dev/st_ino",
+        "st_nlink",
+        "non-promoting",
+        "recovery",
+    ],
     "proc-self-exe-no-mutation": ["/proc/self/exe", "readlink", "device evidence"],
     "run-changed-path-manifest": ["RUN", "changed-path", "manifest"],
 }
@@ -53,8 +61,39 @@ class DirectSyscallPhase2ContractsTest(unittest.TestCase):
                         f"{case_id} must explain its planned device evidence",
                     )
         self.assertIn("attach-pty-signals", planned_or_partial)
+        self.assertIn("linkat-hardlink-semantics", planned_or_partial)
         self.assertIn("path-mediation-binds-volumes", planned_or_partial)
         self.assertIn("run-changed-path-manifest", planned_or_partial)
+
+    def test_linkat_hardlink_semantics_stay_fail_closed_until_evidenced(self):
+        entry = self.phase2["linkat-hardlink-semantics"]
+        case = self.heavy_cases["android.direct.linkat-hardlink-semantics"]
+        known_gap = next(
+            gap
+            for gap in self.manifest["known_gaps"]
+            if gap["phase2_contract"] == "linkat-hardlink-semantics"
+        )
+        text = json.dumps(
+            {"entry": entry, "case": case, "known_gap": known_gap},
+            sort_keys=True,
+        ).lower()
+
+        self.assertIn("gap", entry["status"])
+        self.assertFalse(case["runnable"])
+        for marker in [
+            "fail-closed",
+            "non-promoting",
+            "copy fallback",
+            "st_dev/st_ino",
+            "st_nlink",
+            "write",
+            "unlink",
+            "errno",
+            "artifact",
+            "recovery",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
 
     def test_todo_ledger_still_names_phase2_source_items(self):
         for entry in self.phase2.values():

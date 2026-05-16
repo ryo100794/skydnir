@@ -67,7 +67,16 @@
       "command": "python3 scripts/verify-oom-lmk-survival-gate.py --device-plan-artifact docs/test/oom-lmk-survival-latest.json",
       "seed": null,
       "artifact": "docs/test/oom-lmk-survival-latest.json",
-      "checks": "Non-promoting OOM/LMK survival plan plus host/static classifier: large allocation denial should return ENOMEM before LMK, memory telemetry should be recorded, stale running state must be rejected, and controlled Android replay remains required before promotion."
+      "checks": "Non-promoting OOM/LMK survival plan plus host/static classifier: large allocation denial must return diagnostic ENOMEM before LMK, memory telemetry ring/summary must keep RSS/PSS/swap/headroom and last progress, stale running/UI memory success must be rejected, and controlled Android replay remains required before promotion."
+    },
+    {
+      "id": "stress.runtime-memory-pager-future-gate",
+      "category": "stress",
+      "lane": "android-full",
+      "command": "bash scripts/android-memory-pager-transparent-poc.sh --dry-run",
+      "seed": null,
+      "artifact": "docs/test/apk-memory-pager-transparent-latest.json",
+      "checks": "Non-promoting future mmap/userfault pager gate: dry-run and later device replay must prove explicit opt-in, kernel capability detection, unsupported mapping pass-through or ENOMEM, unresolved-fault fail-closed diagnostics, and no fake success before any large-workload promotion."
     },
     {
       "id": "stress.image-live-pull-interruption",

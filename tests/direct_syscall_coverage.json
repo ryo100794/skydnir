@@ -448,8 +448,8 @@
         "linkat",
         "readlinkat"
       ],
-      "contract": "Link/symlink/readlink paths preserve guest-visible behavior; linkat copy fallback remains an explicit gap until inode/hardlink semantics are implemented, and /proc/self/exe must ultimately be satisfied by readlink emulation without mutating rootfs tmp state.",
-      "fast_check": "Static verifier checks linkat/symlinkat emulation and /proc/self/exe handling.",
+      "contract": "Link/symlink/readlink paths preserve guest-visible behavior. Hardlink closure is fail-closed: the current linkat copy fallback is only a content compatibility workaround and cannot satisfy linkat_hardlink_semantics until same st_dev/st_ino identity, st_nlink growth/decrement, and write-through behavior are proven without rootfs helper mutations.",
+      "fast_check": "Static verifier checks linkat/symlinkat emulation, /proc/self/exe handling, and the non-promoting hardlink semantics plan.",
       "heavy_case": "android.direct.proc-exe-and-links"
     },
     {
@@ -694,7 +694,14 @@
       "tier": "heavy-android",
       "command": "PDOCKER_PACKAGE=\"${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}\"; ROOTFS=\"${ROOTFS:?set ROOTFS to the app-visible rootfs path}\"; adb shell \"run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \\\"set -eu; exe=\\\\\\$(readlink /proc/self/exe); test \\\\\\\"\\\\\\$exe\\\\\\\" = /bin/sh; d=/tmp/pdocker-direct-links; rm -rf \\\\\\$d; mkdir -p \\\\\\$d; echo ok > \\\\\\$d/src; ln \\\\\\$d/src \\\\\\$d/hard; ln -s src \\\\\\$d/sym; test \\\\\\\"\\\\\\$(cat \\\\\\$d/hard)\\\\\\\" = ok; test \\\\\\\"\\\\\\$(readlink \\\\\\$d/sym)\\\\\\\" = src; echo proc_links_ok\\\"'\"",
       "runnable": true,
-      "checks": "/proc/self/exe reports the guest executable; link/symlink emulations preserve guest-visible behavior."
+      "checks": "/proc/self/exe reports the guest executable; link/symlink emulations preserve content-visible behavior. This case is not sufficient for linkat hardlink closure because it does not prove inode identity or link-count preservation."
+    },
+    {
+      "id": "android.direct.linkat-hardlink-semantics",
+      "tier": "heavy-android",
+      "command": "Planned non-promoting Android device gate: run pdocker-direct with a linkat/ln probe that creates /tmp/pdocker-direct-hardlink/src, links it to /tmp/pdocker-direct-hardlink/hard, records stat st_dev/st_ino/st_nlink for both paths before and after writing through one name, unlinks one name, then saves the JSON/log artifact plus restart recovery evidence for any hardlink/CoW metadata update.",
+      "runnable": false,
+      "checks": "Fail-closed expectations while the copy fallback remains: this planned artifact is non-promoting and must not close the contract unless src and hard report identical st_dev and st_ino, both report st_nlink >= 2 after linkat, a write through either name is visible through the other name, unlinking one name decrements st_nlink while the remaining path survives, invalid flags/escape paths return Linux-compatible errno, and restart recovery proves no partial hardlink index or divergent copy-fallback artifact is promoted."
     },
     {
       "id": "android.direct.exec-argv-rootfs",
@@ -778,7 +785,7 @@
       "tier": "heavy-android",
       "command": "PDOCKER_PACKAGE=\"${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}\"; ROOTFS=\"${ROOTFS:?set ROOTFS to the app-visible rootfs path}\"; adb shell \"run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \\\"python3 - <<PY\nimport ctypes, errno, os\nlibc=ctypes.CDLL(None, use_errno=True)\nAT_FDCWD=-100\ndef call(n,*a):\n    ctypes.set_errno(0); rc=libc.syscall(n,*a); return rc, ctypes.get_errno()\n# openat2/name_to_handle_at/linkat/readlinkat/faccessat2 parity probes stay explicit.\nprint(\\\"errno_parity_probe_planned\\\")\nPY\\\"'\"",
       "runnable": true,
-      "checks": "Unsupported or denied syscalls return syscall-specific Linux errno values instead of permissive success; probes include startup fallbacks, path boundary denial, linkat invalid flags, readlinkat short buffers, and openat2/name_to_handle_at behavior."
+      "checks": "Unsupported or denied syscalls return syscall-specific Linux errno values instead of permissive success; probes include startup fallbacks, path boundary denial, linkat invalid flags and escape errors, readlinkat short buffers, and openat2/name_to_handle_at behavior."
     },
     {
       "id": "android.direct.bind-volume-path-mediation",
@@ -811,7 +818,7 @@
     {
       "id": "direct.linkat-copy-fallback",
       "phase2_contract": "linkat-hardlink-semantics",
-      "reason": "Current linkat emulation copies regular file bytes and does not preserve hardlink inode identity."
+      "reason": "Current linkat emulation copies regular file bytes, so hardlink paths do not share st_dev/st_ino, st_nlink stays 1, later writes can diverge, and crash/restart recovery for any future hardlink index or CoW metadata is not evidenced."
     },
     {
       "id": "direct.proc-self-exe-temp-symlink",
@@ -881,7 +888,7 @@
     },
     {
       "id": "linkat-hardlink-semantics",
-      "status": "known-implementation-gap",
+      "status": "planned-non-promoting-implementation-gap",
       "areas": [
         "linkat_hardlink_semantics"
       ],
@@ -889,11 +896,12 @@
         "Replace `linkat` copy fallback"
       ],
       "cases": [
+        "android.direct.linkat-hardlink-semantics",
         "android.direct.proc-exe-and-links",
         "android.direct.syscall-errno-parity"
       ],
-      "fast_gate": "python3 scripts/verify_direct_syscall_contracts.py",
-      "close_requires": "linkat creates guest-visible hardlink/inode semantics or documented CoW-equivalent behavior instead of copying regular file bytes."
+      "fast_gate": "python3 scripts/verify_direct_syscall_contracts.py && python3 -m unittest tests.direct_syscall.test_phase2_contracts",
+      "close_requires": "Non-promoting until an Android device artifact proves true linkat hardlink semantics versus the current copy fallback: both names must report the same st_dev/st_ino, st_nlink must increase after linkat and decrement after unlink, writes through either name must be visible through the other, invalid flags and mediated escapes must return Linux-compatible errno, and restart recovery evidence must prove partial hardlink/CoW metadata updates fail closed without promoting divergent copies."
     },
     {
       "id": "proc-self-exe-no-mutation",

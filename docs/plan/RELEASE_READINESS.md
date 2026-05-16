@@ -96,9 +96,9 @@ that planned gaps remain visible.
 
 Current non-promoting gate representations include the archive API host
 compatibility check, the terminal exec-it artifact verifier, COW kill-at-step
-device lane, OOM/LMK survival lane, and image live-pull interruption plan. They
-are release-blocker evidence until their device-gated promotion conditions
-produce passing artifacts.
+device lane, OOM/LMK survival lane, image live-pull interruption plan, and the
+storage/layer maintenance UI manifest gate. They are release-blocker evidence
+until their device-gated promotion conditions produce passing artifacts.
 
 For release notes and build records, treat these as blockers or scoped-out
 limitations, not passes:
@@ -144,6 +144,10 @@ limitations, not passes:
   input evidence for a real container session.
 - [ ] Storage metrics device sequence covers build, prune, rebuild, and
   edit/copy-up without double-counting shared layers.
+- [ ] Storage/layer maintenance UI evidence proves cache-only references remain
+  distinct from image references, unique/shared/stale sizes are visible, tree
+  rows expose detail/file/delete-with-cache-cleanup actions, and stale
+  build-cache or unreferenced-layer garbage cleanup is shown.
 
 ### llama GPU release gate
 
@@ -194,3 +198,5 @@ Avoid these claims for now:
 - "service is healthy" without current-container listener/log evidence.
 - "crash safe" for image/layer/COW mutations without the device recovery
   artifacts listed above.
+- "storage cleanup is complete" or "safe to delete cache/images" without the
+  storage/layer maintenance UI and device cleanup evidence listed above.

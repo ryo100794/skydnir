@@ -44,6 +44,10 @@ The immediate acceptance signal for `ngl=1` is:
 - Do not accept compare/correctness/benchmark claims unless speedup accounting
   fields are present, even when the CPU baseline is reused rather than freshly
   measured.
+- Do not accept a Q6_K oracle match as a correctness/benchmark claim unless the
+  compact writable-binding diagnostics prove the output buffer hash is identical
+  before writeback (`gpu_after_dispatch_hash`) and after writeback
+  (`fd_after_hash`).
 - Do not start or accept a GPU run while readiness is `false`.
 - Do not allow a benchmark claim without a CPU comparison/baseline.
 
@@ -186,7 +190,17 @@ Treat this as the pass/fail tree for the next real-device llama GPU attempt:
    Without CPU baseline evidence, `correctness_claim_allowed` may be true but
    `benchmark_claim_allowed` must remain false.
 9. **Q6_K gate:** only after the checks above pass, read
-   `q6_workgroup_diagnostics` and follow the Q6_K sections below.
+   `q6_workgroup_diagnostics` and follow the Q6_K sections below.  A
+   `latest_status: "match"` artifact must also include compact writeback
+   evidence:
+   - `q6_writeback_verified_all: true`;
+   - non-empty `q6_writable_bindings`;
+   - for each writable output entry, `index`, `binding`, `writable: true`,
+     non-zero `0x` + 16-hex `gpu_after_dispatch_hash`, matching non-zero
+     `0x` + 16-hex `fd_after_hash`, `writeback_verified: true`, and
+     `writeback_mismatch: false`;
+   - empty `q6_writable_writeback_mismatches` and
+     `q6_writable_writeback_unknown`.
 
 Verifier exit codes for these gates are stable for runbook use: 20 memory
 blocker, 21 readiness blocked, 34 executor marker missing, 35 config
@@ -270,11 +284,30 @@ those classes rather than merely restating that the sampled oracle mismatches.
 If:
 
 ```json
-"latest_status": "match"
+"latest_status": "match",
+"q6_writeback_verified_all": true,
+"q6_writable_bindings": [
+  {
+    "index": 2,
+    "binding": 2,
+    "writable": true,
+    "gpu_after_dispatch_hash": "0x1111111111111111",
+    "fd_after_hash": "0x1111111111111111",
+    "writeback_verified": true,
+    "writeback_mismatch": false
+  }
+],
+"q6_writable_writeback_mismatches": [],
+"q6_writable_writeback_unknown": []
 ```
 
-then run the same command with `--gpu-layers 2`.  Keep `ngl=1` as the rollback
-baseline until `ngl=2` also has correctness evidence.
+then run the same command with `--gpu-layers 2`.  `gpu_after_dispatch_hash` is
+the output-buffer hash before writeback; `fd_after_hash` is the hash after
+writeback to the host/container view.  If either hash is missing/zero/invalid,
+if they differ, or if the compact writable binding entry is absent, keep the run
+diagnostic-only and follow the verifier classification (`q6-writeback-mismatch`
+or `q6-writeback-unverified`).  Keep `ngl=1` as the rollback baseline until
+`ngl=2` also has correctness evidence.
 
 ## Evidence To Preserve
 

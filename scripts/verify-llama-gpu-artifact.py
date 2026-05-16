@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,18 @@ from typing import Any
 
 MEMORY_ERRORS = {"insufficient_memory", "runtime_memory_pressure"}
 ENV_MANIFEST_PATH = Path(__file__).resolve().with_name("llama-gpu-env-manifest.json")
+COMPACT_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{16}$")
+ZERO_COMPACT_HASH = "0x0000000000000000"
+Q6_WRITEBACK_REQUIRED_FIELDS = (
+    "gpu.diagnostics.q6_workgroup_diagnostics.q6_writeback_verified_all",
+    "gpu.diagnostics.q6_workgroup_diagnostics.q6_writable_bindings[].index",
+    "gpu.diagnostics.q6_workgroup_diagnostics.q6_writable_bindings[].binding",
+    "gpu.diagnostics.q6_workgroup_diagnostics.q6_writable_bindings[].writable",
+    "gpu.diagnostics.q6_workgroup_diagnostics.q6_writable_bindings[].gpu_after_dispatch_hash",
+    "gpu.diagnostics.q6_workgroup_diagnostics.q6_writable_bindings[].fd_after_hash",
+    "gpu.diagnostics.q6_workgroup_diagnostics.q6_writable_bindings[].writeback_verified",
+    "gpu.diagnostics.q6_workgroup_diagnostics.q6_writable_bindings[].writeback_mismatch",
+)
 
 
 def _load_env_manifest() -> dict[str, Any]:
@@ -342,6 +355,164 @@ def _speedup_field_status(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _valid_compact_hash(value: Any) -> bool:
+    return isinstance(value, str) and bool(COMPACT_HASH_RE.fullmatch(value)) and value.lower() != ZERO_COMPACT_HASH
+
+
+def _compact_binding_identity(binding: dict[str, Any], path: str) -> dict[str, Any]:
+    return {
+        "path": path,
+        "index": binding.get("index"),
+        "binding": binding.get("binding"),
+        "alias_rep": binding.get("alias_rep"),
+        "offset": binding.get("offset"),
+        "size": binding.get("size"),
+    }
+
+
+def _q6_writeback_evidence(q6: Any) -> dict[str, Any]:
+    """Validate Q6_K compact writable-binding writeback hash evidence.
+
+    The compare summarizer emits compact binding diagnostics for the Q6_K oracle
+    event.  A Q6_K oracle match is only claimable when every writable output
+    binding has a non-zero hash after GPU dispatch, a non-zero hash after
+    host/container writeback, the hashes match, and the executor explicitly
+    marked the writeback as verified.  Missing compact fields fail closed as
+    unverified; present mismatches fail closed as writeback mismatches.
+    """
+
+    required_fields = list(Q6_WRITEBACK_REQUIRED_FIELDS)
+    if not isinstance(q6, dict):
+        return {
+            "summary": "unverified",
+            "required_fields": required_fields,
+            "missing": ["gpu.diagnostics.q6_workgroup_diagnostics"],
+            "mismatches": [],
+            "unknown": [],
+            "verified_bindings": [],
+            "verified_binding_count": 0,
+        }
+
+    missing: list[dict[str, Any]] = []
+    mismatches: list[dict[str, Any]] = []
+    unknown: list[dict[str, Any]] = []
+    verified_bindings: list[dict[str, Any]] = []
+
+    if q6.get("q6_writeback_verified_all") is not True:
+        missing.append({
+            "path": "q6_writeback_verified_all",
+            "reason": "expected true",
+            "value": q6.get("q6_writeback_verified_all"),
+        })
+
+    for item in q6.get("q6_writable_writeback_mismatches") or []:
+        if isinstance(item, dict):
+            mismatches.append(_compact_binding_identity(item, "q6_writable_writeback_mismatches[]") | {
+                "gpu_after_dispatch_hash": item.get("gpu_after_dispatch_hash"),
+                "fd_after_hash": item.get("fd_after_hash"),
+                "writeback_mismatch": item.get("writeback_mismatch"),
+            })
+        else:
+            mismatches.append({"path": "q6_writable_writeback_mismatches[]", "value": item})
+
+    for item in q6.get("q6_writable_writeback_unknown") or []:
+        if isinstance(item, dict):
+            unknown.append(_compact_binding_identity(item, "q6_writable_writeback_unknown[]") | {
+                "gpu_after_dispatch_hash": item.get("gpu_after_dispatch_hash"),
+                "fd_after_hash": item.get("fd_after_hash"),
+                "writeback_verified": item.get("writeback_verified"),
+            })
+        else:
+            unknown.append({"path": "q6_writable_writeback_unknown[]", "value": item})
+
+    writable_bindings = q6.get("q6_writable_bindings")
+    if not isinstance(writable_bindings, list) or not writable_bindings:
+        missing.append({
+            "path": "q6_writable_bindings",
+            "reason": "expected non-empty compact writable binding diagnostics",
+        })
+        writable_bindings = []
+
+    for index, item in enumerate(writable_bindings):
+        path = f"q6_writable_bindings[{index}]"
+        if not isinstance(item, dict):
+            missing.append({"path": path, "reason": "expected object", "value": item})
+            continue
+        identity = _compact_binding_identity(item, path)
+        if item.get("index") is None:
+            missing.append(identity | {"field": "index", "reason": "missing"})
+        if item.get("binding") is None:
+            missing.append(identity | {"field": "binding", "reason": "missing"})
+        if item.get("writable") is not True:
+            missing.append(identity | {"field": "writable", "reason": "expected true", "value": item.get("writable")})
+
+        dispatch_hash = item.get("gpu_after_dispatch_hash")
+        after_hash = item.get("fd_after_hash")
+        dispatch_hash_valid = _valid_compact_hash(dispatch_hash)
+        after_hash_valid = _valid_compact_hash(after_hash)
+        if not dispatch_hash_valid:
+            missing.append(identity | {
+                "field": "gpu_after_dispatch_hash",
+                "reason": "missing, zero, or invalid compact hash",
+                "value": dispatch_hash,
+            })
+        if not after_hash_valid:
+            missing.append(identity | {
+                "field": "fd_after_hash",
+                "reason": "missing, zero, or invalid compact hash",
+                "value": after_hash,
+            })
+        if item.get("writeback_verified") is not True:
+            missing.append(identity | {
+                "field": "writeback_verified",
+                "reason": "expected true",
+                "value": item.get("writeback_verified"),
+            })
+        if item.get("writeback_mismatch") is True:
+            mismatches.append(identity | {
+                "gpu_after_dispatch_hash": dispatch_hash,
+                "fd_after_hash": after_hash,
+                "writeback_mismatch": True,
+            })
+        elif item.get("writeback_mismatch") not in (False, None):
+            missing.append(identity | {
+                "field": "writeback_mismatch",
+                "reason": "expected false",
+                "value": item.get("writeback_mismatch"),
+            })
+        if dispatch_hash_valid and after_hash_valid and str(dispatch_hash).lower() != str(after_hash).lower():
+            mismatches.append(identity | {
+                "gpu_after_dispatch_hash": dispatch_hash,
+                "fd_after_hash": after_hash,
+                "writeback_mismatch": item.get("writeback_mismatch"),
+            })
+        if (
+            item.get("index") is not None
+            and item.get("binding") is not None
+            and item.get("writable") is True
+            and dispatch_hash_valid
+            and after_hash_valid
+            and str(dispatch_hash).lower() == str(after_hash).lower()
+            and item.get("writeback_verified") is True
+            and item.get("writeback_mismatch") in (False, None)
+        ):
+            verified_bindings.append(identity | {
+                "gpu_after_dispatch_hash": dispatch_hash,
+                "fd_after_hash": after_hash,
+            })
+
+    summary = "mismatch" if mismatches else "unverified" if missing or unknown else "pass"
+    return {
+        "summary": summary,
+        "required_fields": required_fields,
+        "missing": missing[:16],
+        "mismatches": mismatches[:16],
+        "unknown": unknown[:16],
+        "verified_bindings": verified_bindings[:16],
+        "verified_binding_count": len(verified_bindings),
+    }
+
+
 def _api_prompt_sanity(data: dict[str, Any]) -> dict[str, Any]:
     if not _is_compare_artifact(data):
         return {"required": False, "summary": "not-required", "missing": []}
@@ -549,20 +720,21 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             "config_propagation": config_propagation,
         }
 
+    q6_writeback_evidence = _q6_writeback_evidence(q6)
     if not q6:
         classification = "q6-not-reached"
         next_action = data.get("next_action") or "collect an ngl=1 artifact with Q6_K oracle enabled"
     elif q6.get("workgroup_shape_blocker") is True:
         classification = "q6-workgroup-shape-blocker"
         next_action = "fix Q6_K local-size propagation/materialization"
-    elif q6.get("latest_status") == "match" and q6.get("q6_writable_writeback_mismatches"):
+    elif q6.get("latest_status") == "match" and q6_writeback_evidence.get("summary") == "mismatch":
         classification = "q6-writeback-mismatch"
         next_action = "fix Q6_K writable output writeback before accepting correctness or benchmark claims"
-    elif q6.get("latest_status") == "match" and q6.get("q6_writeback_verified_all") is not True:
+    elif q6.get("latest_status") == "match" and q6_writeback_evidence.get("summary") != "pass":
         classification = "q6-writeback-unverified"
         next_action = (
             data.get("next_action")
-            or "rerun with PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1 so Q6_K writable output writeback is hash-verified"
+            or "rerun with PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1 so Q6_K compact writable output hashes before/after writeback are present and verified"
         )
     elif q6.get("latest_status") == "match":
         classification = "q6-workgroup-cleared-and-oracle-match"
@@ -594,6 +766,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "target_met": comparison.get("target_met", False),
         "next_action": next_action,
         "q6_workgroup_diagnostics": q6,
+        "q6_writeback_evidence": q6_writeback_evidence,
         "runtime_freshness": runtime_freshness,
         "config_propagation": config_propagation,
         "api_prompt_sanity": api_prompt_sanity,

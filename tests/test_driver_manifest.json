@@ -245,6 +245,49 @@
         }
       ]
     },
+    "storage-layer-maintenance-ui": {
+      "description": "Host-only, non-promoting storage/layer maintenance UI contract. It keeps cache references distinct from image references, requires size and reference-tree actions, and records stale/garbage cleanup evidence without claiming device promotion.",
+      "checkpoint_class": "host-ui-contract-non-promoting",
+      "stable_checkpoint_eligible": false,
+      "planned_gap_contracts": [
+        "storage/layer maintenance device evidence for cache-vs-image refs, sizes, tree actions, and stale/garbage cleanup"
+      ],
+      "promotion_condition": "Non-promoting manifest gate only. Stable/release credit still requires a device artifact proving the UI flow, Engine storage state, and cleanup evidence agree after build, prune, rebuild, image delete, and stale-cache cleanup.",
+      "commands": [
+        {
+          "id": "storage-layer-maintenance-ui-actions",
+          "argv": [
+            "python3",
+            "scripts/verify-ui-actions.py"
+          ],
+          "artifacts": [
+            "tests/feature_scenarios.json",
+            "tests/blackbox_requirements.json",
+            "docs/plan/RELEASE_READINESS.md"
+          ]
+        },
+        {
+          "id": "storage-layer-maintenance-feature-ledger",
+          "argv": [
+            "python3",
+            "scripts/verify-feature-scenarios.py"
+          ],
+          "artifacts": [
+            "tests/feature_scenarios.json"
+          ]
+        },
+        {
+          "id": "storage-layer-maintenance-blackbox",
+          "argv": [
+            "python3",
+            "scripts/verify-blackbox-requirements.py"
+          ],
+          "artifacts": [
+            "tests/blackbox_requirements.json"
+          ]
+        }
+      ]
+    },
     "cow-overlay-bench-recovery": {
       "description": "Local COW overlay benchmark and recovery scaffold for libcow fallback.",
       "checkpoint_class": "local-recovery-scaffold",

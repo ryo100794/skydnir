@@ -236,6 +236,20 @@
       "checks": "Layer cache reuse, prune behavior, active build protection, and storage refresh wiring."
     },
     {
+      "id": "image.layer.maintenance-ui.contract",
+      "area": "image-and-layer-storage",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-ui-actions.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/STORAGE_METRICS.md",
+        "docs/plan/RELEASE_READINESS.md",
+        "tests/blackbox_requirements.json"
+      ],
+      "checks": "Non-promoting UI contract for storage/layer maintenance: image reference rows and build-cache references stay visually distinct, unique/shared/stale sizes remain visible, reference-tree rows expose details/files/delete+clean-cache actions, and stale build-cache or unreferenced-layer garbage cleanup evidence remains surfaced.",
+      "checkpoint_credit": "non-promoting host UI/static manifest gate only; requires future device artifact before storage/layer maintenance release credit"
+    },
+    {
       "id": "image.pull.live-registry-interruption",
       "area": "image-and-layer-storage",
       "lane": "android-full",
