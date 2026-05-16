@@ -555,6 +555,15 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     elif q6.get("workgroup_shape_blocker") is True:
         classification = "q6-workgroup-shape-blocker"
         next_action = "fix Q6_K local-size propagation/materialization"
+    elif q6.get("latest_status") == "match" and q6.get("q6_writable_writeback_mismatches"):
+        classification = "q6-writeback-mismatch"
+        next_action = "fix Q6_K writable output writeback before accepting correctness or benchmark claims"
+    elif q6.get("latest_status") == "match" and q6.get("q6_writeback_verified_all") is not True:
+        classification = "q6-writeback-unverified"
+        next_action = (
+            data.get("next_action")
+            or "rerun with PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1 so Q6_K writable output writeback is hash-verified"
+        )
     elif q6.get("latest_status") == "match":
         classification = "q6-workgroup-cleared-and-oracle-match"
         next_action = "advance to ngl=2 or performance tuning"
@@ -634,6 +643,10 @@ def main(argv: list[str]) -> int:
         return 38
     if classification == "speedup-fields-missing":
         return 39
+    if classification == "q6-writeback-mismatch":
+        return 40
+    if classification == "q6-writeback-unverified":
+        return 41
     if args.require_q6_match:
         return 0 if classification == "q6-workgroup-cleared-and-oracle-match" else 30
     if args.require_q6_workgroup_clear:

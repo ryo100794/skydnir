@@ -121,10 +121,25 @@
       "expected_signal": "pdocker records the last memory telemetry sample, classifies the operation as interrupted-or-lmk-suspected, and avoids stale Up/running UI state",
       "failure_oracle": "The OOM survival replay must fail if the operation disappears without evidence, leaves stale running state, or loses the container/operation identity.",
       "expected_exit_code": null,
-      "evidence_source": "docs/test/runtime-oom-survival-latest.json",
-      "reproduction_command": "bash scripts/android-container-direct-probe.sh --memory-guard --large-mb 512",
+      "evidence_source": "docs/test/oom-lmk-survival-latest.json",
+      "reproduction_command": "python3 scripts/verify-oom-lmk-survival-gate.py --device-plan-artifact docs/test/oom-lmk-survival-latest.json",
       "retention": "Keep device artifacts for release-candidate test sets and attach the operation memory ring.",
-      "gap_reason": "The telemetry ring and LMK replay classifier are designed but not implemented as an executable device test yet."
+      "gap_reason": "Host/static classification and non-promoting device-plan artifacts exist; controlled connected-device LMK/backend-death replay is not promoted yet."
+    },
+    {
+      "id": "abnormal.storage.image-live-pull-interrupted",
+      "category": "storage",
+      "severity": "blocker",
+      "surface": "image-store",
+      "status": "planned-gap",
+      "trigger": "pdockerd is killed while a scenario-owned live registry pull is transferring layers",
+      "expected_signal": "Restart recovery prunes partial pull state, preserves old tags, rejects never-published or partial tags, and records that only scenario-owned fixture paths were touched",
+      "failure_oracle": "The live-pull gate must fail if a partial tag/layer becomes inspectable/runnable, a user tag is overwritten, or cleanup reaches outside scenario-owned paths.",
+      "expected_exit_code": null,
+      "evidence_source": "docs/test/image-pull-crash-safety-live-latest.json",
+      "reproduction_command": "python3 scripts/verify/runner/image_pull_crash_safety_device.py --execute-live-pull-interruption --live-image 127.0.0.1:5000/pdocker-live-pull-fixture:latest --live-fixture-owned",
+      "retention": "Keep device artifacts with release-candidate test sets; planned-gap artifacts are non-promoting.",
+      "gap_reason": "Timed live registry pull interruption is represented but not implemented/promoted; only scenario-owned or isolated fixtures may be used."
     },
     {
       "id": "abnormal.ui.readonly-terminal-keyboard",

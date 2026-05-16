@@ -7,7 +7,13 @@
     "artifact_rule": "Every automated lane writes one run manifest. Individual generated files remain in their canonical locations and are referenced with sha256, size, and producer command.",
     "wrapper_rule": "Legacy shell entrypoints may exist only as compatibility wrappers around the canonical driver.",
     "stable_checkpoint_rule": "A run manifest is stable-checkpoint eligible only when release blockers in docs/plan/RELEASE_READINESS.md are closed or explicitly scoped, and every device-gated artifact named by docs/test/CI_GATE_LEDGER.md is passing with the required proof. Host-only planned-gap verifiers, non-passing artifacts, and device-gated lanes without promotion artifacts are non-promoting evidence.",
-    "non_promoting_statuses": ["planned-gap", "blocked", "failed", "skip", "skipped"],
+    "non_promoting_statuses": [
+      "planned-gap",
+      "blocked",
+      "failed",
+      "skip",
+      "skipped"
+    ],
     "device_gate_rule": "Lanes that require adb/installed APKs provide device evidence only; they do not promote a stable checkpoint unless the corresponding CI gate ledger promotion condition is satisfied and the artifact status is passing."
   },
   "lanes": {
@@ -16,95 +22,217 @@
       "commands": [
         {
           "id": "unittest-all",
-          "argv": ["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]
+          "argv": [
+            "python3",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_*.py"
+          ]
         },
         {
           "id": "verify-runtime-contract",
-          "argv": ["python3", "docker-proot-setup/scripts/verify_runtime_contract.py"]
+          "argv": [
+            "python3",
+            "docker-proot-setup/scripts/verify_runtime_contract.py"
+          ]
         },
         {
           "id": "verify-direct-syscall",
-          "argv": ["python3", "scripts/verify_direct_syscall_contracts.py"],
-          "artifacts": ["tests/direct_syscall_coverage.json"]
+          "argv": [
+            "python3",
+            "scripts/verify_direct_syscall_contracts.py"
+          ],
+          "artifacts": [
+            "tests/direct_syscall_coverage.json"
+          ]
         },
         {
           "id": "verify-build-profile",
-          "argv": ["python3", "scripts/verify-build-profile.py"]
+          "argv": [
+            "python3",
+            "scripts/verify-build-profile.py"
+          ]
         },
         {
           "id": "verify-service-truth-plan",
-          "argv": ["python3", "scripts/verify-service-truth-plan.py"],
-          "artifacts": ["docs/test/service-truth-latest.json", "docs/test/runtime-teardown-latest.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-service-truth-plan.py"
+          ],
+          "artifacts": [
+            "docs/test/service-truth-latest.json",
+            "docs/test/runtime-teardown-latest.json"
+          ]
         },
         {
           "id": "verify-image-pull-crash-safety",
-          "argv": ["python3", "scripts/verify-image-pull-crash-safety.py"],
-          "artifacts": ["docs/test/image-pull-crash-safety-latest.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-image-pull-crash-safety.py"
+          ],
+          "artifacts": [
+            "docs/test/image-pull-crash-safety-latest.json"
+          ]
+        },
+        {
+          "id": "verify-archive-api-compat",
+          "argv": [
+            "python3",
+            "scripts/verify-archive-api-compat.py"
+          ],
+          "artifacts": [
+            "docs/test/COMPATIBILITY.md",
+            "docs/test/compat-audit-latest.md"
+          ]
         },
         {
           "id": "verify-project-library",
-          "argv": ["python3", "scripts/verify-project-library.py"]
+          "argv": [
+            "python3",
+            "scripts/verify-project-library.py"
+          ]
         },
         {
           "id": "verify-input-validation",
-          "argv": ["python3", "scripts/verify-input-validation.py", "--write-artifact", "docs/test/input-validation-latest.json"],
-          "artifacts": ["docs/test/input-validation-latest.json", "tests/input_validation_cases.json", "tests/input_grammar_coverage.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-input-validation.py",
+            "--write-artifact",
+            "docs/test/input-validation-latest.json"
+          ],
+          "artifacts": [
+            "docs/test/input-validation-latest.json",
+            "tests/input_validation_cases.json",
+            "tests/input_grammar_coverage.json"
+          ]
         },
         {
           "id": "verify-abnormal-events",
-          "argv": ["python3", "scripts/verify-abnormal-events.py", "--write-artifact", "docs/test/abnormal-events-latest.json"],
-          "artifacts": ["docs/test/abnormal-events-latest.json", "tests/abnormal_event_cases.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-abnormal-events.py",
+            "--write-artifact",
+            "docs/test/abnormal-events-latest.json"
+          ],
+          "artifacts": [
+            "docs/test/abnormal-events-latest.json",
+            "tests/abnormal_event_cases.json"
+          ]
         },
         {
           "id": "verify-oom-lmk-survival-gate",
-          "argv": ["python3", "scripts/verify-oom-lmk-survival-gate.py"],
-          "artifacts": ["docs/test/CI_GATE_LEDGER.md", "docs/test/APK_MEMORY_PAGER_PROBE.md", "docs/test/oom-lmk-survival-latest.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-oom-lmk-survival-gate.py"
+          ],
+          "artifacts": [
+            "docs/test/CI_GATE_LEDGER.md",
+            "docs/test/APK_MEMORY_PAGER_PROBE.md",
+            "docs/test/oom-lmk-survival-latest.json"
+          ]
         },
         {
           "id": "verify-refactor-resilience",
-          "argv": ["python3", "scripts/verify-refactor-resilience.py", "--write-artifact", "docs/test/refactor-resilience-latest.json"],
-          "artifacts": ["docs/test/refactor-resilience-latest.json", "tests/refactor_resilience_cases.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-refactor-resilience.py",
+            "--write-artifact",
+            "docs/test/refactor-resilience-latest.json"
+          ],
+          "artifacts": [
+            "docs/test/refactor-resilience-latest.json",
+            "tests/refactor_resilience_cases.json"
+          ]
         },
         {
           "id": "verify-input-grammar-coverage",
-          "argv": ["python3", "scripts/verify-input-grammar-coverage.py"],
-          "artifacts": ["tests/input_grammar_coverage.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-input-grammar-coverage.py"
+          ],
+          "artifacts": [
+            "tests/input_grammar_coverage.json"
+          ]
         },
         {
           "id": "verify-stress-regression",
-          "argv": ["python3", "scripts/verify-stress-regression.py", "--write-artifact", "docs/test/stress-regression-latest.json"],
-          "artifacts": ["docs/test/stress-regression-latest.json", "tests/stress_regression_cases.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-stress-regression.py",
+            "--write-artifact",
+            "docs/test/stress-regression-latest.json"
+          ],
+          "artifacts": [
+            "docs/test/stress-regression-latest.json",
+            "tests/stress_regression_cases.json"
+          ]
         },
         {
           "id": "verify-blackbox-requirements",
-          "argv": ["python3", "scripts/verify-blackbox-requirements.py"],
-          "artifacts": ["tests/blackbox_requirements.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-blackbox-requirements.py"
+          ],
+          "artifacts": [
+            "tests/blackbox_requirements.json"
+          ]
         },
         {
           "id": "verify-feature-scenarios",
-          "argv": ["python3", "scripts/verify-feature-scenarios.py"],
-          "artifacts": ["tests/feature_scenarios.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-feature-scenarios.py"
+          ],
+          "artifacts": [
+            "tests/feature_scenarios.json"
+          ]
         },
         {
           "id": "verify-ui-actions",
-          "argv": ["python3", "scripts/verify-ui-actions.py"]
+          "argv": [
+            "python3",
+            "scripts/verify-ui-actions.py"
+          ]
         },
         {
           "id": "verify-terminal-editor",
-          "argv": ["python3", "scripts/verify_terminal_editor_contracts.py"]
+          "argv": [
+            "python3",
+            "scripts/verify_terminal_editor_contracts.py"
+          ]
         }
       ],
       "checkpoint_class": "development-regression-only",
       "stable_checkpoint_eligible": false,
-      "planned_gap_contracts": ["service-truth", "runtime-teardown", "image-pull-crash-safety", "OOM/LMK", "OOM/LMK survival device replay", "llama GPU correctness"]
+      "planned_gap_contracts": [
+        "service-truth",
+        "runtime-teardown",
+        "image-pull-crash-safety",
+        "OOM/LMK",
+        "OOM/LMK survival device replay",
+        "llama GPU correctness",
+        "COW/overlay external kill-at-step device evidence",
+        "terminal exec-it device artifact verifier",
+        "image live-pull interruption device replay",
+        "archive API device mutation promotion"
+      ]
     },
     "python-coverage": {
       "description": "Instrumented Python line/branch coverage evidence.",
       "commands": [
         {
           "id": "python-coverage",
-          "argv": ["bash", "scripts/run-python-coverage.sh"],
-          "artifacts": ["docs/test/python-coverage-latest.json"]
+          "argv": [
+            "bash",
+            "scripts/run-python-coverage.sh"
+          ],
+          "artifacts": [
+            "docs/test/python-coverage-latest.json"
+          ]
         }
       ]
     },
@@ -121,11 +249,19 @@
       "description": "Local COW overlay benchmark and recovery scaffold for libcow fallback.",
       "checkpoint_class": "local-recovery-scaffold",
       "stable_checkpoint_eligible": false,
-      "planned_gap_contracts": ["COW/overlay external kill-at-step device evidence"],
+      "planned_gap_contracts": [
+        "COW/overlay external kill-at-step device evidence"
+      ],
       "commands": [
         {
           "id": "cow-overlay-bench-recovery",
-          "argv": ["python3", "scripts/verify-cow-overlay-bench-recovery.py", "--run-local", "--output-dir", "docs/test"],
+          "argv": [
+            "python3",
+            "scripts/verify-cow-overlay-bench-recovery.py",
+            "--run-local",
+            "--output-dir",
+            "docs/test"
+          ],
           "artifacts": [
             "docs/test/cow-overlay-bench-latest.json",
             "docs/test/cow-overlay-recovery-latest.json"
@@ -135,71 +271,188 @@
     },
     "android-cow-overlay-kill-at-step": {
       "description": "Device route for COW/overlay external daemon/helper kill-at-step recovery evidence. Without adb or the APK checkpoint helper it writes non-promoting planned-gap/blocked-device evidence only.",
-      "requires": ["adb", "installed-debug-apk", "pdocker-cow-kill-at-step-debug-helper"],
+      "requires": [
+        "adb",
+        "installed-debug-apk",
+        "pdocker-cow-kill-at-step-debug-helper"
+      ],
       "checkpoint_class": "device-evidence-only",
       "stable_checkpoint_eligible": false,
       "promotion_condition": "Must satisfy docs/test/CI_GATE_LEDGER.md COW/overlay external kill-at-step promotion condition with status=pass and every required case proven by adb/run-as evidence.",
       "commands": [
         {
           "id": "cow-overlay-kill-at-step-device",
-          "argv": ["python3", "scripts/verify/runner/cow_overlay_kill_at_step_device.py", "--execute-device", "--artifact", "docs/test/cow-overlay-kill-at-step-latest.json"],
-          "artifacts": ["docs/test/cow-overlay-kill-at-step-latest.json"]
+          "argv": [
+            "python3",
+            "scripts/verify/runner/cow_overlay_kill_at_step_device.py",
+            "--execute-device",
+            "--artifact",
+            "docs/test/cow-overlay-kill-at-step-latest.json"
+          ],
+          "artifacts": [
+            "docs/test/cow-overlay-kill-at-step-latest.json"
+          ]
+        }
+      ]
+    },
+    "android-terminal-exec-it": {
+      "description": "Device route for UI-driven Engine exec -it terminal proof. Host artifact verification is non-promoting unless paired with raw Engine exec JSONL from a real container session.",
+      "requires": [
+        "adb",
+        "installed-debug-apk",
+        "running-container",
+        "engine-exec-input-diagnostics"
+      ],
+      "checkpoint_class": "device-evidence-only",
+      "stable_checkpoint_eligible": false,
+      "promotion_condition": "Must satisfy docs/test/CI_GATE_LEDGER.md terminal exec-it promotion condition with a passing UI self-test artifact and engine-exec-input JSONL verified using --require-container.",
+      "commands": [
+        {
+          "id": "android-terminal-exec-it-smoke",
+          "argv": [
+            "bash",
+            "scripts/android-device-smoke.sh",
+            "--quick",
+            "--no-install"
+          ],
+          "artifacts": [
+            "docs/test/ui-it-selftest-latest.json",
+            "docs/test/engine-exec-input-latest.jsonl"
+          ]
+        },
+        {
+          "id": "verify-terminal-exec-it-artifact",
+          "argv": [
+            "python3",
+            "scripts/verify-terminal-exec-it-artifact.py",
+            "docs/test/ui-it-selftest-latest.json",
+            "docs/test/engine-exec-input-latest.jsonl",
+            "--require-container"
+          ],
+          "artifacts": [
+            "docs/test/ui-it-selftest-latest.json",
+            "docs/test/engine-exec-input-latest.jsonl"
+          ]
+        }
+      ]
+    },
+    "android-image-live-pull-interruption": {
+      "description": "Planned device route for timed live registry pull interruption. It must use a scenario-owned or isolated fixture and currently writes non-promoting planned-gap evidence only.",
+      "requires": [
+        "adb",
+        "installed-debug-apk",
+        "scenario-owned-registry-fixture"
+      ],
+      "checkpoint_class": "device-evidence-planned-gap",
+      "stable_checkpoint_eligible": false,
+      "planned_gap_contracts": [
+        "timed live registry pull interruption without user tag overwrite"
+      ],
+      "promotion_condition": "Must satisfy docs/test/CI_GATE_LEDGER.md image pull crash-safety promotion condition with status=pass, live_interrupted_network_pull=true, and proof that only scenario-owned tags/layers were touched.",
+      "commands": [
+        {
+          "id": "image-live-pull-interruption-plan",
+          "argv": [
+            "python3",
+            "scripts/verify/runner/image_pull_crash_safety_device.py",
+            "--execute-live-pull-interruption",
+            "--live-image",
+            "127.0.0.1:5000/pdocker-live-pull-fixture:latest",
+            "--live-fixture-owned",
+            "--artifact",
+            "docs/test/image-pull-crash-safety-live-latest.json"
+          ],
+          "artifacts": [
+            "docs/test/image-pull-crash-safety-live-latest.json"
+          ]
         }
       ]
     },
     "android-test-suite": {
       "description": "Device route: stage compose project, compose up/build through the app, then Engine exec the test-suite.",
-      "requires": ["adb", "installed-debug-apk"],
+      "requires": [
+        "adb",
+        "installed-debug-apk"
+      ],
       "checkpoint_class": "device-evidence-only",
       "stable_checkpoint_eligible": false,
       "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-test-suite-compose-exec",
-          "argv": ["bash", "scripts/android-test-suite-container-exec.sh"],
-          "env": {"PDOCKER_TEST_SUITE_SCENARIO": "all"},
-          "artifacts": ["docs/test/test-run-latest.json"]
+          "argv": [
+            "bash",
+            "scripts/android-test-suite-container-exec.sh"
+          ],
+          "env": {
+            "PDOCKER_TEST_SUITE_SCENARIO": "all"
+          },
+          "artifacts": [
+            "docs/test/test-run-latest.json"
+          ]
         }
       ]
     },
     "android-documents": {
       "description": "Device route: container /documents writes must prove direct SAF/Documents backend output, sidecar metadata, and explicit fallback evidence.",
-      "requires": ["adb", "installed-debug-apk"],
+      "requires": [
+        "adb",
+        "installed-debug-apk"
+      ],
       "checkpoint_class": "device-evidence-only",
       "stable_checkpoint_eligible": false,
       "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-documents-saf-direct-output",
-          "argv": ["bash", "scripts/android-documents-mediator-smoke.sh"],
-          "artifacts": ["docs/test/saf-direct-output-latest.json"]
+          "argv": [
+            "bash",
+            "scripts/android-documents-mediator-smoke.sh"
+          ],
+          "artifacts": [
+            "docs/test/saf-direct-output-latest.json"
+          ]
         }
       ]
     },
     "android-dev-workspace": {
       "description": "Device route: UI-triggered default dev-workspace compose up with build/run, current pdocker-dev Engine state, port 18080 listener, code-server HTTP, configured extension, and UI service-truth evidence.",
-      "requires": ["adb", "installed-debug-apk"],
+      "requires": [
+        "adb",
+        "installed-debug-apk"
+      ],
       "checkpoint_class": "device-evidence-only",
       "stable_checkpoint_eligible": false,
       "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-dev-workspace-compose-smoke",
-          "argv": ["bash", "scripts/android-dev-workspace-compose-smoke.sh"],
-          "artifacts": ["docs/test/dev-workspace-compose-latest.json"]
+          "argv": [
+            "bash",
+            "scripts/android-dev-workspace-compose-smoke.sh"
+          ],
+          "artifacts": [
+            "docs/test/dev-workspace-compose-latest.json"
+          ]
         }
       ]
     },
     "android-blas-cmake-build": {
       "description": "Device build route for apt-installed OpenBLAS visibility across Dockerfile RUN layers and standard CMake FindBLAS.",
-      "requires": ["adb", "installed-debug-apk"],
+      "requires": [
+        "adb",
+        "installed-debug-apk"
+      ],
       "checkpoint_class": "device-evidence-only",
       "stable_checkpoint_eligible": false,
       "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-blas-cmake-build-smoke",
-          "argv": ["bash", "scripts/android-blas-cmake-build-smoke.sh"],
+          "argv": [
+            "bash",
+            "scripts/android-blas-cmake-build-smoke.sh"
+          ],
           "artifacts": [
             "docs/test/android-blas-cmake-build-latest.json",
             "docs/test/android-blas-cmake-build-latest.log"
@@ -209,14 +462,21 @@
     },
     "android-file-io-microbench": {
       "description": "Device benchmark route for native/container file-I/O overhead, including Documents/SD mirror paths when configured.",
-      "requires": ["adb", "installed-debug-apk", "aarch64-linux-gnu-gcc"],
+      "requires": [
+        "adb",
+        "installed-debug-apk",
+        "aarch64-linux-gnu-gcc"
+      ],
       "checkpoint_class": "device-evidence-only",
       "stable_checkpoint_eligible": false,
       "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-file-io-microbench",
-          "argv": ["bash", "scripts/android-file-io-microbench.sh"],
+          "argv": [
+            "bash",
+            "scripts/android-file-io-microbench.sh"
+          ],
           "env": {
             "PDOCKER_FILE_IO_MICRO_FILES": "32",
             "PDOCKER_FILE_IO_MICRO_BLOCKS": "16",
@@ -232,25 +492,47 @@
     },
     "android-memory-pager": {
       "description": "Device route for APK-scoped memory pager probes and bounded OOM/LMK telemetry artifacts.",
-      "requires": ["adb", "installed-debug-apk"],
+      "requires": [
+        "adb",
+        "installed-debug-apk"
+      ],
       "checkpoint_class": "device-evidence-only",
       "stable_checkpoint_eligible": false,
       "promotion_condition": "Must satisfy the matching docs/test/CI_GATE_LEDGER.md promotion condition with a passing device artifact before release/stable credit.",
       "commands": [
         {
           "id": "android-memory-pager-managed-poc",
-          "argv": ["bash", "scripts/android-memory-pager-managed-poc.sh"],
-          "artifacts": ["docs/test/apk-memory-pager-managed-latest.json"]
+          "argv": [
+            "bash",
+            "scripts/android-memory-pager-managed-poc.sh"
+          ],
+          "artifacts": [
+            "docs/test/apk-memory-pager-managed-latest.json"
+          ]
         },
         {
           "id": "android-memory-pager-transparent-poc",
-          "argv": ["bash", "scripts/android-memory-pager-transparent-poc.sh"],
-          "artifacts": ["docs/test/apk-memory-pager-transparent-latest.json"]
+          "argv": [
+            "bash",
+            "scripts/android-memory-pager-transparent-poc.sh"
+          ],
+          "artifacts": [
+            "docs/test/apk-memory-pager-transparent-latest.json"
+          ]
         },
         {
           "id": "oom-lmk-survival-device-gate",
-          "argv": ["python3", "scripts/verify-oom-lmk-survival-gate.py", "--device-plan-artifact", "docs/test/oom-lmk-survival-latest.json"],
-          "artifacts": ["docs/test/oom-lmk-survival-latest.json", "docs/test/apk-memory-pager-managed-latest.json", "docs/test/apk-memory-pager-transparent-latest.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-oom-lmk-survival-gate.py",
+            "--device-plan-artifact",
+            "docs/test/oom-lmk-survival-latest.json"
+          ],
+          "artifacts": [
+            "docs/test/oom-lmk-survival-latest.json",
+            "docs/test/apk-memory-pager-managed-latest.json",
+            "docs/test/apk-memory-pager-transparent-latest.json"
+          ]
         }
       ]
     },
@@ -258,12 +540,22 @@
       "description": "Strict test-design gate. This lane is expected to fail until native/Kotlin coverage evidence and enough check items exist.",
       "checkpoint_class": "strict-governance-known-failing",
       "stable_checkpoint_eligible": false,
-      "planned_gap_contracts": ["native/Kotlin coverage and check-density closure"],
+      "planned_gap_contracts": [
+        "native/Kotlin coverage and check-density closure"
+      ],
       "commands": [
         {
           "id": "verify-test-design-criteria",
-          "argv": ["python3", "scripts/verify-test-design-criteria.py", "--write-artifact", "docs/test/test-design-criteria-latest.json"],
-          "artifacts": ["docs/test/test-design-criteria-latest.json", "tests/test_design_criteria.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-test-design-criteria.py",
+            "--write-artifact",
+            "docs/test/test-design-criteria-latest.json"
+          ],
+          "artifacts": [
+            "docs/test/test-design-criteria-latest.json",
+            "tests/test_design_criteria.json"
+          ]
         }
       ]
     },
@@ -275,8 +567,15 @@
       "commands": [
         {
           "id": "verify-release-readiness-honesty",
-          "argv": ["python3", "scripts/verify-release-readiness.py"],
-          "artifacts": ["docs/plan/RELEASE_READINESS.md", "docs/test/CI_GATE_LEDGER.md", "tests/test_driver_manifest.json"]
+          "argv": [
+            "python3",
+            "scripts/verify-release-readiness.py"
+          ],
+          "artifacts": [
+            "docs/plan/RELEASE_READINESS.md",
+            "docs/test/CI_GATE_LEDGER.md",
+            "tests/test_driver_manifest.json"
+          ]
         }
       ]
     }

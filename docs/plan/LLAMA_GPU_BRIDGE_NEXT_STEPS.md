@@ -335,6 +335,13 @@ Pass criteria:
   fd hash disagrees with the post-dispatch GPU/staging hash, or to
   `vulkan-device-execution` when shader-like Q6 arithmetic is cleared and all
   writable writebacks are hash-verified.
+- The verifier now treats a Q6_K oracle match as insufficient unless writable
+  output writeback is hash-verified.  `latest_status == "match"` with
+  `q6_writable_writeback_mismatches` fails closed as `q6-writeback-mismatch`;
+  missing/unknown writable writeback evidence fails closed as
+  `q6-writeback-unverified`.  This prevents a pre-writeback oracle match from
+  being promoted into a correctness claim when the container-visible fd boundary
+  has not been proven.
 
 Fail criteria:
 

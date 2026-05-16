@@ -191,7 +191,8 @@ Treat this as the pass/fail tree for the next real-device llama GPU attempt:
 Verifier exit codes for these gates are stable for runbook use: 20 memory
 blocker, 21 readiness blocked, 34 executor marker missing, 35 config
 propagation mismatch, 36 unsupported GPU work accepted, 37 oracle fail-closed,
-38 API prompt sanity missing, 39 speedup fields missing, 32 Q6 workgroup shape
+38 API prompt sanity missing, 39 speedup fields missing, 40 Q6 writable
+writeback mismatch, 41 Q6 writable writeback unverified, 32 Q6 workgroup shape
 blocker, 33 Q6 not reached/inconclusive.
 
 ### Memory Guard

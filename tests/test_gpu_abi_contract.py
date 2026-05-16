@@ -926,6 +926,7 @@ class GpuAbiContractTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": {"summary": {"correctness": "pass"}},

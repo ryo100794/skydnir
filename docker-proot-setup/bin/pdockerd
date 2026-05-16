@@ -1760,15 +1760,52 @@ def _tar_child_arcname(parent, name):
     return f"{parent}/{name}"
 
 
+def _tarinfo_with_user_xattrs(info, source):
+    if not hasattr(os, "listxattr") or not hasattr(os, "getxattr"):
+        return info
+    try:
+        names = os.listxattr(source, follow_symlinks=False)
+    except (AttributeError, OSError):
+        return info
+    pax = dict(getattr(info, "pax_headers", {}) or {})
+    for name in names:
+        if not isinstance(name, str):
+            try:
+                name = os.fsdecode(name)
+            except (TypeError, UnicodeError):
+                continue
+        if not name.startswith("user."):
+            continue
+        try:
+            value = os.getxattr(source, name, follow_symlinks=False)
+        except (AttributeError, OSError):
+            continue
+        pax[f"SCHILY.xattr.{name}"] = value.decode("utf-8", "surrogateescape")
+    info.pax_headers = pax
+    return info
+
+
+def _tar_add_host_path(tf, source, arcname, recursive=True):
+    def filt(info, src=source):
+        return _tarinfo_with_user_xattrs(info, src)
+    tf.add(source, arcname=arcname, recursive=False, filter=filt)
+    if recursive and os.path.isdir(source) and not os.path.islink(source):
+        try:
+            names = sorted(os.listdir(source))
+        except OSError:
+            names = []
+        for name in names:
+            _tar_add_host_path(tf, os.path.join(source, name), _tar_child_arcname(arcname, name), recursive=True)
+
+
 def _tar_add_cow_merged_path(tf, cow, rel, arcname):
     source = _cow_archive_source(cow, rel)
     if source is None:
         return
     if not os.path.isdir(source) or os.path.islink(source):
-        tf.add(source, arcname=arcname, recursive=False)
+        _tar_add_host_path(tf, source, arcname, recursive=False)
         return
-    info = tf.gettarinfo(source, arcname=arcname)
-    tf.addfile(info)
+    _tar_add_host_path(tf, source, arcname, recursive=False)
     for name in _cow_merged_dir_entries(cow, rel):
         child_rel = os.path.join(rel, name) if rel else name
         _tar_add_cow_merged_path(tf, cow, child_rel, _tar_child_arcname(arcname, name))
@@ -1787,7 +1824,7 @@ def write_container_path_archive(out_stream, state, cdir, ctr_path):
         if cow:
             _tar_add_cow_merged_path(tf, cow, rel, arcname)
         else:
-            tf.add(source, arcname=arcname)
+            _tar_add_host_path(tf, source, arcname)
 
 
 def _tar_member_path_is_safe(name):
@@ -1815,27 +1852,67 @@ def _remove_whiteout_for_archive_member(dest, member_name):
         pass
 
 
+def _archive_data_filter_member(member, dest):
+    try:
+        return tarfile.data_filter(member, dest)
+    except tarfile.FilterError as exc:
+        raise BadRequest(f"archive member rejected: {exc}") from exc
+
+
+def _archive_member_user_xattrs(member):
+    xattrs = {}
+    for key, value in (getattr(member, "pax_headers", {}) or {}).items():
+        name = None
+        for prefix in ("SCHILY.xattr.", "LIBARCHIVE.xattr."):
+            if key.startswith(prefix):
+                name = key[len(prefix):]
+                break
+        if name and name.startswith("user."):
+            xattrs[name] = value if isinstance(value, bytes) else str(value).encode("utf-8", "surrogateescape")
+    return xattrs
+
+
+def _apply_archive_member_user_xattrs(dest, member):
+    if not hasattr(os, "setxattr") or member.issym():
+        return
+    target = os.path.join(dest, member.name)
+    if not os.path.lexists(target):
+        return
+    for name, value in _archive_member_user_xattrs(member).items():
+        try:
+            os.setxattr(target, name, value, follow_symlinks=False)
+        except (AttributeError, OSError):
+            pass
+
+
 def safe_extract_container_archive(tar_path, dest):
     """Fail-closed Docker archive PUT extractor.
 
     It rejects traversal and overlay whiteout marker injection before extract,
-    then delegates final link/path validation to Python's `data` tar filter.
+    then delegates final link/path validation to Python's `data` tar filter
+    before making filesystem changes.
     Existing upperdir whiteouts are removed when a copied member recreates that
     path, matching Docker cp into an overlay upperdir.
     """
     with tarfile.open(tar_path, mode="r:*") as tf:
-        members = tf.getmembers()
-        for member in members:
+        members = []
+        for member in tf.getmembers():
             if not _tar_member_path_is_safe(member.name):
                 raise BadRequest(f"archive member escapes target: {member.name!r}")
             if any(part.startswith(WHITEOUT_PREFIX) for part in member.name.split("/")):
                 raise BadRequest(f"archive member uses reserved whiteout path: {member.name!r}")
+            filtered = _archive_data_filter_member(member, dest)
+            if filtered is not None:
+                filtered.uid = None
+                filtered.gid = None
+                filtered.uname = None
+                filtered.gname = None
+                members.append(filtered)
         for member in members:
             _remove_whiteout_for_archive_member(dest, member.name)
-        try:
-            tf.extractall(dest, members=members, filter="data")
-        except tarfile.FilterError as exc:
-            raise BadRequest(f"archive member rejected: {exc}") from exc
+        tf.extractall(dest, members=members, filter=lambda member, path: member)
+        for member in members:
+            _apply_archive_member_user_xattrs(dest, member)
 
 
 # ============================================================

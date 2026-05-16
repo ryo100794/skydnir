@@ -42,7 +42,10 @@ issues, and deciding which planned gaps become hard gates.
 4. **[#11](https://github.com/ryo100794/pdocker-android/issues/11)
    Image-pull crash safety** `[P0 doing]`: partial pulls, `.pull-*`,
    `.tmp-*`, `.old-*`, interrupted layer extraction, tag publish, and startup
-   recovery must be tested with an actual kill/restart device artifact.
+   recovery must be tested with an actual kill/restart device artifact. The
+   synthetic residue runner is represented in the manifest; the timed live
+   registry-pull interruption remains device-gated, scenario-owned only, and
+   non-promoting until it proves no partial/user tag is published.
 5. **[#12](https://github.com/ryo100794/pdocker-android/issues/12)
    COW/overlay mutation safety** `[P0 next]`: host-local `libcow` coverage now
    fails closed for copy-up, metadata, `rename()`/`renameat()` over hardlinked
@@ -52,12 +55,16 @@ issues, and deciding which planned gaps become hard gates.
    kill evidence (`copy_up.before_rename` plus
    `copy_up.kill_before_rename_recovery`) before accepting a recovery JSON.
    Remaining release blocker: device daemon/helper kill-at-step restart
-   evidence for the same mutation checkpoints.
+   evidence for the same mutation checkpoints. The COW kill-at-step device lane
+   is present but non-promoting until adb/run-as evidence covers each required
+   copy-up, rename, whiteout, archive, and metadata checkpoint.
 6. **[#5](https://github.com/ryo100794/pdocker-android/issues/5)
    Terminal hard gate** `[P1 next]`: `exec -it` is not closed until an actual
    UI-driven container terminal passes Enter, Ctrl-C, cursor keys, `top`, `q`,
    resize, and IME regression checks. Static or skipped self-tests are not
-   enough.
+   enough; the host artifact verifier must be paired with device
+   `ui-it-selftest-latest.json` and `engine-exec-input-latest.jsonl` before the
+   gate can promote.
 7. **[#14](https://github.com/ryo100794/pdocker-android/issues/14)
    VS Code health gate** `[P1 next]`: default workspace success requires
    compose/build/run, `pdocker-dev` current Engine state, port `18080` listener,
@@ -72,7 +79,9 @@ issues, and deciding which planned gaps become hard gates.
    is still visible are non-promoting. `tests/test_driver_manifest.json`,
    `docs/test/CI_GATE_LEDGER.md`, `docs/test/SCENARIOS.md`, this TODO, and the
    execution timeline must agree before any build/test run is described as a
-   stable checkpoint.
+   stable checkpoint. The current sync list includes archive API compatibility,
+   terminal artifact verification, COW kill-at-step, OOM/LMK survival, and
+   image live-pull interruption gates.
 
 ### Next Queue Generated 2026-05-04
 
@@ -229,6 +238,9 @@ risk, not stable checkpoint credit.
   directories before inspect/list/run and treats layers as cache only when
   `tree/` and matching `meta.json` are present. Remaining acceptance gap: add a
   timed live registry pull interruption lane that cannot overwrite user images.
+  The live lane must stay `planned-gap`/non-promoting unless it is invoked with
+  `--execute-live-pull-interruption`, a scenario-owned or isolated fixture
+  `--live-image`, and `--live-fixture-owned`.
 - [doing] Compose/build log progress rendering. The readonly log pane must
   preserve terminal carriage-return progress updates instead of deleting or
   fragmenting text-mode progress bars. Acceptance: xterm readonly log path keeps
@@ -321,7 +333,10 @@ implementation change plus a focused verification artifact.
   or scripts. Split terminal surface, session transport, Docker Engine exec API,
   local diagnostic PTY, and log panes per
   `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`, then gate fixes with real
-  device Engine exec evidence plus generic terminal input tests.
+  device Engine exec evidence plus generic terminal input tests. The new
+  terminal artifact verifier is a host-side guard only; it becomes promoting
+  evidence only with raw device Engine exec JSONL for a real container and
+  `--require-container`.
 - [done] Runtime freeze risk: stop/kill/rm now treats teardown as a
   no-orphan operation instead of trusting HTTP 204/API acknowledgement. The
   daemon scans known PIDs, descendants, launcher PIDs, and
@@ -344,6 +359,11 @@ implementation change plus a focused verification artifact.
 - [done] Document Docker compatibility scope, non-goals, and discussion points
   for BuildKit, network, volume, cgroup, overlayfs, signals, TTY, and archive
   API in `docs/design/DOCKER_COMPAT_SCOPE.md`.
+- [done] Add the host archive API compatibility gate:
+  `python3 scripts/verify-archive-api-compat.py` compiles the daemon mirror and
+  runs the Docker archive/copy compatibility unit corpus. This is regression
+  evidence only; device-gated COW/archive mutation safety remains blocked until
+  the kill-at-step artifact promotes.
 - [done] Tiny SDK28 compat smoke: `docker build`, `docker compose up`, logs,
   exit code, and `compose down` pass with the scratch direct executor.
 - [done] Ubuntu `apt-get update` signature verification works under direct
@@ -575,8 +595,11 @@ implementation change plus a focused verification artifact.
   NodeSource-bundled npm.
 - [next] Replace `linkat` copy fallback with an inode/hardlink/CoW storage
   model.
-- [next] Replace `/proc/self/exe` rootfs temporary symlink mediation with direct
-  readlink emulation that does not mutate image state.
+- [done] Replace `/proc/self/exe` rootfs temporary symlink mediation with direct
+  readlink emulation that does not mutate image state; remaining work is
+  Android device evidence for `/proc/self/exe`, `/proc/thread-self/exe`, and
+  `/proc/<pid>/exe`.
+  This is still tracked as device evidence rather than host-only closure.
 - [next] Direct syscall Phase 2 contract work:
   - finish attach/PTY/signals semantics beyond the current tiny start/logs and
     raw signaled-root status paths;
@@ -586,9 +609,9 @@ implementation change plus a focused verification artifact.
     snapshots do not require a full post-RUN rootfs walk;
   - harden bind, project volume, and named volume path rewrite as one contract
     across filesystem syscalls and AF_UNIX socket paths;
-  - replace `/proc/self/exe` rootfs temporary symlink mediation with direct
-    readlink emulation that reports the guest executable without mutating image
-    state.
+  - collect Android device evidence that `/proc/self/exe`,
+    `/proc/thread-self/exe`, and `/proc/<pid>/exe` readlink emulation reports
+    the guest executable without mutating image state.
 - [next] Remove normal stderr diagnostics from direct runtime logs once default
   workspace start is stable.
 
@@ -672,10 +695,11 @@ Temporary behavior:
   `ENOSYS` in the direct runtime so Node/libuv falls back to portable polling.
   Replace this with an explicit compatibility policy and tests for runtimes
   that probe io_uring.
-- `/proc/self/exe` readlink is mediated with a rootfs-local temporary symlink
-  so Node sees `/usr/bin/node` instead of the Android host loader path. Replace
-  this with a cleaner readlink emulation path that does not create helper
-  symlinks in rootfs state.
+- `/proc/self/exe` readlink now uses userland `readlinkat` emulation so Node
+  sees `/usr/bin/node` instead of the Android host loader path without creating
+  helper symlinks in rootfs state. Android device evidence for self,
+  thread-self, and pid-specific proc exe paths remains required before closing
+  the Direct syscall Phase 2 device lane.
 - `faccessat2` is now handled in user-space mediation for apt-key. Replace the
   current minimal path probing with full flags/errno parity.
 - `linkat` currently uses a file-copy fallback, including a dpkg

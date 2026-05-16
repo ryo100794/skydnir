@@ -17,6 +17,10 @@ without mixing unrelated dirty lanes.
 - Service truth promotion is blocked unless listener/ports/log/UI card/state
   evidence all reduce to the same exact Engine container ID; otherwise the only
   allowed device result is planned-gap/Success: false, never success.
+- Archive compatibility, terminal exec-it artifact verification, COW
+  kill-at-step, OOM/LMK survival, and image live-pull interruption must stay
+  non-promoting when they are host-only, planned-gap, skipped, or missing
+  connected-device proof.
 - Every adopted agent change needs a focused test command and a file list before
   commit.
 
@@ -26,10 +30,12 @@ without mixing unrelated dirty lanes.
 |---|---|---:|---|---|
 | P0-A service truth | UI cards, Engine API, persisted state, process table, listener, and logs agree on the same Engine container ID. | Goodall output awaiting integration | `service-truth artifact gate` | `bash -n scripts/android-device-smoke.sh`; `python3 scripts/verify-service-truth-plan.py`; service truth contract tests. |
 | P0-B runtime teardown | Stop/kill/rm records process-tree cleanup evidence and never trusts HTTP 204 alone. | integrated T1 baseline | already committed `1c9558a` | Device artifact still planned-gap until real no-orphan evidence is captured. |
-| P0-C terminal `exec -it` | UI route uses Engine exec/HTTP upgrade raw stream, not local shell/log path; regressions remain test-visible. | Hilbert output awaiting integration | `terminal exec-it contract gate` | `python3 -m unittest tests.test_terminal_exec_it_contract`; Kotlin compile when UI code changes. |
-| P0-D OOM/LMK diagnostics | Large allocation, system pressure, RSS/PSS, last progress, LMK classifier, retention, and stale UI guard are recorded. | Carson output awaiting integration | `oom-lmk diagnostic contract` | `python3 scripts/verify-memory-pager-design.py`; memory pager contract tests. |
-| P0-E image pull crash safety | Interrupted pull never publishes a partial image/layer as valid after restart. | Newton output awaiting integration | `image-pull device scenario ledger` | `python3 scripts/verify-image-pull-crash-safety.py`; image pull crash-safety tests. |
+| P0-C terminal `exec -it` | UI route uses Engine exec/HTTP upgrade raw stream, not local shell/log path; regressions remain test-visible. | verifier represented; device proof pending | `terminal exec-it contract gate` | `python3 -m unittest tests.test_terminal_exec_it_contract tests.test_terminal_exec_it_artifact_verifier`; Android verifier promotes only with `ui-it-selftest-latest.json` plus `engine-exec-input-latest.jsonl` and `--require-container`. |
+| P0-D OOM/LMK diagnostics | Large allocation, system pressure, RSS/PSS, last progress, LMK classifier, retention, and stale UI guard are recorded. | static gate integrated; device replay pending | `oom-lmk diagnostic contract` | `python3 scripts/verify-oom-lmk-survival-gate.py`; memory pager contract tests. Device plan artifacts are non-promoting until controlled LMK/backend-death replay passes. |
+| P0-E image pull crash safety | Interrupted pull never publishes a partial image/layer as valid after restart. | synthetic residue runner integrated; live pull pending | `image-pull device scenario ledger` | `python3 scripts/verify-image-pull-crash-safety.py`; image pull crash-safety tests. The live registry interruption lane stays planned-gap/non-promoting until run against a scenario-owned fixture. |
 | P0-F llama GPU correctness | GPU-backed llama response is correct before performance claims; CPU comparison is retained as evidence. | Bohr audit pending | separate GPU dirty-lane commit only | `tests.test_gpu_abi_contract`; GPU artifact verifier; device runbook evidence. |
+| P0-G COW/archive kill-at-step | COW copy-up, rename, whiteout, metadata, and archive PUT fail closed across daemon/helper interruption. | device lane represented; promotion pending | `cow-overlay kill-at-step gate` | `python3 -m unittest tests.test_cow_overlay_kill_at_step_device`; `python3 scripts/verify-cow-overlay-bench-recovery.py --run-local`; adb/run-as artifact required for promotion. |
+| P1-A archive API compatibility | Docker archive GET/PUT/HEAD and copy semantics stay compatible with lower/upper merge behavior. | host gate integrated | `archive api compat gate` | `python3 scripts/verify-archive-api-compat.py`; host regression only, not stable release credit without storage device gates. |
 
 ## Next integration order
 
@@ -74,7 +80,14 @@ is archived:
     planned-gap/Success: false.
 - runtime teardown: `files/pdocker/diagnostics/runtime-teardown-latest.json`
 - interrupted image pull: `docs/test/image-pull-crash-safety-latest.json`
+- image live-pull interruption: planned
+  `docs/test/image-pull-crash-safety-live-latest.json`; must use a
+  scenario-owned/isolated fixture and remain non-promoting until implemented.
 - OOM/LMK diagnostics: planned `pdocker.memory-oom-lmk-diagnostics.v1`
+- terminal exec-it: `docs/test/ui-it-selftest-latest.json` plus
+  `docs/test/engine-exec-input-latest.jsonl`, verified with
+  `scripts/verify-terminal-exec-it-artifact.py --require-container`.
+- COW kill-at-step: `docs/test/cow-overlay-kill-at-step-latest.json`; planned
+  gap or blocked-device artifacts do not promote.
 - llama GPU correctness/performance: latest GPU compare artifact plus API prompt
   correctness sample.
-

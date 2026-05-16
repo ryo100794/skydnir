@@ -331,7 +331,6 @@ def validate_phase2_contracts(manifest: dict[str, object]) -> None:
     required_known = {
         "attach-pty-signals",
         "linkat-hardlink-semantics",
-        "proc-self-exe-no-mutation",
         "run-changed-path-manifest",
     }
     missing_known = sorted(required_known - known_refs)
@@ -394,6 +393,21 @@ def validate_static_contract_markers(source: str) -> None:
             "parse_shebang",
         ],
     )
+    require_contains(
+        "direct proc exe readlink no-mutation emulation",
+        source,
+        [
+            "emulate_proc_self_exe_readlinkat",
+            "strcmp(path, \"/proc/self/exe\")",
+            "strcmp(path, \"/proc/thread-self/exe\")",
+            "is_proc_pid_exe",
+            "state->last_nr == 78",
+            "current_nr == 78",
+            "write_tracee_data(pid, buf, state->exec_guest_path, len)",
+        ],
+    )
+    if ".pdocker-proc-exe" in source or "rewrite_proc_self_exe_readlinkat" in source:
+        fail("proc exe readlink must not create rootfs helper symlinks")
     require_contains(
         "direct exec snapshots argv before tracee scratch writes",
         source,

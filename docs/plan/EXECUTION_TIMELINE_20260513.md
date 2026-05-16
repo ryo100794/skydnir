@@ -8,7 +8,9 @@ truthful UI/API behavior agree.
 Update note (2026-05-15): the evidence-honesty gate is now explicit. Planned
 gaps, skipped/unrun device lanes, non-passing artifacts, and host-only checks
 that merely prove a gap remains visible are non-promoting evidence for stable
-checkpoint purposes.
+checkpoint purposes. The current sync set covers the archive host gate,
+terminal exec-it artifact verifier, COW kill-at-step device lane, OOM/LMK
+survival lane, and image live-pull interruption plan.
 
 Primary sources:
 
@@ -36,8 +38,8 @@ Primary sources:
 | G0: service truth same-container-ID | `docker ps`, UI cards, Engine state, persisted state, process table, listener probes, and logs agree on the same current Engine container ID. | Any user-facing running/healthy claim. |
 | G1: runtime teardown | Stop/kill leaves no stale direct child, GPU executor, listener, duplicate-name residue, or false running state. | Long-running workloads and public APK testing. |
 | G2: correct GPU with synchronized launch environment | llama GPU correctness passes with the same diagnostic/tuning environment through compare script, pdockerd, and UI/compose launches before speed is reported. | GPU acceleration marketing/performance claims. |
-| G3: storage crash safety | Image pull and COW/overlay mutation survive interruption, low-space, and startup recovery. | Image/library workflows. |
-| G4: interactive and workspace hard gates | UI `exec -it` and default VS Code workspace health pass real device gates, not skipped/static checks. | Demo-ready APKs. |
+| G3: storage crash safety | Image pull and COW/overlay mutation survive interruption, low-space, startup recovery, archive PUT/whiteout/rename, and safe scenario-owned live pull interruption. | Image/library workflows. |
+| G4: interactive and workspace hard gates | UI `exec -it` and default VS Code workspace health pass real device gates; terminal host verifiers without raw Engine exec JSONL are non-promoting. | Demo-ready APKs. |
 | G5: SAF direct output | `/documents` writes prove SAF-backed payload plus UnixFS sidecar metadata, or record a truthful fallback. | SD-card/Documents workflows. |
 | G6: test density honesty | Planned gaps stay visible; build records do not claim stronger evidence than tests provide, and non-promoting manifest lanes cannot be counted as stable checkpoint evidence. | Release candidate tagging. |
 
@@ -60,15 +62,15 @@ Primary sources:
 | T1-A Service truth same-container-ID | Implement current-container proof for UI cards, `docker ps`, Engine API, persisted state, process table, listeners, and logs. | Same-ID device artifact, stale/unknown/ambiguous UI states, no healthy claim from metadata alone. |
 | T1-B Runtime teardown | Prove stop/kill removes direct children, GPU executor state, listeners, and stale PID/name state. | Device smoke with process tree before/after, stale PID rejection, duplicate-name cleanup, logs. |
 | T1-C llama GPU Q6_K/env propagation | Resolve or isolate the Q6_K blocker and prevent compare-script-only environment behavior. | CPU/oracle or pass-through evidence, synchronized env contract, artifact verifier rejection of divergent launch paths. |
-| T1-D Image pull crash safety | Atomic layer/tag publish and startup recovery for `.pull-*`, `.tmp-*`, `.old-*`. | Local recovery verifier plus interrupted-pull kill/restart device scenario. |
-| T1-E COW/overlay mutation safety | Prove copy-up, whiteout, rename, archive PUT, hardlink metadata, low-space, and kill-at-step behavior fail closed. | Fault-injection verifier, startup repair/check, recovery artifact. |
-| T1-F OOM/LMK evidence | Structured memory/down events and classifier. | Reproducible LMK/OOM artifact; UI no longer shows stale running state after backend death. |
+| T1-D Image pull crash safety | Atomic layer/tag publish and startup recovery for `.pull-*`, `.tmp-*`, `.old-*`, plus timed live-pull interruption only against scenario-owned/isolated fixtures. | Local recovery verifier, synthetic interrupted-pull kill/restart device scenario, and a non-promoting live-pull plan until the live artifact passes. |
+| T1-E COW/overlay mutation safety | Prove copy-up, whiteout, rename, archive PUT, hardlink metadata, low-space, and kill-at-step behavior fail closed. | Host archive/COW verifier, startup repair/check, recovery artifact, and adb/run-as COW kill-at-step evidence before promotion. |
+| T1-F OOM/LMK evidence | Structured memory/down events and classifier. | Reproducible LMK/OOM artifact; host/static OOM evidence remains non-promoting until controlled device replay proves stale UI is rejected after backend death. |
 
 ### T2 - User-Facing Hard Gates
 
 | Lane | Scope | Deliverables |
 | --- | --- | --- |
-| T2-A Terminal hard gate | Separate generic terminal surface from Engine exec/attach/local PTY/log sessions and require a real container. | UI self-test plus Engine exec smoke for Enter, Ctrl-C, cursor keys, `top`, `q`, resize, and IME behavior. |
+| T2-A Terminal hard gate | Separate generic terminal surface from Engine exec/attach/local PTY/log sessions and require a real container. | UI self-test plus raw Engine exec input JSONL verified by `scripts/verify-terminal-exec-it-artifact.py --require-container` for Enter, Ctrl-C, cursor keys, `top`, `q`, resize, and IME behavior. |
 | T2-B VS Code health gate | Verify default workspace compose/build/run and code-server reachability without relying on stale cards. | Current Engine ID, `18080` listener, HTTP proof, extension evidence, UI card truth artifact. |
 | T2-C SAF direct output | Make `/documents` a SAF-backed UnixFS exchange layer with explicit sidecar metadata. | Direct-write artifact, metadata sidecar proof, failure/fallback record, no silent app-private-only success. |
 
@@ -86,7 +88,7 @@ Primary sources:
 | --- | --- | --- |
 | T4-A Compose parser | Reduce hand-written YAML ambiguity or delegate parsing. | Golden Compose corpus and negative grammar tests. |
 | T4-B Build context tar | Support symlink, directory headers, mode, long path/PAX, and `.dockerignore` parity. | Tar corpus and external Dockerfile compatibility cases. |
-| T4-C Archive API | GET/PUT/HEAD archive corpus with traversal and lower/upper merge cases. | Golden API fixtures and negative archive tests. |
+| T4-C Archive API | GET/PUT/HEAD archive corpus with traversal and lower/upper merge cases. | `scripts/verify-archive-api-compat.py` host corpus plus negative archive tests; release promotion still depends on COW/archive device mutation evidence. |
 | T4-D Port mapping | Advance inactive metadata toward localhost proxy/rewrite evidence and conflict tests. | Active/inactive/conflict labels backed by listener/proxy proof. |
 
 ### T5 - Storage, SAF, and Media Follow-Through

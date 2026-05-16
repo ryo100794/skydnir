@@ -7,7 +7,9 @@ execution.  It runs the focused fail-closed unit tests for:
 - Docker container archive tar PUT/GET helpers.
 - cow_bind lower/upper directory merge behavior.
 - Overlay whiteout hiding and recreation through PUT.
+- Hardlink, symlink, chunked upload, and feasible uid/gid/xattr coverage.
 - Metadata preservation for copied files.
+- Static planned device gate for future Docker CLI `docker cp` end-to-end proof.
 - Path traversal and reserved whiteout injection rejection.
 """
 
@@ -28,6 +30,7 @@ def main():
     checks = [
         [sys.executable, "-m", "py_compile", "docker-proot-setup/bin/pdockerd"],
         [sys.executable, "-m", "unittest", "tests.test_archive_api_compat"],
+        [sys.executable, "-m", "unittest", "tests.test_docker_cp_device_gate"],
     ]
     for argv in checks:
         rc = run(argv)

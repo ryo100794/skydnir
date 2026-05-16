@@ -13,7 +13,7 @@ REQUIRED_PHASE2 = {
     "syscall-errno-parity": ["errno", "ENOSYS", "openat2"],
     "path-mediation-binds-volumes": ["bind", "named volume", "AF_UNIX"],
     "linkat-hardlink-semantics": ["linkat", "hardlink"],
-    "proc-self-exe-no-mutation": ["/proc/self/exe", "readlink", "mutating"],
+    "proc-self-exe-no-mutation": ["/proc/self/exe", "readlink", "device evidence"],
     "run-changed-path-manifest": ["RUN", "changed-path", "manifest"],
 }
 
@@ -68,7 +68,6 @@ class DirectSyscallPhase2ContractsTest(unittest.TestCase):
         for required in [
             "attach-pty-signals",
             "linkat-hardlink-semantics",
-            "proc-self-exe-no-mutation",
             "run-changed-path-manifest",
         ]:
             self.assertIn(required, refs)

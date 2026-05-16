@@ -1970,6 +1970,7 @@ static int syscall_completed_in_userland(long nr) {
            nr == 36 ||   /* symlinkat */
            nr == 37 ||   /* linkat */
            nr == 48 ||   /* faccessat */
+           nr == 78 ||   /* readlinkat proc-exe */
            nr == 425 ||  /* io_uring_setup: report unavailable to libc/node. */
            nr == 426 ||  /* io_uring_enter */
            nr == 427 ||  /* io_uring_register */
@@ -3724,34 +3725,6 @@ static int emulate_proc_self_exe_readlinkat(pid_t pid, struct user_pt_regs *regs
     return 1;
 }
 
-static int rewrite_proc_self_exe_readlinkat(pid_t pid, struct user_pt_regs *regs,
-                                            TraceeState *state, const char *rootfs) {
-    if (!state || !state->exec_guest_path[0]) return 0;
-    char path[PATH_MAX];
-    if (read_tracee_string(pid, regs->regs[1], path, sizeof(path)) < 0) return 0;
-    int is_proc_pid_exe = 0;
-    if (strncmp(path, "/proc/", 6) == 0) {
-        const char *rest = path + 6;
-        while (*rest >= '0' && *rest <= '9') rest++;
-        is_proc_pid_exe = strcmp(rest, "/exe") == 0;
-    }
-    if (strcmp(path, "/proc/self/exe") != 0 &&
-        strcmp(path, "/proc/thread-self/exe") != 0 &&
-        !is_proc_pid_exe) {
-        return 0;
-    }
-    char host_link[PATH_MAX];
-    if (snprintf(host_link, sizeof(host_link), "%s/tmp/.pdocker-proc-exe-%d", rootfs, (int)pid) >= (int)sizeof(host_link)) {
-        return 0;
-    }
-    unlink(host_link);
-    if (symlink(state->exec_guest_path, host_link) != 0) return 0;
-    unsigned long long scratch = (regs->sp - 8192u) & ~15ULL;
-    if (write_tracee_string(pid, scratch, host_link) != 0) return 0;
-    regs->regs[1] = scratch;
-    return 1;
-}
-
 static int copy_file_for_linkat(const char *old_host, const char *new_host, int flags) {
     if (flags & ~AT_SYMLINK_FOLLOW) return -EINVAL;
 
@@ -4432,7 +4405,6 @@ static int rewrite_syscall_paths(pid_t pid, struct user_pt_regs *regs, TraceeSta
         case 439: /* faccessat2(dirfd, pathname, mode, flags) */
             return rewrite_at_path_arg(pid, regs, 0, 1, rootfs, syscall_name(nr), 8192u);
         case 78:  /* readlinkat(dirfd, pathname, buf, bufsiz) */
-            if (rewrite_proc_self_exe_readlinkat(pid, regs, state, rootfs)) return 1;
             return rewrite_path_arg(pid, regs, 1, rootfs, syscall_name(nr));
         case 36:  /* symlinkat(target, newdirfd, linkpath) */
             return rewrite_at_path_arg(pid, regs, 1, 2, rootfs, syscall_name(nr), 8192u);
@@ -4589,7 +4561,7 @@ static int handle_syscall_entry(pid_t pid, struct user_pt_regs *regs, TraceeStat
             fprintf(stderr, "pdocker-direct-trace: pid=%d setregs getcwd emulation failed: %s\n",
                     (int)pid, strerror(errno));
         }
-    } else if (state->last_nr == -78 &&
+    } else if (state->last_nr == 78 &&
                emulate_proc_self_exe_readlinkat(pid, regs, state, &state->emulated_result)) {
         forced_emulation = 1;
         if (complete_emulated_syscall(pid, regs, state->emulated_result) == 0) {
@@ -4984,6 +4956,19 @@ static int trace_and_exec(char *const exec_argv[], const char *rootfs, const cha
                         suppressible = 1;
                     } else {
                         fprintf(stderr, "pdocker-direct-trace: pid=%d setregs direct faccess SIGSYS emulation failed: %s\n",
+                                (int)got, strerror(errno));
+                    }
+                } else if (!suppressible && current_nr == 78 &&
+                           emulate_proc_self_exe_readlinkat(got, &regs, state, &state->emulated_result)) {
+                    state->last_nr = current_nr;
+                    for (int i = 0; i < 6; ++i) state->last_args[i] = regs.regs[i];
+                    if (complete_emulated_syscall(got, &regs, state->emulated_result) == 0) {
+                        state->last_emulated_nr = current_nr;
+                        state->emulated_nr = -1;
+                        state->in_syscall = 0;
+                        suppressible = 1;
+                    } else {
+                        fprintf(stderr, "pdocker-direct-trace: pid=%d setregs direct readlinkat SIGSYS emulation failed: %s\n",
                                 (int)got, strerror(errno));
                     }
                 } else if (!suppressible && syscall_emulate_errno(current_nr, &emulated_errno)) {

@@ -26,6 +26,7 @@ MODE="full"
 GPU_BENCH=0
 SERVICE_TRUTH_TARGET=""
 RUNTIME_TEARDOWN_TARGET=""
+DOCKER_CP_E2E_TARGET=""
 SMOKE_ARTIFACT_DIR_RESOLVED=""
 
 usage() {
@@ -33,6 +34,7 @@ usage() {
 Usage: $0 [--quick] [--gpu-bench] [--no-install]
        $0 --service-truth <default-workspace|llama>
        $0 --runtime-teardown <default-workspace|llama>
+       $0 --docker-cp-e2e <default-workspace|llama>
 
 Runs a repeatable pdocker Android device smoke through adb + run-as.
 
@@ -73,6 +75,9 @@ Modes:
   --runtime-teardown TARGET
                 planned acceptance entrypoint for future stop/process-tree
                 proof. Currently exits nonzero with a structured artifact.
+  --docker-cp-e2e TARGET
+                planned device gate for Docker CLI `docker cp` end-to-end
+                parity. Currently exits nonzero with a structured artifact.
 EOF
 }
 
@@ -91,6 +96,11 @@ while [[ $# -gt 0 ]]; do
     --runtime-teardown)
       [[ $# -ge 2 ]] || { echo "--runtime-teardown requires a target" >&2; exit 2; }
       RUNTIME_TEARDOWN_TARGET="$2"
+      shift
+      ;;
+    --docker-cp-e2e)
+      [[ $# -ge 2 ]] || { echo "--docker-cp-e2e requires a target" >&2; exit 2; }
+      DOCKER_CP_E2E_TARGET="$2"
       shift
       ;;
     -h|--help) usage; exit 0 ;;
@@ -704,6 +714,49 @@ JSON
 cat "$LATEST"
 exit "$SERVICE_TRUTH_EXIT"
 REMOTE_SERVICE_TRUTH
+  run_adb push "$local_script" "$remote_script" >/dev/null
+  rm -f "$local_script"
+  run_adb shell chmod 755 "$remote_script" >/dev/null 2>&1 || true
+  run_as "sh $remote_script $(remote_quote "$target")"
+}
+docker_cp_e2e_acceptance_entrypoint() {
+  local target="$1"
+  local remote_script="/data/local/tmp/pdocker-docker-cp-e2e-smoke.sh"
+  local local_script
+  local_script="$(mktemp)"
+  cat > "$local_script" <<'REMOTE_DOCKER_CP_E2E'
+#!/system/bin/sh
+set +e
+TARGET="${1:-default-workspace}"
+cd files || exit 1
+DIAG="pdocker/diagnostics/docker-cp-e2e"
+LATEST="pdocker/diagnostics/docker-cp-e2e-latest.json"
+rm -rf "$DIAG"; mkdir -p "$DIAG"
+write_negative_case() { cat >"$DIAG/$1.json" <<JSON
+{"Kind":"docker-cp-e2e-negative-case","Status":"planned-gap","Success":false,"ExpectedAccepted":false,"RejectedSignal":"$2","Reason":"$3"}
+JSON
+}
+write_negative_case negative-cli-exit-zero-only "CLI exit 0 alone" "same Engine container ID and full metadata proof required"
+write_negative_case negative-container-name-only "container name only" "same Engine container ID required"
+write_negative_case negative-bytes-only "payload bytes only" "metadata, links, and headers required"
+write_negative_case negative-host-only "host-only archive helper pass" "adb run-as device evidence required"
+write_negative_case negative-network-pull-required "network pull required" "local image/prestaged fixture required"
+write_negative_case negative-terminal-required "terminal/TTY evidence" "non-interactive docker cp proof required"
+cat > "$LATEST" <<JSON
+{
+  "Kind": "docker-cp-e2e",
+  "Status": "planned-gap",
+  "Success": false,
+  "Target": "$TARGET",
+  "DeviceGate": {"RequiresAdb": true, "CollectedViaAdbRunAs": true, "HostStaticVerifierCannotPromote": true, "DoNotClaimDevicePassWithoutAdb": true, "NoGpuRequired": true, "NoTerminalRequired": true, "NoNetworkRequired": true},
+  "EvidencePlan": ["same Engine container ID", "docker cp host-to-container", "container-to-host", "HEAD /containers/{id}/archive", "GET /containers/{id}/archive", "PUT /containers/{id}/archive", "X-Docker-Container-Path-Stat", "byte and sha256 equality", "hardlink", "symlink no-follow policy", "mode, mtime, uid/gid policy", "user.* xattr", "reserved whiteout", "absolute symlink", "escaping hardlink"],
+  "NegativeCases": ["negative-cli-exit-zero-only.json", "negative-container-name-only.json", "negative-bytes-only.json", "negative-host-only.json", "negative-network-pull-required.json", "negative-terminal-required.json"],
+  "Unresolved": ["No device verifier has reduced docker cp CLI and archive HTTP evidence into a passing same-container-ID proof."]
+}
+JSON
+cat "$LATEST"
+exit 2
+REMOTE_DOCKER_CP_E2E
   run_adb push "$local_script" "$remote_script" >/dev/null
   rm -f "$local_script"
   run_adb shell chmod 755 "$remote_script" >/dev/null 2>&1 || true
@@ -1556,6 +1609,9 @@ if [[ -n "$SERVICE_TRUTH_TARGET" ]]; then
 fi
 if [[ -n "$RUNTIME_TEARDOWN_TARGET" ]]; then
   runtime_teardown_acceptance_entrypoint "$RUNTIME_TEARDOWN_TARGET"
+fi
+if [[ -n "$DOCKER_CP_E2E_TARGET" ]]; then
+  docker_cp_e2e_acceptance_entrypoint "$DOCKER_CP_E2E_TARGET"
 fi
 
 echo "[pdocker smoke] docker version"

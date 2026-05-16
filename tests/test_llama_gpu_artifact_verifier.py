@@ -152,6 +152,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": {"summary": {"correctness": "pass"}},
@@ -176,6 +177,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": gpu_correctness_report(),
@@ -246,6 +248,70 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertFalse(report["benchmark_claim_allowed"])
         self.assertIn("vulkan-device-execution-or-writeback", report["next_action"])
 
+    def test_q6_oracle_match_requires_verified_writable_writeback(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        "q6_writeback_verified_all": False,
+                        "q6_writable_writeback_unknown": [
+                            {"index": 2, "binding": 2, "writeback_verified": None}
+                        ],
+                    },
+                },
+                "correctness": gpu_correctness_report(),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=2.0, target_met=True),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 41, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-writeback-unverified")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertIn("writeback", report["next_action"])
+
+    def test_q6_writeback_mismatch_fails_closed_even_if_oracle_matched(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        "q6_writeback_verified_all": False,
+                        "q6_writable_writeback_mismatches": [
+                            {
+                                "index": 2,
+                                "binding": 2,
+                                "gpu_after_dispatch_hash": "0x1111111111111111",
+                                "fd_after_hash": "0x2222222222222222",
+                                "writeback_mismatch": True,
+                            }
+                        ],
+                    },
+                },
+                "correctness": gpu_correctness_report(),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(speedup=2.0, target_met=True),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 40, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-writeback-mismatch")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertIn("writeback", report["next_action"])
+
 
     def test_compare_artifact_without_config_propagation_fails_closed(self):
         payload = {
@@ -256,6 +322,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": {"summary": {"correctness": "pass"}},
@@ -284,6 +351,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": {"summary": {"correctness": "pass"}},
@@ -318,6 +386,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": {"summary": {"correctness": "pass"}},
@@ -350,6 +419,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": {"summary": {"correctness": "pass"}},
@@ -407,6 +477,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": {"summary": {"correctness": "pass"}},
@@ -441,6 +512,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": {"summary": {"correctness": "pass"}},
@@ -475,6 +547,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": gpu_correctness_report(),
@@ -500,6 +573,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": {"summary": {"correctness": "pass"}},
@@ -525,6 +599,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
+                        "q6_writeback_verified_all": True,
                     },
                 },
                 "correctness": gpu_correctness_report(),

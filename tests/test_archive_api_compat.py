@@ -48,6 +48,29 @@ def make_tar(path, entries):
                 tf.addfile(info, io.BytesIO(raw))
 
 
+def make_custom_tar(path, members):
+    with tarfile.open(path, "w", format=tarfile.PAX_FORMAT) as tf:
+        for info, data in members:
+            if data is None:
+                tf.addfile(info)
+            else:
+                raw = data.encode() if isinstance(data, str) else data
+                info.size = len(raw)
+                tf.addfile(info, io.BytesIO(raw))
+
+
+def xattrs_supported(path):
+    if not all(hasattr(os, name) for name in ("setxattr", "getxattr")):
+        return False
+    probe = path / "xattr-probe"
+    probe.write_text("probe")
+    try:
+        os.setxattr(probe, "user.pdocker_archive_probe", b"ok", follow_symlinks=False)
+        return os.getxattr(probe, "user.pdocker_archive_probe", follow_symlinks=False) == b"ok"
+    except OSError:
+        return False
+
+
 class ArchiveApiCompatibilityTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -167,6 +190,80 @@ class ArchiveApiCompatibilityTest(unittest.TestCase):
         st = restored.stat()
         self.assertEqual(stat.S_IMODE(st.st_mode), 0o754)
         self.assertEqual(int(st.st_mtime), 1_700_001_234)
+
+    def test_archive_get_preserves_hardlinks_symlinks_uid_gid_and_xattrs_where_supported(self):
+        state, cdir, lower, upper = self._cow_state()
+        work = upper / "work"
+        work.mkdir()
+        original = work / "original.txt"
+        twin = work / "twin.txt"
+        original.write_text("same inode")
+        os.link(original, twin)
+        os.symlink("original.txt", work / "link.txt")
+        if xattrs_supported(self.root):
+            os.setxattr(original, "user.pdocker_archive", b"value", follow_symlinks=False)
+
+        out = io.BytesIO()
+        self.mod.write_container_path_archive(out, state, str(cdir), "/work")
+        out.seek(0)
+        with tarfile.open(fileobj=out, mode="r:*") as tf:
+            members = {m.name: m for m in tf.getmembers()}
+        hardlink_members = [members["work/original.txt"], members["work/twin.txt"]]
+        self.assertTrue(any(m.islnk() for m in hardlink_members))
+        self.assertEqual(members["work/link.txt"].linkname, "original.txt")
+        self.assertEqual(members["work/original.txt"].uid, original.lstat().st_uid)
+        self.assertEqual(members["work/original.txt"].gid, original.lstat().st_gid)
+        if xattrs_supported(self.root):
+            self.assertEqual(members["work/original.txt"].pax_headers.get("SCHILY.xattr.user.pdocker_archive"), "value")
+
+    def test_archive_put_link_policy_ownership_xattrs_and_chunked_reader(self):
+        dest = self.root / "dest"
+        dest.mkdir()
+        good_tar = self.root / "good-links.tar"
+        base = tarfile.TarInfo("base.txt")
+        base.uid = 12345
+        base.gid = 23456
+        base.pax_headers = {"SCHILY.xattr.user.pdocker_archive": "restored"}
+        hard = tarfile.TarInfo("hard.txt")
+        hard.type = tarfile.LNKTYPE
+        hard.linkname = "base.txt"
+        sym = tarfile.TarInfo("sym.txt")
+        sym.type = tarfile.SYMTYPE
+        sym.linkname = "base.txt"
+        make_custom_tar(good_tar, [(base, "payload"), (hard, None), (sym, None)])
+
+        self.mod.safe_extract_container_archive(good_tar, dest)
+        self.assertEqual((dest / "base.txt").stat().st_ino, (dest / "hard.txt").stat().st_ino)
+        self.assertEqual(os.readlink(dest / "sym.txt"), "base.txt")
+        self.assertNotEqual((dest / "base.txt").stat().st_uid, 12345)
+        self.assertNotEqual((dest / "base.txt").stat().st_gid, 23456)
+        if xattrs_supported(self.root):
+            self.assertEqual(os.getxattr(dest / "base.txt", "user.pdocker_archive", follow_symlinks=False), b"restored")
+
+        for label, typ, linkname in (
+            ("absolute-symlink", tarfile.SYMTYPE, "/etc/passwd"),
+            ("escaping-symlink", tarfile.SYMTYPE, "../outside"),
+            ("escaping-hardlink", tarfile.LNKTYPE, "../outside"),
+        ):
+            tar_path = self.root / f"{label}.tar"
+            bad = tarfile.TarInfo(f"{label}.txt")
+            bad.type = typ
+            bad.linkname = linkname
+            (dest / f".wh.{label}.txt").write_text("")
+            make_custom_tar(tar_path, [(bad, None)])
+            with self.assertRaises(self.mod.BadRequest):
+                self.mod.safe_extract_container_archive(tar_path, dest)
+            self.assertTrue((dest / f".wh.{label}.txt").exists())
+
+        handler = object.__new__(self.mod.DockerAPIHandler)
+        handler.headers = {"Transfer-Encoding": "chunked"}
+        handler.rfile = io.BytesIO(b"5\r\nhello\r\n7;ignored=true\r\n world!\r\n0\r\n\r\n")
+        path = handler._read_body_to_temp(prefix="pdarchiveput_chunked_test_")
+        try:
+            self.assertEqual(Path(path).read_bytes(), b"hello world!")
+            self.assertEqual(handler._request_temp_body_bytes, len(b"hello world!"))
+        finally:
+            os.remove(path)
 
     def test_container_archive_path_resolution_rejects_query_traversal(self):
         state, cdir, lower, upper = self._cow_state()

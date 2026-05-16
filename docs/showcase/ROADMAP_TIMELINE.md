@@ -21,14 +21,14 @@ Current TODO counters:
 
 | State | Count |
 |---|---:|
-| done | 54 |
+| done | 56 |
 | doing | 16 |
-| next | 35 |
+| next | 34 |
 | blocked | 0 |
 
 ## Timeline
 
-### Now: 2026-05-15 to 2026-05-18
+### Now: 2026-05-16 to 2026-05-19
 
 Keep the UI compose path truthful and visible while closing regressions that block demos.
 
@@ -37,7 +37,7 @@ Keep the UI compose path truthful and visible while closing regressions that blo
 - [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from device discovery and...
 - [#6](https://github.com/ryo100794/pdocker-android/issues/6) Service truth same-container-ID device gate: the listener health and ID/label truth work are one gate. Probe default workspace...
 
-### Next: 2026-05-19 to 2026-05-25
+### Next: 2026-05-20 to 2026-05-26
 
 Turn the remaining high-value TODOs into repeatable device checks and public artifacts.
 
@@ -46,7 +46,7 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 - RUN changed-path/snapshot performance. `RUN chmod +x /usr/local/bin/pdocker-*` is functionally correct but still triggers an expensive broad snapshot in the default workspace build...
 - Image reference graph visual polish. The tree must render continuous connector lines, include image detail/version/storage information on the tree nodes, and expose image operations from...
 
-### Then: 2026-05-26 to 2026-06-05
+### Then: 2026-05-27 to 2026-06-06
 
 Use benchmark evidence to harden compatibility and publish tester-ready releases.
 

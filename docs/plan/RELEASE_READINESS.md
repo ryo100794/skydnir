@@ -42,21 +42,34 @@ documentation remains.
   - Required evidence: device stop/kill smoke with process-tree cleanup,
     executor cleanup, duplicate-name recovery, and logs.
 - **Image pull crash safety — blocked**
-  - Why it blocks: static checks exist, but interrupted pull/restart recovery is
-    not closed on device.
+  - Why it blocks: static checks and the synthetic residue kill/restart runner
+    exist, but the timed live registry pull interruption remains a planned gap
+    and cannot be counted as stable evidence.
   - Required evidence: kill-in-pull device scenario plus startup recovery
     verifier showing `.pull-*`, `.tmp-*`, and `.old-*` entries are not promoted
-    as valid layers/tags.
+    as valid layers/tags, followed by a scenario-owned live-pull interruption
+    lane that cannot overwrite user images.
 - **COW/overlay mutation safety — blocked**
-  - Why it blocks: copy-up, whiteout, archive PUT, metadata update, low-space,
-    and kill-at-step cases do not yet have a storage-wide fail-closed verifier.
+  - Why it blocks: host-local copy-up/archive checks and the kill-at-step
+    device runner are represented, but device daemon/helper restart evidence is
+    still non-promoting until the promotion condition passes.
   - Required evidence: fault-injection or replayable recovery artifact plus
-    startup repair/check behavior.
+    startup repair/check behavior, including archive PUT/whiteout/rename
+    coverage and adb/run-as proof for every required kill checkpoint.
 - **OOM/LMK survival — blocked**
   - Why it blocks: Android may kill backend work while UI state survives;
-    replay/classification is not executable yet.
+    host/static classification exists, but controlled connected-device
+    LMK/backend-death replay is still non-promoting planned-gap evidence.
   - Required evidence: structured memory/OOM events and replayable LMK suspected
     device test.
+- **Terminal `exec -it` device verifier — blocked for demo-ready terminal claims**
+  - Why it blocks: host-side verifier logic exists, but a real UI container
+    terminal must be paired with raw Engine exec input JSONL before static or
+    skipped checks can promote the gate.
+  - Required evidence: `ui-it-selftest-latest.json` plus
+    `engine-exec-input-latest.jsonl` passing
+    `scripts/verify-terminal-exec-it-artifact.py --require-container` on a
+    device-run container session.
 - **Modern/no-PRoot runtime truth — blocked for modern flavor execution claims**
   - Why it blocks: modern flavor surfaces can expose metadata routes while
     direct execution is incomplete.
@@ -80,6 +93,12 @@ device-gated artifact required by the gate ledger is passing with the named
 proof. Host-only checks such as `host-smoke` and `release-honesty` are useful
 regression/hygiene evidence, but they are non-promoting while they only prove
 that planned gaps remain visible.
+
+Current non-promoting gate representations include the archive API host
+compatibility check, the terminal exec-it artifact verifier, COW kill-at-step
+device lane, OOM/LMK survival lane, and image live-pull interruption plan. They
+are release-blocker evidence until their device-gated promotion conditions
+produce passing artifacts.
 
 For release notes and build records, treat these as blockers or scoped-out
 limitations, not passes:
@@ -114,9 +133,15 @@ limitations, not passes:
 - [ ] Runtime stop/kill artifact proves direct child and GPU executor cleanup.
 - [ ] Interrupted image pull artifact proves recovery does not publish partial
   layers/tags.
+- [ ] Image live-pull interruption artifact proves a scenario-owned registry
+  pull can be killed mid-transfer without publishing or overwriting user tags.
 - [ ] COW/overlay fault-injection artifact proves mutation recovery is
   fail-closed.
+- [ ] COW kill-at-step artifact proves adb/run-as daemon/helper interruption
+  for every required copy-up, rename, whiteout, archive, and metadata case.
 - [ ] OOM/LMK replay artifact proves stale UI/backend state is classified.
+- [ ] Terminal exec-it artifact verifier passes with raw device Engine exec
+  input evidence for a real container session.
 - [ ] Storage metrics device sequence covers build, prune, rebuild, and
   edit/copy-up without double-counting shared layers.
 

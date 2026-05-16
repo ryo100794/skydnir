@@ -816,7 +816,7 @@
     {
       "id": "direct.proc-self-exe-temp-symlink",
       "phase2_contract": "proc-self-exe-no-mutation",
-      "reason": "Entry-side readlinkat rewrite still creates a tmp rootfs symlink before the exit-side direct readlink emulation path."
+      "reason": "Implementation now uses userland readlinkat emulation without rootfs helper symlinks; Android device evidence for self/thread-self/pid exe variants is still pending."
     },
     {
       "id": "direct.run-traced-changed-path-manifest",
@@ -897,20 +897,20 @@
     },
     {
       "id": "proc-self-exe-no-mutation",
-      "status": "known-implementation-gap",
+      "status": "implemented-pending-device-evidence",
       "areas": [
         "proc_self_exe_no_mutation"
       ],
       "todo_markers": [
-        "/proc/self/exe` rootfs temporary symlink mediation",
-        "readlink emulation"
+        "readlink emulation",
+        "/proc/self/exe"
       ],
       "cases": [
         "android.direct.proc-exe-and-links",
         "android.direct.path-boundary-matrix"
       ],
       "fast_gate": "python3 scripts/verify_direct_syscall_contracts.py",
-      "close_requires": "readlinkat(/proc/self/exe), /proc/thread-self/exe, and /proc/<pid>/exe complete from tracee memory/register emulation without creating tmp symlinks in the rootfs. Closing this requires no mutating helper symlink for any proc exe readlink path."
+      "close_requires": "Device evidence proves readlinkat(/proc/self/exe), /proc/thread-self/exe, and /proc/<pid>/exe return the container guest executable path without creating /tmp/.pdocker-proc-exe-* or other rootfs helper symlinks. Required close evidence remains Android device evidence for all proc exe variants."
     },
     {
       "id": "run-changed-path-manifest",

@@ -175,7 +175,8 @@
         "docs/test/ANDROID_SELFDEBUG.md",
         "docs/test/TERMINAL_EXEC_IT_DEVICE_GATE.md"
       ],
-      "checks": "Engine exec -it path, PTY fallback, Enter, Ctrl-C, ArrowUp/history, top refresh/q, resize, IME fallback, host artifact verifier, bracket argv regression, and Android smoke wiring."
+      "checks": "Engine exec -it path, PTY fallback, Enter, Ctrl-C, ArrowUp/history, top refresh/q, resize, IME fallback, host artifact verifier, bracket argv regression, and Android smoke wiring. Promotion requires ui-it-selftest JSON plus raw engine-exec-input JSONL verified with --require-container; skipped/static checks are non-promoting.",
+      "checkpoint_credit": "device-only; non-promoting without raw Engine exec JSONL and require-container verification"
     },
     {
       "id": "project.library.templates",
@@ -235,6 +236,19 @@
       "checks": "Layer cache reuse, prune behavior, active build protection, and storage refresh wiring."
     },
     {
+      "id": "image.pull.live-registry-interruption",
+      "area": "image-and-layer-storage",
+      "lane": "android-full",
+      "command": "python3 scripts/verify/runner/image_pull_crash_safety_device.py --execute-live-pull-interruption --live-image 127.0.0.1:5000/pdocker-live-pull-fixture:latest --live-fixture-owned",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/IMAGE_PULL_CRASH_SAFETY_DEVICE_GATE.md",
+        "docs/test/CI_GATE_LEDGER.md"
+      ],
+      "checks": "Timed live registry pull interruption plan for a scenario-owned or isolated fixture. It must prove daemon kill/restart during transfer never publishes partial tags/layers or overwrites user images; current plan artifacts are non-promoting until the live device phase is implemented and passes.",
+      "checkpoint_credit": "non-promoting planned-gap until live_interrupted_network_pull=true with scenario-owned evidence"
+    },
+    {
       "id": "cow.overlay.local",
       "area": "cow-overlay-storage",
       "lane": "fast-local",
@@ -247,16 +261,30 @@
       "checks": "COW copy-up, path metadata, fd lifecycle, xattr hooks, JSON microbenchmarks, hardlink ring cache rebuild, and kill-at-step planned-gap evidence."
     },
     {
+      "id": "cow.overlay.kill-at-step-device",
+      "area": "cow-overlay-storage",
+      "lane": "android-full",
+      "command": "python3 scripts/verify/runner/cow_overlay_kill_at_step_device.py --execute-device --artifact docs/test/cow-overlay-kill-at-step-latest.json",
+      "status": "runnable-with-device",
+      "docs": [
+        "docs/design/COW_OVERLAY_STORAGE.md",
+        "docs/test/COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md"
+      ],
+      "checks": "Device daemon/helper kill-at-step route for copy-up, rename, whiteout, archive PUT, metadata, low-space, startup restart, and scoped cleanup. Planned-gap or blocked-device artifacts are non-promoting until every required case is proven by adb/run-as evidence.",
+      "checkpoint_credit": "device-only; non-promoting unless status=pass and promotion condition is satisfied"
+    },
+    {
       "id": "archive.api.compatibility",
       "area": "archive-api",
       "lane": "fast-local",
-      "command": "python3 scripts/compat-audit.py",
-      "status": "planned-gap",
+      "command": "python3 scripts/verify-archive-api-compat.py",
+      "status": "runnable",
       "docs": [
         "docs/design/DOCKER_COMPAT_SCOPE.md",
         "docs/test/COMPATIBILITY.md"
       ],
-      "checks": "GET/PUT/HEAD container archive API routes, tar/stat header compatibility, path traversal defense, and merged lower/upper behavior."
+      "checks": "Host archive API gate for GET/PUT/HEAD container archive routes, tar/stat header compatibility, path traversal defense, whiteout/lower-upper merge behavior, and pdockerd asset mirror freshness. Host-only regression evidence is non-promoting for storage crash-safety release credit until device COW/archive mutation gates pass.",
+      "checkpoint_credit": "non-promoting host compatibility regression only"
     },
     {
       "id": "network.metadata.hostlike",
@@ -828,14 +856,15 @@
       "id": "runtime.oom-survival-large-workload",
       "area": "runtime-oom-survival",
       "lane": "android-full",
-      "command": "bash scripts/android-container-direct-probe.sh --memory-guard",
+      "command": "python3 scripts/verify-oom-lmk-survival-gate.py --device-plan-artifact docs/test/oom-lmk-survival-latest.json",
       "status": "planned-gap",
       "docs": [
         "docs/design/RUNTIME_OOM_SURVIVAL.md",
         "docs/design/APK_MEMORY_PAGER.md",
         "docs/test/APK_MEMORY_PAGER_PROBE.md"
       ],
-      "checks": "Runtime memory telemetry ring, early ENOMEM guard event, LMK-suspected restart classification, Large Workload Mode metadata, and opt-in managed/bridge memory paths."
+      "checks": "Runtime memory telemetry ring, early ENOMEM guard event, LMK-suspected restart classification, Large Workload Mode metadata, opt-in managed/bridge memory paths, and an explicit non-promoting device replay plan until controlled LMK/backend-death evidence passes.",
+      "checkpoint_credit": "non-promoting planned-gap until connected-device replay artifact passes"
     },
     {
       "id": "release.readiness",

@@ -83,14 +83,14 @@
       "axis": "archive-round-trip",
       "status": "planned-gap",
       "lane": "heavy-backend",
-      "command": "python3 scripts/verify-refactor-resilience.py",
+      "command": "python3 scripts/verify-archive-api-compat.py",
       "contract_class": "documented-limitation",
-      "observable_contract": "Archive copy-in/copy-out preserves tar headers, file modes, symlinks, whiteouts, and merged lower/upper views across storage refactors.",
+      "observable_contract": "Archive copy-in/copy-out preserves tar headers, file modes, symlinks, whiteouts, and merged lower/upper views across storage refactors within the documented Docker compatibility scope.",
       "invariant": "Tar round-trip produces the same externally visible file tree and metadata within the declared pdocker compatibility scope.",
       "refactor_risk": "COW or metadata-index refactors can pass simple file tests while breaking Docker archive interoperability.",
       "evidence_artifact": "docs/test/archive-round-trip-latest.json",
       "evidence_required_fast": false,
-      "gap_reason": "Archive API executable corpus is still tracked as a compatibility planned gap."
+      "gap_reason": "Host archive API compatibility is runnable, but full archive round-trip device promotion still depends on storage kill-at-step and broader differential fixtures."
     },
     {
       "id": "refactor.artifact.diff-baseline",

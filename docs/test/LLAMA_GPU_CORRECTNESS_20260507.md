@@ -930,3 +930,9 @@ This is diagnostic-only and still does not claim device correctness.  It
 narrows the existing `vulkan-device-execution-or-writeback` Q6_K blocker:
 hash-stable writable output writeback lets the next artifact name
 `vulkan-device-execution`; a writable hash mismatch names `writeback`.
+
+The artifact verifier also consumes this split fail-closed.  A future
+`latest_status: "match"` Q6_K oracle is not enough for a correctness or
+benchmark claim unless `q6_writeback_verified_all` is true.  Writable
+`q6_writable_writeback_mismatches` classify as `q6-writeback-mismatch`; missing
+or unknown writable writeback hashes classify as `q6-writeback-unverified`.
