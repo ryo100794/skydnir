@@ -256,13 +256,6 @@ static unsigned long long wall_now_ms(void) {
            (unsigned long long)ts.tv_nsec / 1000000ULL;
 }
 
-static unsigned long long monotonic_now_ms(void) {
-    struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
-    return (unsigned long long)ts.tv_sec * 1000ULL +
-           (unsigned long long)ts.tv_nsec / 1000000ULL;
-}
-
 static void json_write_string(FILE *fp, const char *value) {
     fputc('"', fp);
     const unsigned char *p = (const unsigned char *)(value ? value : "");
@@ -2325,20 +2318,6 @@ static void tracee_status_summary(pid_t tracee, char *buf, size_t cap) {
     snprintf(buf, cap, "state=%s ppid=%d tracer=%d", state, ppid, tracer_pid);
 }
 
-static void dump_active_tracees(TraceeState *tracees, pid_t tracer, const char *reason) {
-    fprintf(stderr, "pdocker-direct-trace: %s active=%d\n", reason, tracee_count(tracees));
-    for (int i = 0; i < MAX_TRACEES; ++i) {
-        if (!tracees[i].active) continue;
-        char status[160];
-        tracee_status_summary(tracees[i].pid, status, sizeof(status));
-        fprintf(stderr, "pdocker-direct-trace: active pid=%d owned=%d %s last=%ld(%s) in=%d emu=%ld last_emu=%ld\n",
-                (int)tracees[i].pid, tracee_is_still_owned(tracer, tracees[i].pid),
-                status, tracees[i].last_nr, syscall_name(tracees[i].last_nr),
-                tracees[i].in_syscall, tracees[i].emulated_nr,
-                tracees[i].last_emulated_nr);
-    }
-}
-
 static int prune_dead_tracees(TraceeState *tracees, pid_t tracer) {
     int alive = 0;
     for (int i = 0; i < MAX_TRACEES; ++i) {
@@ -3610,18 +3589,6 @@ static int rewrite_chdir_arg(pid_t pid, struct user_pt_regs *regs, TraceeState *
                              sizeof(state->pending_guest_cwd));
     }
     return rewrite_path_arg(pid, regs, 0, rootfs, "chdir");
-}
-
-static int rewrite_path_args(pid_t pid, struct user_pt_regs *regs, int arg_a, int arg_b,
-                             const char *rootfs, const char *context) {
-    int rewrote = 0;
-    int rc = rewrite_path_arg_scratch(pid, regs, arg_a, rootfs, context, 16384u);
-    if (rc == REWRITE_SYSCALL_COMPLETED) return rc;
-    rewrote |= rc;
-    rc = rewrite_path_arg_scratch(pid, regs, arg_b, rootfs, context, 8192u);
-    if (rc == REWRITE_SYSCALL_COMPLETED) return rc;
-    rewrote |= rc;
-    return rewrote;
 }
 
 static int rewrite_at_path_args(pid_t pid, struct user_pt_regs *regs,

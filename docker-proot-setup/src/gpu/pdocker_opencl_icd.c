@@ -54,18 +54,13 @@ typedef struct PdockerClEvent *cl_event;
 #define CL_INVALID_ARG_INDEX -49
 #define CL_INVALID_OPERATION -59
 
-#define CL_FALSE 0
 #define CL_TRUE 1
 
 #define CL_DEVICE_TYPE_DEFAULT (1u << 0)
-#define CL_DEVICE_TYPE_CPU (1u << 1)
 #define CL_DEVICE_TYPE_GPU (1u << 2)
-#define CL_DEVICE_TYPE_ACCELERATOR (1u << 3)
 #define CL_DEVICE_TYPE_ALL 0xFFFFFFFFu
 
 #define CL_MEM_READ_WRITE (1u << 0)
-#define CL_MEM_WRITE_ONLY (1u << 1)
-#define CL_MEM_READ_ONLY (1u << 2)
 #define CL_MEM_COPY_HOST_PTR (1u << 5)
 
 #define CL_PLATFORM_PROFILE 0x0900

@@ -61,8 +61,6 @@
 #define PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_SENTINEL 0xA5u
 
 #define PDOCKER_VK_FEATURE_SHADER_INT64                 (1ull << 0)
-#define PDOCKER_VK_FEATURE_SHADER_INT16                 (1ull << 1)
-#define PDOCKER_VK_FEATURE_SHADER_FLOAT64               (1ull << 2)
 #define PDOCKER_VK_FEATURE_STORAGE_BUFFER_16            (1ull << 3)
 #define PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16    (1ull << 4)
 #define PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16     (1ull << 5)
@@ -4939,14 +4937,6 @@ static void run_cpu_oracle_rms_norm(
     free(src0);
     free(src1);
     free(dst);
-}
-
-static int pread_f32_at_index(int fd, off_t base_offset, size_t index, float *out) {
-    if (!out) return 0;
-    off_t off = base_offset + (off_t)(index * sizeof(float));
-    ssize_t n = pread(fd, out, sizeof(*out), off);
-    if (n != (ssize_t)sizeof(*out)) return 0;
-    return 1;
 }
 
 static void run_cpu_oracle_rms_norm_sampled(
