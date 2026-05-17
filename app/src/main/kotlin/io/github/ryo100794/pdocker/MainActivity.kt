@@ -3821,10 +3821,6 @@ class MainActivity : AppCompatActivity() {
     private fun documentsProjectsRootWritable(): Boolean =
         documentsTreeMetadata().writeAccess == DocumentsWriteAccess.DirectPathWritable
 
-    private fun selectedDocumentsProjectsRootWritable(selectedHostPath: String): Boolean =
-        documentsDirectPathWritableCandidate(prefs().getString(PREF_DOCUMENTS_TREE_URI, "").orEmpty(), selectedHostPath) &&
-            probeDocumentsProjectsRootWritable(selectedHostPath)
-
     private fun probeDocumentsProjectsRootWritable(selectedHostPath: String): Boolean =
         File(File(selectedHostPath, "pdocker"), "projects").absolutePath.let { path ->
             if (documentsProjectRootProbePath == path) return documentsProjectRootProbeWritable
@@ -4617,12 +4613,6 @@ class MainActivity : AppCompatActivity() {
         ).joinToString("; ")
     }
 
-    private fun dockerBuildCommand(dir: File): String =
-        "cd ${shellQuote(dir.absolutePath)} && docker build -t local/${dir.name}:latest ."
-
-    private fun composeUpCommand(dir: File): String =
-        "cd ${shellQuote(dir.absolutePath)} && docker compose up --detach --build && docker compose ps && docker compose logs --tail=80"
-
     private fun normalizeDockerCommand(command: String): String =
         command.replace(Regex("(^|[;&|]\\s*)docker-compose(?=\\s)")) {
             "${it.groupValues[1]}docker compose"
@@ -5311,10 +5301,6 @@ class MainActivity : AppCompatActivity() {
             content.addView(this)
             addDivider()
         }
-    }
-
-    private fun addMetric(label: String, value: String) {
-        addAction(label, value) {}
     }
 
     private fun addWidget(title: String, value: String, detail: String, detailLines: Int = 3, onClick: (() -> Unit)? = null) {
