@@ -50,6 +50,58 @@ class TestDriverManifestTest(unittest.TestCase):
         self.assertIn("docs/test/file-io-microbench-latest.json", command["artifacts"])
         self.assertEqual(command["env"]["PDOCKER_FILE_IO_MICRO_EXPORT_DOCUMENTS"], "1")
 
+    def test_device_artifact_lanes_chain_strict_verifiers(self):
+        lanes = self.manifest["lanes"]
+        dev_cmd = lanes["android-dev-workspace"]["commands"][0]
+        self.assertIn("verify-dev-workspace-compose-artifact.py", dev_cmd["shell"])
+        self.assertIn("rm -f docs/test/dev-workspace-compose-latest.json", dev_cmd["shell"])
+        self.assertFalse(lanes["android-dev-workspace"]["stable_checkpoint_eligible"])
+
+        docs_cmd = lanes["android-documents"]["commands"][0]
+        self.assertIn("verify-saf-direct-output-artifact.py", docs_cmd["shell"])
+        self.assertIn("verify-dev-workspace-compose-artifact.py", docs_cmd["shell"])
+        self.assertIn("rm -f docs/test/saf-direct-output-latest.json", docs_cmd["shell"])
+        self.assertFalse(lanes["android-documents"]["stable_checkpoint_eligible"])
+
+    def test_focused_p0_device_lanes_are_non_promoting(self):
+        lanes = self.manifest["lanes"]
+        for lane_name in [
+            "android-runtime-teardown",
+            "android-storage-metrics-sequence",
+            "android-single-container-echo-hi",
+            "android-modern-runtime-truth",
+        ]:
+            self.assertIn(lane_name, lanes)
+            self.assertFalse(lanes[lane_name]["stable_checkpoint_eligible"], lane_name)
+
+        single_cmd = lanes["android-single-container-echo-hi"]["commands"][0]["shell"]
+        self.assertIn("--single-container-echo-hi", single_cmd)
+        self.assertNotIn("--quick", single_cmd)
+        storage_cmd = lanes["android-storage-metrics-sequence"]["commands"][0]["shell"]
+        self.assertIn("rm -f docs/test/storage-metrics-sequence-latest.json", storage_cmd)
+        self.assertIn("exit 2", storage_cmd)
+
+    def test_verify_heavy_exposes_focused_device_lanes(self):
+        heavy = (ROOT / "scripts" / "verify-heavy.sh").read_text(encoding="utf-8")
+        for mode in [
+            "--android-dev-workspace",
+            "--android-documents",
+            "--android-runtime-teardown",
+            "--android-storage-metrics-sequence",
+            "--android-single-container",
+            "--android-modern-runtime-truth",
+        ]:
+            self.assertIn(mode, heavy)
+        for lane in [
+            "android-dev-workspace",
+            "android-documents",
+            "android-runtime-teardown",
+            "android-storage-metrics-sequence",
+            "android-single-container-echo-hi",
+            "android-modern-runtime-truth",
+        ]:
+            self.assertIn(f"--lane {lane}", heavy)
+
 
 if __name__ == "__main__":
     unittest.main()

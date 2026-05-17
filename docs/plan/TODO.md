@@ -102,6 +102,11 @@ issues, and deciding which planned gaps become hard gates.
    named device promotion condition produces a passing artifact. This audit
    splits broad blockers into separately executable units so a passing
    sub-check cannot accidentally promote its parent gate.
+10. **Modern/no-PRoot runtime truth** `[P0 next]`: metadata-only flavors must
+    not expose execution claims. Either complete the no-PRoot executor or
+    hard-disable `RUN`, `docker run`, Compose service start, service health,
+    and published-port claims with explicit runtime capability errors and a
+    device artifact at `docs/test/no-proot-runtime-truth-latest.json`.
 
 ### Next Queue Generated 2026-05-04
 
@@ -322,7 +327,7 @@ risk, not stable checkpoint credit.
   the changed-path detection, add regression coverage for wildcard RUN paths,
   and reduce the final no-op-style metadata snapshot without changing Dockerfile
   semantics.
-- [doing] Image reference graph visual polish. Task G reconnaissance on
+- [done] Image reference graph app-code/static slice. Task G reconnaissance on
   2026-05-16 found actual app-code evidence rather than a planned-only gap:
   `MainActivity.kt` now wires `renderImages()` into
   `renderImageCacheHealth()`/`imageCacheHealth()` and
@@ -336,6 +341,20 @@ risk, not stable checkpoint credit.
   scenario. This is no longer a planned-only source gap, but it remains
   non-promoting release evidence until a connected-device screenshot/manual
   visual pass proves connector rendering and tap actions.
+- [next] Storage graph/layer maintenance device evidence: capture
+  connected-device screenshot/manual artifact proving connector rendering,
+  cache-vs-image references, unique/shared/stale sizes, Files/Delete/Clean-cache
+  tap actions, and stale build-cache or unreferenced-layer cleanup after build,
+  prune, rebuild, image delete, and stale-cache cleanup.
+- [next] Media bridge capture/playback gate: Phase-1 descriptor/socket/env
+  negotiation must stay `Ready=false` until Camera2, AudioRecord, and
+  AudioTrack executor IPC exist, runtime permissions are requested, and a
+  device artifact proves capture/playback commands without raw `/dev`
+  passthrough.
+- [next] Build context tar compatibility: Kotlin `DockerEngineClient.createTar`
+  must preserve Docker build-context semantics for regular files, directories,
+  symlinks, executable mode bits, long paths/PAX behavior, mtimes, and
+  `.dockerignore` parity before external Dockerfile context parity is claimed.
 - [next] Pull/update operation semantics. "Pull image" is an Engine API
   operation, not "open docker pull shell"; if the ref already exists, treat it
   as update/re-pull with old tag preserved until success. Acceptance: wording,
@@ -1099,8 +1118,10 @@ Acceptance:
 
 ## P1: VS Code Server and Dev Workspace
 
-Status: **quick-start template exists; runtime is now the blocker for first
-successful service start**.
+Status: **quick-start template exists and has reached code-server on device;
+promotion is now blocked on same-ID service health evidence, configured
+extension proof, first-run credential handling, and the optional full workspace
+template.**
 
 Temporary behavior:
 
@@ -1116,8 +1137,8 @@ Temporary behavior:
 Real implementation needed:
 
 1. Use only standard Dockerfile/Compose semantics for the template.
-2. Once executor lands, start real code-server and expose the actual service
-   URL.
+2. Keep code-server start covered by the default workspace health artifact and
+   require same-ID UI/API/listener truth before promotion.
 3. Add first-run credential/password handling.
 4. Add a full dev workspace template with the heavier editor extensions and
    CLI tools.

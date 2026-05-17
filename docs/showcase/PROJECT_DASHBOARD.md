@@ -22,9 +22,9 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 | Signal | Value |
 |---|---:|
 | Project-library templates | 6 |
-| TODO done entries | 57 |
-| TODO doing entries | 18 |
-| TODO next entries | 32 |
+| TODO done entries | 58 |
+| TODO doing entries | 17 |
+| TODO next entries | 35 |
 | Compatibility audit PASS | 69 |
 | Compatibility audit FAIL | 0 |
 

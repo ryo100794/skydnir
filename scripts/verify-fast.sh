@@ -52,6 +52,12 @@ run python3 -m py_compile \
   scripts/update-showcase.py \
   docker-proot-setup/scripts/verify_runtime_contract.py
 
+run bash -n \
+  scripts/android-device-smoke.sh \
+  scripts/android-dev-workspace-compose-smoke.sh \
+  scripts/android-documents-mediator-smoke.sh \
+  scripts/verify-heavy.sh
+
 run python3 docker-proot-setup/scripts/verify_runtime_contract.py
 run python3 scripts/verify_direct_syscall_contracts.py
 run python3 scripts/verify-memory-pager-design.py

@@ -21,9 +21,9 @@ Current TODO counters:
 
 | State | Count |
 |---|---:|
-| done | 57 |
-| doing | 18 |
-| next | 32 |
+| done | 58 |
+| doing | 17 |
+| next | 35 |
 | blocked | 0 |
 
 ## Timeline
@@ -43,6 +43,7 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 
 - [#8](https://github.com/ryo100794/pdocker-android/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built...
 - RUN changed-path/snapshot performance. `RUN chmod +x /usr/local/bin/pdocker-*` is functionally correct but still triggers an expensive broad snapshot in the default workspace build...
+- Storage graph/layer maintenance device evidence: capture connected-device screenshot/manual artifact proving connector rendering, cache-vs-image references, unique/shared/stale sizes...
 
 ### Then: 2026-05-28 to 2026-06-07
 

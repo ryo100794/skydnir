@@ -27,6 +27,7 @@ GPU_BENCH=0
 SERVICE_TRUTH_TARGET=""
 RUNTIME_TEARDOWN_TARGET=""
 DOCKER_CP_E2E_TARGET=""
+SINGLE_CONTAINER_ECHO_HI=0
 SMOKE_ARTIFACT_DIR_RESOLVED="${PDOCKER_SMOKE_ARTIFACT_DIR:-$ROOT/tmp/device-smoke-artifacts/$(date -u +%Y%m%dT%H%M%SZ)}"
 
 usage() {
@@ -35,6 +36,7 @@ Usage: $0 [--quick] [--gpu-bench] [--no-install]
        $0 --service-truth <default-workspace|llama>
        $0 --runtime-teardown <default-workspace|llama>
        $0 --docker-cp-e2e <default-workspace|llama>
+       $0 --single-container-echo-hi
 
 Runs a repeatable pdocker Android device smoke through adb + run-as.
 
@@ -78,6 +80,9 @@ Modes:
   --docker-cp-e2e TARGET
                 planned device gate for Docker CLI `docker cp` end-to-end
                 parity. Currently exits nonzero with a structured artifact.
+  --single-container-echo-hi
+                run only the focused `docker run --rm ubuntu:22.04 echo hi`
+                gate after daemon startup and collect its diagnostic JSON.
 EOF
 }
 
@@ -102,6 +107,9 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { echo "--docker-cp-e2e requires a target" >&2; exit 2; }
       DOCKER_CP_E2E_TARGET="$2"
       shift
+      ;;
+    --single-container-echo-hi)
+      SINGLE_CONTAINER_ECHO_HI=1
       ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -717,7 +725,12 @@ REMOTE_SERVICE_TRUTH
   run_adb push "$local_script" "$remote_script" >/dev/null
   rm -f "$local_script"
   run_adb shell chmod 755 "$remote_script" >/dev/null 2>&1 || true
+  set +e
   run_as "sh $remote_script $(remote_quote "$target")"
+  local rc=$?
+  set -e
+  collect_device_file "files/pdocker/diagnostics/service-truth-latest.json" "service-truth-latest.json" || true
+  return "$rc"
 }
 docker_cp_e2e_acceptance_entrypoint() {
   local target="$1"
@@ -760,7 +773,12 @@ REMOTE_DOCKER_CP_E2E
   run_adb push "$local_script" "$remote_script" >/dev/null
   rm -f "$local_script"
   run_adb shell chmod 755 "$remote_script" >/dev/null 2>&1 || true
+  set +e
   run_as "sh $remote_script $(remote_quote "$target")"
+  local rc=$?
+  set -e
+  collect_device_file "files/pdocker/diagnostics/docker-cp-e2e-latest.json" "docker-cp-e2e-latest.json" || true
+  return "$rc"
 }
 runtime_teardown_acceptance_entrypoint() {
   local target="$1"
@@ -1318,7 +1336,12 @@ REMOTE_RUNTIME_TEARDOWN
   run_adb push "$local_script" "$remote_script" >/dev/null
   rm -f "$local_script"
   run_adb shell chmod 755 "$remote_script" >/dev/null 2>&1 || true
+  set +e
   run_as "sh $remote_script $(remote_quote "$target")"
+  local rc=$?
+  set -e
+  collect_device_file "files/pdocker/diagnostics/runtime-teardown-latest.json" "runtime-teardown-latest.json" || true
+  return "$rc"
 }
 
 run_adb() {
@@ -1676,6 +1699,14 @@ if [ "$status" -ne 0 ] || [ "$saw_hi" != true ]; then
 fi'
 }
 
+single_container_echo_hi_entrypoint() {
+  rm -f "$(smoke_artifact_dir)/runtime-single-container-echo-hi-latest.json"
+  docker_run_rm_smoke
+  collect_device_file \
+    "files/pdocker/diagnostics/docker-run-rm-ubuntu-echo-hi.json" \
+    "runtime-single-container-echo-hi-latest.json"
+}
+
 echo "[pdocker smoke] device: $(run_adb get-serialno)"
 
 if [[ "$INSTALL" -eq 1 ]]; then
@@ -1744,6 +1775,11 @@ if [[ -n "${PDOCKER_UI_IT_SELFTEST_CONTAINER:-}" ]]; then
   ui_engine_exec_it_selftest "$PDOCKER_UI_IT_SELFTEST_CONTAINER" "${PDOCKER_UI_IT_SELFTEST_REQUIRE_CONTAINER:-1}"
 elif [[ "$MODE" == "quick" ]]; then
   ui_engine_exec_it_selftest "" "${PDOCKER_UI_IT_SELFTEST_REQUIRE_CONTAINER:-0}"
+fi
+
+if [[ "$SINGLE_CONTAINER_ECHO_HI" -eq 1 ]]; then
+  single_container_echo_hi_entrypoint
+  exit 0
 fi
 
 if [[ "$MODE" == "quick" ]]; then

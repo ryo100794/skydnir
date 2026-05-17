@@ -933,6 +933,109 @@
         "docs/test/ANDROID_SELFDEBUG.md"
       ],
       "checks": "Installed APK device smoke, daemon lifecycle, Engine API actions, compose route, terminal/exec path, and no orphan cleanup regressions."
+    },
+    {
+      "id": "direct.syscall.linkat-hardlink-semantics",
+      "area": "direct-runtime-syscalls",
+      "lane": "android-full",
+      "command": "future focused adb/run-as pdocker-direct linkat hardlink probe",
+      "status": "planned-gap",
+      "docs": [
+        "docs/plan/TODO.md",
+        "docs/test/DIRECT_SYSCALL_COVERAGE.md",
+        "docs/test/CI_GATE_LEDGER.md"
+      ],
+      "checks": "Android linkat hardlink semantics must prove same st_dev/st_ino, st_nlink growth/decrement, write-through from either name, Linux errno parity, and restart recovery; the current copy fallback is non-promoting.",
+      "evidence_target": "docs/test/linkat-hardlink-semantics-latest.json",
+      "reason": "Current direct-runtime linkat emulation can fall back to byte-copy behavior and cannot promote hardlink identity without device proof.",
+      "acceptance_scope": [
+        "inode identity",
+        "link-count transitions",
+        "write-through behavior",
+        "errno parity",
+        "restart recovery"
+      ],
+      "exit_criteria": [
+        "Device artifact reports status=pass and success=true",
+        "Copy fallback evidence remains fail-closed/non-promoting"
+      ]
+    },
+    {
+      "id": "archive.api.docker-cp-e2e-device",
+      "area": "archive-api",
+      "lane": "android-full",
+      "command": "bash scripts/android-device-smoke.sh --docker-cp-e2e default-workspace",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/DOCKER_CP_E2E_DEVICE_GATE.md",
+        "docs/test/CI_GATE_LEDGER.md",
+        "docs/plan/TODO.md"
+      ],
+      "checks": "Docker CLI docker cp promotion requires same Engine container ID, archive HEAD/GET/PUT, byte/sha256 equality, hardlink/symlink and metadata policy, xattr, whiteout rejection, and escape-negative cases.",
+      "evidence_target": "files/pdocker/diagnostics/docker-cp-e2e-latest.json",
+      "reason": "Host archive API coverage is non-promoting for device CLI copy parity.",
+      "acceptance_scope": [
+        "same-container-ID proof",
+        "host-to-container copy",
+        "container-to-host copy",
+        "archive stat/header compatibility",
+        "negative escape/whiteout cases"
+      ],
+      "exit_criteria": [
+        "Device artifact reports Status=pass and Success=true",
+        "Host-only or name-only artifacts remain non-promoting"
+      ]
+    },
+    {
+      "id": "backend.runtime.no-proot-truth",
+      "area": "backend-runtime-contract",
+      "lane": "android-quick",
+      "command": "future modern-flavor device capability smoke",
+      "status": "planned-gap",
+      "docs": [
+        "docs/test/CI_GATE_LEDGER.md",
+        "docs/release/RELEASE_READINESS.md",
+        "docs/plan/TODO.md"
+      ],
+      "checks": "Modern/no-PRoot flavor must either execute containers for real or hide/disable execution paths with structured capability errors; metadata-only routes must not claim RUN/docker run/Compose/service success.",
+      "evidence_target": "docs/test/no-proot-runtime-truth-latest.json",
+      "reason": "CI ledger tracks this P0 blocker and the feature scenario ledger must own the device proof.",
+      "acceptance_scope": [
+        "disabled or real execution actions",
+        "capability diagnostics",
+        "no fake service health",
+        "no fake port publishing"
+      ],
+      "exit_criteria": [
+        "Modern-flavor artifact proves fail-closed behavior or real executor support",
+        "Metadata-only success claims are absent"
+      ]
+    },
+    {
+      "id": "build.context.tar-compatibility",
+      "area": "build-dockerfile",
+      "lane": "fast-local",
+      "command": "future build-context tar compatibility verifier",
+      "status": "planned-gap",
+      "docs": [
+        "docs/plan/TODO.md",
+        "docs/design/DOCKER_COMPAT_SCOPE.md",
+        "docs/test/COMPATIBILITY.md"
+      ],
+      "checks": "Kotlin build context tar writer must cover regular files, directories, symlinks, executable modes, long paths/PAX behavior, mtimes, and .dockerignore parity.",
+      "evidence_target": "docs/test/build-context-tar-compat-latest.json",
+      "reason": "Current Android UI build client must not claim external Dockerfile context parity until metadata-preserving tar fixtures are verified.",
+      "acceptance_scope": [
+        "directories",
+        "symlinks",
+        "mode metadata",
+        "long paths/PAX",
+        ".dockerignore parity"
+      ],
+      "exit_criteria": [
+        "Verifier rejects metadata-losing tar output",
+        "Bundled and external context fixtures pass"
+      ]
     }
   ]
 }

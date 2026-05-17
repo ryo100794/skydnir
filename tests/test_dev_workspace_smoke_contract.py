@@ -73,7 +73,9 @@ class DevWorkspaceSmokeContractTest(unittest.TestCase):
         self.assertEqual(len(commands), 1)
         command = commands[0]
         self.assertEqual(command.get("id"), "android-dev-workspace-compose-smoke")
-        self.assertEqual(command.get("argv"), ["bash", "scripts/android-dev-workspace-compose-smoke.sh"])
+        self.assertIn("bash scripts/android-dev-workspace-compose-smoke.sh", command.get("shell") or "")
+        self.assertIn("verify-dev-workspace-compose-artifact.py", command.get("shell") or "")
+        self.assertIn("rm -f docs/test/dev-workspace-compose-latest.json", command.get("shell") or "")
         self.assertIn("docs/test/dev-workspace-compose-latest.json", command.get("artifacts") or [])
         self.assertIn("installed-debug-apk", lane.get("requires") or [])
 

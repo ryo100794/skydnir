@@ -18,6 +18,24 @@ Modes:
   --container-probe run direct-runtime probe against ROOTFS/PDOCKER_DIRECT_EXECUTOR
   --android-quick   run Android device quick smoke through adb
   --android-full    run Android device full smoke through adb
+  --android-dev-workspace
+                    run the default dev-workspace device lane through the
+                    canonical test driver
+  --android-documents
+                    run the SAF/Documents direct-output device lane through
+                    the canonical test driver
+  --android-runtime-teardown
+                    run the runtime teardown planned-gap device lane through
+                    the canonical test driver
+  --android-storage-metrics-sequence
+                    run the storage metrics device-sequence lane through the
+                    canonical test driver
+  --android-single-container
+                    run the focused single-container echo-hi device lane
+                    through the canonical test driver
+  --android-modern-runtime-truth
+                    run the modern/no-PRoot runtime-truth lane through the
+                    canonical test driver
 
 Environment:
   BACKEND_QUICK_TIMEOUT  timeout seconds for backend quick regression (default: 900)
@@ -31,7 +49,7 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --backend-quick|--backend-full|--container-probe|--android-quick|--android-full)
+    --backend-quick|--backend-full|--container-probe|--android-quick|--android-full|--android-dev-workspace|--android-documents|--android-runtime-teardown|--android-storage-metrics-sequence|--android-single-container|--android-modern-runtime-truth)
       MODE="${1#--}"
       ;;
     --no-install)
@@ -69,6 +87,24 @@ case "$MODE" in
     ;;
   android-full)
     bash scripts/android-device-smoke.sh "${INSTALL_FLAG[@]}"
+    ;;
+  android-dev-workspace)
+    python3 scripts/pdocker-test-driver.py --lane android-dev-workspace
+    ;;
+  android-documents)
+    python3 scripts/pdocker-test-driver.py --lane android-documents
+    ;;
+  android-runtime-teardown)
+    python3 scripts/pdocker-test-driver.py --lane android-runtime-teardown
+    ;;
+  android-storage-metrics-sequence)
+    python3 scripts/pdocker-test-driver.py --lane android-storage-metrics-sequence
+    ;;
+  android-single-container)
+    python3 scripts/pdocker-test-driver.py --lane android-single-container-echo-hi
+    ;;
+  android-modern-runtime-truth)
+    python3 scripts/pdocker-test-driver.py --lane android-modern-runtime-truth
     ;;
 esac
 

@@ -621,10 +621,10 @@
       "commands": [
         {
           "id": "android-documents-saf-direct-output",
+          "shell": "rm -f docs/test/saf-direct-output-latest.json\nCID=\"${PDOCKER_SAF_DIRECT_OUTPUT_CONTAINER:-}\"\nif [ -z \"$CID\" ] && [ -f docs/test/dev-workspace-compose-latest.json ]; then\n  python3 scripts/verify-dev-workspace-compose-artifact.py docs/test/dev-workspace-compose-latest.json\n  CID=\"$(python3 - <<'PYDOCS'\nimport json\ntry:\n    data=json.load(open('docs/test/dev-workspace-compose-latest.json'))\n    print(data.get('checks',{}).get('engine_state',{}).get('running_container_id',''))\nexcept Exception:\n    print('')\nPYDOCS\n)\"\nfi\nif [ -z \"$CID\" ]; then\n  echo \"android-documents requires PDOCKER_SAF_DIRECT_OUTPUT_CONTAINER or a passing dev-workspace artifact\" >&2\n  exit 2\nfi\nPDOCKER_SAF_DIRECT_OUTPUT_CONTAINER=\"$CID\" bash scripts/android-documents-mediator-smoke.sh\npython3 scripts/verify-saf-direct-output-artifact.py docs/test/saf-direct-output-latest.json",
           "artifacts": [
             "docs/test/saf-direct-output-latest.json"
-          ],
-          "shell": "CID=\"${PDOCKER_SAF_DIRECT_OUTPUT_CONTAINER:-}\"\nif [ -z \"$CID\" ] && [ -f docs/test/dev-workspace-compose-latest.json ]; then\n  CID=\"$(python3 - <<'PYDOCS'\nimport json\ntry:\n    data=json.load(open('docs/test/dev-workspace-compose-latest.json'))\n    print(data.get('checks',{}).get('engine_state',{}).get('running_container_id',''))\nexcept Exception:\n    print('')\nPYDOCS\n)\"\nfi\nif [ -z \"$CID\" ]; then\n  echo \"android-documents requires PDOCKER_SAF_DIRECT_OUTPUT_CONTAINER or a passing dev-workspace artifact\" >&2\n  exit 2\nfi\nPDOCKER_SAF_DIRECT_OUTPUT_CONTAINER=\"$CID\" bash scripts/android-documents-mediator-smoke.sh"
+          ]
         }
       ],
       "planned_gap_contracts": [
@@ -643,10 +643,7 @@
       "commands": [
         {
           "id": "android-dev-workspace-compose-smoke",
-          "argv": [
-            "bash",
-            "scripts/android-dev-workspace-compose-smoke.sh"
-          ],
+          "shell": "rm -f docs/test/dev-workspace-compose-latest.json; bash scripts/android-dev-workspace-compose-smoke.sh; python3 scripts/verify-dev-workspace-compose-artifact.py docs/test/dev-workspace-compose-latest.json",
           "artifacts": [
             "docs/test/dev-workspace-compose-latest.json"
           ]
@@ -945,7 +942,7 @@
       "commands": [
         {
           "id": "android-storage-metrics-sequence-plan",
-          "shell": "echo \"Capture baseline/build/rebuild/edit/prune snapshots, write docs/test/storage-metrics-sequence-latest.json, then run: python3 scripts/verify-storage-metrics.py --sequence docs/test/storage-metrics-sequence-latest.json\"; test -f docs/test/storage-metrics-sequence-latest.json && python3 scripts/verify-storage-metrics.py --sequence docs/test/storage-metrics-sequence-latest.json",
+          "shell": "rm -f docs/test/storage-metrics-sequence-latest.json\necho \"android-storage-metrics-sequence requires scripts/android-storage-metrics-sequence.sh to capture fresh baseline/build/rebuild/edit/prune device evidence\" >&2\nexit 2",
           "artifacts": [
             "docs/test/storage-metrics-sequence-latest.json"
           ]
@@ -968,9 +965,54 @@
       "commands": [
         {
           "id": "android-runtime-teardown-planned-gap-smoke",
-          "shell": "set +e; bash scripts/android-device-smoke.sh --no-install --runtime-teardown default-workspace; rc=$?; set -e; test \"$rc\" -eq 2",
+          "shell": "rm -f docs/test/runtime-teardown-latest.json\nset +e\nPDOCKER_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --runtime-teardown default-workspace\nrc=$?\nset -e\ntest \"$rc\" -eq 2\npython3 - <<'PY'\nimport json\nfrom pathlib import Path\np=Path('docs/test/runtime-teardown-latest.json')\nif not p.is_file():\n    raise SystemExit('runtime teardown artifact missing')\ndata=json.loads(p.read_text())\nif data.get('Status') != 'planned-gap' or data.get('Success') is not False:\n    raise SystemExit('runtime teardown scaffold must remain planned-gap Success=false')\nPY",
           "artifacts": [
             "docs/test/runtime-teardown-latest.json"
+          ]
+        }
+      ]
+    },
+    "android-single-container-echo-hi": {
+      "description": "Focused Android device gate for docker run --rm ubuntu:22.04 echo hi. It must not rely on --quick, because quick exits before docker_run_rm_smoke.",
+      "checkpoint_class": "device-evidence-only",
+      "stable_checkpoint_eligible": false,
+      "requires": [
+        "adb",
+        "installed-debug-apk",
+        "running-pdockerd"
+      ],
+      "planned_gap_contracts": [
+        "single-container docker run echo-hi device evidence"
+      ],
+      "promotion_condition": "Must produce runtime-single-container-echo-hi-latest.json proving stdout exactly hi, exit code 0, real Engine container ID, and no host-shell fallback.",
+      "commands": [
+        {
+          "id": "android-single-container-echo-hi",
+          "shell": "rm -f docs/test/runtime-single-container-echo-hi-latest.json; PDOCKER_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --single-container-echo-hi; test -f docs/test/runtime-single-container-echo-hi-latest.json",
+          "artifacts": [
+            "docs/test/runtime-single-container-echo-hi-latest.json"
+          ]
+        }
+      ]
+    },
+    "android-modern-runtime-truth": {
+      "description": "Modern/no-PRoot runtime truth gate. Until real no-PRoot process execution exists, this lane records explicit non-promoting capability failure evidence.",
+      "checkpoint_class": "device-evidence-planned-gap",
+      "stable_checkpoint_eligible": false,
+      "requires": [
+        "adb",
+        "installed-modern-apk-or-explicit-scope-out"
+      ],
+      "planned_gap_contracts": [
+        "modern/no-PRoot runtime truth device evidence"
+      ],
+      "promotion_condition": "Must either prove real no-PRoot process execution or a fail-closed UI/API contract with no RUN/docker run/Compose/service success claims.",
+      "commands": [
+        {
+          "id": "android-modern-runtime-truth-plan",
+          "shell": "mkdir -p docs/test\ncat > docs/test/no-proot-runtime-truth-latest.json <<'JSON'\n{\n  \"schema\": \"pdocker.android.no-proot-runtime-truth.v1\",\n  \"status\": \"planned-gap\",\n  \"success\": false,\n  \"reason\": \"modern/no-PRoot execution must be proven on device or fail closed before promotion\",\n  \"promotion\": \"non-promoting scaffold\"\n}\nJSON\npython3 - <<'PY'\nimport json\nfrom pathlib import Path\np=Path('docs/test/no-proot-runtime-truth-latest.json')\ndata=json.loads(p.read_text())\nif data.get('status') != 'planned-gap' or data.get('success') is not False:\n    raise SystemExit('no-PRoot runtime truth scaffold must remain non-promoting')\nPY",
+          "artifacts": [
+            "docs/test/no-proot-runtime-truth-latest.json"
           ]
         }
       ]
