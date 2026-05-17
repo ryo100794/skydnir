@@ -25,6 +25,7 @@ RUN_CPU=1
 CPU_TPS_OVERRIDE="${PDOCKER_LLAMA_CPU_TPS:-}"
 TRACE_ALLOC="${PDOCKER_LLAMA_TRACE_ALLOC:-0}"
 CORRECTNESS="${PDOCKER_LLAMA_CORRECTNESS:-1}"
+CORRECTNESS_TIMEOUT_SEC="${PDOCKER_LLAMA_CORRECTNESS_TIMEOUT_SEC:-180}"
 LOG_TAIL_LINES="${PDOCKER_LLAMA_LOG_TAIL_LINES:-2000}"
 RESTART_APP_DAEMON="${PDOCKER_LLAMA_RESTART_APP_DAEMON:-1}"
 MIN_FREE_MB="${PDOCKER_LLAMA_MIN_FREE_MB:-512}"
@@ -41,6 +42,10 @@ RUNTIME_MIN_SWAP_FREE_MB="${PDOCKER_LLAMA_RUNTIME_MIN_SWAP_FREE_MB:-0}"
 RUNTIME_SWAP_ADVISORY_MB="${PDOCKER_LLAMA_RUNTIME_SWAP_ADVISORY_MB:-512}"
 STOP_ON_FAILURE="${PDOCKER_LLAMA_STOP_ON_FAILURE:-1}"
 ENGINE_START_TIMEOUT_SEC="${PDOCKER_LLAMA_ENGINE_START_TIMEOUT_SEC:-15}"
+OPERATION_NOTIFY_TIMEOUT_SEC="${PDOCKER_LLAMA_OPERATION_NOTIFY_TIMEOUT_SEC:-3}"
+WAIT_SERVER_PROGRESS_INTERVAL_SEC="${PDOCKER_LLAMA_WAIT_SERVER_PROGRESS_INTERVAL_SEC:-10}"
+WAIT_SERVER_CURL_TIMEOUT_SEC="${PDOCKER_LLAMA_WAIT_SERVER_CURL_TIMEOUT_SEC:-2}"
+COMPARE_ARTIFACT_DIR="${PDOCKER_LLAMA_COMPARE_ARTIFACT_DIR:-}"
 STOP_STALE_TARGET_BEFORE_PREFLIGHT="${PDOCKER_LLAMA_STOP_STALE_TARGET_BEFORE_PREFLIGHT:-1}"
 EXPECTED_GPU_EXECUTOR_MARKER="${PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER:-gpu-executor-workgroup3d-20260513}"
 EXPECTED_VULKAN_ICD_MARKER="${PDOCKER_VULKAN_ICD_EXPECTED_MARKER:-vulkan-icd-runtime-marker-20260510}"
@@ -108,6 +113,44 @@ mkdir -p "$(dirname "$OUT")"
 TMP="$(mktemp -d)"
 CURRENT_STAGE="initializing"
 RUNTIME_ABORT_JSON="$TMP/runtime-memory-abort.json"
+
+compare_artifact_dir() {
+  if [[ -n "$COMPARE_ARTIFACT_DIR" ]]; then
+    printf "%s" "$COMPARE_ARTIFACT_DIR"
+  else
+    printf "%s/%s-artifacts" "$(dirname "$OUT")" "$(basename "${OUT%.json}")"
+  fi
+}
+
+record_wait_server_event() {
+  local phase="$1"
+  local elapsed="$2"
+  local timeout_sec="$3"
+  local http_status="$4"
+  local container_status="$5"
+  local container_id="${6:-}"
+  local path
+  path="$(compare_artifact_dir)/wait-server.jsonl"
+  mkdir -p "$(dirname "$path")"
+  python3 - "$path" "$phase" "$elapsed" "$timeout_sec" "$http_status" "$container_status" "$container_id" <<'PY' || true
+import json
+import sys
+from datetime import datetime, timezone
+
+path, phase, elapsed, timeout_s, http_status, container_status, container_id = sys.argv[1:8]
+event = {
+    "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "phase": phase,
+    "elapsed_sec": int(elapsed),
+    "timeout_sec": int(timeout_s),
+    "http": http_status,
+    "container_running": container_status,
+    "container_id": container_id,
+}
+with open(path, "a", encoding="utf-8") as f:
+    f.write(json.dumps(event, separators=(",", ":")) + "\n")
+PY
+}
 
 cleanup() {
   local status="$?"
@@ -187,7 +230,7 @@ print(json.dumps({
 PY
 )"
   len="$(printf "%s" "$json" | wc -c | tr -d ' ')"
-  run_as "cd files && { printf 'POST /system/operations HTTP/1.1\r\nHost: pdocker\r\nContent-Type: application/json\r\nContent-Length: $len\r\nConnection: close\r\n\r\n'; printf %s $(remote_quote "$json"); } | toybox nc -U pdocker/pdockerd.sock >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
+  run_as "cd files && { printf 'POST /system/operations HTTP/1.1\r\nHost: pdocker\r\nContent-Type: application/json\r\nContent-Length: $len\r\nConnection: close\r\n\r\n'; printf %s $(remote_quote "$json"); } | toybox nc -U -W $OPERATION_NOTIFY_TIMEOUT_SEC pdocker/pdockerd.sock >/dev/null 2>&1 || true" >/dev/null 2>&1 || true
 }
 
 stop_stale_target_if_engine_alive() {
@@ -1015,16 +1058,46 @@ PY
 
 wait_server() {
   local seconds="$1"
+  local phase="${2:-wait-server}"
+  local started now elapsed next_progress http_status container_status ref
+  started="$(date +%s)"
+  next_progress=0
   "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
   "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
-  for _ in $(seq 1 "$seconds"); do
+  while true; do
+    now="$(date +%s)"
+    elapsed=$(( now - started ))
+    if (( elapsed >= seconds )); then
+      ref="$(container_ref)"
+      echo "[pdocker llama compare] waiting for $phase server timed out: elapsed=${elapsed}/${seconds}s id=${ref:0:12}" >&2
+      operation_notify "running" "$phase: llama HTTP server wait timed out at ${elapsed}/${seconds}s; collecting logs"
+      record_wait_server_event "$phase" "$elapsed" "$seconds" "timeout" "unknown" "$ref"
+      return 1
+    fi
     runtime_memory_headroom_ok "wait-server" || return 2
-    if curl -fsS --max-time 2 "http://127.0.0.1:$LOCAL_PORT/v1/models" >/dev/null 2>&1 && container_running; then
-      return 0
+    http_status="fail"
+    container_status="not-checked"
+    if curl -fsS --max-time "$WAIT_SERVER_CURL_TIMEOUT_SEC" "http://127.0.0.1:$LOCAL_PORT/v1/models" >/dev/null 2>&1; then
+      http_status="ok"
+      if container_running; then
+        container_status="running"
+        ref="$(container_ref)"
+        echo "[pdocker llama compare] $phase server is reachable: elapsed=${elapsed}/${seconds}s id=${ref:0:12}" >&2
+        operation_notify "running" "$phase: llama HTTP server reachable after ${elapsed}s"
+        record_wait_server_event "$phase" "$elapsed" "$seconds" "$http_status" "$container_status" "$ref"
+        return 0
+      fi
+      container_status="not-running"
+    fi
+    if (( elapsed >= next_progress )); then
+      ref="$(container_ref)"
+      echo "[pdocker llama compare] waiting for $phase server: elapsed=${elapsed}/${seconds}s http=$http_status container=$container_status id=${ref:0:12}" >&2
+      operation_notify "running" "$phase: waiting for llama HTTP server ${elapsed}/${seconds}s; http=$http_status; container=$container_status"
+      record_wait_server_event "$phase" "$elapsed" "$seconds" "$http_status" "$container_status" "$ref"
+      next_progress=$(( elapsed + WAIT_SERVER_PROGRESS_INTERVAL_SEC ))
     fi
     sleep 1
   done
-  return 1
 }
 
 container_ref() {
@@ -1075,17 +1148,23 @@ start_container_mode() {
   local ctx="$2"
   local gpu_layers="${3:-}"
   local payload create_body cid
+  echo "[pdocker llama compare] $mode: waiting for engine" >&2
   wait_for_engine
+  echo "[pdocker llama compare] $mode: checking memory headroom" >&2
   ensure_memory_headroom "starting $mode container"
+  echo "[pdocker llama compare] $mode: removing stale target container" >&2
   remove_container
   payload="$(container_payload "$mode" "$ctx" "$gpu_layers")"
+  echo "[pdocker llama compare] $mode: creating container" >&2
   create_body="$(engine_body POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload")"
   cid="$(printf "%s" "$create_body" | parse_engine_id)"
   CURRENT_CONTAINER_ID="$cid"
+  echo "[pdocker llama compare] $mode: starting container ${cid:0:12}" >&2
   if ! engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" POST "/containers/$cid/start" "" >/dev/null; then
     echo "[pdocker llama compare] Engine start did not return within ${ENGINE_START_TIMEOUT_SEC}s for $cid; continuing with runtime watchdog" >&2
     runtime_memory_headroom_ok "engine-start-timeout" || return 1
   fi
+  echo "[pdocker llama compare] $mode: start request returned for ${cid:0:12}" >&2
   printf "%s\n" "$cid"
 }
 
@@ -1115,14 +1194,15 @@ probe_http_correctness() {
   local out="$2"
   "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
   "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
-  python3 - "http://127.0.0.1:$LOCAL_PORT" "$mode" "$GPU_LAYERS" "$MODEL_PATH" "$out" <<'PY'
+  python3 - "http://127.0.0.1:$LOCAL_PORT" "$mode" "$GPU_LAYERS" "$MODEL_PATH" "$out" "$CORRECTNESS_TIMEOUT_SEC" <<'PY'
 import json
 import os
 import sys
 import time
 import urllib.request
 
-base_url, mode, gpu_layers, model_path, out_path = sys.argv[1:6]
+base_url, mode, gpu_layers, model_path, out_path, timeout_s = sys.argv[1:7]
+timeout_sec = max(1, int(timeout_s))
 n_probs = max(0, int(os.environ.get("PDOCKER_LLAMA_N_PROBS", "10") or "0"))
 
 def post_json(path, body, timeout):
@@ -1147,6 +1227,12 @@ results = []
 for probe in probes:
     item = dict(probe)
     item.update({"passed": False, "content": "", "error": None, "duration_ms": None, "status_code": None})
+    print(
+        f"[pdocker llama compare] correctness probe {mode}/{probe['name']} "
+        f"timeout={timeout_sec}s",
+        file=sys.stderr,
+        flush=True,
+    )
     try:
         status, duration_ms, payload = post_json(
             "/completion",
@@ -1162,7 +1248,7 @@ for probe in probes:
                 "completion_probabilities": n_probs > 0,
                 "stop": ["\n"],
             },
-            timeout=180,
+            timeout=timeout_sec,
         )
         content = str(payload.get("content", ""))
         normalized = content.lstrip()
@@ -1192,6 +1278,18 @@ for probe in probes:
         })
     except Exception as exc:
         item["error"] = f"{type(exc).__name__}: {exc}"
+        print(
+            f"[pdocker llama compare] correctness probe {mode}/{probe['name']} failed: {item['error']}",
+            file=sys.stderr,
+            flush=True,
+        )
+    else:
+        print(
+            f"[pdocker llama compare] correctness probe {mode}/{probe['name']} "
+            f"passed={item['passed']} duration_ms={item['duration_ms']}",
+            file=sys.stderr,
+            flush=True,
+        )
     results.append(item)
 
 required_failures = [p for p in results if p["required"] and not p["passed"]]
@@ -1235,7 +1333,7 @@ if [[ "$RUN_CPU" -eq 1 ]]; then
   CURRENT_STAGE="CPU baseline"
   operation_notify "running" "CPU baseline: starting"
   start_cpu >/dev/null
-  if ! wait_server 90; then
+  if ! wait_server 90 "CPU baseline"; then
     operation_notify "failed" "CPU server did not become reachable" 1
     echo "CPU server did not become reachable" >&2
     container_state >&2
@@ -1286,7 +1384,7 @@ GPU_LOG="$TMP/gpu.log"
 GPU_STATE="$TMP/gpu-state.txt"
 GPU_JSON="$TMP/gpu.json"
 CORRECTNESS_JSON="$TMP/correctness.json"
-if wait_server 120; then
+if wait_server 120 "Forced Vulkan"; then
   operation_notify "running" "Forced Vulkan served; recording HTTP benchmark"
   bench_http "vulkan-forced-ngl-$GPU_LAYERS" "$GPU_JSON" >/dev/null || true
   if [[ "$CORRECTNESS" != "0" ]]; then
@@ -2672,7 +2770,7 @@ if [[ "$RESTORE_CPU" -eq 1 ]]; then
   CURRENT_STAGE="restore CPU server"
   operation_notify "running" "Restoring CPU llama server"
   if start_cpu >/dev/null; then
-    wait_server 90 >/dev/null || true
+    wait_server 90 "CPU restore" >/dev/null || true
   else
     operation_notify "failed" "$SUMMARY; CPU restore failed; compare artifact preserved" 1
     echo "[pdocker llama compare] CPU restore failed; compare artifact preserved" >&2

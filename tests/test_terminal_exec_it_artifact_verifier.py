@@ -182,6 +182,48 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
             with self.assertRaisesRegex(verifier.VerificationError, "missing Ctrl-C byte"):
                 verifier.verify(artifact_path, input_path, require_container=True)
 
+    def test_rejects_duplicate_ime_enter_byte(self):
+        events = [dict(event) for event in good_events()]
+        for index, event in enumerate(events):
+            if event.get("text") == "\r" and index > 0 and "ime-enter-ok" in events[index - 1].get("text", ""):
+                events.insert(index + 1, {"event": "input", "timestampMs": 9.5, "bytes": 1, "hex": "0d", "text": "\r"})
+                break
+        tmp, artifact_path, input_path = self.write_case(events=events)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "duplicate Enter byte"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_ctrl_c_followed_by_literal_c_before_recovery(self):
+        events = [dict(event) for event in good_events()]
+        for index, event in enumerate(events):
+            if event.get("hex") == "03":
+                events.insert(index + 1, {"event": "input", "timestampMs": 14.5, "bytes": 1, "hex": "63", "text": "c"})
+                break
+        tmp, artifact_path, input_path = self.write_case(events=events)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "literal c byte"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_arrow_history_probe_before_seed_script(self):
+        events = [dict(event) for event in good_events()]
+        arrow = next(event for event in events if event.get("hex") == "1b 5b 41 0d")
+        events.remove(arrow)
+        events.insert(6, arrow)
+        tmp, artifact_path, input_path = self.write_case(events=events)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "after the seed shell script"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_q_before_foreground_top(self):
+        events = [dict(event) for event in good_events()]
+        q = next(event for event in events if event.get("hex") == "71")
+        events.remove(q)
+        events.insert(10, q)
+        tmp, artifact_path, input_path = self.write_case(events=events)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "after foreground top"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
     def test_rejects_literal_c_appended_to_sleep_even_with_etx(self):
         events = [dict(event) for event in good_events()]
         for event in events:

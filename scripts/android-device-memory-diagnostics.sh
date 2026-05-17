@@ -365,7 +365,7 @@ report = {
     "next_steps": [
         "Use this standalone diagnostic before launching llama compare when MemAvailable or SwapFree is suspicious.",
         "If stale pdocker llama work is present, stop only pdocker-owned work from the app UI or Engine; do not force-stop user apps from automation.",
-        "If SwapFree remains low after pdocker-owned work is stopped, wait for Android reclaim or reboot the test device before rerunning compare.",
+        "Low SwapFree on Android zram is advisory by default; wait or reboot only when MemAvailable/PSI/LMK evidence also indicates unsafe pressure, or when a strict swap gate was explicitly configured.",
     ],
 }
 encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"

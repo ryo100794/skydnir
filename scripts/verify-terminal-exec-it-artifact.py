@@ -91,6 +91,10 @@ def _hex(event: dict[str, Any]) -> str:
     return value.lower().strip() if isinstance(value, str) else ""
 
 
+def _hex_tokens(event: dict[str, Any]) -> list[str]:
+    return [token for token in _hex(event).split() if token]
+
+
 def _text(event: dict[str, Any]) -> str:
     value = event.get("text", "")
     return value if isinstance(value, str) else ""
@@ -223,6 +227,52 @@ def _verify_jsonl(events: list[dict[str, Any]], container: str) -> None:
              "Engine exec resize proof must be a resize route, not stream-started alone")
     _require("sleep 15c" not in joined_text, "Engine exec input diagnostics show literal c appended to sleep")
     _require(HEX_CTRL_C in joined_hex, "Engine exec input diagnostics missing raw Ctrl-C byte")
+
+    initial_script_index = next((i for i, event in enumerate(input_events) if "p=pdocker-ui-it" in _text(event)), -1)
+    ime_command_index = next((i for i, event in enumerate(input_events) if "ime-enter-ok" in _text(event)), -1)
+    sleep_index = next((i for i, event in enumerate(input_events) if "sleep 15" in _text(event)), -1)
+    recovery_index = next((i for i, event in enumerate(input_events) if "ctrlc-ok" in _text(event)), -1)
+    top_index = next((i for i, event in enumerate(input_events) if _text(event) == "top\r"), -1)
+    q_index = next((i for i, event in enumerate(input_events) if _hex_tokens(event) == [HEX_Q]), -1)
+    arrow_index = next((i for i, event in enumerate(input_events) if HEX_ARROW_UP_ENTER in _hex(event)), -1)
+    ctrl_indexes = [i for i, event in enumerate(input_events) if HEX_CTRL_C in _hex_tokens(event)]
+
+    _require(ime_command_index >= 0, "Engine exec input diagnostics missing IME command event")
+    _require(ime_command_index + 1 < len(input_events), "Engine exec input diagnostics missing IME Enter byte after command")
+    _require(
+        _hex_tokens(input_events[ime_command_index + 1]) == ["0d"],
+        "Engine exec IME command must be followed by exactly one Enter byte (0d)",
+    )
+    _require(
+        ime_command_index + 2 >= len(input_events) or _hex_tokens(input_events[ime_command_index + 2]) != ["0d"],
+        "Engine exec IME command submitted twice; duplicate Enter byte observed",
+    )
+    _require(
+        initial_script_index >= 0 and arrow_index > initial_script_index,
+        "Engine exec ArrowUp history proof must occur after the seed shell script",
+    )
+    _require(
+        top_index >= 0 and q_index > top_index,
+        "Engine exec q byte must be sent after foreground top starts",
+    )
+    _require(
+        sleep_index >= 0 and recovery_index > sleep_index,
+        "Engine exec Ctrl-C recovery command must occur after sleep command",
+    )
+    _require(ctrl_indexes, "Engine exec input diagnostics missing isolated Ctrl-C event")
+    _require(
+        any(sleep_index < index < recovery_index and _hex_tokens(input_events[index]) == [HEX_CTRL_C] for index in ctrl_indexes),
+        "Engine exec Ctrl-C byte must be isolated between sleep and recovery",
+    )
+    bad_ctrl_literal = [
+        index
+        for index, event in enumerate(input_events[sleep_index + 1 : recovery_index], sleep_index + 1)
+        if "63" in _hex_tokens(event) or _hex_tokens(event) == [HEX_CTRL_C, "63"]
+    ]
+    _require(
+        not bad_ctrl_literal,
+        "Engine exec Ctrl-C interval contains literal c byte before recovery",
+    )
 
 
 def verify(artifact_path: Path, input_jsonl_path: Path, require_container: bool = False) -> None:

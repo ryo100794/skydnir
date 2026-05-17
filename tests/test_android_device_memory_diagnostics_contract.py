@@ -34,6 +34,7 @@ class AndroidDeviceMemoryDiagnosticsContractTest(unittest.TestCase):
         self.assertIn('"no_pdockerd_start": True', self.source)
         self.assertIn('"no_container_start": True', self.source)
         self.assertIn('"no_force_stop_user_apps": True', self.source)
+        self.assertIn("Low SwapFree on Android zram is advisory by default", self.source)
         forbidden = [
             "am force-stop",
             "SMOKE_START",
