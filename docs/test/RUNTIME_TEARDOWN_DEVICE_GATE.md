@@ -64,8 +64,8 @@ evidence agrees on the **same Engine container ID**.
 The Android smoke now also writes a conservative, non-promoting
 `VerifierReduction` object for each proof. It records the reducer-visible
 status of `EngineInspectSameContainerId`, `ProcessTreeClear`,
-`DirectChildAbsence`, `ListenerAbsence`, `StalePidAbsence`,
-`StaleNameAbsence`, `GpuMediaExecutorResidueAbsence`,
+`EngineContainersAfterIdAbsent`, `DirectChildAbsence`, `ListenerAbsence`,
+`StalePidAbsence`, `StaleNameAbsence`, `GpuMediaExecutorResidueAbsence`,
 `PersistedStateCleared`, `LifecycleLogsBound`, and `ContainerLogsBound`, plus
 `MismatchedContainerIds` and `Survivors`. Companion reduction artifacts
 (`*-gap-reasons.txt`, `*-fail-reasons.txt`,
@@ -157,11 +157,11 @@ PID, GPU/media executor residue, Engine inspect, logs, and persisted state. The
 host-side reducer now reads the top-level artifact plus the referenced
 `same-container-id-*.json` and negative-case JSON files and rejects missing or
 fake proof. The device smoke performs the first reduction pass for exact
-container IDs, create/inspect binding, direct-child evidence, stale PID
-evidence, and lifecycle/log artifact presence while keeping listener,
-stale-name, GPU/media executor, and persisted-state checks non-promoting until
-they can be bound to the exact Engine container ID. The remaining device work
-is to complete those reductions and promote only when stop-rm and kill-rm both
-show no surviving process tree, no surviving listener, no stale PID reference,
-no GPU/media executor residue, and no stale state/log confusion for that exact
-Engine container ID.
+container IDs, create/inspect binding, `/containers/json` after-rm absence,
+stale-name absence, direct-child evidence, stale PID evidence, and
+lifecycle/log artifact presence while keeping listener, GPU/media executor, and
+persisted-state checks non-promoting until they can be bound to the exact Engine
+container ID. The remaining device work is to complete those reductions and
+promote only when stop-rm and kill-rm both show no surviving process tree, no
+surviving listener, no stale PID reference, no GPU/media executor residue, and
+no stale state/log confusion for that exact Engine container ID.

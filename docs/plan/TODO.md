@@ -39,9 +39,10 @@ issues, and deciding which planned gaps become hard gates.
    `scripts/verify-runtime-teardown-artifact.py`, and emits conservative
    device-side `VerifierReduction`, `GapReasons`, `FailReasons`,
    `MismatchedContainerIds`, and `Survivors` diagnostics for both stop-rm and
-   kill-rm. Remaining slice: reduce listener ownership, stale-name,
-   GPU/media-executor residue, and persisted-state teardown fields to exact
-   same-container-ID proof before allowing promotion.
+   kill-rm. It now also reduces `/containers/json` after-rm absence and
+   stale-name absence into the same-container proof. Remaining slice: reduce
+   listener ownership, GPU/media-executor residue, and persisted-state teardown
+   fields to exact same-container-ID proof before allowing promotion.
 3. **[#4](https://github.com/ryo100794/pdocker-android/issues/4)
    llama GPU Q6_K and environment propagation** `[P0 doing]`: continue the
    Q6_K blocker without touching llama.cpp, Dockerfiles, models, or prompts.

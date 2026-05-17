@@ -134,6 +134,29 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
         ]:
             self.assertIn(required, self.body)
 
+    def test_runtime_teardown_reduces_stale_name_after_container_list_snapshot(self):
+        ordered = [
+            "http_get engine-containers-after '/containers/json?all=1'",
+            "write_name_residue_evidence stop-stale-name-after-rm",
+            "write_name_residue_evidence kill-stale-name-after-rm",
+            "write_same_id_evidence same-container-id-stop-rm",
+            "write_same_id_evidence same-container-id-kill-rm",
+        ]
+        positions = [self.body.index(token) for token in ordered]
+        self.assertEqual(positions, sorted(positions))
+        for required in [
+            "engine-containers-after.http",
+            '"EngineContainersAfterIdAbsent"',
+            "artifact_contains \"$cid\" \"$containers_after\"",
+            "stop-stale-name-after-rm.json",
+            "kill-stale-name-after-rm.json",
+            '"Kind": "runtime-teardown-stale-name-proof"',
+            '"NameStillPresentAfterRemove"',
+            '"StaleNameAbsence"',
+            '"StaleName"',
+        ]:
+            self.assertIn(required, self.body)
+
     def test_runtime_teardown_collects_listener_and_executor_absence_evidence(self):
         for required in [
             "/proc/net/tcp",
