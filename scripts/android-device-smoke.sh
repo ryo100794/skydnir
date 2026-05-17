@@ -27,7 +27,7 @@ GPU_BENCH=0
 SERVICE_TRUTH_TARGET=""
 RUNTIME_TEARDOWN_TARGET=""
 DOCKER_CP_E2E_TARGET=""
-SMOKE_ARTIFACT_DIR_RESOLVED=""
+SMOKE_ARTIFACT_DIR_RESOLVED="${PDOCKER_SMOKE_ARTIFACT_DIR:-$ROOT/tmp/device-smoke-artifacts/$(date -u +%Y%m%dT%H%M%SZ)}"
 
 usage() {
   cat <<EOF
@@ -1390,13 +1390,6 @@ printf '%s\n' \"\$exec_out\" | grep -q 'pdocker-it-ok'
 }
 
 smoke_artifact_dir() {
-  if [[ -z "$SMOKE_ARTIFACT_DIR_RESOLVED" ]]; then
-    if [[ -n "${PDOCKER_SMOKE_ARTIFACT_DIR:-}" ]]; then
-      SMOKE_ARTIFACT_DIR_RESOLVED="$PDOCKER_SMOKE_ARTIFACT_DIR"
-    else
-      SMOKE_ARTIFACT_DIR_RESOLVED="$ROOT/tmp/device-smoke-artifacts/$(date -u +%Y%m%dT%H%M%SZ)"
-    fi
-  fi
   printf '%s' "$SMOKE_ARTIFACT_DIR_RESOLVED"
 }
 
