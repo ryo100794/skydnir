@@ -42,6 +42,8 @@ RUNTIME_MIN_SWAP_FREE_MB="${PDOCKER_LLAMA_RUNTIME_MIN_SWAP_FREE_MB:-0}"
 RUNTIME_SWAP_ADVISORY_MB="${PDOCKER_LLAMA_RUNTIME_SWAP_ADVISORY_MB:-512}"
 STOP_ON_FAILURE="${PDOCKER_LLAMA_STOP_ON_FAILURE:-1}"
 ENGINE_START_TIMEOUT_SEC="${PDOCKER_LLAMA_ENGINE_START_TIMEOUT_SEC:-15}"
+RUN_AS_TIMEOUT_SEC="${PDOCKER_LLAMA_RUN_AS_TIMEOUT_SEC:-30}"
+RUN_AS_CLEANUP_TIMEOUT_SEC="${PDOCKER_LLAMA_RUN_AS_CLEANUP_TIMEOUT_SEC:-5}"
 OPERATION_NOTIFY_TIMEOUT_SEC="${PDOCKER_LLAMA_OPERATION_NOTIFY_TIMEOUT_SEC:-3}"
 WAIT_SERVER_PROGRESS_INTERVAL_SEC="${PDOCKER_LLAMA_WAIT_SERVER_PROGRESS_INTERVAL_SEC:-10}"
 WAIT_SERVER_CURL_TIMEOUT_SEC="${PDOCKER_LLAMA_WAIT_SERVER_CURL_TIMEOUT_SEC:-2}"
@@ -180,11 +182,24 @@ run_as() {
   # the app cwd and then keeps that cwd for the script body.
   local host_script="$TMP/run-as-$$-$RANDOM.sh"
   local device_script="files/.pdocker-run-as-$$-$RANDOM.sh"
+  local device_tmp="/data/local/tmp/$(basename "$host_script")"
+  local run_timeout="${RUN_AS_TIMEOUT_SEC:-30}"
+  local cleanup_timeout="${RUN_AS_CLEANUP_TIMEOUT_SEC:-5}"
+  local rc=0
   printf '%s\n' "$1" > "$host_script"
-  "$ADB" push "$host_script" "/data/local/tmp/$(basename "$host_script")" >/dev/null
-  "$ADB" shell "run-as $PKG cp /data/local/tmp/$(basename "$host_script") $device_script && run-as $PKG sh $device_script"
-  local rc="$?"
-  "$ADB" shell "rm -f /data/local/tmp/$(basename "$host_script"); run-as $PKG rm -f $device_script" >/dev/null 2>&1 || true
+  if command -v timeout >/dev/null 2>&1 && [[ "$run_timeout" =~ ^[0-9]+$ ]] && (( run_timeout > 0 )); then
+    timeout "${run_timeout}s" "$ADB" push "$host_script" "$device_tmp" >/dev/null || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+      timeout "${run_timeout}s" "$ADB" shell "run-as $PKG cp $device_tmp $device_script && run-as $PKG sh $device_script" || rc=$?
+    fi
+    timeout "${cleanup_timeout}s" "$ADB" shell "rm -f $device_tmp; run-as $PKG rm -f $device_script" >/dev/null 2>&1 || true
+  else
+    "$ADB" push "$host_script" "$device_tmp" >/dev/null || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+      "$ADB" shell "run-as $PKG cp $device_tmp $device_script && run-as $PKG sh $device_script" || rc=$?
+    fi
+    "$ADB" shell "rm -f $device_tmp; run-as $PKG rm -f $device_script" >/dev/null 2>&1 || true
+  fi
   return "$rc"
 }
 
@@ -906,13 +921,7 @@ engine_body() {
 engine_request_with_host_timeout() {
   local timeout_sec="$1"
   shift
-  if command -v timeout >/dev/null 2>&1; then
-    export ADB PKG TMP
-    export -f remote_quote run_as engine_request
-    timeout "${timeout_sec}s" bash -c 'engine_request "$@"' _ "$@"
-  else
-    engine_request "$@"
-  fi
+  RUN_AS_TIMEOUT_SEC="$timeout_sec" engine_request "$@"
 }
 
 parse_engine_id() {
@@ -1159,7 +1168,7 @@ start_container_mode() {
   if ! create_body="$(engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload" | http_body)"; then
     echo "[pdocker llama compare] $mode: create request did not return within ${ENGINE_START_TIMEOUT_SEC}s; probing named container" >&2
     operation_notify "running" "$mode: container create timed out; probing named container"
-    create_body="$(engine_body GET "/containers/$(urlencode "$CONTAINER")/json" || true)"
+    create_body="$(engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" GET "/containers/$(urlencode "$CONTAINER")/json" | http_body || true)"
     if [[ -z "$create_body" ]]; then
       echo "[pdocker llama compare] $mode: create timeout left no inspectable named container" >&2
       return 124
