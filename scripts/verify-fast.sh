@@ -51,6 +51,7 @@ run python3 -m py_compile \
   scripts/verify-ui-actions.py \
   scripts/verify-terminal-exec-it-artifact.py \
   scripts/verify_terminal_editor_contracts.py \
+  scripts/summarize-llama-gpu-artifacts.py \
   scripts/update-showcase.py \
   docker-proot-setup/scripts/verify_runtime_contract.py
 
@@ -101,6 +102,7 @@ run python3 -m unittest \
   tests.test_android_storage_metrics_sequence \
   tests.test_saf_direct_output_contract \
   tests.storage_metrics.test_verify_storage_metrics \
+  tests.test_llama_gpu_artifact_sweep \
   tests.test_ci_gate_ledger \
   tests.test_test_driver
 run bash scripts/smoke-vulkan-llama-init.sh
