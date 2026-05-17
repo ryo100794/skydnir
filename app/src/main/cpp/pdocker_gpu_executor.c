@@ -60,6 +60,18 @@
 #define PDOCKER_GPU_WRITEBACK_FULL_HASH_DEFAULT_MAX_BYTES (64u * 1024u * 1024u)
 #define PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_SENTINEL 0xA5u
 
+#define PDOCKER_VK_FEATURE_SHADER_INT64                 (1ull << 0)
+#define PDOCKER_VK_FEATURE_SHADER_INT16                 (1ull << 1)
+#define PDOCKER_VK_FEATURE_SHADER_FLOAT64               (1ull << 2)
+#define PDOCKER_VK_FEATURE_STORAGE_BUFFER_16            (1ull << 3)
+#define PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16    (1ull << 4)
+#define PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16     (1ull << 5)
+#define PDOCKER_VK_FEATURE_STORAGE_BUFFER_8             (1ull << 6)
+#define PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_8     (1ull << 7)
+#define PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8      (1ull << 8)
+#define PDOCKER_VK_FEATURE_SHADER_FLOAT16               (1ull << 9)
+#define PDOCKER_VK_FEATURE_SHADER_INT8                  (1ull << 10)
+
 #ifndef GL_COMPUTE_SHADER
 #define GL_COMPUTE_SHADER 0x91B9
 #endif
@@ -995,7 +1007,13 @@ typedef struct {
     int requires_int8;
     int requires_int64;
     int requires_storage16;
+    int requires_storage16_buffer;
+    int requires_storage16_uniform;
+    int requires_storage16_push_constant;
     int requires_storage8;
+    int requires_storage8_buffer;
+    int requires_storage8_uniform;
+    int requires_storage8_push_constant;
     int requires_subgroup_arithmetic;
     uint64_t hash;
     int valid;
@@ -1072,8 +1090,12 @@ static SpirvTraceSummary summarize_spirv(const uint32_t *code, size_t bytes) {
             else if (cap == 11 || cap == 12) s.requires_int64 = 1;
             else if (cap == 22) s.requires_int16 = 1;
             else if (cap == 39) s.requires_int8 = 1;
-            else if (cap == 4433 || cap == 4434 || cap == 4435) s.requires_storage16 = 1;
-            else if (cap == 4448 || cap == 4449 || cap == 4450) s.requires_storage8 = 1;
+            else if (cap == 4433) s.requires_storage16 = s.requires_storage16_buffer = 1;
+            else if (cap == 4434) s.requires_storage16 = s.requires_storage16_uniform = 1;
+            else if (cap == 4435) s.requires_storage16 = s.requires_storage16_push_constant = 1;
+            else if (cap == 4448) s.requires_storage8 = s.requires_storage8_buffer = 1;
+            else if (cap == 4449) s.requires_storage8 = s.requires_storage8_uniform = 1;
+            else if (cap == 4450) s.requires_storage8 = s.requires_storage8_push_constant = 1;
             else if (cap == 63) s.requires_subgroup_arithmetic = 1;
         } else if (op == 16 && word_count >= 6 && code[i + 2] == 17) {
             s.local_size[0] = code[i + 3];
@@ -1237,7 +1259,47 @@ static int spirv_feature_missing(const SpirvTraceSummary *summary, const VulkanR
     return 0;
 }
 
-static void write_spirv_feature_report(FILE *out, const SpirvTraceSummary *summary, const VulkanRuntime *rt) {
+static uint64_t spirv_required_feature_mask(const SpirvTraceSummary *summary) {
+    uint64_t mask = 0;
+    if (!summary) return mask;
+    if (summary->requires_int64) mask |= PDOCKER_VK_FEATURE_SHADER_INT64;
+    if (summary->requires_storage16_buffer) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
+    if (summary->requires_storage16_uniform) mask |= PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16;
+    if (summary->requires_storage16_push_constant) mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16;
+    if (summary->requires_storage8_buffer) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_8;
+    if (summary->requires_storage8_uniform) mask |= PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_8;
+    if (summary->requires_storage8_push_constant) mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8;
+    if (summary->requires_float16) mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT16;
+    if (summary->requires_int8) mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
+    return mask;
+}
+
+static void write_feature_mask_names(FILE *out, uint64_t mask) {
+    if (!out) return;
+    int first = 1;
+#define WRITE_FEATURE_NAME(bit, name) do { \
+        if (mask & (bit)) { \
+            fprintf(out, "%s\"%s\"", first ? "" : ",", name); \
+            first = 0; \
+        } \
+    } while (0)
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_SHADER_INT64, "shaderInt64");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_STORAGE_BUFFER_16, "storageBuffer16BitAccess");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16, "uniformAndStorageBuffer16BitAccess");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16, "storagePushConstant16");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_STORAGE_BUFFER_8, "storageBuffer8BitAccess");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_8, "uniformAndStorageBuffer8BitAccess");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8, "storagePushConstant8");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_SHADER_FLOAT16, "shaderFloat16");
+    WRITE_FEATURE_NAME(PDOCKER_VK_FEATURE_SHADER_INT8, "shaderInt8");
+#undef WRITE_FEATURE_NAME
+}
+
+static void write_spirv_feature_report(
+        FILE *out,
+        const SpirvTraceSummary *summary,
+        const VulkanRuntime *rt,
+        const VulkanDispatchOptions *options) {
     if (!out || !summary) return;
     const int missing_float16 = summary->requires_float16 && (!rt || !rt->physical_float16_int8.shaderFloat16);
     const int missing_int64 = summary->requires_int64 && (!rt || !rt->physical_features.shaderInt64);
@@ -1246,12 +1308,17 @@ static void write_spirv_feature_report(FILE *out, const SpirvTraceSummary *summa
     const int missing_int8 = summary->requires_int8 && (!rt || !rt->physical_float16_int8.shaderInt8);
     const int missing_subgroup_arithmetic = summary->requires_subgroup_arithmetic &&
         (!rt || (rt->subgroup_properties.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) == 0);
+    const uint64_t required_mask = spirv_required_feature_mask(summary);
+    const uint64_t requested_mask = options ? options->requested_feature_mask : 0;
+    const int requested_mask_present = options && options->has_requested_feature_mask;
+    const uint64_t requested_missing_mask = requested_mask_present ? (required_mask & ~requested_mask) : 0;
     fprintf(out,
             "\"spirv_feature_requirements\":{"
             "\"float16\":%s,\"int16\":%s,\"int8\":%s,\"int64\":%s,"
             "\"storage16\":%s,\"storage8\":%s,\"subgroup_arithmetic\":%s},"
-            "\"spirv_feature_mismatch\":%s,"
-            "\"spirv_feature_mismatches\":[",
+            "\"spirv_required_feature_mask\":\"0x%016llx\","
+            "\"spirv_requested_feature_missing_mask\":\"0x%016llx\","
+            "\"spirv_requested_feature_mismatches\":[",
             summary->requires_float16 ? "true" : "false",
             summary->requires_int16 ? "true" : "false",
             summary->requires_int8 ? "true" : "false",
@@ -1259,6 +1326,13 @@ static void write_spirv_feature_report(FILE *out, const SpirvTraceSummary *summa
             summary->requires_storage16 ? "true" : "false",
             summary->requires_storage8 ? "true" : "false",
             summary->requires_subgroup_arithmetic ? "true" : "false",
+            (unsigned long long)required_mask,
+            (unsigned long long)requested_missing_mask);
+    write_feature_mask_names(out, requested_missing_mask);
+    fprintf(out,
+            "],"
+            "\"spirv_feature_mismatch\":%s,"
+            "\"spirv_feature_mismatches\":[",
             spirv_feature_missing(summary, rt) ? "true" : "false");
     int first = 1;
 #define WRITE_MISMATCH(name, cond) do { \
@@ -7512,6 +7586,17 @@ static int run_vulkan_dispatch_fd(
         strict_passthrough);
     spirv_summary = summarize_spirv(shader_code, shader_size);
     have_spirv_summary = 1;
+    if (strict_passthrough && options && options->has_requested_feature_mask) {
+        const uint64_t required_feature_mask = spirv_required_feature_mask(&spirv_summary);
+        const uint64_t missing_requested_features =
+            required_feature_mask & ~options->requested_feature_mask;
+        if (missing_requested_features) {
+            fail_stage = "spirv-feature-not-requested";
+            rc = VK_ERROR_FEATURE_NOT_PRESENT;
+            ret = 76;
+            goto cleanup;
+        }
+    }
     if (strict_passthrough &&
         !spirv_local_size_consistent(&spirv_summary,
                                      specializations,
@@ -8758,7 +8843,7 @@ static int run_vulkan_dispatch_fd(
                                             binding_alias_rep,
                                             &cpu_oracle_report);
         fprintf(json_out(), ",");
-        write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);
+        write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt, options);
         fprintf(json_out(), ",");
         write_spirv_execution_report(json_out(),
                                      &spirv_summary,
@@ -8913,7 +8998,7 @@ static int run_vulkan_dispatch_fd(
     }
     if (profile_response) {
         fprintf(json_out(), ",");
-        write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);
+        write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt, options);
         fprintf(json_out(), ",");
         write_spirv_execution_report(json_out(),
                                      &spirv_summary,
@@ -9134,7 +9219,7 @@ cleanup:
                                     buffer_fds,
                                     &cpu_oracle_report);
         fprintf(json_out(), ",");
-        write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);
+        write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt, options);
         fprintf(json_out(), ",");
         write_vulkan_limits_report(json_out(), rt);
         if (cpu_oracle_requested || oracle_fail_closed) {

@@ -324,12 +324,13 @@ static VkBool32 advertised_storage16(void) {
 static VkBool32 advertised_storage8(void) {
     /*
      * ggml Vulkan can emit int8/8-bit-storage kernels for quantized weights.
-     * The APK-side Android executor currently rejects at least one real
-     * llama.cpp 8-bit SPIR-V pipeline on this device, so keep the glibc-facing
-     * bridge conservative by default. Advanced tuning runs can opt back in.
+     * Android devices that report both storageBuffer8BitAccess and shaderInt8
+     * need the container-visible ICD to advertise both bits together; otherwise
+     * llama.cpp can still hand the bridge an Int8/Storage8 SPIR-V module while
+     * the executor device was created without those requested features.
      */
     if (env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) return VK_FALSE;
-    return env_truthy_default("PDOCKER_VULKAN_ENABLE_8BIT_STORAGE", false) ? VK_TRUE : VK_FALSE;
+    return env_truthy_default("PDOCKER_VULKAN_ENABLE_8BIT_STORAGE", true) ? VK_TRUE : VK_FALSE;
 }
 
 static VkDeviceSize pdocker_vulkan_heap_size(void) {
@@ -1528,8 +1529,8 @@ static void fill_pnext_features(void *pNext) {
                 VkPhysicalDeviceVulkan11Features *p = (VkPhysicalDeviceVulkan11Features *)cur;
                 VkBool32 storage16 = advertised_storage16();
                 p->storageBuffer16BitAccess = storage16;
-                p->uniformAndStorageBuffer16BitAccess = storage16;
-                p->storagePushConstant16 = storage16;
+                p->uniformAndStorageBuffer16BitAccess = VK_FALSE;
+                p->storagePushConstant16 = VK_FALSE;
                 p->storageInputOutput16 = VK_FALSE;
                 break;
             }
@@ -1537,8 +1538,8 @@ static void fill_pnext_features(void *pNext) {
                 VkPhysicalDevice16BitStorageFeatures *p = (VkPhysicalDevice16BitStorageFeatures *)cur;
                 VkBool32 storage16 = advertised_storage16();
                 p->storageBuffer16BitAccess = storage16;
-                p->uniformAndStorageBuffer16BitAccess = storage16;
-                p->storagePushConstant16 = storage16;
+                p->uniformAndStorageBuffer16BitAccess = VK_FALSE;
+                p->storagePushConstant16 = VK_FALSE;
                 p->storageInputOutput16 = VK_FALSE;
                 break;
             }

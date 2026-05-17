@@ -115,7 +115,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("write_f32_sample_array_at_indices", source)
         self.assertIn("write_f32_fd_sample_array_at_indices", source)
         self.assertIn('\\"compact_summary\\":true', source)
-        self.assertIn("write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt);", source)
+        self.assertIn("write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt, options);", source)
         self.assertIn("write_spirv_execution_report(json_out(),", source)
         self.assertIn('\\"spirv_local_size_resolved\\":[', source)
         self.assertIn('\\"specialization_entries\\":[', source)
@@ -204,6 +204,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"strict_passthrough\\":%s', source)
         self.assertIn('\\"requested_feature_mask\\":\\"0x%016llx\\"', source)
         self.assertIn("requested_feature_mask=", source)
+        self.assertIn("spirv_required_feature_mask", source)
+        self.assertIn("spirv_requested_feature_missing_mask", source)
+        self.assertIn("spirv-feature-not-requested", source)
         self.assertIn("#define PDOCKER_GPU_PIPELINE_CACHE_SLOTS 256", source)
         self.assertIn("last_used = g_vulkan_pipeline_cache_clock++", source)
         self.assertIn('\\"pipeline_key\\":{\\"spirv_hash\\":\\"0x%016llx\\"', source)
@@ -224,6 +227,22 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("has_descriptor_set[code[i + 1]] = 1;", source)
         self.assertIn("!has_descriptor_set[code[i + 1]] || descriptor_sets[code[i + 1]] != 0", source)
         self.assertIn("rewrite_duplicate_descriptor_bindings(\n                shader_code,\n                shader_size,\n                bindings,\n                binding_count,", source)
+        self.assertIn("strict_passthrough ? 0 :\n        options && options->has_rewrite_duplicate_descriptors", source)
+
+    def test_vulkan_feature_contract_matches_android_subset(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        self.assertIn('env_truthy_default("PDOCKER_VULKAN_ENABLE_8BIT_STORAGE", true)', icd)
+        self.assertIn("p->uniformAndStorageBuffer16BitAccess = VK_FALSE;", icd)
+        self.assertIn("p->storagePushConstant16 = VK_FALSE;", icd)
+        self.assertIn("p->shaderInt8 = storage8;", icd)
+        self.assertIn("spirv_required_feature_mask", executor)
+        self.assertIn("PDOCKER_VK_FEATURE_STORAGE_BUFFER_8", executor)
+        self.assertIn("PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_8", executor)
+        self.assertIn("PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8", executor)
+        self.assertIn("PDOCKER_VK_FEATURE_SHADER_INT8", executor)
+        self.assertIn("requires_storage16_uniform", executor)
+        self.assertIn("requires_storage8_push_constant", executor)
 
     def test_fused_rms_rope_hashes_do_not_use_plain_rms_oracle(self):
         source = GPU_EXECUTOR.read_text()
@@ -1052,6 +1071,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "startup_diagnostics",
             "container_config_env",
             "container_archive_file",
+            "except (EOFError, OSError, tarfile.TarError)",
             "container_env_snapshot",
             "llama_completion_timeout",
         ]:
@@ -1106,6 +1126,31 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertFalse(report["correctness_claim_allowed"])
         self.assertFalse(report["benchmark_claim_allowed"])
         self.assertIn("LLAMA_GPU_BACKEND", report["runtime_env"])
+
+    def test_llama_gpu_artifact_verifier_prefers_pre_http_gpu_blocker(self):
+        verifier = load_llama_gpu_artifact_verifier()
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "served": False,
+                "diagnostics": {
+                    "blocker_class": "vulkan_pipeline_feature",
+                    "blocker_detail": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
+                    "runtime_freshness": {
+                        "summary": "pass",
+                        "expected_executor_marker": "gpu-executor-workgroup3d-20260513",
+                        "observed_executor_markers": ["gpu-executor-workgroup3d-20260513"],
+                    },
+                    "config_propagation": {"summary": "pass", "checks": []},
+                },
+            },
+        }
+        report = verifier.classify(payload)
+        self.assertEqual("vulkan-pipeline-feature", report["classification"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertEqual("vulkan_pipeline_feature", report["gpu_blocker_class"])
+        self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", report["gpu_blocker_detail"])
 
     def test_llama_gpu_dispatch_lifecycle_logs_are_recorded(self):
         compare = LLAMA_COMPARE.read_text()

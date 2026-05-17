@@ -898,6 +898,42 @@ def _service_completion_timeout(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+PRE_HTTP_GPU_BLOCKER_CLASSIFICATIONS = {
+    "vulkan_pipeline_feature": "vulkan-pipeline-feature",
+    "vulkan_queue_submit_feature": "vulkan-queue-submit-feature",
+    "vulkan_generic_spirv_dispatch": "vulkan-generic-spirv-dispatch",
+    "vulkan_buffer_allocation": "vulkan-buffer-allocation",
+    "vulkan_buffer_range_accounting": "vulkan-buffer-range-accounting",
+    "vulkan_device_discovery": "vulkan-device-discovery",
+    "runtime_memory_pressure": "runtime-memory-pressure",
+}
+
+
+def _pre_http_gpu_blocker(data: dict[str, Any], diagnostics: dict[str, Any]) -> dict[str, Any]:
+    """Classify structured GPU setup blockers before requiring HTTP probes.
+
+    When the forced Vulkan container exits before the llama server opens HTTP,
+    /completion prompt evidence is necessarily absent.  The artifact should
+    report the earlier structured GPU blocker instead of a misleading
+    api-prompt-sanity-missing classification.
+    """
+
+    if data.get("schema") != "pdocker.llama.gpu.compare.v1":
+        return {}
+    if nested(data, "gpu", "served") is True:
+        return {}
+    blocker_class = str(diagnostics.get("blocker_class") or "")
+    classification = PRE_HTTP_GPU_BLOCKER_CLASSIFICATIONS.get(blocker_class)
+    if not classification:
+        return {}
+    return {
+        "classification": classification,
+        "gpu_blocker_class": blocker_class,
+        "gpu_blocker_detail": diagnostics.get("blocker_detail") or data.get("next_blocker") or "",
+        "next_action": data.get("next_action") or data.get("next_blocker") or "fix the structured GPU setup blocker and rerun",
+    }
+
+
 def _claim_base(
     classification: str,
     *,
@@ -965,6 +1001,18 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     correctness = correctness_summary.get("correctness", "not-run")
     comparison = data.get("comparison") or {}
     runtime_freshness = _runtime_freshness(data)
+
+    pre_http_gpu_blocker = _pre_http_gpu_blocker(data, diagnostics)
+    if pre_http_gpu_blocker:
+        return _claim_base(
+            pre_http_gpu_blocker["classification"],
+            next_action=str(pre_http_gpu_blocker["next_action"]),
+            runtime_freshness=runtime_freshness,
+        ) | {
+            "gpu_blocker_class": pre_http_gpu_blocker["gpu_blocker_class"],
+            "gpu_blocker_detail": pre_http_gpu_blocker["gpu_blocker_detail"],
+            "config_propagation": _config_propagation(data),
+        }
 
     completion_readiness = _service_completion_timeout(data)
     if completion_readiness.get("timeout") is True:

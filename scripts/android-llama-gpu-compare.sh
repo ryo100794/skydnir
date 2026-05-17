@@ -1137,9 +1137,10 @@ container_archive_file() {
   ref="$(container_ref)"
   tmp_tar="$out.tar"
   rm -f "$out" "$tmp_tar"
-  if engine_request GET "/containers/$(urlencode "$ref")/archive?path=$(urlencode "$ctr_path")" > "$tmp_tar"; then
+  if engine_body GET "/containers/$(urlencode "$ref")/archive?path=$(urlencode "$ctr_path")" > "$tmp_tar"; then
     python3 - "$tmp_tar" "$out" <<'PY' || true
 import io
+import os
 import tarfile
 import sys
 from pathlib import Path
@@ -1147,16 +1148,25 @@ from pathlib import Path
 raw_path = Path(sys.argv[1])
 out_path = Path(sys.argv[2])
 raw = raw_path.read_bytes()
-if b"\r\n\r\n" in raw[:4096]:
-    raw = raw.split(b"\r\n\r\n", 1)[1]
-with tarfile.open(fileobj=io.BytesIO(raw), mode="r:*") as tar:
-    members = [m for m in tar.getmembers() if m.isfile()]
-    if not members:
-        raise SystemExit(1)
-    src = tar.extractfile(members[0])
-    if src is None:
-        raise SystemExit(1)
-    out_path.write_bytes(src.read())
+if not raw:
+    raise SystemExit(0)
+try:
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:*") as tar:
+        members = [m for m in tar.getmembers() if m.isfile()]
+        if not members:
+            raise SystemExit(0)
+        src = tar.extractfile(members[0])
+        if src is None:
+            raise SystemExit(0)
+        tmp_out = out_path.with_suffix(out_path.suffix + ".tmp")
+        tmp_out.write_bytes(src.read())
+        os.replace(tmp_out, out_path)
+except (EOFError, OSError, tarfile.TarError):
+    # The Engine may return a JSON error body when the file was never created
+    # (for example when llama exits before startup diagnostics are written).
+    # Keep artifact collection best-effort and do not pollute device logs with
+    # Python tracebacks that hide the real GPU blocker.
+    raise SystemExit(0)
 PY
   fi
   rm -f "$tmp_tar"

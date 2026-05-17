@@ -1,18 +1,22 @@
 {
   "schema": "pdocker.llama.gpu.compare.v1",
-  "timestamp_utc": "2026-05-05T05:58:02Z",
+  "timestamp_utc": "2026-05-17T10:32:55Z",
   "policy": {
     "llama_cpp_modified": false,
     "gpu_entry": "standard Vulkan loader through pdocker-vulkan-icd.so",
     "target_speedup": 10.0
   },
   "settings": {
-    "gpu_layers": 1,
+    "gpu_layers": 2,
     "gpu_ctx": 512,
     "predict": 4,
     "repeat": 1,
+    "warmup_discard": 0,
+    "gpu_summary_scope": "all_runs",
     "trace_alloc": false,
-    "cpu_reused": true
+    "cpu_reused": true,
+    "model_path": "/models/model.gguf",
+    "model_url_set": true
   },
   "cpu": {
     "tokens_per_second": 0.36100235915041706,
@@ -20,69 +24,196 @@
       "predicted_tokens_per_second_mean": 0.36100235915041706,
       "predicted_tokens_per_second_min": 0.36100235915041706,
       "predicted_tokens_per_second_max": 0.36100235915041706
-    }
+    },
+    "correctness": {}
   },
   "gpu": {
-    "tokens_per_second": 0.1577190108857267,
-    "summary": {
-      "predicted_tokens_per_second_mean": 0.1577190108857267,
-      "predicted_tokens_per_second_min": 0.1577190108857267,
-      "predicted_tokens_per_second_max": 0.1577190108857267,
-      "wall_seconds_mean": 33.738364362041466
+    "tokens_per_second": 0.0,
+    "summary": {},
+    "served": false,
+    "state_excerpt": "{\"Id\": \"489cf147358a95bfd5ab22bcdfa619f86d0af5a5fcb7930e49b8b9dec134f1f3\", \"Created\": \"2026-05-17T10:30:34.000000000Z\", \"Path\": \"/usr/local/bin/start-llama-server\", \"Args\": [], \"State\": {\"Status\": \"exited\", \"Running\": false, \"Paused\": false, \"Restarting\": false, \"OOMKilled\": false, \"Dead\": false, \"Pid\": 0, \"ExitCode\": 134, \"PdockerRawReturnCode\": 134, \"PdockerSignal\": 0, \"Error\": \"\", \"StartedAt\": \"2026-05-17T10:30:36.000000000Z\", \"FinishedAt\": \"2026-05-17T10:32:29.000000000Z\", \"Health\": {\"Status\": \"unhealthy\", \"FailingStreak\": 4, \"Log\": [{\"Start\": \"2026-05-17T10:30:38.000000000Z\", \"End\": \"2026-05-17T10:30:39.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-17T10:31:09.000000000Z\", \"End\": \"2026-05-17T10:31:09.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-17T10:31:39.000000000Z\", \"End\": \"2026-05-17T10:31:39.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-17T10:32:09.000000000Z\", \"End\": \"2026-05-17T10:32:10.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-17T10:32:45.000000000Z\", \"End\": \"2026-05-17T10:32:45.000000000Z\", \"ExitCode\": 1, \"Output\": \"container is not running\"}], \"PdockerStopped\": true}, \"PdockerKnownPids\": [], \"PdockerMemory\": {\"schema\": \"pdocker.container-memory-exit.v1\", \"Artifacts\": {\"RingPath\": \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/containers/489cf147358a95bfd5ab22bcdfa619f86d0af5a5fcb7930e49b8b9dec134f1f3/memory-ring.jsonl\", \"SummaryPath\": \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/containers/489cf147358a95bfd5ab22bcdfa619f86d0af5a5fcb7930e49b8b9dec134f1f3/",
+    "log_excerpt": "pre_barriers\":4,\"post_barriers\":4,\"upload_ms\":144.6494,\"dispatch_ms\":0.5279,\"download_ms\":0.0199,\"resident_cache\":{\"enabled\":false,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":false,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":4,\"read_bindings\":4,\"write_bindings\":4,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":0,\"skipped_download_bytes\":0},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"executor_build_marker\":\"gpu-executor-workgroup3d-20260513\",\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"strict_passthrough\":true,\"requested_feature_mask\":\"0x0000000000000038\",\"requested_feature_mask_present\":true,\"strict_object_graph\":{\"used\":true,\"memories\":2,\"buffers\":2,\"device_local_staging_requested\":false,\"device_local_staged_memories\":0,\"staging_upload_copies\":0,\"staging_upload_bytes\":0,\"staging_download_copies\":0,\"staging_download_bytes\":0},\"shader_bytes\":67176,\"entry\":\"main\",\"specializations\":2,\"bindings\":4,\"dispatch\":[1,1,1],\"backend_cached\":true,\"pipeline_cache\":{\"hit\":false,\"entries\":256},\"pipeline_key\":{\"spirv_hash\":\"0xf2f988b94bd3e0dc\",\"spec_hash\":\"0xcac92bf3085c8371\",\"layout_bindings\":4,\"descriptor_sets\":1,\"push_bytes\":128},\"skip_unused_descriptor_transfers\":false,\"spirv_descriptor_access\":false,\"disable_overlap_aliasing\":false,\"cpu_oracle_requested\":false,\"descriptor_aliases\":0,\"duplicate_descriptor_rewrite\":false,\"materialize_descriptor_aliases\":false,\"materialize_specialization\":false,\"disable_pipeline_optimization\":false,\"specialization_materialized\":false,\"q4k_targeted_specialization_materialized\":false,\"local_size_patched\":false,\"spirv_local_size\":[512,1,1],\"spirv_local_size_resolved\":[512,1,1],\"spirv_local_size_consistent\":true,\"q6k_safe_kernel\":false,\"q4k_safe_kernel\":false,\"pipeline_policy_hash\":\"0x47fe0c7eaf8e5030\",\"profile_response\":false,\"pre_barriers\":4,\"post_barriers\":4,\"upload_ms\":689.7033,\"dispatch_ms\":1.0412,\"download_ms\":0.0442,\"resident_cache\":{\"enabled\":false,\"resident_bindings\":0,\"hits\":0,\"bytes\":0},\"mutable_buffer_cache\":{\"enabled\":false,\"entries\":32,\"reused_bindings\":0,\"hits\":0,\"bytes\":0},\"descriptor_usage\":{\"active_bindings\":4,\"read_bindings\":4,\"write_bindings\":4,\"skipped_bindings\":0,\"skipped_bytes\":0,\"skipped_upload_bytes\":0,\"skipped_download_bytes\":0},\"valid\":true}\npdocker-vulkan-icd: generic dispatch response: {\"executor\":\"pdocker-gpu-executor\",\"api\":\"pdocker-gpu-command-v1\",\"abi_version\":\"0.1\",\"executor_build_marker\":\"gpu-executor-workgroup3d-20260513\",\"role\":\"gpu-command-executor\",\"llm_engine\":\"container\",\"device_independent\":true,\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\",\"valid\":false,\"stage\":\"vulkan-dispatch\",\"error\":\"create-generic-compute-pipeline\",\"vk_result\":-13,\"shader_bytes\":18844,\"entry\":\"main\",\"specializations\":3,\"bindings\":5,\"layout_bindings\":5,\"fail_binding_index\":-1,\"io_result\":0,\"dispatch\":[6144,1,1],\"push_bytes\":128,\"pipeline_key\":{\"spirv_hash\":\"0xee4e8d4acf23ec08\",\"spec_hash\":\"0x4256e6bd7dad2e74\",\"layout_bindings\":5,\"descriptor_sets\":1,\"push_bytes\":128},\"estimated_workgroup_bytes\":256,\"duplicate_descriptor_rewrite\":false,\"materialize_specialization\":false,\"specialization_materialized\":false,\"q4k_targeted_specialization_materialized\":false,\"q4k_safe_kernel\":false,\"oracle_fail_closed\":false,\"strict_passthrough\":true,\"requested_feature_mask\":\"0x0000000000000038\",\"requested_feature_mask_present\":true,\"spirv_hash\":\"0xee4e8d4acf23ec08\",\"spirv_valid\":true,\"spirv_truncated\":0,\"spirv_local_size\":[32,2,1],\"spirv_local_size_id\":[0,0,0],\"spirv_local_size_resolved\":[32,2,1],\"specialization_entries\":[{\"constant_id\":0,\"offset\":0,\"size\":4,\"value_u64\":32},{\"constant_id\":1,\"offset\":4,\"size\":4,\"value_u64\":2},{\"constant_id\":2,\"offset\":8,\"size\":4,\"value_u64\":1}],\"descriptor_aliases\":[],\"spirv_capabilities\":[1,39,4433,4448],\"binding_details\":[{\"index\":0,\"set\":0,\"binding\":0,\"offset\":0,\"size\":28311552,\"api_offset\":0,\"api_range\":28311552,\"api_buffer_size\":97910784,\"api_descriptor_type\":7,\"api_dynamic\":false,\"api_memory_offset\":0,\"api_memory_size\":97910784,\"api_memory_id\":\"0x000000557eaabdc0\",\"api_buffer_id\":\"0x000000557eaf0c00\",\"alias_rep\":0,\"active\":true,\"readable\":true,\"writable\":true,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":false,\"mutable_cache_hit\":false,\"upload_ms\":0.0000,\"download_ms\":0.0000,\"dirty_probe_pages\":0,\"dirty_probe_bytes\":0,\"dirty_probe_ms\":0.0000,\"dirty_writeback_cached\":false,\"dirty_writeback_bytes\":0,\"fd_before_hash\":\"0x0000000000000000\",\"gpu_after_upload_hash\":\"0x0000000000000000\",\"gpu_after_dispatch_hash\":\"0x0000000000000000\",\"fd_after_hash\":\"0x0000000000000000\",\"writeback_offset\":0,\"writeback_bytes\":0,\"device_local_staged\":false,\"writeback_verified\":false,\"writeback_mismatch\":false},{\"index\":1,\"set\":0,\"binding\":1,\"offset\":0,\"size\":16384,\"api_offset\":0,\"api_range\":16384,\"api_buffer_size\":319553536,\"api_descriptor_type\":7,\"api_dynamic\":false,\"api_memory_offset\":0,\"api_memory_size\":319553536,\"api_memory_id\":\"0x000000557df65790\",\"api_buffer_id\":\"0x000000557bc15710\",\"alias_rep\":1,\"active\":true,\"readable\":true,\"writable\":true,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":false,\"mutable_cache_hit\":false,\"upload_ms\":0.0000,\"download_ms\":0.0000,\"dirty_probe_pages\":0,\"dirty_probe_bytes\":0,\"dirty_probe_ms\":0.0000,\"dirty_writeback_cached\":false,\"dirty_writeback_bytes\":0,\"fd_before_hash\":\"0x0000000000000000\",\"gpu_after_upload_hash\":\"0x0000000000000000\",\"gpu_after_dispatch_hash\":\"0x0000000000000000\",\"fd_after_hash\":\"0x0000000000000000\",\"writeback_offset\":0,\"writeback_bytes\":0,\"device_local_staged\":false,\"writeback_verified\":false,\"writeback_mismatch\":false},{\"index\":2,\"set\":0,\"binding\":2,\"offset\":49200,\"size\":49152,\"api_offset\":49200,\"api_range\":49152,\"api_buffer_size\":319553536,\"api_descriptor_type\":7,\"api_dynamic\":false,\"api_memory_offset\":0,\"api_memory_size\":319553536,\"api_memory_id\":\"0x000000557df65790\",\"api_buffer_id\":\"0x000000557bc15710\",\"alias_rep\":1,\"active\":true,\"readable\":true,\"writable\":true,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":false,\"mutable_cache_hit\":false,\"upload_ms\":0.0000,\"download_ms\":0.0000,\"dirty_probe_pages\":0,\"dirty_probe_bytes\":0,\"dirty_probe_ms\":0.0000,\"dirty_writeback_cached\":false,\"dirty_writeback_bytes\":0,\"fd_before_hash\":\"0x0000000000000000\",\"gpu_after_upload_hash\":\"0x0000000000000000\",\"gpu_after_dispatch_hash\":\"0x0000000000000000\",\"fd_after_hash\":\"0x0000000000000000\",\"writeback_offset\":49200,\"writeback_bytes\":0,\"device_local_staged\":false,\"writeback_verified\":false,\"writeback_mismatch\":false},{\"index\":3,\"set\":0,\"binding\":3,\"offset\":49200,\"size\":49152,\"api_offset\":49200,\"api_range\":49152,\"api_buffer_size\":319553536,\"api_descriptor_type\":7,\"api_dynamic\":false,\"api_memory_offset\":0,\"api_memory_size\":319553536,\"api_memory_id\":\"0x000000557df65790\",\"api_buffer_id\":\"0x000000557bc15710\",\"alias_rep\":1,\"active\":true,\"readable\":true,\"writable\":true,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":false,\"mutable_cache_hit\":false,\"upload_ms\":0.0000,\"download_ms\":0.0000,\"dirty_probe_pages\":0,\"dirty_probe_bytes\":0,\"dirty_probe_ms\":0.0000,\"dirty_writeback_cached\":false,\"dirty_writeback_bytes\":0,\"fd_before_hash\":\"0x0000000000000000\",\"gpu_after_upload_hash\":\"0x0000000000000000\",\"gpu_after_dispatch_hash\":\"0x0000000000000000\",\"fd_after_hash\":\"0x0000000000000000\",\"writeback_offset\":49200,\"writeback_bytes\":0,\"device_local_staged\":false,\"writeback_verified\":false,\"writeback_mismatch\":false},{\"index\":4,\"set\":0,\"binding\":4,\"offset\":49200,\"size\":49152,\"api_offset\":49200,\"api_range\":49152,\"api_buffer_size\":319553536,\"api_descriptor_type\":7,\"api_dynamic\":false,\"api_memory_offset\":0,\"api_memory_size\":319553536,\"api_memory_id\":\"0x000000557df65790\",\"api_buffer_id\":\"0x000000557bc15710\",\"alias_rep\":1,\"active\":true,\"readable\":true,\"writable\":true,\"resident\":false,\"cache_hit\":false,\"mutable_reused\":false,\"mutable_cache_hit\":false,\"upload_ms\":0.0000,\"download_ms\":0.0000,\"dirty_probe_pages\":0,\"dirty_probe_bytes\":0,\"dirty_probe_ms\":0.0000,\"dirty_writeback_cached\":false,\"dirty_writeback_bytes\":0,\"fd_before_hash\":\"0x0000000000000000\",\"gpu_after_upload_hash\":\"0x0000000000000000\",\"gpu_after_dispatch_hash\":\"0x0000000000000000\",\"fd_after_hash\":\"0x0000000000000000\",\"writeback_offset\":49200,\"writeback_bytes\":0,\"device_local_staged\":false,\"writeback_verified\":false,\"writeback_mismatch\":false}],\"spirv_feature_requirements\":{\"float16\":false,\"int16\":false,\"int8\":true,\"int64\":false,\"storage16\":true,\"storage8\":true,\"subgroup_arithmetic\":false},\"spirv_feature_mismatch\":false,\"spirv_feature_mismatches\":[],\"android_vulkan_device\":{\"api\":\"1.3\",\"deviceName\":\"Adreno (TM) 830\",\"vendorID\":20803,\"deviceID\":1141178369,\"limits\":{\"maxPushConstantsSize\":256,\"maxComputeSharedMemorySize\":32768,\"maxPerStageDescriptorStorageBuffers\":16777216,\"maxDescriptorSetStorageBuffers\":16777216,\"maxBoundDescriptorSets\":7,\"maxComputeWorkGroupInvocations\":1024,\"maxComputeWorkGroupSize\":[1024,1024,1024],\"maxComputeWorkGroupCount\":[65535,65535,65535]}},\"android_vulkan_features\":{\"shaderInt64\":1,\"storageBuffer16BitAccess\":1,\"uniformAndStorageBuffer16BitAccess\":0,\"storagePushConstant16\":0,\"storageBuffer8BitAccess\":1,\"uniformAndStorageBuffer8BitAccess\":0,\"storagePushConstant8\":0,\"shaderFloat16\":1,\"shaderInt8\":1}}\npdocker-vulkan-icd: runtime_marker=vulkan-icd-runtime-marker-20260510 stage=generic-dispatch-op rc=-5\n/opt/llama.cpp/build/bin/libggml-base.so.0(+0x17ec8)[0x74d9157ec8]\n/opt/llama.cpp/build/bin/libggml-base.so.0(ggml_print_backtrace+0x220)[0x74d91583a4]\n/opt/llama.cpp/build/bin/libggml-base.so.0(+0x2a9dc)[0x74d916a9dc]\n/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/containers/489cf147358a95bfd5ab22bcdfa619f86d0af5a5fcb7930e49b8b9dec134f1f3/rootfs/lib/aarch64-linux-gnu/libstdc++.so.6(+0xaa570)[0x74d8f5a570]\n/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/containers/489cf147358a95bfd5ab22bcdfa619f86d0af5a5fcb7930e49b8b9dec134f1f3/rootfs/lib/aarch64-linux-gnu/libstdc++.so.6(_ZSt10unexpectedv+0x0)[0x74d8f50e04]\n/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/containers/489cf147358a95bfd5ab22bcdfa619f86d0af5a5fcb7930e49b8b9dec134f1f3/rootfs/lib/aarch64-linux-gnu/libstdc++.so.6(+0xaa908)[0x74d8f5a908]\n/opt/llama.cpp/build/bin/libggml-vulkan.so.0(+0x9e024)[0x74d5d8e024]\n/opt/llama.cpp/build/bin/libggml-vulkan.so.0(+0x14613c)[0x74d5e3613c]\n/opt/llama.cpp/build/bin/libggml-vulkan.so.0(+0x146d1c)[0x74d5e36d1c]\n/opt/llama.cpp/build/bin/libggml-base.so.0(ggml_backend_sched_graph_compute_async+0x474)[0x74d9174184]\n/opt/llama.cpp/build/bin/libllama.so.0(_ZN13llama_context13graph_computeEP11ggml_cgraphb+0x9c)[0x74d92c17ac]\n/opt/llama.cpp/build/bin/libllama.so.0(_ZN13llama_context14process_ubatchERK12llama_ubatch14llm_graph_typeP22llama_memory_context_iR11ggml_status+0xf0)[0x74d92c4270]\n/opt/llama.cpp/build/bin/libllama.so.0(_ZN13llama_context6decodeERK11llama_batch+0x36c)[0x74d92cb72c]\n/opt/llama.cpp/build/bin/libllama.so.0(llama_decode+0x10)[0x74d92cd160]\n/opt/llama.cpp/build/bin/libllama-common.so.0(_Z23common_init_from_paramsR13common_params+0x334)[0x74d9784a94]\n/opt/llama.cpp/build/bin/llama-server(+0xd2688)[0x74d9ae2688]\n/opt/llama.cpp/build/bin/llama-server(+0x34f24)[0x74d9a44f24]\n/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/containers/489cf147358a95bfd5ab22bcdfa619f86d0af5a5fcb7930e49b8b9dec134f1f3/rootfs/lib/aarch64-linux-gnu/libc.so.6(+0x284c4)[0x74d8c284c4]\n/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/containers/489cf147358a95bfd5ab22bcdfa619f86d0af5a5fcb7930e49b8b9dec134f1f3/rootfs/lib/aarch64-linux-gnu/libc.so.6(__libc_start_main+0x98)[0x74d8c28598]\n/opt/llama.cpp/build/bin/llama-server(+0x360f0)[0x74d9a460f0]\nterminate called after throwing an instance of 'vk::FeatureNotPresentError'\n  what():  vk::Queue::submit: ErrorFeatureNotPresent\npdocker-direct-trace: pid=24927 signaled sig=6 events=283233 last_syscall=56(openat) args=ffffffffffffff9c,74d91c5998,0,0,0,80 active=2\n",
+    "runtime_env": {
+      "GGML_VK_FORCE_MAX_ALLOCATION_SIZE": "536870912",
+      "GGML_VK_FORCE_MAX_BUFFER_SIZE": "536870912",
+      "GGML_VK_SUBALLOCATION_BLOCK_SIZE": "536870912",
+      "LLAMA_ARG_CTX": "512",
+      "LLAMA_ARG_MODEL": "/models/model.gguf",
+      "LLAMA_ARG_N_GPU_LAYERS": "2",
+      "LLAMA_ARG_PORT": "18081",
+      "LLAMA_LOG_FILE": "/workspace/logs/llama-server.log",
+      "LLAMA_MODEL_URL": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
+      "PDOCKER_GPU_ABI_VERSION": "0.1",
+      "PDOCKER_GPU_AUTO": "1",
+      "PDOCKER_GPU_COMMAND_API": "pdocker-gpu-command-v1",
+      "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": "0",
+      "PDOCKER_GPU_DISPATCH_PROFILE_LOG": "1",
+      "PDOCKER_GPU_EXECUTOR_AVAILABLE": "1",
+      "PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER": "gpu-executor-workgroup3d-20260513",
+      "PDOCKER_GPU_EXECUTOR_ROLE": "apk-bionic-gpu-command-executor",
+      "PDOCKER_GPU_FAILED_SPIRV_DIR": "/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/workspaces/llama-cpp-gpu/logs",
+      "PDOCKER_GPU_LLM_ENGINE_LOCATION": "container",
+      "PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES": "0",
+      "PDOCKER_GPU_MODE": "vulkan-raw",
+      "PDOCKER_GPU_MODES": "cuda-compat,vulkan",
+      "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK": "0",
+      "PDOCKER_GPU_Q6K_SAFE_KERNEL": "0",
+      "PDOCKER_GPU_QUEUE_SOCKET": "/run/pdocker-gpu/pdocker-gpu.sock",
+      "PDOCKER_GPU_RESIDENT_CACHE": "1",
+      "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES": "1048576",
+      "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS": "1",
+      "PDOCKER_GPU_SHARED_DIR": "/run/pdocker-gpu",
+      "PDOCKER_GPU_SHIM": "/usr/local/bin/pdocker-gpu-shim",
+      "PDOCKER_GPU_STRICT_PASSTHROUGH": "1",
+      "PDOCKER_GPU_VIRTUAL_MEMORY": "guarded",
+      "PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES": "67108864",
+      "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE": "0",
+      "PDOCKER_VULKAN_DUMP_SPIRV_DIR": "/workspace/logs",
+      "PDOCKER_VULKAN_HEAP_BYTES": "2147483648",
+      "PDOCKER_VULKAN_ICD": "/usr/local/lib/pdocker-vulkan-icd.so",
+      "PDOCKER_VULKAN_ICD_EXPECTED_MARKER": "vulkan-icd-runtime-marker-20260510",
+      "PDOCKER_VULKAN_ICD_KIND": "pdocker-bridge-minimal",
+      "PDOCKER_VULKAN_ICD_READY": "0",
+      "PDOCKER_VULKAN_MAX_BUFFER_BYTES": "536870912",
+      "PDOCKER_VULKAN_PASSTHROUGH": "1",
+      "VK_ICD_FILENAMES": "/etc/vulkan/icd.d/pdocker-android.json"
     },
-    "served": true,
-    "state_excerpt": "{\"Id\": \"d6d8e18ec4df4e9585e9bf6a327d1950\", \"Created\": \"2026-05-05T05:56:34.000000000Z\", \"Path\": \"/usr/local/bin/start-llama-server\", \"Args\": [], \"State\": {\"Status\": \"running\", \"Running\": true, \"Paused\": false, \"Restarting\": false, \"OOMKilled\": false, \"Dead\": false, \"Pid\": 26435, \"ExitCode\": 0, \"PdockerRawReturnCode\": 0, \"PdockerSignal\": 0, \"Error\": \"\", \"StartedAt\": \"2026-05-05T05:56:37.000000000Z\", \"FinishedAt\": \"0001-01-01T00:00:00Z\", \"Health\": {\"Status\": \"healthy\", \"FailingStreak\": 0, \"Log\": [{\"Start\": \"2026-05-05T05:56:39.000000000Z\", \"End\": \"2026-05-05T05:56:39.000000000Z\", \"ExitCode\": 22, \"Output\": \"curl: (22) The requested URL returned error: 503\\ncurl: (22) The requested URL returned error: 503\\n\"}, {\"Start\": \"2026-05-05T05:57:09.000000000Z\", \"End\": \"2026-05-05T05:57:11.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}, {\"Start\": \"2026-05-05T05:57:41.000000000Z\", \"End\": \"2026-05-05T05:57:44.000000000Z\", \"ExitCode\": 0, \"Output\": \"\"}]}, \"PdockerKnownPids\": [{\"Pid\": 26435, \"StartTime\": \"41334147\"}, {\"Pid\": 26446, \"StartTime\": \"41334184\"}, {\"Pid\": 26507, \"StartTime\": \"41334209\"}], \"PidStartTime\": \"41334147\", \"PdockerLauncherPid\": 26435, \"PdockerLauncherPidStartTime\": \"41334147\"}, \"Image\": \"sha256:603172edfc7c617f962ff4050734ec1e39d4308ed1b14591f42aacbfe3535c8d\", \"ResolvConfPath\": \"\", \"HostnamePath\": \"\", \"HostsPath\": \"\", \"LogPath\": \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/logs/d6d8e18ec4df4e9585e9bf6a327d1950.log\", \"Name\": \"/pdocker-llama-cpp\", \"RestartCount\": 0, \"Driver\": \"pdocker-direct\", \"Platform\": \"linux\", \"MountLabel\": \"\", \"ProcessLabel\": \"\", \"AppArmorProfile\": \"\", \"ExecIDs\": null, \"HostConfig\": {\"Binds\": [\"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/projects/llama-cpp-gpu/models:/models\", \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/projects/llama-cpp-gpu/workspace:/workspace\", \"/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/projects/llama-cpp-gpu/profiles:/profiles\"], \"PortBindings\": {\"18081/",
-    "log_excerpt": "ad_from_file_impl: using device Vulkan0 (pdocker Vulkan bridge (queue)) (unknown id) - 8192 MiB free\nllama_model_loader: loaded meta data with 28 key-value pairs and 399 tensors from /models/model.gguf (version GGUF V3 (latest))\nllama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\nllama_model_loader: - kv   0:                       general.architecture str              = qwen3\nllama_model_loader: - kv   1:                               general.type str              = model\nllama_model_loader: - kv   2:                               general.name str              = Qwen3 8B Awq Compatible Instruct\nllama_model_loader: - kv   3:                           general.finetune str              = awq-compatible-Instruct\nllama_model_loader: - kv   4:                           general.basename str              = Qwen3\nllama_model_loader: - kv   5:                         general.size_label str              = 8B\nllama_model_loader: - kv   6:                          qwen3.block_count u32              = 36\nllama_model_loader: - kv   7:                       qwen3.context_length u32              = 40960\nllama_model_loader: - kv   8:                     qwen3.embedding_length u32              = 4096\nllama_model_loader: - kv   9:                  qwen3.feed_forward_length u32              = 12288\nllama_model_loader: - kv  10:                 qwen3.attention.head_count u32              = 32\nllama_model_loader: - kv  11:              qwen3.attention.head_count_kv u32              = 8\nllama_model_loader: - kv  12:                       qwen3.rope.freq_base f32              = 1000000.000000\nllama_model_loader: - kv  13:     qwen3.attention.layer_norm_rms_epsilon f32              = 0.000001\nllama_model_loader: - kv  14:                 qwen3.attention.key_length u32              = 128\nllama_model_loader: - kv  15:               qwen3.attention.value_length u32              = 128\nllama_model_loader: - kv  16:                       tokenizer.ggml.model str              = gpt2\nllama_model_loader: - kv  17:                         tokenizer.ggml.pre str              = qwen2\nllama_model_loader: - kv  18:                      tokenizer.ggml.tokens arr[str,151936]  = [\"!\", \"\\\"\", \"#\", \"$\", \"%\", \"&\", \"'\", ...\nllama_model_loader: - kv  19:                  tokenizer.ggml.token_type arr[i32,151936]  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ...\nllama_model_loader: - kv  20:                      tokenizer.ggml.merges arr[str,151387]  = [\"Ġ Ġ\", \"ĠĠ ĠĠ\", \"i n\", \"Ġ t\",...\nllama_model_loader: - kv  21:                tokenizer.ggml.eos_token_id u32              = 151645\nllama_model_loader: - kv  22:            tokenizer.ggml.padding_token_id u32              = 151643\nllama_model_loader: - kv  23:                tokenizer.ggml.bos_token_id u32              = 151643\nllama_model_loader: - kv  24:               tokenizer.ggml.add_bos_token bool             = false\nllama_model_loader: - kv  25:                    tokenizer.chat_template str              = {%- if tools %}\\n    {{- '<|im_start|>...\nllama_model_loader: - kv  26:               general.quantization_version u32              = 2\nllama_model_loader: - kv  27:                          general.file_type u32              = 15\nllama_model_loader: - type  f32:  145 tensors\nllama_model_loader: - type q4_K:  217 tensors\nllama_model_loader: - type q6_K:   37 tensors\nprint_info: file format = GGUF V3 (latest)\nprint_info: file type   = Q4_K - Medium\nprint_info: file size   = 4.68 GiB (4.90 BPW) \nload: 0 unused tokens\nload: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden\nload: printing all EOG tokens:\nload:   - 128247 ('</s>')\nload:   - 151643 ('<|endoftext|>')\nload:   - 151645 ('<|im_end|>')\nload:   - 151662 ('<|fim_pad|>')\nload:   - 151663 ('<|repo_name|>')\nload:   - 151664 ('<|file_sep|>')\nload: special tokens cache size = 27\nload: token to piece cache size = 0.9311 MB\nprint_info: arch                  = qwen3\nprint_info: vocab_only            = 0\nprint_info: no_alloc              = 0\nprint_info: n_ctx_train           = 40960\nprint_info: n_embd                = 4096\nprint_info: n_embd_inp            = 4096\nprint_info: n_layer               = 36\nprint_info: n_head                = 32\nprint_info: n_head_kv             = 8\nprint_info: n_rot                 = 128\nprint_info: n_swa                 = 0\nprint_info: is_swa_any            = 0\nprint_info: n_embd_head_k         = 128\nprint_info: n_embd_head_v         = 128\nprint_info: n_gqa                 = 4\nprint_info: n_embd_k_gqa          = 1024\nprint_info: n_embd_v_gqa          = 1024\nprint_info: f_norm_eps            = 0.0e+00\nprint_info: f_norm_rms_eps        = 1.0e-06\nprint_info: f_clamp_kqv           = 0.0e+00\nprint_info: f_max_alibi_bias      = 0.0e+00\nprint_info: f_logit_scale         = 0.0e+00\nprint_info: f_attn_scale          = 0.0e+00\nprint_info: n_ff                  = 12288\nprint_info: n_expert              = 0\nprint_info: n_expert_used         = 0\nprint_info: n_expert_groups       = 0\nprint_info: n_group_used          = 0\nprint_info: causal attn           = 1\nprint_info: pooling type          = -1\nprint_info: rope type             = 2\nprint_info: rope scaling          = linear\nprint_info: freq_base_train       = 1000000.0\nprint_info: freq_scale_train      = 1\nprint_info: n_ctx_orig_yarn       = 40960\nprint_info: rope_yarn_log_mul     = 0.0000\nprint_info: rope_finetuned        = unknown\nprint_info: model type            = 8B\nprint_info: model params          = 8.19 B\nprint_info: general.name          = Qwen3 8B Awq Compatible Instruct\nprint_info: vocab type            = BPE\nprint_info: n_vocab               = 151936\nprint_info: n_merges              = 151387\nprint_info: BOS token             = 151643 '<|endoftext|>'\nprint_info: EOS token             = 151645 '<|im_end|>'\nprint_info: EOT token             = 151645 '<|im_end|>'\nprint_info: PAD token             = 151643 '<|endoftext|>'\nprint_info: LF token              = 198 'Ċ'\nprint_info: FIM PRE token         = 151659 '<|fim_prefix|>'\nprint_info: FIM SUF token         = 151661 '<|fim_suffix|>'\nprint_info: FIM MID token         = 151660 '<|fim_middle|>'\nprint_info: FIM PAD token         = 151662 '<|fim_pad|>'\nprint_info: FIM REP token         = 151663 '<|repo_name|>'\nprint_info: FIM SEP token         = 151664 '<|file_sep|>'\nprint_info: EOG token             = 128247 '</s>'\nprint_info: EOG token             = 151643 '<|endoftext|>'\nprint_info: EOG token             = 151645 '<|im_end|>'\nprint_info: EOG token             = 151662 '<|fim_pad|>'\nprint_info: EOG token             = 151663 '<|repo_name|>'\nprint_info: EOG token             = 151664 '<|file_sep|>'\nprint_info: max token length      = 256\nload_tensors: loading model tensors, this can take a while... (mmap = true, direct_io = false)\nload_tensors: offloading output layer to GPU\nload_tensors: offloading 0 repeating layers to GPU\nload_tensors: offloaded 1/37 layers to GPU\nload_tensors:   CPU_Mapped model buffer size =  4302.32 MiB\nload_tensors:      Vulkan0 model buffer size =   486.87 MiB\n.....................................................................................\ncommon_init_result: added </s> logit bias = -inf\ncommon_init_result: added <|endoftext|> logit bias = -inf\ncommon_init_result: added <|im_end|> logit bias = -inf\ncommon_init_result: added <|fim_pad|> logit bias = -inf\ncommon_init_result: added <|repo_name|> logit bias = -inf\ncommon_init_result: added <|file_sep|> logit bias = -inf\nllama_context: constructing llama_context\nllama_context: n_seq_max     = 4\nllama_context: n_ctx         = 512\nllama_context: n_ctx_seq     = 512\nllama_context: n_batch       = 512\nllama_context: n_ubatch      = 512\nllama_context: causal_attn   = 1\nllama_context: flash_attn    = auto\nllama_context: kv_unified    = true\nllama_context: freq_base     = 1000000.0\nllama_context: freq_scale    = 1\nllama_context: n_ctx_seq (512) < n_ctx_train (40960) -- the full capacity of the model will not be utilized\nllama_context: Vulkan_Host  output buffer size =     2.32 MiB\nllama_kv_cache:        CPU KV buffer size =    72.00 MiB\nllama_kv_cache: size =   72.00 MiB (   512 cells,  36 layers,  4/1 seqs), K (f16):   36.00 MiB, V (f16):   36.00 MiB\nllama_kv_cache: attn_rot_k = 0, n_embd_head_k_all = 128\nllama_kv_cache: attn_rot_v = 0, n_embd_head_k_all = 128\nsched_reserve: reserving ...\nsched_reserve: Flash Attention was auto, set to enabled\nsched_reserve: resolving fused Gated Delta Net support:\nsched_reserve: fused Gated Delta Net (autoregressive) enabled\nsched_reserve: fused Gated Delta Net (chunked) enabled\nsched_reserve:    Vulkan0 compute buffer size =   304.75 MiB\nsched_reserve:        CPU compute buffer size =    56.00 MiB\nsched_reserve: Vulkan_Host compute buffer size =    33.51 MiB\nsched_reserve: graph nodes  = 1267\nsched_reserve: graph splits = 542 (with bs=512), 146 (with bs=1)\nsched_reserve: reserve took 6.80 ms, sched copies = 1\ncommon_init_from_params: warming up the model with an empty run - please wait ... (--no-warmup to disable)\nsrv  log_server_r: done request: GET / 127.0.0.1 503\nsrv    load_model: initializing slots, n_slots = 4\nno implementations specified for speculative decoding\nslot   load_model: id  0 | task -1 | new slot, n_ctx = 512\nno implementations specified for speculative decoding\nslot   load_model: id  1 | task -1 | new slot, n_ctx = 512\nno implementations specified for speculative decoding\nslot   load_model: id  2 | task -1 | new slot, n_ctx = 512\nno implementations specified for speculative decoding\nslot   load_model: id  3 | task -1 | new slot, n_ctx = 512\nsrv    load_model: prompt cache is enabled, size limit: 8192 MiB\nsrv    load_model: use `--cache-ram 0` to disable the prompt cache\nsrv    load_model: for more info see https://github.com/ggml-org/llama.cpp/pull/16391\nsrv          init: init: idle slots will be saved to prompt cache and cleared upon starting a new task\ninit: chat template, example_format: '<|im_start|>system\nYou are a helpful assistant<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\nHi there<|im_end|>\n<|im_start|>user\nHow are you?<|im_end|>\n<|im_start|>assistant\n'\nsrv          init: init: chat template, thinking = 1\nmain: model loaded\nmain: server is listening on http://0.0.0.0:18081\nmain: starting the main loop...\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: GET / 127.0.0.1 200\nslot get_availabl: id  3 | task -1 | selected slot by LRU, t_last = -1\nsrv  get_availabl: updating prompt cache\nsrv          load:  - looking for better prompt, base f_keep = -1.000, sim = 0.000\nsrv        update:  - cache state: 0 prompts, 0.000 MiB (limits: 8192.000 MiB, 512 tokens, 8589934592 est)\nsrv  get_availabl: prompt cache update took 0.05 ms\nslot launch_slot_: id  3 | task -1 | sampler chain: logits -> ?penalties -> ?dry -> ?top-n-sigma -> top-k -> ?typical -> top-p -> min-p -> ?xtc -> temp-ext -> dist \nslot launch_slot_: id  3 | task 0 | processing task, is_child = 0\nslot update_slots: id  3 | task 0 | new prompt, n_ctx_slot = 512, n_keep = 0, task.n_tokens = 6\nslot update_slots: id  3 | task 0 | n_tokens = 0, memory_seq_rm [0, end)\nslot init_sampler: id  3 | task 0 | init sampler, took 0.99 ms, tokens: text = 6, total = 6\nslot update_slots: id  3 | task 0 | prompt processing done, n_tokens = 6, batch.n_tokens = 6\nsrv  log_server_r: done request: GET / 127.0.0.1 200\nsrv  log_server_r: done request: GET / 127.0.0.1 200\nslot print_timing: id  3 | task 0 | \nprompt eval time =    8322.21 ms /     6 tokens ( 1387.03 ms per token,     0.72 tokens per second)\n       eval time =   25361.56 ms /     4 tokens ( 6340.39 ms per token,     0.16 tokens per second)\n      total time =   33683.77 ms /    10 tokens\nslot      release: id  3 | task 0 | stop processing: n_tokens = 9, truncated = 0\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: POST /completion 127.0.0.1 200\nsrv  log_server_r: done request: GET / 127.0.0.1 200\n",
+    "container_config_env": {
+      "GGML_VK_FORCE_MAX_ALLOCATION_SIZE": "536870912",
+      "GGML_VK_FORCE_MAX_BUFFER_SIZE": "536870912",
+      "GGML_VK_SUBALLOCATION_BLOCK_SIZE": "536870912",
+      "LLAMA_ARG_CTX": "512",
+      "LLAMA_ARG_MODEL": "/models/model.gguf",
+      "LLAMA_ARG_N_GPU_LAYERS": "2",
+      "LLAMA_ARG_PORT": "18081",
+      "LLAMA_LOG_FILE": "/workspace/logs/llama-server.log",
+      "LLAMA_MODEL_URL": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
+      "PDOCKER_GPU_ABI_VERSION": "0.1",
+      "PDOCKER_GPU_AUTO": "1",
+      "PDOCKER_GPU_COMMAND_API": "pdocker-gpu-command-v1",
+      "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": "0",
+      "PDOCKER_GPU_DISPATCH_PROFILE_LOG": "1",
+      "PDOCKER_GPU_EXECUTOR_AVAILABLE": "1",
+      "PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER": "gpu-executor-workgroup3d-20260513",
+      "PDOCKER_GPU_EXECUTOR_ROLE": "apk-bionic-gpu-command-executor",
+      "PDOCKER_GPU_FAILED_SPIRV_DIR": "/data/user/0/io.github.ryo100794.pdocker.compat/files/pdocker/workspaces/llama-cpp-gpu/logs",
+      "PDOCKER_GPU_LLM_ENGINE_LOCATION": "container",
+      "PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES": "0",
+      "PDOCKER_GPU_MODE": "vulkan-raw",
+      "PDOCKER_GPU_MODES": "cuda-compat,vulkan",
+      "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK": "0",
+      "PDOCKER_GPU_Q6K_SAFE_KERNEL": "0",
+      "PDOCKER_GPU_QUEUE_SOCKET": "/run/pdocker-gpu/pdocker-gpu.sock",
+      "PDOCKER_GPU_RESIDENT_CACHE": "1",
+      "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES": "1048576",
+      "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS": "1",
+      "PDOCKER_GPU_SHARED_DIR": "/run/pdocker-gpu",
+      "PDOCKER_GPU_SHIM": "/usr/local/bin/pdocker-gpu-shim",
+      "PDOCKER_GPU_STRICT_PASSTHROUGH": "1",
+      "PDOCKER_GPU_VIRTUAL_MEMORY": "guarded",
+      "PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES": "67108864",
+      "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE": "0",
+      "PDOCKER_VULKAN_DUMP_SPIRV_DIR": "/workspace/logs",
+      "PDOCKER_VULKAN_HEAP_BYTES": "2147483648",
+      "PDOCKER_VULKAN_ICD": "/usr/local/lib/pdocker-vulkan-icd.so",
+      "PDOCKER_VULKAN_ICD_EXPECTED_MARKER": "vulkan-icd-runtime-marker-20260510",
+      "PDOCKER_VULKAN_ICD_KIND": "pdocker-bridge-minimal",
+      "PDOCKER_VULKAN_ICD_READY": "0",
+      "PDOCKER_VULKAN_MAX_BUFFER_BYTES": "536870912",
+      "PDOCKER_VULKAN_PASSTHROUGH": "1",
+      "VK_ICD_FILENAMES": "/etc/vulkan/icd.d/pdocker-android.json"
+    },
+    "startup_diagnostics": {},
+    "service_readiness": {},
     "evidence": {
       "vulkan_device_seen": true,
       "offload_seen": true,
-      "model_loaded": true,
-      "serve_reachable": true,
+      "model_loaded": false,
+      "serve_reachable": false,
       "buffer_allocation_blocker": false,
       "assert_blocker": false,
       "buffer_range_assert_blocker": false,
       "gpu_model_buffer_seen": true,
-      "gpu_repeating_layers": 0,
-      "gpu_offloaded_layers": 1,
+      "gpu_repeating_layers": 1,
+      "gpu_offloaded_layers": 2,
       "gpu_total_layers": 37,
-      "gpu_output_only_offload": true,
-      "generic_dispatch_response_seen": false,
-      "generic_spirv_dispatch_attempted": false,
-      "generic_spirv_dispatch_seen": false,
+      "gpu_output_only_offload": false,
+      "generic_dispatch_response_seen": true,
+      "generic_spirv_dispatch_attempted": true,
+      "generic_spirv_dispatch_seen": true,
+      "ngl_zero_generic_spirv_dispatch": false,
+      "executor_spirv_feature_mismatch": false,
+      "executor_spirv_feature_mismatches": [],
       "generic_spirv_dispatch_failed": false,
-      "pipeline_feature_blocker": false,
+      "pipeline_feature_blocker": true,
       "executor_spirv_trace_seen": false,
       "executor_feature_trace_seen": false,
       "android_vulkan_dispatch_blocker": false,
       "executor_submit_generic_dispatch_error": false,
       "executor_fallback_dispatch_blocker": false,
-      "queue_submit_blocker": false,
-      "spirv_dispatch_blocker": false
+      "queue_submit_blocker": true,
+      "spirv_dispatch_blocker": true
     },
+    "runtime_abort": {},
     "allocation_trace_bytes": [],
     "bridge_dispatch_profile": {
-      "samples": 0,
-      "upload_ms_mean": 0.0,
-      "dispatch_ms_mean": 0.0,
-      "download_ms_mean": 0.0,
+      "samples": 90,
+      "upload_ms_mean": 366.26970842105266,
+      "dispatch_ms_mean": 3.5849777777777776,
+      "download_ms_mean": 17.41805263157895,
       "copy_buffer_ops_in_log": 0,
-      "copy_buffer_bytes_in_log": 0
+      "copy_buffer_bytes_in_log": 0,
+      "copy_submit_count": 0,
+      "copy_submit_ops": 0,
+      "copy_submit_alias_ops": 0,
+      "copy_submit_memmove_ops": 0,
+      "copy_submit_skipped_ops": 0,
+      "copy_submit_alias_bytes": 0,
+      "copy_submit_memmove_bytes": 0,
+      "copy_submit_skipped_bytes": 0,
+      "guarded_binding_samples": 0,
+      "guarded_binding_max_resident_bytes": 0,
+      "guarded_binding_max_dirty_bytes": 0,
+      "guarded_binding_max_range_bytes": 0,
+      "binding_timing_samples": 0,
+      "binding_upload_ms_max": 0.0,
+      "binding_download_ms_max": 0.0,
+      "dirty_probe_binding_samples": 0,
+      "dirty_probe_max_bytes": 0,
+      "dirty_probe_total_bytes": 0,
+      "dirty_probe_ms_max": 0.0,
+      "dirty_writeback_cached_samples": 0,
+      "dirty_writeback_total_bytes": 0,
+      "top_binding_uploads": [],
+      "top_binding_downloads": [],
+      "top_dirty_probe_bindings": []
     },
     "diagnostics": {
-      "blocker_class": "insufficient_gpu_offload_depth",
-      "blocker_detail": "llama.cpp served, but only the output layer was offloaded; repeating transformer layers stayed on CPU",
+      "blocker_class": "vulkan_pipeline_feature",
+      "blocker_detail": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
+      "dispatch_lifecycle": {
+        "event_count": 0,
+        "begin_count": 0,
+        "stage_count": 0,
+        "end_count": 0,
+        "unmatched_begin_ids": [],
+        "unmatched_end_ids": [],
+        "latest_events": [],
+        "components": [],
+        "stages": []
+      },
       "failure_axes": {
         "advertised_limits": {
-          "state": "not_front_blocker",
-          "reason": "no feature-limit submit failure in this run"
+          "state": "untraced",
+          "reason": "queue submit failed before Android feature/SPIR-V trace was captured"
         },
         "chunking": {
           "state": "pressure",
           "reason": "large model/buffer allocations are at or above the 512MiB bridge clamp; future failures should distinguish splitting/chunk transport from shader lowering"
         },
         "generic_spirv_dispatch": {
-          "state": "not_reached",
-          "reason": "generic SPIR-V dispatch was not the failing axis in this run"
+          "state": "front_blocker",
+          "reason": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT"
         }
       },
       "advertised_limits": {
@@ -102,47 +233,2803 @@
         "largest_allocation_bytes": 0,
         "largest_created_buffer_bytes": 0,
         "allocation_near_clamp": false,
-        "model_cpu_mapped_bytes": 4511309496,
+        "model_cpu_mapped_bytes": 4388689018,
         "model_cpu_mapped_exceeds_bridge_clamp": true,
-        "vulkan_model_buffer_mib": 486.87,
-        "descriptor_range_max_bytes": 0
+        "vulkan_model_buffer_mib": 603.81,
+        "descriptor_range_max_bytes": 0,
+        "descriptor_array_layout_seen": false,
+        "descriptor_array_layouts": []
       },
       "generic_spirv_dispatch": {
-        "attempted": false,
-        "valid_android_vulkan_events": [],
-        "failed_events": [],
+        "attempted": true,
+        "valid_android_vulkan_events": [
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 2,
+              "buffers": 2,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 18844,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              2048,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0xf3744559c7f69003",
+              "spec_hash": "0x2246ead6804e6427",
+              "layout_bindings": 5,
+              "descriptor_sets": 1,
+              "push_bytes": 128
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": true,
+            "spirv_local_size": [
+              32,
+              2,
+              2
+            ],
+            "spirv_local_size_resolved": [
+              32,
+              2,
+              2
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 5,
+            "post_barriers": 5,
+            "upload_ms": 637.2019,
+            "dispatch_ms": 1.4161,
+            "download_ms": 2.5086,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 5,
+              "write_bindings": 5,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 1,
+              "buffers": 1,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 3752,
+            "entry": "main",
+            "specializations": 0,
+            "bindings": 3,
+            "dispatch": [
+              8,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0x479593c689fd0d76",
+              "spec_hash": "0x47fe0d7eaf8e51e3",
+              "layout_bindings": 3,
+              "descriptor_sets": 1,
+              "push_bytes": 128
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 3,
+            "post_barriers": 3,
+            "upload_ms": 169.3042,
+            "dispatch_ms": 0.7175,
+            "download_ms": 0.019,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 3,
+              "read_bindings": 3,
+              "write_bindings": 3,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 1,
+              "buffers": 1,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 5880,
+            "entry": "main",
+            "specializations": 1,
+            "bindings": 4,
+            "dispatch": [
+              1,
+              8,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0x11c0523df6c795b8",
+              "spec_hash": "0x26b3ee067f73c797",
+              "layout_bindings": 4,
+              "descriptor_sets": 1,
+              "push_bytes": 128
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              256,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              256,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 4,
+            "post_barriers": 4,
+            "upload_ms": 144.6494,
+            "dispatch_ms": 0.5279,
+            "download_ms": 0.0199,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 4,
+              "read_bindings": 4,
+              "write_bindings": 4,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 2,
+              "buffers": 2,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 4,
+            "dispatch": [
+              1,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0xf2f988b94bd3e0dc",
+              "spec_hash": "0xcac92bf3085c8371",
+              "layout_bindings": 4,
+              "descriptor_sets": 1,
+              "push_bytes": 128
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 4,
+            "post_barriers": 4,
+            "upload_ms": 689.7033,
+            "dispatch_ms": 1.0412,
+            "download_ms": 0.0442,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 4,
+              "read_bindings": 4,
+              "write_bindings": 4,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          }
+        ],
+        "largest_shader_events": [
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 1,
+              "buffers": 1,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 78068,
+            "entry": "main",
+            "specializations": 1,
+            "bindings": 4,
+            "dispatch": [
+              64,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0xe2227e10aed57cd8",
+              "spec_hash": "0x8763c0f3628678e6",
+              "layout_bindings": 4,
+              "descriptor_sets": 1,
+              "push_bytes": 128
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": true,
+            "spirv_local_size": [
+              32,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              32,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 4,
+            "post_barriers": 4,
+            "upload_ms": 171.142,
+            "dispatch_ms": 1.1435,
+            "download_ms": 0.0541,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 4,
+              "read_bindings": 4,
+              "write_bindings": 4,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 2,
+              "buffers": 2,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 5,
+            "dispatch": [
+              2,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0xf2f988b94bd3e0dc",
+              "spec_hash": "0xcac92bf3085c8371",
+              "layout_bindings": 5,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 5,
+            "post_barriers": 5,
+            "upload_ms": 1473.7086,
+            "dispatch_ms": 157.6248,
+            "download_ms": 0.1094,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 5,
+              "write_bindings": 5,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 2,
+              "buffers": 2,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 67176,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 4,
+            "dispatch": [
+              1,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0xf2f988b94bd3e0dc",
+              "spec_hash": "0xcac92bf3085c8371",
+              "layout_bindings": 4,
+              "descriptor_sets": 1,
+              "push_bytes": 128
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 4,
+            "post_barriers": 4,
+            "upload_ms": 689.7033,
+            "dispatch_ms": 1.0412,
+            "download_ms": 0.0442,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 4,
+              "read_bindings": 4,
+              "write_bindings": 4,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 2,
+              "buffers": 2,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 26784,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              512,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0x952ebb20007da72c",
+              "spec_hash": "0x2246ead6804e6427",
+              "layout_bindings": 5,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": true,
+            "spirv_local_size": [
+              32,
+              2,
+              2
+            ],
+            "spirv_local_size_resolved": [
+              32,
+              2,
+              2
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 5,
+            "post_barriers": 5,
+            "upload_ms": 856.0172,
+            "dispatch_ms": 1.0368,
+            "download_ms": 1.0597,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 5,
+              "write_bindings": 5,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 3,
+              "buffers": 3,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 26148,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 7,
+            "dispatch": [
+              8,
+              2,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0x53c67d2aebf48739",
+              "spec_hash": "0xcac92bf3085c8371",
+              "layout_bindings": 7,
+              "descriptor_sets": 1,
+              "push_bytes": 224
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 7,
+            "post_barriers": 7,
+            "upload_ms": 1618.9969,
+            "dispatch_ms": 3.2222,
+            "download_ms": 439.1882,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 7,
+              "read_bindings": 7,
+              "write_bindings": 7,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 2,
+              "buffers": 2,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 25984,
+            "entry": "main",
+            "specializations": 2,
+            "bindings": 7,
+            "dispatch": [
+              32,
+              2,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0x4f37d4d51dd83526",
+              "spec_hash": "0xcac92bf3085c8371",
+              "layout_bindings": 7,
+              "descriptor_sets": 1,
+              "push_bytes": 224
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              512,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 7,
+            "post_barriers": 7,
+            "upload_ms": 2493.4494,
+            "dispatch_ms": 11.4389,
+            "download_ms": 918.3241,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 7,
+              "read_bindings": 7,
+              "write_bindings": 7,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 2,
+              "buffers": 2,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 18844,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              2048,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0xf3744559c7f69003",
+              "spec_hash": "0x2246ead6804e6427",
+              "layout_bindings": 5,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": true,
+            "spirv_local_size": [
+              32,
+              2,
+              2
+            ],
+            "spirv_local_size_resolved": [
+              32,
+              2,
+              2
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 5,
+            "post_barriers": 5,
+            "upload_ms": 2104.5173,
+            "dispatch_ms": 1.9867,
+            "download_ms": 5.2428,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 5,
+              "write_bindings": 5,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 2,
+              "buffers": 2,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 18844,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "dispatch": [
+              512,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0xf3744559c7f69003",
+              "spec_hash": "0x2246ead6804e6427",
+              "layout_bindings": 5,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": true,
+            "spirv_local_size": [
+              32,
+              2,
+              2
+            ],
+            "spirv_local_size_resolved": [
+              32,
+              2,
+              2
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 5,
+            "post_barriers": 5,
+            "upload_ms": 770.8281,
+            "dispatch_ms": 9.9086,
+            "download_ms": 0.5682,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 5,
+              "write_bindings": 5,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          }
+        ],
+        "largest_binding_events": [
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 1,
+              "buffers": 1,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 5880,
+            "entry": "main",
+            "specializations": 1,
+            "bindings": 3,
+            "dispatch": [
+              1,
+              16,
+              1
+            ],
+            "backend_cached": false,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0x11d5243c43b23a7b",
+              "spec_hash": "0x86b941fe293e0b06",
+              "layout_bindings": 3,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              256,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              256,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 3,
+            "post_barriers": 3,
+            "upload_ms": 991.4479,
+            "dispatch_ms": 1.2448,
+            "download_ms": 0.0204,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 3,
+              "read_bindings": 3,
+              "write_bindings": 3,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 1,
+              "buffers": 1,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 11604,
+            "entry": "main",
+            "specializations": 0,
+            "bindings": 5,
+            "dispatch": [
+              64,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": false,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0xac41e8033a67af4a",
+              "spec_hash": "0x47fe0d7eaf8e51e3",
+              "layout_bindings": 5,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              1,
+              256,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              256,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 5,
+            "post_barriers": 5,
+            "upload_ms": 330.5133,
+            "dispatch_ms": 2.9274,
+            "download_ms": 0.0418,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 5,
+              "write_bindings": 5,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 1,
+              "buffers": 1,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 5880,
+            "entry": "main",
+            "specializations": 1,
+            "bindings": 3,
+            "dispatch": [
+              1,
+              16,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0x11d5243c43b23a7b",
+              "spec_hash": "0x86b941fe293e0b06",
+              "layout_bindings": 3,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              256,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              256,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 3,
+            "post_barriers": 3,
+            "upload_ms": 524.958,
+            "dispatch_ms": 0.7466,
+            "download_ms": 0.0136,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 3,
+              "read_bindings": 3,
+              "write_bindings": 3,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 1,
+              "buffers": 1,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 11604,
+            "entry": "main",
+            "specializations": 0,
+            "bindings": 5,
+            "dispatch": [
+              64,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0xac41e8033a67af4a",
+              "spec_hash": "0x47fe0d7eaf8e51e3",
+              "layout_bindings": 5,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              1,
+              256,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              256,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 5,
+            "post_barriers": 5,
+            "upload_ms": 264.9649,
+            "dispatch_ms": 2.6991,
+            "download_ms": 0.0212,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 5,
+              "write_bindings": 5,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 1,
+              "buffers": 1,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 5880,
+            "entry": "main",
+            "specializations": 1,
+            "bindings": 3,
+            "dispatch": [
+              1,
+              16,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0x11d5243c43b23a7b",
+              "spec_hash": "0x86b941fe293e0b06",
+              "layout_bindings": 3,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              256,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              256,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 3,
+            "post_barriers": 3,
+            "upload_ms": 377.5287,
+            "dispatch_ms": 0.8542,
+            "download_ms": 0.0143,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 3,
+              "read_bindings": 3,
+              "write_bindings": 3,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 1,
+              "buffers": 1,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 11604,
+            "entry": "main",
+            "specializations": 0,
+            "bindings": 5,
+            "dispatch": [
+              64,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0xac41e8033a67af4a",
+              "spec_hash": "0x47fe0d7eaf8e51e3",
+              "layout_bindings": 5,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              1,
+              256,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              256,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 5,
+            "post_barriers": 5,
+            "upload_ms": 236.0712,
+            "dispatch_ms": 2.1124,
+            "download_ms": 0.0447,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 5,
+              "write_bindings": 5,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 1,
+              "buffers": 1,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 5880,
+            "entry": "main",
+            "specializations": 1,
+            "bindings": 3,
+            "dispatch": [
+              1,
+              16,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0x11d5243c43b23a7b",
+              "spec_hash": "0x86b941fe293e0b06",
+              "layout_bindings": 3,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              256,
+              1,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              256,
+              1,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 3,
+            "post_barriers": 3,
+            "upload_ms": 299.2244,
+            "dispatch_ms": 0.8017,
+            "download_ms": 0.0148,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 3,
+              "read_bindings": 3,
+              "write_bindings": 3,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          },
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "strict_object_graph": {
+              "used": true,
+              "memories": 1,
+              "buffers": 1,
+              "device_local_staging_requested": false,
+              "device_local_staged_memories": 0,
+              "staging_upload_copies": 0,
+              "staging_upload_bytes": 0,
+              "staging_download_copies": 0,
+              "staging_download_bytes": 0
+            },
+            "shader_bytes": 11604,
+            "entry": "main",
+            "specializations": 0,
+            "bindings": 5,
+            "dispatch": [
+              64,
+              1,
+              1
+            ],
+            "backend_cached": true,
+            "pipeline_cache": {
+              "hit": true,
+              "entries": 256
+            },
+            "pipeline_key": {
+              "spirv_hash": "0xac41e8033a67af4a",
+              "spec_hash": "0x47fe0d7eaf8e51e3",
+              "layout_bindings": 5,
+              "descriptor_sets": 1,
+              "push_bytes": 116
+            },
+            "skip_unused_descriptor_transfers": false,
+            "spirv_descriptor_access": false,
+            "disable_overlap_aliasing": false,
+            "cpu_oracle_requested": false,
+            "descriptor_aliases": 0,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_descriptor_aliases": false,
+            "materialize_specialization": false,
+            "disable_pipeline_optimization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "local_size_patched": false,
+            "spirv_local_size": [
+              1,
+              256,
+              1
+            ],
+            "spirv_local_size_resolved": [
+              1,
+              256,
+              1
+            ],
+            "spirv_local_size_consistent": true,
+            "q6k_safe_kernel": false,
+            "q4k_safe_kernel": false,
+            "pipeline_policy_hash": "0x47fe0c7eaf8e5030",
+            "profile_response": false,
+            "pre_barriers": 5,
+            "post_barriers": 5,
+            "upload_ms": 208.9051,
+            "dispatch_ms": 0.8688,
+            "download_ms": 0.0204,
+            "resident_cache": {
+              "enabled": false,
+              "resident_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "mutable_buffer_cache": {
+              "enabled": false,
+              "entries": 32,
+              "reused_bindings": 0,
+              "hits": 0,
+              "bytes": 0
+            },
+            "descriptor_usage": {
+              "active_bindings": 5,
+              "read_bindings": 5,
+              "write_bindings": 5,
+              "skipped_bindings": 0,
+              "skipped_bytes": 0,
+              "skipped_upload_bytes": 0,
+              "skipped_download_bytes": 0
+            },
+            "valid": true
+          }
+        ],
+        "failed_events": [
+          {
+            "executor": "pdocker-gpu-executor",
+            "api": "pdocker-gpu-command-v1",
+            "abi_version": "0.1",
+            "executor_build_marker": "gpu-executor-workgroup3d-20260513",
+            "role": "gpu-command-executor",
+            "llm_engine": "container",
+            "device_independent": true,
+            "backend_impl": "android_vulkan",
+            "kernel": "generic_spirv",
+            "valid": false,
+            "stage": "vulkan-dispatch",
+            "error": "create-generic-compute-pipeline",
+            "vk_result": -13,
+            "shader_bytes": 18844,
+            "entry": "main",
+            "specializations": 3,
+            "bindings": 5,
+            "layout_bindings": 5,
+            "fail_binding_index": -1,
+            "io_result": 0,
+            "dispatch": [
+              6144,
+              1,
+              1
+            ],
+            "push_bytes": 128,
+            "pipeline_key": {
+              "spirv_hash": "0xee4e8d4acf23ec08",
+              "spec_hash": "0x4256e6bd7dad2e74",
+              "layout_bindings": 5,
+              "descriptor_sets": 1,
+              "push_bytes": 128
+            },
+            "estimated_workgroup_bytes": 256,
+            "duplicate_descriptor_rewrite": false,
+            "materialize_specialization": false,
+            "specialization_materialized": false,
+            "q4k_targeted_specialization_materialized": false,
+            "q4k_safe_kernel": false,
+            "oracle_fail_closed": false,
+            "strict_passthrough": true,
+            "requested_feature_mask": "0x0000000000000038",
+            "requested_feature_mask_present": true,
+            "spirv_hash": "0xee4e8d4acf23ec08",
+            "spirv_valid": true,
+            "spirv_truncated": 0,
+            "spirv_local_size": [
+              32,
+              2,
+              1
+            ],
+            "spirv_local_size_id": [
+              0,
+              0,
+              0
+            ],
+            "spirv_local_size_resolved": [
+              32,
+              2,
+              1
+            ],
+            "specialization_entries": [
+              {
+                "constant_id": 0,
+                "offset": 0,
+                "size": 4,
+                "value_u64": 32
+              },
+              {
+                "constant_id": 1,
+                "offset": 4,
+                "size": 4,
+                "value_u64": 2
+              },
+              {
+                "constant_id": 2,
+                "offset": 8,
+                "size": 4,
+                "value_u64": 1
+              }
+            ],
+            "descriptor_aliases": [],
+            "spirv_capabilities": [
+              1,
+              39,
+              4433,
+              4448
+            ],
+            "binding_details": [
+              {
+                "index": 0,
+                "set": 0,
+                "binding": 0,
+                "offset": 0,
+                "size": 28311552,
+                "api_offset": 0,
+                "api_range": 28311552,
+                "api_buffer_size": 97910784,
+                "api_descriptor_type": 7,
+                "api_dynamic": false,
+                "api_memory_offset": 0,
+                "api_memory_size": 97910784,
+                "api_memory_id": "0x000000557eaabdc0",
+                "api_buffer_id": "0x000000557eaf0c00",
+                "alias_rep": 0,
+                "active": true,
+                "readable": true,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": false,
+                "mutable_cache_hit": false,
+                "upload_ms": 0.0,
+                "download_ms": 0.0,
+                "dirty_probe_pages": 0,
+                "dirty_probe_bytes": 0,
+                "dirty_probe_ms": 0.0,
+                "dirty_writeback_cached": false,
+                "dirty_writeback_bytes": 0,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_upload_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000",
+                "writeback_offset": 0,
+                "writeback_bytes": 0,
+                "device_local_staged": false,
+                "writeback_verified": false,
+                "writeback_mismatch": false
+              },
+              {
+                "index": 1,
+                "set": 0,
+                "binding": 1,
+                "offset": 0,
+                "size": 16384,
+                "api_offset": 0,
+                "api_range": 16384,
+                "api_buffer_size": 319553536,
+                "api_descriptor_type": 7,
+                "api_dynamic": false,
+                "api_memory_offset": 0,
+                "api_memory_size": 319553536,
+                "api_memory_id": "0x000000557df65790",
+                "api_buffer_id": "0x000000557bc15710",
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": false,
+                "mutable_cache_hit": false,
+                "upload_ms": 0.0,
+                "download_ms": 0.0,
+                "dirty_probe_pages": 0,
+                "dirty_probe_bytes": 0,
+                "dirty_probe_ms": 0.0,
+                "dirty_writeback_cached": false,
+                "dirty_writeback_bytes": 0,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_upload_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000",
+                "writeback_offset": 0,
+                "writeback_bytes": 0,
+                "device_local_staged": false,
+                "writeback_verified": false,
+                "writeback_mismatch": false
+              },
+              {
+                "index": 2,
+                "set": 0,
+                "binding": 2,
+                "offset": 49200,
+                "size": 49152,
+                "api_offset": 49200,
+                "api_range": 49152,
+                "api_buffer_size": 319553536,
+                "api_descriptor_type": 7,
+                "api_dynamic": false,
+                "api_memory_offset": 0,
+                "api_memory_size": 319553536,
+                "api_memory_id": "0x000000557df65790",
+                "api_buffer_id": "0x000000557bc15710",
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": false,
+                "mutable_cache_hit": false,
+                "upload_ms": 0.0,
+                "download_ms": 0.0,
+                "dirty_probe_pages": 0,
+                "dirty_probe_bytes": 0,
+                "dirty_probe_ms": 0.0,
+                "dirty_writeback_cached": false,
+                "dirty_writeback_bytes": 0,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_upload_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000",
+                "writeback_offset": 49200,
+                "writeback_bytes": 0,
+                "device_local_staged": false,
+                "writeback_verified": false,
+                "writeback_mismatch": false
+              },
+              {
+                "index": 3,
+                "set": 0,
+                "binding": 3,
+                "offset": 49200,
+                "size": 49152,
+                "api_offset": 49200,
+                "api_range": 49152,
+                "api_buffer_size": 319553536,
+                "api_descriptor_type": 7,
+                "api_dynamic": false,
+                "api_memory_offset": 0,
+                "api_memory_size": 319553536,
+                "api_memory_id": "0x000000557df65790",
+                "api_buffer_id": "0x000000557bc15710",
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": false,
+                "mutable_cache_hit": false,
+                "upload_ms": 0.0,
+                "download_ms": 0.0,
+                "dirty_probe_pages": 0,
+                "dirty_probe_bytes": 0,
+                "dirty_probe_ms": 0.0,
+                "dirty_writeback_cached": false,
+                "dirty_writeback_bytes": 0,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_upload_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000",
+                "writeback_offset": 49200,
+                "writeback_bytes": 0,
+                "device_local_staged": false,
+                "writeback_verified": false,
+                "writeback_mismatch": false
+              },
+              {
+                "index": 4,
+                "set": 0,
+                "binding": 4,
+                "offset": 49200,
+                "size": 49152,
+                "api_offset": 49200,
+                "api_range": 49152,
+                "api_buffer_size": 319553536,
+                "api_descriptor_type": 7,
+                "api_dynamic": false,
+                "api_memory_offset": 0,
+                "api_memory_size": 319553536,
+                "api_memory_id": "0x000000557df65790",
+                "api_buffer_id": "0x000000557bc15710",
+                "alias_rep": 1,
+                "active": true,
+                "readable": true,
+                "writable": true,
+                "resident": false,
+                "cache_hit": false,
+                "mutable_reused": false,
+                "mutable_cache_hit": false,
+                "upload_ms": 0.0,
+                "download_ms": 0.0,
+                "dirty_probe_pages": 0,
+                "dirty_probe_bytes": 0,
+                "dirty_probe_ms": 0.0,
+                "dirty_writeback_cached": false,
+                "dirty_writeback_bytes": 0,
+                "fd_before_hash": "0x0000000000000000",
+                "gpu_after_upload_hash": "0x0000000000000000",
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": "0x0000000000000000",
+                "writeback_offset": 49200,
+                "writeback_bytes": 0,
+                "device_local_staged": false,
+                "writeback_verified": false,
+                "writeback_mismatch": false
+              }
+            ],
+            "spirv_feature_requirements": {
+              "float16": false,
+              "int16": false,
+              "int8": true,
+              "int64": false,
+              "storage16": true,
+              "storage8": true,
+              "subgroup_arithmetic": false
+            },
+            "spirv_feature_mismatch": false,
+            "spirv_feature_mismatches": [],
+            "android_vulkan_device": {
+              "api": "1.3",
+              "deviceName": "Adreno (TM) 830",
+              "vendorID": 20803,
+              "deviceID": 1141178369,
+              "limits": {
+                "maxPushConstantsSize": 256,
+                "maxComputeSharedMemorySize": 32768,
+                "maxPerStageDescriptorStorageBuffers": 16777216,
+                "maxDescriptorSetStorageBuffers": 16777216,
+                "maxBoundDescriptorSets": 7,
+                "maxComputeWorkGroupInvocations": 1024,
+                "maxComputeWorkGroupSize": [
+                  1024,
+                  1024,
+                  1024
+                ],
+                "maxComputeWorkGroupCount": [
+                  65535,
+                  65535,
+                  65535
+                ]
+              }
+            },
+            "android_vulkan_features": {
+              "shaderInt64": 1,
+              "storageBuffer16BitAccess": 1,
+              "uniformAndStorageBuffer16BitAccess": 0,
+              "storagePushConstant16": 0,
+              "storageBuffer8BitAccess": 1,
+              "uniformAndStorageBuffer8BitAccess": 0,
+              "storagePushConstant8": 0,
+              "shaderFloat16": 1,
+              "shaderInt8": 1
+            }
+          }
+        ],
         "fallback_events": [],
-        "llama_throw": ""
+        "llama_throw": "vk::Queue::submit: ErrorFeatureNotPresent"
       },
-      "executor_backends": [],
-      "executor_errors": [],
-      "spirv_hashes": []
-    }
+      "executor_backends": [
+        "android_vulkan"
+      ],
+      "executor_errors": [
+        "create-generic-compute-pipeline"
+      ],
+      "spirv_hashes": [
+        "0xe2227e10aed57cd8",
+        "0xee4e8d4acf23ec08",
+        "0xf2f988b94bd3e0dc",
+        "0xf3744559c7f69003"
+      ],
+      "runtime_freshness": {
+        "summary": "pass",
+        "expected_executor_marker": "gpu-executor-workgroup3d-20260513",
+        "expected_icd_marker": "vulkan-icd-runtime-marker-20260510",
+        "observed_executor_markers": [
+          "gpu-executor-workgroup3d-20260513"
+        ],
+        "observed_icd_markers": [
+          "vulkan-icd-runtime-marker-20260510"
+        ],
+        "executor_event_count": 91
+      },
+      "config_propagation": {
+        "summary": "pass",
+        "checks": [
+          {
+            "env": "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
+            "executor_field": "duplicate_descriptor_rewrite",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
+            "executor_field": "materialize_specialization",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
+            "executor_field": "disable_pipeline_optimization",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_STRICT_PASSTHROUGH",
+            "executor_field": "strict_passthrough",
+            "expected": null,
+            "observed_values": [
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
+            "executor_field": "skip_unused_descriptor_transfers",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
+            "executor_field": "spirv_descriptor_access",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_DISABLE_OVERLAP_ALIASING",
+            "executor_field": "disable_overlap_aliasing",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_CPU_ORACLE",
+            "executor_field": "cpu_oracle_requested",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",
+            "executor_field": "strict_object_graph.device_local_staging_requested",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_Q6K_SAFE_KERNEL",
+            "executor_field": "q6k_safe_kernel",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
+            "executor_field": "cpu_oracle.oracle_writeback",
+            "expected": null,
+            "observed_values": [],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_Q4K_SAFE_KERNEL",
+            "executor_field": "q4k_safe_kernel",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION",
+            "executor_field": "q4k_targeted_specialization_materialized",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          },
+          {
+            "env": "PDOCKER_GPU_MUTABLE_BUFFER_CACHE",
+            "executor_field": "mutable_buffer_cache.enabled",
+            "expected": null,
+            "observed_values": [
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false,
+              false
+            ],
+            "status": "not-requested"
+          }
+        ]
+      },
+      "api_understanding": {
+        "summary": "not-observed",
+        "missing_binding_details": 0,
+        "range_mismatch_count": 0,
+        "effective_offset_mismatch_count": 0,
+        "binding_samples": []
+      },
+      "diagnostic_bisection": {
+        "method": "binary-search fault isolation over API, graph, ICD, executor, and readback boundaries",
+        "nodes": [
+          {
+            "id": "api_cpu_baseline",
+            "question": "Does the same model and server API produce deterministic CPU/no-offload answers?",
+            "state": "not-run",
+            "routes": {
+              "pass": "gpu_server_output",
+              "fail": "llama_api_or_model_input"
+            }
+          },
+          {
+            "id": "gpu_server_output",
+            "question": "Does GPU/offload output match CPU/no-offload at the HTTP completion boundary?",
+            "state": "not-run",
+            "routes": {
+              "pass": "performance_only",
+              "fail": "token_probability_boundary"
+            }
+          },
+          {
+            "id": "token_probability_boundary",
+            "question": "Do CPU and GPU agree on selected/top token probabilities before sampling policy can hide the error?",
+            "state": "not-run",
+            "routes": {
+              "pass": "sampler_or_decoding",
+              "fail": "logits_or_final_projection"
+            }
+          },
+          {
+            "id": "executor_dispatch_boundary",
+            "question": "Did generic SPIR-V reach the Android Vulkan executor and complete successfully?",
+            "state": "pass",
+            "routes": {
+              "pass": "post_dispatch_logits",
+              "fail": "icd_or_executor_submit"
+            }
+          },
+          {
+            "id": "post_dispatch_logits",
+            "question": "Does the largest/final-projection-like writable binding contain finite float samples after dispatch?",
+            "state": "not-instrumented",
+            "routes": {
+              "pass": "numeric_layout_or_readback",
+              "not-instrumented": "enable_f32_samples",
+              "not-reached": "dispatch_boundary"
+            }
+          },
+          {
+            "id": "readonly_input_integrity",
+            "question": "Do non-aliased read-only descriptor bindings match immediately after upload, then remain stable through dispatch?",
+            "state": "pass",
+            "routes": {
+              "pass": "output_layout_or_shader_math",
+              "upload-fail": "upload_offset_descriptor_or_hash_scope",
+              "dispatch-mutated": "shader_access_or_barrier_scope"
+            }
+          },
+          {
+            "id": "q6_workgroup_shape",
+            "question": "Does Q6_K execute with the same three-dimensional local size that llama.cpp specialized?",
+            "state": "not-reached",
+            "routes": {
+              "inconsistent": "fix_local_size_materialization",
+              "match": "next_ngl_shader_or_performance",
+              "mismatch": "q6_descriptor_memory_or_math"
+            }
+          },
+          {
+            "id": "env_propagation",
+            "question": "Did requested bridge tuning environment variables reach the executor as dispatch evidence?",
+            "state": "pass",
+            "routes": {
+              "pass": "trust_tuning_experiments",
+              "fail": "fix_icd_to_executor_option_transport_first"
+            }
+          }
+        ],
+        "current_focus": "collect_more_boundaries",
+        "finite_f32_sample_count": 0,
+        "readonly_binding_hash_mismatch_count": 0,
+        "readonly_binding_hash_mismatches": [],
+        "primary_readonly_upload_hash_mismatch_count": 0,
+        "primary_readonly_upload_hash_mismatches": [],
+        "primary_readonly_dispatch_mutation_count": 0,
+        "primary_readonly_dispatch_mutations": [],
+        "final_projection_candidate": {
+          "spirv_hash": null,
+          "dispatch": [
+            1,
+            16,
+            1
+          ],
+          "push_bytes": null,
+          "binding_count": 3
+        },
+        "q6_workgroup_diagnostics": {
+          "event_count": 0,
+          "latest_spirv_hash": null,
+          "latest_status": null,
+          "latest_mismatch_count": null,
+          "local_size": null,
+          "local_size_resolved": null,
+          "local_size_consistent": null,
+          "q6_local_size": null,
+          "q6_local_invocations": null,
+          "q6_accum_mask": null,
+          "q6_base_work_group_y": null,
+          "q6_output_base_index": null,
+          "q6_weight_base_blocks": null,
+          "q6_accumulator_sum": null,
+          "q6_shader_like_abs_delta": null,
+          "q6_shader_like_64_abs_delta": null,
+          "q6_shader_like_oracle_cleared": false,
+          "q6_first_mismatch": {},
+          "q6_row_indexed_sample_indices": [],
+          "q6_row_indexed_writeback_evidence": [],
+          "q6_row_indexed_writeback_verified": false,
+          "q6_writable_bindings": [],
+          "q6_readonly_upload_hash_mismatches": [],
+          "q6_readonly_dispatch_mutations": [],
+          "q6_writable_writeback_mismatches": [],
+          "q6_writable_writeback_unknown": [],
+          "q6_writeback_verified_all": false,
+          "workgroup_shape_blocker": false,
+          "blocker_class": "not-reached",
+          "diagnostic_interpretation": "no-q6-oracle-event"
+        }
+      },
+      "q6_workgroup_diagnostics": {
+        "event_count": 0,
+        "latest_spirv_hash": null,
+        "latest_status": null,
+        "latest_mismatch_count": null,
+        "local_size": null,
+        "local_size_resolved": null,
+        "local_size_consistent": null,
+        "q6_local_size": null,
+        "q6_local_invocations": null,
+        "q6_accum_mask": null,
+        "q6_base_work_group_y": null,
+        "q6_output_base_index": null,
+        "q6_weight_base_blocks": null,
+        "q6_accumulator_sum": null,
+        "q6_shader_like_abs_delta": null,
+        "q6_shader_like_64_abs_delta": null,
+        "q6_shader_like_oracle_cleared": false,
+        "q6_first_mismatch": {},
+        "q6_row_indexed_sample_indices": [],
+        "q6_row_indexed_writeback_evidence": [],
+        "q6_row_indexed_writeback_verified": false,
+        "q6_writable_bindings": [],
+        "q6_readonly_upload_hash_mismatches": [],
+        "q6_readonly_dispatch_mutations": [],
+        "q6_writable_writeback_mismatches": [],
+        "q6_writable_writeback_unknown": [],
+        "q6_writeback_verified_all": false,
+        "workgroup_shape_blocker": false,
+        "blocker_class": "not-reached",
+        "diagnostic_interpretation": "no-q6-oracle-event"
+      }
+    },
+    "correctness": {}
+  },
+  "differential_correctness": {
+    "enabled": false,
+    "shared_probe_count": 0,
+    "mismatch_count": 0,
+    "summary": "not-run",
+    "probes": []
+  },
+  "differential_probabilities": {
+    "enabled": false,
+    "shared_probe_count": 0,
+    "top1_mismatch_count": 0,
+    "selected_token_mismatch_count": 0,
+    "summary": "not-run",
+    "probes": []
   },
   "comparison": {
-    "speedup": 0.43689191188917054,
+    "speedup": 0.0,
     "target_tokens_per_second": 3.6100235915041705,
     "target_met": false
   },
   "bridge_overhead_phase": {
     "phase": "not_yet_served",
-    "served": true,
-    "gpu_layers": 1,
+    "served": false,
+    "gpu_layers": 2,
     "cpu_tokens_per_second": 0.36100235915041706,
-    "gpu_tokens_per_second": 0.1577190108857267,
-    "speedup": 0.43689191188917054,
+    "gpu_tokens_per_second": 0.0,
+    "speedup": 0.0,
     "target_speedup": 10.0,
     "target_tokens_per_second": 3.6100235915041705,
     "target_met": false,
-    "blocker": "llama.cpp served, but only the output layer was offloaded; repeating transformer layers stayed on CPU",
-    "next_action": "increase n-gpu-layers until repeating transformer layers are offloaded",
+    "blocker": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
+    "next_action": "map failed SPIR-V capabilities to Android Vulkan feature bits, then clamp or translate the advertised feature set",
     "bridge_dispatch_profile": {
-      "samples": 0,
-      "upload_ms_mean": 0.0,
-      "dispatch_ms_mean": 0.0,
-      "download_ms_mean": 0.0,
+      "samples": 90,
+      "upload_ms_mean": 366.26970842105266,
+      "dispatch_ms_mean": 3.5849777777777776,
+      "download_ms_mean": 17.41805263157895,
       "copy_buffer_ops_in_log": 0,
-      "copy_buffer_bytes_in_log": 0
+      "copy_buffer_bytes_in_log": 0,
+      "copy_submit_count": 0,
+      "copy_submit_ops": 0,
+      "copy_submit_alias_ops": 0,
+      "copy_submit_memmove_ops": 0,
+      "copy_submit_skipped_ops": 0,
+      "copy_submit_alias_bytes": 0,
+      "copy_submit_memmove_bytes": 0,
+      "copy_submit_skipped_bytes": 0,
+      "guarded_binding_samples": 0,
+      "guarded_binding_max_resident_bytes": 0,
+      "guarded_binding_max_dirty_bytes": 0,
+      "guarded_binding_max_range_bytes": 0,
+      "binding_timing_samples": 0,
+      "binding_upload_ms_max": 0.0,
+      "binding_download_ms_max": 0.0,
+      "dirty_probe_binding_samples": 0,
+      "dirty_probe_max_bytes": 0,
+      "dirty_probe_total_bytes": 0,
+      "dirty_probe_ms_max": 0.0,
+      "dirty_writeback_cached_samples": 0,
+      "dirty_writeback_total_bytes": 0,
+      "top_binding_uploads": [],
+      "top_binding_downloads": [],
+      "top_dirty_probe_bindings": []
     }
   },
   "operation": {
@@ -151,6 +3038,6 @@
     "container_surface": "pdocker-llama-cpp remains the container shown by Engine container listing",
     "cleanup": "remove adb port forward and mark failed operation on nonzero exit; CPU restore is opt-in with --restore because the next run recreates the required mode"
   },
-  "next_blocker": "llama.cpp served, but only the output layer was offloaded; repeating transformer layers stayed on CPU",
-  "next_action": "increase n-gpu-layers until repeating transformer layers are offloaded"
+  "next_blocker": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
+  "next_action": "map failed SPIR-V capabilities to Android Vulkan feature bits, then clamp or translate the advertised feature set"
 }
