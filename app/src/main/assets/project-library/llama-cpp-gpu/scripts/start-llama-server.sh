@@ -4,8 +4,17 @@ set -euo pipefail
 profile="${LLAMA_GPU_PROFILE:-/profiles/pdocker-gpu.env}"
 diagnostics="${LLAMA_GPU_DIAGNOSTICS:-/profiles/pdocker-gpu-diagnostics.json}"
 refresh="${LLAMA_GPU_PROFILE_REFRESH:-auto}"
+log_file="${LLAMA_LOG_FILE:-/workspace/logs/llama-server.log}"
+if [[ -n "$log_file" ]]; then
+  mkdir -p "$(dirname "$log_file")" /var/log/pdocker
+  touch "$log_file"
+  ln -sf "$log_file" /var/log/pdocker/llama-server.log
+  exec > >(tee -a "$log_file") 2>&1
+fi
+
+profile_refresh_rc=0
 if [[ "$refresh" = "always" || ! -f "$profile" || ! -f "$diagnostics" || ( "$refresh" = "auto" && "${PDOCKER_GPU_AUTO:-}" = "1" ) ]]; then
-  LLAMA_GPU_DIAGNOSTICS="$diagnostics" pdocker-gpu-profile "$profile" >/dev/null || true
+  LLAMA_GPU_DIAGNOSTICS="$diagnostics" pdocker-gpu-profile "$profile" >/dev/null || profile_refresh_rc=$?
 fi
 if [[ -f "$profile" ]]; then
   # shellcheck disable=SC1090
@@ -26,14 +35,6 @@ if [[ "${LLAMA_GPU_BACKEND:-cpu}" = "cpu" ]]; then
   unset PDOCKER_OPENCL_ICD_KIND
 fi
 
-log_file="${LLAMA_LOG_FILE:-/workspace/logs/llama-server.log}"
-if [[ -n "$log_file" ]]; then
-  mkdir -p "$(dirname "$log_file")" /var/log/pdocker
-  touch "$log_file"
-  ln -sf "$log_file" /var/log/pdocker/llama-server.log
-  exec > >(tee -a "$log_file") 2>&1
-fi
-
 model="${LLAMA_ARG_MODEL:-/models/model.gguf}"
 model_url="${LLAMA_MODEL_URL:-}"
 port="${LLAMA_ARG_PORT:-18081}"
@@ -42,6 +43,7 @@ threads="${LLAMA_ARG_THREADS:-$(nproc 2>/dev/null || echo 4)}"
 ngl="${LLAMA_ARG_N_GPU_LAYERS:-0}"
 extra_args="${LLAMA_EXTRA_ARGS:---jinja}"
 server="/opt/llama.cpp/build/bin/llama-server"
+startup_json="${LLAMA_STARTUP_JSON:-/workspace/logs/llama-startup.json}"
 
 has_llama_arg() {
   local needle="$1"
@@ -61,6 +63,69 @@ if [[ "${LLAMA_GPU_BACKEND:-}" = "vulkan" \
   fi
   echo "pdocker: disabling llama.cpp KV cache offload for unfinished pdocker Vulkan ICD; set PDOCKER_VULKAN_ALLOW_KV_OFFLOAD=1 to override"
 fi
+
+mkdir -p "$(dirname "$startup_json")"
+python3 - "$startup_json" "$profile_refresh_rc" "$profile" "$diagnostics" "$refresh" "$server" "$model" "$port" "$ctx" "$threads" "$ngl" "$extra_args" <<'PY' || true
+import json
+import os
+import sys
+import time
+
+out, profile_rc, profile, diagnostics, refresh, server, model, port, ctx, threads, ngl, extra_args = sys.argv[1:13]
+interesting = (
+    "LLAMA_",
+    "PDOCKER_GPU_",
+    "PDOCKER_VULKAN_",
+    "GGML_VK_",
+    "VK_ICD_FILENAMES",
+    "VK_DRIVER_FILES",
+    "OCL_ICD_VENDORS",
+)
+env = {
+    key: value
+    for key, value in sorted(os.environ.items())
+    if any(key == prefix or key.startswith(prefix) for prefix in interesting)
+}
+meminfo = {}
+try:
+    with open("/proc/meminfo", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            name, _, rest = line.partition(":")
+            if name in {"MemAvailable", "MemFree", "SwapFree", "SwapTotal"}:
+                meminfo[name] = rest.strip()
+except OSError:
+    pass
+argv = [
+    server,
+    "--host", "0.0.0.0",
+    "--port", port,
+    "--model", model,
+    "--ctx-size", ctx,
+    "--threads", threads,
+    "--n-gpu-layers", ngl,
+] + extra_args.split()
+kv_offload_arg_present = any(arg in {"--no-kv-offload", "-nkvo"} for arg in argv)
+kv_offload_env = os.environ.get("LLAMA_ARG_KV_OFFLOAD")
+report = {
+    "schema": "pdocker.llama.startup.v1",
+    "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "profile": profile,
+    "diagnostics": diagnostics,
+    "profile_refresh": refresh,
+    "profile_refresh_rc": int(profile_rc),
+    "env": env,
+    "meminfo": meminfo,
+    "argv": argv,
+    "kv_offload_env": kv_offload_env,
+    "kv_offload_arg_present": kv_offload_arg_present,
+    "kv_offload_disabled_effective": kv_offload_arg_present or kv_offload_env == "0",
+    "kv_offload_guarded": kv_offload_arg_present or kv_offload_env == "0",
+}
+with open(out, "w", encoding="utf-8") as f:
+    json.dump(report, f, indent=2, sort_keys=True)
+    f.write("\n")
+print("pdocker llama startup diagnostics: " + out)
+PY
 
 if [[ ! -f "$model" && -n "$model_url" ]]; then
   echo "Downloading GGUF model from LLAMA_MODEL_URL to $model"

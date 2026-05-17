@@ -26,6 +26,7 @@ CPU_TPS_OVERRIDE="${PDOCKER_LLAMA_CPU_TPS:-}"
 TRACE_ALLOC="${PDOCKER_LLAMA_TRACE_ALLOC:-0}"
 CORRECTNESS="${PDOCKER_LLAMA_CORRECTNESS:-1}"
 CORRECTNESS_TIMEOUT_SEC="${PDOCKER_LLAMA_CORRECTNESS_TIMEOUT_SEC:-180}"
+COMPLETION_READY_TIMEOUT_SEC="${PDOCKER_LLAMA_COMPLETION_READY_TIMEOUT_SEC:-180}"
 LOG_TAIL_LINES="${PDOCKER_LLAMA_LOG_TAIL_LINES:-2000}"
 RESTART_APP_DAEMON="${PDOCKER_LLAMA_RESTART_APP_DAEMON:-1}"
 MIN_FREE_MB="${PDOCKER_LLAMA_MIN_FREE_MB:-512}"
@@ -1119,6 +1120,38 @@ container_logs() {
   engine_request GET "/containers/$(urlencode "$ref")/logs?stdout=1&stderr=1&tail=$LOG_TAIL_LINES" | decode_engine_logs || true
 }
 
+container_archive_file() {
+  local ctr_path="$1"
+  local out="$2"
+  local ref tmp_tar
+  ref="$(container_ref)"
+  tmp_tar="$out.tar"
+  rm -f "$out" "$tmp_tar"
+  if engine_request GET "/containers/$(urlencode "$ref")/archive?path=$(urlencode "$ctr_path")" > "$tmp_tar"; then
+    python3 - "$tmp_tar" "$out" <<'PY' || true
+import io
+import tarfile
+import sys
+from pathlib import Path
+
+raw_path = Path(sys.argv[1])
+out_path = Path(sys.argv[2])
+raw = raw_path.read_bytes()
+if b"\r\n\r\n" in raw[:4096]:
+    raw = raw.split(b"\r\n\r\n", 1)[1]
+with tarfile.open(fileobj=io.BytesIO(raw), mode="r:*") as tar:
+    members = [m for m in tar.getmembers() if m.isfile()]
+    if not members:
+        raise SystemExit(1)
+    src = tar.extractfile(members[0])
+    if src is None:
+        raise SystemExit(1)
+    out_path.write_bytes(src.read())
+PY
+  fi
+  rm -f "$tmp_tar"
+}
+
 container_state() {
   local ref
   ref="$(container_ref)"
@@ -1317,6 +1350,7 @@ summary = {
     "optional_failures": len(optional_failures),
     "benchmark_claim_allowed": not required_failures,
 }
+
 report = {
     "schema": "pdocker.llama.correctness.v1.compare",
     "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1332,6 +1366,117 @@ with open(out_path, "w", encoding="utf-8") as f:
     json.dump(report, f, indent=2, ensure_ascii=False)
     f.write("\n")
 print(json.dumps(summary, indent=2))
+PY
+}
+
+probe_service_readiness() {
+  local mode="$1"
+  local out="$2"
+  "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
+  "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
+  python3 - "http://127.0.0.1:$LOCAL_PORT" "$mode" "$GPU_LAYERS" "$MODEL_PATH" "$out" "$COMPLETION_READY_TIMEOUT_SEC" <<'PY'
+import json
+import sys
+import time
+import urllib.request
+
+base_url, mode, gpu_layers, model_path, out_path, timeout_s = sys.argv[1:7]
+timeout_sec = max(1, int(timeout_s))
+
+
+def get_json(path: str, timeout: int) -> dict:
+    started = time.monotonic()
+    item = {"ok": False, "status_code": None, "duration_ms": None, "error": None, "path": path}
+    try:
+        with urllib.request.urlopen(base_url + path, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", "replace")
+            item.update({
+                "status_code": resp.status,
+                "duration_ms": round((time.monotonic() - started) * 1000.0, 3),
+                "ok": 200 <= int(resp.status) < 300,
+            })
+            try:
+                item["json"] = json.loads(body)
+            except Exception:
+                item["body_excerpt"] = body[:512]
+    except Exception as exc:
+        item.update({
+            "duration_ms": round((time.monotonic() - started) * 1000.0, 3),
+            "error": f"{type(exc).__name__}: {exc}",
+        })
+    return item
+
+
+def post_json(path: str, body: dict, timeout: int) -> dict:
+    data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req = urllib.request.Request(
+        base_url + path,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    started = time.monotonic()
+    item = {
+        "ok": False,
+        "status_code": None,
+        "duration_ms": None,
+        "error": None,
+        "path": path,
+        "timeout_sec": timeout,
+    }
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = resp.read().decode("utf-8", "replace")
+            item.update({
+                "status_code": resp.status,
+                "duration_ms": round((time.monotonic() - started) * 1000.0, 3),
+                "ok": 200 <= int(resp.status) < 300,
+            })
+            try:
+                parsed = json.loads(payload)
+                item["content_excerpt"] = str(parsed.get("content", ""))[:128] if isinstance(parsed, dict) else ""
+            except Exception:
+                item["body_excerpt"] = payload[:512]
+    except Exception as exc:
+        item.update({
+            "duration_ms": round((time.monotonic() - started) * 1000.0, 3),
+            "error": f"{type(exc).__name__}: {exc}",
+        })
+    return item
+
+
+completion_body = {
+    "prompt": "2+3=",
+    "n_predict": 1,
+    "temperature": 0,
+    "top_k": 1,
+    "top_p": 1,
+    "cache_prompt": False,
+    "stream": False,
+    "stop": ["\n"],
+}
+report = {
+    "schema": "pdocker.llama.service-readiness.v1",
+    "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "endpoint": base_url,
+    "mode": mode,
+    "gpu_layers": int(gpu_layers),
+    "model_path": model_path,
+    "completion_timeout_sec": timeout_sec,
+    "health": get_json("/health", min(timeout_sec, 10)),
+    "models": get_json("/v1/models", min(timeout_sec, 10)),
+    "completion": post_json("/completion", completion_body, timeout_sec),
+}
+report["summary"] = {
+    "liveness": "pass" if report["models"]["ok"] else "fail",
+    "completion": "pass" if report["completion"]["ok"] else "fail",
+    "ready": bool(report["models"]["ok"] and report["completion"]["ok"]),
+}
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(report, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+print(json.dumps(report["summary"], indent=2))
+raise SystemExit(0 if report["summary"]["ready"] else 1)
 PY
 }
 
@@ -1401,12 +1546,19 @@ GPU_LOG="$TMP/gpu.log"
 GPU_STATE="$TMP/gpu-state.txt"
 GPU_JSON="$TMP/gpu.json"
 CORRECTNESS_JSON="$TMP/correctness.json"
+SERVICE_READINESS_JSON="$TMP/service-readiness.json"
+STARTUP_JSON="$TMP/llama-startup.json"
 if wait_server 120 "Forced Vulkan"; then
-  operation_notify "running" "Forced Vulkan served; recording HTTP benchmark"
-  bench_http "vulkan-forced-ngl-$GPU_LAYERS" "$GPU_JSON" >/dev/null || true
-  if [[ "$CORRECTNESS" != "0" ]]; then
-    operation_notify "running" "Forced Vulkan served; checking arithmetic correctness"
-    probe_http_correctness "vulkan-forced-ngl-$GPU_LAYERS" "$CORRECTNESS_JSON" >/dev/null || true
+  operation_notify "running" "Forced Vulkan liveness passed; checking completion readiness"
+  if probe_service_readiness "vulkan-forced-ngl-$GPU_LAYERS" "$SERVICE_READINESS_JSON" >/dev/null; then
+    operation_notify "running" "Forced Vulkan completion ready; recording HTTP benchmark"
+    bench_http "vulkan-forced-ngl-$GPU_LAYERS" "$GPU_JSON" >/dev/null || true
+    if [[ "$CORRECTNESS" != "0" ]]; then
+      operation_notify "running" "Forced Vulkan served; checking arithmetic correctness"
+      probe_http_correctness "vulkan-forced-ngl-$GPU_LAYERS" "$CORRECTNESS_JSON" >/dev/null || true
+    fi
+  else
+    operation_notify "running" "Forced Vulkan liveness passed but completion did not finish; collecting evidence"
   fi
   gpu_served=1
 else
@@ -1414,10 +1566,11 @@ else
   gpu_served=0
 fi
 container_state > "$GPU_STATE"
+container_archive_file "/workspace/logs/llama-startup.json" "$STARTUP_JSON"
 container_logs > "$GPU_LOG"
 
 PDOCKER_LLAMA_RUNTIME_ABORT_JSON="$RUNTIME_ABORT_JSON" \
-python3 - "$CPU_JSON" "$CPU_CORRECTNESS_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$CORRECTNESS_JSON" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" "$ROOT/scripts/llama-gpu-env-manifest.json" <<'PY'
+python3 - "$CPU_JSON" "$CPU_CORRECTNESS_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$CORRECTNESS_JSON" "$SERVICE_READINESS_JSON" "$STARTUP_JSON" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" "$ROOT/scripts/llama-gpu-env-manifest.json" <<'PY'
 import json
 import math
 import os
@@ -1426,7 +1579,7 @@ import sys
 import time
 from pathlib import Path
 
-cpu_path, cpu_correctness_path, gpu_path, gpu_log_path, gpu_state_path, correctness_path, out_path, gpu_served_s, gpu_layers, gpu_ctx, predict, repeat, warmup_discard, trace_alloc, model_path, model_url, manifest_path = sys.argv[1:18]
+cpu_path, cpu_correctness_path, gpu_path, gpu_log_path, gpu_state_path, correctness_path, service_readiness_path, startup_path, out_path, gpu_served_s, gpu_layers, gpu_ctx, predict, repeat, warmup_discard, trace_alloc, model_path, model_url, manifest_path = sys.argv[1:20]
 env_manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
 if env_manifest.get("schema") != "pdocker.llama.gpu.env-manifest.v1":
     raise SystemExit(f"unsupported llama GPU env manifest schema: {manifest_path}")
@@ -1445,6 +1598,18 @@ if Path(correctness_path).is_file() and Path(correctness_path).stat().st_size:
         correctness = json.load(open(correctness_path, encoding="utf-8"))
     except Exception:
         correctness = {}
+service_readiness = {}
+if Path(service_readiness_path).is_file() and Path(service_readiness_path).stat().st_size:
+    try:
+        service_readiness = json.load(open(service_readiness_path, encoding="utf-8"))
+    except Exception:
+        service_readiness = {}
+startup_diagnostics = {}
+if Path(startup_path).is_file() and Path(startup_path).stat().st_size:
+    try:
+        startup_diagnostics = json.load(open(startup_path, encoding="utf-8"))
+    except Exception:
+        startup_diagnostics = {}
 runtime_abort = {}
 runtime_abort_path = os.environ.get("PDOCKER_LLAMA_RUNTIME_ABORT_JSON", "")
 if runtime_abort_path and Path(runtime_abort_path).is_file() and Path(runtime_abort_path).stat().st_size:
@@ -1461,6 +1626,48 @@ if Path(cpu_correctness_path).is_file() and Path(cpu_correctness_path).stat().st
 cpu_tps = float(cpu.get("summary", {}).get("predicted_tokens_per_second_mean") or 0.0)
 gpu_tps = float(gpu.get("summary", {}).get("predicted_tokens_per_second_mean") or 0.0)
 target_tps = cpu_tps * 10.0
+
+def parse_container_state(raw):
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+def container_env_snapshot(state_obj):
+    env_values = []
+    config = state_obj.get("Config") if isinstance(state_obj.get("Config"), dict) else {}
+    for key in ("Env",):
+        value = state_obj.get(key)
+        if isinstance(value, list):
+            env_values.extend(value)
+    value = config.get("Env")
+    if isinstance(value, list):
+        env_values.extend(value)
+    prefixes = (
+        "LLAMA_",
+        "PDOCKER_GPU_",
+        "PDOCKER_VULKAN_",
+        "GGML_VK_",
+        "VK_ICD_FILENAMES",
+        "VK_DRIVER_FILES",
+        "OCL_ICD_VENDORS",
+    )
+    snapshot = {}
+    for entry in env_values:
+        if not isinstance(entry, str) or "=" not in entry:
+            continue
+        name, value = entry.split("=", 1)
+        if any(name == prefix or name.startswith(prefix) for prefix in prefixes):
+            snapshot[name] = value
+    return dict(sorted(snapshot.items()))
+
+state_obj = parse_container_state(state)
+runtime_env = container_env_snapshot(state_obj)
+startup_env = startup_diagnostics.get("env") if isinstance(startup_diagnostics.get("env"), dict) else {}
+effective_runtime_env = dict(runtime_env)
+for name, value in startup_env.items():
+    effective_runtime_env[str(name)] = str(value)
 
 def probe_map(report):
     return {
@@ -1903,6 +2110,17 @@ evidence = {
 }
 gpu_correctness_summary = correctness.get("summary", {}).get("correctness")
 differential_correctness_summary = differential_correctness.get("summary")
+service_summary = service_readiness.get("summary") if isinstance(service_readiness.get("summary"), dict) else {}
+service_completion = service_readiness.get("completion") if isinstance(service_readiness.get("completion"), dict) else {}
+service_models = service_readiness.get("models") if isinstance(service_readiness.get("models"), dict) else {}
+completion_ready = service_summary.get("completion") == "pass" or service_completion.get("ok") is True
+models_ready = service_summary.get("liveness") == "pass" or service_models.get("ok") is True
+completion_timeout = (
+    bool(int(gpu_served_s))
+    and models_ready
+    and not completion_ready
+    and "timed out" in str(service_completion.get("error") or "").lower()
+)
 if evidence["buffer_range_assert_blocker"]:
     blocker_class = "vulkan_buffer_range_accounting"
     blocker_detail = "scheduler warmup hit ggml_backend_buffer_get_alloc_size"
@@ -1915,6 +2133,9 @@ elif pipeline_feature_blocker:
 elif generic_spirv_dispatch_blocker:
     blocker_class = "vulkan_generic_spirv_dispatch"
     blocker_detail = "generic SPIR-V dispatch reached submit-generic-dispatch / queue submit failure"
+elif completion_timeout:
+    blocker_class = "llama_completion_timeout"
+    blocker_detail = "HTTP liveness passed, but deterministic /completion did not finish during readiness probing"
 elif runtime_freshness["summary"] == "fail":
     blocker_class = "runtime_freshness_mismatch"
     blocker_detail = "expected GPU executor build marker was not observed; test may be running stale native code or missing executor evidence"
@@ -2635,6 +2856,8 @@ next_action = (
     if evidence["buffer_allocation_blocker"] or evidence["assert_blocker"]
     else "map failed SPIR-V capabilities to Android Vulkan feature bits, then clamp or translate the advertised feature set"
     if blocker_class == "vulkan_pipeline_feature"
+    else "inspect ICD/executor dispatch begin/end evidence; liveness passed but /completion timed out before a benchmarkable token"
+    if blocker_class == "llama_completion_timeout"
     else "lower generic SPIR-V dispatch into the Android Vulkan executor or clamp advertised capabilities"
     if blocker_class in {"vulkan_generic_spirv_dispatch", "vulkan_queue_submit_feature"}
     else "inspect traced Android Vulkan feature/SPIR-V mismatch"
@@ -2689,6 +2912,10 @@ result = {
         "served": bool(int(gpu_served_s)),
         "state_excerpt": state[:2000],
         "log_excerpt": log[-12000:],
+        "runtime_env": effective_runtime_env,
+        "container_config_env": runtime_env,
+        "startup_diagnostics": startup_diagnostics,
+        "service_readiness": service_readiness,
         "evidence": evidence,
         "runtime_abort": runtime_abort,
         "allocation_trace_bytes": allocations[-32:],

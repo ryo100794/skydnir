@@ -1034,6 +1034,77 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertFalse(report["benchmark_claim_allowed"])
         self.assertIn("PDOCKER_GPU_Q6K_SAFE_KERNEL", json.dumps(report["config_propagation"]))
 
+    def test_llama_compare_records_completion_readiness_and_runtime_env(self):
+        compare = LLAMA_COMPARE.read_text()
+        start_script = (ROOT / "app/src/main/assets/project-library/llama-cpp-gpu/scripts/start-llama-server.sh").read_text()
+        verifier_source = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
+
+        for marker in [
+            "PDOCKER_LLAMA_COMPLETION_READY_TIMEOUT_SEC",
+            "probe_service_readiness",
+            '"schema": "pdocker.llama.service-readiness.v1"',
+            '"prompt": "2+3="',
+            '"n_predict": 1',
+            "service_readiness",
+            "runtime_env",
+            "startup_diagnostics",
+            "container_config_env",
+            "container_archive_file",
+            "container_env_snapshot",
+            "llama_completion_timeout",
+        ]:
+            self.assertIn(marker, compare)
+
+        for marker in [
+            "LLAMA_STARTUP_JSON",
+            "pdocker.llama.startup.v1",
+            "profile_refresh_rc",
+            "kv_offload_guarded",
+            "kv_offload_env",
+            "kv_offload_disabled_effective",
+            "pdocker llama startup diagnostics",
+        ]:
+            self.assertIn(marker, start_script)
+
+        self.assertIn("llama-completion-timeout", verifier_source)
+        self.assertIn("_service_completion_timeout", verifier_source)
+
+    def test_llama_gpu_artifact_verifier_classifies_completion_timeout(self):
+        verifier = load_llama_gpu_artifact_verifier()
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "served": True,
+                "runtime_env": {
+                    "LLAMA_GPU_BACKEND": "vulkan",
+                    "PDOCKER_VULKAN_ICD_KIND": "pdocker-bridge-minimal",
+                },
+                "service_readiness": {
+                    "schema": "pdocker.llama.service-readiness.v1",
+                    "summary": {"liveness": "pass", "completion": "fail", "ready": False},
+                    "models": {"ok": True, "status_code": 200},
+                    "completion": {
+                        "ok": False,
+                        "error": "TimeoutError: timed out",
+                        "timeout_sec": 180,
+                        "duration_ms": 180000,
+                    },
+                },
+                "diagnostics": {
+                    "runtime_freshness": {
+                        "summary": "fail",
+                        "expected_executor_marker": "gpu-executor-workgroup3d-20260513",
+                        "observed_executor_markers": [],
+                    },
+                },
+            },
+        }
+        report = verifier.classify(payload)
+        self.assertEqual("llama-completion-timeout", report["classification"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertIn("LLAMA_GPU_BACKEND", report["runtime_env"])
+
 
 if __name__ == "__main__":
     unittest.main()

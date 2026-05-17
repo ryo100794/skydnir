@@ -870,6 +870,34 @@ def _api_prompt_sanity(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _service_completion_timeout(data: dict[str, Any]) -> dict[str, Any]:
+    readiness = nested(data, "gpu", "service_readiness")
+    if not isinstance(readiness, dict) or not readiness:
+        return {"summary": "not-recorded", "timeout": False}
+    if data.get("schema") == "pdocker.llama.gpu.compare.v1" and nested(data, "gpu", "served") is not True:
+        return {"summary": "not-served", "timeout": False}
+    if readiness.get("schema") != "pdocker.llama.service-readiness.v1":
+        return {"summary": "invalid-schema", "timeout": False, "schema": readiness.get("schema")}
+    summary = readiness.get("summary") if isinstance(readiness.get("summary"), dict) else {}
+    models = readiness.get("models") if isinstance(readiness.get("models"), dict) else {}
+    completion = readiness.get("completion") if isinstance(readiness.get("completion"), dict) else {}
+    models_ok = summary.get("liveness") == "pass" or models.get("ok") is True
+    completion_ok = summary.get("completion") == "pass" or completion.get("ok") is True
+    error = str(completion.get("error") or "")
+    timed_out = "timed out" in error.lower() or "timeouterror" in error.lower()
+    timeout = bool(models_ok and not completion_ok and timed_out)
+    return {
+        "summary": "timeout" if timeout else "ready" if completion_ok else "not-ready",
+        "timeout": timeout,
+        "models_ok": bool(models_ok),
+        "completion_ok": bool(completion_ok),
+        "completion_error": error,
+        "completion_duration_ms": completion.get("duration_ms"),
+        "completion_timeout_sec": completion.get("timeout_sec") or readiness.get("completion_timeout_sec"),
+        "runtime_freshness": _runtime_freshness(data),
+    }
+
+
 def _claim_base(
     classification: str,
     *,
@@ -937,6 +965,20 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     correctness = correctness_summary.get("correctness", "not-run")
     comparison = data.get("comparison") or {}
     runtime_freshness = _runtime_freshness(data)
+
+    completion_readiness = _service_completion_timeout(data)
+    if completion_readiness.get("timeout") is True:
+        return _claim_base(
+            "llama-completion-timeout",
+            next_action=(
+                data.get("next_action")
+                or "inspect ICD/executor dispatch begin/end/stage evidence; HTTP liveness passed but deterministic /completion timed out"
+            ),
+            runtime_freshness=runtime_freshness,
+        ) | {
+            "service_readiness": completion_readiness,
+            "runtime_env": nested(data, "gpu", "runtime_env") or {},
+        }
 
     if not _observed_executor_marker_ok(runtime_freshness):
         return _claim_base(
