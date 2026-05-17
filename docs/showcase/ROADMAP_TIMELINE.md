@@ -23,7 +23,7 @@ Current TODO counters:
 |---|---:|
 | done | 57 |
 | doing | 17 |
-| next | 34 |
+| next | 33 |
 | blocked | 0 |
 
 ## Timeline
@@ -43,7 +43,6 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 
 - [#7](https://github.com/ryo100794/pdocker-android/issues/7) Android storage metrics verification: add device smoke/manual coverage that layer, image-view, container-private, total, and...
 - [#8](https://github.com/ryo100794/pdocker-android/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built...
-- Default workspace Dockerfile placeholder repair cleanup: the one-off `Dockerfile.pdocker-broken-backup` migration path in `MainActivity` must be documented as intentional compatibility...
 - RUN changed-path/snapshot performance. `RUN chmod +x /usr/local/bin/pdocker-*` is functionally correct but still triggers an expensive broad snapshot in the default workspace build...
 
 ### Then: 2026-05-28 to 2026-06-07
