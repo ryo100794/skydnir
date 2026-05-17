@@ -940,6 +940,16 @@ if not ident:
 print(ident)'
 }
 
+engine_body_has_id() {
+  python3 -c 'import json,sys
+body = sys.stdin.read()
+try:
+    data = json.loads(body)
+except Exception:
+    raise SystemExit(1)
+raise SystemExit(0 if isinstance(data.get("Id"), str) and data.get("Id") else 1)'
+}
+
 decode_engine_logs() {
   python3 -c 'import sys
 data = sys.stdin.buffer.read()
@@ -1202,7 +1212,7 @@ start_container_mode() {
     echo "[pdocker llama compare] $mode: create request did not return within ${ENGINE_START_TIMEOUT_SEC}s; probing named container" >&2
     operation_notify "running" "$mode: container create timed out; probing named container"
     create_body="$(engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" GET "/containers/$(urlencode "$CONTAINER")/json" | http_body || true)"
-    if [[ -z "$create_body" ]]; then
+    if [[ -z "$create_body" ]] || ! printf "%s" "$create_body" | engine_body_has_id; then
       echo "[pdocker llama compare] $mode: create timeout left no inspectable named container" >&2
       return 124
     fi

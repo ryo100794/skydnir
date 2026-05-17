@@ -1042,6 +1042,8 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "PDOCKER_LLAMA_COMPLETION_READY_TIMEOUT_SEC",
             "probe_service_readiness",
+            "engine_body_has_id",
+            "create timeout left no inspectable named container",
             '"schema": "pdocker.llama.service-readiness.v1"',
             '"prompt": "2+3="',
             '"n_predict": 1',
