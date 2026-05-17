@@ -61,6 +61,19 @@ Each per-container proof file has `Kind: same-container-id-teardown-proof`,
 `BeforeAfterEvidence` object. The gate is only allowed to pass after all
 evidence agrees on the **same Engine container ID**.
 
+The Android smoke now also writes a conservative, non-promoting
+`VerifierReduction` object for each proof. It records the reducer-visible
+status of `EngineInspectSameContainerId`, `ProcessTreeClear`,
+`DirectChildAbsence`, `ListenerAbsence`, `StalePidAbsence`,
+`StaleNameAbsence`, `GpuMediaExecutorResidueAbsence`,
+`PersistedStateCleared`, `LifecycleLogsBound`, and `ContainerLogsBound`, plus
+`MismatchedContainerIds` and `Survivors`. Companion reduction artifacts
+(`*-gap-reasons.txt`, `*-fail-reasons.txt`,
+`*-mismatched-container-ids.txt`, and `*-survivors.txt`) explain why the proof
+is still planned-gap or what concrete residue was observed. These fields are
+diagnostic only until every required flag is true and the top-level artifact is
+explicitly promoted to `device-pass`.
+
 Required before/after evidence for that same ID:
 
 - Engine create/start/stop/kill/rm outputs.
@@ -143,9 +156,12 @@ schemas, and negative-case artifacts for process tree, listener absence, stale
 PID, GPU/media executor residue, Engine inspect, logs, and persisted state. The
 host-side reducer now reads the top-level artifact plus the referenced
 `same-container-id-*.json` and negative-case JSON files and rejects missing or
-fake proof. The remaining device work is to make the Android smoke collect and
-export a complete evidence directory whose reduced proof shows that each
-stopped/killed/removed container has no surviving process tree, no surviving
-listener, no stale PID reference, no GPU/media executor residue, and no stale
-state/log confusion for that exact Engine container ID before promoting the
-artifact from planned-gap to device-pass.
+fake proof. The device smoke performs the first reduction pass for exact
+container IDs, create/inspect binding, direct-child evidence, stale PID
+evidence, and lifecycle/log artifact presence while keeping listener,
+stale-name, GPU/media executor, and persisted-state checks non-promoting until
+they can be bound to the exact Engine container ID. The remaining device work
+is to complete those reductions and promote only when stop-rm and kill-rm both
+show no surviving process tree, no surviving listener, no stale PID reference,
+no GPU/media executor residue, and no stale state/log confusion for that exact
+Engine container ID.

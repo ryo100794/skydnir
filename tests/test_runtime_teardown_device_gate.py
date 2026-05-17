@@ -122,6 +122,15 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
             '"AfterOperation"',
             '"AfterRemove"',
             '"SuccessInvariant"',
+            '"VerifierReduction"',
+            "json_id_field_equals",
+            '"GapReasons"',
+            '"FailReasons"',
+            '"ReductionArtifacts"',
+            '"MismatchedContainerIds"',
+            '"Survivors"',
+            '$label-gap-reasons.txt',
+            '$label-fail-reasons.txt',
         ]:
             self.assertIn(required, self.body)
 

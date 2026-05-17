@@ -812,6 +812,55 @@ json_string() {
   printf '%s' "$1" | awk 'BEGIN{printf "\""}{gsub(/\\/,"\\\\"); gsub(/\"/,"\\\""); gsub(/\t/,"\\t"); if (NR>1) printf "\\n"; printf "%s",$0}END{printf "\""}'
 }
 
+json_bool() {
+  case "$1" in
+    true) printf 'true' ;;
+    *) printf 'false' ;;
+  esac
+}
+
+is_exact_engine_container_id() {
+  printf '%s' "$1" | grep -Eq '^[0-9a-f]{64}$'
+}
+
+artifact_contains() {
+  needle="$1"
+  artifact="$2"
+  [ -n "$needle" ] && [ -f "$artifact" ] && grep -Fq "$needle" "$artifact" 2>/dev/null
+}
+
+json_id_field_equals() {
+  cid="$1"
+  artifact="$2"
+  is_exact_engine_container_id "$cid" && [ -f "$artifact" ] \
+    && grep -Eq '"Id"[[:space:]]*:[[:space:]]*"'$cid'"' "$artifact" 2>/dev/null
+}
+
+json_field_equals() {
+  artifact="$1"
+  field="$2"
+  expected="$3"
+  [ -f "$artifact" ] && grep -Eq '"'$field'"[[:space:]]*:[[:space:]]*"'$expected'"' "$artifact" 2>/dev/null
+}
+
+write_json_string_array_from_file() {
+  artifact="$1"
+  first=1
+  printf '['
+  if [ -f "$artifact" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      if [ "$first" = "1" ]; then
+        first=0
+      else
+        printf ', '
+      fi
+      json_string "$line"
+    done <"$artifact"
+  fi
+  printf ']'
+}
+
 record_cmd() {
   label="$1"
   shift
@@ -1014,6 +1063,139 @@ write_same_id_evidence() {
       direct_children_after_rm=""
       ;;
   esac
+
+  gap_reasons="$DIAG/$label-gap-reasons.txt"
+  fail_reasons="$DIAG/$label-fail-reasons.txt"
+  mismatches="$DIAG/$label-mismatched-container-ids.txt"
+  survivors="$DIAG/$label-survivors.txt"
+  : >"$gap_reasons"
+  : >"$fail_reasons"
+  : >"$mismatches"
+  : >"$survivors"
+
+  add_gap_reason() {
+    printf '%s\n' "$1" >>"$gap_reasons"
+  }
+  add_fail_reason() {
+    printf '%s\n' "$1" >>"$fail_reasons"
+  }
+  add_mismatch() {
+    printf '%s\n' "$1" >>"$mismatches"
+  }
+  add_survivor() {
+    printf '%s\n' "$1" >>"$survivors"
+  }
+
+  created_out_id="$(container_id_from_out "$create_out")"
+  cid_exact=false
+  create_output_same=false
+  inspect_before_same=false
+  inspect_after_same=false
+  inspect_after_rm_gone=false
+  direct_child_absence=false
+  stale_pid_absence=false
+  process_tree_clear=false
+  listener_absence=false
+  stale_name_absence=false
+  residue_absence=false
+  persisted_state_cleared=false
+  lifecycle_logs_bound=false
+  container_logs_bound=false
+
+  if is_exact_engine_container_id "$cid"; then
+    cid_exact=true
+  else
+    add_gap_reason "container ID is not an exact 64-hex Engine ID; create/inspect reduction cannot promote"
+  fi
+
+  if [ "$cid_exact" = "true" ] && [ "$created_out_id" = "$cid" ]; then
+    create_output_same=true
+  else
+    add_fail_reason "Engine create output is not the same exact container ID"
+    add_mismatch "create_out=$(printf '%s' "$created_out_id") expected=$(printf '%s' "$cid")"
+  fi
+
+  if [ "$cid_exact" = "true" ] && json_id_field_equals "$cid" "$inspect_before"; then
+    inspect_before_same=true
+  else
+    add_fail_reason "Engine inspect before operation is not bound to the same container ID"
+    add_mismatch "inspect_before=$(printf '%s' "$inspect_before")"
+  fi
+
+  if [ "$cid_exact" = "true" ] && json_id_field_equals "$cid" "$inspect_after"; then
+    inspect_after_same=true
+  else
+    add_fail_reason "Engine inspect after operation is not bound to the same container ID"
+    add_mismatch "inspect_after_operation=$(printf '%s' "$inspect_after")"
+  fi
+
+  inspect_after_rm_status="${inspect_after_rm%.http}.status"
+  if [ -f "$inspect_after_rm_status" ] && grep -Eq 'HTTP/[0-9.]+[[:space:]]+404' "$inspect_after_rm_status" 2>/dev/null; then
+    inspect_after_rm_gone=true
+  elif [ "$cid_exact" = "true" ] && artifact_contains "$cid" "$inspect_after_rm"; then
+    add_fail_reason "Engine inspect after rm still returns the removed container ID"
+    add_mismatch "inspect_after_rm=$(printf '%s' "$inspect_after_rm") still contains $(printf '%s' "$cid")"
+  else
+    add_gap_reason "Engine inspect after rm did not prove HTTP 404/non-existence for the same container ID"
+  fi
+
+  if json_field_equals "$direct_children_after_operation" "DirectChildrenPresent" "true"; then
+    add_fail_reason "direct children are still present after lifecycle operation"
+    add_survivor "direct_children_after_operation=$(printf '%s' "$direct_children_after_operation")"
+  elif ! json_field_equals "$direct_children_after_operation" "DirectChildrenPresent" "false"; then
+    add_gap_reason "direct-child proof after lifecycle operation is unknown or missing"
+  fi
+  if json_field_equals "$direct_children_after_rm" "DirectChildrenPresent" "true"; then
+    add_fail_reason "direct children are still present after rm"
+    add_survivor "direct_children_after_rm=$(printf '%s' "$direct_children_after_rm")"
+  elif ! json_field_equals "$direct_children_after_rm" "DirectChildrenPresent" "false"; then
+    add_gap_reason "direct-child proof after rm is unknown or missing"
+  fi
+  if json_field_equals "$direct_children_after_operation" "DirectChildrenPresent" "false" \
+    && json_field_equals "$direct_children_after_rm" "DirectChildrenPresent" "false"; then
+    direct_child_absence=true
+    process_tree_clear=true
+  fi
+
+  if json_field_equals "$stale_pid_after_operation" "PidStillPresentInSnapshot" "true"; then
+    add_fail_reason "stale inspect PID is still present after lifecycle operation"
+    add_survivor "stale_pid_after_operation=$(printf '%s' "$stale_pid_after_operation")"
+  elif ! json_field_equals "$stale_pid_after_operation" "PidStillPresentInSnapshot" "false"; then
+    add_gap_reason "stale PID proof after lifecycle operation is unknown or missing"
+  fi
+  if json_field_equals "$stale_pid_after_rm" "PidStillPresentInSnapshot" "true"; then
+    add_fail_reason "stale inspect PID is still present after rm"
+    add_survivor "stale_pid_after_rm=$(printf '%s' "$stale_pid_after_rm")"
+  elif ! json_field_equals "$stale_pid_after_rm" "PidStillPresentInSnapshot" "false"; then
+    add_gap_reason "stale PID proof after rm is unknown or missing"
+  fi
+  if json_field_equals "$stale_pid_after_operation" "PidStillPresentInSnapshot" "false" \
+    && json_field_equals "$stale_pid_after_rm" "PidStillPresentInSnapshot" "false"; then
+    stale_pid_absence=true
+  fi
+
+  if [ -f "$DIAG/$lifecycle_op.rc" ] && [ -f "$DIAG/$lifecycle_rm.rc" ]; then
+    lifecycle_logs_bound=true
+  else
+    add_gap_reason "lifecycle command stdout/stderr/rc artifacts are incomplete"
+  fi
+  if [ -f "$logs_before" ] && [ -f "$logs_after" ]; then
+    container_logs_bound=true
+  else
+    add_gap_reason "container log artifacts are incomplete"
+  fi
+
+  add_gap_reason "listener absence is captured as raw snapshots but not yet reduced to same-container-ID ownership"
+  add_gap_reason "stale-name absence is captured in sibling artifacts but not yet reduced inside this same-container proof"
+  add_gap_reason "GPU/media executor residue is captured as raw snapshots but not yet reduced to this container ID"
+  add_gap_reason "persisted state is captured as raw state.json snapshots but not yet reduced to PdockerTeardown.NoOrphanProcesses=true"
+
+  engine_inspect_same_container_id=false
+  if [ "$create_output_same" = "true" ] && [ "$inspect_before_same" = "true" ] \
+    && [ "$inspect_after_same" = "true" ] && [ "$inspect_after_rm_gone" = "true" ]; then
+    engine_inspect_same_container_id=true
+  fi
+
   cat >"$DIAG/$label.json" <<JSON
 {
   "SchemaVersion": 2,
@@ -1022,6 +1204,28 @@ write_same_id_evidence() {
   "Operation": $(json_string "$operation"),
   "Status": "planned-gap",
   "Success": false,
+  "VerifierReduction": {
+    "EngineInspectSameContainerId": $(json_bool "$engine_inspect_same_container_id"),
+    "ProcessTreeClear": $(json_bool "$process_tree_clear"),
+    "DirectChildAbsence": $(json_bool "$direct_child_absence"),
+    "ListenerAbsence": $(json_bool "$listener_absence"),
+    "StalePidAbsence": $(json_bool "$stale_pid_absence"),
+    "StaleNameAbsence": $(json_bool "$stale_name_absence"),
+    "GpuMediaExecutorResidueAbsence": $(json_bool "$residue_absence"),
+    "PersistedStateCleared": $(json_bool "$persisted_state_cleared"),
+    "LifecycleLogsBound": $(json_bool "$lifecycle_logs_bound"),
+    "ContainerLogsBound": $(json_bool "$container_logs_bound"),
+    "MismatchedContainerIds": $(write_json_string_array_from_file "$mismatches"),
+    "Survivors": $(write_json_string_array_from_file "$survivors")
+  },
+  "GapReasons": $(write_json_string_array_from_file "$gap_reasons"),
+  "FailReasons": $(write_json_string_array_from_file "$fail_reasons"),
+  "ReductionArtifacts": {
+    "GapReasons": $(json_string "files/$gap_reasons"),
+    "FailReasons": $(json_string "files/$fail_reasons"),
+    "MismatchedContainerIds": $(json_string "files/$mismatches"),
+    "Survivors": $(json_string "files/$survivors")
+  },
   "RequiredSameContainerId": [
     "EngineCreateOutput",
     "EngineInspectBefore",

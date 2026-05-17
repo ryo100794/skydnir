@@ -34,11 +34,14 @@ issues, and deciding which planned gaps become hard gates.
    GPU executor helpers, listeners, logs, and stale PIDs are gone before the
    UI or API reports stopped. Current slice complete: focused
    `--android-runtime-teardown` lane now removes stale evidence, collects the
-   detailed runtime-teardown directory, and validates either non-promoting
+   detailed runtime-teardown directory, validates either non-promoting
    planned-gap evidence or a future `device-pass` artifact through
-   `scripts/verify-runtime-teardown-artifact.py`. Remaining slice: implement
-   the device-side reducer that fills `VerifierReduction` and promotes only
-   when stop-rm and kill-rm both prove no same-container-ID residue.
+   `scripts/verify-runtime-teardown-artifact.py`, and emits conservative
+   device-side `VerifierReduction`, `GapReasons`, `FailReasons`,
+   `MismatchedContainerIds`, and `Survivors` diagnostics for both stop-rm and
+   kill-rm. Remaining slice: reduce listener ownership, stale-name,
+   GPU/media-executor residue, and persisted-state teardown fields to exact
+   same-container-ID proof before allowing promotion.
 3. **[#4](https://github.com/ryo100794/pdocker-android/issues/4)
    llama GPU Q6_K and environment propagation** `[P0 doing]`: continue the
    Q6_K blocker without touching llama.cpp, Dockerfiles, models, or prompts.
