@@ -1156,7 +1156,15 @@ start_container_mode() {
   remove_container
   payload="$(container_payload "$mode" "$ctx" "$gpu_layers")"
   echo "[pdocker llama compare] $mode: creating container" >&2
-  create_body="$(engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload" | http_body)"
+  if ! create_body="$(engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload" | http_body)"; then
+    echo "[pdocker llama compare] $mode: create request did not return within ${ENGINE_START_TIMEOUT_SEC}s; probing named container" >&2
+    operation_notify "running" "$mode: container create timed out; probing named container"
+    create_body="$(engine_body GET "/containers/$(urlencode "$CONTAINER")/json" || true)"
+    if [[ -z "$create_body" ]]; then
+      echo "[pdocker llama compare] $mode: create timeout left no inspectable named container" >&2
+      return 124
+    fi
+  fi
   cid="$(printf "%s" "$create_body" | parse_engine_id)"
   CURRENT_CONTAINER_ID="$cid"
   echo "[pdocker llama compare] $mode: starting container ${cid:0:12}" >&2
