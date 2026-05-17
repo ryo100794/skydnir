@@ -84,6 +84,36 @@
           "expected": "PATH_MAX, sockaddr_un.sun_path, exec argv/scratch, memory thresholds, uid/gid sentinels, and wait/signal status are declared"
         }
       ]
+    },
+    {
+      "id": "security-adversarial",
+      "description": "Adversarial payloads must fail closed or stay bounded without root escape, daemon crash, or argv corruption.",
+      "cases": [
+        {
+          "id": "adversarial.archive.path-traversal",
+          "surface": "archive-api",
+          "input": "PUT archive tar members ../escape.txt, nested/../../escape.txt, and /tmp/escape.txt",
+          "expected": "BadRequest and no file written outside destination"
+        },
+        {
+          "id": "adversarial.archive.symlink-escape",
+          "surface": "archive-api",
+          "input": "PUT archive symlink or hardlink entries to /etc/passwd or ../outside",
+          "expected": "BadRequest and no whiteout/state mutation is committed"
+        },
+        {
+          "id": "adversarial.engine-api.huge-json",
+          "surface": "engine-api",
+          "input": "POST /system/operations with a bounded huge JSON Detail field",
+          "expected": "HTTP 2xx/4xx but never 5xx; daemon remains responsive after the request"
+        },
+        {
+          "id": "adversarial.direct-runtime.long-argv",
+          "surface": "direct-runtime",
+          "input": "Long linker-style argv and many object arguments through direct exec rewrite",
+          "expected": "No fixed PATH_MAX argv buffer regression; exec argv/scratch limits remain declared"
+        }
+      ]
     }
   ]
 }

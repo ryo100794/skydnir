@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "tests" / "input_validation_cases.json"
 GRAMMAR_LEDGER = ROOT / "tests" / "input_grammar_coverage.json"
 PDOCKERD = ROOT / "docker-proot-setup" / "bin" / "pdockerd"
-REQUIRED_CATEGORIES = {"api-arguments", "input-file-grammar", "value-ranges"}
+REQUIRED_CATEGORIES = {"api-arguments", "input-file-grammar", "value-ranges", "security-adversarial"}
 REQUIRED_BOUNDARY_IDS = {
     "boundary.path-max-and-enametoolong",
     "boundary.sockaddr-min-and-sun-path-limit",
@@ -340,6 +340,112 @@ def run_value_range_tests() -> None:
     ok("value-range validation covers direct syscall boundary matrix")
 
 
+def run_security_adversarial_tests() -> None:
+    archive_result = subprocess.run(
+        [sys.executable, "scripts/verify-archive-api-compat.py"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if archive_result.returncode != 0:
+        record_evidence(
+            "security-adversarial",
+            "archive traversal and link escape corpus",
+            "fail",
+            returncode=archive_result.returncode,
+            output=archive_result.stdout[-4000:],
+        )
+        raise ValidationError("archive adversarial corpus failed:\n" + archive_result.stdout[-4000:])
+    record_evidence(
+        "security-adversarial",
+        "archive traversal and link escape corpus",
+        "pass",
+        command="python3 scripts/verify-archive-api-compat.py",
+    )
+    ok("security adversarial validation reuses archive traversal/link escape corpus")
+
+    with tempfile.TemporaryDirectory() as raw_tmp:
+        tmpdir = Path(raw_tmp)
+        proc, socket_path = start_daemon(tmpdir)
+        try:
+            huge_detail = "x" * (1024 * 1024)
+            payload = json.dumps(
+                {
+                    "Id": "input-validation-huge-json",
+                    "Kind": "input-validation",
+                    "Title": "huge-json",
+                    "Status": "running",
+                    "Detail": huge_detail,
+                    "Finished": False,
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
+            status, body = request_unix(socket_path, "POST", "/system/operations", payload)
+            if status >= 500:
+                record_evidence(
+                    "security-adversarial",
+                    "huge JSON operation body",
+                    "fail",
+                    status=status,
+                    body=body,
+                    payload_bytes=len(payload),
+                )
+                raise ValidationError(f"huge JSON operation returned HTTP {status}: {body!r}")
+            follow_status, follow_body = request_unix(socket_path, "GET", "/system/operations")
+            if follow_status != 200:
+                record_evidence(
+                    "security-adversarial",
+                    "daemon alive after huge JSON",
+                    "fail",
+                    status=follow_status,
+                    body=follow_body,
+                )
+                raise ValidationError(f"daemon was not responsive after huge JSON: HTTP {follow_status}")
+            record_evidence(
+                "security-adversarial",
+                "huge JSON operation body",
+                "pass",
+                status=status,
+                payload_bytes=len(payload),
+                followup_status=follow_status,
+            )
+            ok("security adversarial validation keeps huge JSON bounded and daemon alive")
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+
+    direct_result = subprocess.run(
+        [sys.executable, "scripts/verify_direct_syscall_contracts.py"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if direct_result.returncode != 0:
+        record_evidence(
+            "security-adversarial",
+            "direct-runtime long argv contract",
+            "fail",
+            returncode=direct_result.returncode,
+            output=direct_result.stdout[-4000:],
+        )
+        raise ValidationError("direct syscall adversarial argv contract failed:\n" + direct_result.stdout[-4000:])
+    record_evidence(
+        "security-adversarial",
+        "direct-runtime long argv contract",
+        "pass",
+        command="python3 scripts/verify_direct_syscall_contracts.py",
+    )
+    ok("security adversarial validation reuses direct-runtime long argv contract")
+
+
 def git_commit() -> str:
     result = subprocess.run(
         ["git", "rev-parse", "--short=12", "HEAD"],
@@ -377,6 +483,7 @@ def build_report(validation_ledger: dict[str, Any], grammar_ledger: dict[str, An
             "bnf_like_coverage_recorded": True,
             "bnf_full_coverage": False,
             "syntax_and_range_validation_recorded": True,
+            "adversarial_corpus_recorded": True,
         },
         "evidence": EVIDENCE,
     }
@@ -393,6 +500,7 @@ def main() -> int:
         run_api_argument_tests()
         run_file_grammar_tests()
         run_value_range_tests()
+        run_security_adversarial_tests()
     except ValidationError as exc:
         fail(str(exc))
     if args.write_artifact:
@@ -401,7 +509,7 @@ def main() -> int:
             json.dumps(build_report(validation_ledger, grammar_ledger), indent=2, sort_keys=True) + "\n"
         )
         ok(f"wrote input validation artifact: {args.write_artifact}")
-    ok("input validation covers API arguments, input-file grammar, and value ranges")
+    ok("input validation covers API arguments, input-file grammar, value ranges, and adversarial payloads")
     return 0
 
 
