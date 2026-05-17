@@ -761,13 +761,16 @@
       "id": "runtime.single-container.echo-hi",
       "area": "runtime-single-container",
       "lane": "android-quick",
-      "command": "bash scripts/android-device-smoke.sh --quick --no-install",
+      "command": "bash scripts/verify-heavy.sh --android-single-container",
       "status": "planned-gap",
       "docs": [
         "docs/plan/TODO.md",
-        "docs/test/ANDROID_SELFDEBUG.md"
+        "docs/test/RUNTIME_SINGLE_CONTAINER_GATE.md",
+        "docs/test/CI_GATE_LEDGER.md"
       ],
-      "checks": "Android docker run equivalent for ubuntu:22.04 echo hi, real process execution, stdout capture, exit code truth, and no host-shell fallback."
+      "checks": "Focused Android docker run equivalent for ubuntu:22.04 echo hi with strict artifact verification: exact stdout hi, exit code 0, real 64-hex Engine container ID from docker --cidfile, linked device stdout/stderr/log/cidfile evidence, and no host-shell fallback.",
+      "evidence_target": "docs/test/runtime-single-container-echo-hi-latest.json",
+      "plan_gate": "python3 scripts/verify-runtime-single-container-artifact.py docs/test/runtime-single-container-echo-hi-latest.json"
     },
     {
       "id": "service.health.listener-container-proof",

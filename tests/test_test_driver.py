@@ -76,10 +76,13 @@ class TestDriverManifestTest(unittest.TestCase):
 
         single_cmd = lanes["android-single-container-echo-hi"]["commands"][0]["shell"]
         self.assertIn("--single-container-echo-hi", single_cmd)
+        self.assertIn("verify-runtime-single-container-artifact.py", single_cmd)
         self.assertNotIn("--quick", single_cmd)
         storage_cmd = lanes["android-storage-metrics-sequence"]["commands"][0]["shell"]
         self.assertIn("rm -f docs/test/storage-metrics-sequence-latest.json", storage_cmd)
-        self.assertIn("exit 2", storage_cmd)
+        self.assertIn("scripts/android-storage-metrics-sequence.sh", storage_cmd)
+        storage_runner = (ROOT / "scripts" / "android-storage-metrics-sequence.sh").read_text(encoding="utf-8")
+        self.assertIn("exit 2", storage_runner)
 
     def test_verify_heavy_exposes_focused_device_lanes(self):
         heavy = (ROOT / "scripts" / "verify-heavy.sh").read_text(encoding="utf-8")

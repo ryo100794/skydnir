@@ -1684,16 +1684,51 @@ run_gpu_executor_bench() {
 docker_run_rm_smoke() {
   echo "[pdocker smoke] docker run --rm ubuntu:22.04 echo hi"
   docker_cmd 'mkdir -p pdocker/diagnostics
+run_stdout=pdocker/diagnostics/docker-run-rm-ubuntu-echo-hi.stdout
+run_stderr=pdocker/diagnostics/docker-run-rm-ubuntu-echo-hi.stderr
 run_log=pdocker/diagnostics/docker-run-rm-ubuntu-echo-hi.log
 run_json=pdocker/diagnostics/docker-run-rm-ubuntu-echo-hi.json
-rm -f "$run_log" "$run_json"
+run_cid=pdocker/diagnostics/docker-run-rm-ubuntu-echo-hi.cid
+rm -f "$run_stdout" "$run_stderr" "$run_log" "$run_json" "$run_cid"
 set +e
-docker run --rm ubuntu:22.04 echo hi >"$run_log" 2>&1
+docker run --cidfile "$run_cid" --rm ubuntu:22.04 echo hi >"$run_stdout" 2>"$run_stderr"
 status=$?
+cat "$run_stdout" "$run_stderr" >"$run_log"
 cat "$run_log"
-if grep -qx hi "$run_log"; then saw_hi=true; else saw_hi=false; fi
-printf "{\"Command\":\"docker run --rm ubuntu:22.04 echo hi\",\"ExitCode\":%s,\"SawHi\":%s,\"Log\":\"files/%s\"}\n" "$status" "$saw_hi" "$run_log" > "$run_json"
-if [ "$status" -ne 0 ] || [ "$saw_hi" != true ]; then
+if grep -qx hi "$run_stdout" && [ "$(wc -l <"$run_stdout" | tr -d " ")" = "1" ]; then stdout_exact_hi=true; else stdout_exact_hi=false; fi
+if [ ! -s "$run_stderr" ]; then stderr_empty=true; else stderr_empty=false; fi
+cid="$(cat "$run_cid" 2>/dev/null | tr -d "\r\n")"
+if printf "%s" "$cid" | grep -Eq "^[0-9a-f]{64}$"; then cid_ok=true; else cid_ok=false; fi
+if [ "$status" -eq 0 ] && [ "$stdout_exact_hi" = true ] && [ "$stderr_empty" = true ] && [ "$cid_ok" = true ]; then
+  success=true
+  status_text=pass
+else
+  success=false
+  status_text=failed
+fi
+cat > "$run_json" <<JSON
+{
+  "schema": "pdocker.android.runtime-single-container-echo-hi.v1",
+  "status": "$status_text",
+  "success": $success,
+  "command": "docker run --rm ubuntu:22.04 echo hi",
+  "effective_command": "docker run --cidfile <diagnostic-cidfile> --rm ubuntu:22.04 echo hi",
+  "exit_code": $status,
+  "stdout_exact": "hi",
+  "stdout_exact_match": $stdout_exact_hi,
+  "stderr_empty": $stderr_empty,
+  "container_id": "$cid",
+  "container_id_source": "docker --cidfile",
+  "host_shell_fallback": $([ "$cid_ok" = true ] && echo false || echo true),
+  "evidence": {
+    "stdout": "files/$run_stdout",
+    "stderr": "files/$run_stderr",
+    "combined_log": "files/$run_log",
+    "cidfile": "files/$run_cid"
+  }
+}
+JSON
+if [ "$success" != true ]; then
   echo "docker run --rm ubuntu:22.04 echo hi failed; diagnostics: files/$run_log and files/$run_json" >&2
   exit 1
 fi'

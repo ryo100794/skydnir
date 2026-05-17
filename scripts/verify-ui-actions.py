@@ -364,7 +364,15 @@ def main() -> int:
     require("template install records version stamp", ".pdocker-template-id" in main_src and ".pdocker-template-version" in main_src and "obj.optInt(\"version\", libraryVersion)" in main_src)
     require("android device smoke script exists", "docker compose up --detach --build" in android_smoke_src and "run-as" in android_smoke_src and "docker version" in android_smoke_src)
     require("android device smoke covers engine exec path", "docker exec \\\"\\$CID\\\" sh -lc" in android_smoke_src and "pdocker-exec-ok" in android_smoke_src and "'/vendor/xbin'" in android_smoke_src and "sleep 300" in android_smoke_src)
-    require("android device smoke covers single docker run gate", "docker_run_rm_smoke" in android_smoke_src and "docker run --rm ubuntu:22.04 echo hi" in android_smoke_src and "docker-run-rm-ubuntu-echo-hi.log" in android_smoke_src and "SawHi" in android_smoke_src)
+    require(
+        "android device smoke covers single docker run gate",
+        "docker_run_rm_smoke" in android_smoke_src
+        and "docker run --rm ubuntu:22.04 echo hi" in android_smoke_src
+        and "--cidfile" in android_smoke_src
+        and "docker-run-rm-ubuntu-echo-hi.stdout" in android_smoke_src
+        and "stdout_exact_match" in android_smoke_src
+        and "host_shell_fallback" in android_smoke_src,
+    )
     require("android device smoke covers engine api it stream", "engine_exec_it_smoke" in android_smoke_src and "/containers/$container_ref/exec" in android_smoke_src and "/exec/%s/start" in android_smoke_src and "pdocker-it-ok" in android_smoke_src)
     require("android device smoke covers ui bridge it self-test", "ACTION_SMOKE_UI_IT_SELFTEST" in main_src and "runUiItSelfTest" in main_src and "ui-it-selftest-latest.json" in main_src and "ui_engine_exec_it_selftest" in android_smoke_src and "SMOKE_UI_IT_SELFTEST" in android_smoke_src and "pdocker-ui-it-ok" in main_src and "pdocker-ui-it-bracket-ok" in main_src and "pdocker-ui-it-ctrlc-ok" in main_src and "pdocker-ui-it-term-ok" in main_src and "pdocker-ui-it-bash-ok" in main_src and "window.pdockerTestSendInput" in main_src)
     require("android device smoke avoids orphan cleanup side effects", "--remove-orphans" not in android_smoke_src)

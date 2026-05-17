@@ -45,6 +45,7 @@ run python3 -m py_compile \
   scripts/verify-service-truth-plan.py \
   scripts/verify-storage-metrics.py \
   scripts/verify-dev-workspace-compose-artifact.py \
+  scripts/verify-runtime-single-container-artifact.py \
   scripts/verify-saf-direct-output-artifact.py \
   scripts/verify-ui-actions.py \
   scripts/verify-terminal-exec-it-artifact.py \
@@ -56,6 +57,7 @@ run bash -n \
   scripts/android-device-smoke.sh \
   scripts/android-dev-workspace-compose-smoke.sh \
   scripts/android-documents-mediator-smoke.sh \
+  scripts/android-storage-metrics-sequence.sh \
   scripts/verify-heavy.sh
 
 run python3 docker-proot-setup/scripts/verify_runtime_contract.py
@@ -93,6 +95,8 @@ run python3 -m unittest \
   tests.test_runtime_teardown_device_gate \
   tests.test_dev_workspace_smoke_contract \
   tests.test_dev_workspace_compose_artifact_verifier \
+  tests.test_runtime_single_container_artifact_verifier \
+  tests.test_android_storage_metrics_sequence \
   tests.test_saf_direct_output_contract \
   tests.storage_metrics.test_verify_storage_metrics \
   tests.test_ci_gate_ledger \

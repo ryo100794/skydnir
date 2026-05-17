@@ -926,7 +926,7 @@
       ]
     },
     "android-storage-metrics-sequence": {
-      "description": "Device route for baseline/build/rebuild/edit/prune storage metrics sequence evidence. The shell command is intentionally explicit and non-promoting until a real captured sequence validates.",
+      "description": "Device route for baseline/build/rebuild/edit/prune storage metrics sequence evidence. The runner removes stale artifacts and writes a non-promoting planned-gap artifact until a full fresh sequence validates.",
       "requires": [
         "adb",
         "installed-debug-apk",
@@ -941,8 +941,8 @@
       "promotion_condition": "Must satisfy docs/test/CI_GATE_LEDGER.md storage metrics sequence promotion condition with a passing docs/test/storage-metrics-sequence-latest.json captured from the connected device.",
       "commands": [
         {
-          "id": "android-storage-metrics-sequence-plan",
-          "shell": "rm -f docs/test/storage-metrics-sequence-latest.json\necho \"android-storage-metrics-sequence requires scripts/android-storage-metrics-sequence.sh to capture fresh baseline/build/rebuild/edit/prune device evidence\" >&2\nexit 2",
+          "id": "android-storage-metrics-sequence-runner",
+          "shell": "rm -f docs/test/storage-metrics-sequence-latest.json\nbash scripts/android-storage-metrics-sequence.sh --out docs/test/storage-metrics-sequence-latest.json",
           "artifacts": [
             "docs/test/storage-metrics-sequence-latest.json"
           ]
@@ -988,7 +988,7 @@
       "commands": [
         {
           "id": "android-single-container-echo-hi",
-          "shell": "rm -f docs/test/runtime-single-container-echo-hi-latest.json; PDOCKER_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --single-container-echo-hi; test -f docs/test/runtime-single-container-echo-hi-latest.json",
+          "shell": "rm -f docs/test/runtime-single-container-echo-hi-latest.json; PDOCKER_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --single-container-echo-hi; python3 scripts/verify-runtime-single-container-artifact.py docs/test/runtime-single-container-echo-hi-latest.json",
           "artifacts": [
             "docs/test/runtime-single-container-echo-hi-latest.json"
           ]
