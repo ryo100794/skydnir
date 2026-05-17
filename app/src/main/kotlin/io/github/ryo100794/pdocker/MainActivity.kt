@@ -391,6 +391,11 @@ class MainActivity : AppCompatActivity() {
         val url: String,
     )
 
+    private data class AutoOpenService(
+        val projectDir: File,
+        val endpoint: ProjectServiceUrl,
+    )
+
     private data class ServiceContainerProof(
         val serviceName: String,
         val engineContainerId: String,
@@ -5009,7 +5014,7 @@ class MainActivity : AppCompatActivity() {
         if (urls.isNotEmpty()) {
             appendEngineJobOutput(job.id, urls.joinToString("\n") { (label, url) -> "Open $label $url" })
             val autoOpen = liveJobAutoOpenService(job)
-            if (autoOpen != null) openServiceWhenReady(job.id, autoOpen.first, autoOpen.second)
+            if (autoOpen != null) openServiceWhenReady(job.id, autoOpen)
         }
     }
 
@@ -5044,7 +5049,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun liveJobAutoOpenService(job: DockerJob): Pair<String, String>? {
+    private fun liveJobAutoOpenService(job: DockerJob): AutoOpenService? {
         val composeDir = job.command
             .takeIf { it.startsWith("engine compose up:") }
             ?.removePrefix("engine compose up:")
@@ -5056,9 +5061,12 @@ class MainActivity : AppCompatActivity() {
             .asSequence()
             .mapNotNull { composeServiceAutoOpenUrl(it) }
             .firstOrNull()
+            ?.let { AutoOpenService(composeDir, it) }
     }
 
-    private fun openServiceWhenReady(jobId: String, label: String, url: String) {
+    private fun openServiceWhenReady(jobId: String, autoOpen: AutoOpenService) {
+        val label = autoOpen.endpoint.label
+        val url = autoOpen.endpoint.url
         if (!isHttpServiceUrl(url)) {
             appendEngineJobOutput(jobId, "$label ready: $url (external client)")
             openServiceUrl(url)
@@ -5066,21 +5074,30 @@ class MainActivity : AppCompatActivity() {
         }
         thread(isDaemon = true, name = "pdocker-service-open") {
             repeat(45) { attempt ->
+                val proof = currentServiceProof(autoOpen.projectDir, autoOpen.endpoint.serviceName)
+                if (proof == null) {
+                    if (attempt == 0 || attempt % 5 == 4) {
+                        appendEngineJobOutput(jobId, "$label waiting: $url (Engine container/listener proof pending)")
+                    }
+                    Thread.sleep(1000)
+                    return@repeat
+                }
                 val result = probeServiceUrl(url)
+                val cacheKey = serviceHealthKey(proof.engineContainerId, url)
                 if (result.startsWith("HTTP ")) {
                     ui.post {
-                        serviceHealth[url] = result
-                        serviceHealthCheckedAt[url] = System.currentTimeMillis()
-                        appendEngineJobOutput(jobId, "$label ready: $url ($result)")
+                        serviceHealth[cacheKey] = result
+                        serviceHealthCheckedAt[cacheKey] = System.currentTimeMillis()
+                        appendEngineJobOutput(jobId, "$label ready: $url ($result, engine=${proof.engineContainerId.take(12)})")
                         openServiceUrl(url)
                     }
                     return@thread
                 }
                 if (attempt == 0 || attempt % 5 == 4) {
                     ui.post {
-                        serviceHealth[url] = result
-                        serviceHealthCheckedAt[url] = System.currentTimeMillis()
-                        appendEngineJobOutput(jobId, "$label waiting: $url ($result)")
+                        serviceHealth[cacheKey] = result
+                        serviceHealthCheckedAt[cacheKey] = System.currentTimeMillis()
+                        appendEngineJobOutput(jobId, "$label waiting: $url ($result, engine=${proof.engineContainerId.take(12)})")
                     }
                 }
                 Thread.sleep(1000)
@@ -6543,7 +6560,7 @@ class MainActivity : AppCompatActivity() {
         return urls.distinctBy { it.second }
     }
 
-    private fun composeServiceAutoOpenUrl(service: ComposeService): Pair<String, String>? {
+    private fun composeServiceAutoOpenUrl(service: ComposeService): ProjectServiceUrl? {
         service.ports
             .mapNotNull { port -> composePortBinding(port) }
             .distinct()
@@ -6553,12 +6570,12 @@ class MainActivity : AppCompatActivity() {
                 if (link != null) {
                     val url = link.url?.takeIf { it.isNotBlank() }
                         ?: serviceUriFor(link.label, "127.0.0.1", hostPort, binding.containerPort)
-                    return link.label to url
+                    return ProjectServiceUrl(service.name, link.label, url)
                 }
             }
         return service.serviceLinks
             .firstOrNull { it.autoOpen && it.port == null && !it.url.isNullOrBlank() }
-            ?.let { it.label to it.url.orEmpty() }
+            ?.let { ProjectServiceUrl(service.name, it.label, it.url.orEmpty()) }
     }
 
     private fun projectServiceHealthSummary(urls: List<ProjectServiceUrl>, projectDir: File): String {
@@ -6573,7 +6590,11 @@ class MainActivity : AppCompatActivity() {
         }
         urls.filter { it.serviceName in runningServices && isHttpServiceUrl(it.url) }
             .filter { runningProofs[it.serviceName]?.engineSnapshotCurrent == true }
-            .forEach { scheduleServiceHealthProbe(it.url) }
+            .forEach { serviceUrl ->
+                runningProofs[serviceUrl.serviceName]?.let { proof ->
+                    scheduleServiceHealthProbe(proof, serviceUrl.url)
+                }
+            }
         val inactive = getString(R.string.service_health_inactive)
         return urls.take(4).joinToString(", ") { serviceUrl ->
             val running = serviceUrl.serviceName in runningServices
@@ -6583,7 +6604,8 @@ class MainActivity : AppCompatActivity() {
                 !running -> inactive
                 proof == null || !proof.engineSnapshotCurrent -> getString(R.string.service_health_unknown)
                 !isHttpServiceUrl(serviceUrl.url) -> getString(R.string.service_health_external_client)
-                else -> serviceHealth[serviceUrl.url] ?: getString(R.string.service_health_requested)
+                else -> serviceHealth[serviceHealthKey(proof.engineContainerId, serviceUrl.url)]
+                    ?: getString(R.string.service_health_requested)
             }
             "${serviceUrl.label}:$state"
         }
@@ -6615,6 +6637,16 @@ class MainActivity : AppCompatActivity() {
             .toMap()
     }
 
+    private fun currentServiceProof(projectDir: File, serviceName: String): ServiceContainerProof? {
+        val snapshots = projectContainerSnapshots(projectDir)
+        if (!serviceTruthEngineSnapshotIsCurrent()) return null
+        return projectRunningServiceProofs(projectDir, snapshots)[serviceName]
+            ?.takeIf { it.engineSnapshotCurrent }
+    }
+
+    private fun serviceHealthKey(engineContainerId: String, url: String): String =
+        "$engineContainerId|$url"
+
     private fun serviceTruthEngineSnapshotAgeMs(): Long? =
         lastContainerSnapshotAt
             .takeIf { it > 0L }
@@ -6636,17 +6668,18 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-    private fun scheduleServiceHealthProbe(url: String) {
-        if (url in serviceHealthInFlight) return
-        val checkedAt = serviceHealthCheckedAt[url] ?: 0L
-        if (url in serviceHealth && System.currentTimeMillis() - checkedAt < 15_000L) return
-        serviceHealthInFlight += url
+    private fun scheduleServiceHealthProbe(proof: ServiceContainerProof, url: String) {
+        val cacheKey = serviceHealthKey(proof.engineContainerId, url)
+        if (cacheKey in serviceHealthInFlight) return
+        val checkedAt = serviceHealthCheckedAt[cacheKey] ?: 0L
+        if (cacheKey in serviceHealth && System.currentTimeMillis() - checkedAt < 15_000L) return
+        serviceHealthInFlight += cacheKey
         thread(isDaemon = true, name = "pdocker-service-probe") {
             val result = probeServiceUrl(url)
             ui.post {
-                serviceHealth[url] = result
-                serviceHealthCheckedAt[url] = System.currentTimeMillis()
-                serviceHealthInFlight -= url
+                serviceHealth[cacheKey] = result
+                serviceHealthCheckedAt[cacheKey] = System.currentTimeMillis()
+                serviceHealthInFlight -= cacheKey
                 if (currentTab == Tab.Overview) renderContent()
             }
         }

@@ -12,6 +12,11 @@ def test_service_probe_success_is_requested_until_listener_proof():
     assert "projectRunningServiceProofs(projectDir, snapshots)" in main
     assert "serviceTruthEngineSnapshotIsCurrent()" in main
     assert "runningProofs[it.serviceName]?.engineSnapshotCurrent == true" in main
+    assert "scheduleServiceHealthProbe(proof, serviceUrl.url)" in main
+    assert "serviceHealthKey(proof.engineContainerId, serviceUrl.url)" in main
+    assert "private fun scheduleServiceHealthProbe(proof: ServiceContainerProof, url: String)" in main
+    assert "val cacheKey = serviceHealthKey(proof.engineContainerId, url)" in main
+    assert "scheduleServiceHealthProbe(it.url)" not in main
     assert "!engineSnapshotCurrent -> getString(R.string.service_health_unknown)" in main
     assert "proof == null || !proof.engineSnapshotCurrent" in main
     assert "matches.distinctBy { it.engineContainerId }.singleOrNull()" in main
