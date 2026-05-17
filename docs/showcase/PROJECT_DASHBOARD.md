@@ -23,8 +23,8 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 |---|---:|
 | Project-library templates | 6 |
 | TODO done entries | 57 |
-| TODO doing entries | 17 |
-| TODO next entries | 33 |
+| TODO doing entries | 18 |
+| TODO next entries | 32 |
 | Compatibility audit PASS | 69 |
 | Compatibility audit FAIL | 0 |
 
@@ -50,7 +50,7 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 | doing | [#6](https://github.com/ryo100794/pdocker-android/issues/6) Service truth same-container-ID device gate: the listener health and ID/label truth work are one gate. Probe default workspace... |
 | next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU performance workflow after Vulkan clamp: keep CPU fallback hiding Vulkan devices, force Vulkan only for measured GPU... |
 | next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) MoE-aware GPU residency layer research and design: after the dense llama GPU bridge is correct, evaluate a pdocker-owned... |
-| next | [#7](https://github.com/ryo100794/pdocker-android/issues/7) Android storage metrics verification: add device smoke/manual coverage that layer, image-view, container-private, total, and... |
+| doing | [#7](https://github.com/ryo100794/pdocker-android/issues/7) Android storage metrics verification: add device smoke/manual coverage that layer, image-view, container-private, total, and... |
 | next | [#8](https://github.com/ryo100794/pdocker-android/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built... |
 | doing | [#9](https://github.com/ryo100794/pdocker-android/issues/9) First public release candidate gate: define and satisfy the minimum GitHub Release criteria for a build that is honest... |
 

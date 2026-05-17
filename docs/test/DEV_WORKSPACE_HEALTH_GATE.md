@@ -18,3 +18,15 @@ all of the following evidence is true for the default workspace:
 Configured ports, completed jobs, stale `state.json`, or extension install
 intent are not success by themselves. The JSON artifact keeps each check under
 `checks` so CI and manual device runs can identify which proof is missing.
+
+Host-side promotion verification is available with:
+
+```sh
+python3 scripts/verify-dev-workspace-compose-artifact.py docs/test/dev-workspace-compose-latest.json
+```
+
+The verifier exits zero only for `status=pass` / `success=true` artifacts whose
+`build_run`, `engine_state`, `listener`, `code_server_http`, configured
+`extensions`, and `ui_truth` checks are all `ok`. `planned-gap`, `fail`,
+`blocked`, and other non-pass artifacts are non-promoting and must keep
+`success=false`.

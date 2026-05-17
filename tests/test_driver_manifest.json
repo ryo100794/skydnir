@@ -72,6 +72,19 @@
           ]
         },
         {
+          "id": "verify-runtime-teardown-device-gate-contract",
+          "argv": [
+            "python3",
+            "-m",
+            "unittest",
+            "tests.test_runtime_teardown_device_gate"
+          ],
+          "artifacts": [
+            "scripts/android-device-smoke.sh",
+            "docs/test/RUNTIME_TEARDOWN_DEVICE_GATE.md"
+          ]
+        },
+        {
           "id": "verify-image-pull-crash-safety",
           "argv": [
             "python3",
@@ -97,6 +110,41 @@
           "argv": [
             "python3",
             "scripts/verify-project-library.py"
+          ]
+        },
+        {
+          "id": "verify-dev-workspace-compose-artifact-contract",
+          "argv": [
+            "python3",
+            "-m",
+            "unittest",
+            "tests.test_dev_workspace_smoke_contract",
+            "tests.test_dev_workspace_compose_artifact_verifier"
+          ],
+          "artifacts": [
+            "docs/test/DEV_WORKSPACE_HEALTH_GATE.md",
+            "docs/test/dev-workspace-compose-latest.json"
+          ]
+        },
+        {
+          "id": "verify-saf-direct-output-artifact-contract",
+          "argv": [
+            "python3",
+            "-m",
+            "unittest",
+            "tests.test_saf_direct_output_contract"
+          ],
+          "artifacts": [
+            "docs/test/SAF_DIRECT_OUTPUT_GATE.md",
+            "docs/test/saf-direct-output-latest.json"
+          ]
+        },
+        {
+          "id": "verify-storage-metrics-sequence-fixture",
+          "shell": "tmp=$(mktemp); python3 scripts/verify-storage-metrics.py --print-sequence-fixture > \"$tmp\"; python3 scripts/verify-storage-metrics.py --sequence \"$tmp\"; rm -f \"$tmp\"",
+          "artifacts": [
+            "docs/test/STORAGE_METRICS.md",
+            "docs/test/storage-metrics-sequence-latest.json"
           ]
         },
         {
@@ -223,7 +271,12 @@
         "Docker CLI docker cp end-to-end device evidence",
         "COW/overlay external kill-at-step device evidence",
         "image live-pull interruption device replay",
-        "archive API device mutation promotion"
+        "archive API device mutation promotion",
+        "default dev-workspace compose health device evidence",
+        "SAF direct-output Documents device evidence",
+        "storage metrics baseline/build/rebuild/edit/prune device sequence evidence",
+        "single-container docker run echo-hi device evidence",
+        "modern/no-PRoot runtime truth device evidence"
       ]
     },
     "android-llama-gpu-q6k": {
@@ -568,14 +621,14 @@
       "commands": [
         {
           "id": "android-documents-saf-direct-output",
-          "argv": [
-            "bash",
-            "scripts/android-documents-mediator-smoke.sh"
-          ],
           "artifacts": [
             "docs/test/saf-direct-output-latest.json"
-          ]
+          ],
+          "shell": "CID=\"${PDOCKER_SAF_DIRECT_OUTPUT_CONTAINER:-}\"\nif [ -z \"$CID\" ] && [ -f docs/test/dev-workspace-compose-latest.json ]; then\n  CID=\"$(python3 - <<'PYDOCS'\nimport json\ntry:\n    data=json.load(open('docs/test/dev-workspace-compose-latest.json'))\n    print(data.get('checks',{}).get('engine_state',{}).get('running_container_id',''))\nexcept Exception:\n    print('')\nPYDOCS\n)\"\nfi\nif [ -z \"$CID\" ]; then\n  echo \"android-documents requires PDOCKER_SAF_DIRECT_OUTPUT_CONTAINER or a passing dev-workspace artifact\" >&2\n  exit 2\nfi\nPDOCKER_SAF_DIRECT_OUTPUT_CONTAINER=\"$CID\" bash scripts/android-documents-mediator-smoke.sh"
         }
+      ],
+      "planned_gap_contracts": [
+        "SAF direct-output Documents device evidence with real container id"
       ]
     },
     "android-dev-workspace": {
@@ -871,6 +924,53 @@
             "docs/release/RELEASE_READINESS.md",
             "docs/test/CI_GATE_LEDGER.md",
             "tests/test_driver_manifest.json"
+          ]
+        }
+      ]
+    },
+    "android-storage-metrics-sequence": {
+      "description": "Device route for baseline/build/rebuild/edit/prune storage metrics sequence evidence. The shell command is intentionally explicit and non-promoting until a real captured sequence validates.",
+      "requires": [
+        "adb",
+        "installed-debug-apk",
+        "running-pdockerd",
+        "controlled-build-project"
+      ],
+      "checkpoint_class": "device-evidence-only",
+      "stable_checkpoint_eligible": false,
+      "planned_gap_contracts": [
+        "storage metrics baseline/build/rebuild/edit/prune device sequence evidence"
+      ],
+      "promotion_condition": "Must satisfy docs/test/CI_GATE_LEDGER.md storage metrics sequence promotion condition with a passing docs/test/storage-metrics-sequence-latest.json captured from the connected device.",
+      "commands": [
+        {
+          "id": "android-storage-metrics-sequence-plan",
+          "shell": "echo \"Capture baseline/build/rebuild/edit/prune snapshots, write docs/test/storage-metrics-sequence-latest.json, then run: python3 scripts/verify-storage-metrics.py --sequence docs/test/storage-metrics-sequence-latest.json\"; test -f docs/test/storage-metrics-sequence-latest.json && python3 scripts/verify-storage-metrics.py --sequence docs/test/storage-metrics-sequence-latest.json",
+          "artifacts": [
+            "docs/test/storage-metrics-sequence-latest.json"
+          ]
+        }
+      ]
+    },
+    "android-runtime-teardown": {
+      "description": "Device route for runtime teardown evidence. The current smoke intentionally returns planned-gap/non-promoting evidence until a device-pass reducer exists.",
+      "requires": [
+        "adb",
+        "installed-debug-apk",
+        "running-pdockerd"
+      ],
+      "checkpoint_class": "device-evidence-planned-gap",
+      "stable_checkpoint_eligible": false,
+      "planned_gap_contracts": [
+        "runtime teardown device-pass reducer for process/listener/stale/executor cleanup"
+      ],
+      "promotion_condition": "Must satisfy docs/test/CI_GATE_LEDGER.md runtime teardown promotion condition with Status=device-pass, Success=true, and strict same-container-ID proof artifacts.",
+      "commands": [
+        {
+          "id": "android-runtime-teardown-planned-gap-smoke",
+          "shell": "set +e; bash scripts/android-device-smoke.sh --no-install --runtime-teardown default-workspace; rc=$?; set -e; test \"$rc\" -eq 2",
+          "artifacts": [
+            "docs/test/runtime-teardown-latest.json"
           ]
         }
       ]

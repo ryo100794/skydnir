@@ -18,6 +18,8 @@ class CiGateLedgerTest(unittest.TestCase):
             "Runtime teardown",
             "Image pull crash safety",
             "OOM/LMK",
+            "Single-container execution",
+            "Modern/no-PRoot runtime truth",
             "Terminal `-it`",
             "llama GPU correctness",
             "status=planned-gap",
@@ -44,6 +46,11 @@ class CiGateLedgerTest(unittest.TestCase):
             "docs/test/service-truth-latest.json",
             "docs/test/runtime-teardown-latest.json",
             "docs/test/image-pull-crash-safety-latest.json",
+            "docs/test/test-run-latest.json",
+            "docs/test/no-proot-runtime-truth-latest.json",
+            "docs/test/dev-workspace-compose-latest.json",
+            "docs/test/saf-direct-output-latest.json",
+            "docs/test/storage-metrics-sequence-latest.json",
             "docs/test/llama-gpu-q6k-workflow-latest.json",
         ]:
             self.assertIn(artifact, self.ledger)

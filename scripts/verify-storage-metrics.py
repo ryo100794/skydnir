@@ -73,6 +73,52 @@ CAPTURE_ENDPOINTS = (
     ("images", "/images/json"),
     ("containers", "/containers/json?all=1&size=1"),
 )
+REQUIRED_SEQUENCE_PHASES = (
+    "baseline",
+    "after-build",
+    "after-rebuild",
+    "after-edit",
+    "after-prune",
+)
+
+
+def _with_summary(snapshot: dict[str, Any], **updates: Any) -> dict[str, Any]:
+    copied = json.loads(json.dumps(snapshot))
+    copied["system_df"].update(updates)
+    return copied
+
+
+SEQUENCE_FIXTURE: dict[str, Any] = {
+    "schema": "pdocker.storage.metrics.sequence.v1",
+    "metadata": {
+        "device": "fixture-device",
+        "build_sha": "fixture-build",
+        "package": "io.github.ryo100794.pdocker.compat",
+    },
+    "phases": [
+        {"name": "baseline", "operation": "capture", "snapshot": FIXTURE},
+        {
+            "name": "after-build",
+            "operation": "build image sharing lower layer",
+            "snapshot": _with_summary(FIXTURE, SharedLayerBytes=70, ContainerUpperBytes=7, UniqueBytes=77),
+        },
+        {
+            "name": "after-rebuild",
+            "operation": "rebuild unchanged image",
+            "snapshot": _with_summary(FIXTURE, SharedLayerBytes=70, ContainerUpperBytes=7, UniqueBytes=77),
+        },
+        {
+            "name": "after-edit",
+            "operation": "container file edit/copy-up",
+            "snapshot": _with_summary(FIXTURE, SharedLayerBytes=70, ContainerUpperBytes=12, UniqueBytes=82),
+        },
+        {
+            "name": "after-prune",
+            "operation": "prune unused images/containers",
+            "snapshot": _with_summary(FIXTURE, SharedLayerBytes=60, ContainerUpperBytes=7, UniqueBytes=67),
+        },
+    ],
+}
 
 
 class ValidationError(Exception):
@@ -291,6 +337,104 @@ def validate(snapshot: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _phase_summary(phase: dict[str, Any]) -> dict[str, Any]:
+    snapshot = require_mapping(phase.get("snapshot"), f"phase {phase.get('name')}.snapshot")
+    return require_mapping(snapshot.get("system_df"), f"phase {phase.get('name')}.snapshot.system_df")
+
+
+def _number(summary: dict[str, Any], phase: str, key: str, errors: list[str]) -> float:
+    value = summary.get(key)
+    if not is_number(value):
+        fail(errors, f"sequence phase {phase} system_df.{key} must be numeric")
+        return 0.0
+    return float(value)
+
+
+def validate_sequence(sequence: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    try:
+        if sequence.get("schema") != "pdocker.storage.metrics.sequence.v1":
+            fail(errors, "sequence.schema must be pdocker.storage.metrics.sequence.v1")
+        metadata = require_mapping(sequence.get("metadata", {}), "metadata")
+        for key in ("device", "build_sha", "package"):
+            if not isinstance(metadata.get(key), str) or not metadata.get(key, "").strip():
+                fail(errors, f"metadata.{key} is required for reproducible device sequence evidence")
+        phases_raw = require_list(sequence.get("phases"), "phases")
+    except ValidationError as exc:
+        return [f"FAIL: {exc}"]
+
+    phases: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for index, raw in enumerate(phases_raw):
+        try:
+            phase = require_mapping(raw, f"phases[{index}]")
+        except ValidationError as exc:
+            errors.append(f"FAIL: {exc}")
+            continue
+        name = phase.get("name")
+        if not isinstance(name, str) or not name:
+            fail(errors, f"phases[{index}].name is required")
+            continue
+        if name in phases:
+            fail(errors, f"duplicate storage metrics phase {name}")
+            continue
+        phases[name] = phase
+        order.append(name)
+        snapshot = phase.get("snapshot")
+        if isinstance(snapshot, dict):
+            errors.extend(
+                f"FAIL: phase {name}: {message.removeprefix('FAIL: ')}"
+                for message in validate(snapshot)
+            )
+        else:
+            fail(errors, f"phase {name}.snapshot must be a JSON object")
+
+    missing = [name for name in REQUIRED_SEQUENCE_PHASES if name not in phases]
+    if missing:
+        fail(errors, "sequence is missing required phases: " + ", ".join(missing))
+        return errors
+    expected_positions = [order.index(name) for name in REQUIRED_SEQUENCE_PHASES]
+    if expected_positions != sorted(expected_positions):
+        fail(errors, "required storage metrics phases must appear in baseline/build/rebuild/edit/prune order")
+
+    summaries: dict[str, dict[str, Any]] = {}
+    for name in REQUIRED_SEQUENCE_PHASES:
+        try:
+            summaries[name] = _phase_summary(phases[name])
+        except ValidationError as exc:
+            errors.append(f"FAIL: {exc}")
+            return errors
+
+    baseline_unique = _number(summaries["baseline"], "baseline", "UniqueBytes", errors)
+    build_unique = _number(summaries["after-build"], "after-build", "UniqueBytes", errors)
+    rebuild_unique = _number(summaries["after-rebuild"], "after-rebuild", "UniqueBytes", errors)
+    edit_unique = _number(summaries["after-edit"], "after-edit", "UniqueBytes", errors)
+    prune_unique = _number(summaries["after-prune"], "after-prune", "UniqueBytes", errors)
+    build_shared = _number(summaries["after-build"], "after-build", "SharedLayerBytes", errors)
+    rebuild_shared = _number(summaries["after-rebuild"], "after-rebuild", "SharedLayerBytes", errors)
+    edit_upper = _number(summaries["after-edit"], "after-edit", "ContainerUpperBytes", errors)
+    rebuild_upper = _number(summaries["after-rebuild"], "after-rebuild", "ContainerUpperBytes", errors)
+
+    if build_unique < baseline_unique:
+        fail(errors, "after-build UniqueBytes must not be lower than baseline without an explicit prune phase")
+    if rebuild_unique > build_unique:
+        fail(errors, "after-rebuild UniqueBytes must not grow from an unchanged rebuild")
+    if rebuild_shared > build_shared:
+        fail(errors, "after-rebuild SharedLayerBytes must not grow from reused lower layers")
+    if edit_upper <= rebuild_upper:
+        fail(errors, "after-edit ContainerUpperBytes must grow after file edit/copy-up")
+    if edit_unique < rebuild_unique:
+        fail(errors, "after-edit UniqueBytes must not shrink before prune")
+    if prune_unique > edit_unique:
+        fail(errors, "after-prune UniqueBytes must not grow after cleanup")
+
+    edit_containers = phases["after-edit"].get("snapshot", {}).get("containers", [])
+    if not any(isinstance(item, dict) and is_number(item.get("SizeRw")) and item["SizeRw"] > 0 for item in edit_containers):
+        fail(errors, "after-edit must include a container row with SizeRw > 0")
+
+    return errors
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Validate storage metric JSON snapshots or the built-in fixture."
@@ -301,9 +445,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="JSON snapshot with system_df, images, and containers sections.",
     )
     parser.add_argument(
+        "--sequence",
+        type=Path,
+        help="JSON sequence with baseline/build/rebuild/edit/prune storage metric snapshots.",
+    )
+    parser.add_argument(
         "--print-fixture",
         action="store_true",
         help="Print the built-in example snapshot and exit.",
+    )
+    parser.add_argument(
+        "--print-sequence-fixture",
+        action="store_true",
+        help="Print the built-in storage-metrics sequence fixture and exit.",
     )
     parser.add_argument(
         "--capture-device",
@@ -346,9 +500,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.print_fixture:
         print(json.dumps(FIXTURE, indent=2, sort_keys=True))
         return 0
+    if args.print_sequence_fixture:
+        print(json.dumps(SEQUENCE_FIXTURE, indent=2, sort_keys=True))
+        return 0
 
-    if args.fixture and args.capture_device:
-        parser.error("--fixture and --capture-device are mutually exclusive")
+    selected_inputs = sum(1 for value in (args.fixture, args.sequence, args.capture_device) if value)
+    if selected_inputs > 1:
+        parser.error("--fixture, --sequence, and --capture-device are mutually exclusive")
     if args.dry_run and not args.capture_device:
         parser.error("--dry-run requires --capture-device")
     if args.output and not args.capture_device:
@@ -375,6 +533,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         if args.output:
             args.output.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
+    elif args.sequence:
+        try:
+            sequence = require_mapping(json.loads(args.sequence.read_text()), str(args.sequence))
+        except (OSError, json.JSONDecodeError, ValidationError) as exc:
+            print(f"FAIL: {exc}")
+            return 1
+        errors = validate_sequence(sequence)
+        if errors:
+            print("\n".join(errors))
+            return 1
+        print(f"verify-storage-metrics: PASS ({args.sequence})")
+        return 0
     else:
         snapshot = load_snapshot(args.fixture)
 

@@ -580,8 +580,12 @@ def seed_layered_image(mod, image: str, diff_ids: list[str], config: dict | None
     rootfs = img_dir / "rootfs"
     rootfs.mkdir(parents=True, exist_ok=True)
     for did in diff_ids:
-        tree = Path(mod.LAYERS_DIR) / did / "tree"
+        layer_dir = Path(mod.LAYERS_DIR) / did
+        tree = layer_dir / "tree"
         tree.mkdir(parents=True, exist_ok=True)
+        meta = layer_dir / "meta.json"
+        if not meta.exists():
+            meta.write_text(json.dumps({"diff_id": did, "size": 0}))
     mod._save_image_manifest(str(img_dir), diff_ids, config or {"config": {"Env": []}})
     (img_dir / "config.json").write_text(json.dumps(config or {"config": {"Env": []}}))
     (img_dir / "image_ref").write_text(mod.normalize_image(image))
@@ -592,18 +596,19 @@ def test_storage_summary_distinguishes_layer_and_upper_bytes() -> None:
         home_path = Path(home)
         mod = load_pdockerd_with_env("storage_summary", "no-proot", home_path)
         layers = {
-            "aaa": 10,
-            "bbb": 20,
-            "ccc": 30,
+            "a" * 64: 10,
+            "b" * 64: 20,
+            "c" * 64: 30,
         }
         for did, size in layers.items():
             layer_dir = Path(mod.LAYERS_DIR) / did
             tree = layer_dir / "tree"
             tree.mkdir(parents=True, exist_ok=True)
             (tree / f"{did}.txt").write_bytes(b"x" * size)
-            (layer_dir / "meta.json").write_text(json.dumps({"size": size}))
-        seed_layered_image(mod, "local/one:latest", ["aaa", "bbb"])
-        seed_layered_image(mod, "local/two:latest", ["aaa", "ccc"])
+            (layer_dir / "meta.json").write_text(json.dumps({"diff_id": did, "size": size}))
+        layer_ids = list(layers)
+        seed_layered_image(mod, "local/one:latest", [layer_ids[0], layer_ids[1]])
+        seed_layered_image(mod, "local/two:latest", [layer_ids[0], layer_ids[2]])
 
         cid = "c" * 64
         cdir = Path(mod.CONTAINERS_DIR) / cid
@@ -765,7 +770,9 @@ def test_existing_tag_full_image_cache() -> None:
         (rootfs / "app").mkdir(parents=True)
         (rootfs / "app" / "hello.txt").write_text("hello\n")
         for did in (run, copy):
-            (Path(mod.LAYERS_DIR) / did / "tree").mkdir(parents=True, exist_ok=True)
+            layer_dir = Path(mod.LAYERS_DIR) / did
+            (layer_dir / "tree").mkdir(parents=True, exist_ok=True)
+            (layer_dir / "meta.json").write_text(json.dumps({"diff_id": did, "size": 0}))
         cfg = {
             "config": {"Env": []},
             "rootfs": {"type": "layers", "diff_ids": [f"sha256:{base}", f"sha256:{run}", f"sha256:{copy}"]},
@@ -814,9 +821,11 @@ def test_build_cache_contract() -> None:
         if key1 == key3:
             fail("build cache key must include parent layer stack")
         did = "c" * 64
-        layer_tree = Path(mod.LAYERS_DIR) / did / "tree"
+        layer_dir = Path(mod.LAYERS_DIR) / did
+        layer_tree = layer_dir / "tree"
         layer_tree.mkdir(parents=True)
         (layer_tree / "marker").write_text("cached\n")
+        (layer_dir / "meta.json").write_text(json.dumps({"diff_id": did, "size": 7}))
         mod.store_build_cache_entry(key1, {"diff_id": did, "size": 7})
         entry = mod.load_build_cache_entry(key1)
         if not entry or entry.get("diff_id") != did:

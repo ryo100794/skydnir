@@ -60,7 +60,13 @@ def main() -> int:
     require("daemon sets Docker tmp paths", "PDOCKER_TMP_DIR" in source["runtime"] and "PROOT_TMP_DIR" in source["runtime"])
 
     require("host intent start path still gates daemon start", "ACTION_SMOKE_START" in source["main"] and "startDaemon()" in source["main"])
-    require("dockerfile/compose commands avoid host shell path", "docker compose up --detach --build" in source["main"])
+    require(
+        "dockerfile/compose commands avoid host shell path",
+        "runEngineJob(title, dir.name, \"engine compose up:" in source["main"]
+        and "parseComposeServices(dir)" in source["main"]
+        and "createContainer(containerName" in source["main"]
+        and "docker compose up --detach --build" not in source["main"],
+    )
 
     return 0
 

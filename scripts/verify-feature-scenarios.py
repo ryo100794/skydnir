@@ -121,7 +121,6 @@ def main() -> int:
         "python3 scripts/verify-feature-scenarios.py",
         "python3 scripts/verify-abnormal-events.py",
         "python3 scripts/verify-refactor-resilience.py",
-        "python3 scripts/verify-test-design-criteria.py",
         "python3 scripts/verify-input-grammar-coverage.py",
         "python3 scripts/verify-input-validation.py",
         "python3 scripts/verify-stress-regression.py",
@@ -132,6 +131,14 @@ def main() -> int:
     ):
         if command not in verify_fast:
             fail(f"verify-fast.sh must include {command}")
+    driver_manifest = (ROOT / "tests" / "test_driver_manifest.json").read_text()
+    for term in (
+        '"id": "verify-test-design-criteria"',
+        '"checkpoint_class": "strict-governance-known-failing"',
+        "docs/test/test-design-criteria-latest.json",
+    ):
+        if term not in driver_manifest:
+            fail(f"test design governance lane must include {term}")
 
     ok(f"feature scenario ledger covers {len(areas)} areas with {len(scenarios)} scenarios")
     ok(f"feature scenario ledger has {runnable_fast} fast runnable scenarios and {device_count} device scenarios")

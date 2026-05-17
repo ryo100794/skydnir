@@ -194,10 +194,13 @@ issues, and deciding which planned gaps become hard gates.
   evidence; Docker/Compose metadata and bare active flags remain planned or
   inactive. Foreign listeners and peer host-port claims surface as conflicts,
   and container cards show active/inactive/planned/conflict counts.
-- [next] [#7](https://github.com/ryo100794/pdocker-android/issues/7)
+- [doing] [#7](https://github.com/ryo100794/pdocker-android/issues/7)
   Android storage metrics verification: add device smoke/manual coverage
   that layer, image-view, container-private, total, and free-space values are
   nonnegative and refresh after build, prune, rebuild, and container edit flows.
+  Host-side sequence validation now exists via
+  `python3 scripts/verify-storage-metrics.py --sequence ...`; promotion still
+  requires a real device sequence artifact for baseline/build/rebuild/edit/prune.
 - [next] [#8](https://github.com/ryo100794/pdocker-android/issues/8)
   Reproducible release/F-Droid readiness: turn the local build wrapper
   into a broader pinned CI/release process with source-built native payloads,
@@ -226,7 +229,8 @@ issues, and deciding which planned gaps become hard gates.
   Android-heavy dry-runs.
 - [done] Storage metrics validation has an ADB-free fixture checker:
   `python3 scripts/verify-storage-metrics.py`, documenting shared layer-pool
-  accounting and guarding against image-view double counting.
+  accounting, guarding against image-view double counting, and rejecting fake
+  rebuild/edit/prune sequences that do not preserve shared-layer accounting.
 - [done] F-Droid/reproducible-build readiness is captured in
   `docs/release/FDROID_RELEASE_PROCESS.md`, including the distinction between
   user-directed container/image/package downloads and hidden APK self-extension.
@@ -307,8 +311,9 @@ risk, not stable checkpoint credit.
   metadata. The executable VS Code health gate is now
   `bash scripts/android-dev-workspace-compose-smoke.sh`; its contract is
   documented in `docs/test/DEV_WORKSPACE_HEALTH_GATE.md` and its required
-  artifact is `docs/test/dev-workspace-compose-latest.json`. Static
-  acceptance-plan guard remains `python3 scripts/verify-service-truth-plan.py`;
+  artifact is `docs/test/dev-workspace-compose-latest.json`. Host-side artifact
+  promotion is guarded by `python3 scripts/verify-dev-workspace-compose-artifact.py`;
+  static acceptance-plan guard remains `python3 scripts/verify-service-truth-plan.py`;
   future same-ID service-truth evidence also writes
   `docs/test/service-truth-latest.json`.
 - [next] RUN changed-path/snapshot performance. `RUN chmod +x
@@ -366,7 +371,9 @@ implementation change plus a focused verification artifact.
   backend with `FilesystemBackend` and `UnixMetadataBackend` contracts.
   Overlay, archive, runtime, and UI code must consume those abstract contracts
   and capability flags instead of branching on SAF, SD-card, FAT32, exFAT,
-  `DocumentProvider`, tree URIs, or sidecar internals.
+  `DocumentProvider`, tree URIs, or sidecar internals. Direct-output evidence is
+  now guarded by `python3 scripts/verify-saf-direct-output-artifact.py`, which
+  rejects mirror-only/fallback fake success and unsafe path fallback.
 - [next] Storage metrics accounting: the shared layer pool is counted once for
   total storage. Image apparent sizes, container apparent rootfs sizes, and
   merged views intentionally overlap lower-layer bytes, so UI summaries and

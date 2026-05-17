@@ -137,6 +137,46 @@ class StorageMetricsCaptureTest(unittest.TestCase):
             errors,
         )
 
+    def test_sequence_fixture_validates_build_rebuild_edit_prune_order(self):
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            rc = verify_storage_metrics.main(["--sequence", self._write_json(verify_storage_metrics.SEQUENCE_FIXTURE)])
+
+        self.assertEqual(rc, 0)
+        self.assertIn("verify-storage-metrics: PASS", stdout.getvalue())
+
+    def test_sequence_validation_rejects_unchanged_rebuild_growth(self):
+        sequence = json.loads(json.dumps(verify_storage_metrics.SEQUENCE_FIXTURE))
+        for phase in sequence["phases"]:
+            if phase["name"] == "after-rebuild":
+                phase["snapshot"]["system_df"]["SharedLayerBytes"] += 1
+                phase["snapshot"]["system_df"]["UniqueBytes"] += 1
+
+        errors = verify_storage_metrics.validate_sequence(sequence)
+
+        self.assertIn("FAIL: after-rebuild UniqueBytes must not grow from an unchanged rebuild", errors)
+        self.assertIn("FAIL: after-rebuild SharedLayerBytes must not grow from reused lower layers", errors)
+
+    def test_sequence_validation_rejects_missing_edit_copyup_growth(self):
+        sequence = json.loads(json.dumps(verify_storage_metrics.SEQUENCE_FIXTURE))
+        for phase in sequence["phases"]:
+            if phase["name"] == "after-edit":
+                phase["snapshot"]["system_df"]["ContainerUpperBytes"] = 7
+                phase["snapshot"]["system_df"]["UniqueBytes"] = 77
+                phase["snapshot"]["containers"][0]["SizeRw"] = 0
+
+        errors = verify_storage_metrics.validate_sequence(sequence)
+
+        self.assertIn("FAIL: after-edit ContainerUpperBytes must grow after file edit/copy-up", errors)
+        self.assertIn("FAIL: after-edit must include a container row with SizeRw > 0", errors)
+
+    def _write_json(self, payload):
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        with tmp:
+            json.dump(payload, tmp)
+        return tmp.name
+
 
 if __name__ == "__main__":
     unittest.main()

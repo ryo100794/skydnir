@@ -22,8 +22,8 @@ Current TODO counters:
 | State | Count |
 |---|---:|
 | done | 57 |
-| doing | 17 |
-| next | 33 |
+| doing | 18 |
+| next | 32 |
 | blocked | 0 |
 
 ## Timeline
@@ -41,7 +41,6 @@ Keep the UI compose path truthful and visible while closing regressions that blo
 
 Turn the remaining high-value TODOs into repeatable device checks and public artifacts.
 
-- [#7](https://github.com/ryo100794/pdocker-android/issues/7) Android storage metrics verification: add device smoke/manual coverage that layer, image-view, container-private, total, and...
 - [#8](https://github.com/ryo100794/pdocker-android/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built...
 - RUN changed-path/snapshot performance. `RUN chmod +x /usr/local/bin/pdocker-*` is functionally correct but still triggers an expensive broad snapshot in the default workspace build...
 

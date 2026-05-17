@@ -33,6 +33,49 @@ python3 scripts/verify-storage-metrics.py --fixture /path/to/storage-snapshot.js
 The fixture mode intentionally does not start pdockerd, build an APK, or require
 ADB. It validates only the storage-metric contract.
 
+## Device Sequence Evidence
+
+The release gate for storage metrics is stronger than a single snapshot.  It
+must prove that metrics stay coherent across the normal mutation sequence:
+baseline, build, unchanged rebuild, container edit/copy-up, and prune.
+
+To inspect the expected shape:
+
+```sh
+python3 scripts/verify-storage-metrics.py --print-sequence-fixture
+```
+
+To validate a captured sequence:
+
+```sh
+python3 scripts/verify-storage-metrics.py --sequence /path/to/storage-sequence.json
+```
+
+The sequence JSON uses:
+
+```json
+{
+  "schema": "pdocker.storage.metrics.sequence.v1",
+  "metadata": {
+    "device": "...",
+    "build_sha": "...",
+    "package": "io.github.ryo100794.pdocker.compat"
+  },
+  "phases": [
+    {"name": "baseline", "snapshot": {"system_df": {}, "images": [], "containers": []}},
+    {"name": "after-build", "snapshot": {}},
+    {"name": "after-rebuild", "snapshot": {}},
+    {"name": "after-edit", "snapshot": {}},
+    {"name": "after-prune", "snapshot": {}}
+  ]
+}
+```
+
+Each phase is validated with the same single-snapshot rules.  The sequence gate
+also rejects unchanged rebuilds that grow shared-layer or unique bytes,
+container edit phases that do not grow `ContainerUpperBytes` / `SizeRw`, and
+prune phases that increase `UniqueBytes`.
+
 ## Device Capture
 
 The verifier can also capture the three Docker-compatible endpoints from a
@@ -123,6 +166,10 @@ container copy-up/edit behavior, prune behavior, or Android storage refresh.
 8. Repeat one build or edit flow after pruning. Confirm metrics recover to a
    coherent nonnegative state and still validate with the capture or fixture
    script.
+9. Combine the accepted snapshots into the sequence JSON above and run
+   `python3 scripts/verify-storage-metrics.py --sequence ...`.  Store that
+   sequence artifact with the device note before treating the storage-metrics
+   gate as promoted.
 
 Record the device model, APK flavor, build SHA, commands used, and the final
 validated JSON snapshot in the test note or PR that exercised this lane.

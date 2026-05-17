@@ -27,6 +27,17 @@ docs/test/saf-direct-output-latest.json
 ```
 
 The canonical lane is `android-documents` in `tests/test_driver_manifest.json`.
+After a device run, promote the artifact only if the standalone host verifier
+accepts it:
+
+```sh
+python3 scripts/verify-saf-direct-output-artifact.py docs/test/saf-direct-output-latest.json
+```
+
+The verifier rejects top-level fake success, mirror-only payload evidence,
+recorded fallback, planned-skip/planned-gap status, missing container execution,
+missing rename/unlink proof, malformed sidecar/provider/conflict evidence, and
+unsafe-path cases that do not fail closed before fallback.
 
 ## Required proof
 

@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from copy import deepcopy
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -5,6 +9,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SMOKE = ROOT / "scripts" / "android-device-smoke.sh"
 DOC = ROOT / "docs" / "test" / "RUNTIME_TEARDOWN_DEVICE_GATE.md"
+VERIFIER = ROOT / "scripts" / "verify-service-truth-plan.py"
+
+_spec = importlib.util.spec_from_file_location("verify_service_truth_plan", VERIFIER)
+assert _spec and _spec.loader
+verify_service_truth_plan = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(verify_service_truth_plan)
 
 
 def _shell_function_body(source: str, name: str) -> str:
@@ -19,6 +29,18 @@ def _shell_function_body(source: str, name: str) -> str:
             if depth == 0:
                 return source[start : idx + 1]
     raise AssertionError(f"function not closed: {name}")
+
+
+def runtime_teardown_fixture():
+    artifact, proofs, negatives = verify_service_truth_plan.build_runtime_teardown_success_fixture()
+    return deepcopy(artifact), deepcopy(proofs), deepcopy(negatives)
+
+
+def validate_runtime_teardown_contract(artifact: dict, proofs: dict | None = None, negatives: dict | None = None) -> None:
+    try:
+        verify_service_truth_plan.validate_runtime_teardown_artifact(artifact, proofs, negatives)
+    except ValueError as exc:
+        raise AssertionError(str(exc)) from exc
 
 
 class RuntimeTeardownDeviceGateTest(unittest.TestCase):
@@ -182,6 +204,99 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
             "mixed evidence from a different container ID",
         ]:
             self.assertIn(required, self.body)
+
+    def test_runtime_teardown_planned_gap_is_never_success_even_with_evidence(self):
+        artifact, proofs, negatives = runtime_teardown_fixture()
+        artifact["Status"] = "planned-gap"
+        artifact["Success"] = True
+        with self.assertRaises(AssertionError):
+            validate_runtime_teardown_contract(artifact, proofs, negatives)
+
+        artifact["Success"] = False
+        validate_runtime_teardown_contract(artifact, proofs, negatives)
+
+        artifact, proofs, negatives = runtime_teardown_fixture()
+        artifact["Status"] = "skip"
+        artifact["Success"] = True
+        with self.assertRaises(AssertionError):
+            validate_runtime_teardown_contract(artifact, proofs, negatives)
+
+        artifact["Success"] = False
+        validate_runtime_teardown_contract(artifact, proofs, negatives)
+
+    def test_runtime_teardown_success_requires_same_container_id_proofs(self):
+        artifact, proofs, negatives = runtime_teardown_fixture()
+        validate_runtime_teardown_contract(artifact, proofs, negatives)
+
+        with self.assertRaises(AssertionError):
+            validate_runtime_teardown_contract(artifact, None, negatives)
+
+        bad = deepcopy(proofs)
+        bad["same-container-id-stop-rm"]["ContainerId"] = artifact["ContainerIds"]["StopRm"][:12]
+        with self.assertRaises(AssertionError):
+            validate_runtime_teardown_contract(artifact, bad, negatives)
+
+        bad = deepcopy(proofs)
+        bad["same-container-id-kill-rm"]["Operation"] = "stop-rm"
+        with self.assertRaises(AssertionError):
+            validate_runtime_teardown_contract(artifact, bad, negatives)
+
+    def test_runtime_teardown_fake_success_rejects_http_or_cli_only(self):
+        artifact, proofs, negatives = runtime_teardown_fixture()
+        for mutate in [
+            lambda a, p, n: a["Evidence"].pop("ProcessTree"),
+            lambda a, p, n: a["Evidence"].pop("EngineApiInspect"),
+            lambda a, p, n: p["same-container-id-stop-rm"]["Evidence"].pop("ProcessTreeBeforeAfter"),
+            lambda a, p, n: p["same-container-id-stop-rm"]["VerifierReduction"].update({"ProcessTreeClear": False}),
+            lambda a, p, n: p["same-container-id-stop-rm"]["VerifierReduction"].update({"ContainerLogsBound": False}),
+            lambda a, p, n: p["same-container-id-kill-rm"].update({"Success": False}),
+        ]:
+            with self.subTest(mutate=mutate):
+                candidate = deepcopy(artifact)
+                proof_candidate = deepcopy(proofs)
+                negative_candidate = deepcopy(negatives)
+                mutate(candidate, proof_candidate, negative_candidate)
+                with self.assertRaises(AssertionError):
+                    validate_runtime_teardown_contract(candidate, proof_candidate, negative_candidate)
+
+    def test_runtime_teardown_fake_success_rejects_missing_absence_sources(self):
+        artifact, proofs, negatives = runtime_teardown_fixture()
+        for mutate in [
+            lambda a, p, n: a["Evidence"].pop("DirectChildAbsence"),
+            lambda a, p, n: a["Evidence"].pop("ListenerAbsence"),
+            lambda a, p, n: a["Evidence"].pop("StalePid"),
+            lambda a, p, n: a["Evidence"].pop("StaleName"),
+            lambda a, p, n: a["Evidence"].pop("GpuMediaExecutorResidue"),
+            lambda a, p, n: p["same-container-id-stop-rm"]["BeforeAfterEvidence"].pop("DirectChildAbsence"),
+            lambda a, p, n: p["same-container-id-kill-rm"]["VerifierReduction"].update({"ListenerAbsence": False}),
+            lambda a, p, n: p["same-container-id-kill-rm"]["VerifierReduction"].update({"GpuMediaExecutorResidueAbsence": False}),
+            lambda a, p, n: p["same-container-id-kill-rm"]["VerifierReduction"].update({"Survivors": ["listener 18080"]}),
+        ]:
+            with self.subTest(mutate=mutate):
+                candidate = deepcopy(artifact)
+                proof_candidate = deepcopy(proofs)
+                negative_candidate = deepcopy(negatives)
+                mutate(candidate, proof_candidate, negative_candidate)
+                with self.assertRaises(AssertionError):
+                    validate_runtime_teardown_contract(candidate, proof_candidate, negative_candidate)
+
+    def test_runtime_teardown_negative_cases_must_remain_non_success(self):
+        artifact, proofs, negatives = runtime_teardown_fixture()
+        validate_runtime_teardown_contract(artifact, proofs, negatives)
+        for name in verify_service_truth_plan.TEARDOWN_REQUIRED_NEGATIVE_CASES:
+            with self.subTest(name=name):
+                candidate = deepcopy(negatives)
+                candidate[name]["Success"] = True
+                with self.assertRaises(AssertionError):
+                    validate_runtime_teardown_contract(artifact, proofs, candidate)
+
+        candidate = deepcopy(negatives)
+        candidate["negative-wrong-container-id"]["ExpectedAccepted"] = True
+        with self.assertRaises(AssertionError):
+            validate_runtime_teardown_contract(artifact, proofs, candidate)
+
+    def test_static_verifier_self_checks_runtime_teardown_fixture_contract(self):
+        verify_service_truth_plan.validate_runtime_teardown_fixture_contract()
 
     def test_runtime_teardown_device_gate_doc_matches_artifact_contract(self):
         doc = DOC.read_text()

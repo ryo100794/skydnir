@@ -66,6 +66,57 @@ SOURCE_ARTIFACT_TERMS = {
     "ListenerProbe": ["configured-ports", "listener-probe", "listener-owner-map", "proc-net-tcp"],
     "ContainerLogs": ["logs-selected"],
 }
+TEARDOWN_ARTIFACT_SOURCES = [
+    "EngineApiContainersJson",
+    "EngineApiInspect",
+    "ProcessTable",
+    "ProcessTree",
+    "DirectChildAbsence",
+    "ListenerAbsence",
+    "StalePid",
+    "StaleName",
+    "GpuMediaExecutorResidue",
+    "SameContainerId",
+    "PersistedStateJson",
+    "LifecycleLogs",
+    "ContainerLogs",
+]
+TEARDOWN_REQUIRED_NEGATIVE_CASES = [
+    "negative-http-204-only",
+    "negative-cli-exit-zero-only",
+    "negative-name-only",
+    "negative-stale-state-json",
+    "negative-listener-only",
+    "negative-process-only",
+    "negative-previous-container-logs",
+    "negative-wrong-container-id",
+]
+TEARDOWN_REQUIRED_PROOF_SOURCES = [
+    "EngineCreateOutput",
+    "EngineInspectBefore",
+    "EngineInspectAfterOperation",
+    "EngineInspectAfterRemove",
+    "ProcessTreeBeforeAfter",
+    "DirectChildAbsence",
+    "ListenerAbsenceBeforeAfter",
+    "StalePidAbsence",
+    "GpuMediaExecutorResidueBeforeAfter",
+    "PersistedStateJsonBeforeAfter",
+    "LifecycleLogs",
+    "ContainerLogs",
+]
+TEARDOWN_REQUIRED_REDUCTION_FLAGS = [
+    "EngineInspectSameContainerId",
+    "ProcessTreeClear",
+    "DirectChildAbsence",
+    "ListenerAbsence",
+    "StalePidAbsence",
+    "StaleNameAbsence",
+    "GpuMediaExecutorResidueAbsence",
+    "PersistedStateCleared",
+    "LifecycleLogsBound",
+    "ContainerLogsBound",
+]
 
 
 def fail(message: str) -> None:
@@ -152,6 +203,10 @@ def validate_planned_acceptance(scenario: dict[str, Any], *, required_sources: s
 
 def artifact_error(message: str) -> ValueError:
     return ValueError(f"service truth artifact contract violation: {message}")
+
+
+def teardown_artifact_error(message: str) -> ValueError:
+    return ValueError(f"runtime teardown artifact contract violation: {message}")
 
 
 def require_artifact_paths(source_name: str, source: dict[str, Any]) -> list[str]:
@@ -276,6 +331,199 @@ def validate_service_truth_artifact(artifact: dict[str, Any]) -> None:
         raise artifact_error("ContainerLogs.MarkerEngineContainerId must exactly match Proof.EngineContainerId")
 
 
+def _require_teardown(condition: bool, message: str) -> None:
+    if not condition:
+        raise teardown_artifact_error(message)
+
+
+def _exact_container_id(value: Any, field_name: str) -> str:
+    _require_teardown(isinstance(value, str) and bool(ENGINE_CONTAINER_ID_RE.fullmatch(value)), f"{field_name} must be an exact 64-hex Engine container ID")
+    return value
+
+
+def _require_non_empty_pathish(value: Any, field_name: str) -> None:
+    if isinstance(value, str):
+        _require_teardown(bool(value.strip()), f"{field_name} must name an artifact path")
+    elif isinstance(value, list):
+        _require_teardown(bool(value), f"{field_name} must name at least one artifact path")
+        for index, item in enumerate(value):
+            _require_non_empty_pathish(item, f"{field_name}[{index}]")
+    elif isinstance(value, dict):
+        _require_teardown(bool(value), f"{field_name} must not be empty")
+        for key, item in value.items():
+            _require_non_empty_pathish(item, f"{field_name}.{key}")
+    else:
+        raise teardown_artifact_error(f"{field_name} must name artifact paths")
+
+
+def validate_runtime_teardown_negative_case(name: str, artifact: dict[str, Any]) -> None:
+    """Validate a teardown negative-case artifact remains non-promoting."""
+
+    if artifact.get("Kind") != "runtime-teardown-negative-case":
+        raise teardown_artifact_error(f"{name} Kind must be runtime-teardown-negative-case")
+    if artifact.get("SchemaVersion") != 1:
+        raise teardown_artifact_error(f"{name} SchemaVersion must be 1")
+    if artifact.get("Success") is not False:
+        raise teardown_artifact_error(f"{name} must never report Success true")
+    if artifact.get("ExpectedAccepted") is not False:
+        raise teardown_artifact_error(f"{name} must declare ExpectedAccepted=false")
+    if not artifact.get("RejectedSignal"):
+        raise teardown_artifact_error(f"{name} must record the rejected fake-success signal")
+    if not artifact.get("Reason"):
+        raise teardown_artifact_error(f"{name} must record why the signal is insufficient")
+    required_proof = str(artifact.get("RequiredProof", "")).lower()
+    for term in ["same engine container id", "process tree", "listener", "stale pid", "logs"]:
+        if term not in required_proof:
+            raise teardown_artifact_error(f"{name} RequiredProof must mention {term}")
+
+
+def validate_runtime_teardown_proof(
+    name: str,
+    proof: dict[str, Any],
+    *,
+    expected_cid: str,
+    expected_operation: str,
+) -> None:
+    """Validate one future device-pass same-container-ID teardown proof.
+
+    The smoke script already emits planned-gap proof scaffolds.  A promoted
+    artifact must be stricter: every before/after evidence group is tied to one
+    exact Engine container ID and the device-side reducer must explicitly
+    reduce raw paths into absence/bound-log verdicts.
+    """
+
+    if proof.get("Kind") != "same-container-id-teardown-proof":
+        raise teardown_artifact_error(f"{name} Kind must be same-container-id-teardown-proof")
+    if proof.get("SchemaVersion") != 2:
+        raise teardown_artifact_error(f"{name} SchemaVersion must be 2")
+    if proof.get("Status") != "device-pass":
+        raise teardown_artifact_error(f"{name} must be device-pass before it can promote runtime teardown")
+    if proof.get("Success") is not True:
+        raise teardown_artifact_error(f"{name} must set Success=true only after device proof reduction")
+    cid = _exact_container_id(proof.get("ContainerId"), f"{name}.ContainerId")
+    if cid != expected_cid:
+        raise teardown_artifact_error(f"{name} ContainerId must exactly match the created Engine container ID")
+    if proof.get("Operation") != expected_operation:
+        raise teardown_artifact_error(f"{name} Operation must be {expected_operation}")
+
+    required = proof.get("RequiredSameContainerId")
+    _require_teardown(isinstance(required, list), f"{name}.RequiredSameContainerId must be a list")
+    missing_required = [source for source in TEARDOWN_REQUIRED_PROOF_SOURCES if source not in required]
+    if missing_required:
+        raise teardown_artifact_error(f"{name} missing RequiredSameContainerId sources: {', '.join(missing_required)}")
+
+    evidence = proof.get("Evidence")
+    _require_teardown(isinstance(evidence, dict), f"{name}.Evidence must be an object")
+    for source in TEARDOWN_REQUIRED_PROOF_SOURCES:
+        _require_teardown(source in evidence, f"{name}.Evidence missing {source}")
+        _require_non_empty_pathish(evidence[source], f"{name}.Evidence.{source}")
+
+    before_after = proof.get("BeforeAfterEvidence")
+    _require_teardown(isinstance(before_after, dict), f"{name}.BeforeAfterEvidence must be an object")
+    for source in [
+        "EngineInspect",
+        "ProcessTree",
+        "DirectChildAbsence",
+        "ListenerAbsence",
+        "StalePid",
+        "GpuMediaExecutorResidue",
+        "PersistedStateJson",
+        "LifecycleLogs",
+        "ContainerLogs",
+    ]:
+        _require_teardown(source in before_after, f"{name}.BeforeAfterEvidence missing {source}")
+        _require_non_empty_pathish(before_after[source], f"{name}.BeforeAfterEvidence.{source}")
+
+    reduction = proof.get("VerifierReduction")
+    _require_teardown(isinstance(reduction, dict), f"{name}.VerifierReduction must be present for device-pass")
+    for flag in TEARDOWN_REQUIRED_REDUCTION_FLAGS:
+        if reduction.get(flag) is not True:
+            raise teardown_artifact_error(f"{name}.VerifierReduction.{flag} must be true")
+    if reduction.get("MismatchedContainerIds"):
+        raise teardown_artifact_error(f"{name} cannot promote with mismatched container IDs")
+    if reduction.get("Survivors"):
+        raise teardown_artifact_error(f"{name} cannot promote with surviving processes/listeners/executors")
+
+
+def _extract_teardown_proof_artifacts(artifact: dict[str, Any], proof_artifacts: dict[str, dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+    if proof_artifacts is not None:
+        return proof_artifacts
+    embedded = artifact.get("ProofArtifacts")
+    if isinstance(embedded, dict):
+        return embedded
+    raise teardown_artifact_error("device-pass runtime teardown requires loaded same-container-ID proof artifacts")
+
+
+def _extract_teardown_negative_artifacts(artifact: dict[str, Any], negative_artifacts: dict[str, dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+    if negative_artifacts is not None:
+        return negative_artifacts
+    embedded = artifact.get("NegativeCaseArtifacts")
+    if isinstance(embedded, dict):
+        return embedded
+    raise teardown_artifact_error("device-pass runtime teardown requires loaded negative-case artifacts")
+
+
+def validate_runtime_teardown_artifact(
+    artifact: dict[str, Any],
+    proof_artifacts: dict[str, dict[str, Any]] | None = None,
+    negative_artifacts: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Validate the future device-pass shape for runtime teardown.
+
+    Planned-gap/skip artifacts are valid evidence but must never promote.  A
+    device-pass has to survive a fake-success reducer: HTTP 204, CLI exit 0,
+    name matching, process absence, listener absence, stale state, or old logs
+    are insufficient unless all sources agree for the exact 64-hex Engine ID.
+    """
+
+    if artifact.get("SchemaVersion") != 1:
+        raise teardown_artifact_error("SchemaVersion must be 1")
+    if artifact.get("Kind") != "runtime-teardown":
+        raise teardown_artifact_error("Kind must be runtime-teardown")
+
+    if artifact.get("Status") in {"planned-gap", "skip", "skipped"}:
+        if artifact.get("Success") is not False:
+            raise teardown_artifact_error("planned-gap/skip runtime teardown artifacts must set Success false and are never a pass")
+        return
+
+    if artifact.get("Status") != "device-pass":
+        raise teardown_artifact_error("successful runtime teardown artifact must set Status device-pass")
+    if artifact.get("Success") is not True:
+        raise teardown_artifact_error("non-planned runtime teardown artifact is not a success")
+
+    container_ids = artifact.get("ContainerIds")
+    _require_teardown(isinstance(container_ids, dict), "ContainerIds object is required")
+    stop_cid = _exact_container_id(container_ids.get("StopRm"), "ContainerIds.StopRm")
+    kill_cid = _exact_container_id(container_ids.get("KillRm"), "ContainerIds.KillRm")
+    if stop_cid == kill_cid:
+        raise teardown_artifact_error("StopRm and KillRm must be independent exact Engine container IDs")
+
+    evidence = artifact.get("Evidence")
+    _require_teardown(isinstance(evidence, dict), "Evidence object is required")
+    for source in TEARDOWN_ARTIFACT_SOURCES:
+        _require_teardown(source in evidence, f"Evidence missing {source}")
+        _require_non_empty_pathish(evidence[source], f"Evidence.{source}")
+
+    proof_refs = artifact.get("SameContainerIdTeardownArtifacts")
+    _require_teardown(isinstance(proof_refs, dict), "SameContainerIdTeardownArtifacts object is required")
+    for key, cid, operation in [("StopRm", stop_cid, "stop-rm"), ("KillRm", kill_cid, "kill-rm")]:
+        ref = proof_refs.get(key)
+        _require_teardown(isinstance(ref, dict), f"SameContainerIdTeardownArtifacts.{key} must be an object")
+        if ref.get("ContainerId") != cid:
+            raise teardown_artifact_error(f"SameContainerIdTeardownArtifacts.{key}.ContainerId must match ContainerIds.{key}")
+        if ref.get("Operation") != operation:
+            raise teardown_artifact_error(f"SameContainerIdTeardownArtifacts.{key}.Operation must be {operation}")
+        _require_non_empty_pathish(ref.get("Artifact"), f"SameContainerIdTeardownArtifacts.{key}.Artifact")
+
+    proofs = _extract_teardown_proof_artifacts(artifact, proof_artifacts)
+    validate_runtime_teardown_proof("same-container-id-stop-rm", proofs.get("same-container-id-stop-rm", {}), expected_cid=stop_cid, expected_operation="stop-rm")
+    validate_runtime_teardown_proof("same-container-id-kill-rm", proofs.get("same-container-id-kill-rm", {}), expected_cid=kill_cid, expected_operation="kill-rm")
+
+    negatives = _extract_teardown_negative_artifacts(artifact, negative_artifacts)
+    for name in TEARDOWN_REQUIRED_NEGATIVE_CASES:
+        validate_runtime_teardown_negative_case(name, negatives.get(name, {}))
+
+
 def build_success_fixture() -> dict[str, Any]:
     cid = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     pid = 4242
@@ -392,6 +640,244 @@ def validate_service_truth_fixture_contract() -> None:
             continue
         fail("service truth fixture self-check accepted a fake success")
 
+
+def _teardown_proof_fixture(cid: str, operation: str, prefix: str) -> dict[str, Any]:
+    before_after = {
+        "EngineInspect": {
+            "Before": f"files/pdocker/diagnostics/runtime-teardown/{prefix}-inspect-before.http",
+            "AfterOperation": f"files/pdocker/diagnostics/runtime-teardown/{prefix}-inspect-after.http",
+            "AfterRemove": f"files/pdocker/diagnostics/runtime-teardown/{prefix}-inspect-after-rm.http",
+        },
+        "ProcessTree": {
+            "Before": "files/pdocker/diagnostics/runtime-teardown/process-before.txt",
+            "AfterStart": f"files/pdocker/diagnostics/runtime-teardown/process-after-{prefix}-start.txt",
+            "AfterOperation": f"files/pdocker/diagnostics/runtime-teardown/process-after-{prefix}.txt",
+            "AfterRemove": f"files/pdocker/diagnostics/runtime-teardown/process-after-rm-{prefix}.txt",
+        },
+        "DirectChildAbsence": {
+            "AfterOperation": f"files/pdocker/diagnostics/runtime-teardown/{prefix}-process-tree-after-operation.json",
+            "AfterRemove": f"files/pdocker/diagnostics/runtime-teardown/{prefix}-process-tree-after-rm.json",
+        },
+        "ListenerAbsence": {
+            "Before": "files/pdocker/diagnostics/runtime-teardown/listeners-before.txt",
+            "AfterStart": f"files/pdocker/diagnostics/runtime-teardown/listeners-after-{prefix}-start.txt",
+            "AfterOperation": f"files/pdocker/diagnostics/runtime-teardown/listeners-after-{prefix}.txt",
+            "AfterRemove": f"files/pdocker/diagnostics/runtime-teardown/listeners-after-rm-{prefix}.txt",
+        },
+        "StalePid": {
+            "AfterOperation": f"files/pdocker/diagnostics/runtime-teardown/{prefix}-stale-pid-after-operation.json",
+            "AfterRemove": f"files/pdocker/diagnostics/runtime-teardown/{prefix}-stale-pid-after-rm.json",
+        },
+        "GpuMediaExecutorResidue": {
+            "Before": "files/pdocker/diagnostics/runtime-teardown/executor-residue-before.txt",
+            "AfterStart": f"files/pdocker/diagnostics/runtime-teardown/executor-residue-after-{prefix}-start.txt",
+            "AfterOperation": f"files/pdocker/diagnostics/runtime-teardown/executor-residue-after-{prefix}.txt",
+            "AfterRemove": f"files/pdocker/diagnostics/runtime-teardown/executor-residue-after-rm-{prefix}.txt",
+        },
+        "PersistedStateJson": {
+            "Before": "files/pdocker/diagnostics/runtime-teardown/persisted-state-before.txt",
+            "AfterStart": f"files/pdocker/diagnostics/runtime-teardown/persisted-state-after-{prefix}-start.txt",
+            "AfterOperation": f"files/pdocker/diagnostics/runtime-teardown/persisted-state-after-{prefix}.txt",
+            "AfterRemove": f"files/pdocker/diagnostics/runtime-teardown/persisted-state-after-rm-{prefix}.txt",
+        },
+        "LifecycleLogs": {
+            "OperationOut": f"files/pdocker/diagnostics/runtime-teardown/{prefix}.out",
+            "OperationErr": f"files/pdocker/diagnostics/runtime-teardown/{prefix}.err",
+            "RemoveOut": f"files/pdocker/diagnostics/runtime-teardown/rm-{prefix}.out",
+            "RemoveErr": f"files/pdocker/diagnostics/runtime-teardown/rm-{prefix}.err",
+        },
+        "ContainerLogs": {
+            "BeforeOperation": f"files/pdocker/diagnostics/runtime-teardown/logs-{prefix}-before.out",
+            "AfterOperation": f"files/pdocker/diagnostics/runtime-teardown/logs-{prefix}-after.out",
+        },
+    }
+    return {
+        "SchemaVersion": 2,
+        "Kind": "same-container-id-teardown-proof",
+        "ContainerId": cid,
+        "Operation": operation,
+        "Status": "device-pass",
+        "Success": True,
+        "RequiredSameContainerId": TEARDOWN_REQUIRED_PROOF_SOURCES,
+        "BeforeAfterEvidence": before_after,
+        "Evidence": {
+            "EngineCreateOutput": f"files/pdocker/diagnostics/runtime-teardown/create-{prefix}.out",
+            "EngineInspectBefore": before_after["EngineInspect"]["Before"],
+            "EngineInspectAfterOperation": before_after["EngineInspect"]["AfterOperation"],
+            "EngineInspectAfterRemove": before_after["EngineInspect"]["AfterRemove"],
+            "ProcessTreeBeforeAfter": list(before_after["ProcessTree"].values()),
+            "DirectChildAbsence": list(before_after["DirectChildAbsence"].values()),
+            "ListenerAbsenceBeforeAfter": list(before_after["ListenerAbsence"].values()),
+            "StalePidAbsence": list(before_after["StalePid"].values()),
+            "GpuMediaExecutorResidueBeforeAfter": list(before_after["GpuMediaExecutorResidue"].values()),
+            "PersistedStateJsonBeforeAfter": list(before_after["PersistedStateJson"].values()),
+            "LifecycleLogs": list(before_after["LifecycleLogs"].values()),
+            "ContainerLogs": list(before_after["ContainerLogs"].values()),
+        },
+        "VerifierReduction": {
+            "EngineInspectSameContainerId": True,
+            "ProcessTreeClear": True,
+            "DirectChildAbsence": True,
+            "ListenerAbsence": True,
+            "StalePidAbsence": True,
+            "StaleNameAbsence": True,
+            "GpuMediaExecutorResidueAbsence": True,
+            "PersistedStateCleared": True,
+            "LifecycleLogsBound": True,
+            "ContainerLogsBound": True,
+            "MismatchedContainerIds": [],
+            "Survivors": [],
+        },
+    }
+
+
+def _teardown_negative_fixture(name: str) -> dict[str, Any]:
+    return {
+        "SchemaVersion": 1,
+        "Kind": "runtime-teardown-negative-case",
+        "Status": "planned-gap",
+        "Success": False,
+        "ExpectedAccepted": False,
+        "RejectedSignal": name.replace("-", " "),
+        "Reason": "This signal is insufficient without same-container-ID before/after proof.",
+        "RequiredProof": "same Engine container ID plus before/after process tree, listener absence, stale PID absence, GPU/media executor residue, persisted state, Engine inspect, lifecycle logs, and container logs",
+    }
+
+
+def build_runtime_teardown_success_fixture() -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    stop_cid = "1" * 64
+    kill_cid = "2" * 64
+    evidence = {
+        "EngineApiContainersJson": [
+            "files/pdocker/diagnostics/runtime-teardown/engine-containers-before.http",
+            "files/pdocker/diagnostics/runtime-teardown/engine-containers-after.http",
+        ],
+        "EngineApiInspect": [
+            "files/pdocker/diagnostics/runtime-teardown/stop-inspect-before.http",
+            "files/pdocker/diagnostics/runtime-teardown/stop-inspect-after.http",
+            "files/pdocker/diagnostics/runtime-teardown/stop-inspect-after-rm.http",
+            "files/pdocker/diagnostics/runtime-teardown/kill-inspect-before.http",
+            "files/pdocker/diagnostics/runtime-teardown/kill-inspect-after.http",
+            "files/pdocker/diagnostics/runtime-teardown/kill-inspect-after-rm.http",
+        ],
+        "ProcessTable": [
+            "files/pdocker/diagnostics/runtime-teardown/process-before.txt",
+            "files/pdocker/diagnostics/runtime-teardown/process-after-stop.txt",
+            "files/pdocker/diagnostics/runtime-teardown/process-after-rm-stopped.txt",
+            "files/pdocker/diagnostics/runtime-teardown/process-after-kill.txt",
+            "files/pdocker/diagnostics/runtime-teardown/process-after-rm-killed.txt",
+        ],
+        "ProcessTree": [
+            "files/pdocker/diagnostics/runtime-teardown/same-container-id-stop-rm.json",
+            "files/pdocker/diagnostics/runtime-teardown/same-container-id-kill-rm.json",
+            "files/pdocker/diagnostics/runtime-teardown/stop-process-tree-after-stop.json",
+            "files/pdocker/diagnostics/runtime-teardown/kill-process-tree-after-kill.json",
+        ],
+        "DirectChildAbsence": [
+            "files/pdocker/diagnostics/runtime-teardown/stop-process-tree-after-stop.json",
+            "files/pdocker/diagnostics/runtime-teardown/stop-process-tree-after-rm.json",
+            "files/pdocker/diagnostics/runtime-teardown/kill-process-tree-after-kill.json",
+            "files/pdocker/diagnostics/runtime-teardown/kill-process-tree-after-rm.json",
+        ],
+        "ListenerAbsence": [
+            "files/pdocker/diagnostics/runtime-teardown/listeners-before.txt",
+            "files/pdocker/diagnostics/runtime-teardown/listeners-after-stop.txt",
+            "files/pdocker/diagnostics/runtime-teardown/listeners-after-rm-stopped.txt",
+            "files/pdocker/diagnostics/runtime-teardown/listeners-after-kill.txt",
+            "files/pdocker/diagnostics/runtime-teardown/listeners-after-rm-killed.txt",
+        ],
+        "StalePid": [
+            "files/pdocker/diagnostics/runtime-teardown/stop-stale-pid-after-stop.json",
+            "files/pdocker/diagnostics/runtime-teardown/kill-stale-pid-after-kill.json",
+        ],
+        "StaleName": [
+            "files/pdocker/diagnostics/runtime-teardown/stop-stale-name-after-rm.json",
+            "files/pdocker/diagnostics/runtime-teardown/kill-stale-name-after-rm.json",
+        ],
+        "GpuMediaExecutorResidue": [
+            "files/pdocker/diagnostics/runtime-teardown/executor-residue-before.txt",
+            "files/pdocker/diagnostics/runtime-teardown/executor-residue-after-stop.txt",
+            "files/pdocker/diagnostics/runtime-teardown/executor-residue-after-kill.txt",
+        ],
+        "SameContainerId": [
+            "files/pdocker/diagnostics/runtime-teardown/same-container-id-stop-rm.json",
+            "files/pdocker/diagnostics/runtime-teardown/same-container-id-kill-rm.json",
+        ],
+        "PersistedStateJson": [
+            "files/pdocker/diagnostics/runtime-teardown/persisted-state-before.txt",
+            "files/pdocker/diagnostics/runtime-teardown/persisted-state-after-stop.txt",
+            "files/pdocker/diagnostics/runtime-teardown/persisted-state-after-kill.txt",
+        ],
+        "LifecycleLogs": [
+            "files/pdocker/diagnostics/runtime-teardown/stop.out",
+            "files/pdocker/diagnostics/runtime-teardown/kill.out",
+            "files/pdocker/diagnostics/runtime-teardown/rm-stopped.out",
+            "files/pdocker/diagnostics/runtime-teardown/rm-killed.out",
+        ],
+        "ContainerLogs": [
+            "files/pdocker/diagnostics/runtime-teardown/logs-stop-before.out",
+            "files/pdocker/diagnostics/runtime-teardown/logs-stop-after.out",
+            "files/pdocker/diagnostics/runtime-teardown/logs-kill-before.out",
+            "files/pdocker/diagnostics/runtime-teardown/logs-kill-after.out",
+        ],
+    }
+    artifact = {
+        "SchemaVersion": 1,
+        "Kind": "runtime-teardown",
+        "Status": "device-pass",
+        "Success": True,
+        "ContainerIds": {"StopRm": stop_cid, "KillRm": kill_cid},
+        "Evidence": evidence,
+        "SameContainerIdTeardownArtifacts": {
+            "StopRm": {
+                "ContainerId": stop_cid,
+                "Artifact": "files/pdocker/diagnostics/runtime-teardown/same-container-id-stop-rm.json",
+                "Operation": "stop-rm",
+            },
+            "KillRm": {
+                "ContainerId": kill_cid,
+                "Artifact": "files/pdocker/diagnostics/runtime-teardown/same-container-id-kill-rm.json",
+                "Operation": "kill-rm",
+            },
+        },
+    }
+    proof_artifacts = {
+        "same-container-id-stop-rm": _teardown_proof_fixture(stop_cid, "stop-rm", "stop"),
+        "same-container-id-kill-rm": _teardown_proof_fixture(kill_cid, "kill-rm", "kill"),
+    }
+    negative_artifacts = {name: _teardown_negative_fixture(name) for name in TEARDOWN_REQUIRED_NEGATIVE_CASES}
+    return artifact, proof_artifacts, negative_artifacts
+
+
+def validate_runtime_teardown_fixture_contract() -> None:
+    artifact, proofs, negatives = build_runtime_teardown_success_fixture()
+    validate_runtime_teardown_artifact(artifact, proofs, negatives)
+
+    mutations = [
+        lambda a, p, n: a.update({"Status": "planned-gap"}),
+        lambda a, p, n: a["ContainerIds"].update({"StopRm": a["ContainerIds"]["StopRm"][:12]}),
+        lambda a, p, n: a["Evidence"].pop("DirectChildAbsence"),
+        lambda a, p, n: a["SameContainerIdTeardownArtifacts"]["StopRm"].update({"ContainerId": "3" * 64}),
+        lambda a, p, n: p["same-container-id-stop-rm"].update({"Status": "planned-gap"}),
+        lambda a, p, n: p["same-container-id-stop-rm"].update({"ContainerId": a["ContainerIds"]["StopRm"][:12]}),
+        lambda a, p, n: p["same-container-id-stop-rm"]["Evidence"].pop("ListenerAbsenceBeforeAfter"),
+        lambda a, p, n: p["same-container-id-stop-rm"]["VerifierReduction"].update({"DirectChildAbsence": False}),
+        lambda a, p, n: p["same-container-id-kill-rm"]["VerifierReduction"].update({"Survivors": ["pid 99"]}),
+        lambda a, p, n: n["negative-http-204-only"].update({"Success": True}),
+        lambda a, p, n: n["negative-wrong-container-id"].update({"ExpectedAccepted": True}),
+    ]
+    for mutate in mutations:
+        candidate = json.loads(json.dumps(artifact))
+        proof_candidate = json.loads(json.dumps(proofs))
+        negative_candidate = json.loads(json.dumps(negatives))
+        mutate(candidate, proof_candidate, negative_candidate)
+        try:
+            validate_runtime_teardown_artifact(candidate, proof_candidate, negative_candidate)
+        except ValueError:
+            continue
+        fail("runtime teardown fixture self-check accepted a fake success")
+
+
 def validate_docs() -> None:
     combined = "\n".join(path.read_text() for path in DOCS)
     require_terms(
@@ -489,7 +975,9 @@ def main() -> int:
     validate_docs()
     validate_android_smoke_entrypoints()
     validate_service_truth_fixture_contract()
+    validate_runtime_teardown_fixture_contract()
     ok("service truth fixture rejects fake success without listener/port/log/UI/state same-container-ID proof")
+    ok("runtime teardown fixture rejects fake success without same-container-ID process/listener/stale/executor/state/log proof")
     ok("service truth planned gap has runnable commands, evidence contract, negative cases, and exit criteria")
     ok("runtime teardown planned gap has runnable commands, evidence contract, negative cases, and exit criteria")
     return 0

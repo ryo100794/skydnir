@@ -9,7 +9,8 @@
     "android-documents": "Android SAF Documents mediator tests.",
     "android-gpu": "Android GPU executor and bridge measurements.",
     "android-llama": "llama.cpp container and benchmark measurements.",
-    "release": "Publication, payload, and secret-readiness checks."
+    "release": "Publication, payload, and secret-readiness checks.",
+    "governance": "Strict governance gates that may be known-failing and non-promoting until closure criteria are met."
   },
   "required_areas": [
     "abnormal-event-evidence",
@@ -222,7 +223,7 @@
       "docs": [
         "docs/test/STORAGE_METRICS.md"
       ],
-      "checks": "Unique/shared layer accounting, image/container/cache buckets, and fixture/capture contract."
+      "checks": "Unique/shared layer accounting, image/container/cache buckets, fixture/capture contract, and the baseline/build/rebuild/edit/prune sequence artifact."
     },
     {
       "id": "image.layer.storage.prune",
@@ -456,14 +457,25 @@
     {
       "id": "test.design.criteria",
       "area": "test-design-governance",
-      "lane": "fast-local",
-      "command": "python3 scripts/verify-test-design-criteria.py",
-      "status": "runnable",
+      "lane": "governance",
+      "command": "python3 scripts/verify-test-design-criteria.py --write-artifact docs/test/test-design-criteria-latest.json",
+      "status": "planned-gap",
       "docs": [
         "docs/test/TEST_DESIGN_STANDARD.md",
         "tests/test_design_criteria.json"
       ],
-      "checks": "Currently failing 2x literal token gate, required test design axes, Python coverage artifact, fast runner wiring, per-change test design policy, and build-set artifact rules."
+      "checks": "Currently failing 2x literal token gate, required test design axes, Python coverage artifact, governance runner wiring, per-change test design policy, and build-set artifact rules.",
+      "evidence_target": "docs/test/test-design-criteria-latest.json",
+      "reason": "The strict literal check-count to implementation-code token ratio is recorded but not yet high enough to be a passing fast lane.",
+      "acceptance_scope": [
+        "literal token ratio reaches the configured 2.0x minimum without lowering the standard",
+        "C0/C1/C2 structural evidence and instrumented coverage remain recorded as evidence",
+        "the governance lane writes the artifact and exits zero"
+      ],
+      "exit_criteria": [
+        "python3 scripts/verify-test-design-criteria.py --write-artifact docs/test/test-design-criteria-latest.json exits zero",
+        "docs/test/test-design-criteria-latest.json reports literal_check_count_at_2x_token_target_met=true"
+      ]
     },
     {
       "id": "mutation.testing.planned",
