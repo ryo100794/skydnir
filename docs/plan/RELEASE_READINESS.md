@@ -125,7 +125,14 @@ limitations, not passes:
 - `status=planned-gap`, `blocked`, `failed`, `skip`, or `skipped`;
 - `success=false`;
 - a device lane that was not run on the required installed APK/device;
+- a required device artifact that is absent from the checkpoint bundle;
 - a host-only verifier pass whose purpose is to keep a planned gap explicit.
+
+Absence of real device artifacts is not a soft pass. If the release/checkpoint
+bundle lacks a required artifact named in `docs/test/CI_GATE_LEDGER.md`, record
+that row as "missing device artifact" or "planned gap" and keep the stable
+checkpoint blocked unless the row is explicitly scoped out with user-visible
+unsupported/experimental wording.
 
 ## Release readiness checklist
 

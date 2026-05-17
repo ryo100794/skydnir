@@ -6,13 +6,15 @@
     "canonical_driver": "scripts/pdocker-test-driver.py",
     "artifact_rule": "Every automated lane writes one run manifest. Individual generated files remain in their canonical locations and are referenced with sha256, size, and producer command.",
     "wrapper_rule": "Legacy shell entrypoints may exist only as compatibility wrappers around the canonical driver.",
-    "stable_checkpoint_rule": "A run manifest is stable-checkpoint eligible only when release blockers in docs/plan/RELEASE_READINESS.md are closed or explicitly scoped, and every device-gated artifact named by docs/test/CI_GATE_LEDGER.md is passing with the required proof. Host-only planned-gap verifiers, non-passing artifacts, device-gated lanes without promotion artifacts, and planned-gap artifacts with success=false are non-promoting evidence.",
+    "stable_checkpoint_rule": "A run manifest is stable-checkpoint eligible only when release blockers in docs/plan/RELEASE_READINESS.md are closed or explicitly scoped, and every device-gated artifact named by docs/test/CI_GATE_LEDGER.md is passing with the required proof. Host-only planned-gap verifiers, non-passing artifacts, device-gated lanes without promotion artifacts, missing required device artifacts, and planned-gap artifacts with success=false are non-promoting evidence.",
+    "artifact_absence_rule": "If a device-gated lane or CI gate ledger row names a required artifact and the run/checkpoint bundle does not contain a fresh artifact produced by the named device command on the required installed APK/device, classify the gate as missing-artifact or planned-gap evidence. Absence of a real device artifact is never a pass, even when a host verifier exits zero after validating the planned-gap contract.",
     "non_promoting_statuses": [
       "planned-gap",
       "blocked",
       "failed",
       "skip",
-      "skipped"
+      "skipped",
+      "missing-artifact"
     ],
     "device_gate_rule": "Lanes that require adb/installed APKs provide device evidence only; they do not promote a stable checkpoint unless the corresponding CI gate ledger promotion condition is satisfied, the artifact status is passing, and success/stable_checkpoint_eligible are true.",
     "granularity_rule": "Broad P0/P1 blockers are split into execution_units. A passing sub-unit is regression evidence only and cannot promote a stable checkpoint unless the lane promotion_condition and matching device artifact promotion condition also pass."

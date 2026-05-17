@@ -55,6 +55,13 @@ metadata. The `release-honesty` lane runs host-only release hygiene checks; it
 does not promote a build until the release blocker checklist and CI gate ledger
 show passing device evidence or an explicit scoped-out/unsupported decision.
 
+For scenario and checkpoint summaries, "artifact not present" is a separate
+non-complete state. If a scenario is device-gated and its required artifact was
+not produced by the named device lane on the required installed APK/device, the
+scenario remains **missing device evidence** even if a host/static verifier
+passed. Missing device evidence must be reported as planned-gap, blocked, or
+missing-artifact evidence, never as a passing scenario.
+
 ## Lanes
 
 | Lane | Purpose |

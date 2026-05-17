@@ -69,6 +69,31 @@ Run manifests are also single-sourced. Each driver invocation writes
 `docs/test/runs/<run-id>/manifest.json`, including command lines, log paths,
 artifact paths, sha256 hashes, git commit, build flavor, and device metadata.
 
+## Planned-gap and missing device artifact honesty
+
+Ledger or verifier success may mean "the planned gap is still explicitly
+tracked"; it does **not** mean the corresponding device behavior passed.
+For every Android/device-gated row, absence of the named real-device artifact is
+classified as missing evidence and remains non-promoting. A placeholder,
+schema-only, host-only, skipped, blocked, or `status=planned-gap` artifact must
+keep `success=false` and must not be summarized as pass.
+
+Release/checkpoint records must therefore distinguish these states:
+
+- **passed device evidence**: the required artifact exists, was produced by the
+  named device lane on the required installed APK/device, reports pass/success,
+  and satisfies the ledger promotion condition;
+- **planned gap**: the lane is designed but the real device proof is not yet
+  implemented or not yet collected;
+- **missing artifact**: the ledger names a required device artifact, but the
+  artifact is absent from the release/checkpoint evidence bundle;
+- **blocked/skipped/failed**: the artifact or lane explicitly says it did not
+  complete successfully.
+
+Only the first state may be counted as a stable checkpoint. The other states are
+release-blocker evidence or scoped limitations, even when a host verifier exits
+zero after checking that the non-promoting state is honestly documented.
+
 Instrumented Python coverage is generated separately:
 
 ```sh

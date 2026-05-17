@@ -18,6 +18,15 @@ contribute evidence only after the artifact named in this ledger satisfies its
 promotion condition; until then it is non-promoting evidence, even if the
 driver command exits zero because it produced the expected planned-gap record.
 
+Missing artifact rule: if the "Required artifact" column names an Android or
+device-gated artifact and that artifact is absent from the checkpoint bundle,
+the gate state is **missing evidence**, not pass. Missing evidence has the same
+release effect as `planned-gap`/`blocked`: it cannot promote a stable
+checkpoint, cannot be used to close the row, and must be called out in release
+or checkpoint notes. A host/static verifier pass only proves that this ledger
+and the planned-gap contract are coherent; it does not substitute for the
+missing device artifact.
+
 ## Gate table
 
 | Gate | Priority | Current visibility | Fast/static gate | Heavy / Android-device gate | Required artifact | Promotion condition |
@@ -67,3 +76,8 @@ listed above, or a non-passing artifact with `status=planned-gap`, `blocked`, or
 If a driver run contains any non-promoting status or only host-side planned-gap
 contract checks, the release note may call it a regression/checkpoint run, but
 not a stable release checkpoint.
+
+When no real-device artifact was produced, write "missing device artifact" or
+"planned gap" in the ledger/checkpoint summary instead of "pass". Do not infer
+success from a zero-exit planning verifier, a schema placeholder, stale artifact
+path, or unrun device lane.
