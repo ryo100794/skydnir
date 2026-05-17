@@ -1139,7 +1139,7 @@ PY
 }
 
 remove_container() {
-  engine_request DELETE "/containers/$(urlencode "$CONTAINER")?force=true" >/dev/null || true
+  engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" DELETE "/containers/$(urlencode "$CONTAINER")?force=true" >/dev/null || true
   CURRENT_CONTAINER_ID=""
 }
 
@@ -1156,7 +1156,7 @@ start_container_mode() {
   remove_container
   payload="$(container_payload "$mode" "$ctx" "$gpu_layers")"
   echo "[pdocker llama compare] $mode: creating container" >&2
-  create_body="$(engine_body POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload")"
+  create_body="$(engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload" | http_body)"
   cid="$(printf "%s" "$create_body" | parse_engine_id)"
   CURRENT_CONTAINER_ID="$cid"
   echo "[pdocker llama compare] $mode: starting container ${cid:0:12}" >&2

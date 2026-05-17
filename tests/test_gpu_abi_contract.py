@@ -701,6 +701,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('wait_server 120 "Forced Vulkan"', compare)
         self.assertIn("waiting for $phase server", compare)
         self.assertIn("$mode: creating container", compare)
+        self.assertIn('engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" DELETE', compare)
+        self.assertIn('engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" POST "/containers/create', compare)
         self.assertIn('STOP_STALE_TARGET_BEFORE_PREFLIGHT="${PDOCKER_LLAMA_STOP_STALE_TARGET_BEFORE_PREFLIGHT:-1}"', compare)
         self.assertIn("stop_stale_target_if_engine_alive", compare)
         self.assertIn("Do not start", compare)
