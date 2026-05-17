@@ -11,7 +11,8 @@
     "android-gpu": "Android GPU executor and bridge measurements.",
     "android-llama": "llama.cpp container and benchmark measurements.",
     "release": "Publication, payload, and secret-readiness checks.",
-    "governance": "Strict governance gates that may be known-failing and non-promoting until closure criteria are met."
+    "governance": "Strict governance gates that may be known-failing and non-promoting until closure criteria are met.",
+    "android-runtime-teardown": "Focused Android runtime teardown proof/reducer evidence."
   },
   "required_areas": [
     "abnormal-event-evidence",
@@ -863,12 +864,13 @@
     {
       "id": "runtime.stop-process-tree-teardown",
       "area": "runtime-process-teardown",
-      "lane": "android-full",
-      "command": "bash scripts/android-device-smoke.sh --no-install",
+      "lane": "android-runtime-teardown",
+      "command": "bash scripts/verify-heavy.sh --android-runtime-teardown",
       "status": "planned-gap",
       "docs": [
         "docs/plan/TODO.md",
-        "docs/test/ANDROID_SELFDEBUG.md"
+        "docs/test/ANDROID_SELFDEBUG.md",
+        "docs/test/RUNTIME_TEARDOWN_DEVICE_GATE.md"
       ],
       "checks": "Executable acceptance plan for runtime teardown: stop/kill/rm is accepted only when Engine state, persisted state, process table, lifecycle logs, and duplicate-name cleanup prove the current Engine container ID has no live process-tree residue.",
       "evidence_target": "docs/test/runtime-teardown-latest.json",

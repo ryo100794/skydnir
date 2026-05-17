@@ -4,9 +4,10 @@ Snapshot date: 2026-05-13.
 
 This gate defines the device evidence required before `docker stop`,
 `docker kill`, and `docker rm` can be treated as real runtime teardown. The
-current implementation is intentionally a **non-passing scaffold**: it writes
-`Status: planned-gap` and `Success: false` until a device verifier proves the
-complete same-container-ID teardown chain.
+focused lane currently accepts only a **non-passing scaffold**:
+`Status: planned-gap` and `Success: false`. The promotion verifier exists, but
+it requires external same-container-ID proof files before any device-pass can
+be accepted.
 
 ## Entry point
 
@@ -14,6 +15,21 @@ Run through the Android smoke script:
 
 ```bash
 scripts/android-device-smoke.sh --runtime-teardown <default-workspace|llama>
+```
+
+The focused planned-gap lane is:
+
+```bash
+scripts/verify-heavy.sh --android-runtime-teardown
+```
+
+The promoted device-pass reducer is:
+
+```bash
+scripts/verify-runtime-teardown-artifact.py \
+  --expect-device-pass \
+  --evidence-root docs/test/runtime-teardown \
+  docs/test/runtime-teardown-latest.json
 ```
 
 The device artifact is:
@@ -101,8 +117,9 @@ accidental weakening:
 - `negative-wrong-container-id.json`: mixed evidence from a different container
   ID is not sufficient.
 
-Until the verifier reduces all collected files to one same-container-ID proof,
-the artifact must remain:
+Until `scripts/verify-runtime-teardown-artifact.py --expect-device-pass`
+reduces all collected files to one same-container-ID proof, the artifact must
+remain:
 
 ```text
 Status: planned-gap
@@ -124,8 +141,11 @@ process-group fields only after the survivor set is empty.
 The smoke script collects raw before/after evidence, same-container-ID proof
 schemas, and negative-case artifacts for process tree, listener absence, stale
 PID, GPU/media executor residue, Engine inspect, logs, and persisted state. The
-remaining work is the device verifier that reads those files and proves that
-each stopped/killed/removed container has no surviving process tree, no
-surviving listener, no stale PID reference, no GPU/media executor residue, and
-no stale state/log confusion for that exact Engine container ID before
-promoting the artifact from planned-gap to device-pass.
+host-side reducer now reads the top-level artifact plus the referenced
+`same-container-id-*.json` and negative-case JSON files and rejects missing or
+fake proof. The remaining device work is to make the Android smoke collect and
+export a complete evidence directory whose reduced proof shows that each
+stopped/killed/removed container has no surviving process tree, no surviving
+listener, no stale PID reference, no GPU/media executor residue, and no stale
+state/log confusion for that exact Engine container ID before promoting the
+artifact from planned-gap to device-pass.

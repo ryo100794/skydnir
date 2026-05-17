@@ -965,9 +965,10 @@
       "commands": [
         {
           "id": "android-runtime-teardown-planned-gap-smoke",
-          "shell": "rm -f docs/test/runtime-teardown-latest.json\nset +e\nPDOCKER_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --runtime-teardown default-workspace\nrc=$?\nset -e\ntest \"$rc\" -eq 2\npython3 - <<'PY'\nimport json\nfrom pathlib import Path\np=Path('docs/test/runtime-teardown-latest.json')\nif not p.is_file():\n    raise SystemExit('runtime teardown artifact missing')\ndata=json.loads(p.read_text())\nif data.get('Status') != 'planned-gap' or data.get('Success') is not False:\n    raise SystemExit('runtime teardown scaffold must remain planned-gap Success=false')\nPY",
+          "shell": "rm -f docs/test/runtime-teardown-latest.json\nrm -rf docs/test/runtime-teardown\nset +e\nPDOCKER_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --runtime-teardown default-workspace\nrc=$?\nset -e\ncase \"$rc\" in\n  0)\n    python3 scripts/verify-runtime-teardown-artifact.py --expect-device-pass --evidence-root docs/test/runtime-teardown docs/test/runtime-teardown-latest.json\n    ;;\n  2)\n    python3 scripts/verify-runtime-teardown-artifact.py --expect-planned-gap docs/test/runtime-teardown-latest.json\n    ;;\n  *)\n    exit \"$rc\"\n    ;;\nesac",
           "artifacts": [
-            "docs/test/runtime-teardown-latest.json"
+            "docs/test/runtime-teardown-latest.json",
+            "docs/test/runtime-teardown/*.json"
           ]
         }
       ]

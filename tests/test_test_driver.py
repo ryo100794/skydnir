@@ -75,6 +75,17 @@ class TestDriverManifestTest(unittest.TestCase):
             self.assertIn(lane_name, lanes)
             self.assertFalse(lanes[lane_name]["stable_checkpoint_eligible"], lane_name)
 
+        teardown_cmd = lanes["android-runtime-teardown"]["commands"][0]["shell"]
+        self.assertIn("rm -rf docs/test/runtime-teardown", teardown_cmd)
+        self.assertIn("--runtime-teardown default-workspace", teardown_cmd)
+        self.assertIn("verify-runtime-teardown-artifact.py --expect-planned-gap", teardown_cmd)
+        self.assertIn("verify-runtime-teardown-artifact.py --expect-device-pass", teardown_cmd)
+        self.assertIn("case \"$rc\" in", teardown_cmd)
+        self.assertIn(
+            "docs/test/runtime-teardown/*.json",
+            lanes["android-runtime-teardown"]["commands"][0]["artifacts"],
+        )
+
         service_cmd = lanes["android-service-truth"]["commands"][0]["shell"]
         self.assertIn("rm -f docs/test/service-truth-latest.json", service_cmd)
         self.assertIn("PDOCKER_SMOKE_ARTIFACT_DIR=docs/test", service_cmd)

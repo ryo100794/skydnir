@@ -1340,6 +1340,7 @@ REMOTE_RUNTIME_TEARDOWN
   run_as "sh $remote_script $(remote_quote "$target")"
   local rc=$?
   set -e
+  collect_device_dir "files/pdocker/diagnostics/runtime-teardown" "runtime-teardown" || true
   collect_device_file "files/pdocker/diagnostics/runtime-teardown-latest.json" "runtime-teardown-latest.json" || true
   return "$rc"
 }
@@ -1427,6 +1428,32 @@ collect_device_file() {
     echo "[pdocker smoke] collected $device_path -> $dest_dir/$host_name"
   else
     echo "[pdocker smoke] could not collect $device_path; see $dest_dir/$host_name.err" >&2
+    return 1
+  fi
+}
+
+collect_device_dir() {
+  local device_dir="$1"
+  local host_name="$2"
+  local dest_dir rel parent base tmp err
+  dest_dir="$(smoke_artifact_dir)"
+  rel="${device_dir#files/}"
+  parent="${rel%/*}"
+  base="${rel##*/}"
+  tmp="$(mktemp)"
+  err="$dest_dir/$host_name.err"
+  mkdir -p "$dest_dir"
+  rm -rf "$dest_dir/$host_name"
+  if run_adb exec-out run-as "$PKG" sh -c "cd files/$parent && tar cf - $base" >"$tmp" 2>"$err" \
+      && tar xf "$tmp" -C "$dest_dir" 2>>"$err"; then
+    rm -f "$tmp" "$err"
+    if [[ "$base" != "$host_name" && -d "$dest_dir/$base" ]]; then
+      mv "$dest_dir/$base" "$dest_dir/$host_name"
+    fi
+    echo "[pdocker smoke] collected $device_dir -> $dest_dir/$host_name"
+  else
+    rm -f "$tmp"
+    echo "[pdocker smoke] could not collect $device_dir; see $err" >&2
     return 1
   fi
 }

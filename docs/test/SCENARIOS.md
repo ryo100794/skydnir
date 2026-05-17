@@ -72,6 +72,7 @@ missing-artifact evidence, never as a passing scenario.
 | `android-quick` | Short ADB smoke tests on an installed APK. |
 | `android-full` | Longer ADB smoke tests on an installed APK. |
 | `android-documents` | SAF Documents mediator tests. |
+| `android-runtime-teardown` | Focused Android runtime teardown proof and reducer evidence. |
 | `android-service-truth` | Focused Android planned-gap service truth evidence. |
 | `android-gpu` | GPU executor and bridge measurements. |
 | `android-llama` | llama.cpp container and benchmark measurements. |

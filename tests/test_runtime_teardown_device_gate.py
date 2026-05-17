@@ -180,6 +180,11 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
         ]:
             self.assertIn(required, self.body)
 
+    def test_runtime_teardown_collects_full_evidence_directory_for_reducer(self):
+        self.assertIn('collect_device_dir "files/pdocker/diagnostics/runtime-teardown" "runtime-teardown"', self.smoke)
+        self.assertIn('collect_device_file "files/pdocker/diagnostics/runtime-teardown-latest.json"', self.smoke)
+        self.assertIn("tar cf -", self.smoke)
+
     def test_runtime_teardown_negative_cases_are_host_detectable(self):
         for required in [
             "write_negative_case_evidence",

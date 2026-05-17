@@ -45,6 +45,7 @@ run python3 -m py_compile \
   scripts/verify-service-truth-plan.py \
   scripts/verify-storage-metrics.py \
   scripts/verify-dev-workspace-compose-artifact.py \
+  scripts/verify-runtime-teardown-artifact.py \
   scripts/verify-runtime-single-container-artifact.py \
   scripts/verify-saf-direct-output-artifact.py \
   scripts/verify-ui-actions.py \
@@ -93,6 +94,7 @@ run python3 -m unittest \
   tests.test_terminal_exec_it_contract \
   tests.test_terminal_exec_it_artifact_verifier \
   tests.test_runtime_teardown_device_gate \
+  tests.test_runtime_teardown_artifact_verifier \
   tests.test_dev_workspace_smoke_contract \
   tests.test_dev_workspace_compose_artifact_verifier \
   tests.test_runtime_single_container_artifact_verifier \
