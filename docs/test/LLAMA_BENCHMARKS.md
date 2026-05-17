@@ -753,8 +753,10 @@ default.
 - Bridge ABI progress: `VULKAN_DISPATCH_V2` preserves the compute shader entry
   point and bounded specialization constants across the glibc ICD to Android
   executor boundary. `scripts/smoke-vulkan-icd-bridge.sh` now verifies a
-  minimal storage-buffer compute dispatch through the same socket path, and
-  `scripts/verify-fast.sh` runs both Vulkan init and bridge smokes.
+  minimal storage-buffer compute dispatch through the same socket path when the
+  local executor Vulkan preflight is available, and reports a planned preflight
+  skip instead of hanging when native Vulkan is unavailable. `scripts/verify-fast.sh`
+  runs both Vulkan init and bridge smokes.
 - Diagnostic progress: allocation pNext tracing, range accounting, generic
   SPIR-V dispatch lowering, and server HTTP handling are past the earlier
   blockers. The current bridge overhead phase is explicit in the JSON report:

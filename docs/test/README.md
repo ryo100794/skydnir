@@ -27,7 +27,7 @@ run it, and where the latest result is stored.
 | [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md) | llama.cpp CPU/GPU benchmark history and current blockers |
 | `scripts/verify-archive-api-compat.py` | Host-only fail-closed Docker archive API / `docker cp` compatibility gate |
 | `scripts/smoke-vulkan-llama-init.sh` | Lightweight llama.cpp-oriented Vulkan ICD initialization smoke |
-| `scripts/smoke-vulkan-icd-bridge.sh` | Lightweight Vulkan ICD dispatch smoke through the pdocker GPU executor socket |
+| `scripts/smoke-vulkan-icd-bridge.sh` | Lightweight Vulkan ICD dispatch smoke through the pdocker GPU executor socket; planned-skip when the local executor Vulkan preflight is unavailable |
 
 ## Canonical Sources
 
@@ -51,6 +51,9 @@ run it, and where the latest result is stored.
   compatibility snapshot.
 - Use [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md) as the human-readable
   benchmark history, with JSON files kept as machine-readable artifacts.
+- Fixed release-candidate build evidence lives under
+  [`../release/builds/`](../release/builds/) so immutable release records do not
+  mix with mutable `latest` test outputs.
 - Link to [`../design/DOCKER_COMPAT_SCOPE.md`](../design/DOCKER_COMPAT_SCOPE.md)
   for product boundaries and to [`../design/GPU_COMPAT.md`](../design/GPU_COMPAT.md)
   for GPU design rules.

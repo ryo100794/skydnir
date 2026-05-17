@@ -11,8 +11,8 @@ must become real implementations later, see [`TODO.md`](TODO.md).
 
 Build `20260505.1` is the current fixed Android build record for announcement
 copy and is committed at `dd3ce31`. Evidence is stored under
-[`../test/build-20260505.1/`](../test/build-20260505.1/), with release-note
-summary in [`RELEASE_NOTES_20260505.1.md`](RELEASE_NOTES_20260505.1.md) and
+[`../release/builds/20260505.1/`](../release/builds/20260505.1/), with release-note
+summary in [`../release/RELEASE_NOTES_20260505.1.md`](../release/RELEASE_NOTES_20260505.1.md) and
 project-news copy in
 [`../showcase/NEWS_TIMELINE.md`](../showcase/NEWS_TIMELINE.md). Compat/modern
 APK outputs built, Android quick smoke passed, and Android full smoke passed

@@ -13,7 +13,7 @@ Please check:
 - [`docs/plan/TODO.md`](docs/plan/TODO.md) for active work.
 - [`docs/test/COMPATIBILITY.md`](docs/test/COMPATIBILITY.md) for Docker API and
   protocol coverage.
-- [`docs/test/build-20260505.1/README.md`](docs/test/build-20260505.1/README.md)
+- [`docs/release/builds/20260505.1/README.md`](docs/release/builds/20260505.1/README.md)
   for the latest fixed build evidence.
 
 Current public baseline: build `20260505.1` is committed at `dd3ce31`; the APK

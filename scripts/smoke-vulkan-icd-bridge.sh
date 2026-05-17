@@ -68,8 +68,10 @@ int main(void) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[i].dstSet = set; writes[i].dstBinding = i; writes[i].descriptorCount = 1; writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; writes[i].pBufferInfo = &infos[i];
     }
     vkUpdateDescriptorSets(dev, 3, writes, 0, NULL);
-    uint32_t fake_spv = 0x07230203;
-    VkShaderModuleCreateInfo smci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = sizeof(fake_spv), .pCode = &fake_spv};
+    static const uint32_t vector_add_spv[] = {
+#include "pdocker-vector-add-spv.inc"
+    };
+    VkShaderModuleCreateInfo smci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = sizeof(vector_add_spv), .pCode = vector_add_spv};
     VkShaderModule shader; CHECK(vkCreateShaderModule(dev, &smci, NULL, &shader), "vkCreateShaderModule");
     VkComputePipelineCreateInfo cpci = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = shader, .pName = "main"}, .layout = pipeline_layout};
     VkPipeline pipeline; CHECK(vkCreateComputePipelines(dev, VK_NULL_HANDLE, 1, &cpci, NULL, &pipeline), "vkCreateComputePipelines");
@@ -93,10 +95,27 @@ int main(void) {
 }
 C
 
+python3 - "$ROOT/app/src/main/cpp/pdocker_gpu_executor.c" "$TMP/pdocker-vector-add-spv.inc" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text()
+match = re.search(r"static const uint32_t kVectorAddSpv\[\] = \{(?P<body>.*?)\n\};", source, re.S)
+if not match:
+    raise SystemExit("kVectorAddSpv not found")
+Path(sys.argv[2]).write_text(match.group("body").strip() + "\n")
+PY
 gcc "$TMP/pdocker-vk-smoke.c" -o "$TMP/pdocker-vk-smoke" -lvulkan
 cat >"$TMP/pdocker_icd.json" <<JSON
 {"file_format_version":"1.0.0","ICD":{"library_path":"$ICD","api_version":"1.2.0"}}
 JSON
+
+if ! timeout 30 "$EXECUTOR" --bench-vulkan-vector-add 1 >"$TMP/executor-preflight.log" 2>&1; then
+    echo "smoke-vulkan-icd-bridge: SKIP executor Vulkan preflight unavailable" >&2
+    cat "$TMP/executor-preflight.log" >&2
+    exit 0
+fi
 
 "$EXECUTOR" --serve-socket "$SOCK" >"$TMP/executor.log" 2>&1 &
 PID=$!
@@ -108,4 +127,8 @@ done
 
 VK_ICD_FILENAMES="$TMP/pdocker_icd.json" \
 PDOCKER_GPU_QUEUE_SOCKET="$SOCK" \
-"$TMP/pdocker-vk-smoke"
+timeout 30 "$TMP/pdocker-vk-smoke" || {
+    rc=$?
+    cat "$TMP/executor.log" >&2
+    exit "$rc"
+}

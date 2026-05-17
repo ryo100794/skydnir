@@ -1,7 +1,7 @@
 # pdocker-android News Timeline
 
 Source snapshot: managed build commit `dd3ce31`, with build evidence in
-[`../test/build-20260505.1/`](../test/build-20260505.1/).
+[`../release/builds/20260505.1/`](../release/builds/20260505.1/).
 
 This page is concise announcement copy for GitHub releases, pinned issues, and
 project news posts. It should stay factual: green items need repository

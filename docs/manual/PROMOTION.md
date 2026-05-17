@@ -38,7 +38,7 @@ normal APK.
 
 Use these facts for the README, GitHub repository description, pinned issues,
 release notes, and demo captions until a newer verification record replaces
-[`../test/build-20260505.1/README.md`](../test/build-20260505.1/README.md):
+[`../release/builds/20260505.1/README.md`](../release/builds/20260505.1/README.md):
 
 - Build `20260505.1` has PASS records for compat/modern debug APKs and
   unsigned compat/modern release APKs. The verification commit is `dd3ce31`.

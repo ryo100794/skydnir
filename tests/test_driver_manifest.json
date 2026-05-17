@@ -6,7 +6,7 @@
     "canonical_driver": "scripts/pdocker-test-driver.py",
     "artifact_rule": "Every automated lane writes one run manifest. Individual generated files remain in their canonical locations and are referenced with sha256, size, and producer command.",
     "wrapper_rule": "Legacy shell entrypoints may exist only as compatibility wrappers around the canonical driver.",
-    "stable_checkpoint_rule": "A run manifest is stable-checkpoint eligible only when release blockers in docs/plan/RELEASE_READINESS.md are closed or explicitly scoped, and every device-gated artifact named by docs/test/CI_GATE_LEDGER.md is passing with the required proof. Host-only planned-gap verifiers, non-passing artifacts, device-gated lanes without promotion artifacts, missing required device artifacts, and planned-gap artifacts with success=false are non-promoting evidence.",
+    "stable_checkpoint_rule": "A run manifest is stable-checkpoint eligible only when release blockers in docs/release/RELEASE_READINESS.md are closed or explicitly scoped, and every device-gated artifact named by docs/test/CI_GATE_LEDGER.md is passing with the required proof. Host-only planned-gap verifiers, non-passing artifacts, device-gated lanes without promotion artifacts, missing required device artifacts, and planned-gap artifacts with success=false are non-promoting evidence.",
     "artifact_absence_rule": "If a device-gated lane or CI gate ledger row names a required artifact and the run/checkpoint bundle does not contain a fresh artifact produced by the named device command on the required installed APK/device, classify the gate as missing-artifact or planned-gap evidence. Absence of a real device artifact is never a pass, even when a host verifier exits zero after validating the planned-gap contract.",
     "non_promoting_statuses": [
       "planned-gap",
@@ -345,7 +345,7 @@
           "artifacts": [
             "tests/feature_scenarios.json",
             "tests/blackbox_requirements.json",
-            "docs/plan/RELEASE_READINESS.md"
+            "docs/release/RELEASE_READINESS.md"
           ]
         },
         {
@@ -859,7 +859,7 @@
       "description": "Host-only release-blocker honesty check. Passing means publication hygiene and metadata wording are sane; it does not promote a stable checkpoint while P0 device gates remain open.",
       "checkpoint_class": "release-blocker-ledger-only",
       "stable_checkpoint_eligible": false,
-      "promotion_condition": "All P0 rows in docs/plan/RELEASE_READINESS.md must be closed or explicitly scoped, and device-gated artifacts in docs/test/CI_GATE_LEDGER.md must satisfy their promotion conditions.",
+      "promotion_condition": "All P0 rows in docs/release/RELEASE_READINESS.md must be closed or explicitly scoped, and device-gated artifacts in docs/test/CI_GATE_LEDGER.md must satisfy their promotion conditions.",
       "commands": [
         {
           "id": "verify-release-readiness-honesty",
@@ -868,7 +868,7 @@
             "scripts/verify-release-readiness.py"
           ],
           "artifacts": [
-            "docs/plan/RELEASE_READINESS.md",
+            "docs/release/RELEASE_READINESS.md",
             "docs/test/CI_GATE_LEDGER.md",
             "tests/test_driver_manifest.json"
           ]

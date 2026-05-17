@@ -52,4 +52,4 @@
 - `docs/plan/TODO.md`
 - `docs/test/COMPATIBILITY.md`
 - `docs/test/SECRET_AUDIT.md`
-- `docs/test/build-20260505.1/README.md` or newer fixed build record
+- `docs/release/builds/20260505.1/README.md` or newer fixed build record

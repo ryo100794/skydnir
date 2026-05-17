@@ -39,7 +39,7 @@ a phone or tablet, this repository is the experiment.
 ## Current Evidence Snapshot
 
 The current fixed verification record is
-[`docs/test/build-20260505.1/README.md`](docs/test/build-20260505.1/README.md):
+[`docs/release/builds/20260505.1/README.md`](docs/release/builds/20260505.1/README.md):
 
 - Build `20260505.1` is committed at `dd3ce31` (`Record fixed build
   20260505.1 verification`).
@@ -59,7 +59,7 @@ The generated compatibility audit records `69` PASS and `0` FAIL entries, and
 APK payload checks confirm the product APK omits upstream Docker CLI/Compose,
 PRoot, proot-loader, and talloc. This is still a development preview rather
 than a broad stable release: the current release-readiness gate is tracked in
-[`docs/plan/RELEASE_READINESS.md`](docs/plan/RELEASE_READINESS.md), including
+[`docs/release/RELEASE_READINESS.md`](docs/release/RELEASE_READINESS.md), including
 P0 blockers for service-health truth, runtime stop cleanup, image/COW crash
 safety, OOM/LMK recovery, modern-runtime capability truth, and build/test
 checkpoint truth.
@@ -96,7 +96,7 @@ pdocker treats that as the design challenge rather than hiding it.
 
 See [`docs/plan/STATUS.md`](docs/plan/STATUS.md) for the detailed
 implementation snapshot, [`docs/plan/TODO.md`](docs/plan/TODO.md) for the live
-task board, and [`docs/plan/RELEASE_READINESS.md`](docs/plan/RELEASE_READINESS.md)
+task board, and [`docs/release/RELEASE_READINESS.md`](docs/release/RELEASE_READINESS.md)
 for the release checklist and current blocker summary.
 
 For a GitHub-friendly view of the current demo surface, template library,

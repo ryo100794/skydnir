@@ -243,7 +243,7 @@
       "status": "runnable",
       "docs": [
         "docs/test/STORAGE_METRICS.md",
-        "docs/plan/RELEASE_READINESS.md",
+        "docs/release/RELEASE_READINESS.md",
         "tests/blackbox_requirements.json"
       ],
       "checks": "App-code-backed UI contract for storage/layer maintenance: MainActivity renderImages, renderImageCacheHealth/imageCacheHealth, renderImageReferenceTree/imageParentMap, ImageGraphLayout connector drawing, imageDetail/imageReferenceInfos, and ImageGraphAction now provide distinct image/cache rows, unique/shared/stale size evidence, tree details/files/delete+clean-cache actions, and stale build-cache or unreferenced-layer garbage surfacing.",
@@ -902,9 +902,9 @@
       "command": "python3 scripts/verify-release-readiness.py",
       "status": "runnable",
       "docs": [
-        "docs/build/FDROID_RELEASE_PROCESS.md",
+        "docs/release/FDROID_RELEASE_PROCESS.md",
         "docs/test/SECRET_AUDIT.md",
-        "docs/plan/RELEASE_READINESS.md",
+        "docs/release/RELEASE_READINESS.md",
         "docs/test/CI_GATE_LEDGER.md",
         "tests/test_driver_manifest.json"
       ],

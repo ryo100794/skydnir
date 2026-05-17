@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FDROID_DOC = ROOT / "docs" / "build" / "FDROID_RELEASE_PROCESS.md"
+FDROID_DOC = ROOT / "docs" / "release" / "FDROID_RELEASE_PROCESS.md"
 METADATA_README = ROOT / "metadata" / "fdroid" / "README.md"
 INVENTORY = ROOT / "metadata" / "fdroid" / "generated-binary-inventory.md"
 

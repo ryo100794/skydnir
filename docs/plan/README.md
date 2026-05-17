@@ -13,10 +13,8 @@ which temporary accommodations must be replaced.
 | Document | Scope |
 |---|---|
 | [`STATUS.md`](STATUS.md) | Current implementation status summary |
-| [`RELEASE_READINESS.md`](RELEASE_READINESS.md) | Release gates, current blockers, and release-candidate checklist |
 | [`TODO.md`](TODO.md) | Live unfinished-work ledger and temporary workaround tracker |
 | [`LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](LLAMA_GPU_BRIDGE_NEXT_STEPS.md) | Active llama.cpp GPU bridge procedure, stage gates, and compact-model handoff |
-| [`RELEASE_NOTES_20260505.1.md`](RELEASE_NOTES_20260505.1.md) | Fixed build 20260505.1 release-note summary and remaining gates |
 | [`INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md`](INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md) | Consolidated P0/P1/P2 incomplete-work audit |
 | [`ISSUE_WORKFLOW.md`](ISSUE_WORKFLOW.md) | GitHub Issue workflow and TODO/timeline synchronization |
 | [`REPLAN_2026-05-01.md`](REPLAN_2026-05-01.md) | Historical replan snapshot after UI/build/GPU steering |
@@ -24,8 +22,8 @@ which temporary accommodations must be replaced.
 ## Canonical Sources
 
 - Use [`STATUS.md`](STATUS.md) for the current implementation summary.
-- Use [`RELEASE_READINESS.md`](RELEASE_READINESS.md) for public release
-  posture, blocker summary, and the release-candidate checklist.
+- Use [`../release/RELEASE_READINESS.md`](../release/RELEASE_READINESS.md) for
+  public release posture, blocker summary, and the release-candidate checklist.
 - Use [`INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md`](INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md)
   as the source list for P0/P1/P2 unfinished-work classification.
 - Use [`TODO.md`](TODO.md) for active work, temporary accommodations, blockers,

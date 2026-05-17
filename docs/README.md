@@ -18,6 +18,7 @@ repository-level overview.
 | Build | Local setup, APK packaging, install commands, and build gates | [`build/README.md`](build/README.md) |
 | Test | Repeatable checks, audits, debug workflows, and recorded results | [`test/README.md`](test/README.md) |
 | Plan | Current status, TODOs, and historical steering snapshots | [`plan/README.md`](plan/README.md) |
+| Release | Release gates, fixed build evidence, distribution process, and announcements | [`release/README.md`](release/README.md) |
 | Showcase | GitHub-facing generated dashboard, roadmap timeline, and Wiki seed | [`showcase/README.md`](showcase/README.md) |
 
 ## Canonical Sources

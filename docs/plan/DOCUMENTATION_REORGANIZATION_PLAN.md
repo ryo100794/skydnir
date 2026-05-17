@@ -36,13 +36,13 @@ files remain canonical and the docs page is only an index.
 
 Scattered files:
 
-- `docs/build/FDROID_RELEASE_PROCESS.md`
-- `docs/plan/RELEASE_READINESS.md`
-- `docs/plan/RELEASE_NOTES_20260505.1.md`
-- `docs/test/build-20260505.1/README.md`
+- `docs/release/FDROID_RELEASE_PROCESS.md`
+- `docs/release/RELEASE_READINESS.md`
+- `docs/release/RELEASE_NOTES_20260505.1.md`
+- `docs/release/builds/20260505.1/README.md`
 - `docs/manual/NEWSFLOW.md`
 - `docs/manual/PROMOTION.md`
-- `docs/showcase/ANNOUNCEMENT_DRAFTS_20260505.md`
+- `docs/release/announcements/20260505.md`
 - `docs/showcase/NEWS_TIMELINE.md`
 - `docs/showcase/PROJECT_DASHBOARD.md`
 - release/build links in root `README.md`
@@ -186,8 +186,8 @@ are moved, update the producers and verifier paths in the same commit.
 ## Safe work order
 
 1. Decide canonical owners:
-   - release readiness: `docs/plan/RELEASE_READINESS.md` until moved.
-   - build evidence: `docs/test/build-20260505.1/README.md` until moved.
+   - release readiness: `docs/release/RELEASE_READINESS.md`.
+   - build evidence: `docs/release/builds/20260505.1/README.md`.
    - compatibility: `docs/test/COMPATIBILITY.md`.
    - Docker scope: `docs/design/DOCKER_COMPAT_SCOPE.md`.
    - TODO: `docs/plan/TODO.md`.

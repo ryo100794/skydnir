@@ -4,7 +4,7 @@ Snapshot date: 2026-05-16.
 
 This page is the GitHub-facing release gate. It keeps the public README and
 showcase copy aligned with the current P0 blockers from
-[`INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md`](INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md).
+[`../plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md`](../plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md).
 It is intentionally conservative: a feature is not marked complete until the
 implementation and the referenced artifact both exist.
 
@@ -153,7 +153,7 @@ unsupported/experimental wording.
 ### Device evidence gates
 
 - [x] Fixed build `20260505.1` records APK build outputs and Android quick/full
-  smoke evidence under [`../test/build-20260505.1/`](../test/build-20260505.1/).
+  smoke evidence under [`builds/20260505.1/`](builds/20260505.1/).
 - [ ] Service truth device artifact exists and ties UI/API/state/process/listener
   logs to one current container ID.
 - [ ] Runtime stop/kill artifact proves direct child and GPU executor cleanup.
@@ -210,7 +210,7 @@ A release candidate can be proposed only when:
 4. build/test records do not present known failing gates as green;
 5. test-driver lanes and scenario entries marked non-promoting are not counted
    as stable checkpoint evidence;
-6. signing and distribution steps follow [`../build/FDROID_RELEASE_PROCESS.md`](../build/FDROID_RELEASE_PROCESS.md)
+6. signing and distribution steps follow [`FDROID_RELEASE_PROCESS.md`](FDROID_RELEASE_PROCESS.md)
    and keep signing material outside Git.
 
 ## Suggested GitHub release framing

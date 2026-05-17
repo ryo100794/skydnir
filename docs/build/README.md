@@ -12,7 +12,7 @@ validate every runtime behavior.
 
 This category currently has one canonical local build document: this README.
 F-Droid/reproducible-build readiness planning lives in
-[`FDROID_RELEASE_PROCESS.md`](FDROID_RELEASE_PROCESS.md).
+[`../release/FDROID_RELEASE_PROCESS.md`](../release/FDROID_RELEASE_PROCESS.md).
 
 ## Canonical Sources
 

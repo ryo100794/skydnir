@@ -1,6 +1,6 @@
 # pdocker TODO ledger
 
-Snapshot date: 2026-05-16.
+Snapshot date: 2026-05-17.
 
 This is the working TODO list for unfinished items and deliberate temporary
 accommodations. Keep this file current whenever a workaround is added so it
@@ -75,8 +75,9 @@ issues, and deciding which planned gaps become hard gates.
    stable `top` refresh, and `q` returning to a usable shell. Work units:
    terminal surface/session-type split; Engine exec/HTTP-upgrade byte capture;
    UI scripted input artifact; raw JSONL verifier with `--require-container`;
-   and resize/IME regression replay. Host-only verifier results remain
-   non-promoting.
+   resize/IME regression replay; and an explicit decision on the bundled
+   `xterm.css` IME composition-position TODO marker. Host-only verifier results
+   remain non-promoting.
 7. **[#14](https://github.com/ryo100794/pdocker-android/issues/14)
    VS Code health gate** `[P1 next]`: default workspace success requires
    compose/build/run, `pdocker-dev` current Engine state, port `18080` listener,
@@ -84,7 +85,9 @@ issues, and deciding which planned gaps become hard gates.
 8. **[#15](https://github.com/ryo100794/pdocker-android/issues/15)
    SAF direct output** `[P1 next]`: `/documents` must be a SAF-backed UnixFS
    exchange layer with sidecar metadata and direct-write evidence; app-private
-   fallback is allowed only when explicitly recorded.
+   fallback is allowed only when explicitly recorded. The default project
+   `/documents` placeholder and `pdocker-new-project` wording must be tied to
+   this gate so SAF fallback UX cannot drift from the UnixFS mediator design.
 9. **[#9](https://github.com/ryo100794/pdocker-android/issues/9)
    Release evidence honesty gate** `[P0 doing]`: planned-gap artifacts,
    skipped or unrun device lanes, and host-only checks that merely prove a gap
@@ -153,6 +156,9 @@ issues, and deciding which planned gaps become hard gates.
   `docs/test/TERMINAL_EXEC_IT_DEVICE_GATE.md`: fresh UI artifact plus raw
   Engine exec JSONL proving Enter once, isolated Ctrl-C ETX with no literal
   `c`, cursor-key history, stable `top` repaint, `q` exit, and resize route.
+  Audit note: the bundled xterm stylesheet still contains an upstream-style IME
+  composition-position TODO marker. Either close it with device IME evidence or
+  explicitly exclude the vendored marker from pdocker-owned TODO scans.
 - [doing] [#6](https://github.com/ryo100794/pdocker-android/issues/6)
   Service truth same-container-ID device gate: the listener health and
   ID/label truth work are one gate. Probe default workspace `18080` and llama
@@ -206,7 +212,7 @@ issues, and deciding which planned gaps become hard gates.
   `release-honesty` pass proves publication hygiene only; stable checkpoint
   credit still requires the P0 device artifacts listed in
   `docs/test/CI_GATE_LEDGER.md` and the blocker closures in
-  `docs/plan/RELEASE_READINESS.md`.
+  `docs/release/RELEASE_READINESS.md`.
 - [done] Agent recovery process is recorded in
   `docs/plan/AGENT_COORDINATION.md`: recovered agent results must be moved into
   implementation, focused docs, or TODO before they are considered durable, and
@@ -222,12 +228,16 @@ issues, and deciding which planned gaps become hard gates.
   `python3 scripts/verify-storage-metrics.py`, documenting shared layer-pool
   accounting and guarding against image-view double counting.
 - [done] F-Droid/reproducible-build readiness is captured in
-  `docs/build/FDROID_RELEASE_PROCESS.md`, including the distinction between
+  `docs/release/FDROID_RELEASE_PROCESS.md`, including the distinction between
   user-directed container/image/package downloads and hidden APK self-extension.
 - [done] Daemon storage summaries now separate shared layer-pool bytes,
   per-image virtual/shared/unique bytes, container upper/private bytes, and
   merged image/rootfs view bytes with explicit overlap notes so UI totals do
   not double-count hardlinked lower data.
+- [next] Default workspace Dockerfile placeholder repair cleanup: the
+  one-off `Dockerfile.pdocker-broken-backup` migration path in `MainActivity`
+  must be documented as intentional compatibility repair logic or retired after
+  a bounded migration window with a regression fixture.
 
 ### Post-Build Conversation Intake 2026-05-06
 
@@ -1289,7 +1299,8 @@ Current 2026-05-04 blocker:
   preserves `VkPipelineShaderStageCreateInfo::pName` and bounded
   `VkSpecializationInfo` data without modifying llama.cpp, and
   `scripts/smoke-vulkan-icd-bridge.sh` verifies a minimal ICD dispatch through
-  the executor command socket. It still cannot serve tokens reliably:
+  the executor command socket when local executor Vulkan preflight is available
+  and reports a planned skip otherwise. It still cannot serve tokens reliably:
   prompt processing reaches a later generic SPIR-V dispatch where Android
   `vkQueueSubmit` returns `VK_ERROR_FEATURE_NOT_PRESENT`. CPU mode is restored
   as the usable path after GPU experiments.

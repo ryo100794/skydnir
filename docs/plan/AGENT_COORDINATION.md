@@ -22,7 +22,7 @@ risks; it does not edit implementation files or resolve sibling work.
 | Direct syscall coverage lane | Banach | `scripts/run_direct_syscall_scenarios.py --lane local`, `tests/direct_syscall/`, `docs/test/DIRECT_SYSCALL_COVERAGE.md` | Included in `scripts/verify-fast.sh` |
 | Storage metrics validation lane | Leibniz | `scripts/verify-storage-metrics.py`, `docs/test/STORAGE_METRICS.md` | Included in `scripts/verify-fast.sh`; device metric checks remain TODO |
 | Terminal / `-it` investigation | Hypatia | Root cause captured in TODO: direct executor argv rewrite and readonly selection IME | Implement after GPU-safe checkpoint; add direct `/usr/bin/[` smoke |
-| F-Droid/reproducible-build readiness | Carver | `docs/build/FDROID_RELEASE_PROCESS.md`, `metadata/fdroid/README.md` | Keep runtime container downloads documented as user-directed product behavior |
+| F-Droid/reproducible-build readiness | Carver | `docs/release/FDROID_RELEASE_PROCESS.md`, `metadata/fdroid/README.md` | Keep runtime container downloads documented as user-directed product behavior |
 
 ## Intake Rule
 
