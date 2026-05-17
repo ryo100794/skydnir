@@ -546,6 +546,7 @@ static const uint32_t kMatmul256Spv[] = {
 };
 
 static FILE *g_json_out = NULL;
+static uint64_t g_vulkan_dispatch_lifecycle_sequence = 0;
 
 static FILE *json_out(void) {
     return g_json_out ? g_json_out : stdout;
@@ -7139,6 +7140,13 @@ static int run_vulkan_dispatch_fd(
     if (init_vulkan_runtime(&g_vulkan_runtime) != 0) return -21;
     VulkanRuntime *rt = &g_vulkan_runtime;
     const char *fail_stage = "start";
+    const uint64_t dispatch_lifecycle_id =
+        __sync_add_and_fetch(&g_vulkan_dispatch_lifecycle_sequence, 1);
+    const double dispatch_lifecycle_start_ms = now_ms();
+    const int dispatch_lifecycle_log =
+        env_truthy("PDOCKER_GPU_DISPATCH_PROFILE_LOG", 0);
+    int dispatch_lifecycle_begin_logged = 0;
+    uint64_t dispatch_lifecycle_spirv_hash = 0;
     VkResult rc = VK_SUCCESS;
     int ret = -21;
     int oracle_fail_closed = 0;
@@ -7426,6 +7434,22 @@ static int run_vulkan_dispatch_fd(
     }
     SpirvTraceSummary source_spirv_summary = summarize_spirv(shader_code, shader_size);
     const uint64_t original_spirv_hash = source_spirv_summary.hash;
+    dispatch_lifecycle_spirv_hash = original_spirv_hash;
+    if (dispatch_lifecycle_log) {
+        fprintf(stderr,
+                "pdocker-gpu-executor: generic dispatch lifecycle: "
+                "{\"component\":\"executor\",\"event\":\"begin\",\"dispatch_id\":%llu,"
+                "\"backend_impl\":\"android_vulkan\",\"spirv_hash\":\"0x%016llx\","
+                "\"shader_bytes\":%zu,\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
+                "\"stage\":\"prepare\"}\n",
+                (unsigned long long)dispatch_lifecycle_id,
+                (unsigned long long)dispatch_lifecycle_spirv_hash,
+                shader_size,
+                binding_count,
+                gx, gy, gz);
+        fflush(stderr);
+        dispatch_lifecycle_begin_logged = 1;
+    }
     const int q4k_safe_kernel_requested =
         strict_passthrough ? 0 :
         options && options->has_q4k_safe_kernel
@@ -8324,6 +8348,15 @@ static int run_vulkan_dispatch_fd(
     if (rc != VK_SUCCESS) { fail_stage = "create-generic-fence"; goto cleanup; }
     VkSubmitInfo submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &command_buffer};
     fail_stage = "submit-generic-dispatch";
+    if (dispatch_lifecycle_log && dispatch_lifecycle_begin_logged) {
+        fprintf(stderr,
+                "pdocker-gpu-executor: generic dispatch lifecycle: "
+                "{\"component\":\"executor\",\"event\":\"stage\",\"dispatch_id\":%llu,"
+                "\"stage\":\"submit\",\"spirv_hash\":\"0x%016llx\"}\n",
+                (unsigned long long)dispatch_lifecycle_id,
+                (unsigned long long)dispatch_lifecycle_spirv_hash);
+        fflush(stderr);
+    }
     rc = vkQueueSubmit(rt->queue, 1, &submit, fence);
     if (rc != VK_SUCCESS) goto cleanup;
     fail_stage = "wait-generic-fence";
@@ -8338,6 +8371,18 @@ static int run_vulkan_dispatch_fd(
     }
     if (rc != VK_SUCCESS) goto cleanup;
     double dispatch_ms = now_ms() - dispatch_start;
+    if (dispatch_lifecycle_log && dispatch_lifecycle_begin_logged) {
+        fprintf(stderr,
+                "pdocker-gpu-executor: generic dispatch lifecycle: "
+                "{\"component\":\"executor\",\"event\":\"stage\",\"dispatch_id\":%llu,"
+                "\"stage\":\"wait-complete\",\"spirv_hash\":\"0x%016llx\","
+                "\"vk_result\":%d,\"dispatch_ms\":%.3f}\n",
+                (unsigned long long)dispatch_lifecycle_id,
+                (unsigned long long)dispatch_lifecycle_spirv_hash,
+                rc,
+                dispatch_ms);
+        fflush(stderr);
+    }
     if (profile_response) {
         for (size_t i = 0; i < binding_count; ++i) {
             if (!active_bindings[i] || !vk_buffers[i] || !vk_buffers[i]->map) continue;
@@ -8933,6 +8978,20 @@ static int run_vulkan_dispatch_fd(
     ret = 0;
 
 cleanup:
+    if (dispatch_lifecycle_log && dispatch_lifecycle_begin_logged) {
+        fprintf(stderr,
+                "pdocker-gpu-executor: generic dispatch lifecycle: "
+                "{\"component\":\"executor\",\"event\":\"end\",\"dispatch_id\":%llu,"
+                "\"stage\":\"%s\",\"ret\":%d,\"vk_result\":%d,"
+                "\"elapsed_ms\":%.3f,\"spirv_hash\":\"0x%016llx\"}\n",
+                (unsigned long long)dispatch_lifecycle_id,
+                fail_stage ? fail_stage : "unknown",
+                ret,
+                rc,
+                now_ms() - dispatch_lifecycle_start_ms,
+                (unsigned long long)dispatch_lifecycle_spirv_hash);
+        fflush(stderr);
+    }
     if (ret != 0) {
         fprintf(stderr, "pdocker-gpu-executor: generic Vulkan dispatch failed stage=%s rc=%d\n", fail_stage, rc);
         log_vulkan_feature_trace(rt);

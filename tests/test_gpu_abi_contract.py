@@ -1105,6 +1105,41 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertFalse(report["benchmark_claim_allowed"])
         self.assertIn("LLAMA_GPU_BACKEND", report["runtime_env"])
 
+    def test_llama_gpu_dispatch_lifecycle_logs_are_recorded(self):
+        compare = LLAMA_COMPARE.read_text()
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for marker in [
+            "generic dispatch lifecycle:",
+            "dispatch_lifecycle_log_enabled",
+            "g_generic_dispatch_sequence",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn('\\"event\\":\\"begin\\"', icd)
+        self.assertIn('\\"event\\":\\"end\\"', icd)
+        self.assertIn('component', icd)
+        self.assertIn('icd', icd)
+
+        for marker in [
+            "generic dispatch lifecycle:",
+            "g_vulkan_dispatch_lifecycle_sequence",
+        ]:
+            self.assertIn(marker, executor)
+        self.assertIn('\\"event\\":\\"stage\\"', executor)
+        self.assertIn('\\"stage\\":\\"submit\\"', executor)
+        self.assertIn('\\"stage\\":\\"wait-complete\\"', executor)
+        self.assertIn('component', executor)
+        self.assertIn('executor', executor)
+
+        for marker in [
+            "extract_dispatch_lifecycle_events",
+            "summarize_dispatch_lifecycle",
+            "unmatched_begin_ids",
+            "dispatch_lifecycle",
+        ]:
+            self.assertIn(marker, compare)
+
 
 if __name__ == "__main__":
     unittest.main()

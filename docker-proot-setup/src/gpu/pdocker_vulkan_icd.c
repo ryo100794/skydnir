@@ -22,6 +22,7 @@
 #include <sys/syscall.h>
 #include <sys/un.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_icd.h>
@@ -72,6 +73,8 @@ typedef struct PdockerVkFence PdockerVkFence;
 #define PDOCKER_VK_MAX_GUARDED_MEMORIES 256
 #define PDOCKER_VULKAN_ICD_BUILD_MARKER "vulkan-icd-runtime-marker-20260510"
 #define PDOCKER_VK_GUARDED_DEFAULT_MIN_BYTES (64ull * 1024ull * 1024ull)
+
+static uint64_t g_generic_dispatch_sequence = 0;
 
 #define PDOCKER_VK_FEATURE_SHADER_INT64                 (1ull << 0)
 #define PDOCKER_VK_FEATURE_SHADER_INT16                 (1ull << 1)
@@ -656,6 +659,29 @@ static void hex_encode(const uint8_t *src, size_t src_size, char *dst, size_t ds
     dst[src_size * 2] = '\0';
 }
 
+static double monotonic_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+}
+
+static uint64_t fnv1a64_bytes(const void *data, size_t size) {
+    const unsigned char *bytes = (const unsigned char *)data;
+    uint64_t hash = 1469598103934665603ull;
+    if (!bytes) return 0;
+    for (size_t i = 0; i < size; ++i) {
+        hash ^= (uint64_t)bytes[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+static bool dispatch_lifecycle_log_enabled(void) {
+    return trace_allocations() ||
+           getenv("PDOCKER_VULKAN_ICD_DEBUG") ||
+           env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false);
+}
+
 static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding);
 static VkSubgroupFeatureFlags advertised_subgroup_operations(void);
 static uint32_t advertised_subgroup_size(void);
@@ -1001,8 +1027,40 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     command[off++] = '\n';
     command[off] = '\0';
 
+    const uint64_t dispatch_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
+    const uint64_t shader_hash = fnv1a64_bytes(shader->code_map, shader->code_size);
+    const bool lifecycle_log = dispatch_lifecycle_log_enabled();
+    const double lifecycle_start_ms = monotonic_ms();
+    if (lifecycle_log) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: generic dispatch lifecycle: "
+                "{\"component\":\"icd\",\"event\":\"begin\",\"dispatch_id\":%llu,"
+                "\"spirv_hash\":\"0x%016llx\",\"shader_bytes\":%zu,"
+                "\"bindings\":%zu,\"dispatch\":[%u,%u,%u]}\n",
+                (unsigned long long)dispatch_id,
+                (unsigned long long)shader_hash,
+                shader->code_size,
+                binding_count,
+                op->dispatch_x,
+                op->dispatch_y ? op->dispatch_y : 1,
+                op->dispatch_z ? op->dispatch_z : 1);
+        fflush(stderr);
+    }
+
     int socket_fd = connect_queue();
-    if (socket_fd < 0) return socket_fd;
+    if (socket_fd < 0) {
+        if (lifecycle_log) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: generic dispatch lifecycle: "
+                    "{\"component\":\"icd\",\"event\":\"end\",\"dispatch_id\":%llu,"
+                    "\"rc\":%d,\"elapsed_ms\":%.3f,\"stage\":\"connect\"}\n",
+                    (unsigned long long)dispatch_id,
+                    socket_fd,
+                    monotonic_ms() - lifecycle_start_ms);
+            fflush(stderr);
+        }
+        return socket_fd;
+    }
     char control[CMSG_SPACE(sizeof(fds))];
     struct iovec iov;
     struct msghdr msg;
@@ -1079,6 +1137,16 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         }
         if (rc == 0 && strstr(line, "\"valid\":true") == NULL) rc = -EIO;
         free(heap_line);
+    }
+    if (lifecycle_log) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: generic dispatch lifecycle: "
+                "{\"component\":\"icd\",\"event\":\"end\",\"dispatch_id\":%llu,"
+                "\"rc\":%d,\"elapsed_ms\":%.3f,\"stage\":\"response\"}\n",
+                (unsigned long long)dispatch_id,
+                rc,
+                monotonic_ms() - lifecycle_start_ms);
+        fflush(stderr);
     }
     close(socket_fd);
     return rc;

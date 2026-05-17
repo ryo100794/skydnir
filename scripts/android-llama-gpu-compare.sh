@@ -1853,6 +1853,39 @@ def observed_event_values(events, field):
             values.append(current)
     return values
 
+def extract_dispatch_lifecycle_events(text):
+    events = []
+    marker = "generic dispatch lifecycle:"
+    for line in text.splitlines():
+        if marker not in line:
+            continue
+        payload = line.split(marker, 1)[1].strip()
+        try:
+            event = json.loads(payload)
+        except Exception:
+            continue
+        if isinstance(event, dict) and event.get("event") in {"begin", "stage", "end"}:
+            events.append(event)
+    return events
+
+def summarize_dispatch_lifecycle(events):
+    begins = [e for e in events if e.get("event") == "begin"]
+    ends = [e for e in events if e.get("event") == "end"]
+    stages = [e for e in events if e.get("event") == "stage"]
+    begin_ids = {str(e.get("dispatch_id")) for e in begins if e.get("dispatch_id") is not None}
+    end_ids = {str(e.get("dispatch_id")) for e in ends if e.get("dispatch_id") is not None}
+    return {
+        "event_count": len(events),
+        "begin_count": len(begins),
+        "stage_count": len(stages),
+        "end_count": len(ends),
+        "unmatched_begin_ids": sorted(begin_ids - end_ids)[:16],
+        "unmatched_end_ids": sorted(end_ids - begin_ids)[:16],
+        "latest_events": events[-12:],
+        "components": sorted({str(e.get("component")) for e in events if e.get("component")}),
+        "stages": sorted({str(e.get("stage")) for e in events if e.get("stage")}),
+    }
+
 def parse_android_feature_trace(text):
     m = re.search(
         r"pdocker-gpu-executor: Android Vulkan features (?:build_marker=([^ ]+) )?api=([0-9]+)\.([0-9]+) .*?"
@@ -1916,6 +1949,7 @@ def parse_spirv_traces(text):
     return traces
 
 executor_events = extract_executor_json_events(log)
+dispatch_lifecycle = summarize_dispatch_lifecycle(extract_dispatch_lifecycle_events(log))
 executor_backends = sorted(set(executor_backends) | {e.get("backend_impl") for e in executor_events if e.get("backend_impl")})
 executor_errors = sorted(set(executor_errors) | {e.get("error") for e in executor_events if e.get("error")})
 spirv_hashes = sorted(set(spirv_hashes) | {e.get("spirv_hash") for e in executor_events if e.get("spirv_hash")})
@@ -2923,6 +2957,7 @@ result = {
         "diagnostics": {
             "blocker_class": blocker_class,
             "blocker_detail": blocker_detail,
+            "dispatch_lifecycle": dispatch_lifecycle,
             "failure_axes": failure_axes,
             "advertised_limits": advertised_limits,
             "chunking_pressure": chunking_pressure,
