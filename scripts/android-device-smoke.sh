@@ -1451,25 +1451,35 @@ write_ui_it_selftest_skip_artifact() {
   "HardGateRequired": $hard_gate_json,
   "Evidence": {
     "enter-single-submit": false,
+    "enter-no-duplicate-submit": false,
     "ctrl-c-interrupts-without-literal-c": false,
+    "jp-en-ctrl-c-isolated-etx": false,
     "arrow-up-reaches-readline-history": false,
+    "arrow-up-no-escape-text": false,
     "ime-enter-ctrlc-regression-covered": false,
     "top-starts-on-tty": false,
     "top-refresh-observed-before-q": false,
     "top-repaint-remains-terminal-shaped": false,
     "q-quits-top": false,
-    "resize-route-is-observable": false
+    "top-q-shell-recovery": false,
+    "resize-route-is-observable": false,
+    "selection-keyboard-suppression": false
   },
   "RequiredEvidence": [
     "enter-single-submit",
+    "enter-no-duplicate-submit",
     "ctrl-c-interrupts-without-literal-c",
+    "jp-en-ctrl-c-isolated-etx",
     "arrow-up-reaches-readline-history",
+    "arrow-up-no-escape-text",
     "ime-enter-ctrlc-regression-covered",
     "top-starts-on-tty",
     "top-refresh-observed-before-q",
     "top-repaint-remains-terminal-shaped",
     "q-quits-top",
-    "resize-route-is-observable"
+    "top-q-shell-recovery",
+    "resize-route-is-observable",
+    "selection-keyboard-suppression"
   ],
   "Contract": "ACTION_PREFIX.action.SMOKE_UI_IT_SELFTEST must only pass after a real requested/running Engine container is exercised; skip artifacts are non-success and must not be treated as fake success.",
   "StartedAtMs": $now,
@@ -1519,6 +1529,8 @@ if "\x1b[A" in tail or "^[[A" in tail:
     fail("UI exec-it arrow evidence leaked raw ArrowUp escape text")
 if "pdocker-ui-it-topq-ok" not in tail:
     fail("UI exec-it top/q evidence missing shell recovery marker")
+if not artifact.get("Evidence", {}).get("selection-keyboard-suppression"):
+    fail("UI exec-it artifact missing selection keyboard suppression evidence")
 
 events = []
 for line in jsonl_path.read_text(errors="replace").splitlines():
@@ -1571,6 +1583,11 @@ arrow_indexes = [
 ]
 if not arrow_indexes:
     fail("UI exec-it ArrowUp+Enter byte evidence is missing")
+top_indexes = [index for index, text in enumerate(texts) if text == "top\r"]
+q_indexes = [index for index, tokens in enumerate(hex_tokens) if tokens == ["71"]]
+topq_indexes = [index for index, text in enumerate(texts) if "topq-ok" in text]
+if not top_indexes or not q_indexes or not topq_indexes or not (top_indexes[0] < q_indexes[0] < topq_indexes[0]):
+    fail("UI exec-it top q shell recovery must be ordered as top, q, recovery command")
 PY
 }
 

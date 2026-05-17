@@ -19,14 +19,19 @@ from typing import Any
 
 REQUIRED_EVIDENCE = [
     "enter-single-submit",
+    "enter-no-duplicate-submit",
     "ctrl-c-interrupts-without-literal-c",
+    "jp-en-ctrl-c-isolated-etx",
     "arrow-up-reaches-readline-history",
+    "arrow-up-no-escape-text",
     "ime-enter-ctrlc-regression-covered",
     "top-starts-on-tty",
     "top-refresh-observed-before-q",
     "top-repaint-remains-terminal-shaped",
     "q-quits-top",
+    "top-q-shell-recovery",
     "resize-route-is-observable",
+    "selection-keyboard-suppression",
 ]
 
 TOP_REFRESH_MARKERS = ("PID", "Tasks:", "Task:", "Mem:", "CPU:", "load average", "Load Avg")
@@ -144,15 +149,22 @@ def _verify_success_json(artifact: dict[str, Any], require_container: bool) -> s
     tail = str(artifact.get("OutputTail", ""))
     checks = {
         "enter-single-submit": "pdocker-ui-it-ok" in tail,
+        "enter-no-duplicate-submit": tail.count("pdocker-ui-it-ok") == 1,
         "ctrl-c-interrupts-without-literal-c": "pdocker-ui-it-ctrlc-ok" in tail and "sleep 15c" not in tail,
+        "jp-en-ctrl-c-isolated-etx": "pdocker-ui-it-ctrlc-ok" in tail and "sleep 15c" not in tail,
         "arrow-up-reaches-readline-history": tail.count("pdocker-ui-it-arrow-seed") >= 2 and "\u001b[A" not in tail,
+        "arrow-up-no-escape-text": "\u001b[A" not in tail and "^[[A" not in tail,
         "ime-enter-ctrlc-regression-covered": "pdocker-ui-it-ime-enter-ok" in tail and "pdocker-ui-it-ctrlc-ok" in tail and "sleep 15c" not in tail,
         "top-starts-on-tty": "pdocker-ui-it-top-ok" in tail,
         "top-refresh-observed-before-q": any(marker in tail for marker in TOP_REFRESH_MARKERS),
         "top-repaint-remains-terminal-shaped": evidence.get("top-repaint-remains-terminal-shaped") is True,
         "q-quits-top": "pdocker-ui-it-topq-ok" in tail,
+        "top-q-shell-recovery": "pdocker-ui-it-topq-ok" in tail,
         # Checked against JSONL below; stream-started alone is not accepted.
         "resize-route-is-observable": True,
+        # Selection suppression is a UI-surface artifact flag; static contract tests
+        # keep the hook generic and session-neutral.
+        "selection-keyboard-suppression": evidence.get("selection-keyboard-suppression") is True,
     }
     missing = [name for name, ok in checks.items() if not ok]
     _require(not missing, "UI exec-it evidence missing from output tail: " + ", ".join(missing))
@@ -221,7 +233,7 @@ def _verify_jsonl(events: list[dict[str, Any]], container: str) -> None:
              "Engine exec input diagnostics missing ArrowUp+Enter bytes (1b 5b 41 0d)")
     _require(any(h == HEX_CTRL_C or f" {HEX_CTRL_C} " in f" {h} " for h in hexes),
              "Engine exec input diagnostics missing Ctrl-C byte (03)")
-    _require(any(h == HEX_Q or f" {HEX_Q} " in f" {h} " for h in hexes),
+    _require(any(_hex_tokens(event) == [HEX_Q] for event in input_events),
              "Engine exec input diagnostics missing q byte (71) for top quit")
     _require("stream-started" in [_event_name(event) for event in events] and "/resize?h=" in "\n".join(_event_body(event) for event in resize_events),
              "Engine exec resize proof must be a resize route, not stream-started alone")
@@ -247,6 +259,11 @@ def _verify_jsonl(events: list[dict[str, Any]], container: str) -> None:
         ime_command_index + 2 >= len(input_events) or _hex_tokens(input_events[ime_command_index + 2]) != ["0d"],
         "Engine exec IME command submitted twice; duplicate Enter byte observed",
     )
+    enter_ok_input_count = sum(1 for event in input_events if "echo ${p}-ok" in _text(event))
+    _require(
+        enter_ok_input_count == 1,
+        "Engine exec Enter evidence must have exactly one initial submit command",
+    )
     _require(
         initial_script_index >= 0 and arrow_index > initial_script_index,
         "Engine exec ArrowUp history proof must occur after the seed shell script",
@@ -255,6 +272,11 @@ def _verify_jsonl(events: list[dict[str, Any]], container: str) -> None:
         top_index >= 0 and q_index > top_index,
         "Engine exec q byte must be sent after foreground top starts",
     )
+    top_recovery_index = next((i for i, event in enumerate(input_events) if "topq-ok" in _text(event)), -1)
+    _require(
+        top_recovery_index > q_index > top_index >= 0,
+        "Engine exec top q shell recovery command must occur after q quits foreground top",
+    )
     _require(
         sleep_index >= 0 and recovery_index > sleep_index,
         "Engine exec Ctrl-C recovery command must occur after sleep command",
@@ -262,7 +284,7 @@ def _verify_jsonl(events: list[dict[str, Any]], container: str) -> None:
     _require(ctrl_indexes, "Engine exec input diagnostics missing isolated Ctrl-C event")
     _require(
         any(sleep_index < index < recovery_index and _hex_tokens(input_events[index]) == [HEX_CTRL_C] for index in ctrl_indexes),
-        "Engine exec Ctrl-C byte must be isolated between sleep and recovery",
+        "Engine exec Ctrl-C must be an isolated ETX byte between sleep and recovery for JP/EN IME routes",
     )
     bad_ctrl_literal = [
         index

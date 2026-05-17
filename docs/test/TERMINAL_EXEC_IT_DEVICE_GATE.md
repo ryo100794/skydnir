@@ -51,9 +51,12 @@ A real-run artifact must include:
 - a non-empty `Container`; `RequestedContainer` is trace context only and is not
   proof that a container was exercised
 - `RequiredEvidence`
-- `Evidence`, including `ime-enter-ctrlc-regression-covered`,
-  `top-refresh-observed-before-q`, `top-repaint-remains-terminal-shaped`, and
-  `resize-route-is-observable` as first-class keys set to `true`
+- `Evidence`, including `enter-no-duplicate-submit`,
+  `jp-en-ctrl-c-isolated-etx`, `arrow-up-no-escape-text`,
+  `ime-enter-ctrlc-regression-covered`, `top-refresh-observed-before-q`,
+  `top-repaint-remains-terminal-shaped`, `top-q-shell-recovery`,
+  `resize-route-is-observable`, and `selection-keyboard-suppression` as
+  first-class keys set to `true`
 - `OutputTail` containing the required UI-observable shell markers; embedded
   `EngineExecDiagnostics` text in this JSON is helpful for debugging but is
   never a substitute for the raw JSONL sidecar
@@ -72,12 +75,17 @@ stdin, or a JavaScript-only assertion.
 - `input` events that include the UI-driven script, ArrowUp+Enter
   (`1b 5b 41 0d`), `top`, `q` (`71`), `sleep 15`, raw Ctrl-C (`03`), and the
   post-interrupt recovery command
-- for the IME Enter regression, the command containing
-  `pdocker-ui-it-ime-enter-ok` followed by exactly one Enter byte (`0d`), with
-  no immediate second Enter event
+- for the duplicate Enter regression, both the normal Enter marker and the IME
+  command containing `pdocker-ui-it-ime-enter-ok` must be submitted once; the
+  IME command is followed by exactly one Enter byte (`0d`), with no immediate
+  second Enter event
 - for the JP/EN IME Ctrl-C regression, an isolated ETX byte (`03`) after
   `sleep 15`; `03 63`, a standalone `63` before recovery, or `sleep 15c` is
   failure evidence, not a pass
+- for ArrowUp, JSONL must show UI-generated `1b 5b 41 0d` after the history
+  seed, and `OutputTail` must not contain raw `ESC [ A`/`^[[A` escape text
+- for fullscreen `top`, JSONL must show `top`, isolated `q`, and the following
+  shell recovery command in that order
 - the generic Ctrl/Alt modifier policy remains session-neutral: Ctrl maps a
   single character to the conventional terminal control byte, Alt/Esc prefix the
   resulting byte sequence with `ESC`, modifiers clear after one modified send or
@@ -104,13 +112,20 @@ The gate validates the following evidence names for a real-container run:
 - `enter-single-submit`: Enter submits a command once and produces
   `pdocker-ui-it-ok`. A second Enter must not be needed, and Enter must not move
   the cursor horizontally instead of submitting.
+- `enter-no-duplicate-submit`: the required Enter/IME Enter paths submit exactly
+  once; duplicate Enter bytes or duplicate success markers are failure evidence.
 - `ctrl-c-interrupts-without-literal-c`: Ctrl-C interrupts `sleep` and returns
   to the shell without injecting literal `c` into the command stream. This is
   the device proof for the Japanese IME / Android WebView modifier fallback, not
   just a JavaScript unit check.
+- `jp-en-ctrl-c-isolated-etx`: JP/EN Ctrl-C routes are accepted only as an
+  isolated ETX (`03`) between `sleep 15` and shell recovery, never `03 63`, a
+  standalone literal `c`, or `sleep 15c`.
 - `arrow-up-reaches-readline-history`: Arrow-up reaches shell history/readline
   and does not print raw escape bytes as text. This covers the cursor-key route
   through the UI soft-key/test hook into the same terminal byte stream.
+- `arrow-up-no-escape-text`: the UI artifact must separately prove raw ArrowUp
+  escape text (`ESC [ A` / `^[[A`) did not leak into the terminal output.
 - `ime-enter-ctrlc-regression-covered`: the WebView helper-textarea IME fallback
   path dispatches an Enter `beforeinput` event to submit a command and a Ctrl-C
   `beforeinput` event to interrupt `sleep` without injecting literal `c`. This
@@ -126,10 +141,16 @@ The gate validates the following evidence names for a real-container run:
   success flag.
 - `q-quits-top`: `q` exits `top`, after which the shell accepts another
   command.
+- `top-q-shell-recovery`: JSONL must order the foreground `top` command, the
+  isolated `q` byte, and the post-`q` recovery command so a stale output marker
+  cannot satisfy the check.
 - `resize-route-is-observable`: the Engine exec resize route is observable
   through terminal diagnostics. The bridge records the Docker-compatible
   `/exec/{id}/resize?h={rows}&w={cols}` path on resize success and on explicit
   `resize-failed` events; opening the stream alone is not resize evidence.
+- `selection-keyboard-suppression`: selection mode must keep the soft keyboard
+  suppressed through the generic terminal surface (`selectionSuppressesIme()` /
+  `suppressImeForSelection()`), so selection/copy cannot inject terminal input.
 
 ## UI-driven reproduction route
 
@@ -164,10 +185,11 @@ private test-only Engine endpoint. Required reproductions are:
 |---|---|
 | Generic terminal surface | Input is sent through `xterm/index.html` generic test hooks and `PdockerBridge.input`; resize is sent through `PdockerBridge.resize`; static tests keep Docker/Engine tokens out of the surface. |
 | Engine exec session transport | JSONL shows one exec id with create response, created event, 101 start response, stream-started event, raw input events, and matching container id. |
-| IME handling | The helper-textarea `beforeinput` path submits the IME Enter command with exactly one `0d` and sends Ctrl-C as one isolated `03` without literal `c`. |
+| IME handling | The helper-textarea `beforeinput` path submits the IME Enter command with exactly one `0d`, rejects duplicate Enter, and sends JP/EN Ctrl-C as one isolated `03` without literal `c`. |
 | Ctrl/Alt modifier policy | Ctrl/Alt behavior is verified as generic terminal input behavior; device Ctrl-C evidence proves the control-byte route, while host/static tests cover Alt/Esc prefix and one-shot clearing. |
-| Top/fullscreen behavior | Foreground `top` must repaint before `q`, remain terminal-shaped, accept `q`, and return to a shell that runs the recovery command. |
+| Top/fullscreen behavior | Foreground `top` must repaint before `q`, remain terminal-shaped, accept an isolated `q`, and JSONL must show shell recovery after `q`. |
 | Resize | JSONL contains `/exec/{id}/resize?h={rows}&w={cols}` or same-id `resize-failed`; `stream-started` is never counted as resize proof. |
+| Selection keyboard suppression | Static and artifact evidence keep selection mode keyboard suppression in the generic terminal surface, preventing selection/copy from forwarding input bytes. |
 
 ## Regression symptoms this gate is meant to catch
 

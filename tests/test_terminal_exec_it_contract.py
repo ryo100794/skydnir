@@ -158,6 +158,9 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn("if (event.inputType === 'insertCompositionText') return;", self.xterm)
         self.assertIn("sendInput(data, true);", self.xterm)
         self.assertIn("window.pdockerTestImeFallbackInput", self.xterm)
+        self.assertIn("selectionSuppressesIme()", self.xterm)
+        self.assertIn("suppressImeForSelection()", self.xterm)
+        self.assertIn("ta.setAttribute('inputmode', 'none')", self.xterm)
         self.assertIn("enter-beforeinput", self.xterm)
         self.assertIn("ctrl-beforeinput", self.xterm)
         self.assertIn("dispatchSyntheticTerminalEvent", self.xterm)
@@ -243,14 +246,19 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('"RequiredEvidence"', skip_body)
         for evidence_name in [
             "enter-single-submit",
+            "enter-no-duplicate-submit",
             "ctrl-c-interrupts-without-literal-c",
+            "jp-en-ctrl-c-isolated-etx",
             "arrow-up-reaches-readline-history",
+            "arrow-up-no-escape-text",
             "ime-enter-ctrlc-regression-covered",
             "top-starts-on-tty",
             "top-refresh-observed-before-q",
             "top-repaint-remains-terminal-shaped",
             "q-quits-top",
+            "top-q-shell-recovery",
             "resize-route-is-observable",
+            "selection-keyboard-suppression",
         ]:
             self.assertIn(f'"{evidence_name}": false', skip_body)
         self.assertIn('fake success', skip_body)
@@ -269,14 +277,19 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn("hard gate requires a real container; planned-skip is not a pass", verifier)
         self.assertIn('REQUIRED_EVIDENCE = [', verifier)
         self.assertIn('"enter-single-submit"', verifier)
+        self.assertIn('"enter-no-duplicate-submit"', verifier)
         self.assertIn('"ctrl-c-interrupts-without-literal-c"', verifier)
+        self.assertIn('"jp-en-ctrl-c-isolated-etx"', verifier)
         self.assertIn('"arrow-up-reaches-readline-history"', verifier)
+        self.assertIn('"arrow-up-no-escape-text"', verifier)
         self.assertIn('"ime-enter-ctrlc-regression-covered"', verifier)
         self.assertIn('"top-starts-on-tty"', verifier)
         self.assertIn('"top-refresh-observed-before-q"', verifier)
         self.assertIn('"top-repaint-remains-terminal-shaped"', verifier)
         self.assertIn('"q-quits-top"', verifier)
+        self.assertIn('"top-q-shell-recovery"', verifier)
         self.assertIn('"resize-route-is-observable"', verifier)
+        self.assertIn('"selection-keyboard-suppression"', verifier)
         self.assertIn('missing_flags', verifier)
         self.assertIn('"pdocker-ui-it-ime-enter-ok" in tail', verifier)
         self.assertIn('any(marker in tail for marker in TOP_REFRESH_MARKERS)', verifier)
@@ -410,12 +423,17 @@ class TerminalExecItContractTest(unittest.TestCase):
             "planned-skip is evidence, not success",
             "HardGateRequired",
             "enter-single-submit",
+            "enter-no-duplicate-submit",
             "ctrl-c-interrupts-without-literal-c",
+            "jp-en-ctrl-c-isolated-etx",
             "arrow-up-reaches-readline-history",
+            "arrow-up-no-escape-text",
             "top-starts-on-tty",
             "top-refresh-observed-before-q",
             "q-quits-top",
+            "top-q-shell-recovery",
             "resize-route-is-observable",
+            "selection-keyboard-suppression",
             "top-repaint-remains-terminal-shaped",
             "ime-enter-ctrlc-regression-covered",
             "UI-driven reproduction route",

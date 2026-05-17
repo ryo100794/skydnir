@@ -70,6 +70,7 @@ def good_events():
         {"event": "input", "timestampMs": 10, "bytes": 4, "hex": "1b 5b 41 0d", "text": "\\e[A\r"},
         {"event": "input", "timestampMs": 11, "bytes": 4, "hex": "74 6f 70 0d", "text": "top\r"},
         {"event": "input", "timestampMs": 12, "bytes": 1, "hex": "71", "text": "q"},
+        {"event": "input", "timestampMs": 12.5, "bytes": 43, "hex": "65 63 68 6f 20 24 7b 70 7d 2d 74 6f 70 2d 6f 6b 0d 65 63 68 6f 20 24 7b 70 7d 2d 74 6f 70 71 2d 6f 6b 0d", "text": "echo ${p}-top-ok\necho ${p}-topq-ok\n"},
         {"event": "input", "timestampMs": 13, "bytes": 9, "hex": "73 6c 65 65 70 20 31 35 0d", "text": "sleep 15\r"},
         {"event": "input", "timestampMs": 14, "bytes": 1, "hex": "03", "text": "\u0003"},
         {"event": "input", "timestampMs": 15, "bytes": 30, "hex": "65 63 68 6f 20 63 74 72 6c 63 2d 6f 6b 0d 65 78 69 74 0d", "text": "echo ${p}-ctrlc-ok\nexit\n"},
