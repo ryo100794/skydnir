@@ -1148,6 +1148,31 @@ def _q6_shader_like_interpretation(q6: Any) -> dict[str, Any]:
     }
 
 
+def _q6_output_layout_probe(q6: Any) -> dict[str, Any]:
+    if not isinstance(q6, dict):
+        return {"summary": "not-run", "samples": []}
+    probe = q6.get("q6_output_layout_probe")
+    if not isinstance(probe, dict):
+        return {
+            "summary": q6.get("q6_output_layout_probe_summary") or "not-run",
+            "samples": [],
+        }
+    samples = probe.get("samples")
+    if not isinstance(samples, list):
+        samples = []
+    return {
+        "summary": str(probe.get("summary") or q6.get("q6_output_layout_probe_summary") or "not-run"),
+        "samples": samples,
+        "canonical_match_count": probe.get("canonical_match_count"),
+        "found_elsewhere_count": probe.get("found_elsewhere_count"),
+        "mismatch_count": probe.get("mismatch_count"),
+        "consistent_relative_offset": probe.get("consistent_relative_offset"),
+        "relative_offset": probe.get("relative_offset"),
+        "search_base_index": probe.get("search_base_index"),
+        "search_float_count": probe.get("search_float_count"),
+    }
+
+
 def _pre_http_feature_evidence_missing(
     blocker: dict[str, Any],
     evidence: dict[str, Any],
@@ -1411,6 +1436,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
 
     q6_writeback_evidence = _q6_writeback_evidence(q6)
     q6_shader_like = _q6_shader_like_interpretation(q6)
+    q6_output_layout = _q6_output_layout_probe(q6)
     if not q6:
         classification = "q6-not-reached"
         responsibility_boundary = "q6-not-reached"
@@ -1441,12 +1467,27 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         classification = "q6-workgroup-cleared-but-oracle-mismatch"
         responsibility_boundary = "q6-oracle"
         q6_blocker_class = str(q6.get("blocker_class") or "descriptor-memory-synchronization-or-q6-arithmetic")
-        if (
-            q6_blocker_class == "q6-arithmetic-reduction-or-output-layout"
-            and q6_shader_like["q6_shader_like_oracle_cleared"] is True
-            and q6_writeback_evidence.get("summary") == "pass"
-        ):
-            q6_blocker_class = "vulkan-device-execution"
+        if q6_writeback_evidence.get("summary") == "pass":
+            if q6_output_layout.get("summary") == "canonical-mismatch-found-elsewhere":
+                classification = "q6-native-output-layout"
+                responsibility_boundary = "q6-output-layout"
+                q6_blocker_class = "native-q6-output-layout"
+            elif q6_output_layout.get("summary") == "canonical-mismatch-inconclusive":
+                classification = "q6-native-output-layout-inconclusive"
+                responsibility_boundary = "q6-output-layout"
+                q6_blocker_class = "native-q6-output-layout-inconclusive"
+            elif (
+                q6_output_layout.get("summary") == "canonical-mismatch-not-found"
+                and q6_shader_like["q6_shader_like_oracle_cleared"] is True
+            ):
+                classification = "q6-native-reduction-or-device-execution"
+                responsibility_boundary = "q6-native-reduction"
+                q6_blocker_class = "native-q6-reduction-or-device-execution"
+            elif (
+                q6_blocker_class == "q6-arithmetic-reduction-or-output-layout"
+                and q6_shader_like["q6_shader_like_oracle_cleared"] is True
+            ):
+                q6_blocker_class = "vulkan-device-execution"
         next_action = f"continue Q6_K strict-passthrough split at the {q6_blocker_class} boundary"
     else:
         classification = "q6-inconclusive"
@@ -1473,8 +1514,16 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "next_action": next_action,
         "q6_workgroup_diagnostics": q6,
         "q6_shader_like_interpretation": q6_shader_like,
+        "q6_output_layout_probe": q6_output_layout,
         "q6_effective_blocker_class": (
-            q6_blocker_class if classification == "q6-workgroup-cleared-but-oracle-mismatch" else None
+            q6_blocker_class
+            if classification in {
+                "q6-workgroup-cleared-but-oracle-mismatch",
+                "q6-native-output-layout",
+                "q6-native-output-layout-inconclusive",
+                "q6-native-reduction-or-device-execution",
+            }
+            else None
         ),
         "q6_writeback_evidence": q6_writeback_evidence,
         "runtime_freshness": runtime_freshness,
@@ -1542,6 +1591,9 @@ def main(argv: list[str]) -> int:
         return 0 if classification in {
             "q6-workgroup-cleared-and-oracle-match",
             "q6-workgroup-cleared-but-oracle-mismatch",
+            "q6-native-output-layout",
+            "q6-native-output-layout-inconclusive",
+            "q6-native-reduction-or-device-execution",
         } else 31
     if classification == "q6-workgroup-shape-blocker":
         return 32

@@ -405,6 +405,16 @@ Pass criteria:
   `q6-writeback-unverified`.  This prevents a pre-writeback oracle match from
   being promoted into a correctness claim when the container-visible fd boundary
   has not been proven.
+- The strict safe-kernel control now matches under the same bridge/object graph,
+  so the next native diagnostic is a bounded Q6_K reduction/output-layout probe
+  in the APK executor.  It emits `source_spirv_hash`,
+  `effective_spirv_hash`, `q6_native_reduction_tree_*`, and
+  `q6_output_layout_probe` fields without modifying llama.cpp, Dockerfiles,
+  models, prompts, or descriptor data.  A verified writeback plus multiple
+  mismatched rows found at the same non-canonical relative offset classifies as
+  native output layout; mixed or single-hit layout probes stay inconclusive. A
+  verified writeback plus `canonical-mismatch-not-found` with shader-like
+  arithmetic cleared classifies as native reduction/device-execution.
 
 #### Row-indexed Q6_K device-run decision tree
 

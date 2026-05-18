@@ -112,6 +112,19 @@ typedef struct {
     double abs_error;
 } CpuOracleSample;
 
+typedef struct {
+    uint64_t dst_index;
+    float expected;
+    float gpu_at_dst;
+    double abs_error_at_dst;
+    uint64_t best_index;
+    float best_value;
+    double best_abs_error;
+    int64_t best_relative_offset;
+    int canonical_match;
+    int found_elsewhere;
+} Q6OutputLayoutProbeSample;
+
 typedef struct CpuOracleReport CpuOracleReport;
 
 typedef struct {
@@ -4040,6 +4053,9 @@ struct CpuOracleReport {
     double q6_packed16_view_abs_delta;
     double q6_shader_like_sum;
     double q6_shader_like_abs_delta;
+    double q6_native_reduction_tree_sum;
+    double q6_native_reduction_tree_abs_delta;
+    double q6_native_reduction_tree_gpu_abs_error;
     uint64_t q6_local_size[3];
     uint64_t q6_local_invocations;
     uint64_t q6_accum_mask;
@@ -4055,6 +4071,17 @@ struct CpuOracleReport {
     size_t oracle_writeback_rows;
     CpuOracleSample row_window[32];
     size_t row_window_count;
+    int q6_output_layout_probe_ran;
+    char q6_output_layout_probe_summary[64];
+    uint64_t q6_output_layout_probe_search_base_index;
+    size_t q6_output_layout_probe_search_float_count;
+    size_t q6_output_layout_probe_mismatch_count;
+    size_t q6_output_layout_probe_canonical_match_count;
+    size_t q6_output_layout_probe_found_elsewhere_count;
+    int q6_output_layout_probe_consistent_offset;
+    int64_t q6_output_layout_probe_relative_offset;
+    Q6OutputLayoutProbeSample q6_output_layout_probe_samples[8];
+    size_t q6_output_layout_probe_sample_count;
     int has_first_mismatch;
     CpuOracleSample first_mismatch;
     CpuOracleSample samples[8];
@@ -4267,6 +4294,9 @@ static void write_cpu_oracle_report(
                 "\"q6_packed16_view_abs_delta\":%.9g,"
                 "\"q6_shader_like_sum\":%.9g,"
                 "\"q6_shader_like_abs_delta\":%.9g,"
+                "\"q6_native_reduction_tree_sum\":%.9g,"
+                "\"q6_native_reduction_tree_abs_delta\":%.9g,"
+                "\"q6_native_reduction_tree_gpu_abs_error\":%.9g,"
                 "\"q6_local_size\":[%llu,%llu,%llu],"
                 "\"q6_local_invocations\":%llu,"
                 "\"q6_accum_mask\":%llu,"
@@ -4288,6 +4318,9 @@ static void write_cpu_oracle_report(
                 report->q6_packed16_view_abs_delta,
                 report->q6_shader_like_sum,
                 report->q6_shader_like_abs_delta,
+                report->q6_native_reduction_tree_sum,
+                report->q6_native_reduction_tree_abs_delta,
+                report->q6_native_reduction_tree_gpu_abs_error,
                 (unsigned long long)report->q6_local_size[0],
                 (unsigned long long)report->q6_local_size[1],
                 (unsigned long long)report->q6_local_size[2],
@@ -4338,6 +4371,49 @@ static void write_cpu_oracle_report(
                     sample->abs_error);
         }
         fprintf(out, "]");
+    }
+    if (report->q6_output_layout_probe_ran) {
+        const char *summary = report->q6_output_layout_probe_summary[0]
+            ? report->q6_output_layout_probe_summary
+            : "not-run";
+        fprintf(out,
+                ",\"q6_output_layout_probe\":{\"summary\":\"%s\","
+                "\"search_base_index\":%llu,\"search_float_count\":%zu,"
+                "\"mismatch_count\":%zu,"
+                "\"canonical_match_count\":%zu,\"found_elsewhere_count\":%zu,"
+                "\"consistent_relative_offset\":%s,"
+                "\"relative_offset\":%lld,"
+                "\"samples\":[",
+                summary,
+                (unsigned long long)report->q6_output_layout_probe_search_base_index,
+                report->q6_output_layout_probe_search_float_count,
+                report->q6_output_layout_probe_mismatch_count,
+                report->q6_output_layout_probe_canonical_match_count,
+                report->q6_output_layout_probe_found_elsewhere_count,
+                report->q6_output_layout_probe_consistent_offset ? "true" : "false",
+                (long long)report->q6_output_layout_probe_relative_offset);
+        for (size_t i = 0; i < report->q6_output_layout_probe_sample_count; ++i) {
+            const Q6OutputLayoutProbeSample *sample =
+                &report->q6_output_layout_probe_samples[i];
+            fprintf(out,
+                    "%s{\"dst_index\":%llu,\"expected\":%.9g,"
+                    "\"gpu_at_dst\":%.9g,\"abs_error_at_dst\":%.9g,"
+                    "\"best_index\":%llu,\"best_value\":%.9g,"
+                    "\"best_abs_error\":%.9g,\"best_relative_offset\":%lld,"
+                    "\"canonical_match\":%s,\"found_elsewhere\":%s}",
+                    i ? "," : "",
+                    (unsigned long long)sample->dst_index,
+                    sample->expected,
+                    sample->gpu_at_dst,
+                    sample->abs_error_at_dst,
+                    (unsigned long long)sample->best_index,
+                    sample->best_value,
+                    sample->best_abs_error,
+                    (long long)sample->best_relative_offset,
+                    sample->canonical_match ? "true" : "false",
+                    sample->found_elsewhere ? "true" : "false");
+        }
+        fprintf(out, "]}");
     }
     fprintf(out, ",\"samples\":[");
     for (size_t i = 0; i < report->sample_count; ++i) {
@@ -5272,6 +5348,149 @@ static int q6k_accumulate_tid_partial_shader_like(
     return 1;
 }
 
+#define PDOCKER_GPU_Q6_OUTPUT_LAYOUT_PROBE_MAX_FLOATS 4096u
+
+static double q6k_native_reduction_tree_sum32(const double partials[32]) {
+    float scratch[32];
+    for (uint32_t i = 0; i < 32u; ++i) {
+        scratch[i] = (float)partials[i];
+    }
+    /*
+     * Diagnostic-only mirror of the native Q6_K SPIR-V shared-memory tree:
+     * local_x lanes fold 16,8,4,2,1 in f32.  This does not transform data and
+     * does not replace the llama shader; it only records whether the observed
+     * mismatch is explained by f32 reduction order or by device/output layout.
+     */
+    for (uint32_t stride = 16u; stride > 0u; stride >>= 1u) {
+        for (uint32_t lane = 0; lane < stride; ++lane) {
+            scratch[lane] = scratch[lane] + scratch[lane + stride];
+        }
+    }
+    return (double)scratch[0];
+}
+
+static void q6k_record_output_layout_probe_sample(
+        CpuOracleReport *report,
+        const unsigned char *dst_base,
+        size_t dst_size,
+        uint64_t output_base_index,
+        uint64_t dst_index,
+        float expected,
+        float gpu_at_dst) {
+    if (!report || !dst_base || dst_size < sizeof(float)) return;
+    if (report->q6_output_layout_probe_sample_count >=
+        sizeof(report->q6_output_layout_probe_samples) /
+            sizeof(report->q6_output_layout_probe_samples[0])) {
+        return;
+    }
+    const uint64_t total_floats = (uint64_t)(dst_size / sizeof(float));
+    if (total_floats == 0 || dst_index >= total_floats) return;
+    uint64_t search_base = output_base_index;
+    if (search_base >= total_floats) {
+        search_base = dst_index;
+    }
+    uint64_t max_scan = PDOCKER_GPU_Q6_OUTPUT_LAYOUT_PROBE_MAX_FLOATS;
+    if (max_scan > total_floats) max_scan = total_floats;
+    if (dst_index < search_base || dst_index >= search_base + max_scan) {
+        search_base = dst_index > max_scan / 2u ? dst_index - max_scan / 2u : 0u;
+    }
+    if (search_base >= total_floats) search_base = 0;
+    uint64_t search_count_u64 = total_floats - search_base;
+    if (search_count_u64 > max_scan) search_count_u64 = max_scan;
+    if (search_count_u64 == 0) return;
+
+    Q6OutputLayoutProbeSample *sample =
+        &report->q6_output_layout_probe_samples[report->q6_output_layout_probe_sample_count++];
+    memset(sample, 0, sizeof(*sample));
+    sample->dst_index = dst_index;
+    sample->expected = expected;
+    sample->gpu_at_dst = gpu_at_dst;
+    sample->abs_error_at_dst = fabs((double)expected - (double)gpu_at_dst);
+    sample->best_index = dst_index;
+    sample->best_value = gpu_at_dst;
+    sample->best_abs_error = sample->abs_error_at_dst;
+    if (!isfinite(sample->best_abs_error)) {
+        sample->best_abs_error = INFINITY;
+    }
+    sample->best_relative_offset = 0;
+    sample->canonical_match =
+        isfinite(sample->abs_error_at_dst) && sample->abs_error_at_dst <= 1.0e-3;
+
+    for (uint64_t rel = 0; rel < search_count_u64; ++rel) {
+        const uint64_t index = search_base + rel;
+        int ok = 0;
+        const float value = load_f32_at_index(dst_base, dst_size, (size_t)index, &ok);
+        if (!ok || !isfinite(value)) continue;
+        const double err = fabs((double)expected - (double)value);
+        if (err < sample->best_abs_error) {
+            sample->best_abs_error = err;
+            sample->best_index = index;
+            sample->best_value = value;
+            sample->best_relative_offset = (int64_t)index - (int64_t)dst_index;
+        }
+    }
+    sample->found_elsewhere =
+        !sample->canonical_match &&
+        sample->best_index != dst_index &&
+        sample->best_abs_error <= 1.0e-3;
+
+    report->q6_output_layout_probe_ran = 1;
+    report->q6_output_layout_probe_search_base_index = search_base;
+    report->q6_output_layout_probe_search_float_count = (size_t)search_count_u64;
+    if (sample->canonical_match) {
+        report->q6_output_layout_probe_canonical_match_count++;
+    }
+    if (sample->found_elsewhere) {
+        report->q6_output_layout_probe_found_elsewhere_count++;
+    }
+}
+
+static void q6k_finalize_output_layout_probe(CpuOracleReport *report) {
+    if (!report || !report->q6_output_layout_probe_ran) return;
+    const size_t count = report->q6_output_layout_probe_sample_count;
+    size_t mismatch_count = 0;
+    size_t found_elsewhere_count = 0;
+    int have_offset = 0;
+    int consistent_offset = 1;
+    int64_t relative_offset = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const Q6OutputLayoutProbeSample *sample =
+            &report->q6_output_layout_probe_samples[i];
+        if (sample->canonical_match) continue;
+        mismatch_count++;
+        if (!sample->found_elsewhere) continue;
+        found_elsewhere_count++;
+        if (!have_offset) {
+            relative_offset = sample->best_relative_offset;
+            have_offset = 1;
+        } else if (relative_offset != sample->best_relative_offset) {
+            consistent_offset = 0;
+        }
+    }
+    report->q6_output_layout_probe_mismatch_count = mismatch_count;
+    report->q6_output_layout_probe_found_elsewhere_count = found_elsewhere_count;
+    report->q6_output_layout_probe_consistent_offset =
+        have_offset && consistent_offset ? 1 : 0;
+    report->q6_output_layout_probe_relative_offset =
+        have_offset && consistent_offset ? relative_offset : 0;
+    const char *summary = "not-run";
+    if (count > 0 &&
+        report->q6_output_layout_probe_canonical_match_count == count) {
+        summary = "canonical-match";
+    } else if (mismatch_count >= 2 &&
+               found_elsewhere_count == mismatch_count &&
+               report->q6_output_layout_probe_consistent_offset) {
+        summary = "canonical-mismatch-found-elsewhere";
+    } else if (count > 0 && found_elsewhere_count == 0) {
+        summary = "canonical-mismatch-not-found";
+    } else if (count > 0) {
+        summary = "canonical-mismatch-inconclusive";
+    }
+    snprintf(report->q6_output_layout_probe_summary,
+             sizeof(report->q6_output_layout_probe_summary),
+             "%s", summary);
+}
+
 static int q6k_accumulate_tid_partial(
         const int weight_fd,
         const int vector_fd,
@@ -5470,12 +5689,14 @@ static void run_cpu_oracle_q6k_matvec_sample(
         double partials[32];
         double shader_like_partials[32];
         double shader_like_partials64[64];
+        double native_reduction_tree_sum = 0.0;
         memset(partials, 0, sizeof(partials));
         memset(shader_like_partials, 0, sizeof(shader_like_partials));
         memset(shader_like_partials64, 0, sizeof(shader_like_partials64));
         int have_partials = 1;
         int have_shader_like_partials = 1;
         int have_shader_like_partials64 = 1;
+        int have_native_reduction_tree = 0;
         for (uint32_t block_index = 0; block_index < num_blocks_per_row; ++block_index) {
             uint8_t block[210];
             off_t off = bindings[idx0].offset +
@@ -5553,6 +5774,10 @@ static void run_cpu_oracle_q6k_matvec_sample(
                 break;
             }
         }
+        if (have_shader_like_partials) {
+            native_reduction_tree_sum = q6k_native_reduction_tree_sum32(shader_like_partials);
+            have_native_reduction_tree = 1;
+        }
         /*
          * Diagnostic only: Q6_K shaders commonly specialize LocalSize to
          * 32x2x1.  If the executor accidentally materializes the SPIR-V as
@@ -5590,6 +5815,15 @@ static void run_cpu_oracle_q6k_matvec_sample(
             return;
         }
         float expected = (float)(sum + accumulator_sum);
+        const float gpu_before_oracle_writeback = gpu;
+        q6k_record_output_layout_probe_sample(
+            report,
+            dst_base,
+            bindings[idx2].size,
+            output_base_index,
+            dst_index,
+            expected,
+            gpu_before_oracle_writeback);
         if (q6k_oracle_writeback &&
             (size_t)dst_index * sizeof(float) + sizeof(float) <= bindings[idx2].size) {
             memcpy(dst_base + (size_t)dst_index * sizeof(float), &expected, sizeof(expected));
@@ -5623,6 +5857,14 @@ static void run_cpu_oracle_q6k_matvec_sample(
                     report->q6_shader_like_sum += shader_like_partials[tid];
                 }
                 report->q6_shader_like_abs_delta = fabs(report->q6_shader_like_sum - sum);
+            }
+            if (have_native_reduction_tree) {
+                report->q6_native_reduction_tree_sum = native_reduction_tree_sum;
+                report->q6_native_reduction_tree_abs_delta =
+                    fabs(native_reduction_tree_sum - sum);
+                report->q6_native_reduction_tree_gpu_abs_error =
+                    fabs((native_reduction_tree_sum + accumulator_sum) -
+                         (double)gpu_before_oracle_writeback);
             }
             report->q6_shader_like_64_sum = 0.0;
             if (have_shader_like_partials64) {
@@ -5682,6 +5924,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
             window->abs_error = abs_error;
         }
     }
+    q6k_finalize_output_layout_probe(report);
     report->executed = 1;
     report->skipped = 0;
     snprintf(report->status, sizeof(report->status), "%s",
@@ -8836,7 +9079,10 @@ static int run_vulkan_dispatch_fd(
                 "\"device_local_staging_requested\":%s,\"device_local_staged_memories\":%zu,"
                 "\"staging_upload_copies\":%zu,\"staging_upload_bytes\":%zu,"
                 "\"staging_download_copies\":%zu,\"staging_download_bytes\":%zu},"
-                "\"shader_bytes\":%zu,\"entry\":\"%s\",\"specializations\":%zu,"
+                "\"shader_bytes\":%zu,"
+                "\"source_spirv_hash\":\"0x%016llx\","
+                "\"effective_spirv_hash\":\"0x%016llx\","
+                "\"entry\":\"%s\",\"specializations\":%zu,"
                 "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
                 "\"pipeline_key\":{\"spirv_hash\":\"0x%016llx\","
                 "\"spec_hash\":\"0x%016llx\",\"layout_bindings\":%u,"
@@ -8876,7 +9122,10 @@ static int run_vulkan_dispatch_fd(
                 strict_staging_upload_bytes,
                 strict_staging_download_copies,
                 strict_staging_download_bytes,
-                shader_size, entry_name, specialization_count, binding_count, gx, gy, gz,
+                shader_size,
+                (unsigned long long)original_spirv_hash,
+                (unsigned long long)spirv_summary.hash,
+                entry_name, specialization_count, binding_count, gx, gy, gz,
                 (unsigned long long)spirv_summary.hash,
                 (unsigned long long)spec_hash,
                 layout_count,
@@ -8976,7 +9225,10 @@ static int run_vulkan_dispatch_fd(
             "\"device_local_staging_requested\":%s,\"device_local_staged_memories\":%zu,"
             "\"staging_upload_copies\":%zu,\"staging_upload_bytes\":%zu,"
             "\"staging_download_copies\":%zu,\"staging_download_bytes\":%zu},"
-            "\"shader_bytes\":%zu,\"entry\":\"%s\",\"specializations\":%zu,"
+            "\"shader_bytes\":%zu,"
+            "\"source_spirv_hash\":\"0x%016llx\","
+            "\"effective_spirv_hash\":\"0x%016llx\","
+            "\"entry\":\"%s\",\"specializations\":%zu,"
             "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
             "\"backend_cached\":%s,\"pipeline_cache\":{\"hit\":%s,\"entries\":%u},"
             "\"pipeline_key\":{\"spirv_hash\":\"0x%016llx\","
@@ -9025,7 +9277,10 @@ static int run_vulkan_dispatch_fd(
             strict_staging_upload_bytes,
             strict_staging_download_copies,
             strict_staging_download_bytes,
-            shader_size, entry_name, specialization_count, binding_count, gx, gy, gz,
+            shader_size,
+            (unsigned long long)original_spirv_hash,
+            (unsigned long long)spirv_summary.hash,
+            entry_name, specialization_count, binding_count, gx, gy, gz,
             was_ready ? "true" : "false",
             pipeline_cache_hit ? "true" : "false",
             PDOCKER_GPU_PIPELINE_CACHE_SLOTS,

@@ -2753,6 +2753,19 @@ q6_first_mismatch = (
     if isinstance(q6_latest_oracle.get("first_mismatch"), dict)
     else {}
 )
+q6_output_layout_probe = (
+    q6_latest_oracle.get("q6_output_layout_probe")
+    if isinstance(q6_latest_oracle.get("q6_output_layout_probe"), dict)
+    else {}
+)
+q6_output_layout_probe_summary = q6_output_layout_probe.get("summary") or "not-run"
+q6_native_spirv_identity = {
+    "source_spirv_hash": q6_latest.get("source_spirv_hash"),
+    "effective_spirv_hash": q6_latest.get("effective_spirv_hash"),
+    "pipeline_spirv_hash": (q6_latest.get("pipeline_key") or {}).get("spirv_hash")
+    if isinstance(q6_latest.get("pipeline_key"), dict)
+    else None,
+}
 q6_safe_kernel_used = q6_latest.get("q6k_safe_kernel") is True
 q6_expected_local_size = [1, 1, 1] if q6_safe_kernel_used else [32, 2, 1]
 q6_workgroup_shape_blocker = bool(
@@ -2814,6 +2827,16 @@ q6_blocker_class = (
     if q6_readonly_dispatch_mutations
     else "writeback"
     if q6_writable_writeback_mismatches
+    else "native-q6-output-layout"
+    if q6_output_layout_probe_summary == "canonical-mismatch-found-elsewhere" and q6_writeback_verified_all
+    else "native-q6-output-layout-inconclusive"
+    if q6_output_layout_probe_summary == "canonical-mismatch-inconclusive" and q6_writeback_verified_all
+    else "native-q6-reduction-or-device-execution"
+    if (
+        q6_output_layout_probe_summary == "canonical-mismatch-not-found"
+        and q6_shader_like_oracle_cleared
+        and q6_writeback_verified_all
+    )
     else "vulkan-device-execution"
     if q6_shader_like_oracle_cleared and q6_writeback_verified_all
     else "vulkan-device-execution-or-writeback"
@@ -2841,6 +2864,12 @@ q6_workgroup_diagnostics = {
     "q6_accumulator_sum": q6_latest_partial.get("q6_accumulator_sum"),
     "q6_shader_like_abs_delta": q6_latest_partial.get("q6_shader_like_abs_delta"),
     "q6_shader_like_64_abs_delta": q6_latest_partial.get("q6_shader_like_64_abs_delta"),
+    "q6_native_reduction_tree_sum": q6_latest_partial.get("q6_native_reduction_tree_sum"),
+    "q6_native_reduction_tree_abs_delta": q6_latest_partial.get("q6_native_reduction_tree_abs_delta"),
+    "q6_native_reduction_tree_gpu_abs_error": q6_latest_partial.get("q6_native_reduction_tree_gpu_abs_error"),
+    "q6_native_spirv_identity": q6_native_spirv_identity,
+    "q6_output_layout_probe": q6_output_layout_probe,
+    "q6_output_layout_probe_summary": q6_output_layout_probe_summary,
     "q6_shader_like_oracle_cleared": q6_shader_like_oracle_cleared,
     "q6_shader_like_64_required": q6_shader_like_64_required,
     "q6_shader_like_clear_basis": q6_shader_like_clear_basis,
