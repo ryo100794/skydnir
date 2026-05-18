@@ -107,6 +107,11 @@ The compare script also writes `gpu.runtime_env_manifest` into the artifact and
 echoes manifest-selected runtime environment variables before collection; keep
 that record with the Q6_K evidence so env propagation can be audited without
 changing llama.cpp, the image, models, or prompts.
+If the run stops before Q6_K, the artifact verifier now preserves bounded
+`pre_http_failure_evidence` for the first failed generic SPIR-V event
+(`fail_stage`/`error`, `vk_result`, SPIR-V hash, pipeline key, feature
+requirements, Android feature bits, and `q6_reachability`). Treat that as a
+pre-Q6 setup blocker, not as a Q6 correctness result.
 
 Milestone compare with CPU baseline should be run only after a correctness
 blocker changes, not after every small diagnostic edit.

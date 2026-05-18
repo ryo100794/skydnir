@@ -808,6 +808,83 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(result.returncode, 32, result.stdout)
         self.assertIn("q6-workgroup-shape-blocker", result.stdout)
 
+    def test_pre_http_vulkan_pipeline_feature_keeps_first_failure_evidence(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "next_action": "map failed SPIR-V capabilities to Android Vulkan feature bits",
+            "gpu": {
+                "served": False,
+                "diagnostics": {
+                    "blocker_class": "vulkan_pipeline_feature",
+                    "blocker_detail": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "generic_spirv_dispatch": {
+                        "attempted": True,
+                        "failed_events": [
+                            {
+                                "valid": False,
+                                "kernel": "generic_spirv",
+                                "stage": "vulkan-dispatch",
+                                "error": "create-generic-compute-pipeline",
+                                "vk_result": -13,
+                                "spirv_hash": "0xee4e8d4acf23ec08",
+                                "shader_bytes": 18844,
+                                "entry": "main",
+                                "bindings": 5,
+                                "dispatch": [6144, 1, 1],
+                                "push_bytes": 128,
+                                "requested_feature_mask": "0x0000000000000038",
+                                "requested_feature_mask_present": True,
+                                "strict_passthrough": True,
+                                "pipeline_key": {
+                                    "spirv_hash": "0xee4e8d4acf23ec08",
+                                    "spec_hash": "0x4256e6bd7dad2e74",
+                                    "layout_bindings": 5,
+                                    "descriptor_sets": 1,
+                                    "push_bytes": 128,
+                                },
+                                "spirv_feature_requirements": {
+                                    "int8": True,
+                                    "storage16": True,
+                                    "storage8": True,
+                                },
+                                "spirv_feature_mismatch": False,
+                                "spirv_feature_mismatches": [],
+                                "android_vulkan_features": {
+                                    "shaderInt8": 1,
+                                    "storageBuffer16BitAccess": 1,
+                                    "storageBuffer8BitAccess": 1,
+                                },
+                                "spirv_capabilities": [1, 39, 4433, 4448],
+                            }
+                        ],
+                        "llama_throw": "vk::Queue::submit: ErrorFeatureNotPresent",
+                    },
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 0,
+                        "blocker_class": "not-reached",
+                        "diagnostic_interpretation": "no-q6-oracle-event",
+                    },
+                },
+                "correctness": gpu_correctness_report("fail", required_failures=1, passed=False, content="4"),
+            },
+            **speedup_sections(speedup=0.0, target_met=False, cpu_tps=0.1, gpu_tps=0.0),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "vulkan-pipeline-feature")
+        evidence = report["pre_http_failure_evidence"]
+        self.assertTrue(evidence["generic_spirv_attempted"])
+        self.assertEqual(evidence["failed_event_count"], 1)
+        self.assertEqual(evidence["failure_event"]["error"], "create-generic-compute-pipeline")
+        self.assertEqual(evidence["failure_event"]["vk_result"], -13)
+        self.assertEqual(evidence["failure_event"]["spirv_hash"], "0xee4e8d4acf23ec08")
+        self.assertEqual(evidence["pipeline_key"]["spec_hash"], "0x4256e6bd7dad2e74")
+        self.assertEqual(evidence["q6_reachability"]["blocker_class"], "not-reached")
+        self.assertEqual(evidence["q6_reachability"]["event_count"], 0)
+
     def test_structured_unsupported_executor_oracle_evidence_fails_closed(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",

@@ -955,6 +955,74 @@ def _pre_http_gpu_blocker(data: dict[str, Any], diagnostics: dict[str, Any]) -> 
     }
 
 
+def _pre_http_failure_evidence(diagnostics: dict[str, Any]) -> dict[str, Any]:
+    """Return bounded first-failure evidence for pre-HTTP GPU blockers.
+
+    A `vulkan-pipeline-feature` report is only useful if it names the exact
+    executor event that stopped the run.  Keep this payload small and stable so
+    CI, humans, and future agents can tell whether Q6_K was never reached or a
+    later correctness gate actually failed.
+    """
+
+    generic = diagnostics.get("generic_spirv_dispatch") if isinstance(diagnostics, dict) else {}
+    if not isinstance(generic, dict):
+        generic = {}
+    failed_events = generic.get("failed_events")
+    if not isinstance(failed_events, list):
+        failed_events = []
+    failed_dicts = [event for event in failed_events if isinstance(event, dict)]
+    event = failed_dicts[-1] if failed_dicts else {}
+    q6 = diagnostics.get("q6_workgroup_diagnostics") if isinstance(diagnostics, dict) else {}
+    if not isinstance(q6, dict):
+        q6 = {}
+
+    def pick(source: dict[str, Any], *keys: str) -> dict[str, Any]:
+        return {key: source.get(key) for key in keys if key in source}
+
+    pipeline_key = event.get("pipeline_key")
+    if not isinstance(pipeline_key, dict):
+        pipeline_key = {}
+
+    return {
+        "generic_spirv_attempted": generic.get("attempted") is True,
+        "failed_event_count": len(failed_dicts),
+        "failure_event": pick(
+            event,
+            "stage",
+            "error",
+            "vk_result",
+            "spirv_hash",
+            "shader_bytes",
+            "entry",
+            "bindings",
+            "dispatch",
+            "push_bytes",
+            "requested_feature_mask",
+            "requested_feature_mask_present",
+            "strict_passthrough",
+            "spirv_feature_requirements",
+            "spirv_feature_mismatch",
+            "spirv_feature_mismatches",
+            "android_vulkan_features",
+            "spirv_capabilities",
+        ),
+        "pipeline_key": pick(
+            pipeline_key,
+            "spirv_hash",
+            "spec_hash",
+            "layout_bindings",
+            "descriptor_sets",
+            "push_bytes",
+        ),
+        "llama_throw": generic.get("llama_throw") or "",
+        "q6_reachability": {
+            "event_count": q6.get("event_count", 0),
+            "blocker_class": q6.get("blocker_class") or "not-reached",
+            "diagnostic_interpretation": q6.get("diagnostic_interpretation") or "",
+        },
+    }
+
+
 def _claim_base(
     classification: str,
     *,
@@ -1041,6 +1109,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         ) | {
             "gpu_blocker_class": pre_http_gpu_blocker["gpu_blocker_class"],
             "gpu_blocker_detail": pre_http_gpu_blocker["gpu_blocker_detail"],
+            "pre_http_failure_evidence": _pre_http_failure_evidence(diagnostics),
             "config_propagation": _config_propagation(data),
         }
 

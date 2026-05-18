@@ -1212,6 +1212,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertFalse(report["benchmark_claim_allowed"])
         self.assertEqual("vulkan_pipeline_feature", report["gpu_blocker_class"])
         self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", report["gpu_blocker_detail"])
+        self.assertIn("pre_http_failure_evidence", report)
+        self.assertIn("q6_reachability", report["pre_http_failure_evidence"])
 
     def test_llama_gpu_dispatch_lifecycle_logs_are_recorded(self):
         compare = LLAMA_COMPARE.read_text()
