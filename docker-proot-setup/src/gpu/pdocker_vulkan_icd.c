@@ -423,6 +423,15 @@ static void trace_icd_runtime_failure(const char *stage, int rc) {
             rc);
 }
 
+static void trace_icd_runtime_marker_once(const char *stage) {
+    static int emitted = 0;
+    if (__sync_lock_test_and_set(&emitted, 1)) return;
+    fprintf(stderr,
+            "pdocker-vulkan-icd: runtime_marker=%s stage=%s rc=0\n",
+            PDOCKER_VULKAN_ICD_BUILD_MARKER,
+            stage ? stage : "loaded");
+}
+
 static bool copy_alias_enabled(void) {
     return env_truthy_default("PDOCKER_VULKAN_ALIAS_COPIES", false);
 }
@@ -1833,6 +1842,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
     *pInstance = (VkInstance)instance;
     set_loader_magic_value(&g_device);
     set_loader_magic_value(&g_queue);
+    trace_icd_runtime_marker_once("create-instance");
     return VK_SUCCESS;
 }
 
@@ -2393,6 +2403,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     }
     set_loader_magic_value(device);
     *pDevice = (VkDevice)device;
+    trace_icd_runtime_marker_once("create-device");
     return VK_SUCCESS;
 }
 
