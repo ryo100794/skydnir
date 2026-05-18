@@ -1,0 +1,186 @@
+{
+  "checks": [
+    {
+      "detail": "",
+      "name": "TODO records build-context tar compatibility",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "feature scenario is fast-local",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "feature scenario is runnable",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "feature scenario uses this verifier",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "feature scenario records latest artifact target",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "scenario covers regular files",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "scenario covers directories",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "scenario covers symlinks",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "scenario covers executable modes",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "scenario covers long paths/PAX",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "scenario covers mtimes",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "scenario covers .dockerignore parity",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "recursive writer does not filter to files only",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'private fun addTarPath('",
+      "name": "explicit path walker",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'Files.isSymbolicLink(path)'",
+      "name": "symlink detection",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'Files.readSymbolicLink(path)'",
+      "name": "symlink target recording",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'LinkOption.NOFOLLOW_LINKS'",
+      "name": "nofollow metadata",
+      "status": "pass"
+    },
+    {
+      "detail": "found token \"typeFlag = '5'\"",
+      "name": "directory tar entries",
+      "status": "pass"
+    },
+    {
+      "detail": "found token \"typeFlag = '2'\"",
+      "name": "symlink tar entries",
+      "status": "pass"
+    },
+    {
+      "detail": "found token \"typeFlag = '0'\"",
+      "name": "regular tar entries",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'file.canExecute()'",
+      "name": "executable fallback mode",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'mode: Int'",
+      "name": "mode parameter",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'linkName: String'",
+      "name": "link name parameter",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'records[\"path\"] = name'",
+      "name": "pax path support",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'records[\"linkpath\"] = linkName'",
+      "name": "pax linkpath support",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'writePaxHeaderIfNeeded'",
+      "name": "pax header writer",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'private fun paxRecord('",
+      "name": "pax record length calculator",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'private fun splitUstarName('",
+      "name": "ustar prefix splitter",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'putString(header, 345, 155, prefix)'",
+      "name": "ustar prefix field",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'private fun linkAwareMtime('",
+      "name": "mtime nofollow helper",
+      "status": "pass"
+    },
+    {
+      "detail": "found token 'DockerIgnore.load(root)'",
+      "name": "dockerignore still applied",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "tar entries are deterministic",
+      "status": "pass"
+    },
+    {
+      "detail": "",
+      "name": "tar stream has end-of-archive blocks",
+      "status": "pass"
+    }
+  ],
+  "fixtures": [
+    "regular files",
+    "directories",
+    "symlinks",
+    "executable modes",
+    "long paths/PAX",
+    "mtimes",
+    ".dockerignore parity"
+  ],
+  "limitations": [
+    "Host gate is a source contract and compile gate; connected-device build-context byte corpus is still required for release promotion.",
+    "PAX path/linkpath support is required for long names, but upstream Docker differential parity is a later corpus gate."
+  ],
+  "scenario": "build.context.tar-compatibility",
+  "schema": "pdocker.build-context-tar-compat.v1",
+  "source": "app/src/main/kotlin/io/github/ryo100794/pdocker/DockerEngineClient.kt",
+  "status": "pass"
+}

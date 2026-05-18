@@ -328,6 +328,12 @@
       "role": "Host-side verification/test driver or static contract gate."
     },
     {
+      "path": "scripts/verify-build-context-tar-compat.py",
+      "category": "test-verification",
+      "stability": "internal-gate",
+      "role": "Host gate for Android build-context tar metadata, symlink, PAX, and dockerignore compatibility."
+    },
+    {
       "path": "scripts/verify-cow-overlay-bench-recovery.py",
       "category": "test-verification",
       "stability": "test-helper",

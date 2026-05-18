@@ -8,6 +8,9 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.net.URLEncoder
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.Path
 import java.util.Locale
 
 class DockerEngineClient(private val socket: File) {
@@ -320,19 +323,87 @@ class DockerEngineClient(private val socket: File) {
         private fun createTar(root: File): ByteArray {
             val out = ByteArrayOutputStream()
             val ignore = DockerIgnore.load(root)
-            root.walkTopDown()
-                .onEnter { dir ->
-                    dir == root || !ignore.excludes(root, dir, isDir = true)
-                }
-                .filter { it != root }
-                .filter { it.isFile }
-                .forEach { file ->
-                    val rel = root.toPath().relativize(file.toPath()).joinToString("/")
-                    if (ignore.excludes(rel, isDir = false)) return@forEach
-                    writeTarEntry(out, rel, file.readBytes(), file.lastModified() / 1000)
+            val rootPath = root.toPath()
+            root.listFiles()
+                ?.sortedBy { it.name }
+                ?.forEach { file ->
+                    addTarPath(out, rootPath, file, ignore)
                 }
             out.write(ByteArray(1024))
             return out.toByteArray()
+        }
+
+        private fun addTarPath(
+            out: ByteArrayOutputStream,
+            rootPath: Path,
+            file: File,
+            ignore: DockerIgnore,
+        ) {
+            val path = file.toPath()
+            val rel = rootPath.relativize(path).joinToString("/").replace('\\', '/')
+            if (rel.isBlank()) return
+
+            val isSymlink = Files.isSymbolicLink(path)
+            val isDir = !isSymlink && file.isDirectory
+            if (ignore.excludes(rel, isDir = isDir)) return
+
+            val mtime = linkAwareMtime(path, file)
+            val mode = tarMode(path, file, isDir = isDir, isSymlink = isSymlink)
+            when {
+                isSymlink -> {
+                    val target = Files.readSymbolicLink(path).toString().replace('\\', '/')
+                    writeTarEntry(
+                        out = out,
+                        name = rel,
+                        data = ByteArray(0),
+                        mtime = mtime,
+                        mode = mode,
+                        typeFlag = '2',
+                        linkName = target,
+                    )
+                }
+                isDir -> {
+                    writeTarEntry(
+                        out = out,
+                        name = rel.trimEnd('/') + "/",
+                        data = ByteArray(0),
+                        mtime = mtime,
+                        mode = mode,
+                        typeFlag = '5',
+                    )
+                    file.listFiles()
+                        ?.sortedBy { it.name }
+                        ?.forEach { child -> addTarPath(out, rootPath, child, ignore) }
+                }
+                file.isFile -> {
+                    writeTarEntry(
+                        out = out,
+                        name = rel,
+                        data = file.readBytes(),
+                        mtime = mtime,
+                        mode = mode,
+                        typeFlag = '0',
+                    )
+                }
+            }
+        }
+
+        private fun linkAwareMtime(path: Path, file: File): Long =
+            runCatching {
+                Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toMillis() / 1000
+            }.getOrDefault(file.lastModified() / 1000)
+
+        private fun tarMode(path: Path, file: File, isDir: Boolean, isSymlink: Boolean): Int {
+            val unixMode = runCatching {
+                (Files.getAttribute(path, "unix:mode", LinkOption.NOFOLLOW_LINKS) as Number).toInt() and 0xfff
+            }.getOrNull()
+            if (unixMode != null) return unixMode
+            return when {
+                isSymlink -> 511 // 0777
+                isDir -> 493 // 0755
+                file.canExecute() -> 493 // 0755
+                else -> 420 // 0644
+            }
         }
 
         private data class DockerIgnore(val rules: List<Rule>) {
@@ -403,25 +474,109 @@ class DockerEngineClient(private val socket: File) {
             }
         }
 
-        private fun writeTarEntry(out: ByteArrayOutputStream, name: String, data: ByteArray, mtime: Long) {
+        private fun writeTarEntry(
+            out: ByteArrayOutputStream,
+            name: String,
+            data: ByteArray,
+            mtime: Long,
+            mode: Int,
+            typeFlag: Char,
+            linkName: String = "",
+        ) {
+            writePaxHeaderIfNeeded(out, name, linkName, mtime)
+            writeTarHeader(out, name, data.size.toLong(), mtime, mode, typeFlag, linkName)
+            if (data.isNotEmpty()) out.write(data)
+            val pad = (512 - (data.size % 512)) % 512
+            if (pad > 0) out.write(ByteArray(pad))
+        }
+
+        private fun writePaxHeaderIfNeeded(
+            out: ByteArrayOutputStream,
+            name: String,
+            linkName: String,
+            mtime: Long,
+        ) {
+            val records = linkedMapOf<String, String>()
+            if (splitUstarName(name) == null) records["path"] = name
+            if (linkName.toByteArray(Charsets.UTF_8).size > 100) records["linkpath"] = linkName
+            if (records.isEmpty()) return
+
+            val body = records.entries
+                .joinToString(separator = "") { (key, value) -> paxRecord(key, value) }
+                .toByteArray(Charsets.UTF_8)
+            val safeName = trimUtf8ToMax("PaxHeaders/${name.substringAfterLast('/').ifBlank { "path" }}", 100)
+            writeTarHeader(out, safeName, body.size.toLong(), mtime, 420, 'x', "")
+            out.write(body)
+            val pad = (512 - (body.size % 512)) % 512
+            if (pad > 0) out.write(ByteArray(pad))
+        }
+
+        private fun paxRecord(key: String, value: String): String {
+            var length = 0
+            while (true) {
+                val record = "$length $key=$value\n"
+                val actual = record.toByteArray(Charsets.UTF_8).size
+                if (actual == length) return record
+                length = actual
+            }
+        }
+
+        private fun writeTarHeader(
+            out: ByteArrayOutputStream,
+            name: String,
+            size: Long,
+            mtime: Long,
+            mode: Int,
+            typeFlag: Char,
+            linkName: String,
+        ) {
             val header = ByteArray(512)
-            putString(header, 0, 100, name)
-            putOctal(header, 100, 8, 420)
+            val (entryName, prefix) = splitUstarName(name)
+                ?: (trimUtf8ToMax(name.substringAfterLast('/').ifBlank { "pax-path" }, 100) to "")
+            putString(header, 0, 100, entryName)
+            putOctal(header, 100, 8, mode.toLong())
             putOctal(header, 108, 8, 0)
             putOctal(header, 116, 8, 0)
-            putOctal(header, 124, 12, data.size.toLong())
+            putOctal(header, 124, 12, size)
             putOctal(header, 136, 12, mtime)
             for (i in 148 until 156) header[i] = 0x20
-            header[156] = '0'.code.toByte()
+            header[156] = typeFlag.code.toByte()
+            if (linkName.isNotEmpty()) putString(header, 157, 100, trimUtf8ToMax(linkName, 100))
             putString(header, 257, 6, "ustar")
             putString(header, 263, 2, "00")
+            if (prefix.isNotEmpty()) putString(header, 345, 155, prefix)
             val sum = header.sumOf { it.toInt() and 0xff }
             val chk = String.format(Locale.US, "%06o\u0000 ", sum).toByteArray(Charsets.US_ASCII)
             chk.copyInto(header, 148, 0, chk.size.coerceAtMost(8))
             out.write(header)
-            out.write(data)
-            val pad = (512 - (data.size % 512)) % 512
-            if (pad > 0) out.write(ByteArray(pad))
+        }
+
+        private fun splitUstarName(name: String): Pair<String, String>? {
+            if (name.toByteArray(Charsets.UTF_8).size <= 100) return name to ""
+            name.indices
+                .filter { name[it] == '/' }
+                .asReversed()
+                .forEach { slash ->
+                    val prefix = name.substring(0, slash)
+                    val entryName = name.substring(slash + 1)
+                    if (
+                        prefix.toByteArray(Charsets.UTF_8).size <= 155 &&
+                        entryName.toByteArray(Charsets.UTF_8).size <= 100
+                    ) {
+                        return entryName to prefix
+                    }
+                }
+            return null
+        }
+
+        private fun trimUtf8ToMax(value: String, maxBytes: Int): String {
+            val out = ByteArrayOutputStream()
+            for (ch in value) {
+                val bytes = ch.toString().toByteArray(Charsets.UTF_8)
+                if (out.size() + bytes.size > maxBytes) break
+                out.write(bytes)
+            }
+            return out.toByteArray().toString(Charsets.UTF_8)
         }
 
         private fun putString(buf: ByteArray, offset: Int, length: Int, value: String) {

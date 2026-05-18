@@ -17,7 +17,7 @@ This directory is intentionally kept with stable top-level entrypoints while the
 |---|---:|---|
 | `runtime-package-needed` | 1 | Needed to stage runtime/APK payloads or otherwise part of packaging flow. |
 | `build-developer` | 8 | Build, setup, fetch, or developer environment helper. |
-| `test-verification` | 70 | Test, smoke, benchmark, contract, or device verification helper. |
+| `test-verification` | 71 | Test, smoke, benchmark, contract, or device verification helper. |
 | `generated-maintenance` | 3 | Generated-doc/evidence maintenance or manifest data. |
 | `obsolete-suspect` | 3 | Unreferenced or weakly referenced candidate; not deleted without audit. |
 
@@ -93,6 +93,7 @@ This directory is intentionally kept with stable top-level entrypoints while the
 | `scripts/verify-archive-api-compat.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-blackbox-requirements.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-build-profile.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
+| `scripts/verify-build-context-tar-compat.py` | `test-helper` | Host-side verifier for Android build-context tar metadata, symlink, PAX, and dockerignore compatibility. |
 | `scripts/verify-cow-overlay-bench-recovery.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-dev-workspace-compose-artifact.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-device-llama-template.sh` | `test-helper` | Host-side verification/test driver or static contract gate. |

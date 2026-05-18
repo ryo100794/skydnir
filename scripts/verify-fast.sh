@@ -30,6 +30,7 @@ run python3 -m py_compile \
   scripts/verify-abnormal-events.py \
   scripts/verify-archive-api-compat.py \
   scripts/verify-build-profile.py \
+  scripts/verify-build-context-tar-compat.py \
   scripts/verify-blackbox-requirements.py \
   scripts/verify-dockerfile-standard.py \
   scripts/verify-feature-scenarios.py \
@@ -89,6 +90,7 @@ run python3 scripts/verify-blackbox-requirements.py
 run python3 scripts/verify-feature-scenarios.py
 run python3 scripts/verify-dockerfile-standard.py
 run python3 scripts/verify-archive-api-compat.py
+run python3 scripts/verify-build-context-tar-compat.py
 run python3 scripts/verify-cow-overlay-bench-recovery.py --run-local
 run python3 scripts/verify-project-library.py
 run python3 scripts/verify-storage-metrics.py

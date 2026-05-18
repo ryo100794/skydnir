@@ -401,10 +401,14 @@ risk, not stable checkpoint credit.
   AudioTrack executor IPC exist, runtime permissions are requested, and a
   device artifact proves capture/playback commands without raw `/dev`
   passthrough.
-- [next] Build context tar compatibility: Kotlin `DockerEngineClient.createTar`
-  must preserve Docker build-context semantics for regular files, directories,
-  symlinks, executable mode bits, long paths/PAX behavior, mtimes, and
-  `.dockerignore` parity before external Dockerfile context parity is claimed.
+- [doing] Build context tar compatibility: Kotlin `DockerEngineClient.createTar`
+  now has a host-gated metadata-preserving path for regular files,
+  directories, symlinks, executable mode bits, mtimes, ustar prefixes, PAX
+  `path`/`linkpath`, and `.dockerignore` filtering. Local evidence is
+  `python3 scripts/verify-build-context-tar-compat.py --out
+  docs/test/build-context-tar-compat-latest.json`. This remains non-promoting
+  for release until a connected-device byte corpus and upstream Docker
+  differential fixture prove external Dockerfile context parity.
 - [next] Pull/update operation semantics. "Pull image" is an Engine API
   operation, not "open docker pull shell"; if the ref already exists, treat it
   as update/re-pull with old tag preserved until success. Acceptance: wording,

@@ -1021,8 +1021,8 @@
       "id": "build.context.tar-compatibility",
       "area": "build-dockerfile",
       "lane": "fast-local",
-      "command": "future build-context tar compatibility verifier",
-      "status": "planned-gap",
+      "command": "python3 scripts/verify-build-context-tar-compat.py",
+      "status": "runnable",
       "docs": [
         "docs/plan/TODO.md",
         "docs/design/DOCKER_COMPAT_SCOPE.md",
@@ -1030,12 +1030,14 @@
       ],
       "checks": "Kotlin build context tar writer must cover regular files, directories, symlinks, executable modes, long paths/PAX behavior, mtimes, and .dockerignore parity.",
       "evidence_target": "docs/test/build-context-tar-compat-latest.json",
-      "reason": "Current Android UI build client must not claim external Dockerfile context parity until metadata-preserving tar fixtures are verified.",
+      "reason": "Host source/compile contract is implemented; connected-device byte corpus and upstream Docker differential parity remain non-promoting release evidence.",
       "acceptance_scope": [
+        "regular files",
         "directories",
         "symlinks",
-        "mode metadata",
+        "executable modes",
         "long paths/PAX",
+        "mtimes",
         ".dockerignore parity"
       ],
       "exit_criteria": [
