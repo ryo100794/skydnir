@@ -21,9 +21,9 @@ Current TODO counters:
 
 | State | Count |
 |---|---:|
-| done | 63 |
+| done | 64 |
 | doing | 20 |
-| next | 33 |
+| next | 34 |
 | blocked | 0 |
 
 ## Timeline
@@ -43,6 +43,7 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 
 - [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU performance workflow after Vulkan clamp: keep CPU fallback hiding Vulkan devices, force Vulkan only for measured GPU...
 - [#4](https://github.com/ryo100794/pdocker-android/issues/4) MoE-aware GPU residency layer research and design: after the dense llama GPU bridge is correct, evaluate a pdocker-owned...
+- Mobile-resource residency constraints for MoE: keep a concise design note with device RAM/headroom, thermal, storage bandwidth, SAF/app-private backing, cache eviction, and correctness...
 - [#8](https://github.com/ryo100794/pdocker-android/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built...
 
 ### Then: 2026-05-29 to 2026-06-08
