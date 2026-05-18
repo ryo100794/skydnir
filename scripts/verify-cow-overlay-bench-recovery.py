@@ -250,10 +250,24 @@ def static_contract() -> None:
         "success",
         "planned-gap",
         "collected_via_adb_run_as",
+        "artifact_contract",
+        "pass_requires_exact_checkpoint_pid",
+        "CheckpointAckFile",
+        "PreKillStateFile",
+        "PostRestartStateFile",
     ):
         require(token in runner_text, f"device kill-at-step runner lacks {token}")
+    for token in (
+        "pdocker-cow-kill-at-step",
+        "checkpoint.pid",
+        "kill_exact_checkpoint_pid",
+        "run_one_case",
+        "prepare --token",
+        "verify --token",
+    ):
+        require(token in side_text, f"device kill-at-step side runner lacks {token}")
     require("pkill" not in side_text and "killall" not in side_text, "device kill-at-step side runner must not kill by process name")
-    for token in ("Status: planned-gap", "success=false", "stable_checkpoint_eligible=false", "copy_up", "rename", "metadata", "whiteout", "hardlink_ring"):
+    for token in ("Status: planned-gap", "success=false", "stable_checkpoint_eligible=false", "CheckpointAckFile", "PreKillStateFile", "PostRestartStateFile", "copy_up", "rename", "metadata", "whiteout", "hardlink_ring"):
         require(token in doc_text, f"device kill-at-step doc lacks {token}")
     with tempfile.TemporaryDirectory(prefix="cow-kill-at-step-static-") as td:
         planned = Path(td) / "planned.json"

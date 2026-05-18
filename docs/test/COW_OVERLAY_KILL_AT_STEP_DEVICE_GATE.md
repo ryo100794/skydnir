@@ -47,10 +47,39 @@ Schema:
 | `hardlink_ring.daemon_kill_during_cache_publish` | daemon | payload tree is authoritative; corrupt/truncated ring cache is discarded and rebuilt |
 | `hardlink_ring.helper_kill_during_cache_rebuild` | helper | helper death cannot promote a partial ring cache; restart rebuilds from payload tree |
 
-Each passing case must include `OperationId`, `KilledPid`,
-`KilledProcessName`, `CheckpointReached=true`, `KillDelivered=true`,
-`RestartCompleted=true`, `MergedViewVerified=true`, `FailureOracleMatched=true`,
-case-specific `Proof` booleans, and non-empty `EvidenceFiles`.
+Each passing case must include `OperationId`, `CheckpointToken` equal to the
+case `Step`, `CheckpointReached=true`, `CheckpointAckFile`,
+`PreKillStateFile`, numeric `KilledPid`, `KilledProcessName`, `KillSignal`
+(`TERM`/`KILL` or `SIGTERM`/`SIGKILL`), `KillDelivered=true`,
+`RestartCompleted=true`, `RestartEvidenceFile`, `MergedViewVerified=true`,
+`FailureOracleMatched=true`, `PostRestartStateFile`, case-specific `Proof`
+booleans, and non-empty relative `EvidenceFiles`.  Absolute paths and `..`
+evidence paths are rejected because host-side static JSON cannot prove pulled
+device evidence.
+
+## Device helper checkpoint contract
+
+The only promoted execution route is adb + `run-as` into the debuggable app and
+the APK-provided helper at:
+
+- `files/pdocker/tools/pdocker-cow-kill-at-step`
+
+For each required case the device-side runner writes a token-scoped request and
+invokes the helper in two phases:
+
+1. `prepare --checkpoint <step>` starts the operation, stops exactly at the
+   checkpoint, records pre-kill state, and writes `checkpoint.pid` whose first
+   line is the exact daemon/helper pid to kill.
+2. The shell runner sends `TERM` to that exact numeric pid only.  It never uses
+   `pkill`, `killall`, process-name matching, or a process list as kill proof.
+3. `verify --checkpoint <step>` restarts/reconciles pdocker and writes
+   post-restart evidence proving the merged view and residue oracle.
+
+The host artifact may be promoted only after the pulled evidence is summarized
+into `status=pass`, `success=true`, `stable_checkpoint_eligible=true`,
+`device_promotion_evidence=true`, and all required per-case fields above.
+Device-side shell exit zero, helper stdout, or HTTP/CLI acknowledgement alone is
+not a pass condition.
 
 ## Commands
 
@@ -87,6 +116,10 @@ status.
 - `status=pass` without adb serial, run-as collection, operation id, exact pid,
   checkpoint acknowledgement, kill delivery, restart proof, merged-view proof,
   and evidence files for every required case.
+- `status=pass` with `stable_checkpoint_eligible=false` or with missing
+  `artifact_contract.pass_requires_exact_checkpoint_pid=true`.
+- Per-case evidence that omits `CheckpointAckFile`, `PreKillStateFile`,
+  `RestartEvidenceFile`, or `PostRestartStateFile`.
 - Treating HTTP/CLI acknowledgement, helper exit status, or a clean process list
   alone as recovery proof.
 - Trusting partial `.cow`, rename stage, metadata stage, whiteout marker, or

@@ -2,11 +2,11 @@
 """Android device-gated COW/overlay daemon/helper kill-at-step runner.
 
 Default mode is non-executing and writes a planned-gap artifact.  A host without
-adb, without a debuggable installed APK, or without the future APK kill-step
-protocol must never be reported as success.  Passing artifacts are accepted only
-when they contain per-case evidence that adb/run-as reached a deterministic
-checkpoint, killed the named daemon/helper process, restarted/reconciled, and
-verified the merged overlay state.
+adb, without a debuggable installed APK, or without the APK kill-step protocol
+must never be reported as success.  Passing artifacts are accepted only when
+they contain per-case evidence that adb/run-as reached a deterministic
+checkpoint, killed the exact daemon/helper pid acknowledged by that checkpoint,
+restarted/reconciled, and verified the merged overlay state.
 """
 
 from __future__ import annotations
@@ -29,9 +29,30 @@ DEVICE_SIDE_RUNNER = ROOT / "scripts" / "verify" / "runner" / "cow-overlay-kill-
 SCHEMA = "pdocker.cow-overlay-kill-at-step-device.v1"
 SCENARIO_ID = "cow.overlay.external-daemon-helper-kill-at-step"
 PLAN_GATE = "python3 scripts/verify-cow-overlay-bench-recovery.py"
+REMOTE_RUNNER = "/data/local/tmp/pdocker-cow-overlay-kill-at-step-device.sh"
+DEVICE_HELPER = "files/pdocker/tools/pdocker-cow-kill-at-step"
+REQUIRED_PHASES = ["preflight", "execute", "pull-evidence", "cleanup"]
 
 NON_PASSING = {"planned-gap", "blocked-device", "blocked", "failed", "fail", "skip", "skipped"}
 VALID_STATUS = NON_PASSING | {"pass"}
+VALID_KILL_SIGNALS = {"TERM", "KILL", "SIGTERM", "SIGKILL"}
+REQUIRED_PASS_CASE_FIELDS = {
+    "OperationId",
+    "CheckpointToken",
+    "CheckpointReached",
+    "CheckpointAckFile",
+    "PreKillStateFile",
+    "KilledPid",
+    "KilledProcessName",
+    "KillSignal",
+    "KillDelivered",
+    "RestartCompleted",
+    "RestartEvidenceFile",
+    "MergedViewVerified",
+    "FailureOracleMatched",
+    "PostRestartStateFile",
+    "EvidenceFiles",
+}
 
 REQUIRED_CASES: list[dict[str, Any]] = [
     {
@@ -127,7 +148,13 @@ def planned_case(case: dict[str, Any], status: str, reason: str) -> dict[str, An
         "Operation": case["Operation"],
         "ProcessTarget": case["ProcessTarget"],
         "Step": case["Step"],
+        "CheckpointToken": case["Step"],
+        "CheckpointReached": False,
         "KillSignal": "TERM-or-KILL after checkpoint acknowledgement",
+        "KillDelivered": False,
+        "RestartCompleted": False,
+        "MergedViewVerified": False,
+        "FailureOracleMatched": False,
         "Status": status,
         "ExpectedRecovery": case["ExpectedRecovery"],
         "FailureOracle": failure_oracle(case["Operation"]),
@@ -149,17 +176,16 @@ def failure_oracle(operation: str) -> str:
 
 
 def scenario_commands(adb: str, package: str, token: str, device_out: str) -> list[str]:
-    remote = "/data/local/tmp/pdocker-cow-overlay-kill-at-step-device.sh"
     commands = [
         f"{PLAN_GATE}",
         f"{adb} get-state",
         f"{adb} shell run-as {package} sh -c 'cd files && test -S pdocker/pdockerd.sock'",
-        f"{adb} push scripts/verify/runner/cow-overlay-kill-at-step-device.sh {remote}",
-        f"{adb} shell chmod 755 {remote}",
-        f"{adb} shell sh {remote} --phase preflight --package {package} --token {token} --out-dir {device_out}",
-        f"{adb} shell sh {remote} --phase execute --package {package} --token {token} --out-dir {device_out}",
+        f"{adb} push scripts/verify/runner/cow-overlay-kill-at-step-device.sh {REMOTE_RUNNER}",
+        f"{adb} shell chmod 755 {REMOTE_RUNNER}",
+        f"{adb} shell sh {REMOTE_RUNNER} --phase preflight --package {package} --token {token} --out-dir {device_out}",
+        f"{adb} shell sh {REMOTE_RUNNER} --phase execute --package {package} --token {token} --out-dir {device_out}",
         f"{adb} pull {device_out} docs/test/device-evidence/cow-overlay-kill-at-step-{token}",
-        f"{adb} shell sh {remote} --phase cleanup --package {package} --token {token} --out-dir {device_out}",
+        f"{adb} shell sh {REMOTE_RUNNER} --phase cleanup --package {package} --token {token} --out-dir {device_out}",
     ]
     return commands
 
@@ -189,7 +215,15 @@ def base_artifact(args: argparse.Namespace, status: str, reason: str, device: di
             "allowed_process_targets": ["daemon", "helper"],
         },
         "coverage": {operation: False for operation in sorted(REQUIRED_OPERATION_COVERAGE)},
-        "phases": ["preflight", "execute", "pull-evidence", "cleanup"],
+        "phases": REQUIRED_PHASES,
+        "artifact_contract": {
+            "pass_requires_real_device": True,
+            "pass_requires_adb_run_as": True,
+            "pass_requires_exact_checkpoint_pid": True,
+            "pass_requires_external_helper": DEVICE_HELPER,
+            "pass_forbids_name_based_kill": True,
+            "required_case_fields": sorted(REQUIRED_PASS_CASE_FIELDS),
+        },
         "required_cases": REQUIRED_CASES,
         "kill_at_step_cases": cases,
         "negative_expected_conditions": [
@@ -226,6 +260,17 @@ def require(condition: bool, message: str, errors: list[str]) -> None:
         errors.append(message)
 
 
+def valid_relative_evidence_path(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    path = Path(value)
+    return not path.is_absolute() and ".." not in path.parts
+
+
+def require_evidence_path(value: Any, message: str, errors: list[str]) -> None:
+    require(valid_relative_evidence_path(value), message, errors)
+
+
 def validate_artifact_data(data: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     status = data.get("status")
@@ -234,6 +279,16 @@ def validate_artifact_data(data: dict[str, Any]) -> list[str]:
     require(status in VALID_STATUS, f"invalid status {status!r}", errors)
     require(data.get("requires_adb") is True, "requires_adb must be true", errors)
     require(data.get("host_static_verifier_cannot_promote") is True, "host static verifier cannot promote device evidence", errors)
+    require(data.get("phases") == REQUIRED_PHASES, f"phases must be {REQUIRED_PHASES}", errors)
+    contract = data.get("artifact_contract")
+    require(isinstance(contract, dict), "artifact_contract must be present", errors)
+    if isinstance(contract, dict):
+        require(contract.get("pass_requires_real_device") is True, "artifact contract must require a real device", errors)
+        require(contract.get("pass_requires_adb_run_as") is True, "artifact contract must require adb run-as", errors)
+        require(contract.get("pass_requires_exact_checkpoint_pid") is True, "artifact contract must require exact checkpoint pid", errors)
+        require(contract.get("pass_forbids_name_based_kill") is True, "artifact contract must forbid name-based kill", errors)
+        declared = set(contract.get("required_case_fields") or [])
+        require(REQUIRED_PASS_CASE_FIELDS <= declared, "artifact contract missing required pass case fields", errors)
     cases = data.get("kill_at_step_cases")
     require(isinstance(cases, list), "kill_at_step_cases must be a list", errors)
     cases = cases if isinstance(cases, list) else []
@@ -245,6 +300,7 @@ def validate_artifact_data(data: dict[str, Any]) -> list[str]:
 
     if status == "pass":
         require(data.get("success") is True, "pass artifacts must set success=true", errors)
+        require(data.get("stable_checkpoint_eligible") is True, "pass artifacts must set stable_checkpoint_eligible=true", errors)
         require(data.get("device_promotion_evidence") is True, "pass artifacts require device_promotion_evidence=true", errors)
         require(data.get("collected_via_adb_run_as") is True, "pass artifacts require collected_via_adb_run_as=true", errors)
         device = data.get("device") or {}
@@ -260,14 +316,24 @@ def validate_artifact_data(data: dict[str, Any]) -> list[str]:
             require(case.get("Operation") == required["Operation"], f"{prefix} operation mismatch", errors)
             require(case.get("Step") == required["Step"], f"{prefix} step mismatch", errors)
             require(case.get("OperationId"), f"{prefix} missing OperationId", errors)
+            require(case.get("CheckpointToken") == required["Step"], f"{prefix} checkpoint token must match step", errors)
+            require_evidence_path(case.get("CheckpointAckFile"), f"{prefix} missing relative checkpoint ack file", errors)
+            require_evidence_path(case.get("PreKillStateFile"), f"{prefix} missing relative pre-kill state file", errors)
             require(isinstance(case.get("KilledPid"), int) and case.get("KilledPid") > 0, f"{prefix} missing killed pid", errors)
             require(case.get("KilledProcessName"), f"{prefix} missing killed process name", errors)
+            require(case.get("KillSignal") in VALID_KILL_SIGNALS, f"{prefix} invalid kill signal", errors)
             require(case.get("CheckpointReached") is True, f"{prefix} checkpoint was not proven", errors)
             require(case.get("KillDelivered") is True, f"{prefix} kill delivery was not proven", errors)
             require(case.get("RestartCompleted") is True, f"{prefix} restart/reconciliation was not proven", errors)
+            require_evidence_path(case.get("RestartEvidenceFile"), f"{prefix} missing relative restart evidence file", errors)
             require(case.get("MergedViewVerified") is True, f"{prefix} merged view was not verified", errors)
             require(case.get("FailureOracleMatched") is True, f"{prefix} failure oracle was not matched", errors)
-            require(bool(case.get("EvidenceFiles")), f"{prefix} missing evidence files", errors)
+            require_evidence_path(case.get("PostRestartStateFile"), f"{prefix} missing relative post-restart state file", errors)
+            evidence_files = case.get("EvidenceFiles")
+            require(isinstance(evidence_files, list) and bool(evidence_files), f"{prefix} missing evidence files", errors)
+            if isinstance(evidence_files, list):
+                for evidence in evidence_files:
+                    require_evidence_path(evidence, f"{prefix} evidence file must be relative and token-scoped", errors)
             proof = case.get("Proof") or {}
             for key in required["ProofKeys"]:
                 require(proof.get(key) is True, f"{prefix} proof.{key} must be true", errors)
@@ -312,16 +378,84 @@ def write_blocked_device(args: argparse.Namespace, artifact: Path, reason: str, 
     return 2
 
 
+def adb_step(adb: str, argv: list[str], timeout: int = 60) -> dict[str, Any]:
+    result = run_cmd([adb, *argv], timeout=timeout)
+    return {
+        "argv": [adb, *argv],
+        "returncode": result.returncode,
+        "stdout": result.stdout[-4000:],
+        "stderr": result.stderr[-4000:],
+    }
+
+
 def execute_device(args: argparse.Namespace, artifact: Path) -> int:
     device = detect_device(args.adb)
     if device.get("adb_present") is False or device.get("state") != "device":
         return write_blocked_device(args, artifact, "adb device unavailable; no kill-at-step execution attempted", device)
     if not DEVICE_SIDE_RUNNER.exists():
         return write_blocked_device(args, artifact, "device-side COW kill-at-step runner is missing", device)
+    token = safe_token(args.token)
+    args.token = token
+    pulled = ROOT / "docs" / "test" / "device-evidence" / f"cow-overlay-kill-at-step-{token}"
+    steps = [
+        adb_step(args.adb, ["push", str(DEVICE_SIDE_RUNNER), REMOTE_RUNNER]),
+        adb_step(args.adb, ["shell", "chmod", "755", REMOTE_RUNNER]),
+        adb_step(
+            args.adb,
+            [
+                "shell",
+                "sh",
+                REMOTE_RUNNER,
+                "--phase",
+                "preflight",
+                "--package",
+                args.package,
+                "--token",
+                token,
+                "--out-dir",
+                args.device_out,
+            ],
+        ),
+        adb_step(
+            args.adb,
+            [
+                "shell",
+                "sh",
+                REMOTE_RUNNER,
+                "--phase",
+                "execute",
+                "--package",
+                args.package,
+                "--token",
+                token,
+                "--out-dir",
+                args.device_out,
+            ],
+            timeout=300,
+        ),
+        adb_step(args.adb, ["pull", args.device_out, str(pulled)], timeout=120),
+        adb_step(
+            args.adb,
+            [
+                "shell",
+                "sh",
+                REMOTE_RUNNER,
+                "--phase",
+                "cleanup",
+                "--package",
+                args.package,
+                "--token",
+                token,
+                "--out-dir",
+                args.device_out,
+            ],
+        ),
+    ]
+    device["execution_steps"] = steps
     return write_blocked_device(
         args,
         artifact,
-        "APK deterministic COW kill-at-step debug protocol is not implemented/promoted yet; refusing to synthesize success",
+        "device execution is non-promoting until pulled adb/run-as helper evidence is validated into the pass artifact contract",
         device,
     )
 
