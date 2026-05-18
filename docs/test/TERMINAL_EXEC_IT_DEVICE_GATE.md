@@ -11,8 +11,10 @@ ID or name is required by the caller.
   with `--require-container`, `Status: planned-skip` must fail the gate.
 - A planned-skip may validate only as optional skip evidence; it never promotes
   or substitutes for a real-container pass, even if a stale JSONL sidecar exists.
-- A real-container pass must contain `Success: true` and a non-empty
-  `Container` value, and the JSONL `start.container` must exactly match it.
+- A real-container pass must contain `Success: true`, a non-empty
+  `Container` value, `StartedAtMs`, and non-negative `DurationMs`; the JSONL
+  `start.container` must exactly match it. A success artifact that explicitly
+  says `DeviceProofAttempted: false` is never promoting.
 - A `Success: true` JSON file is not enough. The host-side verifier
   `python3 scripts/verify-terminal-exec-it-artifact.py
   ui-it-selftest-latest.json engine-exec-input-latest.jsonl
@@ -57,7 +59,9 @@ A real-run artifact must include:
   `top-repaint-remains-terminal-shaped`, `top-q-shell-recovery`,
   `resize-route-is-observable`, and `selection-keyboard-suppression` as
   first-class keys set to `true`
-- `OutputTail` containing the required UI-observable shell markers; embedded
+- `OutputTail` containing the required UI-observable shell markers, including
+  at least two refresh/status markers from foreground `top` before the `topq`
+  recovery marker so periodic repaint is proven; embedded
   `EngineExecDiagnostics` text in this JSON is helpful for debugging but is
   never a substitute for the raw JSONL sidecar
 
@@ -69,12 +73,17 @@ exec create, HTTP 101 start/hijack, exact raw stdin writes, and explicit resize
 route observation. They must not be replaced by host-side replay, local shell
 stdin, or a JavaScript-only assertion.
 
+- monotonic numeric `timestampMs` values inside the device artifact timing window
+  (`StartedAtMs` through `StartedAtMs + DurationMs`, with verifier slack only
+  for collection jitter), so stale JSONL cannot promote a new JSON artifact
 - a `start` event whose `container` equals the artifact `Container`
 - `create-response`, `created`, `start-response`, and `stream-started` events
   for one exec id, including a 2xx exec-create response and a 101 hijack start
-- `input` events that include the UI-driven script, ArrowUp+Enter
+- `input` events whose `bytes` count must match the hex token count for every
+  raw stdin record and that include the UI-driven script, ArrowUp+Enter
   (`1b 5b 41 0d`), `top`, `q` (`71`), `sleep 15`, raw Ctrl-C (`03`), and the
-  post-interrupt recovery command
+  post-interrupt recovery command; this bytes count must match the hex token
+  count rule catches truncated or host-reconstructed JSONL
 - for the duplicate Enter regression, both the normal Enter marker and the IME
   command containing `pdocker-ui-it-ime-enter-ok` must be submitted once; the
   IME command is followed by exactly one Enter byte (`0d`), with no immediate
@@ -85,7 +94,9 @@ stdin, or a JavaScript-only assertion.
 - for ArrowUp, JSONL must show UI-generated `1b 5b 41 0d` after the history
   seed, and `OutputTail` must not contain raw `ESC [ A`/`^[[A` escape text
 - for fullscreen `top`, JSONL must show `top`, isolated `q`, and the following
-  shell recovery command in that order
+  shell recovery command in that order; `OutputTail` must show at least two
+  refresh/status markers before `q` recovery, otherwise a single initial paint
+  or stale marker is non-promoting
 - the generic Ctrl/Alt modifier policy remains session-neutral: Ctrl maps a
   single character to the conventional terminal control byte, Alt/Esc prefix the
   resulting byte sequence with `ESC`, modifiers clear after one modified send or
@@ -96,8 +107,10 @@ stdin, or a JavaScript-only assertion.
 
 The verifier rejects fake success cases such as a planned-skip with
 `Success: true`, a success JSON without the raw JSONL sidecar, a `stream-started`
-event counted as resize evidence, mismatched container/exec ids, missing Ctrl-C
-byte proof, missing `q` for `top`, or literal `sleep 15c` input.
+event counted as resize evidence, mismatched container/exec ids, stale/non-monotonic timestamps outside the
+artifact timing window, incomplete input hex/byte counts, missing Ctrl-C byte
+proof, missing `q` for `top`, a single non-periodic `top` marker, or literal
+`sleep 15c` input.
 `scripts/android-device-smoke.sh` also clears any stale
 `ui-it-selftest-latest.json` and `engine-exec-input-latest.jsonl` before each
 UI self-test and before writing planned-skip evidence, then applies stricter
@@ -171,7 +184,7 @@ private test-only Engine endpoint. Required reproductions are:
    with one isolated `03` byte for both Japanese and English IME routes.
 4. Send the UI cursor-key path (`ArrowUp` / `\u001b[A`) and verify readline
    history replays the seeded command instead of printing escape text.
-5. Launch foreground/full-screen `top`, require a visible refresh before `q`
+5. Launch foreground/full-screen `top`, require at least two refresh/status markers before `q`
    via `top-refresh-observed-before-q`, verify the display remains a TTY-shaped
    terminal repaint, press UI `q`, and verify the shell accepts
    `echo pdocker-ui-it-topq-ok`. The batch `top -b -n 1` probe is only a
@@ -187,7 +200,7 @@ private test-only Engine endpoint. Required reproductions are:
 | Engine exec session transport | JSONL shows one exec id with create response, created event, 101 start response, stream-started event, raw input events, and matching container id. |
 | IME handling | The helper-textarea `beforeinput` path submits the IME Enter command with exactly one `0d`, rejects duplicate Enter, and sends JP/EN Ctrl-C as one isolated `03` without literal `c`. |
 | Ctrl/Alt modifier policy | Ctrl/Alt behavior is verified as generic terminal input behavior; device Ctrl-C evidence proves the control-byte route, while host/static tests cover Alt/Esc prefix and one-shot clearing. |
-| Top/fullscreen behavior | Foreground `top` must repaint before `q`, remain terminal-shaped, accept an isolated `q`, and JSONL must show shell recovery after `q`. |
+| Top/fullscreen behavior | Foreground `top` must emit at least two refresh/status markers before `q`, remain terminal-shaped, accept an isolated `q`, and JSONL must show shell recovery after `q`. |
 | Resize | JSONL contains `/exec/{id}/resize?h={rows}&w={cols}` or same-id `resize-failed`; `stream-started` is never counted as resize proof. |
 | Selection keyboard suppression | Static and artifact evidence keep selection mode keyboard suppression in the generic terminal surface, preventing selection/copy from forwarding input bytes. |
 

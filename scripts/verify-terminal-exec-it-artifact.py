@@ -115,6 +115,23 @@ def _event_exec_id(event: dict[str, Any]) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _timestamp_ms(event: dict[str, Any]) -> float:
+    value = event.get("timestampMs")
+    if isinstance(value, (int, float)) and value >= 0:
+        return float(value)
+    name = _event_name(event) or "<unknown>"
+    raise VerificationError(f"Engine exec diagnostics event {name} missing numeric timestampMs")
+
+
+def _validate_input_hex(event: dict[str, Any]) -> None:
+    tokens = _hex_tokens(event)
+    _require(tokens, "Engine exec input diagnostics event missing hex bytes")
+    bad_tokens = [token for token in tokens if not re.fullmatch(r"[0-9a-f]{2}", token)]
+    _require(not bad_tokens, "Engine exec input diagnostics contain invalid hex byte tokens: " + ", ".join(bad_tokens))
+    byte_count = event.get("bytes")
+    _require(isinstance(byte_count, int) and byte_count == len(tokens), "Engine exec input diagnostics bytes count must match hex byte count")
+
+
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise VerificationError(message)
@@ -135,6 +152,10 @@ def _verify_success_json(artifact: dict[str, Any], require_container: bool) -> s
     if require_container:
         _require(bool(artifact.get("Container")), "UI exec-it hard gate artifact is missing Container")
     _require(artifact.get("Success") is True, f"UI exec-it self-test failed: {artifact.get('Error', artifact)}")
+    if artifact.get("DeviceProofAttempted") is False:
+        raise VerificationError("UI exec-it success artifact claims DeviceProofAttempted=false")
+    _require(isinstance(artifact.get("StartedAtMs"), (int, float)) and artifact.get("StartedAtMs") >= 0, "UI exec-it success artifact missing StartedAtMs device timestamp")
+    _require(isinstance(artifact.get("DurationMs"), (int, float)) and artifact.get("DurationMs") >= 0, "UI exec-it success artifact missing non-negative DurationMs")
     container = str(artifact.get("Container", "")).strip()
     _require(bool(container), "UI exec-it success artifact is missing Container")
 
@@ -147,6 +168,10 @@ def _verify_success_json(artifact: dict[str, Any], require_container: bool) -> s
     _require(not missing_flags, "UI exec-it artifact Evidence flags not true: " + ", ".join(missing_flags))
 
     tail = str(artifact.get("OutputTail", ""))
+    _require(tail.strip(), "UI exec-it success artifact missing OutputTail")
+    top_marker_matches = list(re.finditer(r"(?im)(\bPID\b|Tasks?:|Mem:|CPU:|load average|Load Avg)", tail))
+    topq_index = tail.find("pdocker-ui-it-topq-ok")
+    top_ok_index = tail.find("pdocker-ui-it-top-ok")
     checks = {
         "enter-single-submit": "pdocker-ui-it-ok" in tail,
         "enter-no-duplicate-submit": tail.count("pdocker-ui-it-ok") == 1,
@@ -156,10 +181,10 @@ def _verify_success_json(artifact: dict[str, Any], require_container: bool) -> s
         "arrow-up-no-escape-text": "\u001b[A" not in tail and "^[[A" not in tail,
         "ime-enter-ctrlc-regression-covered": "pdocker-ui-it-ime-enter-ok" in tail and "pdocker-ui-it-ctrlc-ok" in tail and "sleep 15c" not in tail,
         "top-starts-on-tty": "pdocker-ui-it-top-ok" in tail,
-        "top-refresh-observed-before-q": any(marker in tail for marker in TOP_REFRESH_MARKERS),
-        "top-repaint-remains-terminal-shaped": evidence.get("top-repaint-remains-terminal-shaped") is True,
-        "q-quits-top": "pdocker-ui-it-topq-ok" in tail,
-        "top-q-shell-recovery": "pdocker-ui-it-topq-ok" in tail,
+        "top-refresh-observed-before-q": len(top_marker_matches) >= 2 and topq_index > top_marker_matches[-1].start(),
+        "top-repaint-remains-terminal-shaped": evidence.get("top-repaint-remains-terminal-shaped") is True and len(top_marker_matches) >= 2,
+        "q-quits-top": topq_index >= 0 and topq_index > top_ok_index >= 0,
+        "top-q-shell-recovery": topq_index >= 0 and topq_index > top_ok_index >= 0,
         # Checked against JSONL below; stream-started alone is not accepted.
         "resize-route-is-observable": True,
         # Selection suppression is a UI-surface artifact flag; static contract tests
@@ -169,11 +194,23 @@ def _verify_success_json(artifact: dict[str, Any], require_container: bool) -> s
     missing = [name for name, ok in checks.items() if not ok]
     _require(not missing, "UI exec-it evidence missing from output tail: " + ", ".join(missing))
     _require(not re.search(r"(/usr/bin/)?\[: extra argument", tail), "UI exec-it output contains bracket argv noise")
+    _require("\\e[A" not in tail, "UI exec-it output contains textual ArrowUp escape marker")
     _require("pdocker-ui-it-ok\r\n" in tail or "pdocker-ui-it-ok\n" in tail, "UI exec-it did not preserve terminal CRLF line control")
     return container
 
 
-def _verify_jsonl(events: list[dict[str, Any]], container: str) -> None:
+def _verify_jsonl(events: list[dict[str, Any]], container: str, artifact: dict[str, Any]) -> None:
+    timestamps = [_timestamp_ms(event) for event in events]
+    _require(timestamps == sorted(timestamps), "Engine exec diagnostics timestampMs values are not monotonic")
+    started_at = float(artifact.get("StartedAtMs", 0))
+    duration = float(artifact.get("DurationMs", 0))
+    completed_at = started_at + duration
+    slack_ms = 30_000.0
+    _require(
+        all(started_at - slack_ms <= ts <= completed_at + slack_ms for ts in timestamps),
+        "Engine exec diagnostics timestamps do not overlap the UI device artifact window",
+    )
+
     start_events = _events(events, "start")
     _require(start_events, "Engine exec diagnostics missing start event")
     start_container = str(start_events[0].get("container", "")).strip()
@@ -215,6 +252,9 @@ def _verify_jsonl(events: list[dict[str, Any]], container: str) -> None:
     _require(resize_ok, "Engine exec resize route is not observable for the created execId")
 
     input_events = _events(events, "input")
+    _require(input_events, "Engine exec diagnostics missing input events")
+    for event in input_events:
+        _validate_input_hex(event)
     texts = [_text(event) for event in input_events]
     hexes = [_hex(event) for event in input_events]
     joined_text = "\n".join(texts)
@@ -307,7 +347,7 @@ def verify(artifact_path: Path, input_jsonl_path: Path, require_container: bool 
         raise VerificationError("UI exec-it planned-skip must never be accepted as success")
     container = _verify_success_json(artifact, require_container=require_container)
     events = _read_jsonl(input_jsonl_path)
-    _verify_jsonl(events, container=container)
+    _verify_jsonl(events, container=container, artifact=artifact)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -25,6 +25,39 @@ def runtime_teardown_fixture():
     return deepcopy(artifact), deepcopy(proofs), deepcopy(negatives)
 
 
+def add_strict_remaining_slice_reduction(proofs):
+    for proof in proofs.values():
+        cid = proof["ContainerId"]
+        reduction = proof["VerifierReduction"]
+        reduction["SourceContainerIds"].update(
+            {
+                "ListenerOwner": cid,
+                "GpuMediaExecutorResidue": cid,
+                "PersistedStateJson": cid,
+            }
+        )
+        reduction.update(
+            {
+                "ListenerOwnerSameContainerId": True,
+                "GpuMediaExecutorResidueSameContainerId": True,
+                "PersistedStateJsonSameContainerId": True,
+                "PersistedStateTeardownFields": {
+                    "ContainerId": cid,
+                    "StatePidCleared": True,
+                    "PidStartTimeCleared": True,
+                    "PdockerKnownPidsCleared": True,
+                    "PdockerLauncherPidCleared": True,
+                    "PdockerLauncherPidStartTimeCleared": True,
+                    "PdockerLauncherPgidCleared": True,
+                    "PdockerProcessGroupIdCleared": True,
+                    "PdockerTeardownNoOrphanProcesses": True,
+                    "PdockerTeardownSurvivorsEmpty": True,
+                    "PdockerTeardownSurvivors": [],
+                },
+            }
+        )
+
+
 class RuntimeTeardownArtifactVerifierTest(unittest.TestCase):
     def run_verifier(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -38,6 +71,7 @@ class RuntimeTeardownArtifactVerifierTest(unittest.TestCase):
 
     def write_device_pass_fixture(self, root: Path, mutate=None) -> Path:
         artifact, proofs, negatives = runtime_teardown_fixture()
+        add_strict_remaining_slice_reduction(proofs)
         if mutate:
             mutate(artifact, proofs, negatives)
         evidence = root / "runtime-teardown"
@@ -94,6 +128,42 @@ class RuntimeTeardownArtifactVerifierTest(unittest.TestCase):
             bad = self.run_verifier(str(artifact_path), "--evidence-root", str(Path(tmp) / "runtime-teardown"))
             self.assertNotEqual(bad.returncode, 0)
             self.assertIn("DirectChildAbsence", bad.stderr)
+
+    def test_device_pass_rejects_listener_owner_container_id_mismatch(self):
+        def mutate(_artifact, proofs, _negatives):
+            proofs["same-container-id-stop-rm"]["VerifierReduction"]["SourceContainerIds"][
+                "ListenerOwner"
+            ] = "3" * 64
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = self.write_device_pass_fixture(Path(tmp), mutate=mutate)
+            bad = self.run_verifier(str(artifact_path), "--evidence-root", str(Path(tmp) / "runtime-teardown"))
+            self.assertNotEqual(bad.returncode, 0)
+            self.assertIn("SourceContainerIds.ListenerOwner", bad.stderr)
+
+    def test_device_pass_rejects_gpu_media_executor_container_id_mismatch(self):
+        def mutate(_artifact, proofs, _negatives):
+            proofs["same-container-id-stop-rm"]["VerifierReduction"]["SourceContainerIds"][
+                "GpuMediaExecutorResidue"
+            ] = "3" * 64
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = self.write_device_pass_fixture(Path(tmp), mutate=mutate)
+            bad = self.run_verifier(str(artifact_path), "--evidence-root", str(Path(tmp) / "runtime-teardown"))
+            self.assertNotEqual(bad.returncode, 0)
+            self.assertIn("SourceContainerIds.GpuMediaExecutorResidue", bad.stderr)
+
+    def test_device_pass_rejects_stale_persisted_state_teardown_fields(self):
+        def mutate(_artifact, proofs, _negatives):
+            fields = proofs["same-container-id-kill-rm"]["VerifierReduction"]["PersistedStateTeardownFields"]
+            fields["StatePidCleared"] = False
+            fields["PdockerTeardownSurvivors"] = ["pid 99"]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = self.write_device_pass_fixture(Path(tmp), mutate=mutate)
+            bad = self.run_verifier(str(artifact_path), "--evidence-root", str(Path(tmp) / "runtime-teardown"))
+            self.assertNotEqual(bad.returncode, 0)
+            self.assertIn("PersistedStateTeardownFields.StatePidCleared", bad.stderr)
 
     def test_planned_gap_is_not_device_pass(self):
         artifact, _proofs, _negatives = runtime_teardown_fixture()

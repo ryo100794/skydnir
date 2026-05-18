@@ -73,11 +73,16 @@ status of `ReducedEngineContainerId`, `SourceContainerIds`,
 `*-mismatched-container-ids.txt`, and `*-survivors.txt`) explain why the proof
 is still planned-gap or what concrete residue was observed. For a promoted
 `device-pass`, the reducer must also bind `/containers/json`, Engine inspect,
-`state.json`, process table/process tree, listener owner, lifecycle logs, and
-container logs to the proof `ContainerId` through `SourceContainerIds`; any
-missing, prefix-only, or mismatched Engine container ID is a hard failure. These
-fields are diagnostic only until every required flag is true and the top-level
-artifact is explicitly promoted to `device-pass`.
+`state.json`, process table/process tree, listener owner, GPU/media-executor
+residue, lifecycle logs, and container logs to the proof `ContainerId` through
+`SourceContainerIds`; any missing, prefix-only, or mismatched Engine container
+ID is a hard failure. Promotion additionally requires
+`ListenerOwnerSameContainerId`, `GpuMediaExecutorResidueSameContainerId`,
+`PersistedStateJsonSameContainerId`, and a `PersistedStateTeardownFields`
+object for the same exact container ID proving all active PID/launcher/process
+group fields are cleared and `PdockerTeardown` has `NoOrphanProcesses: true`
+with no survivors. These fields are diagnostic only until every required flag
+is true and the top-level artifact is explicitly promoted to `device-pass`.
 
 Required before/after evidence for that same ID:
 
@@ -161,12 +166,15 @@ schemas, and negative-case artifacts for process tree, listener absence, stale
 PID, GPU/media executor residue, Engine inspect, logs, and persisted state. The
 host-side reducer now reads the top-level artifact plus the referenced
 `same-container-id-*.json` and negative-case JSON files and rejects missing or
-fake proof. The device smoke performs the first reduction pass for exact
-container IDs, create/inspect binding, `/containers/json` after-rm absence,
-stale-name absence, direct-child evidence, stale PID evidence, and
-lifecycle/log artifact presence while keeping listener, GPU/media executor, and
-persisted-state checks non-promoting until they can be bound to the exact Engine
-container ID. The remaining device work is to complete those reductions and
-promote only when stop-rm and kill-rm both show no surviving process tree, no
+fake proof. It also rejects promoted artifacts where listener ownership,
+GPU/media executor residue, or persisted-state teardown fields are missing,
+stale, or bound to a different Engine container ID. The device smoke performs
+the first reduction pass for exact container IDs, create/inspect binding,
+`/containers/json` after-rm absence, stale-name absence, direct-child evidence,
+stale PID evidence, and lifecycle/log artifact presence while keeping listener,
+GPU/media executor, and persisted-state checks non-promoting until a real
+adb/run-as run emits those strict same-container-ID fields. The remaining
+device work is to complete those reductions and promote only when stop-rm and
+kill-rm both show no surviving process tree, no
 surviving listener, no stale PID reference, no GPU/media executor residue, and
 no stale state/log confusion for that exact Engine container ID.

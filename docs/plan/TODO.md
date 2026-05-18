@@ -40,9 +40,12 @@ issues, and deciding which planned gaps become hard gates.
    device-side `VerifierReduction`, `GapReasons`, `FailReasons`,
    `MismatchedContainerIds`, and `Survivors` diagnostics for both stop-rm and
    kill-rm. It now also reduces `/containers/json` after-rm absence and
-   stale-name absence into the same-container proof. Remaining slice: reduce
-   listener ownership, GPU/media-executor residue, and persisted-state teardown
-   fields to exact same-container-ID proof before allowing promotion.
+   stale-name absence into the same-container proof. Host verifier hardening now
+   rejects device-pass promotion unless listener owner, GPU/media-executor
+   residue, and persisted-state teardown fields are reduced to the same exact
+   Engine container ID, with negative fixtures covering those regressions.
+   Remaining slice: produce that stricter evidence from a real adb/run-as
+   device run before allowing promotion.
 3. **[#4](https://github.com/ryo100794/pdocker-android/issues/4)
    llama GPU Q6_K and environment propagation** `[P0 doing]`: continue the
    Q6_K blocker without touching llama.cpp, Dockerfiles, models, or prompts.
@@ -94,10 +97,15 @@ issues, and deciding which planned gaps become hard gates.
    code-server reachability, extension evidence, and UI card truth agreement.
 8. **[#15](https://github.com/ryo100794/pdocker-android/issues/15)
    SAF direct output** `[P1 next]`: `/documents` must be a SAF-backed UnixFS
-   exchange layer with sidecar metadata and direct-write evidence; app-private
-   fallback is allowed only when explicitly recorded. The default project
-   `/documents` placeholder and `pdocker-new-project` wording must be tied to
-   this gate so SAF fallback UX cannot drift from the UnixFS mediator design.
+   exchange layer with sidecar metadata and direct-write evidence. Host
+   contract coverage now requires `DirectWriteEvidence`, non-promoting
+   app-private fallback with explicit `fallbackRecorded`/`fallbackReason`,
+   sidecar-backed Unix metadata for FAT/SD-like stores, and `LayerBoundary`
+   proof that upper layers consume `FilesystemBackend`/`UnixMetadataBackend`
+   instead of SAF internals. The default project `/documents` placeholder and
+   `pdocker-new-project` wording must be tied to this gate so SAF fallback UX
+   cannot drift from the UnixFS mediator design; real device SAF pass evidence
+   remains separate and must not be fabricated.
 9. **[#9](https://github.com/ryo100794/pdocker-android/issues/9)
    Release evidence honesty gate** `[P0 doing]`: planned-gap artifacts,
    skipped or unrun device lanes, and host-only checks that merely prove a gap
@@ -432,9 +440,11 @@ implementation change plus a focused verification artifact.
   backend with `FilesystemBackend` and `UnixMetadataBackend` contracts.
   Overlay, archive, runtime, and UI code must consume those abstract contracts
   and capability flags instead of branching on SAF, SD-card, FAT32, exFAT,
-  `DocumentProvider`, tree URIs, or sidecar internals. Direct-output evidence is
-  now guarded by `python3 scripts/verify-saf-direct-output-artifact.py`, which
-  rejects mirror-only/fallback fake success and unsafe path fallback.
+  `DocumentProvider`, tree URIs, or sidecar internals. Direct-output host
+  evidence is now guarded by `python3 scripts/verify-saf-direct-output-artifact.py`,
+  which rejects mirror-only/fallback fake success, fallback without explicit
+  reason/provider error, missing sidecar Unix metadata, missing direct-write
+  evidence, missing layer boundary evidence, and unsafe path fallback.
 - [next] Storage metrics accounting: the shared layer pool is counted once for
   total storage. Image apparent sizes, container apparent rootfs sizes, and
   merged views intentionally overlap lower-layer bytes, so UI summaries and

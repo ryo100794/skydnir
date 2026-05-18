@@ -18,6 +18,18 @@ spec.loader.exec_module(verifier)
 REQUIRED = list(verifier.REQUIRED_EVIDENCE)
 CID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 EXEC_ID = "abcdef123456"
+STARTED_AT_MS = 1_000_000
+
+
+def input_event(timestamp, text, raw_bytes=None):
+    data = raw_bytes if raw_bytes is not None else text.encode("utf-8")
+    return {
+        "event": "input",
+        "timestampMs": timestamp,
+        "bytes": len(data),
+        "hex": " ".join(f"{byte:02x}" for byte in data),
+        "text": text.replace("\x1b", "\\e"),
+    }
 
 
 def smoke_script_function(script, name):
@@ -39,6 +51,7 @@ def good_artifact():
             "pdocker-ui-it-arrow-seed",
             "pdocker-ui-it-arrow-seed",
             "PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND",
+            "Tasks: 2 total, 1 running, 1 sleeping",
             "pdocker-ui-it-ime-enter-ok",
             "pdocker-ui-it-topq-ok",
             "pdocker-ui-it-ctrlc-ok",
@@ -49,6 +62,8 @@ def good_artifact():
         "Success": True,
         "Container": CID,
         "RequestedContainer": CID[:12],
+        "StartedAtMs": STARTED_AT_MS,
+        "DurationMs": 2_000,
         "RequiredEvidence": REQUIRED,
         "Evidence": {name: True for name in REQUIRED},
         "OutputTail": tail,
@@ -57,23 +72,39 @@ def good_artifact():
 
 
 def good_events():
+    initial_script = """p=pdocker-ui-it
+echo ${p}-ok
+/usr/bin/[ "x" = "x" ] && echo ${p}-bracket-ok
+pwd
+[ -t 0 ] && echo ${p}-tty-ok
+[ "$TERM" = "xterm-256color" ] && echo ${p}-term-ok
+[ -n "$BASH_VERSION" ] && echo ${p}-bash-ok
+top -b -n 1 >/dev/null && echo ${p}-top-ok
+echo ${p}-arrow-seed
+"""
+    top_recovery = """echo ${p}-top-ok
+echo ${p}-topq-ok
+"""
+    ctrlc_recovery = """echo ${p}-ctrlc-ok
+exit
+"""
     return [
-        {"event": "start", "container": CID, "timestampMs": 1},
-        {"event": "create-response", "timestampMs": 2, "status": 201, "body": json.dumps({"Id": EXEC_ID}), "execId": ""},
-        {"event": "created", "timestampMs": 3, "execId": EXEC_ID},
-        {"event": "resize", "timestampMs": 4, "execId": EXEC_ID, "status": 201, "body": f"/exec/{EXEC_ID}/resize?h=24&w=80"},
-        {"event": "start-response", "timestampMs": 5, "execId": EXEC_ID, "body": "HTTP/1.1 101 UPGRADED\r\n\r\n"},
-        {"event": "stream-started", "timestampMs": 6, "execId": EXEC_ID},
-        {"event": "input", "timestampMs": 7, "bytes": 220, "hex": "70 3d 70 64 6f", "text": "p=pdocker-ui-it\necho ${p}-ok\n/usr/bin/[ \"x\" = \"x\" ] && echo ${p}-bracket-ok\npwd\n[ -t 0 ] && echo ${p}-tty-ok\n[ \"$TERM\" = \"xterm-256color\" ] && echo ${p}-term-ok\n[ -n \"$BASH_VERSION\" ] && echo ${p}-bash-ok\ntop -b -n 1 >/dev/null && echo ${p}-top-ok\necho ${p}-arrow-seed\n"},
-        {"event": "input", "timestampMs": 8, "bytes": 33, "hex": "70 72 69 6e 74 66 0d", "text": "printf '%s\\n' \"$p-ime-enter-ok\""},
-        {"event": "input", "timestampMs": 9, "bytes": 1, "hex": "0d", "text": "\r"},
-        {"event": "input", "timestampMs": 10, "bytes": 4, "hex": "1b 5b 41 0d", "text": "\\e[A\r"},
-        {"event": "input", "timestampMs": 11, "bytes": 4, "hex": "74 6f 70 0d", "text": "top\r"},
-        {"event": "input", "timestampMs": 12, "bytes": 1, "hex": "71", "text": "q"},
-        {"event": "input", "timestampMs": 12.5, "bytes": 43, "hex": "65 63 68 6f 20 24 7b 70 7d 2d 74 6f 70 2d 6f 6b 0d 65 63 68 6f 20 24 7b 70 7d 2d 74 6f 70 71 2d 6f 6b 0d", "text": "echo ${p}-top-ok\necho ${p}-topq-ok\n"},
-        {"event": "input", "timestampMs": 13, "bytes": 9, "hex": "73 6c 65 65 70 20 31 35 0d", "text": "sleep 15\r"},
-        {"event": "input", "timestampMs": 14, "bytes": 1, "hex": "03", "text": "\u0003"},
-        {"event": "input", "timestampMs": 15, "bytes": 30, "hex": "65 63 68 6f 20 63 74 72 6c 63 2d 6f 6b 0d 65 78 69 74 0d", "text": "echo ${p}-ctrlc-ok\nexit\n"},
+        {"event": "start", "container": CID, "timestampMs": STARTED_AT_MS + 1},
+        {"event": "create-response", "timestampMs": STARTED_AT_MS + 2, "status": 201, "body": json.dumps({"Id": EXEC_ID}), "execId": ""},
+        {"event": "created", "timestampMs": STARTED_AT_MS + 3, "execId": EXEC_ID},
+        {"event": "resize", "timestampMs": STARTED_AT_MS + 4, "execId": EXEC_ID, "status": 201, "body": f"/exec/{EXEC_ID}/resize?h=24&w=80"},
+        {"event": "start-response", "timestampMs": STARTED_AT_MS + 5, "execId": EXEC_ID, "body": "HTTP/1.1 101 UPGRADED\r\n\r\n"},
+        {"event": "stream-started", "timestampMs": STARTED_AT_MS + 6, "execId": EXEC_ID},
+        input_event(STARTED_AT_MS + 7, initial_script),
+        input_event(STARTED_AT_MS + 8, "printf '%s\\n' \"$p-ime-enter-ok\""),
+        input_event(STARTED_AT_MS + 9, "\r"),
+        input_event(STARTED_AT_MS + 10, "\x1b[A\r", raw_bytes=b"\x1b[A\r"),
+        input_event(STARTED_AT_MS + 11, "top\r"),
+        input_event(STARTED_AT_MS + 12, "q"),
+        input_event(STARTED_AT_MS + 13, top_recovery),
+        input_event(STARTED_AT_MS + 14, "sleep 15\r"),
+        input_event(STARTED_AT_MS + 15, "\u0003", raw_bytes=b"\x03"),
+        input_event(STARTED_AT_MS + 16, ctrlc_recovery),
     ]
 
 
@@ -139,6 +170,41 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
             with self.assertRaisesRegex(verifier.VerificationError, "success artifact is missing Container"):
                 verifier.verify(artifact_path, input_path, require_container=False)
 
+
+    def test_rejects_success_artifact_without_device_timing_window(self):
+        artifact = good_artifact()
+        del artifact["StartedAtMs"]
+        tmp, artifact_path, input_path = self.write_case(artifact=artifact, events=good_events())
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "missing StartedAtMs"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_success_artifact_claiming_no_device_proof_attempt(self):
+        artifact = good_artifact()
+        artifact["DeviceProofAttempted"] = False
+        tmp, artifact_path, input_path = self.write_case(artifact=artifact, events=good_events())
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "DeviceProofAttempted=false"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_stale_jsonl_outside_artifact_time_window(self):
+        events = [dict(event) for event in good_events()]
+        for event in events:
+            event["timestampMs"] = STARTED_AT_MS - 120_000 + (event["timestampMs"] - STARTED_AT_MS)
+        tmp, artifact_path, input_path = self.write_case(events=events)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "do not overlap the UI device artifact window"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_input_event_with_incomplete_hex_byte_count(self):
+        events = [dict(event) for event in good_events()]
+        first_input = next(event for event in events if event.get("event") == "input")
+        first_input["hex"] = "70 3d 70"
+        tmp, artifact_path, input_path = self.write_case(events=events)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "bytes count must match hex byte count"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
     def test_rejects_container_mismatch_between_artifact_and_engine_exec_jsonl(self):
         events = [dict(event) for event in good_events()]
         events[0]["container"] = "fedcba9876543210"
@@ -187,7 +253,7 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
         events = [dict(event) for event in good_events()]
         for index, event in enumerate(events):
             if event.get("text") == "\r" and index > 0 and "ime-enter-ok" in events[index - 1].get("text", ""):
-                events.insert(index + 1, {"event": "input", "timestampMs": 9.5, "bytes": 1, "hex": "0d", "text": "\r"})
+                events.insert(index + 1, {"event": "input", "timestampMs": STARTED_AT_MS + 9.5, "bytes": 1, "hex": "0d", "text": "\r"})
                 break
         tmp, artifact_path, input_path = self.write_case(events=events)
         with tmp:
@@ -198,7 +264,7 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
         events = [dict(event) for event in good_events()]
         for index, event in enumerate(events):
             if event.get("hex") == "03":
-                events.insert(index + 1, {"event": "input", "timestampMs": 14.5, "bytes": 1, "hex": "63", "text": "c"})
+                events.insert(index + 1, {"event": "input", "timestampMs": STARTED_AT_MS + 15.5, "bytes": 1, "hex": "63", "text": "c"})
                 break
         tmp, artifact_path, input_path = self.write_case(events=events)
         with tmp:
@@ -209,6 +275,7 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
         events = [dict(event) for event in good_events()]
         arrow = next(event for event in events if event.get("hex") == "1b 5b 41 0d")
         events.remove(arrow)
+        arrow["timestampMs"] = STARTED_AT_MS + 6.5
         events.insert(6, arrow)
         tmp, artifact_path, input_path = self.write_case(events=events)
         with tmp:
@@ -219,6 +286,7 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
         events = [dict(event) for event in good_events()]
         q = next(event for event in events if event.get("hex") == "71")
         events.remove(q)
+        q["timestampMs"] = STARTED_AT_MS + 10.5
         events.insert(10, q)
         tmp, artifact_path, input_path = self.write_case(events=events)
         with tmp:
@@ -256,6 +324,17 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
         artifact = good_artifact()
         artifact["OutputTail"] = artifact["OutputTail"].replace(
             "PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND\n",
+            "",
+        )
+        tmp, artifact_path, input_path = self.write_case(artifact=artifact, events=good_events())
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "top-refresh-observed-before-q"):
+                verifier.verify(artifact_path, input_path, require_container=True)
+
+    def test_rejects_single_top_refresh_marker_as_non_periodic(self):
+        artifact = good_artifact()
+        artifact["OutputTail"] = artifact["OutputTail"].replace(
+            "Tasks: 2 total, 1 running, 1 sleeping\n",
             "",
         )
         tmp, artifact_path, input_path = self.write_case(artifact=artifact, events=good_events())

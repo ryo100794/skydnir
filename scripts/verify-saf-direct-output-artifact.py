@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Host-side verifier for SAF direct-output device artifacts.
+"""Host-side verifier for SAF direct-output / UnixFS mediator artifacts.
 
 The device smoke script can emit a JSON artifact, but a top-level
 ``Success=true`` is not enough for promotion.  This verifier re-checks the
 contract encoded in the artifact and only accepts proof that a real container
 wrote through ``/documents`` and that the selected Documents/SAF backend (not
 only the app-private mirror) contains the write/rename/unlink/sidecar/path
-validation evidence.
+validation evidence. It also verifies the UnixFS mediator boundary: direct-write
+evidence must identify the provider path, fallback must carry an explicit
+reason and stay non-promoting, FAT/SD Unix metadata must be sidecar-backed, and
+upper layers must consume FilesystemBackend/UnixMetadataBackend instead of SAF
+details.
 """
 
 from __future__ import annotations
@@ -20,6 +24,11 @@ from typing import Any
 FALLBACK_PAYLOAD_STATES = {"mirror-fallback-after-saf-error"}
 DIRECT_PAYLOAD_STATES = {"saf-synced-mirror-evicted", "mirror-present"}
 NON_PROMOTING_STATUSES = {"planned-skip", "planned-gap", "skipped", "skip", "blocked", "fallback"}
+REQUIRED_LAYER_BOUNDARY = {
+    "FilesystemBackend": "saf-unixfs",
+    "UnixMetadataBackend": "sidecar",
+}
+
 REQUIRED_CASES = (
     "container_documents_write",
     "direct_saf_payload",
@@ -73,12 +82,62 @@ def _sidecar_has_provider_evidence(sidecar: Any, expected_relative: str) -> bool
         return False
     if sidecar.get("unixMetadata") != "sidecar" or sidecar.get("relativePath") != expected_relative:
         return False
-    # Older smoke artifacts at least expose providerEvidence/conflictState on
-    # current sidecars.  The verifier makes that evidence promotion-critical so
-    # sidecar-only fake success cannot hide provider divergence.
     provider = sidecar.get("providerEvidence")
-    return isinstance(provider, dict) and bool(provider.get("sha256")) and bool(sidecar.get("conflictState"))
+    if not (isinstance(provider, dict) and bool(provider.get("sha256")) and bool(provider.get("documentId")) and bool(sidecar.get("conflictState"))):
+        return False
+    unix = sidecar.get("UnixMetadata")
+    if not isinstance(unix, dict):
+        return False
+    required_unix = {
+        "source": "sidecar",
+        "emulates": "unixfs",
+        "fileType": "regular",
+    }
+    for key, expected in required_unix.items():
+        if unix.get(key) != expected:
+            return False
+    if not isinstance(unix.get("mode"), int) or not isinstance(unix.get("uid"), int) or not isinstance(unix.get("gid"), int):
+        return False
+    caps = sidecar.get("CapabilityReport")
+    return isinstance(caps, dict) and caps.get("emulated_unix_metadata") is True and caps.get("native_unix_metadata") is False
 
+
+
+def _verify_direct_write_evidence(case: dict[str, Any], selected_host: str) -> None:
+    evidence = case.get("DirectWriteEvidence")
+    _require(isinstance(evidence, dict), "direct SAF payload must include DirectWriteEvidence")
+    _require(evidence.get("Backend") == "saf-unixfs", "DirectWriteEvidence must identify saf-unixfs backend")
+    _require(evidence.get("WritePath") == "selected-saf-documents", "DirectWriteEvidence must prove selected Documents/SAF write path")
+    _require(_text(evidence.get("SelectedHostPath")) == selected_host, "DirectWriteEvidence SelectedHostPath mismatches artifact")
+    _require(_text(evidence.get("RelativePath")) == _text(case.get("RelativePath")), "DirectWriteEvidence RelativePath mismatches payload case")
+    _require(isinstance(evidence.get("BytesWritten"), int) and evidence.get("BytesWritten") > 0, "DirectWriteEvidence must record positive BytesWritten")
+    _require(evidence.get("AppPrivateMirrorPromotes") is False, "DirectWriteEvidence must state app-private mirror cannot promote")
+
+
+def _verify_explicit_fallback_record(artifact: dict[str, Any]) -> None:
+    policy = artifact.get("FallbackPolicy")
+    if not isinstance(policy, dict):
+        raise VerificationError("FallbackPolicy must be present")
+    fallback_recorded = policy.get("FallbackRecorded") is True
+    fallback_state = _text(_case(artifact, "direct_saf_payload").get("PayloadState")) in FALLBACK_PAYLOAD_STATES
+    if fallback_recorded or fallback_state:
+        reason = _text(policy.get("FallbackReason"))
+        source_error = _text(policy.get("ProviderError")) or _text(policy.get("SafWriteError"))
+        _require(reason, "fallback was used but FallbackReason is missing")
+        _require(source_error, "fallback was used but provider/SAF error evidence is missing")
+        _require(policy.get("PromotesDirectOutput") is False, "fallback record must be non-promoting")
+
+
+def _verify_layer_boundary(artifact: dict[str, Any]) -> None:
+    boundary = artifact.get("LayerBoundary")
+    _require(isinstance(boundary, dict), "LayerBoundary evidence is required")
+    for key, expected in REQUIRED_LAYER_BOUNDARY.items():
+        _require(boundary.get(key) == expected, f"LayerBoundary {key} must be {expected}")
+    _require(boundary.get("UpperLayersSeeSaf") is False, "upper layers must not see SAF implementation details")
+    consumers = boundary.get("AbstractConsumers")
+    _require(isinstance(consumers, list) and {"overlay", "archive", "runtime", "ui"}.issubset(set(consumers)), "LayerBoundary must list abstract upper-layer consumers")
+    forbidden = boundary.get("ForbiddenUpperLayerTerms")
+    _require(isinstance(forbidden, list) and {"DocumentProvider", "treeUri", "FAT32", "exFAT", "SD-card"}.issubset(set(forbidden)), "LayerBoundary must forbid SAF/FAT/SD branching above backend")
 
 def _verify_promoting_status(artifact: dict[str, Any]) -> None:
     status = _text(artifact.get("Status")).lower()
@@ -111,8 +170,10 @@ def _verify_direct_payload(artifact: dict[str, Any]) -> None:
     _require(_bool(case.get("DirectPayloadObserved")), "payload was not observed under the selected Documents/SAF host path")
     _require(_text(case.get("SelectedHostPath")) == selected_host, "direct payload case SelectedHostPath mismatches artifact")
     state = _text(case.get("PayloadState"))
+    _verify_explicit_fallback_record(artifact)
     _require(state in DIRECT_PAYLOAD_STATES, f"direct payload has non-promoting payloadState: {state or '<missing>'}")
     _require(state not in FALLBACK_PAYLOAD_STATES, "fallback payloadState cannot promote SAF direct-output evidence")
+    _verify_direct_write_evidence(case, selected_host)
     mirror_only = _bool(case.get("MirrorPayloadPresent")) and not _bool(case.get("DirectPayloadObserved"))
     _require(not mirror_only, "mirror-only payload evidence is not direct SAF output")
 
@@ -124,6 +185,7 @@ def _verify_mirror_policy(artifact: dict[str, Any]) -> None:
     policy = artifact.get("FallbackPolicy")
     _require(isinstance(policy, dict), "FallbackPolicy must be present")
     _require(policy.get("AllowedOnlyWhenExplicitlyRecorded") is True, "FallbackPolicy must require explicit fallback recording")
+    _verify_explicit_fallback_record(artifact)
     _require(policy.get("FallbackRecorded") is not True, "fallback was recorded; fallback evidence is non-promoting")
     _require(policy.get("MirrorOnlyRejected") is not True, "mirror-only evidence was observed; not promotable")
 
@@ -173,6 +235,7 @@ def verify(path: Path, *, require_container: bool = True) -> None:
     _require(isinstance(cases, dict), "artifact Cases must be an object")
     missing = [name for name in REQUIRED_CASES if name not in cases]
     _require(not missing, "artifact missing required SAF direct-output cases: " + ", ".join(missing))
+    _verify_layer_boundary(artifact)
     _verify_promoting_status(artifact)
     _verify_container(artifact, require_container=require_container)
     _verify_direct_payload(artifact)

@@ -13,6 +13,7 @@ DOC = ROOT / "docs" / "test" / "SAF_DIRECT_OUTPUT_GATE.md"
 MEDIATOR = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "SafDocumentsMediator.kt"
 MAIN = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "MainActivity.kt"
 VERIFIER = ROOT / "scripts" / "verify-saf-direct-output-artifact.py"
+STORAGE_DOC = ROOT / "docs" / "design" / "STORAGE_LAYER_ARCHITECTURE.md"
 
 
 class SafDirectOutputContractTest(unittest.TestCase):
@@ -160,6 +161,11 @@ class SafDirectOutputContractTest(unittest.TestCase):
             "rename_stat",
             "unlink",
             "direct_write_path_validation",
+            "DirectWriteEvidence",
+            "LayerBoundary",
+            "FallbackReason",
+            "UnixMetadataBackend",
+            "FilesystemBackend",
             "mirror-only payload evidence is not direct SAF output",
             "fallback was recorded; fallback evidence is non-promoting",
         ]:
@@ -196,6 +202,20 @@ def synthetic_saf_artifact():
         return {
             "relativePath": rel,
             "unixMetadata": "sidecar",
+            "UnixMetadata": {
+                "source": "sidecar",
+                "emulates": "unixfs",
+                "fileType": "regular",
+                "mode": 0o100644,
+                "uid": 1000,
+                "gid": 1000,
+                "mtime": "2026-05-18T00:00:00Z",
+            },
+            "CapabilityReport": {
+                "emulated_unix_metadata": True,
+                "native_unix_metadata": False,
+                "external_mutation_possible": True,
+            },
             "conflictState": "clean",
             "providerEvidence": {
                 "relativePath": rel,
@@ -231,6 +251,14 @@ def synthetic_saf_artifact():
                 "DirectPayloadObserved": True,
                 "MirrorPayloadPresent": False,
                 "MirrorPayloadEvicted": True,
+                "DirectWriteEvidence": {
+                    "Backend": "saf-unixfs",
+                    "WritePath": "selected-saf-documents",
+                    "SelectedHostPath": "/storage/emulated/0/Documents",
+                    "RelativePath": write_rel,
+                    "BytesWritten": 19,
+                    "AppPrivateMirrorPromotes": False,
+                },
             },
             "mirror_not_accepted_as_direct": {
                 "Attempted": True,
@@ -273,6 +301,13 @@ def synthetic_saf_artifact():
             "AcceptedPayloadStateForFallback": "mirror-fallback-after-saf-error",
             "FallbackRecorded": False,
             "MirrorOnlyRejected": False,
+        },
+        "LayerBoundary": {
+            "FilesystemBackend": "saf-unixfs",
+            "UnixMetadataBackend": "sidecar",
+            "UpperLayersSeeSaf": False,
+            "AbstractConsumers": ["overlay", "archive", "runtime", "ui"],
+            "ForbiddenUpperLayerTerms": ["DocumentProvider", "treeUri", "FAT32", "exFAT", "SD-card"],
         },
         "Failures": [],
     }
@@ -335,6 +370,54 @@ class SafDirectOutputArtifactVerifierTest(unittest.TestCase):
         with tmp:
             with self.assertRaisesRegex(verifier.VerificationError, "write sidecar"):
                 verifier.verify(path, require_container=True)
+
+    def test_verifier_rejects_missing_direct_write_evidence(self):
+        artifact = synthetic_saf_artifact()
+        artifact["Cases"]["direct_saf_payload"].pop("DirectWriteEvidence")
+        tmp, path = self.write_artifact(artifact)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "DirectWriteEvidence"):
+                verifier.verify(path, require_container=True)
+
+    def test_verifier_rejects_fallback_without_explicit_reason(self):
+        artifact = synthetic_saf_artifact()
+        artifact["Cases"]["direct_saf_payload"]["PayloadState"] = "mirror-fallback-after-saf-error"
+        artifact["FallbackPolicy"]["FallbackRecorded"] = True
+        tmp, path = self.write_artifact(artifact)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "FallbackReason"):
+                verifier.verify(path, require_container=True)
+
+    def test_verifier_rejects_sidecar_without_unix_metadata_contract(self):
+        artifact = synthetic_saf_artifact()
+        artifact["Cases"]["sidecar_metadata"]["WriteSidecar"].pop("UnixMetadata")
+        tmp, path = self.write_artifact(artifact)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "write sidecar"):
+                verifier.verify(path, require_container=True)
+
+    def test_verifier_rejects_missing_layer_boundary(self):
+        artifact = synthetic_saf_artifact()
+        artifact.pop("LayerBoundary")
+        tmp, path = self.write_artifact(artifact)
+        with tmp:
+            with self.assertRaisesRegex(verifier.VerificationError, "LayerBoundary"):
+                verifier.verify(path, require_container=True)
+
+    def test_storage_layer_architecture_documents_unixfs_mediator_gate(self):
+        for token in [
+            "SAF-backed UnixFS exchange layer",
+            "direct SAF write first",
+            "fallbackRecorded",
+            "fallbackReason",
+            "FilesystemBackend",
+            "UnixMetadataBackend",
+            "sidecar metadata",
+            "FAT32/exFAT/SD-card",
+            "upper layers must not branch on SAF",
+            "host contract",
+        ]:
+            self.assertIn(token, STORAGE_DOC.read_text())
 
 
 if __name__ == "__main__":

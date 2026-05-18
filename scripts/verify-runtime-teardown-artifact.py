@@ -33,6 +33,30 @@ if not _spec or not _spec.loader:  # pragma: no cover - defensive import guard
 verify_service_truth_plan = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(verify_service_truth_plan)
 
+ENGINE_CONTAINER_ID_RE = verify_service_truth_plan.ENGINE_CONTAINER_ID_RE
+
+TEARDOWN_STRICT_SAME_ID_SOURCES = [
+    "ListenerOwner",
+    "GpuMediaExecutorResidue",
+    "PersistedStateJson",
+]
+TEARDOWN_STRICT_SAME_ID_FLAGS = [
+    "ListenerOwnerSameContainerId",
+    "GpuMediaExecutorResidueSameContainerId",
+    "PersistedStateJsonSameContainerId",
+]
+TEARDOWN_PERSISTED_STATE_CLEAR_FIELDS = [
+    "StatePidCleared",
+    "PidStartTimeCleared",
+    "PdockerKnownPidsCleared",
+    "PdockerLauncherPidCleared",
+    "PdockerLauncherPidStartTimeCleared",
+    "PdockerLauncherPgidCleared",
+    "PdockerProcessGroupIdCleared",
+    "PdockerTeardownNoOrphanProcesses",
+    "PdockerTeardownSurvivorsEmpty",
+]
+
 
 def fail(message: str, code: int = 1) -> None:
     print(f"verify-runtime-teardown-artifact: FAIL: {message}", file=sys.stderr)
@@ -147,6 +171,62 @@ def load_negative_artifacts(
     return loaded
 
 
+
+def exact_container_id(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not ENGINE_CONTAINER_ID_RE.match(value):
+        fail(f"{field} must be an exact 64-hex Engine container ID")
+    return value.lower()
+
+
+def validate_strict_same_container_reduction(proofs: dict[str, dict[str, Any]]) -> None:
+    """Require the remaining teardown residues to be same-container-ID proof.
+
+    The service-truth contract validates the broad promoted schema.  This
+    verifier additionally hard-gates the remaining P0 slice before accepting a
+    device-pass artifact: listener owner, GPU/media executor residue, and every
+    persisted-state teardown field must reduce to the proof's exact Engine
+    container ID.
+    """
+
+    for name, proof in proofs.items():
+        cid = exact_container_id(proof.get("ContainerId"), f"{name}.ContainerId")
+        reduction = proof.get("VerifierReduction")
+        if not isinstance(reduction, dict):
+            fail(f"{name}.VerifierReduction must be present")
+        source_ids = reduction.get("SourceContainerIds")
+        if not isinstance(source_ids, dict):
+            fail(f"{name}.VerifierReduction.SourceContainerIds must be present")
+
+        for source in TEARDOWN_STRICT_SAME_ID_SOURCES:
+            source_cid = exact_container_id(
+                source_ids.get(source),
+                f"{name}.VerifierReduction.SourceContainerIds.{source}",
+            )
+            if source_cid != cid:
+                fail(f"{name}.VerifierReduction.SourceContainerIds.{source} must exactly match ContainerId")
+
+        for flag in TEARDOWN_STRICT_SAME_ID_FLAGS:
+            if reduction.get(flag) is not True:
+                fail(f"{name}.VerifierReduction.{flag} must be true")
+
+        persisted = reduction.get("PersistedStateTeardownFields")
+        if not isinstance(persisted, dict):
+            fail(f"{name}.VerifierReduction.PersistedStateTeardownFields must be present")
+        persisted_cid = exact_container_id(
+            persisted.get("ContainerId"),
+            f"{name}.VerifierReduction.PersistedStateTeardownFields.ContainerId",
+        )
+        if persisted_cid != cid:
+            fail(f"{name}.VerifierReduction.PersistedStateTeardownFields.ContainerId must exactly match ContainerId")
+        for field in TEARDOWN_PERSISTED_STATE_CLEAR_FIELDS:
+            if persisted.get(field) is not True:
+                fail(f"{name}.VerifierReduction.PersistedStateTeardownFields.{field} must be true")
+
+        survivors = persisted.get("PdockerTeardownSurvivors")
+        if survivors not in ([], None):
+            fail(f"{name}.VerifierReduction.PersistedStateTeardownFields.PdockerTeardownSurvivors must be empty")
+
+
 def validate_planned_gap(artifact: dict[str, Any]) -> None:
     try:
         verify_service_truth_plan.validate_runtime_teardown_artifact(artifact)
@@ -162,6 +242,7 @@ def validate_device_pass(artifact: dict[str, Any], *, artifact_path: Path, evide
         fail("expected Status=device-pass with reduced teardown proof", code=2)
     proofs = load_proof_artifacts(artifact, artifact_path=artifact_path, evidence_root=evidence_root)
     negatives = load_negative_artifacts(artifact, artifact_path=artifact_path, evidence_root=evidence_root)
+    validate_strict_same_container_reduction(proofs)
     try:
         verify_service_truth_plan.validate_runtime_teardown_artifact(artifact, proofs, negatives)
     except ValueError as exc:

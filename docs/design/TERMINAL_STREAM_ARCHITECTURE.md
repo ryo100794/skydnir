@@ -68,7 +68,7 @@ available:
   Raw soft keys such as Ctrl-C/Ctrl-D/Ctrl-Z send their literal control bytes and
   bypass modifier state.
 - **Top/fullscreen behavior:** the real-device gate requires foreground `top` to
-  emit a visible terminal repaint before `q` is accepted. A batch `top` check or
+  emit at least two `top` refresh/status markers before `q` is accepted. A batch `top` check or
   a shell prompt after a failed launch is not enough. The evidence also records
   that the repaint remains terminal-shaped rather than turning into log text,
   bracket argv noise, raw cursor-key text, or broken CR/LF output.
@@ -281,10 +281,14 @@ The terminal suite must include:
 - UI self-test that launches a real Engine exec session from the same path as
   the user button.
 - Device evidence stored under `files/pdocker/diagnostics/` and copied to the
-  test artifact tree when run by the Android smoke driver. The artifact should
+  test artifact tree when run by the Android smoke driver. The host verifier
+  ties raw JSONL to the device artifact timing window, requires monotonic
+  `timestampMs`, and rejects input records whose `bytes` count does not match
+  the hex token count. The artifact should
   expose first-class `Evidence` keys for top repaint shape, foreground `top`
-  refresh before `q`, `q` quit, Ctrl-C, ArrowUp/history, IME Enter/Ctrl-C,
-  Enter, and Engine exec resize route observation.
+  periodic refresh (at least two refresh/status markers before `q`), `q` quit,
+  Ctrl-C, ArrowUp/history, IME Enter/Ctrl-C, Enter, and Engine exec resize route
+  observation.
 
 Passing a JavaScript-only self-test is not enough to claim `exec -it` is fixed.
 The gate is a real device session that can run at least:
@@ -339,7 +343,10 @@ Android input method
   -> process tty line discipline
 ```
 
-Each boundary has one job. If Enter requires two presses, Ctrl-C also inserts
+Each boundary has one job. Device promotion therefore requires raw Engine exec
+JSONL from the same timing window as the UI artifact; a stale sidecar, a
+host-reconstructed transcript, or an input record whose hex bytes do not match
+its byte count is diagnostic-only evidence. If Enter requires two presses, Ctrl-C also inserts
 `c`, or full-screen programs behave like a dumb terminal, the failure must be
 localized to one of these boundaries before adding code.
 

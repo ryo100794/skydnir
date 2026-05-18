@@ -292,11 +292,18 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('"selection-keyboard-suppression"', verifier)
         self.assertIn('missing_flags', verifier)
         self.assertIn('"pdocker-ui-it-ime-enter-ok" in tail', verifier)
-        self.assertIn('any(marker in tail for marker in TOP_REFRESH_MARKERS)', verifier)
+        self.assertIn('len(top_marker_matches) >= 2', verifier)
         self.assertIn('"/resize?h=" in _event_body(event)', verifier)
         self.assertIn('"resize-failed"', verifier)
         self.assertIn('_read_jsonl(input_jsonl_path)', verifier)
         self.assertIn('Engine exec input diagnostics missing Ctrl-C byte', verifier)
+        self.assertIn('StartedAtMs', verifier)
+        self.assertIn('DurationMs', verifier)
+        self.assertIn('DeviceProofAttempted=false', verifier)
+        self.assertIn('timestampMs values are not monotonic', verifier)
+        self.assertIn('do not overlap the UI device artifact window', verifier)
+        self.assertIn('bytes count must match hex byte count', verifier)
+        self.assertIn('len(top_marker_matches) >= 2', verifier)
         self.assertNotRegex(
             verifier,
             r'"resize-route-is-observable"[^\n]*stream-started',
@@ -331,6 +338,10 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('Engine exec input diagnostics missing ArrowUp+Enter bytes', verifier)
         self.assertIn('Engine exec input diagnostics missing Ctrl-C byte', verifier)
         self.assertIn('Engine exec input diagnostics missing q byte', verifier)
+        self.assertIn('Engine exec diagnostics timestampMs values are not monotonic', verifier)
+        self.assertIn('Engine exec diagnostics timestamps do not overlap the UI device artifact window', verifier)
+        self.assertIn('Engine exec input diagnostics bytes count must match hex byte count', verifier)
+        self.assertIn('UI exec-it success artifact missing StartedAtMs device timestamp', verifier)
 
 
     def test_engine_exec_path_is_centralized_in_named_session(self):
@@ -414,6 +425,8 @@ class TerminalExecItContractTest(unittest.TestCase):
             "Ctrl applies the conventional terminal control mapping",
             "Top/fullscreen behavior",
             "Raw soft-key buttons bypass the modifier",
+            "device artifact timing window",
+            "top` refresh/status markers before `q`",
         ]:
             self.assertIn(required, design)
 
@@ -447,6 +460,9 @@ class TerminalExecItContractTest(unittest.TestCase):
             "generic Ctrl/Alt modifier policy",
             "foreground/full-screen `top`",
             "batch `top -b -n 1` probe is only a",
+            "device artifact timing window",
+            "at least two refresh/status markers",
+            "bytes count must match the hex token",
         ]:
             self.assertIn(required, doc)
 

@@ -3504,6 +3504,6 @@
     "vulkan-generic-spirv-dispatch": 1
   },
   "schema": "pdocker.llama.gpu.artifact-sweep.v1",
-  "snapshot_date": "2026-05-17",
+  "snapshot_date": "2026-05-18",
   "source_glob": "docs/test/llama-gpu-*.json"
 }
