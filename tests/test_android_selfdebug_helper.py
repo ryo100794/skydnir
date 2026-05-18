@@ -18,6 +18,11 @@ class AndroidSelfDebugHelperTest(unittest.TestCase):
         self.assertTrue(mode & stat.S_IXUSR, "android-selfdebug helper must be executable")
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("127.0.0.1", source)
+        self.assertIn("active Wi-Fi association", source)
+        self.assertIn("cannot bypass that OS prerequisite", source)
+        self.assertIn("explain_wireless_debugging_prerequisite", source)
+        self.assertIn("adb_output_failed", source)
+        self.assertIn("failed to connect", source)
         self.assertIn("adb_plain pair", source)
         self.assertIn("adb_plain connect", source)
         self.assertIn("install -r", source)
@@ -116,12 +121,50 @@ class AndroidSelfDebugHelperTest(unittest.TestCase):
             self.assertIn("shell run-as io.github.ryo100794.pdocker.compat curl -fsS --unix-socket files/pdocker/pdockerd.sock http://d/version", calls)
             self.assertIn("shell run-as io.github.ryo100794.pdocker.compat ls -la files", calls)
 
+    def test_helper_treats_adb_connect_refused_output_as_failure_even_with_zero_rc(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            fake_adb = tmp / "adb"
+            fake_adb.write_text(
+                textwrap.dedent(
+                    """
+                    #!/usr/bin/env bash
+                    if [[ "$1" == "connect" ]]; then
+                      echo "failed to connect to '$2': Connection refused"
+                      exit 0
+                    fi
+                    exit 0
+                    """
+                ).lstrip(),
+                encoding="utf-8",
+            )
+            fake_adb.chmod(0o755)
+            env = os.environ.copy()
+            env["ADB"] = str(fake_adb)
+
+            result = subprocess.run(
+                [str(SCRIPT), "connect", "127.0.0.1:5555"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("Connection refused", result.stderr)
+            self.assertIn("Wireless debugging must already be enabled", result.stderr)
+            self.assertIn("no root/userdebug privileges", result.stderr)
+
     def test_runbook_points_to_helper_without_replacing_manual_workflow(self):
         doc = DOC.read_text(encoding="utf-8")
         self.assertIn("scripts/android-selfdebug.sh", doc)
         self.assertIn("adb pair 127.0.0.1", doc)
         self.assertIn("adb connect 127.0.0.1", doc)
         self.assertIn("Pair device with pairing code", doc)
+        self.assertIn("disabled until the phone is associated with a", doc)
+        self.assertIn("no USB and no Wi-Fi association", doc)
+        self.assertIn("in-app diagnostics", doc)
 
 
 if __name__ == "__main__":

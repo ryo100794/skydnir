@@ -39,7 +39,9 @@ Usage:
 
 Thin helper for Android single-device self-debugging.  It is intended for
 Termux/PRoot-on-the-same-phone workflows where Android Wireless debugging is
-already enabled and the ADB target is localhost.
+already enabled and the ADB target is localhost.  Many Android builds require
+an active Wi-Fi association before Wireless debugging can be turned on; this
+helper cannot bypass that OS prerequisite.
 
 Environment:
   ADB                     adb executable path (default: adb)
@@ -61,6 +63,28 @@ adb_device() {
   else
     "$ADB_BIN" "$@"
   fi
+}
+
+explain_wireless_debugging_prerequisite() {
+  cat >&2 <<'EOF'
+
+android-selfdebug: Wireless debugging must already be enabled by Android.
+If this phone is not connected to Wi-Fi, many Android builds refuse to turn
+Wireless debugging on and no localhost ADB port exists.  With no USB, no Wi-Fi
+association, and no root/userdebug privileges, use the APK's in-app diagnostics
+route instead of ADB.
+EOF
+}
+
+adb_output_failed() {
+  case "$1" in
+    *"failed to connect"*|*"Connection refused"*|*"unable to connect"*|*"failed to pair"*|*"Invalid pairing code"*|*"cannot connect"*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 require_arg_count() {
@@ -109,13 +133,23 @@ case "$command" in
     target="$1"
     code="$2"
     require_localhost_target "$target"
-    adb_plain pair "$target" "$code"
+    if ! output="$(adb_plain pair "$target" "$code" 2>&1)" || adb_output_failed "$output"; then
+      printf '%s\n' "$output" >&2
+      explain_wireless_debugging_prerequisite
+      exit 1
+    fi
+    printf '%s\n' "$output"
     ;;
   connect)
     require_arg_count 1 "$#" "$command"
     target="$1"
     require_localhost_target "$target"
-    adb_plain connect "$target"
+    if ! output="$(adb_plain connect "$target" 2>&1)" || adb_output_failed "$output"; then
+      printf '%s\n' "$output" >&2
+      explain_wireless_debugging_prerequisite
+      exit 1
+    fi
+    printf '%s\n' "$output"
     ;;
   devices)
     adb_plain devices -l

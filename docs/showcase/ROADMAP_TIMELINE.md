@@ -23,12 +23,12 @@ Current TODO counters:
 |---|---:|
 | done | 60 |
 | doing | 17 |
-| next | 35 |
+| next | 36 |
 | blocked | 0 |
 
 ## Timeline
 
-### Now: 2026-05-17 to 2026-05-20
+### Now: 2026-05-18 to 2026-05-21
 
 Keep the UI compose path truthful and visible while closing regressions that block demos.
 
@@ -37,15 +37,15 @@ Keep the UI compose path truthful and visible while closing regressions that blo
 - [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from device discovery and...
 - [#6](https://github.com/ryo100794/pdocker-android/issues/6) Service truth same-container-ID device gate: the listener health and ID/label truth work are one gate. Probe default workspace...
 
-### Next: 2026-05-21 to 2026-05-27
+### Next: 2026-05-22 to 2026-05-28
 
 Turn the remaining high-value TODOs into repeatable device checks and public artifacts.
 
 - [#8](https://github.com/ryo100794/pdocker-android/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built...
+- ADB-less self-debug fallback: when the test constraint is no USB and no Wi-Fi association, treat ADB as unavailable and keep critical debug flows inside the APK UI/Engine route: daemon...
 - RUN changed-path/snapshot performance. `RUN chmod +x /usr/local/bin/pdocker-*` is functionally correct but still triggers an expensive broad snapshot in the default workspace build...
-- Storage graph/layer maintenance device evidence: capture connected-device screenshot/manual artifact proving connector rendering, cache-vs-image references, unique/shared/stale sizes...
 
-### Then: 2026-05-28 to 2026-06-07
+### Then: 2026-05-29 to 2026-06-08
 
 Use benchmark evidence to harden compatibility and publish tester-ready releases.
 

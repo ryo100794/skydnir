@@ -29,7 +29,14 @@ same device.
 
 ## One-Time Setup
 
-- Device: enable Developer options, then enable **Wireless debugging**.
+- Device: enable Developer options, then enable **Wireless debugging**. On many
+  Android builds this toggle is disabled until the phone is associated with a
+  Wi-Fi network.  The network does not need Internet access, but Android must
+  start its Wireless debugging ADB service before localhost pairing can work.
+- If the constraints are **no USB and no Wi-Fi association**, this ADB workflow
+  is not available on a normal production phone. Use pdocker's in-app
+  diagnostics, logs, Engine API panels, and Documents-exported test artifacts
+  instead of ADB.
 - PRoot side: install native aarch64 ADB with `apt install adb`. Avoid
   box64-wrapped ADB builds because they can crash while starting the daemon.
 - First pairing:
@@ -58,9 +65,9 @@ device LAN address from PRoot.
 ## Helper Script
 
 `scripts/android-selfdebug.sh` is a thin wrapper around the manual commands
-above.  It does not enable ADB over TCP, scan the LAN, or start the non-exported
-pdockerd service directly; Wireless debugging must already be enabled from the
-Android Developer options screen.
+above.  It does not enable ADB over TCP, scan the LAN, fake Wi-Fi association,
+or start the non-exported pdockerd service directly; Wireless debugging must
+already be enabled from the Android Developer options screen.
 
 ```sh
 # Pair once, using the short-lived pairing port and code from Android Settings.
@@ -204,6 +211,8 @@ bump `versionCode`.
 | `tar: can't link ...: Permission denied` | SELinux denied `link()` | Use `PDOCKER_LINK_MODE=symlink`; the bridge probes this automatically |
 | App crashes immediately with `Theme.AppCompat` | Manifest is missing `android:theme=` | Set an AppCompat theme such as `Theme.AppCompat.DayNight.NoActionBar` on the application tag |
 | `adb connect` returns connection refused | The Wireless debugging port changed | Recheck the current port on the device and connect again |
+| Wireless debugging cannot be toggled on | Android requires an active Wi-Fi association on this device | Connect to a trusted/offline Wi-Fi network if ADB is required, or use in-app diagnostics when the test constraint forbids Wi-Fi |
+| No USB and no Wi-Fi association | Normal production Android exposes no ADB transport to pair with | Treat ADB as unavailable; run debug flows from the APK UI and exported Documents artifacts |
 
 ## Maintenance
 

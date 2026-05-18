@@ -250,7 +250,15 @@ issues, and deciding which planned gaps become hard gates.
   debugging helper: `scripts/android-selfdebug.sh` wraps pair/connect,
   install/start, logcat, `run-as`, and Unix-socket probes without enabling ADB
   TCP itself or scanning the LAN. The manual fallback remains
-  `docs/test/ANDROID_SELFDEBUG.md`.
+  `docs/test/ANDROID_SELFDEBUG.md`. This route still depends on Android
+  Wireless debugging being enabled; normal production devices commonly require
+  an active Wi-Fi association before that toggle is available.
+- [next] ADB-less self-debug fallback: when the test constraint is no USB and
+  no Wi-Fi association, treat ADB as unavailable and keep critical debug flows
+  inside the APK UI/Engine route: daemon state, active operations, logs,
+  storage, memory/process/handle snapshots, test-suite launch, and Documents
+  JSON export. Do not represent localhost Wireless debugging as a no-Wi-Fi
+  solution.
 - [done] Root script clutter now has a first-pass inventory gate:
   `scripts/script-inventory.json`, `scripts/README.md`, and
   `scripts/verify-script-inventory.py` classify top-level scripts into
