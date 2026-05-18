@@ -322,7 +322,9 @@ risk, not stable checkpoint credit.
   app or daemon kill cannot leave a partial layer/image that is later treated
   as valid. Static verifier added: `python3 scripts/verify-image-pull-crash-safety.py`
   checks `.pull-*`, `.old-*`, layer `.tmp-*`, diff-id verification, atomic
-  publish ordering, and startup recovery. Device runner upgraded:
+  publish ordering, and startup recovery, and this verifier plus
+  `tests.test_image_pull_crash_safety_verifier` are now part of
+  `scripts/verify-fast.sh`. Device runner upgraded:
   `python3 scripts/verify/runner/image_pull_crash_safety_device.py --execute-device`
   now performs a safe scenario-owned residue kill/restart recovery lane with
   `.pull-*`, `.old-*`, `.tmp-*`, malformed partial-layer, partial-image

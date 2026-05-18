@@ -268,6 +268,20 @@
       ]
     },
     {
+      "id": "image.pull.crash-safety-static",
+      "area": "image-and-layer-storage",
+      "lane": "fast-local",
+      "command": "python3 scripts/verify-image-pull-crash-safety.py",
+      "status": "runnable",
+      "docs": [
+        "docs/test/IMAGE_PULL_CRASH_SAFETY_DEVICE_GATE.md",
+        "docs/test/CI_GATE_LEDGER.md",
+        "docs/plan/TODO.md"
+      ],
+      "checks": "Host source and synthetic-runner gate for atomic image pull publication: .pull/.old image staging, tmp layer staging, digest verification, startup prune/recovery, partial-image rejection, and non-promoting device/live-pull evidence shape.",
+      "checkpoint_credit": "fast local regression gate only; release credit still requires image.pull.live-registry-interruption device evidence"
+    },
+    {
       "id": "image.pull.live-registry-interruption",
       "area": "image-and-layer-storage",
       "lane": "android-full",

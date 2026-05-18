@@ -34,6 +34,7 @@ run python3 -m py_compile \
   scripts/verify-blackbox-requirements.py \
   scripts/verify-dockerfile-standard.py \
   scripts/verify-feature-scenarios.py \
+  scripts/verify-image-pull-crash-safety.py \
   scripts/verify-input-grammar-coverage.py \
   scripts/verify-input-validation.py \
   scripts/verify-stress-regression.py \
@@ -91,6 +92,7 @@ run python3 scripts/verify-feature-scenarios.py
 run python3 scripts/verify-dockerfile-standard.py
 run python3 scripts/verify-archive-api-compat.py
 run python3 scripts/verify-build-context-tar-compat.py
+run python3 scripts/verify-image-pull-crash-safety.py
 run python3 scripts/verify-cow-overlay-bench-recovery.py --run-local
 run python3 scripts/verify-project-library.py
 run python3 scripts/verify-storage-metrics.py
@@ -115,6 +117,7 @@ run python3 -m unittest \
   tests.test_runtime_teardown_artifact_verifier \
   tests.test_dev_workspace_smoke_contract \
   tests.test_dev_workspace_compose_artifact_verifier \
+  tests.test_image_pull_crash_safety_verifier \
   tests.test_runtime_single_container_artifact_verifier \
   tests.test_android_storage_metrics_sequence \
   tests.test_saf_direct_output_contract \
