@@ -267,14 +267,17 @@ issues, and deciding which planned gaps become hard gates.
   Documents/SAF copy at `pdocker/diagnostics/self-debug-bundle-latest.json`
   without USB, Wi-Fi ADB, `run-as`, or host shell access. The bundle records
   app/build/device metadata, Engine API ping/version/info/container probes,
-  Documents grant/export state, memory/process/fd snapshots, debug resource
-  roots, and known diagnostic artifact paths. Localhost Wireless debugging and
-  `scripts/android-selfdebug.sh` remain convenience routes only, not a
-  no-Wi-Fi substitute.
-- [next] ADB-free diagnostics follow-up: add a small fixture/verifier for the
-  self-debug bundle schema and extend the in-app route only where needed for
-  active operation/job launch state or log excerpts that are not already covered
-  by Engine probes, artifact summaries, and the Documents JSON export.
+  active daemon operations, app-owned Docker job state, bounded job log
+  excerpts, Documents grant/export state, memory/process/fd snapshots, debug
+  resource roots, and known diagnostic artifact paths. Localhost Wireless
+  debugging and `scripts/android-selfdebug.sh` remain convenience routes only,
+  not a no-Wi-Fi substitute.
+- [done] ADB-free self-debug schema verification covers the in-app bundle:
+  `python3 scripts/verify-self-debug-bundle.py` and
+  `tests.test_self_debug_bundle_verifier` validate the bundle contract,
+  explicit collection errors, active operation shape, app-owned job log paths,
+  and bounded job/log excerpts. `scripts/verify-ui-actions.py` also gates the
+  Kotlin route so future UI-only regressions are caught before device testing.
 - [done] Root script clutter now has a first-pass inventory gate:
   `scripts/script-inventory.json`, `scripts/README.md`, and
   `scripts/verify-script-inventory.py` classify top-level scripts into

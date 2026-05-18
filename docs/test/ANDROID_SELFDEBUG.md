@@ -64,10 +64,11 @@ The app writes:
   `pdocker/diagnostics/self-debug-bundle-latest.json`
 
 The bundle schema is `pdocker.self-debug.bundle.v1`. It records the app build,
-device/SDK/ABI, daemon Engine API probe results, container list, Documents grant
-state, memory/process/fd snapshots, debug resource roots, and known diagnostic
-artifact paths. It is generated entirely inside the APK and therefore does not
-require USB, Wi-Fi ADB, `run-as`, or a host shell.
+device/SDK/ABI, daemon Engine API probe results, container list, active daemon
+operation evidence (`active_operations`), Docker job/log-excerpt evidence
+(`jobs`), Documents grant state, memory/process/fd snapshots, debug resource
+roots, and known diagnostic artifact paths. It is generated entirely inside the
+APK and therefore does not require USB, Wi-Fi ADB, `run-as`, or a host shell.
 
 Verify an exported bundle without ADB:
 
@@ -77,10 +78,17 @@ python3 scripts/verify-self-debug-bundle.py /path/to/self-debug-bundle-latest.js
 
 The verifier checks the ADB-free contract (`adb_independent=true` and
 `requires_adb=false`), required `app`, `engine`, `documents`, `debug_roots`,
-`memory_layers`, snapshot text, `LocalEvidenceFiles`, `DocumentsExport`, and
-`DocumentsEvidenceExport` evidence. A planned or failed Documents export is
-accepted only when the export object keeps the normal structure and includes an
-explicit `Error`, `Reason`, or `Message` (directly or in an `Attempts` entry).
+`memory_layers`, snapshot text, `active_operations`, `jobs`,
+`LocalEvidenceFiles`, `DocumentsExport`, and `DocumentsEvidenceExport` evidence.
+The active-operation and Docker-job collections may contain explicit collection
+errors when runtime collection fails, but otherwise must be structured objects.
+The `jobs` object must use the `app-owned` job log path policy, include only app
+sandbox log paths such as
+`/data/user/0/<package>/files/pdocker/logs/jobs/<job-id>.log`, and keep excerpts
+bounded to at most 10 jobs, 20 output lines per job, and 32768 bytes per log
+excerpt. A planned or failed Documents export is accepted only when the export
+object keeps the normal structure and includes an explicit `Error`, `Reason`, or
+`Message` (directly or in an `Attempts` entry).
 
 ## Connect Each Session
 

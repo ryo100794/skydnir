@@ -104,6 +104,35 @@ def good_bundle():
         "memory_snapshot_text": "MemTotal: 4096 kB\n",
         "process_snapshot_text": "PID     PPID    STATE  RSS\n123 1 S 12\n",
         "handle_snapshot_text": "fd snapshot\n123/fd/0 -> /dev/null\n",
+        "active_operations": {
+            "Source": "engine:/system/operations",
+            "Count": 1,
+            "Items": [
+                {
+                    "Id": "op-1",
+                    "Kind": "pull",
+                    "Status": "Running",
+                    "StartedAt": 1770000000000,
+                    "UpdatedAt": 1770000001000,
+                }
+            ],
+        },
+        "jobs": {
+            "Source": "files/pdocker/jobs.json + files/pdocker/logs/jobs/*.log",
+            "JobLogPathPolicy": "app-owned",
+            "Count": 1,
+            "Items": [
+                {
+                    "id": "job-1",
+                    "title": "Docker pull",
+                    "command": "engine pull alpine:latest",
+                    "status": "Running",
+                    "LogPath": "/data/user/0/io.github.ryo100794.pdocker/files/pdocker/logs/jobs/job-1.log",
+                    "output": ["pulling alpine", "extracting layer"],
+                    "LogExcerptBytes": 31,
+                }
+            ],
+        },
         "LocalEvidenceFiles": {
             "Latest": "/data/user/0/io.github.ryo100794.pdocker/files/pdocker/diagnostics/self-debug-bundle-latest.json",
             "Timestamped": "/data/user/0/io.github.ryo100794.pdocker/files/pdocker/diagnostics/self-debug-bundle-1770000000000.json",
@@ -186,6 +215,77 @@ class SelfDebugBundleVerifierTest(unittest.TestCase):
         bundle["LocalEvidenceFiles"]["Latest"] = ""
         self.assert_rejected(bundle, "LocalEvidenceFiles.Latest must be a non-empty string")
 
+    def test_requires_active_operations_and_jobs_objects(self):
+        bundle = good_bundle()
+        del bundle["active_operations"]
+        self.assert_rejected(bundle, "active_operations must be an object")
+
+        bundle = good_bundle()
+        del bundle["jobs"]
+        self.assert_rejected(bundle, "jobs must be an object")
+
+    def test_accepts_explicit_active_operations_and_jobs_collection_errors(self):
+        bundle = good_bundle()
+        bundle["active_operations"] = {"Error": "daemon socket unavailable"}
+        bundle["jobs"] = {"Error": "jobs.json unavailable"}
+        tmp, path = self.write_case(bundle)
+        with tmp:
+            verifier.verify(path)
+
+    def test_rejects_job_count_and_log_excerpt_caps(self):
+        bundle = good_bundle()
+        base_job = bundle["jobs"]["Items"][0]
+        bundle["jobs"]["Items"] = [dict(base_job, id=f"job-{i}", LogPath=f"/data/user/0/io.github.ryo100794.pdocker/files/pdocker/logs/jobs/job-{i}.log") for i in range(11)]
+        self.assert_rejected(bundle, "at most 10 jobs")
+
+        bundle = good_bundle()
+        bundle["jobs"]["Items"][0]["output"] = [f"line {i}" for i in range(21)]
+        self.assert_rejected(bundle, "at most 20 lines")
+
+        bundle = good_bundle()
+        bundle["jobs"]["Items"][0].pop("output")
+        bundle["jobs"]["Items"][0]["LogExcerpt"] = "x" * 32769
+        self.assert_rejected(bundle, "at most 32768 bytes")
+
+        bundle = good_bundle()
+        bundle["jobs"]["Items"][0].pop("output")
+        bundle["jobs"]["Items"][0]["LogExcerpt"] = {
+            "Path": "/data/user/0/io.github.ryo100794.pdocker/files/pdocker/logs/jobs/job-1.log",
+            "Exists": True,
+            "Bytes": 65536,
+            "ExcerptBytes": 32768,
+            "Truncated": True,
+            "Text": "tail\n",
+        }
+        tmp, path = self.write_case(bundle)
+        with tmp:
+            verifier.verify(path)
+
+        bundle = good_bundle()
+        bundle["jobs"]["Items"][0].pop("output")
+        bundle["jobs"]["Items"][0]["LogExcerpt"] = {
+            "Path": "/data/user/0/io.github.ryo100794.pdocker/files/pdocker/logs/jobs/job-1.log",
+            "Exists": True,
+            "Bytes": 65536,
+            "ExcerptBytes": 32769,
+            "Truncated": True,
+            "Text": "tail\n",
+        }
+        self.assert_rejected(bundle, "ExcerptBytes must be at most 32768")
+
+    def test_rejects_unsafe_or_non_app_owned_job_log_paths(self):
+        bundle = good_bundle()
+        bundle["jobs"]["JobLogPathPolicy"] = "external"
+        self.assert_rejected(bundle, "JobLogPathPolicy must be app-owned")
+
+        bundle = good_bundle()
+        bundle["jobs"]["Items"][0]["LogPath"] = "/sdcard/Download/job-1.log"
+        self.assert_rejected(bundle, "app-owned job log path")
+
+        bundle = good_bundle()
+        bundle["jobs"]["Items"][0]["LogPath"] = "/data/user/0/io.github.ryo100794.pdocker/files/pdocker/logs/jobs/../secret.log"
+        self.assert_rejected(bundle, "app-owned job log path")
+
     def test_accepts_failed_documents_export_with_explicit_error(self):
         bundle = good_bundle()
         bundle["DocumentsExport"] = failed_export()
@@ -228,6 +328,9 @@ class SelfDebugBundleVerifierTest(unittest.TestCase):
         self.assertIn("pdocker.self-debug.bundle.v1", doc)
         self.assertIn("DocumentsExport", doc)
         self.assertIn("DocumentsEvidenceExport", doc)
+        self.assertIn("active_operations", doc)
+        self.assertIn("jobs", doc)
+        self.assertIn("32768 bytes", doc)
 
 
 if __name__ == "__main__":

@@ -21,9 +21,9 @@ Current TODO counters:
 
 | State | Count |
 |---|---:|
-| done | 61 |
+| done | 62 |
 | doing | 20 |
-| next | 33 |
+| next | 32 |
 | blocked | 0 |
 
 ## Timeline
@@ -42,7 +42,7 @@ Keep the UI compose path truthful and visible while closing regressions that blo
 Turn the remaining high-value TODOs into repeatable device checks and public artifacts.
 
 - [#8](https://github.com/ryo100794/pdocker-android/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built...
-- ADB-free diagnostics follow-up: add a small fixture/verifier for the self-debug bundle schema and extend the in-app route only where needed for active operation/job launch state or log...
+- Storage graph/layer maintenance device evidence: capture connected-device screenshot/manual artifact proving connector rendering, cache-vs-image references, unique/shared/stale sizes...
 
 ### Then: 2026-05-29 to 2026-06-08
 

@@ -422,6 +422,20 @@ def main() -> int:
         and '"handle_snapshot_text"' in main_src
         and "boundedDebugText(debugHandleSnapshot(), maxChars = 96 * 1024)" in main_src,
     )
+    require(
+        "self-debug bundle includes active operations and bounded app-owned job logs",
+        '"active_operations"' in main_src
+        and "selfDebugOperationsJson" in main_src
+        and 'engine.request("GET", "/system/operations", timeoutMs = 5_000)' in main_src
+        and '"jobs"' in main_src
+        and "selfDebugJobsJson" in main_src
+        and "JobLogPathPolicy" in main_src
+        and "MAX_SELF_DEBUG_JOBS = 10" in main_src
+        and "MAX_SELF_DEBUG_JOB_OUTPUT_LINES = 20" in main_src
+        and "MAX_SELF_DEBUG_JOB_LOG_BYTES = 32 * 1024" in main_src
+        and "jobLogFile(job.id)" in main_src
+        and "RandomAccessFile" in main_src,
+    )
     require("debug root browser back exits instead of images fallback", "standaloneRoot" in image_src and "finish()" in image_src.split("if (standaloneRoot)", 1)[1].split("currentMergedLower", 1)[0])
     require("selected image browser back returns to caller", "selectedImage != null" in image_src and "standaloneRoot = true" in image_src.split("selectedImage != null", 1)[1].split("selectedContainer != null", 1)[0])
     require("file browser rows are explorer-style single rows", "orientation = LinearLayout.HORIZONTAL" in image_src.split("private fun addRow", 1)[1].split("private fun addMessage", 1)[0] and "ellipsize = TextUtils.TruncateAt.MIDDLE" in image_src.split("private fun addRow", 1)[1].split("private fun addMessage", 1)[0])

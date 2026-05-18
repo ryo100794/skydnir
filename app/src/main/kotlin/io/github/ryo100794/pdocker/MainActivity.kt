@@ -51,6 +51,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -462,6 +463,10 @@ class MainActivity : AppCompatActivity() {
         private const val MAX_JOB_HISTORY = 20
         private const val MAX_JOB_LINES = 200
         private const val MAX_JOB_LOG_VIEW_BYTES = 256 * 1024
+        private const val MAX_SELF_DEBUG_JOBS = 10
+        private const val MAX_SELF_DEBUG_OPERATIONS = 10
+        private const val MAX_SELF_DEBUG_JOB_LOG_BYTES = 32 * 1024
+        private const val MAX_SELF_DEBUG_JOB_OUTPUT_LINES = 20
         private const val MAX_TEXT_TOOL_VIEW_BYTES = 128 * 1024
         private const val MAX_UI_WALK_ENTRIES = 512
         private const val MAX_PROJECT_DASHBOARD_PROJECTS = 8
@@ -1932,6 +1937,8 @@ class MainActivity : AppCompatActivity() {
                     }),
             )
             .put("debug_roots", roots)
+            .put("active_operations", selfDebugOperationsJson())
+            .put("jobs", selfDebugJobsJson())
             .put(
                 "artifacts",
                 JSONObject()
@@ -1958,6 +1965,131 @@ class MainActivity : AppCompatActivity() {
             .put("memory_snapshot_text", boundedDebugText(debugMemorySnapshot()))
             .put("process_snapshot_text", boundedDebugText(debugProcessSnapshot()))
             .put("handle_snapshot_text", boundedDebugText(debugHandleSnapshot(), maxChars = 96 * 1024))
+    }
+
+    private fun selfDebugOperationsJson(): JSONObject {
+        val source = "GET /system/operations"
+        return runCatching {
+            val resp = engine.request("GET", "/system/operations", timeoutMs = 5_000)
+            if (resp.status !in 200..299) {
+                JSONObject()
+                    .put("Source", source)
+                    .put("Status", resp.status)
+                    .put("Count", 0)
+                    .put("Truncated", false)
+                    .put("Items", JSONArray())
+                    .put("Error", resp.text.take(16 * 1024).ifBlank { "HTTP ${resp.status}" })
+            } else {
+                val raw = JSONArray(resp.text.ifBlank { "[]" })
+                val items = JSONArray()
+                val limit = minOf(raw.length(), MAX_SELF_DEBUG_OPERATIONS)
+                for (i in 0 until limit) {
+                    val op = raw.optJSONObject(i) ?: continue
+                    items.put(
+                        JSONObject()
+                            .put("Id", op.optString("Id", op.optString("id")))
+                            .put("Kind", op.optString("Kind", op.optString("kind", "operation")))
+                            .put("Title", op.optString("Title", op.optString("title", "operation")))
+                            .put("Detail", op.optString("Detail", op.optString("detail", "")))
+                            .put("Status", op.optString("Status", op.optString("status", "unknown")))
+                            .put("StartedAt", op.optDouble("StartedAt", op.optDouble("startedAt", 0.0)))
+                            .put("UpdatedAt", op.optDouble("UpdatedAt", op.optDouble("updatedAt", 0.0)))
+                            .apply {
+                                if (op.has("EndedAt")) put("EndedAt", op.optDouble("EndedAt", 0.0))
+                            },
+                    )
+                }
+                JSONObject()
+                    .put("Source", source)
+                    .put("Status", resp.status)
+                    .put("Count", raw.length())
+                    .put("Truncated", raw.length() > MAX_SELF_DEBUG_OPERATIONS)
+                    .put("Items", items)
+            }
+        }.getOrElse {
+            throwableJson(it)
+                .put("Source", source)
+                .put("Count", 0)
+                .put("Truncated", false)
+                .put("Items", JSONArray())
+        }
+    }
+
+    private fun selfDebugJobsJson(): JSONObject {
+        val items = JSONArray()
+        dockerJobs
+            .sortedByDescending { it.startedAt }
+            .take(MAX_SELF_DEBUG_JOBS)
+            .forEach { job ->
+                val logExcerpt = selfDebugJobLogExcerptJson(job)
+                items.put(
+                    JSONObject()
+                        .put("Id", job.id)
+                        .put("Title", job.title)
+                        .put("Detail", job.detail)
+                        .put("Command", job.command)
+                        .put("Group", job.group)
+                        .put("ToolKey", job.toolKey)
+                        .put("Status", job.status)
+                        .put("ExitCode", job.exitCode ?: JSONObject.NULL)
+                        .put("StartedAt", job.startedAt)
+                        .put("EndedAt", job.endedAt ?: JSONObject.NULL)
+                        .put("Progress", job.progress)
+                        .put("OutputLines", JSONArray().apply {
+                            job.output.takeLast(MAX_SELF_DEBUG_JOB_OUTPUT_LINES).forEach { put(it) }
+                        })
+                        .put("LogPath", logExcerpt.optString("Path", jobLogFile(job.id).absolutePath))
+                        .put("LogExcerptBytes", logExcerpt.optInt("ExcerptBytes", 0))
+                        .put("LogExcerpt", logExcerpt),
+                )
+            }
+        return JSONObject()
+            .put("Source", "MainActivity.dockerJobs + files/pdocker/logs/jobs")
+            .put("JobLogPathPolicy", "app-owned")
+            .put("Count", dockerJobs.size)
+            .put("Running", dockerJobs.count { it.exitCode == null })
+            .put("Truncated", dockerJobs.size > MAX_SELF_DEBUG_JOBS)
+            .put("MaxIncludedJobs", MAX_SELF_DEBUG_JOBS)
+            .put("MaxOutputLines", MAX_SELF_DEBUG_JOB_OUTPUT_LINES)
+            .put("MaxLogExcerptBytes", MAX_SELF_DEBUG_JOB_LOG_BYTES)
+            .put("Items", items)
+    }
+
+    private fun selfDebugJobLogExcerptJson(job: DockerJob): JSONObject {
+        val file = jobLogFile(job.id)
+        if (!file.isFile) {
+            return JSONObject()
+                .put("Path", file.absolutePath)
+                .put("Exists", false)
+                .put("Bytes", 0L)
+                .put("ExcerptBytes", 0)
+                .put("Truncated", false)
+                .put("Text", "")
+        }
+        return runCatching {
+            val total = file.length()
+            val readLen = minOf(total, MAX_SELF_DEBUG_JOB_LOG_BYTES.toLong()).toInt()
+            val buffer = ByteArray(readLen)
+            RandomAccessFile(file, "r").use { raf ->
+                raf.seek(total - readLen)
+                raf.readFully(buffer)
+            }
+            JSONObject()
+                .put("Path", file.absolutePath)
+                .put("Exists", true)
+                .put("Bytes", total)
+                .put("ExcerptBytes", readLen)
+                .put("Truncated", total > readLen)
+                .put("Text", buffer.toString(Charsets.UTF_8))
+        }.getOrElse {
+            throwableJson(it)
+                .put("Path", file.absolutePath)
+                .put("Exists", true)
+                .put("Bytes", file.length())
+                .put("ExcerptBytes", 0)
+                .put("Truncated", true)
+                .put("Text", "")
+        }
     }
 
     private fun boundedDebugText(text: String, maxChars: Int = 64 * 1024): String =
