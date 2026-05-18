@@ -134,6 +134,14 @@ header fields before dispatching to concrete Vulkan structs.  Keep
 VkPhysicalDeviceVulkan11Features -> VkPhysicalDeviceVulkan12Features` collapses
 back to the base feature mask only.
 
+2026-05-18 verifier gate: commit `cdd5f3f` also prevents a stale ICD artifact
+from being promoted into a new pre-Q6 conclusion.  When the compare artifact
+declares an `expected_icd_marker`, `scripts/verify-llama-gpu-artifact.py`
+requires that marker in `observed_icd_markers` before classifying generic
+SPIR-V pipeline failures.  If this trips, reinstall the freshly built compat
+APK and rerun the same compare; do not infer feature-chain or Q6_K state from
+the stale artifact.
+
 Milestone compare with CPU baseline should be run only after a correctness
 blocker changes, not after every small diagnostic edit.
 
