@@ -7640,8 +7640,14 @@ static int run_vulkan_dispatch_fd(
             source_spirv_summary = summarize_spirv(shader_code, shader_size);
         }
     }
+    /*
+     * PDOCKER_GPU_Q6K_SAFE_KERNEL is an explicit diagnostic override, not a
+     * default optimization.  Keep it available under strict passthrough so the
+     * same descriptor/object graph can split "bridge/device execution" from
+     * the native llama.cpp Q6_K SPIR-V reduction/output-layout path without
+     * changing llama.cpp, Dockerfiles, models, or prompts.
+     */
     const int q6k_safe_kernel_requested =
-        strict_passthrough ? 0 :
         options && options->has_q6k_safe_kernel
             ? options->q6k_safe_kernel
             : env_truthy("PDOCKER_GPU_Q6K_SAFE_KERNEL", 0);

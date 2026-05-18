@@ -224,6 +224,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"q4k_targeted_specialization_materialized\\":%s', source)
         self.assertIn('\\"q4k_safe_kernel\\":%s', source)
         self.assertIn("kQ4kSafeSpv", source)
+        self.assertIn("kQ6kSafeSpv", source)
+        self.assertIn("PDOCKER_GPU_Q6K_SAFE_KERNEL is an explicit diagnostic override", source)
+        self.assertNotIn(
+            "const int q6k_safe_kernel_requested =\n        strict_passthrough ? 0 :",
+            source,
+        )
         self.assertIn('"PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": os.environ.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0")', PDOCKERD.read_text())
 
     def test_vulkan_duplicate_binding_rewrite_avoids_passed_bindings(self):
