@@ -125,6 +125,15 @@ surface consistently with the feature bits it exposes.  If a pre-Q6
 `android_vulkan_enabled_features` first; do not jump to Q6_K oracle work until
 those fields prove the bridge setup is coherent.
 
+2026-05-18 follow-up: commit `5e5f0c7` hardens the ICD pNext traversal used by
+that feature-chain path.  The previous generic `VkBaseInStructure` view can
+miss nested feature structs under optimized C builds, so the ICD now copies the
+header fields before dispatching to concrete Vulkan structs.  Keep
+`tests.test_vulkan_icd_feature_chain` in the fast gate; it compiles a tiny
+`-O2` C harness and catches regressions where `VkPhysicalDeviceFeatures2 ->
+VkPhysicalDeviceVulkan11Features -> VkPhysicalDeviceVulkan12Features` collapses
+back to the base feature mask only.
+
 Milestone compare with CPU baseline should be run only after a correctness
 blocker changes, not after every small diagnostic edit.
 
