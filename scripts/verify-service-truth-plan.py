@@ -1066,6 +1066,32 @@ def validate_android_smoke_entrypoints() -> None:
             "\"Success\": false",
         ],
     )
+    try:
+        service_body = smoke.split("service_truth_acceptance_entrypoint()", 1)[1].split(
+            "runtime_teardown_acceptance_entrypoint()", 1
+        )[0]
+    except IndexError:
+        fail("android smoke is missing an extractable service_truth_acceptance_entrypoint body")
+    require_terms(
+        "android smoke service truth VerifierReduction",
+        service_body,
+        [
+            "\"VerifierReduction\"",
+            "ReducedEngineContainerId",
+            "RequiredSources",
+            "SourceContainerIds",
+            "UICardSameContainerId",
+            "DockerPsSameContainerId",
+            "EngineApiContainersJsonSameContainerId",
+            "PersistedStateJsonSameContainerId",
+            "ProcessTableSameContainerId",
+            "ListenerOwnerSameContainerId",
+            "ContainerLogsSameContainerId",
+            "REDUCTION_MISSING_SOURCES",
+            "REDUCTION_MISMATCHED_SOURCES",
+            "SERVICE_TRUTH_EXIT=0",
+        ],
+    )
 
 
 def main() -> int:

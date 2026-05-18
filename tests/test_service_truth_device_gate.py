@@ -64,6 +64,16 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
             "TruthContract",
             "RequiredSameContainerId",
             "Proof.SameEngineContainerId",
+            "VerifierReduction",
+            "ReducedEngineContainerId",
+            "SourceContainerIds",
+            "UICardSameContainerId",
+            "DockerPsSameContainerId",
+            "EngineApiContainersJsonSameContainerId",
+            "PersistedStateJsonSameContainerId",
+            "ProcessTableSameContainerId",
+            "ListenerOwnerSameContainerId",
+            "ContainerLogsSameContainerId",
             "EngineContainerId",
             "logs-selected.out",
             "docker ps --no-trunc",
@@ -198,6 +208,18 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
         self.assertIn('"DockerPs"', body)
         self.assertIn('SAME_ENGINE_CONTAINER_ID=true', body)
         self.assertIn('"SameEngineContainerId": $(json_bool "$SAME_ENGINE_CONTAINER_ID")', body)
+        self.assertIn('"VerifierReduction": {', body)
+        self.assertIn('"ReducedEngineContainerId": $( [ "$SELECTED_ID_EXACT" = true ]', body)
+        self.assertIn('"SourceContainerIds": {', body)
+        self.assertIn('"RequiredSources": ["UICard", "DockerPs", "EngineApiContainersJson", "PersistedStateJson", "ProcessTable", "ListenerProbe", "ContainerLogs"]', body)
+        self.assertIn('"UICardSameContainerId": $(json_bool "$UI_CARD_SAME_CONTAINER_ID")', body)
+        self.assertIn('"DockerPsSameContainerId": $(json_bool "$DOCKER_PS_SAME_CONTAINER_ID")', body)
+        self.assertIn('"EngineApiContainersJsonSameContainerId": $(json_bool "$ENGINE_API_CONTAINERS_JSON_SAME_CONTAINER_ID")', body)
+        self.assertIn('"PersistedStateJsonSameContainerId": $(json_bool "$PERSISTED_STATE_JSON_SAME_CONTAINER_ID")', body)
+        self.assertIn('"ProcessTableSameContainerId": $(json_bool "$PROCESS_TABLE_SAME_CONTAINER_ID")', body)
+        self.assertIn('"ListenerOwnerSameContainerId": $(json_bool "$LISTENER_OWNER_SAME_CONTAINER_ID")', body)
+        self.assertIn('"ContainerLogsSameContainerId": $(json_bool "$CONTAINER_LOGS_SAME_CONTAINER_ID")', body)
+        self.assertIn('printf \'%s\' "$REDUCTION_MISSING_SOURCES" | tr -d', body)
         self.assertIn("$2 == id", body)
         self.assertNotIn("index(id,$2)==1", body)
         for term in [
@@ -281,6 +303,9 @@ class ServiceTruthDeviceGateTest(unittest.TestCase):
         self.assertIn("ListenerProbe.OwnerEngineContainerId must be an exact 64-hex", verifier)
         self.assertIn("planned-gap/skip artifacts must set Success false", verifier)
         self.assertIn("successful service truth artifact must set Status device-pass", verifier)
+        self.assertIn("VerifierReduction object is required", verifier)
+        self.assertIn("VerifierReduction.ReducedEngineContainerId must exactly match", verifier)
+        self.assertIn("VerifierReduction.SourceContainerIds object is required", verifier)
 
     def test_static_verifier_fixture_rejects_missing_same_id_edges(self):
         verify_service_truth_plan.validate_service_truth_fixture_contract()

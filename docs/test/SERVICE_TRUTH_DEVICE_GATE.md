@@ -243,6 +243,12 @@ cannot be introduced silently.
 `files/pdocker/diagnostics/service-truth/same-id-source-summary.json`.  The
 summary is used by the promoted gate, but it is only a pass signal when the
 seven source objects also prove the same exact 64-hex Engine container ID.
+The runner also emits the same reduction as top-level `VerifierReduction`:
+`ReducedEngineContainerId`, `RequiredSources`, `SourceContainerIds`, and the
+seven `*SameContainerId` flags are present on every
+`service-truth-latest.json`.  Exit 0 is gated by that reducer being complete:
+all seven flags true, empty `MismatchedSources`, empty `MissingSources`, and
+all source IDs equal to the exact `Proof.EngineContainerId`.
 
 The diagnostic collector attempts to reduce each source to the selected exact
 Engine container ID as follows:

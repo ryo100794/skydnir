@@ -573,11 +573,36 @@ MISMATCHED_SOURCES=""
 [ "$LOGS_PROVEN" = true ] || MISSING_SOURCES="$MISSING_SOURCES ContainerLogs"
 [ -n "$UI_CARD_CID" ] && [ -n "$SELECTED_ENGINE_CID" ] && [ "$UI_CARD_CID" != "$SELECTED_ENGINE_CID" ] && MISMATCHED_SOURCES="$MISMATCHED_SOURCES UICard"
 
+UI_CARD_SAME_CONTAINER_ID=false
+DOCKER_PS_SAME_CONTAINER_ID=false
+ENGINE_API_CONTAINERS_JSON_SAME_CONTAINER_ID=false
+PERSISTED_STATE_JSON_SAME_CONTAINER_ID=false
+PROCESS_TABLE_SAME_CONTAINER_ID=false
+LISTENER_OWNER_SAME_CONTAINER_ID=false
+CONTAINER_LOGS_SAME_CONTAINER_ID=false
+[ "$SELECTED_ID_EXACT" = true ] && [ "$UI_CARD_PROVEN" = true ] && [ "$UI_CARD_CID" = "$SELECTED_ENGINE_CID" ] && UI_CARD_SAME_CONTAINER_ID=true
+[ "$SELECTED_ID_EXACT" = true ] && [ "$DOCKER_PS_PROVEN" = true ] && DOCKER_PS_SAME_CONTAINER_ID=true
+[ "$SELECTED_ID_EXACT" = true ] && [ "$ENGINE_API_PROVEN" = true ] && ENGINE_API_CONTAINERS_JSON_SAME_CONTAINER_ID=true
+[ "$SELECTED_ID_EXACT" = true ] && [ "$STATE_MATCH" = true ] && PERSISTED_STATE_JSON_SAME_CONTAINER_ID=true
+[ "$SELECTED_ID_EXACT" = true ] && [ "$PROCESS_PROVEN" = true ] && PROCESS_TABLE_SAME_CONTAINER_ID=true
+[ "$SELECTED_ID_EXACT" = true ] && [ "$LISTENER_PROVEN" = true ] && [ "$LISTENER_OWNER_ENGINE_CID" = "$SELECTED_ENGINE_CID" ] && LISTENER_OWNER_SAME_CONTAINER_ID=true
+[ "$SELECTED_ID_EXACT" = true ] && [ "$LOGS_PROVEN" = true ] && [ "$LOGS_MARKER_ENGINE_CID" = "$SELECTED_ENGINE_CID" ] && CONTAINER_LOGS_SAME_CONTAINER_ID=true
+
+REDUCTION_MISSING_SOURCES=""
+REDUCTION_MISMATCHED_SOURCES="$MISMATCHED_SOURCES"
+[ "$UI_CARD_SAME_CONTAINER_ID" = true ] || REDUCTION_MISSING_SOURCES="$REDUCTION_MISSING_SOURCES UICard"
+[ "$DOCKER_PS_SAME_CONTAINER_ID" = true ] || REDUCTION_MISSING_SOURCES="$REDUCTION_MISSING_SOURCES DockerPs"
+[ "$ENGINE_API_CONTAINERS_JSON_SAME_CONTAINER_ID" = true ] || REDUCTION_MISSING_SOURCES="$REDUCTION_MISSING_SOURCES EngineApiContainersJson"
+[ "$PERSISTED_STATE_JSON_SAME_CONTAINER_ID" = true ] || REDUCTION_MISSING_SOURCES="$REDUCTION_MISSING_SOURCES PersistedStateJson"
+[ "$PROCESS_TABLE_SAME_CONTAINER_ID" = true ] || REDUCTION_MISSING_SOURCES="$REDUCTION_MISSING_SOURCES ProcessTable"
+[ "$LISTENER_OWNER_SAME_CONTAINER_ID" = true ] || REDUCTION_MISSING_SOURCES="$REDUCTION_MISSING_SOURCES ListenerProbe"
+[ "$CONTAINER_LOGS_SAME_CONTAINER_ID" = true ] || REDUCTION_MISSING_SOURCES="$REDUCTION_MISSING_SOURCES ContainerLogs"
+
 SAME_ENGINE_CONTAINER_ID=false
 SERVICE_TRUTH_STATUS="planned-gap"
 SERVICE_TRUTH_SUCCESS=false
 SERVICE_TRUTH_EXIT=2
-if [ "$SELECTED_ID_EXACT" = true ]   && [ "$UI_CARD_PROVEN" = true ]   && [ "$DOCKER_PS_PROVEN" = true ]   && [ "$ENGINE_API_PROVEN" = true ]   && [ "$STATE_MATCH" = true ]   && [ "$PROCESS_PROVEN" = true ]   && [ "$LISTENER_PROVEN" = true ]   && [ "$LOGS_PROVEN" = true ]   && [ -z "$(printf '%s' "$MISMATCHED_SOURCES" | tr -d ' ')" ]; then
+if [ "$SELECTED_ID_EXACT" = true ]   && [ "$UI_CARD_SAME_CONTAINER_ID" = true ]   && [ "$DOCKER_PS_SAME_CONTAINER_ID" = true ]   && [ "$ENGINE_API_CONTAINERS_JSON_SAME_CONTAINER_ID" = true ]   && [ "$PERSISTED_STATE_JSON_SAME_CONTAINER_ID" = true ]   && [ "$PROCESS_TABLE_SAME_CONTAINER_ID" = true ]   && [ "$LISTENER_OWNER_SAME_CONTAINER_ID" = true ]   && [ "$CONTAINER_LOGS_SAME_CONTAINER_ID" = true ]   && [ -z "$(printf '%s' "$REDUCTION_MISMATCHED_SOURCES" | tr -d ' ')" ]   && [ -z "$(printf '%s' "$REDUCTION_MISSING_SOURCES" | tr -d ' ')" ]; then
   SAME_ENGINE_CONTAINER_ID=true
   SERVICE_TRUTH_STATUS="device-pass"
   SERVICE_TRUTH_SUCCESS=true
@@ -604,6 +629,28 @@ cat > "$LATEST" <<JSON
     "AggregationArtifact": "files/$DIAG/same-id-source-summary.json",
     "MismatchedSources": $(json_word_array "$MISMATCHED_SOURCES"),
     "MissingSources": $(json_word_array "$MISSING_SOURCES")
+  },
+  "VerifierReduction": {
+    "ReducedEngineContainerId": $( [ "$SELECTED_ID_EXACT" = true ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+    "RequiredSources": ["UICard", "DockerPs", "EngineApiContainersJson", "PersistedStateJson", "ProcessTable", "ListenerProbe", "ContainerLogs"],
+    "SourceContainerIds": {
+      "UICard": $(is_engine_container_id "$UI_CARD_CID" && json_string "$UI_CARD_CID" || printf null),
+      "DockerPs": $( [ "$DOCKER_PS_SAME_CONTAINER_ID" = true ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+      "EngineApiContainersJson": $( [ "$ENGINE_API_CONTAINERS_JSON_SAME_CONTAINER_ID" = true ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+      "PersistedStateJson": $( [ "$PERSISTED_STATE_JSON_SAME_CONTAINER_ID" = true ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+      "ProcessTable": $( [ "$PROCESS_TABLE_SAME_CONTAINER_ID" = true ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+      "ListenerProbe": $( [ "$LISTENER_OWNER_SAME_CONTAINER_ID" = true ] && json_string "$SELECTED_ENGINE_CID" || printf null ),
+      "ContainerLogs": $( [ "$CONTAINER_LOGS_SAME_CONTAINER_ID" = true ] && json_string "$SELECTED_ENGINE_CID" || printf null )
+    },
+    "UICardSameContainerId": $(json_bool "$UI_CARD_SAME_CONTAINER_ID"),
+    "DockerPsSameContainerId": $(json_bool "$DOCKER_PS_SAME_CONTAINER_ID"),
+    "EngineApiContainersJsonSameContainerId": $(json_bool "$ENGINE_API_CONTAINERS_JSON_SAME_CONTAINER_ID"),
+    "PersistedStateJsonSameContainerId": $(json_bool "$PERSISTED_STATE_JSON_SAME_CONTAINER_ID"),
+    "ProcessTableSameContainerId": $(json_bool "$PROCESS_TABLE_SAME_CONTAINER_ID"),
+    "ListenerOwnerSameContainerId": $(json_bool "$LISTENER_OWNER_SAME_CONTAINER_ID"),
+    "ContainerLogsSameContainerId": $(json_bool "$CONTAINER_LOGS_SAME_CONTAINER_ID"),
+    "MismatchedSources": $(json_word_array "$REDUCTION_MISMATCHED_SOURCES"),
+    "MissingSources": $(json_word_array "$REDUCTION_MISSING_SOURCES")
   },
   "Observed": {
     "EngineCliExitCode": $(json_string "$ENGINE_PS_RC"),

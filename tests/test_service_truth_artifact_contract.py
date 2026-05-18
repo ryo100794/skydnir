@@ -18,6 +18,18 @@ def test_service_truth_device_artifact_pass_branch_requires_same_id_proof():
     assert 'SERVICE_TRUTH_EXIT=2' in body
     assert "TruthContract" in body
     assert "RequiredSameContainerId" in body
+    assert '"VerifierReduction": {' in body
+    assert '"ReducedEngineContainerId":' in body
+    assert '"RequiredSources": ["UICard", "DockerPs", "EngineApiContainersJson", "PersistedStateJson", "ProcessTable", "ListenerProbe", "ContainerLogs"]' in body
+    assert '"SourceContainerIds": {' in body
+    assert '"UICardSameContainerId": $(json_bool "$UI_CARD_SAME_CONTAINER_ID")' in body
+    assert '"DockerPsSameContainerId": $(json_bool "$DOCKER_PS_SAME_CONTAINER_ID")' in body
+    assert '"EngineApiContainersJsonSameContainerId": $(json_bool "$ENGINE_API_CONTAINERS_JSON_SAME_CONTAINER_ID")' in body
+    assert '"PersistedStateJsonSameContainerId": $(json_bool "$PERSISTED_STATE_JSON_SAME_CONTAINER_ID")' in body
+    assert '"ProcessTableSameContainerId": $(json_bool "$PROCESS_TABLE_SAME_CONTAINER_ID")' in body
+    assert '"ListenerOwnerSameContainerId": $(json_bool "$LISTENER_OWNER_SAME_CONTAINER_ID")' in body
+    assert '"ContainerLogsSameContainerId": $(json_bool "$CONTAINER_LOGS_SAME_CONTAINER_ID")' in body
+    assert 'printf \'%s\' "$REDUCTION_MISSING_SOURCES" | tr -d' in body
     for source in [
         "UICard",
         "EngineApiContainersJson",
@@ -58,6 +70,11 @@ def test_static_verifier_and_docs_require_concrete_service_truth_schema():
         "service_truth_acceptance_entrypoint",
         "TruthContract",
         "RequiredSameContainerId",
+        "VerifierReduction",
+        "ReducedEngineContainerId",
+        "SourceContainerIds",
+        "UICardSameContainerId",
+        "ContainerLogsSameContainerId",
         "ListenerProbe",
         "CandidateSelection",
         "engine-candidates.json",
