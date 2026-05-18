@@ -31,10 +31,12 @@ The standing workflow is:
 
 ## Compaction Handoff Snapshot
 
-- Latest committed/pushed green base before the current local work slice:
-  `f053df0` (`main`/`origin/main`, "Guard script/doc drift") as
-  observed locally on 2026-05-18.
-- Last known green default gate: `bash scripts/verify-fast.sh`.
+- Latest committed base before the current local work slice: `2ce8396`
+  ("Harden teardown and terminal evidence gates") as observed locally on
+  2026-05-18.
+- Last known green external gate: CI Showcase succeeded for `2ce8396`.
+- Last known green local default gate before this slice: `bash
+  scripts/verify-fast.sh`.
 - Default operating loop: read this ledger, inspect repo status, recover/close
   sibling lanes, integrate only narrow owned changes, run focused checks plus
   `git diff --check`, then commit/push only reviewed work.
@@ -60,13 +62,14 @@ artifact instead of relying on retained chat history.
 
 | Lane | Owner | Write scope | Expected deliverable | Integration risks |
 | --- | --- | --- | --- | --- |
-| Llama GPU Q6 classifier/oracle boundary | Main agent | GPU bridge code plus llama GPU compare/verifier artifacts | Resolve the Q6_K classifier/oracle boundary and keep memory blockers, workgroup/writeback diagnostics, and numeric mismatches classified as non-promoting until the oracle matches | Must keep llama.cpp unmodified and avoid broad docs/script churn while GPU ABI is moving |
+| Llama GPU Q6 classifier/oracle boundary | Main agent | GPU bridge code plus llama GPU compare/verifier artifacts | Resolve the Q6_K classifier/oracle boundary; effective blocker remains `vulkan-device-execution`, and memory blockers, workgroup/writeback diagnostics, and numeric mismatches stay non-promoting until the oracle matches | Must keep llama.cpp unmodified and avoid broad docs/script churn while GPU ABI is moving |
 | Connected Android device status | Goodall | read-only ADB at `192.168.179.26:39565` | Device connected; package `io.github.ryo100794.pdocker.compat` installed; `pdockerd`, `pdocker-gpu-executor`, and `pdocker-media-executor` observed running | Do not force-stop, reinstall, or start long builds unless explicitly assigned |
 | Service truth same-container-ID | Assigned P0 worker | Issue #6 implementation/tests/artifacts only | Produce the same-current-Engine-container-ID service truth artifact across UI, docker ps/API, state, process table, listener owner, and logs | Coordinate around `scripts/android-device-smoke.sh`; do not overlap with runtime teardown or terminal exec-it edits |
 | Image-pull crash safety | Assigned P0 worker | Issue #11 implementation/tests/artifacts only | Produce scenario-owned interrupted pull/restart evidence without publishing partial/user tags | Keep live registry interruption non-promoting unless the fixture is explicitly isolated and owned |
 | COW/overlay mutation safety | Assigned P0 worker | Issue #12 implementation/tests/artifacts only | Produce daemon/helper kill-at-step restart evidence for copy-up, rename, whiteout, archive, and metadata checkpoints | Coordinate with runtime smoke ownership before touching shared device-smoke helpers |
-| Runtime teardown | Planned next | Runtime teardown scripts/tests/artifacts | Follow service/image/COW integration with real adb/run-as teardown evidence | Planned after current P0 workers because it conflicts on `scripts/android-device-smoke.sh` |
-| Terminal exec-it | Planned next | Terminal exec/UI/session scripts/tests/artifacts | Implement the Engine exec-it device gate with raw JSONL and UI artifact evidence | Planned after runtime teardown/service-smoke coordination because it also conflicts on `scripts/android-device-smoke.sh` |
+| Runtime teardown | Committed gate slice | Runtime teardown docs/scripts/tests/artifacts already landed outside this docs-only follow-up | Gate hardening committed as `2ce8396`; CI Showcase succeeded; next deliverable is real adb/run-as teardown evidence before promotion | Future edits still conflict on `scripts/android-device-smoke.sh`; serialize with service/image/COW workers |
+| Terminal exec-it | Committed gate slice | Terminal exec/UI/session docs/scripts/tests/artifacts already landed outside this docs-only follow-up | Gate hardening committed as `2ce8396`; CI Showcase succeeded; next deliverable is raw JSONL plus UI artifact evidence before promotion | Future edits still conflict on `scripts/android-device-smoke.sh`; serialize with runtime/service-smoke coordination |
+| Modern/no-PRoot runtime truth | Herschel | Issue-local no-PRoot runtime truth implementation/tests/artifact | Active worker: complete the no-PRoot executor or hard-disable execution/service claims with explicit runtime capability errors and `docs/test/no-proot-runtime-truth-latest.json` | Do not let metadata-only flavors claim RUN, Compose service health, or published-port success without executor evidence |
 | Low-conflict docs backlog | Pauli-derived queue | docs-only scopes under release/test/plan/maintenance README ownership | Delegate release dedup, GPU/storage evidence indexes, memory/terminal link cleanup, F-Droid consistency, test evidence retention, and plan/status cross-link hygiene as independent tasks | Avoid touching GPU/runtime implementation while these docs lanes run |
 
 ## Recently Recovered Agent Results
@@ -93,6 +96,7 @@ artifact instead of relying on retained chat history.
 | CI release-readiness clean-checkout payload | Helmholtz/Archimedes | `scripts/verify-release-readiness.py`, `tests/test_release_readiness_notice_audit.py`, `metadata/fdroid/generated-binary-inventory.md` | Local fix distinguishes gitignored generated/staged payload rows from missing source-tree payloads; next check is GitHub Release readiness rerun after push |
 | Llama GPU next-step audit | Anscombe | read-only | Next GPU action: fresh APK/readiness/Q6_K row-indexed artifact before further C changes |
 | Script/doc drift guard | Main agent | `f053df0` | Pushed guard for script/doc maintenance drift; continue using docs-maintenance and script-inventory checks before broad cleanup |
+| Runtime teardown / terminal evidence gates | Main agent | `2ce8396` | CI Showcase succeeded; both gates remain non-promoting until fresh device evidence lands |
 
 ## Intake Rule
 

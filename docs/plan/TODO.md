@@ -30,7 +30,7 @@ issues, and deciding which planned gaps become hard gates.
    PID, UI card current reason, and a matching
    `pdocker-service-truth-marker`, before the gate can leave `planned-gap`.
 2. **[#10](https://github.com/ryo100794/pdocker-android/issues/10)
-   Runtime teardown** `[P0 next]`: stop/kill must prove direct children,
+   Runtime teardown** `[P0 device-evidence next]`: stop/kill must prove direct children,
    GPU executor helpers, listeners, logs, and stale PIDs are gone before the
    UI or API reports stopped. Current slice complete: focused
    `--android-runtime-teardown` lane now removes stale evidence, collects the
@@ -44,8 +44,10 @@ issues, and deciding which planned gaps become hard gates.
    rejects device-pass promotion unless listener owner, GPU/media-executor
    residue, and persisted-state teardown fields are reduced to the same exact
    Engine container ID, with negative fixtures covering those regressions.
-   Remaining slice: produce that stricter evidence from a real adb/run-as
-   device run before allowing promotion.
+   Runtime teardown/terminal gate hardening is committed as `2ce8396`, and the
+   CI Showcase check is green for that commit. Remaining slice: produce that
+   stricter evidence from a real adb/run-as device run before allowing
+   promotion.
 3. **[#4](https://github.com/ryo100794/pdocker-android/issues/4)
    llama GPU Q6_K and environment propagation** `[P0 doing]`: continue the
    Q6_K blocker without touching llama.cpp, Dockerfiles, models, or prompts.
@@ -56,7 +58,9 @@ issues, and deciding which planned gaps become hard gates.
    readiness/headroom artifact before model load; (c) NGL=1 Q6_K
    workgroup/writeback oracle run; (d) artifact classification that keeps
    memory blockers and Q6_K mismatches non-promoting; and (e) only after a
-   matching oracle, CPU/GPU benchmark reporting.
+   matching oracle, CPU/GPU benchmark reporting. Effective blocker remains
+   `vulkan-device-execution`; do not interpret memory-safe setup or host-only
+   diagnostics as GPU correctness.
 4. **[#11](https://github.com/ryo100794/pdocker-android/issues/11)
    Image-pull crash safety** `[P0 doing]`: partial pulls, `.pull-*`,
    `.tmp-*`, `.old-*`, interrupted layer extraction, tag publish, and startup
@@ -85,7 +89,9 @@ issues, and deciding which planned gaps become hard gates.
    `engine-exec-input-latest.jsonl` before the gate can promote. The JSONL must
    prove single-Enter submission, isolated ETX with no injected `c` for JP/EN
    IME Ctrl-C, ArrowUp reaching shell history instead of raw escape text, a
-   stable `top` refresh, and `q` returning to a usable shell. Work units:
+   stable `top` refresh, and `q` returning to a usable shell. Gate hardening
+   landed in `2ce8396` with CI Showcase success, but remains non-promoting
+   until fresh device UI/JSONL evidence lands. Work units:
    terminal surface/session-type split; Engine exec/HTTP-upgrade byte capture;
    UI scripted input artifact; raw JSONL verifier with `--require-container`;
    resize/IME regression replay; and an explicit decision on the bundled
@@ -120,8 +126,9 @@ issues, and deciding which planned gaps become hard gates.
    named device promotion condition produces a passing artifact. This audit
    splits broad blockers into separately executable units so a passing
    sub-check cannot accidentally promote its parent gate.
-10. **Modern/no-PRoot runtime truth** `[P0 next]`: metadata-only flavors must
-    not expose execution claims. Either complete the no-PRoot executor or
+10. **Modern/no-PRoot runtime truth** `[P0 doing]`: metadata-only flavors must
+    not expose execution claims. Herschel owns the active no-PRoot worker lane.
+    Either complete the no-PRoot executor or
     hard-disable `RUN`, `docker run`, Compose service start, service health,
     and published-port claims with explicit runtime capability errors and a
     device artifact at `docs/test/no-proot-runtime-truth-latest.json`.
@@ -183,8 +190,9 @@ issues, and deciding which planned gaps become hard gates.
   results are not interpreted ad hoc. Environment propagation is now a
   first-class blocker: diagnostic flags used by the compare script, pdockerd
   defaults, UI/compose launches, and artifact verification must remain
-  synchronized before a GPU result can be compared. The Q6_K workgroup and
-  writable-output writeback diagnostics are non-promoting blocker evidence until
+  synchronized before a GPU result can be compared. The effective blocker
+  remains `vulkan-device-execution`; the Q6_K workgroup and writable-output
+  writeback diagnostics are non-promoting blocker evidence until
   the Q6_K oracle matches; they must not be used for benchmark or inference
   claims by themselves. Device-side validation steps are maintained in
   `docs/test/LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`.
@@ -192,11 +200,12 @@ issues, and deciding which planned gaps become hard gates.
   `docs/plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`.
 - [next] [#10](https://github.com/ryo100794/pdocker-android/issues/10)
   / [#5](https://github.com/ryo100794/pdocker-android/issues/5) runtime
-  teardown and terminal exec-it scheduling: plan these as the next integration
-  lanes after the currently assigned P0 service-truth, image-pull, and COW
-  workers report back, because both lanes conflict on
-  `scripts/android-device-smoke.sh`. Acceptance: only one owner edits the
-  smoke helper at a time, and each lane reports its focused device artifact
+  teardown and terminal exec-it scheduling: gate hardening landed as `2ce8396`
+  and the CI Showcase check is green. The lanes remain non-promoting until a
+  real adb/run-as device run provides the focused runtime-teardown and
+  terminal exec-it artifacts; keep future smoke-helper edits serialized with
+  service-truth, image-pull, and COW workers. Acceptance: only one owner edits
+  the smoke helper at a time, and each lane reports its focused device artifact
   before promotion.
 - [next] [#5](https://github.com/ryo100794/pdocker-android/issues/5)
   Terminal `-it` interactive path: refactor the terminal stack according to
