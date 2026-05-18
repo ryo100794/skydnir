@@ -1,0 +1,114 @@
+{
+  "created_at_utc": "2026-05-18T20:17:14Z",
+  "direct_executor_probe": {
+    "advertises_process_exec_1": false,
+    "diagnostic": "pdocker runtime error: the configured no-PRoot/direct Android executor '<truth-gate-helper>' is installed, but it does not advertise process-exec=1 yet. Image pull, image browsing, Dockerfile/Compose editing, and Engine API metadata can run; RUN, docker run, docker exec, compose services, and published ports need the RuntimeBackend executor implementation.",
+    "error": "",
+    "helper": "<truth-gate-helper>",
+    "output": "pdocker-direct-executor:1\nprocess-exec=0\n",
+    "probe_ok": true,
+    "process_exec": false
+  },
+  "evidence": {
+    "container_id": "4e1a34d7ddd87dc6f5ad250398d87025194c47e0ac82d394399898a4bb3fe946",
+    "dockerfile_result": null,
+    "mode": "host-contract-probe",
+    "script": "scripts/android-no-proot-runtime-truth-gate.sh",
+    "source": "pdockerd imported with PDOCKER_RUNTIME_BACKEND=no-proot and a process-exec=0 direct helper",
+    "verifier": "scripts/verify-no-proot-runtime-truth-artifact.py"
+  },
+  "health": {
+    "cannot_become_healthy": true,
+    "diagnostic": "pdocker runtime error: the configured no-PRoot/direct Android executor '<truth-gate-helper>' is installed, but it does not advertise process-exec=1 yet. Image pull, image browsing, Dockerfile/Compose editing, and Engine API metadata can run; RUN, docker run, docker exec, compose services, and published ports need the RuntimeBackend executor implementation.",
+    "failing_streak": 1,
+    "final_status": "unhealthy",
+    "has_healthy_claim": false,
+    "log": [
+      {
+        "End": "2026-05-18T20:17:13.000000000Z",
+        "ExitCode": 1,
+        "Output": "pdocker runtime error: the configured no-PRoot/direct Android executor '<truth-gate-helper>' is installed, but it does not advertise process-exec=1 yet. Image pull, image browsing, Dockerfile/Compose editing, and Engine API metadata can run; RUN, docker run, docker exec, compose services, and published ports need the RuntimeBackend executor implementation.",
+        "Start": "2026-05-18T20:17:13.000000000Z"
+      }
+    ],
+    "running": false
+  },
+  "operations": {
+    "docker_exec": {
+      "attempted": true,
+      "capability_error": true,
+      "diagnostic": "pdocker runtime error: the configured no-PRoot/direct Android executor '<truth-gate-helper>' is installed, but it does not advertise process-exec=1 yet. Image pull, image browsing, Dockerfile/Compose editing, and Engine API metadata can run; RUN, docker run, docker exec, compose services, and published ports need the RuntimeBackend executor implementation.",
+      "exit_code": 126,
+      "forbidden_success_claim": false,
+      "success": false
+    },
+    "docker_run": {
+      "attempted": true,
+      "capability_error": true,
+      "diagnostic": "pdocker runtime error: the configured no-PRoot/direct Android executor '<truth-gate-helper>' is installed, but it does not advertise process-exec=1 yet. Image pull, image browsing, Dockerfile/Compose editing, and Engine API metadata can run; RUN, docker run, docker exec, compose services, and published ports need the RuntimeBackend executor implementation.",
+      "exit_code": 126,
+      "forbidden_success_claim": false,
+      "success": false
+    },
+    "dockerfile_run": {
+      "attempted": true,
+      "capability_error": true,
+      "diagnostic": "Step: FROM ubuntu:22.04\n  cloning legacy base rootfs\n  build-profile clone-legacy-base: 0.026s\n  snapshotting layer: legacy base\n  build-profile snapshot legacy base: prev-index=0.000s walk=0.013s whiteouts=0.000s stage=0.011s tar=0.123s digest=0.001s extract=0.212s relink=0.005s cleanup=0.006s changed=2 seen=2 prev=0 whiteout=0 index-cache=off index-cache-size=0 mode=scan\n  layer sha256:b62460fc067b (0.4s)\nStep: RUN echo should-not-be-faked\npdocker runtime error: the configured no-PRoot/direct Android executor '<truth-gate-helper>' is installed, but it does not advertise process-exec=1 yet. Image pull, image browsing, Dockerfile/Compose editing, and Engine API metadata can run; RUN, docker run, docker exec, compose services, and published ports need the RuntimeBackend executor implementation.\nRUN requires a real container process executor; build stopped without recording a fake layer",
+      "exit_code": 1,
+      "forbidden_success_claim": false,
+      "success": false
+    }
+  },
+  "ports": {
+    "active_count": 0,
+    "planned_or_inactive_only": true,
+    "status_cases": [
+      {
+        "Active": false,
+        "Evidence": [],
+        "HostIp": "127.0.0.1",
+        "HostPort": 47477,
+        "Message": "container is not running; published port is only configured",
+        "Protocol": "tcp",
+        "State": "planned",
+        "case": "created-before-start"
+      },
+      {
+        "Active": false,
+        "Evidence": [],
+        "HostIp": "127.0.0.1",
+        "HostPort": 47477,
+        "Message": "container is not running; published port is only configured",
+        "Protocol": "tcp",
+        "State": "planned",
+        "case": "failed-start"
+      },
+      {
+        "Active": false,
+        "Evidence": [],
+        "HostIp": "127.0.0.1",
+        "HostPort": 47477,
+        "Message": "pdocker has recorded this published port, but no pdocker-owned listener/proxy/rewrite is active for it yet.",
+        "Protocol": "tcp",
+        "State": "inactive",
+        "case": "metadata-only-running-control"
+      }
+    ],
+    "summary": {
+      "Active": 0,
+      "Conflict": 0,
+      "Inactive": 1,
+      "Planned": 2
+    }
+  },
+  "promotion": "non-promoting runtime truth gate until real no-PRoot process execution is implemented",
+  "reason": "no-PRoot/direct executor probe lacks process-exec=1; runtime operations must fail closed instead of faking Docker success",
+  "schema": "pdocker.android.no-proot-runtime-truth.v1",
+  "status": "planned-gap",
+  "subject": {
+    "driver": "pdocker-direct",
+    "operating_system": "Android direct runtime",
+    "runtime_backend": "direct"
+  },
+  "success": false
+}

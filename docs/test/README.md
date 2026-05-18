@@ -21,6 +21,7 @@ run it, and where the latest result is stored.
 | [`DEV_WORKSPACE_HEALTH_GATE.md`](DEV_WORKSPACE_HEALTH_GATE.md) | Default VS Code workspace compose/build/run health gate |
 | [`DOCKER_CP_E2E_DEVICE_GATE.md`](DOCKER_CP_E2E_DEVICE_GATE.md) | Device-gated `docker cp` end-to-end promotion procedure |
 | [`IMAGE_PULL_CRASH_SAFETY_DEVICE_GATE.md`](IMAGE_PULL_CRASH_SAFETY_DEVICE_GATE.md) | Device-gated interrupted image-pull crash-safety procedure |
+| [`NO_PROOT_RUNTIME_TRUTH_GATE.md`](NO_PROOT_RUNTIME_TRUTH_GATE.md) | No-PRoot/direct-runtime truth gate for fail-closed execution, health, and port evidence |
 | [`RUNTIME_SINGLE_CONTAINER_GATE.md`](RUNTIME_SINGLE_CONTAINER_GATE.md) | Device-gated single-container runtime promotion evidence |
 | [`RUNTIME_TEARDOWN_DEVICE_GATE.md`](RUNTIME_TEARDOWN_DEVICE_GATE.md) | Device-gated runtime teardown promotion contract |
 | [`SERVICE_TRUTH_DEVICE_GATE.md`](SERVICE_TRUTH_DEVICE_GATE.md) | Same-container-ID service truth device gate |
