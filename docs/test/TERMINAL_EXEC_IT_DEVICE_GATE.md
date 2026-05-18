@@ -2,9 +2,10 @@
 
 Canonical stream-boundary design:
 [`../design/TERMINAL_STREAM_ARCHITECTURE.md`](../design/TERMINAL_STREAM_ARCHITECTURE.md).
-This gate is the executable evidence contract for Engine `exec -it`; the
-architecture document is the source of truth for terminal/session stream
-boundaries.
+This gate is only the executable evidence contract for Engine `exec -it`.
+Terminal/session ownership, component responsibilities, and stream-boundary
+rationale are intentionally not restated here; the architecture document is the
+source of truth for those design details.
 
 This gate protects the UI route that opens an interactive container terminal
 through the Engine exec API. It is a hard gate only when a real Engine container
@@ -36,12 +37,11 @@ The runner collects these files into `PDOCKER_SMOKE_ARTIFACT_DIR`:
 - `ui-it-selftest-latest.json`
 - `engine-exec-input-latest.jsonl`
 
-The current evidence model is intentionally split by layer: the JSON artifact
+The current evidence model is intentionally split by artifact: the JSON file
 summarizes required UI-observable evidence, while the JSONL sidecar is the
-session-transport proof emitted by `EngineExecSession`. A pass must show that
-the generic terminal surface produced the bytes, that the Engine exec session
-transport delivered those bytes over a Docker hijacked TTY stream, and that
-resize/top/IME behavior was observed through the same route a user action uses.
+session proof emitted by `EngineExecSession`. Keep architectural ownership
+rules in the canonical stream-boundary design; this gate records only the
+observable pass/fail proof required from those artifacts.
 
 A planned-skip artifact is non-promoting and must include:
 
@@ -72,12 +72,12 @@ A real-run artifact must include:
   never a substitute for the raw JSONL sidecar
 
 For a real run, `engine-exec-input-latest.jsonl` must contain device-emitted
-EngineExecSession records, not reconstructed host text:
-
-These records are the EngineExecSession transport contract: Docker-compatible
-exec create, HTTP 101 start/hijack, exact raw stdin writes, and explicit resize
-route observation. They must not be replaced by host-side replay, local shell
-stdin, or a JavaScript-only assertion.
+EngineExecSession records, not reconstructed host text. The JSONL is test
+evidence for create/start, HTTP 101 start/hijack, exact raw stdin writes, and
+resize-route observation; the design reasons for this boundary live in
+[`../design/TERMINAL_STREAM_ARCHITECTURE.md`](../design/TERMINAL_STREAM_ARCHITECTURE.md).
+These records must not be replaced by host-side replay, local shell stdin, or a
+JavaScript-only assertion.
 
 - monotonic numeric `timestampMs` values inside the device artifact timing window
   (`StartedAtMs` through `StartedAtMs + DurationMs`, with verifier slack only
@@ -224,9 +224,7 @@ private test-only Engine endpoint. Required reproductions are:
 
 The stream-boundary source of truth is
 [`../design/TERMINAL_STREAM_ARCHITECTURE.md`](../design/TERMINAL_STREAM_ARCHITECTURE.md).
-In this gate, keep only the test-facing rule: the WebView/xterm terminal surface
-emits generic bytes and resize events, while `EngineExecSession` owns Docker
-exec create/start hijack, raw stdin, resize diagnostics, and Engine endpoint
-policy. A static host test must continue to fail if Docker/Engine routing tokens
-move into `app/src/main/assets/xterm/index.html`, or if the Engine exec path is
-not centralized in the named session helper.
+Do not duplicate the architecture prose here. In this gate, keep only the
+test-facing rule: a static host test must continue to fail if Docker/Engine
+routing tokens move into `app/src/main/assets/xterm/index.html`, or if the
+Engine exec path is not centralized in the named session helper.

@@ -226,7 +226,10 @@ was built, what was copied, and what was excluded.
 
 Issue #9 tracks the first public GitHub release candidate gate. Passing that
 gate is separate from F-Droid readiness: it can make a GitHub RC transparent and
-testable without claiming source-reproducible F-Droid inclusion.
+testable without claiming source-reproducible F-Droid inclusion. The canonical
+GitHub release posture, blocker list, and release-candidate cut criteria live
+in [`RELEASE_READINESS.md`](RELEASE_READINESS.md); do not duplicate that status
+text here.
 
 Before publishing a GitHub RC, record these criteria in the issue or release
 notes:
@@ -247,18 +250,16 @@ notes:
 - Runtime-download wording that distinguishes app-shipped code from
   user-directed container/image/package downloads.
 - Storage metrics release evidence from
-  `python3 scripts/verify-storage-metrics.py` and, for device-tested RCs, a
-  captured snapshot or note that uses the accounting language from
-  `docs/test/STORAGE_METRICS.md`: shared layer pool counted once, image/rootfs
-  apparent views overlap lower data, and container upperdir bytes are private
-  writable storage.
-- Known blockers, unsupported Docker compatibility scope, and any required
-  user data reset or upgrade notes.
+  `python3 scripts/verify-storage-metrics.py`, with accounting language owned
+  by [`docs/test/STORAGE_METRICS.md`](../test/STORAGE_METRICS.md).
+- A link to the current blocker scope in
+  [`RELEASE_READINESS.md`](RELEASE_READINESS.md), plus any required user data
+  reset or upgrade notes.
 
 The lightweight CI workflow in `.github/workflows/release-readiness.yml` runs
 only host checks. It does not build an APK, does not require an Android device,
-does not download runtime payloads, and does not certify the app as F-Droid
-ready.
+does not download runtime payloads, and does not certify F-Droid inclusion
+readiness.
 
 ## Metadata Placeholder
 

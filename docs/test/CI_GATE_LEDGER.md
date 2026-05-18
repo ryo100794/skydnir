@@ -96,3 +96,9 @@ When no real-device artifact was produced, write "missing device artifact" or
 "planned gap" in the ledger/checkpoint summary instead of "pass". Do not infer
 success from a zero-exit planning verifier, a schema placeholder, stale artifact
 path, or unrun device lane.
+
+Evidence retention: each required artifact named in this ledger must remain
+discoverable through the gate row, the test-driver run manifest, or a release
+record. Retain referenced immutable evidence; for mutable `*-latest.*` or
+producer scratch output, keep the producer/consumer contract indexed or mark the
+path generated/cache-excluded before pruning or deduplicating it.

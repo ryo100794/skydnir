@@ -168,6 +168,9 @@ Exact duplicate payloads observed on 2026-05-18:
 Backlog:
 
 - Treat `*-latest.*` files as mutable pointers, not accidental duplicates.
+- Do not prune evidence merely because payloads repeat: first ensure each
+  artifact is indexed by the test README, gate/runbook, run manifest, or release
+  record; otherwise retain it or classify the path as generated/cache-excluded.
 - Before pruning repeated logs, confirm the test-driver retention policy and
   whether release evidence references a specific run directory.
 

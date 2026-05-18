@@ -2,11 +2,15 @@
 
 Snapshot date: 2026-05-16.
 
-This page is the GitHub-facing release gate. It keeps the public README and
-showcase copy aligned with the current P0 blockers from
+This page is the canonical GitHub-facing release gate: it owns public release
+posture, blocker scope, and release-candidate cut criteria. It keeps the public
+README and showcase copy aligned with the current P0 blockers from
 [`../plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md`](../plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md).
-It is intentionally conservative: a feature is not marked complete until the
-implementation and the referenced artifact both exist.
+F-Droid-oriented build, signing, metadata, runtime-download, and generated
+payload policy lives in
+[`FDROID_RELEASE_PROCESS.md`](FDROID_RELEASE_PROCESS.md) and should be linked
+instead of duplicated here. It is intentionally conservative: a feature is not
+marked complete until the implementation and the referenced artifact both exist.
 
 ## Current release posture
 
@@ -141,7 +145,8 @@ unsupported/experimental wording.
 - [x] Describe pdocker as a Docker-shaped Android workspace, not Docker Desktop
   parity.
 - [x] State that upstream Docker CLI/Compose, PRoot, proot-loader, and talloc
-  are not bundled in the default product APK.
+  are not bundled in the default product APK; keep detailed distribution policy
+  in [`FDROID_RELEASE_PROCESS.md`](FDROID_RELEASE_PROCESS.md).
 - [x] Keep bridge networking, media, and GPU behavior framed as Android-specific
   extensions with explicit limits.
 - [x] Link from the README to this checklist and the live TODO/status docs.

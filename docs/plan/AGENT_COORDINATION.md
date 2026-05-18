@@ -29,6 +29,18 @@ The standing workflow is:
 8. Commit and push only after integration review, focused tests, `git diff
    --check`, and an explicit check that untracked moved files are staged.
 
+## Compaction Handoff Snapshot
+
+- Latest committed/pushed SHA placeholder: `1335072` (`main`/`origin/main`,
+  "Organize docs and script maintenance gates") as observed locally on
+  2026-05-18.
+- Last known green default gate: `bash scripts/verify-fast.sh`.
+- Default operating loop: read this ledger, inspect repo status, recover/close
+  sibling lanes, integrate only narrow owned changes, run focused checks plus
+  `git diff --check`, then commit/push only reviewed work.
+- Future agents must open this file before relying on chat history, especially
+  after compaction or handoff.
+
 ## Context Hygiene Rule
 
 The main agent must not keep raw agent transcripts, long command logs, or large
@@ -49,6 +61,8 @@ artifact instead of relying on retained chat history.
 | Lane | Owner | Write scope | Expected deliverable | Integration risks |
 | --- | --- | --- | --- | --- |
 | Llama GPU bridge implementation | Main agent | `docker-proot-setup/src/gpu/`, `app/src/main/cpp/pdocker_gpu_executor.c`, GPU smoke/benchmark artifacts | Working llama GPU bridge plus final integrated repo state | Must keep llama.cpp unmodified and avoid broad docs/script churn while GPU ABI is moving |
+| Connected Android device status | Goodall | read-only ADB at `192.168.179.26:39565` | Device connected; package `io.github.ryo100794.pdocker.compat` installed; `pdockerd`, `pdocker-gpu-executor`, and `pdocker-media-executor` observed running | Do not force-stop, reinstall, or start long builds unless explicitly assigned |
+| Low-conflict docs backlog | Pauli-derived queue | docs-only scopes under release/test/plan/maintenance README ownership | Delegate release dedup, GPU/storage evidence indexes, memory/terminal link cleanup, F-Droid consistency, test evidence retention, and plan/status cross-link hygiene as independent tasks | Avoid touching GPU/runtime implementation while these docs lanes run |
 
 ## Recently Recovered Agent Results
 
@@ -109,6 +123,25 @@ The public roadmap is generated from `docs/plan/TODO.md` by
   native payload and reproducibility checks exist.
 - Terminal `-it` fixes touch direct executor behavior and should be tested with
   package-manager and shell expression cases, not only UI copy/paste tests.
+
+## Verifier Backlog For Context-Loss Prevention
+
+The following rules are important enough that they should move from prose into
+verifiers before the next broad documentation cleanup:
+
+1. Agent coordination drift: either mark historical plan snapshots as
+   non-operational or teach `scripts/verify-docs-maintenance.py` to reject stale
+   `running` assignments outside this ledger.
+2. Timeline source quality: TODO entries promoted into generated showcase output
+   should carry an issue link, artifact path, or acceptance cue unless explicitly
+   historical/exempt.
+3. Script migration completion: `scripts/verify-script-inventory.py` should
+   eventually scan docs, `.github/`, and test manifests before any migrated
+   top-level wrapper can be removed.
+4. Documentation discoverability: every new `docs/**/*.md` should be reachable
+   through its category README or the maintenance backlog owner map.
+5. Issue workflow parity: major active TODO items should include `[#N]` unless
+   the TODO entry documents why it is local-only or historical.
 
 ## Main Agent Pre-Commit Checklist
 

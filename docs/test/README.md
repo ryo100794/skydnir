@@ -64,6 +64,11 @@ run it, and where the latest result is stored.
 - Keep generated or recorded results in this category, but register every
   automated result through the test driver run manifest. Do not introduce a new
   standalone test launcher with its own artifact convention.
+- Evidence artifacts must have an explicit retention path: index them from this
+  README, the relevant gate/runbook, the test-driver manifest, or a release
+  record; retain immutable run/release artifacts that are referenced; or mark
+  producer-owned scratch output as generated/cache-excluded instead of treating
+  it as maintained prose.
 - Do not describe a host-only planned-gap verifier pass, `release-honesty` pass,
   skipped device lane, or `status=planned-gap` / `success=false` artifact as a
   stable checkpoint. Link the residual blocker instead.

@@ -122,6 +122,8 @@ commands, evidence, and pass/fail criteria here. Detailed terminal stream
 boundaries, including the generic terminal surface versus Engine exec session
 ownership, are canonical in
 [`../design/TERMINAL_STREAM_ARCHITECTURE.md`](../design/TERMINAL_STREAM_ARCHITECTURE.md).
+Do not copy those architecture rules into this scenario ledger; link to the
+canonical design document when a scenario needs stream-boundary context.
 
 ## Direct Runtime Coverage
 
