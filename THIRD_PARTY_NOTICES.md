@@ -1,6 +1,6 @@
 # Third-party licenses and distribution notes
 
-Snapshot date: 2026-05-01.
+Snapshot date: 2026-05-18.
 
 This inventory covers externally sourced code and binary payloads bundled by
 pdocker-android. The current default APK set is usable for distribution when
@@ -13,7 +13,11 @@ the notice asset is included and upstream license texts/notices are preserved.
 | go-containerregistry / crane | `docker-proot-setup/docker-bin/crane`, packaged as `libcrane.so` | Apache-2.0 | Include license notice. | OK with notice asset. |
 | xterm.js | `app/src/main/assets/xterm/xterm.js`, `xterm.css` | MIT | Include copyright and license notice. | OK with notice asset. |
 | xterm-addon-fit | `app/src/main/assets/xterm/xterm-addon-fit.js` | MIT | Include copyright and license notice. | OK with notice asset. |
-| Chaquopy | Gradle plugin/runtime for Python on Android | Open-source builds; upstream states restrictions were removed from 12.0.1 onward | Use current OSS version and Maven Central-compatible distribution. | OK: project uses Chaquopy 15.0.1. |
+| Chaquopy | Gradle plugin/runtime for Python on Android, including APK-resolved `libchaquopy_java.so`, bootstrap native modules, and `.imy` Python payload archives | Open-source builds; upstream states restrictions were removed from 12.0.1 onward | Use current OSS version and Maven Central-compatible distribution; keep the APK notice asset. | OK: project uses Chaquopy 15.0.1 and audits resolved APK payloads. |
+| CPython / Python 3.11 runtime | APK-resolved `libpython3.11.so`, Python standard-library payloads, and native extension modules packaged by Chaquopy | Python Software Foundation License | Include Python license/notice through the packaged notice set and release inventory. | OK with notice asset and APK-aware audit. |
+| OpenSSL | APK-resolved `libssl_chaquopy.so` and `libcrypto_chaquopy.so` packaged by Chaquopy | OpenSSL License / Apache-2.0 depending packaged upstream version | Preserve upstream OpenSSL license and attribution notices for the packaged runtime libraries. | OK with notice asset and APK-aware audit. |
+| SQLite | APK-resolved `libsqlite3_chaquopy.so` packaged by Chaquopy | SQLite public-domain dedication / blessing | Preserve bundled runtime attribution in the notice inventory. | OK with notice asset and APK-aware audit. |
+| CA certificate bundle / certifi | APK-resolved `assets/chaquopy/cacert.pem` used by the Python runtime | MPL-2.0-derived certificate bundle notices, as packaged by the Python/Chaquopy runtime | Preserve certificate bundle notice/attribution when redistributing the APK. | OK with notice asset and APK-aware audit. |
 | Android Gradle Plugin | Build plugin | Apache-2.0 | Build-time dependency; keep normal Gradle/Maven notices for redistributed build artifacts if needed. | OK. |
 | AndroidX core/appcompat/webkit | App dependencies | Apache-2.0 | Include license notice when redistributed. | OK with notice asset. |
 | Material Components for Android | App dependency | Apache-2.0 | Include license notice when redistributed. | OK with notice asset. |
@@ -27,6 +31,10 @@ the notice asset is included and upstream license texts/notices are preserved.
 - go-containerregistry/crane upstream: https://github.com/google/go-containerregistry
 - xterm.js upstream: https://github.com/xtermjs/xterm.js
 - Chaquopy license page: https://chaquo.com/chaquopy/license/
+- CPython license: https://docs.python.org/3/license.html
+- OpenSSL license: https://www.openssl.org/source/license.html
+- SQLite copyright status: https://www.sqlite.org/copyright.html
+- certifi / Mozilla CA bundle: https://github.com/certifi/python-certifi
 - Kotlin upstream: https://github.com/JetBrains/kotlin
 - llama.cpp upstream: https://github.com/ggml-org/llama.cpp
 

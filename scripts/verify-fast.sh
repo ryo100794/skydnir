@@ -37,6 +37,7 @@ run python3 -m py_compile \
   scripts/verify-image-pull-crash-safety.py \
   scripts/verify-input-grammar-coverage.py \
   scripts/verify-input-validation.py \
+  scripts/verify-release-readiness.py \
   scripts/verify-stress-regression.py \
   scripts/verify-test-design-criteria.py \
   scripts/verify_direct_syscall_contracts.py \
@@ -97,6 +98,7 @@ run python3 scripts/verify-cow-overlay-bench-recovery.py --run-local
 run python3 scripts/verify-project-library.py
 run python3 scripts/verify-storage-metrics.py
 run python3 scripts/verify-script-inventory.py
+run python3 scripts/verify-release-readiness.py
 tmp_storage_sequence="$(mktemp)"
 printf '\n==> python3 scripts/verify-storage-metrics.py --print-sequence-fixture > %s\n' "$tmp_storage_sequence"
 python3 scripts/verify-storage-metrics.py --print-sequence-fixture > "$tmp_storage_sequence"
@@ -110,6 +112,7 @@ run python3 -m unittest \
   tests.test_terminal_exec_it_contract \
   tests.test_android_selfdebug_helper \
   tests.test_self_debug_bundle_verifier \
+  tests.test_release_readiness_notice_audit \
   tests.test_script_inventory_audit \
   tests.test_terminal_exec_it_artifact_verifier \
   tests.test_service_truth_device_gate \

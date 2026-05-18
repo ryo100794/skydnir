@@ -21,9 +21,9 @@ Current TODO counters:
 
 | State | Count |
 |---|---:|
-| done | 62 |
+| done | 63 |
 | doing | 20 |
-| next | 32 |
+| next | 31 |
 | blocked | 0 |
 
 ## Timeline

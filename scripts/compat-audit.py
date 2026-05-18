@@ -283,7 +283,8 @@ def check_license_inventory() -> list[Check]:
     text = LICENSE_DOC.read_text()
     required = [
         "Apache-2.0", "go-containerregistry", "xterm.js",
-        "MIT", "Chaquopy", "AndroidX", "Kotlin",
+        "MIT", "Chaquopy", "CPython", "Python 3.11", "OpenSSL",
+        "SQLite", "certificate", "AndroidX", "Kotlin",
     ]
     for token in required:
         checks.append(Check(f"license token: {token}", "PASS" if token in text else "FAIL"))

@@ -1,6 +1,6 @@
 # Generated and Prebuilt Payload Inventory
 
-Snapshot date: 2026-05-05.
+Snapshot date: 2026-05-18.
 
 This is a release-readiness inventory, not F-Droid submission metadata. It
 records payloads that currently exist in the working tree and would need a
@@ -42,3 +42,22 @@ For package review, keep three statuses distinct:
 | `docker-proot-setup/lib/pdocker-gpu-shim` | Built from `docker-proot-setup/src/gpu/pdocker_gpu_shim.c` by local GPU shim tooling. | Generated binary; must be rebuilt and compared before release. |
 | `docker-proot-setup/lib/pdocker-opencl-icd.so` | Built from `docker-proot-setup/src/gpu/pdocker_opencl_icd.c` by local GPU shim tooling. | Generated binary; must be rebuilt and compared before release. |
 | `docker-proot-setup/lib/pdocker-vulkan-icd.so` | Built from `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c` by local GPU shim tooling. | Generated binary; must be rebuilt and compared before release. |
+
+## APK-resolved packaged payloads
+
+The following payloads are produced by Gradle/Chaquopy while assembling an APK.
+They may not exist in the source tree before packaging, so
+`python3 scripts/verify-release-readiness.py` audits built APKs directly when
+they are present, and requires that audit when
+`PDOCKER_REQUIRE_APK_NOTICE_AUDIT=1` is set.
+
+| APK path pattern | Source or producer | Current release status |
+| --- | --- | --- |
+| `APK:lib/arm64-v8a/libchaquopy_java.so` | Chaquopy runtime. | APK-resolved third-party runtime; covered by the APK notice asset and this inventory. |
+| `APK:lib/arm64-v8a/libpython3.11.so` | CPython / Python 3.11 runtime packaged by Chaquopy. | APK-resolved third-party runtime; covered by the APK notice asset and this inventory. |
+| `APK:lib/arm64-v8a/libcrypto_chaquopy.so` | OpenSSL runtime library packaged by Chaquopy. | APK-resolved third-party runtime; covered by the APK notice asset and this inventory. |
+| `APK:lib/arm64-v8a/libssl_chaquopy.so` | OpenSSL runtime library packaged by Chaquopy. | APK-resolved third-party runtime; covered by the APK notice asset and this inventory. |
+| `APK:lib/arm64-v8a/libsqlite3_chaquopy.so` | SQLite runtime library packaged by Chaquopy. | APK-resolved third-party runtime; covered by the APK notice asset and this inventory. |
+| `APK:assets/chaquopy/bootstrap-native/arm64-v8a/*.so` | Chaquopy bootstrap and CPython native extension modules. | APK-resolved third-party runtime; covered by the APK notice asset and this inventory. |
+| `APK:assets/chaquopy/*.imy` | Chaquopy-packaged CPython/Python standard library and app/requirements payload archives. | APK-resolved third-party runtime; covered by the APK notice asset and this inventory. |
+| `APK:assets/chaquopy/cacert.pem` | Certificate bundle / certifi payload packaged by Chaquopy. | APK-resolved third-party data payload; covered by the APK notice asset and this inventory. |

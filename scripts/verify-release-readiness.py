@@ -7,10 +7,15 @@ import os
 import re
 import subprocess
 import sys
+import zipfile
+from fnmatch import fnmatch
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TOP_LEVEL_NOTICE = ROOT / "THIRD_PARTY_NOTICES.md"
+APK_NOTICE_SOURCE = ROOT / "app" / "src" / "main" / "assets" / "oss-licenses" / "THIRD_PARTY_NOTICES.md"
+APK_NOTICE_ENTRY = "assets/oss-licenses/THIRD_PARTY_NOTICES.md"
 FDROID_DOC = ROOT / "docs" / "release" / "FDROID_RELEASE_PROCESS.md"
 METADATA_README = ROOT / "metadata" / "fdroid" / "README.md"
 INVENTORY = ROOT / "metadata" / "fdroid" / "generated-binary-inventory.md"
@@ -37,6 +42,40 @@ SECRET_PATTERNS = {
     "Slack token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b"),
     "AWS access key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
 }
+
+LEGACY_FORBIDDEN_APK_ENTRIES = (
+    "lib/arm64-v8a/libproot.so",
+    "lib/arm64-v8a/libproot-loader.so",
+    "lib/arm64-v8a/libtalloc.so",
+    "lib/arm64-v8a/libdocker.so",
+    "lib/arm64-v8a/libdocker-compose.so",
+)
+
+APK_NOTICE_TOKENS = (
+    "go-containerregistry",
+    "xterm.js",
+    "xterm-addon-fit",
+    "Chaquopy",
+    "CPython",
+    "Python 3.11",
+    "OpenSSL",
+    "SQLite",
+    "certificate",
+    "AndroidX",
+    "Material Components",
+    "Kotlin",
+)
+
+APK_RESOLVED_PAYLOAD_BUCKETS = (
+    ("lib/arm64-v8a/libchaquopy_java.so", ("Chaquopy",)),
+    ("lib/arm64-v8a/libpython3.11.so", ("CPython", "Python 3.11")),
+    ("lib/arm64-v8a/libcrypto_chaquopy.so", ("OpenSSL",)),
+    ("lib/arm64-v8a/libssl_chaquopy.so", ("OpenSSL",)),
+    ("lib/arm64-v8a/libsqlite3_chaquopy.so", ("SQLite",)),
+    ("assets/chaquopy/cacert.pem", ("certificate",)),
+    ("assets/chaquopy/*.imy", ("Chaquopy", "CPython")),
+    ("assets/chaquopy/bootstrap-native/arm64-v8a/*.so", ("Chaquopy", "CPython")),
+)
 
 
 class CheckFailure(Exception):
@@ -164,7 +203,13 @@ def check_payload_inventory() -> None:
     missing = [path for path in payloads if path not in inventory_paths]
     if missing:
         fail("payloads missing from generated/prebuilt inventory: " + ", ".join(missing))
-    stale = sorted(path for path in inventory_paths if not (ROOT / path).exists())
+    stale = sorted(
+        path
+        for path in inventory_paths
+        if not path.startswith("APK:")
+        and "*" not in path
+        and not (ROOT / path).exists()
+    )
     if stale:
         fail("inventory entries point to missing files: " + ", ".join(stale))
 
@@ -172,6 +217,87 @@ def check_payload_inventory() -> None:
     staged = ROOT / "app" / "src" / "main" / "assets" / "pdockerd" / "pdockerd"
     if source.is_file() and staged.is_file() and source.read_bytes() != staged.read_bytes():
         fail("staged pdockerd asset differs from docker-proot-setup/bin/pdockerd")
+
+
+def find_built_apks() -> list[Path]:
+    override = os.environ.get("PDOCKER_APK_NOTICE_AUDIT_PATHS")
+    if override:
+        return [Path(item) for item in override.split(os.pathsep) if item]
+    apk_root = ROOT / "app" / "build" / "outputs" / "apk"
+    if not apk_root.exists():
+        return []
+    return sorted(path for path in apk_root.rglob("*.apk") if path.is_file())
+
+
+def has_token(text: str, token: str) -> bool:
+    return token.lower() in text.lower()
+
+
+def require_tokens(text: str, tokens: tuple[str, ...], where: str) -> None:
+    missing = [token for token in tokens if not has_token(text, token)]
+    if missing:
+        fail(f"{where} missing notice/inventory tokens: {', '.join(missing)}")
+
+
+def matches_apk_pattern(entry: str, pattern: str) -> bool:
+    return entry == pattern or fnmatch(entry, pattern)
+
+
+def check_apk_notice_audit(
+    required: bool = False,
+    apk_paths: list[Path] | None = None,
+    notice_source_text: str | None = None,
+    top_notice_text: str | None = None,
+    inventory_text: str | None = None,
+) -> None:
+    """Verify third-party notices against resolved APK contents.
+
+    The source-tree inventory covers staged binaries, but Gradle/Chaquopy add
+    package-resolved runtime payloads only at APK build time.  This audit keeps
+    those APK-only payloads tied to the shipped notice asset and the release
+    inventory so a later packaging change cannot silently add third-party code.
+    """
+
+    apks = list(apk_paths) if apk_paths is not None else find_built_apks()
+    if not apks:
+        if required:
+            fail("APK notice audit required but no built APKs were found")
+        return
+
+    source_notice = notice_source_text if notice_source_text is not None else read(APK_NOTICE_SOURCE)
+    root_notice = top_notice_text if top_notice_text is not None else read(TOP_LEVEL_NOTICE)
+    inventory = inventory_text if inventory_text is not None else read(INVENTORY)
+
+    require_tokens(source_notice, APK_NOTICE_TOKENS, rel(APK_NOTICE_SOURCE))
+    require_tokens(root_notice, APK_NOTICE_TOKENS, rel(TOP_LEVEL_NOTICE))
+
+    for apk in apks:
+        try:
+            with zipfile.ZipFile(apk) as archive:
+                names = set(archive.namelist())
+                if APK_NOTICE_ENTRY not in names:
+                    fail(f"{apk} missing {APK_NOTICE_ENTRY}")
+                apk_notice = archive.read(APK_NOTICE_ENTRY).decode("utf-8")
+        except zipfile.BadZipFile:
+            fail(f"{apk} is not a readable APK/ZIP archive")
+        except UnicodeDecodeError:
+            fail(f"{apk}:{APK_NOTICE_ENTRY} is not UTF-8")
+
+        if apk_notice.strip() != source_notice.strip():
+            fail(f"{apk}:{APK_NOTICE_ENTRY} is stale or differs from {rel(APK_NOTICE_SOURCE)}")
+        require_tokens(apk_notice, APK_NOTICE_TOKENS, f"{apk}:{APK_NOTICE_ENTRY}")
+
+        forbidden = sorted(entry for entry in LEGACY_FORBIDDEN_APK_ENTRIES if entry in names)
+        if forbidden:
+            fail(f"{apk} contains forbidden legacy/upstream payloads: {', '.join(forbidden)}")
+
+        for pattern, tokens in APK_RESOLVED_PAYLOAD_BUCKETS:
+            matched = sorted(entry for entry in names if matches_apk_pattern(entry, pattern))
+            if not matched:
+                continue
+            require_tokens(apk_notice, tokens, f"{apk}:{APK_NOTICE_ENTRY} for {pattern}")
+            require_tokens(root_notice, tokens, f"{rel(TOP_LEVEL_NOTICE)} for {pattern}")
+            require_tokens(inventory, tokens, f"{rel(INVENTORY)} for {pattern}")
 
 
 def check_secret_filenames(files: list[Path]) -> None:
@@ -205,6 +331,7 @@ def main() -> int:
         check_docs()
         check_metadata_placeholder()
         check_payload_inventory()
+        check_apk_notice_audit(os.environ.get("PDOCKER_REQUIRE_APK_NOTICE_AUDIT") == "1")
         check_secret_filenames(files)
         check_secret_content(files)
     except CheckFailure as exc:

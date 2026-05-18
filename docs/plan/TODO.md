@@ -897,7 +897,13 @@ implementation change plus a focused verification artifact.
 - [done] Remove unused bundled `proot`/`proot-runtime` payloads from the
   integrated backend tree; optional proot comparison remains command-supplied
   only.
-- [next] Re-run third-party notice audit after packaging changes.
+- [done] Re-ran the third-party notice/release-readiness audit after packaging
+  changes. `python3 scripts/verify-release-readiness.py`,
+  `python3 scripts/compat-audit.py`, and `python3 scripts/verify-script-inventory.py`
+  pass with the APK notice asset, top-level `THIRD_PARTY_NOTICES.md`, and
+  `metadata/fdroid/generated-binary-inventory.md` aligned to the current
+  packaged payload model. This is a host-only release hygiene gate and still
+  does not claim F-Droid readiness.
 
 ## P0: Real Android Container Execution
 
