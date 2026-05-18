@@ -110,11 +110,15 @@ Primary sources:
 
 ## Current Agent Assignments
 
+Historical snapshot note: this table records the assignment state captured on
+2026-05-13. Live agent ownership is tracked only in
+[`AGENT_COORDINATION.md`](AGENT_COORDINATION.md).
+
 | Agent | Lane | Write ownership | Manager status |
 | --- | --- | --- | --- |
-| Locke | T0-B Android smoke single-container run gate | `scripts/android-device-smoke.sh`, verifier/test docs only | running |
-| Raman | T0-C Memory-layer UI source/age/transparent metrics | `MainActivity.kt` memory-layer block, memory strings, memory UI test | running |
-| Pauli | T0-D Service truth executable acceptance | feature scenarios, service truth verifier/docs only | running |
+| Locke | T0-B Android smoke single-container run gate | `scripts/android-device-smoke.sh`, verifier/test docs only | historical |
+| Raman | T0-C Memory-layer UI source/age/transparent metrics | `MainActivity.kt` memory-layer block, memory strings, memory UI test | historical |
+| Pauli | T0-D Service truth executable acceptance | feature scenarios, service truth verifier/docs only | historical |
 
 ## Backlog Decomposition Queue
 

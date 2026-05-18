@@ -134,15 +134,26 @@ issues, and deciding which planned gaps become hard gates.
   Markdown docs, Kotlin/Android UI, native/direct runtime, GPU bridge, scripts,
   and test ledgers.  Before claiming a feature is complete, reconcile it
   against that audit and either close it with implementation plus evidence or
-  keep it visible as an explicit planned gap.
+  keep it visible as an explicit planned gap. Acceptance: each promoted
+  completion cites an implementation path plus evidence artifact, or remains a
+  visible planned-gap entry.
 - [doing] Execution timeline and delegated task control:
   `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged
   gates, current agent assignments, merge checklists, and decomposition rules.
   Active T0 lanes are Android single-container smoke, memory-layer UI
   source/age telemetry, and service-health executable acceptance criteria.
+  Acceptance: live assignments move to `docs/plan/AGENT_COORDINATION.md` and
+  historical timeline snapshots do not retain operational `running` statuses.
 - [next] Documentation/script sprawl guard: new docs or scripts are durable
   only when connected to a category README, inventory/manifest, verifier, or
-  fast/heavy gate.
+  fast/heavy gate. Acceptance: `scripts/verify-docs-maintenance.py` or
+  `scripts/verify-script-inventory.py` rejects unindexed durable docs/scripts.
+- [next] Script directory cleanup follow-up: register `scripts/verify/runner/*`
+  in the script inventory, decide and document the `__pycache__` cleanup policy,
+  finish migrated wrapper reference updates, and align the remaining Vulkan smoke
+  helper with the `scripts/test` layout. Acceptance: `scripts/verify-script-inventory.py`
+  and the docs-maintenance verifier reject any unclassified script or stale
+  top-level wrapper reference.
 - [doing] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
   llama GPU bridge ABI: keep llama.cpp unmodified while expanding the
   pdocker Vulkan/OpenCL bridge from device discovery and model-buffer
@@ -322,7 +333,7 @@ risk, not stable checkpoint credit.
   host environment (`/system/host` / `PDOCKER_PLATFORM`) with ABI fallback only
   when the daemon is unreachable. Local implementation now passes the selected
   platform through `/images/create?platform=...` into `pull_image(...,
-  platform=...)` and records it in the Engine job log. Acceptance still needs a
+  platform=...)` and records it in the Engine job log. Acceptance: still needs a
   connected-device smoke that pulls a user-selected ref without opening a
   Docker shell.
 - [doing] Image pull crash safety. `pull_image` and layer extraction must stage
@@ -434,7 +445,9 @@ risk, not stable checkpoint credit.
 - [next] Device verification after rebuild. Install the next compat APK and run:
   image pull dialog, Docker Hub search fallback, selected platform display,
   image browse/back behavior, image tree actions, VS Code compose up build log
-  progress, and post-kill image-store consistency.
+  progress, and post-kill image-store consistency. Acceptance: a connected-device
+  artifact or screenshot set records each listed UI route after the rebuilt APK
+  is installed.
 
 ### Current Open Risk Ledger 2026-05-05
 
@@ -452,12 +465,15 @@ implementation change plus a focused verification artifact.
   both directions. Phase 2 is still not implemented: delete propagation, rename
   detection, conflict detection/quarantine/rescan UX, and full Unix metadata
   emulation must remain explicit design work rather than implied behavior.
+  Acceptance: `docs/test` records direct SAF output evidence plus explicit
+  fallback/provider-error classification for every sync direction.
 - [next] SD-card/FAT32/exFAT exchange metadata: external Documents storage may
   hold raw payload bytes, but Unix metadata must be app-private sidecar state
   with rebuild/check evidence, conflict handling, and clear emulation limits for
   symlinks, uid/gid, modes, xattrs, hardlinks, special files, and executable
   semantics. SAF `DocumentProvider` mediation is required unless direct POSIX
-  writability is proven for the selected path.
+  writability is proven for the selected path. Acceptance: an artifact proves
+  sidecar metadata rebuild/check behavior against a FAT32/exFAT-like fixture.
 - [next] SAF UnixFS layering: implement `saf-unixfs` as a lower filesystem
   backend with `FilesystemBackend` and `UnixMetadataBackend` contracts.
   Overlay, archive, runtime, and UI code must consume those abstract contracts
@@ -470,7 +486,9 @@ implementation change plus a focused verification artifact.
 - [next] Storage metrics accounting: the shared layer pool is counted once for
   total storage. Image apparent sizes, container apparent rootfs sizes, and
   merged views intentionally overlap lower-layer bytes, so UI summaries and
-  tests must not add those apparent values together as unique usage.
+  tests must not add those apparent values together as unique usage. Acceptance:
+  `scripts/verify-storage-metrics.py` plus a device artifact prove nonnegative
+  totals and no shared-layer double counting.
 - [doing] Service health truth source: tracked by active issue #6 above and
   `docs/test/SERVICE_TRUTH_DEVICE_GATE.md`. Health is not accepted until UI
   card, `docker ps`/Engine API, state, process table, listener owner, and logs
@@ -576,12 +594,15 @@ implementation change plus a focused verification artifact.
 - [next] Add or finish the UI/device health card for the active #6 gate:
   check the real listener for the service port, verify the owning Engine
   container ID and health state, and link to container logs rather than relying
-  on placeholder/job state.
+  on placeholder/job state. Acceptance: the #6 same-container-ID artifact proves
+  card, Engine API, listener, and logs agree.
 - [next] Prevent duplicate container truth after interrupted compose attempts.
   The current device had an old exited `pdocker-llama-cpp` plus the new running
   one, which makes name-based `docker logs` and `docker ps` display ambiguous.
   Compose reconciliation must prefer Engine container IDs plus pdocker
   project/service labels and reserve names for display or legacy fallback.
+  Acceptance: a restart/interruption artifact proves stale same-name containers
+  do not override current Engine IDs.
 - [next] If default workspace regresses, capture the first failing syscall or
   package-manager operation and add a focused direct-runtime smoke before
   retrying the full template. Latest focused blocker: npm self-update
@@ -589,7 +610,11 @@ implementation change plus a focused verification artifact.
   `promise-retry` during Arborist rebuild. `@openai/codex` install with the
   NodeSource-bundled npm 10.9.7 works, so the template temporarily avoids the
   self-update while the runtime rename/reify parity bug remains open.
+  Acceptance: a focused runtime smoke captures the exact failing syscall or
+  package-manager operation before any template retry is promoted.
 - [next] Add `docker run --rm ubuntu:22.04 echo hi` as an Android smoke gate.
+  Acceptance: the smoke artifact records Engine create/start/exit/log status for
+  this unmodified upstream-style command.
 
 ### Performance
 
@@ -638,7 +663,9 @@ implementation change plus a focused verification artifact.
   diagnostics, so normal seccomp/ptrace runs avoid one procfs open/read per
   trapped syscall.
 - [next] Run optional PRoot/proot-like comparison only when an existing command
-  is supplied; do not download or bundle external PRoot/fakechroot.
+  is supplied; do not download or bundle external PRoot/fakechroot. Acceptance:
+  any comparison artifact records the operator-supplied command path and proves
+  no external PRoot/fakechroot payload was downloaded or packaged.
 - [doing] Prototype APK-scoped memory pager. System swap/zram tuning is blocked
   on production devices (`adb root` unavailable, `swapon` not permitted), so the
   viable path is opt-in managed regions under pdocker control. The SDK28 compat
@@ -705,7 +732,8 @@ implementation change plus a focused verification artifact.
 - [next] Revisit Dockerfile build memory pressure without changing upstream
   Dockerfiles. The managed-region pager remains explicit and opt-in; ordinary
   toolchain heap allocations such as `cc1plus` are not yet under pdocker memory
-  ownership.
+  ownership. Acceptance: a large-build artifact distinguishes guard-denied,
+  LMK-suspected, and successful cases without modifying the Dockerfile.
 - [next] [#13](https://github.com/ryo100794/pdocker-android/issues/13)
   Implement Runtime OOM Survival and Large Workload Mode. The default
   path should keep using large-allocation guardrails to return `ENOMEM` before
@@ -734,6 +762,8 @@ implementation change plus a focused verification artifact.
   with `newfstatat` and `openat` still the top trapped syscalls. After removing
   default per-stop `/proc/<pid>/status` validation, the same lightweight run on
   2026-05-03 reported about 0.141s / 1,069 stops.
+  Acceptance: each promoted optimization includes syscall-frequency evidence,
+  errno parity coverage, and a negative-control artifact for disabled variants.
 - [doing] Decouple daemon lifetime from UI crashes and background ANR paths.
   `PdockerdService` runs in the dedicated `:pdockerd` process, and the boot/debug
   receivers now run there too so daemon-only test starts do not wake the UI
@@ -742,6 +772,8 @@ implementation change plus a focused verification artifact.
   verified receiver-only daemon start, socket ping, no pdocker ANR/FATAL during
   the observation window, and no default UI process after receiver startup.
   Next check: container process reconciliation across UI process death.
+  Acceptance: a device artifact proves UI-process death does not kill pdockerd
+  or make cards report stale running state.
 - [done] Optimize Python layer diff/snapshot by comparing against a compact
   prior-layer path index and re-hardlinking committed snapshot files. Tiny
   Android `RUN` layer snapshots dropped from about 3.0s to about 1.5-1.9s.
@@ -775,16 +807,20 @@ implementation change plus a focused verification artifact.
   instead of scanning the whole rootfs, cutting the reusable microbench from
   about 2.1-2.3s per COPY snapshot to about 0.2s. Remaining non-cache large
   RUN layers still need a direct-runtime changed-path manifest so snapshot can
-  avoid a full rootfs walk after apt/npm.
+  avoid a full rootfs walk after apt/npm. Acceptance: build-profile artifacts
+  separate apt/npm execution time from snapshot walk/relink/digest time.
 - [next] Revisit rootfs-fd path rewriting as an opt-in optimization only after
   fd lifetime handling is proven. A trial that rewrote absolute `*at` paths to
   `openat(rootfs_fd, relative)` made apt resolver cleanup hit
   `getaddrinfo (9: Bad file descriptor)`, so the optimization is currently
-  gated behind `PDOCKER_DIRECT_ROOTFD_REWRITE` and off by default.
+  gated behind `PDOCKER_DIRECT_ROOTFD_REWRITE` and off by default. Acceptance:
+  a parity artifact proves fd lifetime, DNS resolver cleanup, and path escape
+  behavior before the option can be enabled.
 - [next] Revisit `statx -> ENOSYS` as an optional Node/npm optimization only
   after apt Acquire DNS remains stable; a trial removed `statx` stops but made
   `apt-get update` report `Could not resolve 'ports.ubuntu.com'` despite
-  `getent hosts` working.
+  `getent hosts` working. Acceptance: DNS, apt Acquire, and npm startup
+  artifacts must pass with the optimization enabled and disabled.
 - [done] Measure whether `newfstatat/statx` can simply bypass ptrace. It cannot:
   `PDOCKER_DIRECT_UNTRACED_STAT_PATHS=1` reduced an apt-cache probe to 73 stops
   but broke PATH resolution (`apt-cache: not found`, `apt-get: not found`).
@@ -800,7 +836,9 @@ implementation change plus a focused verification artifact.
   `ca-certificates`/debconf failure; a device run completed in about 145s with
   `newfstatat` and `openat` as the dominant trapped syscalls.
 - [doing] Replace permissive syscall answers with Docker/Linux-compatible errno
-  behavior where package managers depend on it.
+  behavior where package managers depend on it. Acceptance: syscall-specific
+  errno parity tests cover the package-manager paths before permissive answers
+  are removed or promoted.
 - [done] Treat Android-blocked NUMA policy syscalls (`mbind`,
   `get_mempolicy`, `set_mempolicy`, `migrate_pages`, `move_pages`, and
   `set_mempolicy_home_node`) as unavailable with `ENOSYS`. This unblocks
@@ -808,7 +846,8 @@ implementation change plus a focused verification artifact.
   NUMA behavior.
 - [next] Fix npm self-update rename/reify compatibility so
   `npm install -g npm@latest` works without temporarily relying on the
-  NodeSource-bundled npm.
+  NodeSource-bundled npm. Acceptance: a focused npm self-update artifact records
+  successful Arborist reify/rename behavior under the direct runtime.
 - [next] Replace `linkat` copy fallback with an inode/hardlink/CoW storage
   model. The current compatibility copy remains a fail-closed, non-promoting
   Phase 2 gap: closure requires Android device evidence that linked paths share
@@ -857,19 +896,26 @@ implementation change plus a focused verification artifact.
   - collect Android device evidence that `/proc/self/exe`,
     `/proc/thread-self/exe`, and `/proc/<pid>/exe` readlink emulation reports
     the guest executable without mutating image state.
+  Acceptance: each Phase 2 sub-gate has a host/static verifier plus a
+  non-promoting Android artifact before being considered for promotion.
 - [next] Remove normal stderr diagnostics from direct runtime logs once default
-  workspace start is stable.
+  workspace start is stable. Acceptance: default workspace and llama startup
+  artifacts remain diagnosable through structured logs after stderr noise is
+  suppressed.
 
 ### UI / Workflow
 
 - [done] Keep host shell diagnostic-only and keep normal Compose/Dockerfile
   flows on widgets or Engine actions.
 - [doing] Keep job/task cards useful for build/compose failures, retries, and
-  logs.
+  logs. Acceptance: failure, retry, and log-opening UI artifacts prove cards use
+  Engine operation state rather than stale UI memory.
 - [next] Surface default workspace service health only from the real container
-  listener, never from a placeholder process.
+  listener, never from a placeholder process. Acceptance: the #6 service-truth
+  artifact rejects placeholder/job-only health.
 - [next] Validate terminal text selection and copy on-device after the runtime
-  smoke is stable.
+  smoke is stable. Acceptance: a device UI artifact covers selection handles,
+  copy/all/clear actions, and no soft-keyboard popup during selection.
 
 ### GPU / Models
 
@@ -880,9 +926,13 @@ implementation change plus a focused verification artifact.
   `scripts/android-llama-gpu-compare.sh`: keep CPU fallback hiding Vulkan
   devices, force Vulkan only for measured attempts, capture device/thermal
   metadata, and keep the latest artifact under `docs/test` and
-  `files/pdocker/bench`.
+  `files/pdocker/bench`. Acceptance: the compare artifact reports correctness,
+  CPU baseline, GPU TPS, thermal state, and non-promoting classification when
+  readiness/oracle checks fail.
 - [next] Verify llama.cpp compose after runtime service start works, including
-  model download/resume and docker logs.
+  model download/resume and docker logs. Acceptance: device evidence shows the
+  same Engine container ID in compose state, `docker ps`, logs, health, and HTTP
+  endpoint.
 
 ### Storage / Metrics
 
@@ -890,7 +940,8 @@ implementation change plus a focused verification artifact.
   container-private, total, and free-space numbers must be nonnegative, must
   preserve the daemon's shared-layer/container-upper overlap distinction, and
   must refresh after build, prune, rebuild, and container file-edit/copy-up
-  flows.
+  flows. Acceptance: a device artifact records before/after metrics for each
+  flow and proves shared bytes are counted once in totals.
 
 ### Packaging / License
 

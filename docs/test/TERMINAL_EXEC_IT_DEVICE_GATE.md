@@ -39,7 +39,7 @@ The runner collects these files into `PDOCKER_SMOKE_ARTIFACT_DIR`:
 
 The current evidence model is intentionally split by artifact: the JSON file
 summarizes required UI-observable evidence, while the JSONL sidecar is the
-session proof emitted by `EngineExecSession`. Keep architectural ownership
+EngineExecSession transport proof emitted by `EngineExecSession`. Keep architectural ownership
 rules in the canonical stream-boundary design; this gate records only the
 observable pass/fail proof required from those artifacts.
 

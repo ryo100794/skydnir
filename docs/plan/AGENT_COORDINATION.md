@@ -129,12 +129,11 @@ The public roadmap is generated from `docs/plan/TODO.md` by
 The following rules are important enough that they should move from prose into
 verifiers before the next broad documentation cleanup:
 
-1. Agent coordination drift: either mark historical plan snapshots as
-   non-operational or teach `scripts/verify-docs-maintenance.py` to reject stale
-   `running` assignments outside this ledger.
-2. Timeline source quality: TODO entries promoted into generated showcase output
-   should carry an issue link, artifact path, or acceptance cue unless explicitly
-   historical/exempt.
+1. Agent coordination drift: guarded by `scripts/verify-docs-maintenance.py`,
+   which rejects stale `running` assignments outside this ledger.
+2. Timeline source quality: guarded by `scripts/verify-docs-maintenance.py`,
+   which requires active TODO entries to carry an issue link, artifact path,
+   verifier, or acceptance cue before they can remain on the roadmap.
 3. Script migration completion: `scripts/verify-script-inventory.py` should
    eventually scan docs, `.github/`, and test manifests before any migrated
    top-level wrapper can be removed.

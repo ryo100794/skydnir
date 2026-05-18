@@ -122,9 +122,14 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
             "docs/design/RUNTIME_STRATEGY.md",
             "docs/design/TERMINAL_STREAM_ARCHITECTURE.md",
             "docs/test/README.md",
-            "docs/plan/TODO.md",
         ]:
             (self.tmp / path).write_text("# fixture\n", encoding="utf-8")
+        (self.tmp / "docs" / "plan" / "TODO.md").write_text(
+            "# TODO\n\n"
+            "- [doing] [#1](https://example.invalid/issues/1) issue-linked item\n"
+            "- [next] Artifact-backed item writes docs/test/example-latest.json\n",
+            encoding="utf-8",
+        )
         (self.tmp / "docs" / "maintenance" / "DOCUMENTATION_DEDUP_BACKLOG.md").write_text(
             BACKLOG,
             encoding="utf-8",
@@ -166,6 +171,86 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
         issues = verifier.check_local_markdown_links(self.tmp)
         self.assertEqual(1, len(issues))
         self.assertEqual("NOPE.md", issues[0].target)
+
+    def test_historical_plan_rejects_live_running_assignment_section(self):
+        timeline = self.tmp / "docs" / "plan" / "EXECUTION_TIMELINE_20260513.md"
+        timeline.write_text(
+            "The service was observed running in historical prose.\n\n"
+            "## Current Agent Assignments\n\n"
+            "| Agent | Lane | Write ownership | Manager status |\n"
+            "| --- | --- | --- | --- |\n"
+            "| Locke | T0-B | docs only | running |\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_historical_agent_assignments(self.tmp)
+
+    def test_operational_ledger_allows_running_status(self):
+        ledger = self.tmp / "docs" / "plan" / "AGENT_COORDINATION.md"
+        ledger.write_text(
+            "## Current Agent Assignments\n\n"
+            "| Agent | Lane | Write ownership | Manager status |\n"
+            "| --- | --- | --- | --- |\n"
+            "| Main | GPU | runtime | running |\n",
+            encoding="utf-8",
+        )
+
+        verifier.check_historical_agent_assignments(self.tmp)
+
+    def test_historical_plan_accepts_non_running_status(self):
+        timeline = self.tmp / "docs" / "plan" / "EXECUTION_TIMELINE_20260513.md"
+        timeline.write_text(
+            "## Current Agent Assignments\n\n"
+            "| Agent | Lane | Write ownership | Manager status |\n"
+            "| --- | --- | --- | --- |\n"
+            "| Locke | T0-B | docs only | historical |\n",
+            encoding="utf-8",
+        )
+
+        verifier.check_historical_agent_assignments(self.tmp)
+
+    def test_todo_source_quality_rejects_vague_active_item(self):
+        todo = self.tmp / "docs" / "plan" / "TODO.md"
+        todo.write_text("- [doing] Vague public roadmap item without proof cue\n", encoding="utf-8")
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_todo_roadmap_source_quality(self.tmp)
+
+    def test_todo_source_quality_scans_beyond_showcase_horizon(self):
+        todo = self.tmp / "docs" / "plan" / "TODO.md"
+        todo.write_text(
+            "".join(
+                f"- [next] Acceptance: backed item {index}\n"
+                for index in range(20)
+            )
+            + "- [next] Late vague item without durable cue\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_todo_roadmap_source_quality(self.tmp)
+
+    def test_todo_source_quality_rejects_generic_modal_words(self):
+        todo = self.tmp / "docs" / "plan" / "TODO.md"
+        todo.write_text(
+            "- [next] We must improve the UI before launch and prove it later\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_todo_roadmap_source_quality(self.tmp)
+
+    def test_todo_source_quality_accepts_issue_artifact_and_acceptance_cues(self):
+        todo = self.tmp / "docs" / "plan" / "TODO.md"
+        todo.write_text(
+            "- [doing] [#4](https://example.invalid/issues/4) issue cue\n"
+            "- [next] Artifact cue records docs/test/example-latest.json\n"
+            "- [blocked] Acceptance: explicit gate must prove device evidence\n",
+            encoding="utf-8",
+        )
+
+        verifier.check_todo_roadmap_source_quality(self.tmp)
 
 
 if __name__ == "__main__":

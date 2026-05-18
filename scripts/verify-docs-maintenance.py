@@ -12,10 +12,20 @@ from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKLOG = ROOT / "docs" / "maintenance" / "DOCUMENTATION_DEDUP_BACKLOG.md"
+AGENT_COORDINATION = "docs/plan/AGENT_COORDINATION.md"
 
 GROUP_RE = re.compile(r"^###\s+(\d+)\.\s+(.+?)\s*$", re.MULTILINE)
 INLINE_LINK_RE = re.compile(r"!?\[[^\]\n]*\]\(([^)\s]+)(?:\s+[^)]*)?\)")
 REFERENCE_LINK_RE = re.compile(r"^\s{0,3}\[[^\]]+\]:\s+(\S+)", re.MULTILINE)
+HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+ACTIVE_TODO_RE = re.compile(r"^- \[(doing|next|blocked)\]\s+(.*)")
+ANY_TODO_RE = re.compile(r"^- \[[a-z]+\]\s+")
+ROADMAP_CUE_RE = re.compile(
+    r"(\[#\d+\]|issues/\d+|docs/test/|latest\.json|artifact|verifier|"
+    r"scripts/verify-|Acceptance:|non-promoting|planned-gap)",
+    re.IGNORECASE,
+)
+TABLE_SEPARATOR_RE = re.compile(r"^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$")
 
 
 class CheckFailure(Exception):
@@ -127,9 +137,101 @@ def check_links(root: Path = ROOT) -> None:
         fail(f"local markdown link check failed: {rendered}{suffix}")
 
 
+def normalize_table_cell(text: str) -> str:
+    return text.strip().strip("`*_ ").lower()
+
+
+def iter_section_lines(text: str, title: str) -> list[tuple[int, str]]:
+    lines = text.splitlines()
+    start_index: int | None = None
+    start_level = 0
+    for index, line in enumerate(lines):
+        match = HEADING_RE.match(line)
+        if match and match.group(2).strip() == title:
+            start_index = index + 1
+            start_level = len(match.group(1))
+            break
+    if start_index is None:
+        return []
+
+    result: list[tuple[int, str]] = []
+    for index in range(start_index, len(lines)):
+        line = lines[index]
+        match = HEADING_RE.match(line)
+        if match and len(match.group(1)) <= start_level:
+            break
+        result.append((index + 1, line))
+    return result
+
+
+def check_historical_agent_assignments(root: Path = ROOT) -> None:
+    plan_dir = root / "docs" / "plan"
+    if not plan_dir.is_dir():
+        return
+    for path in sorted(plan_dir.glob("*.md")):
+        relative = rel(path, root)
+        if relative == AGENT_COORDINATION:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for line_no, line in iter_section_lines(text, "Current Agent Assignments"):
+            if not line.startswith("|") or TABLE_SEPARATOR_RE.match(line):
+                continue
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if cells and normalize_table_cell(cells[-1]) == "running":
+                fail(
+                    f"{relative}:{line_no} contains stale running agent assignment "
+                    f"outside {AGENT_COORDINATION}; move live state to the ledger "
+                    "or mark the row historical"
+                )
+
+
+def active_todo_items(text: str, limit: int | None = None) -> list[tuple[str, str]]:
+    items: list[tuple[str, str]] = []
+    state = ""
+    current: list[str] = []
+    for line in text.splitlines():
+        if ANY_TODO_RE.match(line) and current:
+            items.append((state, " ".join(current)))
+            if limit is not None and len(items) >= limit:
+                return items
+            current = []
+            state = ""
+        match = ACTIVE_TODO_RE.match(line)
+        if match:
+            state = match.group(1)
+            current = [match.group(2).strip()]
+            continue
+        if current and line.startswith("  ") and line.strip():
+            current.append(line.strip())
+            continue
+        if current and not line.strip():
+            items.append((state, " ".join(current)))
+            if limit is not None and len(items) >= limit:
+                return items
+            current = []
+            state = ""
+    if current and (limit is None or len(items) < limit):
+        items.append((state, " ".join(current)))
+    return items
+
+
+def check_todo_roadmap_source_quality(root: Path = ROOT) -> None:
+    todo = root / "docs" / "plan" / "TODO.md"
+    text = read_text(todo, root)
+    for index, (state, item) in enumerate(active_todo_items(text), start=1):
+        if not ROADMAP_CUE_RE.search(item):
+            fail(
+                f"{rel(todo, root)} active roadmap item {index} ({state}) lacks "
+                "an issue, artifact/verifier, or acceptance cue: "
+                f"{item[:180]}"
+            )
+
+
 def run(root: Path = ROOT) -> None:
     check_backlog(root)
     check_links(root)
+    check_historical_agent_assignments(root)
+    check_todo_roadmap_source_quality(root)
 
 
 def main(argv: list[str] | None = None) -> int:
