@@ -47,6 +47,28 @@ same device.
   4. Confirm that ADB reports success; the pairing record is persisted on the
      device.
 
+## ADB-Free Self-Debug Bundle
+
+When Android does not expose any ADB transport, use the APK itself as the
+debugger:
+
+1. Open **Debug**.
+2. Open **Browse app resources**.
+3. Tap **Export self-debug bundle**.
+
+The app writes:
+
+- local app-sandbox copy:
+  `files/pdocker/diagnostics/self-debug-bundle-latest.json`
+- Documents/SAF copy:
+  `pdocker/diagnostics/self-debug-bundle-latest.json`
+
+The bundle schema is `pdocker.self-debug.bundle.v1`. It records the app build,
+device/SDK/ABI, daemon Engine API probe results, container list, Documents grant
+state, memory/process/fd snapshots, debug resource roots, and known diagnostic
+artifact paths. It is generated entirely inside the APK and therefore does not
+require USB, Wi-Fi ADB, `run-as`, or a host shell.
+
 ## Connect Each Session
 
 On the Wireless debugging top screen, note the current **IP address and port**

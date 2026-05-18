@@ -44,6 +44,8 @@
     <string name="detail_debug_processes">Show app, daemon, executor, and container helper processes</string>
     <string name="action_debug_handles">Handle snapshot</string>
     <string name="detail_debug_handles">Show open file descriptors for pdocker-owned processes</string>
+    <string name="action_export_self_debug_bundle">Export self-debug bundle</string>
+    <string name="detail_export_self_debug_bundle">Write ADB-free diagnostics to app storage and Documents</string>
     <string name="section_memory_layers">Memory layers</string>
     <string name="action_debug_memory_layers">Memory layer details</string>
     <string name="detail_debug_memory_layers">Show how Android-owned RAM/swap is wrapped by pdocker managed virtual memory</string>

@@ -165,6 +165,9 @@ class AndroidSelfDebugHelperTest(unittest.TestCase):
         self.assertIn("disabled until the phone is associated with a", doc)
         self.assertIn("no USB and no Wi-Fi association", doc)
         self.assertIn("in-app diagnostics", doc)
+        self.assertIn("ADB-Free Self-Debug Bundle", doc)
+        self.assertIn("pdocker.self-debug.bundle.v1", doc)
+        self.assertIn("self-debug-bundle-latest.json", doc)
 
 
 if __name__ == "__main__":

@@ -44,6 +44,8 @@
     <string name="detail_debug_processes">アプリ、デーモン、executor、コンテナ補助プロセスを表示</string>
     <string name="action_debug_handles">ハンドルスナップショット</string>
     <string name="detail_debug_handles">pdocker 所有プロセスのファイルディスクリプタを表示</string>
+    <string name="action_export_self_debug_bundle">自己診断バンドルを書き出し</string>
+    <string name="detail_export_self_debug_bundle">ADB なしで使える診断をアプリ領域と Documents に保存します</string>
     <string name="section_memory_layers">メモリレイヤ</string>
     <string name="action_debug_memory_layers">メモリレイヤ詳細</string>
     <string name="detail_debug_memory_layers">Android 管轄の RAM/swap に pdocker のアプリ仮想記憶がどう被さるかを表示</string>

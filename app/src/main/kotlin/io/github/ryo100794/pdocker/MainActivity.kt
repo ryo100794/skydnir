@@ -1763,6 +1763,11 @@ class MainActivity : AppCompatActivity() {
                 debugHandleSnapshot()
             }
         }
+        addAction(getString(R.string.action_export_self_debug_bundle), getString(R.string.detail_export_self_debug_bundle)) {
+            openTextToolAsync(getString(R.string.section_debug_resources), getString(R.string.action_export_self_debug_bundle)) {
+                exportSelfDebugBundle()
+            }
+        }
         debugResourceRoots().forEach { item ->
             val detail = listOf(
                 item.root.absolutePath,
@@ -1809,6 +1814,187 @@ class MainActivity : AppCompatActivity() {
             putExtra(ImageFilesActivity.EXTRA_ROOT_LABEL, label)
             putExtra(ImageFilesActivity.EXTRA_ROOT_WRITABLE, writable)
         })
+    }
+
+    private fun exportSelfDebugBundle(): String {
+        val diagnosticsDir = File(pdockerHome, "diagnostics").apply { mkdirs() }
+        val bundleFile = File(diagnosticsDir, "self-debug-bundle-latest.json")
+        val bundle = selfDebugBundleJson()
+        bundleFile.writeText(bundle.toString(2) + "\n")
+        val export = writeDocumentsFileForAutomation(
+            sourcePath = bundleFile.absolutePath,
+            targetPath = "pdocker/diagnostics/self-debug-bundle-latest.json",
+            mimeType = "application/json",
+        )
+        bundle.put("DocumentsExport", export)
+        bundleFile.writeText(bundle.toString(2) + "\n")
+        if (!export.optBoolean("Success", false)) {
+            val retry = writeDocumentsFileForAutomation(
+                sourcePath = bundleFile.absolutePath,
+                targetPath = "pdocker/diagnostics/self-debug-bundle-latest.json",
+                mimeType = "application/json",
+            )
+            bundle.put("DocumentsExportRetry", retry)
+            bundleFile.writeText(bundle.toString(2) + "\n")
+        }
+        val documentsSuccess = export.optBoolean("Success", false)
+        val documentsMode = export.optString("Mode", "-")
+        val documentsTarget = export.optString("Target", "pdocker/diagnostics/self-debug-bundle-latest.json")
+        val documentsActiveHostPath = export.optString("ActiveHostPath", "-")
+        return buildString {
+            appendLine("pdocker self-debug bundle")
+            appendLine("ADB-independent=true")
+            appendLine("local=${bundleFile.absolutePath}")
+            appendLine("documents.success=$documentsSuccess")
+            appendLine("documents.mode=$documentsMode")
+            appendLine("documents.target=$documentsTarget")
+            appendLine("documents.activeHostPath=$documentsActiveHostPath")
+            appendLine()
+            appendLine("This bundle is generated entirely inside the APK. It does not require USB, Wi-Fi ADB, run-as, or shell access.")
+        }
+    }
+
+    private fun selfDebugBundleJson(): JSONObject {
+        val roots = JSONArray()
+        debugResourceRoots().forEach { item ->
+            roots.put(
+                JSONObject()
+                    .put("Label", item.label)
+                    .put("Path", item.root.absolutePath)
+                    .put("Writable", item.writable)
+                    .put("Exists", item.root.exists())
+                    .put("Summary", debugResourceSummary(item.root)),
+            )
+        }
+        val diagnosticsDir = File(pdockerHome, "diagnostics")
+        val latestServiceTruth = File(diagnosticsDir, "ui-rendered-service-truth-latest.json")
+        val latestJobs = File(pdockerHome, "jobs.json")
+        val memoryLayer = memoryLayerSnapshot()
+        return JSONObject()
+            .put("schema", "pdocker.self-debug.bundle.v1")
+            .put("created_at_epoch_ms", System.currentTimeMillis())
+            .put("adb_independent", true)
+            .put("requires_adb", false)
+            .put(
+                "debug_policy",
+                JSONObject()
+                    .put("NoUsbNoWifiFallback", "Use this UI-exported bundle plus Documents artifacts when Android exposes no ADB transport.")
+                    .put("AdbHelper", "scripts/android-selfdebug.sh remains only a convenience wrapper for Wireless debugging."),
+            )
+            .put(
+                "app",
+                JSONObject()
+                    .put("Package", packageName)
+                    .put("Uid", applicationInfo.uid)
+                    .put("Version", appBuildInfo())
+                    .put("BuildGitCommit", BuildConfig.BUILD_GIT_COMMIT)
+                    .put("BuildTimeUtc", BuildConfig.BUILD_TIME_UTC)
+                    .put("SdkInt", Build.VERSION.SDK_INT)
+                    .put("Device", "${Build.MANUFACTURER} ${Build.MODEL}")
+                    .put("Abi", Build.SUPPORTED_ABIS.joinToString(",")),
+            )
+            .put(
+                "engine",
+                JSONObject()
+                    .put("Ping", engineTextOrError("/_ping"))
+                    .put("Version", engineJsonOrError("/version"))
+                    .put("Info", engineJsonOrError("/info"))
+                    .put("ContainersAll", engineArrayOrError("/containers/json?all=1")),
+            )
+            .put(
+                "documents",
+                JSONObject()
+                    .put("Metadata", documentsTreeMetadataJson())
+                    .put("PersistedGrant", safDocumentsMediator().persistedGrantState().let {
+                        JSONObject().put("Read", it.read).put("Write", it.write)
+                    }),
+            )
+            .put("debug_roots", roots)
+            .put(
+                "artifacts",
+                JSONObject()
+                    .put("ServiceTruth", artifactSummaryJson(latestServiceTruth))
+                    .put("DockerJobs", artifactSummaryJson(latestJobs))
+                    .put("MemoryPagerManaged", artifactSummaryJson(File(pdockerHome, "docs/test/apk-memory-pager-managed-latest.json")))
+                    .put("MemoryPagerTransparent", artifactSummaryJson(File(pdockerHome, "docs/test/apk-memory-pager-transparent-latest.json"))),
+            )
+            .put(
+                "memory_layers",
+                JSONObject()
+                    .put("OsMemTotal", memoryLayer.memTotal)
+                    .put("OsMemAvailable", memoryLayer.memAvailable)
+                    .put("OsSwapTotal", memoryLayer.swapTotal)
+                    .put("OsSwapFree", memoryLayer.swapFree)
+                    .put("PdockerProcessCount", memoryLayer.pdockerProcessCount)
+                    .put("PdockerRss", memoryLayer.pdockerRss)
+                    .put("PdockerSwap", memoryLayer.pdockerSwap)
+                    .put("ManagedReserveBytes", memoryLayer.managedReserveBytes)
+                    .put("ManagedResidentBytes", memoryLayer.managedResidentBytes)
+                    .put("TransparentRegistered", memoryLayer.transparentRegistered)
+                    .put("Source", memoryLayer.source),
+            )
+            .put("memory_snapshot_text", boundedDebugText(debugMemorySnapshot()))
+            .put("process_snapshot_text", boundedDebugText(debugProcessSnapshot()))
+            .put("handle_snapshot_text", boundedDebugText(debugHandleSnapshot(), maxChars = 96 * 1024))
+    }
+
+    private fun boundedDebugText(text: String, maxChars: Int = 64 * 1024): String =
+        if (text.length <= maxChars) text else "[pdocker] truncated to last $maxChars chars\n" + text.takeLast(maxChars)
+
+    private fun engineTextOrError(path: String): JSONObject =
+        runCatching {
+            val resp = engine.request("GET", path, timeoutMs = 5_000)
+            JSONObject()
+                .put("Status", resp.status)
+                .put("Text", resp.text.take(16 * 1024))
+        }.getOrElse { throwableJson(it) }
+
+    private fun engineJsonOrError(path: String): JSONObject =
+        runCatching {
+            val resp = engine.request("GET", path, timeoutMs = 5_000)
+            if (resp.status !in 200..299) {
+                JSONObject()
+                    .put("Status", resp.status)
+                    .put("Error", resp.text.take(16 * 1024))
+            } else {
+                JSONObject(resp.text.ifBlank { "{}" }).put("_HttpStatus", resp.status)
+            }
+        }.getOrElse { throwableJson(it) }
+
+    private fun engineArrayOrError(path: String): JSONObject =
+        runCatching {
+            val resp = engine.request("GET", path, timeoutMs = 5_000)
+            if (resp.status !in 200..299) {
+                JSONObject()
+                    .put("Status", resp.status)
+                    .put("Error", resp.text.take(16 * 1024))
+            } else {
+                JSONObject()
+                    .put("Status", resp.status)
+                    .put("Items", JSONArray(resp.text.ifBlank { "[]" }))
+            }
+        }.getOrElse { throwableJson(it) }
+
+    private fun throwableJson(error: Throwable): JSONObject =
+        JSONObject()
+            .put("Error", error.message ?: error.javaClass.simpleName)
+            .put("Type", error.javaClass.name)
+
+    private fun artifactSummaryJson(file: File): JSONObject =
+        JSONObject()
+            .put("Path", file.absolutePath)
+            .put("Exists", file.isFile)
+            .put("Bytes", if (file.isFile) file.length() else 0L)
+            .put("ModifiedEpochMs", if (file.exists()) file.lastModified() else 0L)
+
+    private fun documentsTreeMetadataJson(): JSONObject {
+        val metadata = documentsTreeMetadata()
+        return JSONObject()
+            .put("DisplayName", metadata.displayName)
+            .put("SelectedHostPath", metadata.selectedHostPath)
+            .put("DirectHostPath", metadata.directHostPath)
+            .put("ActiveHostPath", metadata.activeHostPath)
+            .put("WriteAccess", metadata.writeAccess.envValue)
     }
 
     private data class DebugProc(
