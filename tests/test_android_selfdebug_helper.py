@@ -156,6 +156,104 @@ class AndroidSelfDebugHelperTest(unittest.TestCase):
             self.assertIn("Wireless debugging must already be enabled", result.stderr)
             self.assertIn("no root/userdebug privileges", result.stderr)
 
+
+    def _main_activity_source(self):
+        return (ROOT / "app/src/main/kotlin/io/github/ryo100794/pdocker/MainActivity.kt").read_text(encoding="utf-8")
+
+    def _kotlin_function_body(self, source: str, name: str) -> str:
+        marker = f"private fun {name}("
+        start = source.index(marker)
+        brace = source.index("{", start)
+        depth = 0
+        for idx in range(brace, len(source)):
+            ch = source[idx]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return source[brace + 1:idx]
+        self.fail(f"could not find body for {name}")
+
+    def test_in_app_self_debug_bundle_is_adb_free_and_documents_exported(self):
+        source = self._main_activity_source()
+        render_body = self._kotlin_function_body(source, "renderDebugResources")
+        export_body = self._kotlin_function_body(source, "exportSelfDebugBundle")
+        bundle_body = self._kotlin_function_body(source, "selfDebugBundleJson")
+
+        self.assertIn("action_export_self_debug_bundle", render_body)
+        self.assertIn("openTextToolAsync", render_body)
+        self.assertIn("exportSelfDebugBundle()", render_body)
+        self.assertIn('File(diagnosticsDir, "self-debug-bundle-latest.json")', export_body)
+        self.assertIn("selfDebugBundleJson()", export_body)
+        self.assertIn("writeDocumentsFileForAutomation", export_body)
+        self.assertIn('targetPath = "pdocker/diagnostics/self-debug-bundle-latest.json"', export_body)
+        self.assertIn('mimeType = "application/json"', export_body)
+        self.assertIn('bundle.put("DocumentsExport", latestExport)', export_body)
+        self.assertIn('bundle.put("DocumentsEvidenceExport", evidenceExport)', export_body)
+        self.assertIn('bundle.put("DocumentsExportRetry", retry)', export_body)
+        self.assertIn("documents.success=", export_body)
+        self.assertIn("documents.mode=", export_body)
+        self.assertIn("documents.target=", export_body)
+        self.assertIn("documents.evidence.target=", export_body)
+        self.assertIn("documents.activeHostPath=", export_body)
+        self.assertIn("It does not require USB, Wi-Fi ADB, run-as, or shell access", export_body)
+        self.assertIn('.put("adb_independent", true)', bundle_body)
+        self.assertIn('.put("requires_adb", false)', bundle_body)
+        self.assertIn("NoUsbNoWifiFallback", bundle_body)
+        self.assertIn("Use this UI-exported bundle plus Documents artifacts", bundle_body)
+        self.assertIn("scripts/android-selfdebug.sh remains only a convenience wrapper", bundle_body)
+        forbidden_runtime_dependencies = ("adb pair", "adb connect", "logcat -d", "run-as ", "am start")
+        for forbidden in forbidden_runtime_dependencies:
+            self.assertNotIn(forbidden, export_body + bundle_body)
+
+    def test_self_debug_bundle_contains_engine_probe_and_resource_snapshots(self):
+        source = self._main_activity_source()
+        bundle_body = self._kotlin_function_body(source, "selfDebugBundleJson")
+        memory_body = self._kotlin_function_body(source, "debugMemorySnapshot")
+        process_body = self._kotlin_function_body(source, "debugProcessSnapshot")
+        handle_body = self._kotlin_function_body(source, "debugHandleSnapshot")
+        debug_processes_body = self._kotlin_function_body(source, "debugProcesses")
+        engine_text_body = self._kotlin_function_body(source, "engineTextOrError")
+        engine_json_body = self._kotlin_function_body(source, "engineJsonOrError")
+        engine_array_body = self._kotlin_function_body(source, "engineArrayOrError")
+
+        for key, probe in {
+            '"Ping"': 'engineTextOrError("/_ping")',
+            '"Version"': 'engineJsonOrError("/version")',
+            '"Info"': 'engineJsonOrError("/info")',
+            '"ContainersAll"': 'engineArrayOrError("/containers/json?all=1")',
+        }.items():
+            self.assertIn(key, bundle_body)
+            self.assertIn(probe, bundle_body)
+        self.assertIn("timeoutMs = 5_000", engine_text_body)
+        self.assertIn("timeoutMs = 5_000", engine_json_body)
+        self.assertIn("timeoutMs = 5_000", engine_array_body)
+        self.assertIn('put("Status", resp.status)', engine_text_body + engine_json_body + engine_array_body)
+        self.assertIn('put("Items", JSONArray', engine_array_body)
+        self.assertGreaterEqual(source.count(".getOrElse { throwableJson(it) }"), 3)
+
+        for key, producer in {
+            '"memory_layers"': "memoryLayerSnapshot()",
+            '"memory_snapshot_text"': "boundedDebugText(debugMemorySnapshot())",
+            '"process_snapshot_text"': "boundedDebugText(debugProcessSnapshot())",
+            '"handle_snapshot_text"': "boundedDebugText(debugHandleSnapshot(), maxChars = 96 * 1024)",
+        }.items():
+            self.assertIn(key, bundle_body)
+            self.assertIn(producer, bundle_body)
+        for field in ("OsMemTotal", "OsMemAvailable", "OsSwapTotal", "OsSwapFree", "PdockerProcessCount", "PdockerRss", "PdockerSwap"):
+            self.assertIn(field, bundle_body)
+        self.assertIn("/system/memory-pressure", memory_body)
+        self.assertIn('File("/proc/meminfo")', memory_body)
+        self.assertIn("debugProcesses().forEach", memory_body)
+        self.assertIn("PID     PPID    STATE", process_body)
+        self.assertIn("fdCount", process_body)
+        self.assertIn('File("/proc").listFiles()', debug_processes_body)
+        self.assertIn('File(dir, "fd").list()?.size', debug_processes_body)
+        self.assertIn('File("/proc/${proc.pid}/fd")', handle_body)
+        self.assertIn("Os.readlink", handle_body)
+        self.assertIn("fds.take(256)", handle_body)
+
     def test_runbook_points_to_helper_without_replacing_manual_workflow(self):
         doc = DOC.read_text(encoding="utf-8")
         self.assertIn("scripts/android-selfdebug.sh", doc)

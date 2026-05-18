@@ -383,7 +383,44 @@ def main() -> int:
     require("image browser accepts selected container extra", "EXTRA_CONTAINER_ID" in image_src)
     require("debug resources pane browses app-owned roots", "Tab.Debug" in main_src and "renderDebugResources" in main_src and "openDebugResources" in main_src and "EXTRA_ROOT_PATH" in image_src and "isAllowedDebugRoot" in image_src and "section_debug_resources" in string_src)
     require("debug resources pane exposes memory process and handle snapshots", "debugMemorySnapshot" in main_src and "debugProcessSnapshot" in main_src and "debugHandleSnapshot" in main_src and "/proc/meminfo" in main_src and "/fd" in main_src and "action_debug_handles" in string_src)
-    require("debug resources pane exports adb-free self-debug bundle", "exportSelfDebugBundle" in main_src and "self-debug-bundle-latest.json" in main_src and "writeDocumentsFileForAutomation" in main_src and "pdocker.self-debug.bundle.v1" in main_src and "adb_independent" in main_src and "action_export_self_debug_bundle" in string_src)
+    require(
+        "debug snapshots enumerate memory pressure processes and fds",
+        "/system/memory-pressure" in main_src
+        and 'File("/proc/meminfo")' in main_src
+        and 'File("/proc").listFiles()' in main_src
+        and 'File(dir, "fd").list()?.size' in main_src
+        and 'File("/proc/${proc.pid}/fd")' in main_src
+        and "Os.readlink" in main_src
+        and "fds.take(256)" in main_src,
+    )
+    require("debug resources pane exports adb-free self-debug bundle", "exportSelfDebugBundle" in main_src and "self-debug-bundle-latest.json" in main_src and "writeDocumentsFileForAutomation" in main_src and "pdocker.self-debug.bundle.v1" in main_src and "adb_independent" in main_src and "requires_adb" in main_src and "NoUsbNoWifiFallback" in main_src and "action_export_self_debug_bundle" in string_src)
+    require(
+        "self-debug bundle exports to Documents with retry and operator-visible target",
+        'targetPath = "pdocker/diagnostics/self-debug-bundle-latest.json"' in main_src
+        and 'mimeType = "application/json"' in main_src
+        and 'bundle.put("DocumentsExport", latestExport)' in main_src
+        and 'bundle.put("DocumentsEvidenceExport", evidenceExport)' in main_src
+        and 'bundle.put("DocumentsExportRetry", retry)' in main_src
+        and "documents.success=" in main_src
+        and "documents.mode=" in main_src
+        and "documents.target=" in main_src
+        and "documents.evidence.target=" in main_src
+        and "documents.activeHostPath=" in main_src
+        and "It does not require USB, Wi-Fi ADB, run-as, or shell access" in main_src,
+    )
+    require(
+        "self-debug bundle includes bounded engine memory process and handle payloads",
+        'engineTextOrError("/_ping")' in main_src
+        and 'engineJsonOrError("/version")' in main_src
+        and 'engineJsonOrError("/info")' in main_src
+        and 'engineArrayOrError("/containers/json?all=1")' in main_src
+        and "timeoutMs = 5_000" in main_src
+        and '"memory_layers"' in main_src
+        and '"memory_snapshot_text"' in main_src
+        and '"process_snapshot_text"' in main_src
+        and '"handle_snapshot_text"' in main_src
+        and "boundedDebugText(debugHandleSnapshot(), maxChars = 96 * 1024)" in main_src,
+    )
     require("debug root browser back exits instead of images fallback", "standaloneRoot" in image_src and "finish()" in image_src.split("if (standaloneRoot)", 1)[1].split("currentMergedLower", 1)[0])
     require("selected image browser back returns to caller", "selectedImage != null" in image_src and "standaloneRoot = true" in image_src.split("selectedImage != null", 1)[1].split("selectedContainer != null", 1)[0])
     require("file browser rows are explorer-style single rows", "orientation = LinearLayout.HORIZONTAL" in image_src.split("private fun addRow", 1)[1].split("private fun addMessage", 1)[0] and "ellipsize = TextUtils.TruncateAt.MIDDLE" in image_src.split("private fun addRow", 1)[1].split("private fun addMessage", 1)[0])

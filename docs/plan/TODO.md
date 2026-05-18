@@ -1,6 +1,6 @@
 # pdocker TODO ledger
 
-Snapshot date: 2026-05-17.
+Snapshot date: 2026-05-18.
 
 This is the working TODO list for unfinished items and deliberate temporary
 accommodations. Keep this file current whenever a workaround is added so it
@@ -253,12 +253,20 @@ issues, and deciding which planned gaps become hard gates.
   `docs/test/ANDROID_SELFDEBUG.md`. This route still depends on Android
   Wireless debugging being enabled; normal production devices commonly require
   an active Wi-Fi association before that toggle is available.
-- [next] ADB-less self-debug fallback: when the test constraint is no USB and
-  no Wi-Fi association, treat ADB as unavailable and keep critical debug flows
-  inside the APK UI/Engine route: daemon state, active operations, logs,
-  storage, memory/process/handle snapshots, test-suite launch, and Documents
-  JSON export. Do not represent localhost Wireless debugging as a no-Wi-Fi
-  solution.
+- [done] ADB-free self-debug fallback has an APK-owned bundle export: the
+  Debug resources panel can write
+  `files/pdocker/diagnostics/self-debug-bundle-latest.json` and a
+  Documents/SAF copy at `pdocker/diagnostics/self-debug-bundle-latest.json`
+  without USB, Wi-Fi ADB, `run-as`, or host shell access. The bundle records
+  app/build/device metadata, Engine API ping/version/info/container probes,
+  Documents grant/export state, memory/process/fd snapshots, debug resource
+  roots, and known diagnostic artifact paths. Localhost Wireless debugging and
+  `scripts/android-selfdebug.sh` remain convenience routes only, not a
+  no-Wi-Fi substitute.
+- [next] ADB-free diagnostics follow-up: add a small fixture/verifier for the
+  self-debug bundle schema and extend the in-app route only where needed for
+  active operation/job launch state or log excerpts that are not already covered
+  by Engine probes, artifact summaries, and the Documents JSON export.
 - [done] Root script clutter now has a first-pass inventory gate:
   `scripts/script-inventory.json`, `scripts/README.md`, and
   `scripts/verify-script-inventory.py` classify top-level scripts into

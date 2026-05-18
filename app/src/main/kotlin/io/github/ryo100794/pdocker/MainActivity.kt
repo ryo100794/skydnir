@@ -1818,36 +1818,58 @@ class MainActivity : AppCompatActivity() {
 
     private fun exportSelfDebugBundle(): String {
         val diagnosticsDir = File(pdockerHome, "diagnostics").apply { mkdirs() }
+        val createdAtMs = System.currentTimeMillis()
         val bundleFile = File(diagnosticsDir, "self-debug-bundle-latest.json")
+        val evidenceFile = File(diagnosticsDir, "self-debug-bundle-$createdAtMs.json")
         val bundle = selfDebugBundleJson()
-        bundleFile.writeText(bundle.toString(2) + "\n")
-        val export = writeDocumentsFileForAutomation(
+            .put(
+                "LocalEvidenceFiles",
+                JSONObject()
+                    .put("Latest", bundleFile.absolutePath)
+                    .put("Timestamped", evidenceFile.absolutePath),
+            )
+        val payload = bundle.toString(2) + "\n"
+        bundleFile.writeText(payload)
+        evidenceFile.writeText(payload)
+        val latestExport = writeDocumentsFileForAutomation(
             sourcePath = bundleFile.absolutePath,
             targetPath = "pdocker/diagnostics/self-debug-bundle-latest.json",
             mimeType = "application/json",
         )
-        bundle.put("DocumentsExport", export)
-        bundleFile.writeText(bundle.toString(2) + "\n")
-        if (!export.optBoolean("Success", false)) {
+        val evidenceExport = writeDocumentsFileForAutomation(
+            sourcePath = evidenceFile.absolutePath,
+            targetPath = "pdocker/diagnostics/self-debug-bundle-$createdAtMs.json",
+            mimeType = "application/json",
+        )
+        bundle.put("DocumentsExport", latestExport)
+        bundle.put("DocumentsEvidenceExport", evidenceExport)
+        val finalPayload = bundle.toString(2) + "\n"
+        bundleFile.writeText(finalPayload)
+        evidenceFile.writeText(finalPayload)
+        if (!latestExport.optBoolean("Success", false)) {
             val retry = writeDocumentsFileForAutomation(
                 sourcePath = bundleFile.absolutePath,
                 targetPath = "pdocker/diagnostics/self-debug-bundle-latest.json",
                 mimeType = "application/json",
             )
             bundle.put("DocumentsExportRetry", retry)
-            bundleFile.writeText(bundle.toString(2) + "\n")
+            val retryPayload = bundle.toString(2) + "\n"
+            bundleFile.writeText(retryPayload)
+            evidenceFile.writeText(retryPayload)
         }
-        val documentsSuccess = export.optBoolean("Success", false)
-        val documentsMode = export.optString("Mode", "-")
-        val documentsTarget = export.optString("Target", "pdocker/diagnostics/self-debug-bundle-latest.json")
-        val documentsActiveHostPath = export.optString("ActiveHostPath", "-")
+        val documentsSuccess = latestExport.optBoolean("Success", false)
+        val documentsMode = latestExport.optString("Mode", "-")
+        val documentsTarget = latestExport.optString("Target", "pdocker/diagnostics/self-debug-bundle-latest.json")
+        val documentsActiveHostPath = latestExport.optString("ActiveHostPath", "-")
         return buildString {
             appendLine("pdocker self-debug bundle")
             appendLine("ADB-independent=true")
             appendLine("local=${bundleFile.absolutePath}")
+            appendLine("local.evidence=${evidenceFile.absolutePath}")
             appendLine("documents.success=$documentsSuccess")
             appendLine("documents.mode=$documentsMode")
             appendLine("documents.target=$documentsTarget")
+            appendLine("documents.evidence.target=${evidenceExport.optString("Target", "pdocker/diagnostics/self-debug-bundle-$createdAtMs.json")}")
             appendLine("documents.activeHostPath=$documentsActiveHostPath")
             appendLine()
             appendLine("This bundle is generated entirely inside the APK. It does not require USB, Wi-Fi ADB, run-as, or shell access.")
