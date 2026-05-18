@@ -31,9 +31,9 @@ The standing workflow is:
 
 ## Compaction Handoff Snapshot
 
-- Latest committed/pushed SHA placeholder: `1335072` (`main`/`origin/main`,
-  "Organize docs and script maintenance gates") as observed locally on
-  2026-05-18.
+- Latest committed/pushed green base before the current local work slice:
+  `a3325bd` (`main`/`origin/main`, "Verify roadmap and agent state hygiene") as
+  observed locally on 2026-05-18.
 - Last known green default gate: `bash scripts/verify-fast.sh`.
 - Default operating loop: read this ledger, inspect repo status, recover/close
   sibling lanes, integrate only narrow owned changes, run focused checks plus
@@ -81,6 +81,11 @@ artifact instead of relying on retained chat history.
 | Docs maintenance verifier | Linnaeus | `scripts/verify-docs-maintenance.py`, `tests/test_docs_maintenance.py`, fast gate hook | Run with docs/script cleanup commit |
 | Terminal exec doc canonicalization | Poincare | `docs/test/TERMINAL_EXEC_IT_DEVICE_GATE.md`, `docs/test/SCENARIOS.md` | Keep architecture doc as stream-boundary source of truth |
 | Memory/OOM gate canonicalization | Halley | `docs/test/APK_MEMORY_PAGER_PROBE.md`, `docs/test/OOM_LMK_SURVIVAL_GATE.md` | Keep design docs as policy source of truth |
+| Roadmap/agent-state hygiene | Gibbs/Franklin | `scripts/verify-docs-maintenance.py`, `tests/test_docs_maintenance.py`, TODO/showcase docs | Landed in `a3325bd`; active TODO entries now require evidence cues and stale historical `running` rows are rejected |
+| Script runner inventory | Hume | `scripts/script-inventory.json`, `tests/test_script_inventory_audit.py`, `scripts/README.md` | Integrated locally: `scripts/verify/runner/*` registered as subtree entries |
+| Pycache cleanup policy | Curie | `.gitignore`, single TODO wording update | Integrated locally: `__pycache__` remains ignored/local and outside script inventory |
+| Wrapper migration audit | Descartes | read-only | Next slice: migrate execution/test/doc references before retiring top-level wrappers |
+| Llama GPU next-step audit | Anscombe | read-only | Next GPU action: fresh APK/readiness/Q6_K row-indexed artifact before further C changes |
 
 ## Intake Rule
 

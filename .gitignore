@@ -6,6 +6,8 @@ local.properties
 *.iml
 .idea/
 .DS_Store
+# Python bytecode caches are local/runtime artifacts. Keep scripts/__pycache__
+# (and nested __pycache__ directories) ignored rather than inventoried or tracked.
 __pycache__/
 *.py[cod]
 .coverage*

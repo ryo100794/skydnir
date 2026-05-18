@@ -11,6 +11,10 @@ class ScriptInventoryAuditTest(unittest.TestCase):
         self.inventory = json.loads((ROOT / "scripts" / "script-inventory.json").read_text(encoding="utf-8"))
         self.readme = (ROOT / "scripts" / "README.md").read_text(encoding="utf-8")
         self.entries = {entry["path"]: entry for entry in self.inventory["entries"]}
+        self.subtree_entries = {
+            entry["path"]: entry
+            for entry in self.inventory.get("subtree_entries", [])
+        }
 
     def assertIsExecutable(self, path):
         self.assertTrue(
@@ -82,6 +86,31 @@ class ScriptInventoryAuditTest(unittest.TestCase):
                         self.assertPythonWrapper(entry["path"], candidate_path, wrapper)
                     else:
                         self.fail(f"unsupported wrapper type: {entry['path']}")
+
+    def test_verify_runner_files_are_classified_as_subtree_entries(self):
+        expected_runner_paths = {
+            "scripts/verify/runner/cow-overlay-kill-at-step-device.sh": "device-side-runner",
+            "scripts/verify/runner/cow_overlay_kill_at_step_device.py": "device-runner",
+            "scripts/verify/runner/image-pull-crash-safety-device.sh": "device-side-runner",
+            "scripts/verify/runner/image_pull_crash_safety_device.py": "device-runner",
+        }
+
+        self.assertEqual(set(expected_runner_paths), set(self.subtree_entries))
+        for path, stability in expected_runner_paths.items():
+            with self.subTest(path=path):
+                entry = self.subtree_entries[path]
+                self.assertTrue((ROOT / path).is_file())
+                self.assertEqual(entry["category"], "test-verification")
+                self.assertEqual(entry["stability"], stability)
+                migration = entry["migration"]
+                self.assertEqual(migration["target_dir"], "scripts/test/verify/runner")
+                self.assertEqual(
+                    migration["candidate_path"],
+                    f"scripts/test/verify/runner/{Path(path).name}",
+                )
+                self.assertEqual(migration["action"], "candidate-move-behind-wrapper")
+                self.assertIn("scripts/verify/runner", migration["compat_wrapper"])
+                self.assertIn(path, self.readme)
 
     def test_obsolete_suspects_have_audit_decisions_and_replacements(self):
         expected_replacements = {

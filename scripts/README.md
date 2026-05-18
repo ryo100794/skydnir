@@ -52,6 +52,19 @@ shell/python wrapper shape.
 | `scripts/verify-device-llama-template.sh` | `scripts/test/verify-device-llama-template.sh` |
 | `scripts/summarize-llama-gpu-artifacts.py` | `scripts/maintenance/summarize-llama-gpu-artifacts.py` |
 
+## Subtree Entries
+
+These non-top-level runner helpers are tracked in `subtree_entries` so
+verification inventory audits classify them without changing stable public
+entrypoint counts.
+
+| Path | Category | Stability |
+|---|---|---|
+| `scripts/verify/runner/cow-overlay-kill-at-step-device.sh` | `test-verification` | `device-side-runner` |
+| `scripts/verify/runner/cow_overlay_kill_at_step_device.py` | `test-verification` | `device-runner` |
+| `scripts/verify/runner/image-pull-crash-safety-device.sh` | `test-verification` | `device-side-runner` |
+| `scripts/verify/runner/image_pull_crash_safety_device.py` | `test-verification` | `device-runner` |
+
 ## Stable Public Entrypoints
 
 - `scripts/build-all.sh` — full build orchestration.

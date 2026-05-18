@@ -38,6 +38,60 @@
       "wrapper_policy": "no compatibility wrapper until audit chooses archive-over-delete; prefer deletion over moved wrapper when safe"
     }
   },
+  "subtree_entries": [
+    {
+      "path": "scripts/verify/runner/cow-overlay-kill-at-step-device.sh",
+      "category": "test-verification",
+      "stability": "device-side-runner",
+      "role": "Device-side runner implementation used by verification manifests and host runner wrappers.",
+      "migration": {
+        "target_dir": "scripts/test/verify/runner",
+        "candidate_path": "scripts/test/verify/runner/cow-overlay-kill-at-step-device.sh",
+        "phase": "phase-1-runner-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "runner helper paths remain stable until test manifests and docs stop referencing scripts/verify/runner paths"
+      }
+    },
+    {
+      "path": "scripts/verify/runner/cow_overlay_kill_at_step_device.py",
+      "category": "test-verification",
+      "stability": "device-runner",
+      "role": "Device-side runner implementation used by verification manifests and host runner wrappers.",
+      "migration": {
+        "target_dir": "scripts/test/verify/runner",
+        "candidate_path": "scripts/test/verify/runner/cow_overlay_kill_at_step_device.py",
+        "phase": "phase-1-runner-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "runner helper paths remain stable until test manifests and docs stop referencing scripts/verify/runner paths"
+      }
+    },
+    {
+      "path": "scripts/verify/runner/image-pull-crash-safety-device.sh",
+      "category": "test-verification",
+      "stability": "device-side-runner",
+      "role": "Device-side runner implementation used by verification manifests and host runner wrappers.",
+      "migration": {
+        "target_dir": "scripts/test/verify/runner",
+        "candidate_path": "scripts/test/verify/runner/image-pull-crash-safety-device.sh",
+        "phase": "phase-1-runner-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "runner helper paths remain stable until test manifests and docs stop referencing scripts/verify/runner paths"
+      }
+    },
+    {
+      "path": "scripts/verify/runner/image_pull_crash_safety_device.py",
+      "category": "test-verification",
+      "stability": "device-runner",
+      "role": "Device-side runner implementation used by verification manifests and host runner wrappers.",
+      "migration": {
+        "target_dir": "scripts/test/verify/runner",
+        "candidate_path": "scripts/test/verify/runner/image_pull_crash_safety_device.py",
+        "phase": "phase-1-runner-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "runner helper paths remain stable until test manifests and docs stop referencing scripts/verify/runner paths"
+      }
+    }
+  ],
   "entries": [
     {
       "path": "scripts/android-api29-direct-feasibility.sh",

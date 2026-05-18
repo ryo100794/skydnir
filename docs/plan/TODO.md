@@ -149,11 +149,13 @@ issues, and deciding which planned gaps become hard gates.
   fast/heavy gate. Acceptance: `scripts/verify-docs-maintenance.py` or
   `scripts/verify-script-inventory.py` rejects unindexed durable docs/scripts.
 - [next] Script directory cleanup follow-up: register `scripts/verify/runner/*`
-  in the script inventory, decide and document the `__pycache__` cleanup policy,
-  finish migrated wrapper reference updates, and align the remaining Vulkan smoke
-  helper with the `scripts/test` layout. Acceptance: `scripts/verify-script-inventory.py`
-  and the docs-maintenance verifier reject any unclassified script or stale
-  top-level wrapper reference.
+  in the script inventory, keep the documented `__pycache__` cleanup policy in
+  `.gitignore` (`scripts/__pycache__` and nested bytecode caches stay ignored,
+  untracked, and outside script inventory), finish migrated wrapper reference
+  updates, and align the remaining Vulkan smoke helper with the `scripts/test`
+  layout. Acceptance: `scripts/verify-script-inventory.py` and the
+  docs-maintenance verifier reject any unclassified script or stale top-level
+  wrapper reference.
 - [doing] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
   llama GPU bridge ABI: keep llama.cpp unmodified while expanding the
   pdocker Vulkan/OpenCL bridge from device discovery and model-buffer
