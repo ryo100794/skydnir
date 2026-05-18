@@ -17,7 +17,24 @@ run it, and where the latest result is stored.
 | [`TEST_DESIGN_STANDARD.md`](TEST_DESIGN_STANDARD.md) | Minimum test design criteria and the automated gate that enforces them |
 | [`SCENARIOS.md`](SCENARIOS.md) | Feature-level scenario ledger and combined test runner |
 | [`COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md`](COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md) | Android device-gated COW/overlay daemon/helper kill-at-step evidence contract |
+| [`COPY_WILDCARD_REGRESSION.md`](COPY_WILDCARD_REGRESSION.md) | Dockerfile `COPY` wildcard regression procedure and evidence |
+| [`DEV_WORKSPACE_HEALTH_GATE.md`](DEV_WORKSPACE_HEALTH_GATE.md) | Default VS Code workspace compose/build/run health gate |
+| [`DOCKER_CP_E2E_DEVICE_GATE.md`](DOCKER_CP_E2E_DEVICE_GATE.md) | Device-gated `docker cp` end-to-end promotion procedure |
+| [`IMAGE_PULL_CRASH_SAFETY_DEVICE_GATE.md`](IMAGE_PULL_CRASH_SAFETY_DEVICE_GATE.md) | Device-gated interrupted image-pull crash-safety procedure |
+| [`RUNTIME_SINGLE_CONTAINER_GATE.md`](RUNTIME_SINGLE_CONTAINER_GATE.md) | Device-gated single-container runtime promotion evidence |
+| [`RUNTIME_TEARDOWN_DEVICE_GATE.md`](RUNTIME_TEARDOWN_DEVICE_GATE.md) | Device-gated runtime teardown promotion contract |
+| [`SERVICE_TRUTH_DEVICE_GATE.md`](SERVICE_TRUTH_DEVICE_GATE.md) | Same-container-ID service truth device gate |
+| [`SERVICE_TRUTH_DEVICE_CAPTURE_20260513.md`](SERVICE_TRUTH_DEVICE_CAPTURE_20260513.md) | Sanitized 2026-05-13 service-truth device capture summary |
+| [`STORAGE_METRICS_SEQUENCE_RUNNER.md`](STORAGE_METRICS_SEQUENCE_RUNNER.md) | Android storage metrics sequence runner scaffold |
+| [`REFACTOR_RESILIENCE.md`](REFACTOR_RESILIENCE.md) | Refactor-resilience testing contract for external behavior |
 | [`compat-audit-latest.md`](compat-audit-latest.md) | Latest recorded compatibility audit result |
+| [`file-io-bench-latest.md`](file-io-bench-latest.md) | Latest file I/O benchmark result |
+| [`file-io-microbench-latest.md`](file-io-microbench-latest.md) | Latest file I/O microbenchmark result |
+| [`path-micro-profile-latest.md`](path-micro-profile-latest.md) | Latest seccomp path micro-profile result |
+| [`path-micro-profile-cached-latest.md`](path-micro-profile-cached-latest.md) | Latest cached path micro-profile result |
+| [`syscall-usecase-profile-latest.md`](syscall-usecase-profile-latest.md) | Latest seccomp syscall use-case profile result |
+| [`syscall-usecase-profile-syscall-latest.md`](syscall-usecase-profile-syscall-latest.md) | Latest syscall-trace use-case profile result |
+| [`llama-api-prompt-20260509.md`](llama-api-prompt-20260509.md) | 2026-05-09 llama API prompt smoke-test evidence |
 | [`ANDROID_SELFDEBUG.md`](ANDROID_SELFDEBUG.md) | Android single-device localhost Wireless debugging and self-debug workflow, including `scripts/android-selfdebug.sh` |
 | [`DIRECT_SYSCALL_COVERAGE.md`](DIRECT_SYSCALL_COVERAGE.md) | Direct runtime syscall hook inventory and fast/static coverage gate |
 | [`APK_MEMORY_PAGER_PROBE.md`](APK_MEMORY_PAGER_PROBE.md) | SDK28 compat APK syscall probe for the opt-in memory pager |

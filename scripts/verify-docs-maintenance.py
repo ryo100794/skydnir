@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import re
 import sys
 from dataclasses import dataclass
@@ -26,6 +27,14 @@ ROADMAP_CUE_RE = re.compile(
     re.IGNORECASE,
 )
 TABLE_SEPARATOR_RE = re.compile(r"^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$")
+
+# Durable Markdown documents must be discoverable from an index.  Test-run
+# summaries are addressed by the test-driver manifest convention documented in
+# docs/test/README.md; keep this pattern explicit so new durable prose still
+# needs an index link or backlog owner.
+DISCOVERABILITY_OWNER_PATTERNS = {
+    "docs/test/runs/*/summary.md": "docs/test/README.md",
+}
 
 
 class CheckFailure(Exception):
@@ -137,6 +146,74 @@ def check_links(root: Path = ROOT) -> None:
         fail(f"local markdown link check failed: {rendered}{suffix}")
 
 
+def discoverability_index_paths(root: Path = ROOT) -> list[Path]:
+    docs = root / "docs"
+    paths = sorted(docs.rglob("README.md"))
+    backlog = root / "docs" / "maintenance" / "DOCUMENTATION_DEDUP_BACKLOG.md"
+    if backlog.is_file():
+        paths.append(backlog)
+    return paths
+
+
+def discoverability_links(root: Path = ROOT) -> set[str]:
+    root_resolved = root.resolve()
+    linked: set[str] = set()
+    for path in discoverability_index_paths(root):
+        text = path.read_text(encoding="utf-8")
+        for _, target in iter_markdown_link_targets(text):
+            if not target or target.startswith("#") or is_external_or_nonlocal(target):
+                continue
+            path_part = unquote(target.split("#", 1)[0])
+            if not path_part:
+                continue
+            candidate = (path.parent / path_part).resolve()
+            if candidate.is_dir():
+                candidate = candidate / "README.md"
+            try:
+                relative = candidate.relative_to(root_resolved).as_posix()
+            except ValueError:
+                continue
+            if (
+                relative.startswith("docs/")
+                and candidate.is_file()
+                and candidate.suffix == ".md"
+            ):
+                linked.add(relative)
+    return linked
+
+
+def has_explicit_discoverability_owner(relative: str, root: Path = ROOT) -> bool:
+    for pattern, owner in DISCOVERABILITY_OWNER_PATTERNS.items():
+        if fnmatch.fnmatchcase(relative, pattern):
+            owner_path = root / owner
+            if not owner_path.is_file():
+                fail(f"discoverability owner for {pattern} is missing: {owner}")
+            return True
+    return False
+
+
+def check_doc_discoverability(root: Path = ROOT) -> None:
+    docs = root / "docs"
+    linked = discoverability_links(root)
+    missing: list[str] = []
+    for path in sorted(docs.rglob("*.md")):
+        relative = rel(path, root)
+        if path.name == "README.md":
+            continue
+        if relative in linked or has_explicit_discoverability_owner(relative, root):
+            continue
+        missing.append(relative)
+
+    if missing:
+        rendered = ", ".join(missing[:20])
+        suffix = "" if len(missing) <= 20 else f", ... and {len(missing) - 20} more"
+        fail(
+            "docs discoverability check failed; add each durable Markdown file "
+            "to its category README or DISCOVERABILITY_OWNER_PATTERNS: "
+            f"{rendered}{suffix}"
+        )
+
+
 def normalize_table_cell(text: str) -> str:
     return text.strip().strip("`*_ ").lower()
 
@@ -230,6 +307,7 @@ def check_todo_roadmap_source_quality(root: Path = ROOT) -> None:
 def run(root: Path = ROOT) -> None:
     check_backlog(root)
     check_links(root)
+    check_doc_discoverability(root)
     check_historical_agent_assignments(root)
     check_todo_roadmap_source_quality(root)
 

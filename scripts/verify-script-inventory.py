@@ -9,10 +9,11 @@ exists and all references are migrated.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +57,99 @@ KNOWN_OBSOLETE_SUSPECTS = {
     "scripts/verify-llama-startup-logging.py",
     "scripts/wrap-ndk-box64.sh",
 }
+
+REFERENCE_SCAN_PREFIXES = (
+    "docs/",
+    ".github/workflows/",
+)
+REFERENCE_SCAN_TEST_SUFFIXES = (".json",)
+REFERENCE_SCAN_TEST_NAME_FRAGMENT = "manifest"
+REFERENCE_SCAN_ALLOWLIST = {
+    "scripts/README.md",
+    "scripts/script-inventory.json",
+    "scripts/verify-script-inventory.py",
+    "tests/test_script_inventory_audit.py",
+}
+
+
+def is_reference_scan_path(path: str) -> bool:
+    if path in REFERENCE_SCAN_ALLOWLIST:
+        return False
+    if path.startswith(REFERENCE_SCAN_PREFIXES):
+        return True
+    if path.startswith("tests/"):
+        name = Path(path).name
+        return (
+            name.endswith(REFERENCE_SCAN_TEST_SUFFIXES)
+            or REFERENCE_SCAN_TEST_NAME_FRAGMENT in name
+        )
+    return False
+
+
+def tracked_reference_scan_files() -> list[Path]:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files"],
+            cwd=ROOT,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        candidates = (
+            list((ROOT / "docs").rglob("*"))
+            + list((ROOT / ".github" / "workflows").rglob("*"))
+            + list((ROOT / "tests").rglob("*"))
+        )
+        return sorted(
+            path
+            for path in candidates
+            if path.is_file()
+            and is_reference_scan_path(path.relative_to(ROOT).as_posix())
+        )
+
+    paths: list[Path] = []
+    for line in result.stdout.splitlines():
+        if is_reference_scan_path(line):
+            path = ROOT / line
+            if path.is_file():
+                paths.append(path)
+    return paths
+
+
+def find_script_references(
+    script_paths: Iterable[str],
+    scan_files: Iterable[Path],
+) -> dict[str, list[str]]:
+    script_path_list = sorted(set(script_paths))
+    references = {path: [] for path in script_path_list}
+    for scan_file in scan_files:
+        rel = scan_file.relative_to(ROOT).as_posix()
+        try:
+            text = scan_file.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = scan_file.read_text(encoding="utf-8", errors="ignore")
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            for script_path in script_path_list:
+                if script_path in line:
+                    references[script_path].append(f"{rel}:{line_no}: {line.strip()}")
+    return {path: hits for path, hits in references.items() if hits}
+
+
+def validate_migrated_wrapper_reference_scan(migrated_paths: Iterable[str]) -> None:
+    references = find_script_references(migrated_paths, tracked_reference_scan_files())
+    if references:
+        details = []
+        for path, hits in sorted(references.items()):
+            formatted_hits = "; ".join(hits[:5])
+            extra = "" if len(hits) <= 5 else f"; ... +{len(hits) - 5} more"
+            details.append(f"{path} -> {formatted_hits}{extra}")
+        fail(
+            "migrated wrappers still referenced outside inventory/README/verifier allowlist; "
+            "migrate docs, workflows, or test manifests before retiring wrappers: "
+            + " | ".join(details)
+        )
 
 
 def is_executable(path: Path) -> bool:
@@ -154,6 +248,7 @@ def main() -> int:
     categories: Counter[str] = Counter()
     stable_paths: set[str] = set()
     obsolete_paths: set[str] = set()
+    migrated_wrapper_paths: set[str] = set()
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             fail(f"entry {index} is not an object")
@@ -191,6 +286,7 @@ def main() -> int:
             fail(f"{path} non-obsolete action must not be audit-delete-or-archive")
         if action == "migrated-behind-wrapper":
             validate_wrapper(path, candidate_path)
+            migrated_wrapper_paths.add(path)
         for field_name, value in {
             "phase": phase,
             "compat_wrapper": compat_wrapper,
@@ -227,6 +323,8 @@ def main() -> int:
 
     if "runtime-package-needed" not in categories:
         fail("runtime package staging category is empty")
+
+    validate_migrated_wrapper_reference_scan(migrated_wrapper_paths)
 
     readme = README.read_text(encoding="utf-8")
     for category, count in categories.items():

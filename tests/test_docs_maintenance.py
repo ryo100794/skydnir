@@ -134,6 +134,10 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
             BACKLOG,
             encoding="utf-8",
         )
+        (self.tmp / "docs" / "maintenance" / "README.md").write_text(
+            "[`DOCUMENTATION_DEDUP_BACKLOG.md`](DOCUMENTATION_DEDUP_BACKLOG.md)\n",
+            encoding="utf-8",
+        )
 
     def tearDown(self):
         shutil.rmtree(self.tmp)
@@ -171,6 +175,39 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
         issues = verifier.check_local_markdown_links(self.tmp)
         self.assertEqual(1, len(issues))
         self.assertEqual("NOPE.md", issues[0].target)
+
+    def test_doc_discoverability_accepts_category_readme_link(self):
+        doc = self.tmp / "docs" / "test" / "DEVICE_GATE.md"
+        doc.write_text("# Device gate\n", encoding="utf-8")
+        readme = self.tmp / "docs" / "test" / "README.md"
+        readme.write_text(
+            "| Document | Scope |\n"
+            "|---|---|\n"
+            "| [`DEVICE_GATE.md`](DEVICE_GATE.md) | Device gate |\n",
+            encoding="utf-8",
+        )
+
+        verifier.check_doc_discoverability(self.tmp)
+
+    def test_doc_discoverability_rejects_unindexed_durable_doc(self):
+        doc = self.tmp / "docs" / "test" / "UNLISTED.md"
+        doc.write_text("# Unlisted\n", encoding="utf-8")
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_doc_discoverability(self.tmp)
+
+    def test_doc_discoverability_accepts_explicit_owner_pattern(self):
+        run_dir = (
+            self.tmp
+            / "docs"
+            / "test"
+            / "runs"
+            / "20260518T000000Z-host-smoke"
+        )
+        run_dir.mkdir(parents=True)
+        (run_dir / "summary.md").write_text("# Run summary\n", encoding="utf-8")
+
+        verifier.check_doc_discoverability(self.tmp)
 
     def test_historical_plan_rejects_live_running_assignment_section(self):
         timeline = self.tmp / "docs" / "plan" / "EXECUTION_TIMELINE_20260513.md"

@@ -1,9 +1,19 @@
+import importlib.util
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+VERIFY_INVENTORY_PATH = ROOT / "scripts" / "verify-script-inventory.py"
+VERIFY_INVENTORY_SPEC = importlib.util.spec_from_file_location(
+    "verify_script_inventory",
+    VERIFY_INVENTORY_PATH,
+)
+verify_script_inventory = importlib.util.module_from_spec(VERIFY_INVENTORY_SPEC)
+assert VERIFY_INVENTORY_SPEC.loader is not None
+VERIFY_INVENTORY_SPEC.loader.exec_module(verify_script_inventory)
 
 
 class ScriptInventoryAuditTest(unittest.TestCase):
@@ -111,6 +121,83 @@ class ScriptInventoryAuditTest(unittest.TestCase):
                 self.assertEqual(migration["action"], "candidate-move-behind-wrapper")
                 self.assertIn("scripts/verify/runner", migration["compat_wrapper"])
                 self.assertIn(path, self.readme)
+
+    def test_migrated_wrappers_have_no_retirement_blocking_references(self):
+        migrated_paths = {
+            entry["path"]
+            for entry in self.inventory["entries"]
+            if entry["migration"]["action"] == "migrated-behind-wrapper"
+        }
+        references = verify_script_inventory.find_script_references(
+            migrated_paths,
+            verify_script_inventory.tracked_reference_scan_files(),
+        )
+        self.assertEqual({}, references)
+
+    def test_reference_scan_scope_and_allowlist(self):
+        self.assertTrue(
+            verify_script_inventory.is_reference_scan_path("docs/manual/README.md")
+        )
+        self.assertTrue(
+            verify_script_inventory.is_reference_scan_path(
+                ".github/workflows/showcase.yml"
+            )
+        )
+        self.assertTrue(
+            verify_script_inventory.is_reference_scan_path(
+                "tests/test_driver_manifest.json"
+            )
+        )
+        self.assertTrue(
+            verify_script_inventory.is_reference_scan_path(
+                "tests/test_scenario_manifest.py"
+            )
+        )
+        self.assertFalse(
+            verify_script_inventory.is_reference_scan_path("scripts/README.md")
+        )
+        self.assertFalse(
+            verify_script_inventory.is_reference_scan_path(
+                "scripts/script-inventory.json"
+            )
+        )
+        self.assertFalse(
+            verify_script_inventory.is_reference_scan_path(
+                "scripts/verify-script-inventory.py"
+            )
+        )
+        self.assertFalse(
+            verify_script_inventory.is_reference_scan_path(
+                "tests/test_script_inventory_audit.py"
+            )
+        )
+
+    def test_reference_scan_finds_top_level_wrapper_mentions(self):
+        script_path = "scripts/smoke-opencl-bridge.sh"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            manifest = tmp_root / "manifest.json"
+            manifest.write_text(
+                '{"cmd": "bash scripts/smoke-opencl-bridge.sh"}\n',
+                encoding="utf-8",
+            )
+            previous_root = verify_script_inventory.ROOT
+            try:
+                verify_script_inventory.ROOT = tmp_root
+                references = verify_script_inventory.find_script_references(
+                    [script_path],
+                    [manifest],
+                )
+            finally:
+                verify_script_inventory.ROOT = previous_root
+        self.assertEqual(
+            {
+                script_path: [
+                    'manifest.json:1: {"cmd": "bash scripts/smoke-opencl-bridge.sh"}'
+                ]
+            },
+            references,
+        )
 
     def test_obsolete_suspects_have_audit_decisions_and_replacements(self):
         expected_replacements = {

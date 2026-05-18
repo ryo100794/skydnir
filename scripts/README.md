@@ -42,8 +42,10 @@ documented commands, test manifests, and CI lanes explicitly point at the new
 implementation path.
 `scripts/verify-script-inventory.py` and `tests/test_script_inventory_audit.py`
 verify that each migrated top-level wrapper points at its recorded
-`candidate_path`, keeps an executable bit, and follows the expected thin
-shell/python wrapper shape.
+`candidate_path`, keeps an executable bit, follows the expected thin
+shell/python wrapper shape, and is no longer referenced from docs,
+`.github/workflows`, or test manifests outside the explicit
+inventory/README/verifier allowlist.
 
 | Stable wrapper | Implementation path |
 |---|---|
