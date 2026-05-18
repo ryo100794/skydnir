@@ -151,11 +151,13 @@ issues, and deciding which planned gaps become hard gates.
 - [next] Script directory cleanup follow-up: register `scripts/verify/runner/*`
   in the script inventory, keep the documented `__pycache__` cleanup policy in
   `.gitignore` (`scripts/__pycache__` and nested bytecode caches stay ignored,
-  untracked, and outside script inventory), finish migrated wrapper reference
-  updates, and align the remaining Vulkan smoke helper with the `scripts/test`
-  layout. Acceptance: `scripts/verify-script-inventory.py` and the
-  docs-maintenance verifier reject any unclassified script or stale top-level
-  wrapper reference.
+  untracked, and outside script inventory), and align the remaining Vulkan smoke
+  helper with the `scripts/test` layout. Wrapper reference migration is already
+  committed as `0e9b33e`; when this lane is near-complete, auto-add wrapper
+  retirement after the compatibility window as a separate task. Acceptance:
+  `scripts/verify-script-inventory.py` and the docs-maintenance verifier reject
+  any unclassified script, stale top-level wrapper reference, or premature
+  wrapper removal.
 - [doing] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
   llama GPU bridge ABI: keep llama.cpp unmodified while expanding the
   pdocker Vulkan/OpenCL bridge from device discovery and model-buffer
@@ -254,7 +256,15 @@ issues, and deciding which planned gaps become hard gates.
   `release-honesty` pass proves publication hygiene only; stable checkpoint
   credit still requires the P0 device artifacts listed in
   `docs/test/CI_GATE_LEDGER.md` and the blocker closures in
-  `docs/release/RELEASE_READINESS.md`.
+  `docs/release/RELEASE_READINESS.md`. Current slice: the release-readiness
+  verifier now treats gitignored staged/generated APK payload rows as allowed to
+  be absent from a clean source checkout, while still failing if a
+  non-generated source-tree inventory row points to a missing file. When this
+  lane is near-complete, auto-add a GitHub Release readiness rerun and wrapper
+  retirement guard instead of silently relying on local ignored payloads.
+  Acceptance: a clean checkout passes the host-only verifier or fails with an
+  explicit missing source-tree payload diagnostic, and GitHub Release readiness
+  is rerun after the fix is pushed.
 - [done] Agent recovery process is recorded in
   `docs/plan/AGENT_COORDINATION.md`: recovered agent results must be moved into
   implementation, focused docs, or TODO before they are considered durable, and

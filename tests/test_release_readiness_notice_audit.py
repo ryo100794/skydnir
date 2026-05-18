@@ -2,6 +2,7 @@ import importlib.util
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 from pathlib import Path
 
 
@@ -40,6 +41,53 @@ APK:assets/chaquopy/cacert.pem certificate
 APK:assets/chaquopy/*.imy Chaquopy CPython
 APK:assets/chaquopy/bootstrap-native/arm64-v8a/*.so Chaquopy CPython
 """
+
+
+class ReleaseReadinessPayloadInventoryTest(unittest.TestCase):
+    INVENTORY_PREFIX = """# Generated and Prebuilt Payload Inventory\n\nThis is a release-readiness inventory, not F-Droid submission metadata.\n\n| Path | Source or regeneration path | Current release status |\n| --- | --- | --- |\n"""
+
+    def make_root(self, inventory_rows: str) -> Path:
+        root = Path(tempfile.mkdtemp(prefix="pdocker-inventory-test-"))
+        inventory = root / "metadata" / "fdroid" / "generated-binary-inventory.md"
+        inventory.parent.mkdir(parents=True)
+        inventory.write_text(self.INVENTORY_PREFIX + inventory_rows, encoding="utf-8")
+        return root
+
+    def run_inventory_check(self, root: Path, ignored_paths: set[str] | None = None) -> None:
+        payload_dirs = (
+            root / "app" / "src" / "main" / "assets" / "pdockerd",
+            root / "app" / "src" / "main" / "jniLibs",
+            root / "docker-proot-setup" / "docker-bin",
+        )
+        ignored_paths = ignored_paths or set()
+        with mock.patch.object(verifier, "ROOT", root), \
+             mock.patch.object(verifier, "INVENTORY", root / "metadata" / "fdroid" / "generated-binary-inventory.md"), \
+             mock.patch.object(verifier, "PAYLOAD_DIRS", payload_dirs), \
+             mock.patch.object(verifier, "is_gitignored_inventory_path", side_effect=ignored_paths.__contains__):
+            verifier.check_payload_inventory()
+
+    def test_allows_missing_generated_staged_app_inventory_rows_on_clean_checkout(self):
+        root = self.make_root(
+            "| `docker-proot-setup/docker-bin/docker` | External Docker CLI payload. | Prebuilt external binary; blocker. |\n"
+            "| `app/src/main/assets/pdockerd/pdockerd` | Copied from `docker-proot-setup/bin/pdockerd` by the Gradle `syncPdockerdAsset` task. | Generated asset; verify by comparing source and staged asset. |\n"
+            "| `app/src/main/jniLibs/arm64-v8a/libcow.so` | Built from `docker-proot-setup/src/overlay/libcow.c` by local native build tooling. | Generated binary; must be rebuilt and compared before release. |\n"
+        )
+        source_payload = root / "docker-proot-setup" / "docker-bin" / "docker"
+        source_payload.parent.mkdir(parents=True)
+        source_payload.write_bytes(b"\x7fELFfixture")
+
+        self.run_inventory_check(root, {
+            "app/src/main/assets/pdockerd/pdockerd",
+            "app/src/main/jniLibs/arm64-v8a/libcow.so",
+        })
+
+    def test_rejects_missing_non_generated_source_tree_inventory_rows(self):
+        root = self.make_root(
+            "| `docker-proot-setup/docker-bin/docker` | External Docker CLI payload. | Prebuilt external binary; blocker. |\n"
+        )
+
+        with self.assertRaisesRegex(verifier.CheckFailure, "missing source-tree files"):
+            self.run_inventory_check(root)
 
 
 class ReleaseReadinessNoticeAuditTest(unittest.TestCase):

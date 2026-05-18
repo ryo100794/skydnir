@@ -32,7 +32,7 @@ The standing workflow is:
 ## Compaction Handoff Snapshot
 
 - Latest committed/pushed green base before the current local work slice:
-  `a3325bd` (`main`/`origin/main`, "Verify roadmap and agent state hygiene") as
+  `0e9b33e` (`main`/`origin/main`, "Migrate script wrapper references") as
   observed locally on 2026-05-18.
 - Last known green default gate: `bash scripts/verify-fast.sh`.
 - Default operating loop: read this ledger, inspect repo status, recover/close
@@ -84,7 +84,8 @@ artifact instead of relying on retained chat history.
 | Roadmap/agent-state hygiene | Gibbs/Franklin | `scripts/verify-docs-maintenance.py`, `tests/test_docs_maintenance.py`, TODO/showcase docs | Landed in `a3325bd`; active TODO entries now require evidence cues and stale historical `running` rows are rejected |
 | Script runner inventory | Hume | `scripts/script-inventory.json`, `tests/test_script_inventory_audit.py`, `scripts/README.md` | Integrated locally: `scripts/verify/runner/*` registered as subtree entries |
 | Pycache cleanup policy | Curie | `.gitignore`, single TODO wording update | Integrated locally: `__pycache__` remains ignored/local and outside script inventory |
-| Wrapper migration audit | Descartes | read-only | Next slice: migrate execution/test/doc references before retiring top-level wrappers |
+| Wrapper migration audit | Descartes | read-only | Reference migration follow-up committed as `0e9b33e`; next slice is wrapper retirement only after the compatibility window |
+| CI release-readiness clean-checkout payload | Helmholtz/Archimedes | `scripts/verify-release-readiness.py`, `tests/test_release_readiness_notice_audit.py`, `metadata/fdroid/generated-binary-inventory.md` | Local fix distinguishes gitignored generated/staged payload rows from missing source-tree payloads; next check is GitHub Release readiness rerun after push |
 | Llama GPU next-step audit | Anscombe | read-only | Next GPU action: fresh APK/readiness/Q6_K row-indexed artifact before further C changes |
 
 ## Intake Rule
@@ -141,11 +142,14 @@ verifiers before the next broad documentation cleanup:
    verifier, or acceptance cue before they can remain on the roadmap.
 3. Script migration completion: `scripts/verify-script-inventory.py` should
    eventually scan docs, `.github/`, and test manifests before any migrated
-   top-level wrapper can be removed.
+   top-level wrapper can be removed. Wrapper reference migration landed as
+   `0e9b33e`; auto-add wrapper retirement only after the compatibility window.
 4. Documentation discoverability: every new `docs/**/*.md` should be reachable
    through its category README or the maintenance backlog owner map.
 5. Issue workflow parity: major active TODO items should include `[#N]` unless
    the TODO entry documents why it is local-only or historical.
+6. Release clean-checkout guard: before near-complete release readiness, auto-add
+   a verifier task that fails when generated payloads appear in a clean checkout.
 
 ## Main Agent Pre-Commit Checklist
 

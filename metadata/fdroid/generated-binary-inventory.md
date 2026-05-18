@@ -11,8 +11,12 @@ release claim.
 
 Use this table with `python3 scripts/verify-release-readiness.py` before a
 release candidate. A passing host-only audit means every detected payload path
-has an inventory row and no obvious signing secret is committed; it does not
-mean the APK is source-built, reproducible, or ready for F-Droid submission.
+has an inventory row and no obvious signing secret is committed. Rows for
+gitignored generated or staged app payloads may be absent in a clean source
+checkout and are audited as generated inventory entries rather than required
+checked-in files; the audit still fails if a non-generated source-tree payload
+row points to a missing file. A passing host-only audit does not mean the APK is
+source-built, reproducible, or ready for F-Droid submission.
 
 For package review, keep three statuses distinct:
 

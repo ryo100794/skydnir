@@ -10,6 +10,7 @@ import sys
 import zipfile
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import NamedTuple
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +77,12 @@ APK_RESOLVED_PAYLOAD_BUCKETS = (
     ("assets/chaquopy/*.imy", ("Chaquopy", "CPython")),
     ("assets/chaquopy/bootstrap-native/arm64-v8a/*.so", ("Chaquopy", "CPython")),
 )
+
+
+class InventoryEntry(NamedTuple):
+    path: str
+    source: str
+    status: str
 
 
 class CheckFailure(Exception):
@@ -181,37 +188,73 @@ def check_metadata_placeholder() -> None:
         fail(f"metadata/fdroid must stay placeholder-only for now; active metadata found: {names}")
 
 
-def parse_inventory_paths() -> set[str]:
+def parse_inventory_entries() -> list[InventoryEntry]:
     text = read(INVENTORY)
-    paths: set[str] = set()
+    entries: list[InventoryEntry] = []
     for line in text.splitlines():
         if not line.startswith("| `"):
             continue
-        first_cell = line.split("|", 2)[1].strip()
-        if first_cell.startswith("`") and first_cell.endswith("`"):
-            paths.add(first_cell.strip("`"))
-    if not paths:
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 3:
+            continue
+        path_cell, source, status = cells[:3]
+        if path_cell.startswith("`") and path_cell.endswith("`"):
+            entries.append(InventoryEntry(path_cell.strip("`"), source, status))
+    if not entries:
         fail(f"{rel(INVENTORY)} has no payload rows")
     if "not F-Droid submission metadata" not in text:
         fail(f"{rel(INVENTORY)} must say it is not F-Droid submission metadata")
-    return paths
+    return entries
+
+
+def parse_inventory_paths() -> set[str]:
+    return {entry.path for entry in parse_inventory_entries()}
+
+
+def is_gitignored_inventory_path(path: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "--quiet", "--", path],
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        return False
+    return result.returncode == 0
+
+
+def may_be_absent_from_clean_checkout(entry: InventoryEntry) -> bool:
+    """Return True for inventory rows not expected in a clean source tree.
+
+    The inventory is intentionally broader than the clean checkout: it documents
+    APK-resolved payloads and gitignored staged outputs that local/release build
+    steps may generate.  Missing generated rows should not mask missing
+    checked-in source-tree payloads, so non-APK rows are allowed to be absent
+    only when gitignore marks that exact path as generated/staged.
+    """
+
+    path = entry.path
+    if path.startswith("APK:") or "*" in path:
+        return True
+    return is_gitignored_inventory_path(path)
 
 
 def check_payload_inventory() -> None:
-    inventory_paths = parse_inventory_paths()
+    inventory_entries = parse_inventory_entries()
+    inventory_paths = {entry.path for entry in inventory_entries}
     payloads = sorted(rel(path) for base in PAYLOAD_DIRS for path in base.rglob("*") if looks_like_payload(path))
     missing = [path for path in payloads if path not in inventory_paths]
     if missing:
         fail("payloads missing from generated/prebuilt inventory: " + ", ".join(missing))
     stale = sorted(
-        path
-        for path in inventory_paths
-        if not path.startswith("APK:")
-        and "*" not in path
-        and not (ROOT / path).exists()
+        entry.path
+        for entry in inventory_entries
+        if not (ROOT / entry.path).exists()
+        and not may_be_absent_from_clean_checkout(entry)
     )
     if stale:
-        fail("inventory entries point to missing files: " + ", ".join(stale))
+        fail("inventory entries point to missing source-tree files: " + ", ".join(stale))
 
     source = ROOT / "docker-proot-setup" / "bin" / "pdockerd"
     staged = ROOT / "app" / "src" / "main" / "assets" / "pdockerd" / "pdockerd"
