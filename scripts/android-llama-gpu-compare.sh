@@ -50,7 +50,7 @@ WAIT_SERVER_PROGRESS_INTERVAL_SEC="${PDOCKER_LLAMA_WAIT_SERVER_PROGRESS_INTERVAL
 WAIT_SERVER_CURL_TIMEOUT_SEC="${PDOCKER_LLAMA_WAIT_SERVER_CURL_TIMEOUT_SEC:-2}"
 COMPARE_ARTIFACT_DIR="${PDOCKER_LLAMA_COMPARE_ARTIFACT_DIR:-}"
 STOP_STALE_TARGET_BEFORE_PREFLIGHT="${PDOCKER_LLAMA_STOP_STALE_TARGET_BEFORE_PREFLIGHT:-1}"
-EXPECTED_GPU_EXECUTOR_MARKER="${PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER:-gpu-executor-workgroup3d-20260513}"
+EXPECTED_GPU_EXECUTOR_MARKER="${PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER:-gpu-executor-enabled-features-20260518}"
 EXPECTED_VULKAN_ICD_MARKER="${PDOCKER_VULKAN_ICD_EXPECTED_MARKER:-vulkan-icd-runtime-marker-20260510}"
 OP_ID="llama-gpu-compare-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 CURRENT_CONTAINER_ID=""
@@ -1072,7 +1072,7 @@ env = [
     f"LLAMA_ARG_CTX={ctx}",
     f"LLAMA_ARG_PORT={port}",
     "LLAMA_LOG_FILE=/workspace/logs/llama-server.log",
-    f"PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER={os.environ.get('PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER', 'gpu-executor-workgroup3d-20260513')}",
+    f"PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER={os.environ.get('PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER', 'gpu-executor-enabled-features-20260518')}",
     f"PDOCKER_VULKAN_ICD_EXPECTED_MARKER={os.environ.get('PDOCKER_VULKAN_ICD_EXPECTED_MARKER', 'vulkan-icd-runtime-marker-20260510')}",
 ]
 if model_url:
@@ -2130,7 +2130,7 @@ config_propagation = {
     "summary": "fail" if any(item["status"] in {"missing-evidence", "mismatch"} for item in config_checks) else "pass",
     "checks": config_checks,
 }
-expected_executor_marker = os.environ.get("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", "gpu-executor-workgroup3d-20260513")
+expected_executor_marker = os.environ.get("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", "gpu-executor-enabled-features-20260518")
 expected_icd_marker = os.environ.get("PDOCKER_VULKAN_ICD_EXPECTED_MARKER", "vulkan-icd-runtime-marker-20260510")
 observed_executor_markers = sorted({
     str(e.get("executor_build_marker"))
@@ -2438,6 +2438,71 @@ generic_spirv_dispatch = {
     "fallback_events": [e for e in executor_events if e.get("backend_affinity") == "fallback"][-4:],
     "llama_throw": "vk::Queue::submit: ErrorFeatureNotPresent" if queue_submit_blocker else "",
 }
+
+
+def compact_pre_q6_failure(generic_dispatch, q6_diagnostics):
+    """Record why a run stopped before Q6_K without promoting correctness.
+
+    This is deliberately derived from structured executor JSON, not from prose
+    log snippets, so a stale or unrelated llama log line cannot become a GPU
+    correctness diagnosis.  The verifier mirrors this shape as
+    `pre_http_failure_evidence`.
+    """
+
+    if not isinstance(generic_dispatch, dict):
+        generic_dispatch = {}
+    if not isinstance(q6_diagnostics, dict):
+        q6_diagnostics = {}
+    failed = [
+        event for event in (generic_dispatch.get("failed_events") or [])
+        if isinstance(event, dict)
+    ]
+    event = failed[-1] if failed else {}
+    pipeline_key = event.get("pipeline_key") if isinstance(event.get("pipeline_key"), dict) else {}
+
+    def pick(source, keys):
+        if not isinstance(source, dict):
+            return {}
+        return {key: source.get(key) for key in keys if key in source}
+
+    return {
+        "generic_spirv_attempted": generic_dispatch.get("attempted") is True,
+        "failed_event_count": len(failed),
+        "failure_event": pick(event, [
+            "stage",
+            "error",
+            "vk_result",
+            "spirv_hash",
+            "shader_bytes",
+            "entry",
+            "bindings",
+            "dispatch",
+            "push_bytes",
+            "requested_feature_mask",
+            "requested_feature_mask_present",
+            "strict_passthrough",
+            "spirv_feature_requirements",
+            "spirv_feature_mismatch",
+            "spirv_feature_mismatches",
+            "android_vulkan_features",
+            "android_vulkan_enabled_features",
+            "spirv_capabilities",
+        ]),
+        "pipeline_key": pick(pipeline_key, [
+            "spirv_hash",
+            "spec_hash",
+            "layout_bindings",
+            "descriptor_sets",
+            "push_bytes",
+        ]),
+        "llama_throw": generic_dispatch.get("llama_throw") or "",
+        "q6_reachability": {
+            "event_count": q6_diagnostics.get("event_count", 0),
+            "blocker_class": q6_diagnostics.get("blocker_class") or "not-reached",
+            "diagnostic_interpretation": q6_diagnostics.get("diagnostic_interpretation") or "",
+        },
+    }
+
 
 valid_spirv_events = [
     e for e in executor_events
@@ -2763,6 +2828,10 @@ q6_workgroup_diagnostics = {
         else "q6-inconclusive"
     ),
 }
+generic_spirv_dispatch["pre_q6_failure"] = compact_pre_q6_failure(
+    generic_spirv_dispatch,
+    q6_workgroup_diagnostics,
+)
 diagnostic_bisection = {
     "method": "binary-search fault isolation over API, graph, ICD, executor, and readback boundaries",
     "nodes": [

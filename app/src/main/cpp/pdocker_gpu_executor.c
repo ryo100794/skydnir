@@ -905,13 +905,25 @@ typedef struct {
     VkPhysicalDevice16BitStorageFeatures physical_storage16;
     VkPhysicalDevice8BitStorageFeatures physical_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features physical_float16_int8;
+    VkPhysicalDeviceFeatures enabled_features;
+    VkPhysicalDeviceVulkan11Features enabled_vulkan11;
+    VkPhysicalDeviceVulkan12Features enabled_vulkan12;
+    VkPhysicalDevice16BitStorageFeatures enabled_storage16;
+    VkPhysicalDevice8BitStorageFeatures enabled_storage8;
+    VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
+    uint32_t enabled_extension_count;
+    uint8_t enabled_ext_16bit_storage;
+    uint8_t enabled_ext_8bit_storage;
+    uint8_t enabled_ext_shader_float16_int8;
+    uint8_t enabled_ext_storage_buffer_storage_class;
+    uint8_t enabled_chain_compat_feature_structs;
     VkPhysicalDeviceSubgroupProperties subgroup_properties;
     double init_ms;
 } VulkanRuntime;
 
 static VulkanRuntime g_vulkan_runtime;
 
-#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-workgroup3d-20260513"
+#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-enabled-features-20260518"
 
 static uint32_t choose_vulkan_instance_api_version(void) {
     uint32_t supported = VK_API_VERSION_1_0;
@@ -1191,6 +1203,59 @@ static void log_vulkan_enabled_feature_trace(
             vulkan12 ? vulkan12->storagePushConstant8 : 0,
             vulkan12 ? vulkan12->shaderFloat16 : 0,
             vulkan12 ? vulkan12->shaderInt8 : 0);
+}
+
+static void write_android_vulkan_enabled_features_report(FILE *out, const VulkanRuntime *rt) {
+    if (!out) return;
+    fprintf(out,
+            "\"android_vulkan_enabled_features\":{"
+            "\"shaderInt64\":%u,"
+            "\"storageBuffer16BitAccess\":%u,"
+            "\"uniformAndStorageBuffer16BitAccess\":%u,"
+            "\"storagePushConstant16\":%u,"
+            "\"storageBuffer8BitAccess\":%u,"
+            "\"uniformAndStorageBuffer8BitAccess\":%u,"
+            "\"storagePushConstant8\":%u,"
+            "\"shaderFloat16\":%u,"
+            "\"shaderInt8\":%u,"
+            "\"core11_storageBuffer16BitAccess\":%u,"
+            "\"core11_uniformAndStorageBuffer16BitAccess\":%u,"
+            "\"core11_storagePushConstant16\":%u,"
+            "\"core12_storageBuffer8BitAccess\":%u,"
+            "\"core12_uniformAndStorageBuffer8BitAccess\":%u,"
+            "\"core12_storagePushConstant8\":%u,"
+            "\"core12_shaderFloat16\":%u,"
+            "\"core12_shaderInt8\":%u,"
+            "\"extension_count\":%u,"
+            "\"chain_compat_feature_structs\":%u,"
+            "\"extensions\":{"
+            "\"VK_KHR_16bit_storage\":%u,"
+            "\"VK_KHR_8bit_storage\":%u,"
+            "\"VK_KHR_shader_float16_int8\":%u,"
+            "\"VK_KHR_storage_buffer_storage_class\":%u}}",
+            rt ? rt->enabled_features.shaderInt64 : 0,
+            rt ? rt->enabled_storage16.storageBuffer16BitAccess : 0,
+            rt ? rt->enabled_storage16.uniformAndStorageBuffer16BitAccess : 0,
+            rt ? rt->enabled_storage16.storagePushConstant16 : 0,
+            rt ? rt->enabled_storage8.storageBuffer8BitAccess : 0,
+            rt ? rt->enabled_storage8.uniformAndStorageBuffer8BitAccess : 0,
+            rt ? rt->enabled_storage8.storagePushConstant8 : 0,
+            rt ? rt->enabled_float16_int8.shaderFloat16 : 0,
+            rt ? rt->enabled_float16_int8.shaderInt8 : 0,
+            rt ? rt->enabled_vulkan11.storageBuffer16BitAccess : 0,
+            rt ? rt->enabled_vulkan11.uniformAndStorageBuffer16BitAccess : 0,
+            rt ? rt->enabled_vulkan11.storagePushConstant16 : 0,
+            rt ? rt->enabled_vulkan12.storageBuffer8BitAccess : 0,
+            rt ? rt->enabled_vulkan12.uniformAndStorageBuffer8BitAccess : 0,
+            rt ? rt->enabled_vulkan12.storagePushConstant8 : 0,
+            rt ? rt->enabled_vulkan12.shaderFloat16 : 0,
+            rt ? rt->enabled_vulkan12.shaderInt8 : 0,
+            rt ? rt->enabled_extension_count : 0,
+            rt ? rt->enabled_chain_compat_feature_structs : 0,
+            rt ? rt->enabled_ext_16bit_storage : 0,
+            rt ? rt->enabled_ext_8bit_storage : 0,
+            rt ? rt->enabled_ext_shader_float16_int8 : 0,
+            rt ? rt->enabled_ext_storage_buffer_storage_class : 0);
 }
 
 static void log_spirv_trace(
@@ -6448,33 +6513,54 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         enabled_storage16.uniformAndStorageBuffer16BitAccess ||
         enabled_storage16.storagePushConstant16 ||
         enabled_storage16.storageInputOutput16) {
+        const uint32_t before = enabled_extension_count;
         append_vulkan_device_extension(rt->physical_device,
                                        enabled_extensions,
                                        &enabled_extension_count,
                                        (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
                                        VK_KHR_16BIT_STORAGE_EXTENSION_NAME);
+        rt->enabled_ext_16bit_storage = enabled_extension_count > before;
     }
     if (enabled_storage8.storageBuffer8BitAccess ||
         enabled_storage8.uniformAndStorageBuffer8BitAccess ||
         enabled_storage8.storagePushConstant8) {
+        const uint32_t before = enabled_extension_count;
         append_vulkan_device_extension(rt->physical_device,
                                        enabled_extensions,
                                        &enabled_extension_count,
                                        (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
                                        VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
+        rt->enabled_ext_8bit_storage = enabled_extension_count > before;
     }
     if (enabled_float16_int8.shaderFloat16 || enabled_float16_int8.shaderInt8) {
+        const uint32_t before = enabled_extension_count;
         append_vulkan_device_extension(rt->physical_device,
                                        enabled_extensions,
                                        &enabled_extension_count,
                                        (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
                                        VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+        rt->enabled_ext_shader_float16_int8 = enabled_extension_count > before;
     }
+    const uint32_t storage_class_before = enabled_extension_count;
     append_vulkan_device_extension(rt->physical_device,
                                    enabled_extensions,
                                    &enabled_extension_count,
                                    (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
                                    VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME);
+    rt->enabled_ext_storage_buffer_storage_class = enabled_extension_count > storage_class_before;
+    rt->enabled_features = enabled_features;
+    rt->enabled_vulkan11 = enabled_vulkan11;
+    rt->enabled_vulkan12 = enabled_vulkan12;
+    rt->enabled_storage16 = enabled_storage16;
+    rt->enabled_storage8 = enabled_storage8;
+    rt->enabled_float16_int8 = enabled_float16_int8;
+    rt->enabled_vulkan11.pNext = NULL;
+    rt->enabled_vulkan12.pNext = NULL;
+    rt->enabled_storage16.pNext = NULL;
+    rt->enabled_storage8.pNext = NULL;
+    rt->enabled_float16_int8.pNext = NULL;
+    rt->enabled_extension_count = enabled_extension_count;
+    rt->enabled_chain_compat_feature_structs = (uint8_t)chain_compat_feature_structs;
     VkDeviceCreateInfo dci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = device_features_pnext,
@@ -9226,7 +9312,7 @@ cleanup:
                 "\"uniformAndStorageBuffer8BitAccess\":%u,"
                 "\"storagePushConstant8\":%u,"
                 "\"shaderFloat16\":%u,"
-                "\"shaderInt8\":%u}}\n",
+                "\"shaderInt8\":%u},",
                 rt ? rt->physical_features.shaderInt64 : 0,
                 rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
                 rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
@@ -9236,6 +9322,8 @@ cleanup:
                 rt ? rt->physical_storage8.storagePushConstant8 : 0,
                 rt ? rt->physical_float16_int8.shaderFloat16 : 0,
                 rt ? rt->physical_float16_int8.shaderInt8 : 0);
+        write_android_vulkan_enabled_features_report(json_out(), rt);
+        fprintf(json_out(), "}\n");
         fflush(json_out());
     }
     if (fence) vkDestroyFence(rt->device, fence, NULL);
@@ -9362,8 +9450,7 @@ static void print_capabilities(const char *transport) {
             "\"shaderFloat16\":%u,\"shaderInt8\":%u,"
             "\"subgroupSize\":%u,"
             "\"subgroupStages\":%u,"
-            "\"subgroupOperations\":%u},"
-            "\"process_exec\":true}\n",
+            "\"subgroupOperations\":%u},",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
             PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
             transport,
@@ -9382,6 +9469,8 @@ static void print_capabilities(const char *transport) {
             rt ? rt->subgroup_properties.subgroupSize : 0,
             rt ? rt->subgroup_properties.supportedStages : 0,
             rt ? rt->subgroup_properties.supportedOperations : 0);
+    write_android_vulkan_enabled_features_report(json_out(), rt);
+    fprintf(json_out(), ",\"process_exec\":true}\n");
     fflush(json_out());
 }
 

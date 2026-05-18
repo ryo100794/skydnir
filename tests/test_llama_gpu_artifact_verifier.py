@@ -13,8 +13,8 @@ VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 def runtime_marker():
     return {
         "summary": "pass",
-        "expected_executor_marker": "gpu-executor-workgroup3d-20260513",
-        "observed_executor_markers": ["gpu-executor-workgroup3d-20260513"],
+        "expected_executor_marker": "gpu-executor-enabled-features-20260518",
+        "observed_executor_markers": ["gpu-executor-enabled-features-20260518"],
         "observed_icd_markers": ["vulkan-icd-runtime-marker-20260510"],
         "executor_event_count": 1,
     }
@@ -313,7 +313,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-workgroup3d-20260513",
+                        "expected_executor_marker": "gpu-executor-enabled-features-20260518",
                         "observed_executor_markers": [],
                         "observed_icd_markers": ["vulkan-icd-runtime-marker-20260510"],
                     },
@@ -856,6 +856,13 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                                     "storageBuffer16BitAccess": 1,
                                     "storageBuffer8BitAccess": 1,
                                 },
+                                "android_vulkan_enabled_features": {
+                                    "shaderInt8": 1,
+                                    "storageBuffer16BitAccess": 1,
+                                    "storageBuffer8BitAccess": 1,
+                                    "extension_count": 4,
+                                    "chain_compat_feature_structs": 1,
+                                },
                                 "spirv_capabilities": [1, 39, 4433, 4448],
                             }
                         ],
@@ -881,9 +888,43 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(evidence["failure_event"]["error"], "create-generic-compute-pipeline")
         self.assertEqual(evidence["failure_event"]["vk_result"], -13)
         self.assertEqual(evidence["failure_event"]["spirv_hash"], "0xee4e8d4acf23ec08")
+        self.assertEqual(evidence["failure_event"]["android_vulkan_enabled_features"]["shaderInt8"], 1)
         self.assertEqual(evidence["pipeline_key"]["spec_hash"], "0x4256e6bd7dad2e74")
         self.assertEqual(evidence["q6_reachability"]["blocker_class"], "not-reached")
         self.assertEqual(evidence["q6_reachability"]["event_count"], 0)
+
+    def test_legacy_pre_http_pipeline_feature_artifacts_do_not_require_enabled_features(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "served": False,
+                "diagnostics": {
+                    "blocker_class": "vulkan_pipeline_feature",
+                    "blocker_detail": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "generic_spirv_dispatch": {
+                        "attempted": True,
+                        "failed_events": [
+                            {
+                                "error": "create-generic-compute-pipeline",
+                                "vk_result": -13,
+                                "spirv_hash": "0xlegacy",
+                                "android_vulkan_features": {"shaderInt8": 1},
+                            }
+                        ],
+                    },
+                    "q6_workgroup_diagnostics": {"event_count": 0, "blocker_class": "not-reached"},
+                },
+            },
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "vulkan-pipeline-feature")
+        failure_event = report["pre_http_failure_evidence"]["failure_event"]
+        self.assertEqual(failure_event["android_vulkan_features"]["shaderInt8"], 1)
+        self.assertNotIn("android_vulkan_enabled_features", failure_event)
 
     def test_structured_unsupported_executor_oracle_evidence_fails_closed(self):
         payload = {

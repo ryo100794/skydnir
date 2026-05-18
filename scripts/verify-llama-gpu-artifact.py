@@ -1004,6 +1004,7 @@ def _pre_http_failure_evidence(diagnostics: dict[str, Any]) -> dict[str, Any]:
             "spirv_feature_mismatch",
             "spirv_feature_mismatches",
             "android_vulkan_features",
+            "android_vulkan_enabled_features",
             "spirv_capabilities",
         ),
         "pipeline_key": pick(

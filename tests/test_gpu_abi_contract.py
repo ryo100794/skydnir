@@ -1021,8 +1021,8 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-workgroup3d-20260513",
-                        "observed_executor_markers": ["gpu-executor-workgroup3d-20260513"],
+                        "expected_executor_marker": "gpu-executor-enabled-features-20260518",
+                        "observed_executor_markers": ["gpu-executor-enabled-features-20260518"],
                     },
                     "config_propagation": {
                         "summary": "fail",
@@ -1134,7 +1134,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-workgroup3d-20260513",
+                        "expected_executor_marker": "gpu-executor-enabled-features-20260518",
                         "observed_executor_markers": [],
                     },
                 },
@@ -1176,7 +1176,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-workgroup3d-20260513",
+                        "expected_executor_marker": "gpu-executor-enabled-features-20260518",
                         "observed_executor_markers": [],
                     },
                 },
@@ -1199,8 +1199,8 @@ class GpuAbiContractTest(unittest.TestCase):
                     "blocker_detail": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-workgroup3d-20260513",
-                        "observed_executor_markers": ["gpu-executor-workgroup3d-20260513"],
+                        "expected_executor_marker": "gpu-executor-enabled-features-20260518",
+                        "observed_executor_markers": ["gpu-executor-enabled-features-20260518"],
                     },
                     "config_propagation": {"summary": "pass", "checks": []},
                 },
@@ -1214,6 +1214,49 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", report["gpu_blocker_detail"])
         self.assertIn("pre_http_failure_evidence", report)
         self.assertIn("q6_reachability", report["pre_http_failure_evidence"])
+
+    def test_llama_gpu_compare_records_pre_q6_failure_summary(self):
+        compare = LLAMA_COMPARE.read_text()
+        for marker in [
+            "def compact_pre_q6_failure",
+            'generic_spirv_dispatch["pre_q6_failure"]',
+            '"q6_reachability"',
+            '"failed_event_count"',
+            '"failure_event"',
+            '"requested_feature_mask"',
+            '"spirv_feature_requirements"',
+            '"android_vulkan_features"',
+            '"android_vulkan_enabled_features"',
+        ]:
+            self.assertIn(marker, compare)
+
+    def test_gpu_executor_reports_enabled_vulkan_features_in_json(self):
+        source = GPU_EXECUTOR.read_text()
+        for marker in [
+            "write_android_vulkan_enabled_features_report",
+            '\\"android_vulkan_enabled_features\\":{',
+            '\\"chain_compat_feature_structs\\":%u',
+            "enabled_ext_16bit_storage",
+            "enabled_ext_8bit_storage",
+            "enabled_ext_shader_float16_int8",
+            "enabled_ext_storage_buffer_storage_class",
+            "#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER \"gpu-executor-enabled-features-20260518\"",
+        ]:
+            self.assertIn(marker, source)
+        failure_body = source.split("if (ret != 0) {", 1)[1].split("if (fence) vkDestroyFence", 1)[0]
+        failure_features = failure_body.index('\\"android_vulkan_features\\":{')
+        failure_enabled = failure_body.index("write_android_vulkan_enabled_features_report(json_out(), rt);")
+        failure_close = failure_body.index('fprintf(json_out(), "}\\n");', failure_enabled)
+        self.assertLess(failure_features, failure_enabled)
+        self.assertLess(failure_enabled, failure_close)
+        capabilities_body = source.split("static void print_capabilities", 1)[1].split(
+            "static void print_noop", 1
+        )[0]
+        capabilities_features = capabilities_body.index('\\"android_vulkan_features\\":{')
+        capabilities_enabled = capabilities_body.index("write_android_vulkan_enabled_features_report(json_out(), rt);")
+        capabilities_close = capabilities_body.index('fprintf(json_out(), ",\\\"process_exec\\\":true}\\n");')
+        self.assertLess(capabilities_features, capabilities_enabled)
+        self.assertLess(capabilities_enabled, capabilities_close)
 
     def test_llama_gpu_dispatch_lifecycle_logs_are_recorded(self):
         compare = LLAMA_COMPARE.read_text()
