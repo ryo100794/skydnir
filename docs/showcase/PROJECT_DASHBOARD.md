@@ -47,7 +47,7 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 | doing | Execution timeline and delegated task control: `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged gates, current agent assignments, merge checklists, and... |
 | next | Script directory cleanup follow-up: register `scripts/verify/runner/*` in the script inventory, keep the documented `__pycache__` cleanup policy in `.gitignore` (`scripts/__pycache__` and... |
 | doing | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from device discovery and... |
-| next | [#10](https://github.com/ryo100794/pdocker-android/issues/10) / [#5](https://github.com/ryo100794/pdocker-android/issues/5) runtime teardown and terminal exec-it scheduling: plan these as... |
+| next | [#10](https://github.com/ryo100794/pdocker-android/issues/10) / [#5](https://github.com/ryo100794/pdocker-android/issues/5) runtime teardown and terminal exec-it scheduling: gate hardening... |
 | next | [#5](https://github.com/ryo100794/pdocker-android/issues/5) Terminal `-it` interactive path: refactor the terminal stack according to `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`. The UI... |
 | doing | [#6](https://github.com/ryo100794/pdocker-android/issues/6) Service truth same-container-ID device gate: the listener health and ID/label truth work are one gate. Probe default workspace... |
 | next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU performance workflow after Vulkan clamp: keep CPU fallback hiding Vulkan devices, force Vulkan only for measured GPU... |
