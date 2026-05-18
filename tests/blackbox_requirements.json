@@ -141,7 +141,7 @@
         "given": "A readonly build or daemon log pane is focused.",
         "when": "The user selects or scrolls text.",
         "then": "The soft keyboard does not appear and the pane never accepts terminal input.",
-        "failure_oracle": "UI contract checks fail if readonly terminals are not marked readonly or keyboard suppression is removed; the exec-it verifier rejects planned-skip or missing raw input evidence when container proof is required."
+        "failure_oracle": "UI contract checks fail if readonly terminals are not marked readonly or keyboard suppression is removed; the exec-it verifier rejects planned-skip artifacts and missing raw input evidence; passing evidence requires a real container."
       }
     },
     {

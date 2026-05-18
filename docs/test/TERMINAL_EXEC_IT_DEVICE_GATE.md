@@ -8,16 +8,16 @@ rationale are intentionally not restated here; the architecture document is the
 source of truth for those design details.
 
 This gate protects the UI route that opens an interactive container terminal
-through the Engine exec API. It is a hard gate only when a real Engine container
-ID or name is required by the caller.
+through the Engine exec API. Passing evidence always requires a real Engine
+container ID or name; planned-skip artifacts are diagnostics only.
 
 ## Pass/fail rule
 
 - `planned-skip is evidence, not success`.
-- If `HardGateRequired` is true in a skip artifact, or the verifier is invoked
-  with `--require-container`, `Status: planned-skip` must fail the gate.
-- A planned-skip may validate only as optional skip evidence; it never promotes
-  or substitutes for a real-container pass, even if a stale JSONL sidecar exists.
+- `Status: planned-skip` must fail the verifier with or without
+  `--require-container`.
+- A planned-skip never promotes or substitutes for a real-container pass, even
+  if a stale JSONL sidecar exists.
 - A real-container pass must contain `Success: true`, a non-empty
   `Container` value, `StartedAtMs`, and non-negative `DurationMs`; the JSONL
   `start.container` must exactly match it. A success artifact that explicitly
@@ -27,8 +27,8 @@ ID or name is required by the caller.
   ui-it-selftest-latest.json engine-exec-input-latest.jsonl
   --require-container` must also pass against the raw Engine exec JSONL
   collected from the device.
-- Quick smoke may still write a planned-skip artifact when no container exists,
-  but that artifact is never counted as a hard-gate pass.
+- Quick smoke does not count no-container planned-skip artifacts as a pass; the
+  UI self-test runs only when a container is provided or created by full smoke.
 
 ## Device artifacts
 

@@ -34,13 +34,34 @@ def add_strict_remaining_slice_reduction(proofs):
                 "ListenerOwner": cid,
                 "GpuMediaExecutorResidue": cid,
                 "PersistedStateJson": cid,
+                "LifecycleLogs": cid,
+                "ContainerLogs": cid,
             }
         )
         reduction.update(
             {
+                "LivePreOperationIdentitySameContainerId": True,
+                "StalePidAnchoredToLiveIdentity": True,
+                "DirectChildProofAnchoredToLiveIdentity": True,
                 "ListenerOwnerSameContainerId": True,
                 "GpuMediaExecutorResidueSameContainerId": True,
                 "PersistedStateJsonSameContainerId": True,
+                "LifecycleLogsSameContainerId": True,
+                "ContainerLogsSameContainerId": True,
+                "LiveIdentity": {
+                    "ContainerId": cid,
+                    "InspectBeforePid": "4242",
+                    "LiveBeforeOperation": True,
+                    "PidPresentBeforeOperation": True,
+                    "StalePidArtifactsAnchored": True,
+                    "DirectChildArtifactsAnchored": True,
+                },
+                "ListenerReduction": {
+                    "ContainerId": cid,
+                    "ListenerOwnerSameContainerId": True,
+                    "AfterOperationListenerForLivePidAbsent": True,
+                    "AfterRemoveListenerForLivePidAbsent": True,
+                },
                 "PersistedStateTeardownFields": {
                     "ContainerId": cid,
                     "StatePidCleared": True,
@@ -53,6 +74,13 @@ def add_strict_remaining_slice_reduction(proofs):
                     "PdockerTeardownNoOrphanProcesses": True,
                     "PdockerTeardownSurvivorsEmpty": True,
                     "PdockerTeardownSurvivors": [],
+                },
+                "LogBinding": {
+                    "ContainerId": cid,
+                    "LifecycleLogsSameContainerId": True,
+                    "ContainerLogsSameContainerId": True,
+                    "LifecycleCommandArtifactsComplete": True,
+                    "ContainerLogArtifactsComplete": True,
                 },
             }
         )
@@ -164,6 +192,29 @@ class RuntimeTeardownArtifactVerifierTest(unittest.TestCase):
             bad = self.run_verifier(str(artifact_path), "--evidence-root", str(Path(tmp) / "runtime-teardown"))
             self.assertNotEqual(bad.returncode, 0)
             self.assertIn("PersistedStateTeardownFields.StatePidCleared", bad.stderr)
+
+    def test_device_pass_rejects_unanchored_stale_pid_and_direct_child_proof(self):
+        def mutate(_artifact, proofs, _negatives):
+            reduction = proofs["same-container-id-stop-rm"]["VerifierReduction"]
+            reduction["StalePidAnchoredToLiveIdentity"] = False
+            reduction["LiveIdentity"]["StalePidArtifactsAnchored"] = False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = self.write_device_pass_fixture(Path(tmp), mutate=mutate)
+            bad = self.run_verifier(str(artifact_path), "--evidence-root", str(Path(tmp) / "runtime-teardown"))
+            self.assertNotEqual(bad.returncode, 0)
+            self.assertIn("StalePidAnchoredToLiveIdentity", bad.stderr)
+
+    def test_device_pass_rejects_log_binding_container_id_mismatch(self):
+        def mutate(_artifact, proofs, _negatives):
+            proofs["same-container-id-kill-rm"]["VerifierReduction"]["LogBinding"]["ContainerId"] = "3" * 64
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = self.write_device_pass_fixture(Path(tmp), mutate=mutate)
+            bad = self.run_verifier(str(artifact_path), "--evidence-root", str(Path(tmp) / "runtime-teardown"))
+            self.assertNotEqual(bad.returncode, 0)
+            self.assertIn("LogBinding.ContainerId", bad.stderr)
+
 
     def test_planned_gap_is_not_device_pass(self):
         artifact, _proofs, _negatives = runtime_teardown_fixture()

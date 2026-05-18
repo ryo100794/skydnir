@@ -143,8 +143,7 @@ def _verify_planned_skip(artifact: dict[str, Any], require_container: bool) -> N
         artifact.get("DeviceProofAttempted") is not True,
         "UI exec-it planned-skip must not claim device proof was attempted",
     )
-    if require_container or artifact.get("HardGateRequired") is True:
-        raise VerificationError("UI exec-it hard gate requires a real container; planned-skip is not a pass")
+    raise VerificationError("UI exec-it requires a real container; planned-skip is not a pass")
 
 
 def _verify_success_json(artifact: dict[str, Any], require_container: bool) -> str:
@@ -354,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("artifact", type=Path, help="ui-it-selftest-latest.json")
     parser.add_argument("input_jsonl", type=Path, help="engine-exec-input-latest.jsonl")
-    parser.add_argument("--require-container", action="store_true", help="planned-skip is a hard failure")
+    parser.add_argument("--require-container", action="store_true", help="require a non-empty container in success artifacts; planned-skip always fails")
     args = parser.parse_args(argv)
     try:
         verify(args.artifact, args.input_jsonl, require_container=args.require_container)

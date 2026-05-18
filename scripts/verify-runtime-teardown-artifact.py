@@ -6,7 +6,7 @@ artifacts until the device evidence has been reduced.  This verifier has two
 explicit modes:
 
 * ``--expect-planned-gap``: accept only ``Status=planned-gap`` /
-  ``Success=false``.  This is the current focused lane.
+  ``Success=false`` for non-promoted evidence.
 * default / ``--expect-device-pass``: require ``Status=device-pass`` and load
   the referenced same-container-ID proof and negative-case artifacts from disk.
 
@@ -39,11 +39,18 @@ TEARDOWN_STRICT_SAME_ID_SOURCES = [
     "ListenerOwner",
     "GpuMediaExecutorResidue",
     "PersistedStateJson",
+    "LifecycleLogs",
+    "ContainerLogs",
 ]
 TEARDOWN_STRICT_SAME_ID_FLAGS = [
+    "LivePreOperationIdentitySameContainerId",
+    "StalePidAnchoredToLiveIdentity",
+    "DirectChildProofAnchoredToLiveIdentity",
     "ListenerOwnerSameContainerId",
     "GpuMediaExecutorResidueSameContainerId",
     "PersistedStateJsonSameContainerId",
+    "LifecycleLogsSameContainerId",
+    "ContainerLogsSameContainerId",
 ]
 TEARDOWN_PERSISTED_STATE_CLEAR_FIELDS = [
     "StatePidCleared",
@@ -178,14 +185,33 @@ def exact_container_id(value: Any, field: str) -> str:
     return value.lower()
 
 
+
+def require_reduction_object(reduction: dict[str, Any], name: str, field: str) -> dict[str, Any]:
+    value = reduction.get(field)
+    if not isinstance(value, dict):
+        fail(f"{name}.VerifierReduction.{field} must be present")
+    return value
+
+
+def require_same_container_field(obj: dict[str, Any], *, name: str, field: str, cid: str) -> None:
+    obj_cid = exact_container_id(obj.get("ContainerId"), f"{name}.VerifierReduction.{field}.ContainerId")
+    if obj_cid != cid:
+        fail(f"{name}.VerifierReduction.{field}.ContainerId must exactly match ContainerId")
+
+
+def require_true(obj: dict[str, Any], *, name: str, prefix: str, field: str) -> None:
+    if obj.get(field) is not True:
+        fail(f"{name}.VerifierReduction.{prefix}.{field} must be true")
+
 def validate_strict_same_container_reduction(proofs: dict[str, dict[str, Any]]) -> None:
     """Require the remaining teardown residues to be same-container-ID proof.
 
     The service-truth contract validates the broad promoted schema.  This
     verifier additionally hard-gates the remaining P0 slice before accepting a
-    device-pass artifact: listener owner, GPU/media executor residue, and every
-    persisted-state teardown field must reduce to the proof's exact Engine
-    container ID.
+    device-pass artifact: stale PID/direct-child proof must anchor to the live
+    pre-stop/pre-kill identity, and listener owner, GPU/media executor residue,
+    persisted-state teardown, and log-binding fields must reduce to the proof's
+    exact Engine container ID.
     """
 
     for name, proof in proofs.items():
@@ -209,15 +235,30 @@ def validate_strict_same_container_reduction(proofs: dict[str, dict[str, Any]]) 
             if reduction.get(flag) is not True:
                 fail(f"{name}.VerifierReduction.{flag} must be true")
 
-        persisted = reduction.get("PersistedStateTeardownFields")
-        if not isinstance(persisted, dict):
-            fail(f"{name}.VerifierReduction.PersistedStateTeardownFields must be present")
-        persisted_cid = exact_container_id(
-            persisted.get("ContainerId"),
-            f"{name}.VerifierReduction.PersistedStateTeardownFields.ContainerId",
-        )
-        if persisted_cid != cid:
-            fail(f"{name}.VerifierReduction.PersistedStateTeardownFields.ContainerId must exactly match ContainerId")
+        live_identity = require_reduction_object(reduction, name, "LiveIdentity")
+        require_same_container_field(live_identity, name=name, field="LiveIdentity", cid=cid)
+        for field in [
+            "LiveBeforeOperation",
+            "PidPresentBeforeOperation",
+            "StalePidArtifactsAnchored",
+            "DirectChildArtifactsAnchored",
+        ]:
+            require_true(live_identity, name=name, prefix="LiveIdentity", field=field)
+        live_pid = live_identity.get("InspectBeforePid")
+        if not isinstance(live_pid, (int, str)) or not str(live_pid).isdigit() or int(live_pid) <= 0:
+            fail(f"{name}.VerifierReduction.LiveIdentity.InspectBeforePid must be a live positive PID")
+
+        listener = require_reduction_object(reduction, name, "ListenerReduction")
+        require_same_container_field(listener, name=name, field="ListenerReduction", cid=cid)
+        for field in [
+            "ListenerOwnerSameContainerId",
+            "AfterOperationListenerForLivePidAbsent",
+            "AfterRemoveListenerForLivePidAbsent",
+        ]:
+            require_true(listener, name=name, prefix="ListenerReduction", field=field)
+
+        persisted = require_reduction_object(reduction, name, "PersistedStateTeardownFields")
+        require_same_container_field(persisted, name=name, field="PersistedStateTeardownFields", cid=cid)
         for field in TEARDOWN_PERSISTED_STATE_CLEAR_FIELDS:
             if persisted.get(field) is not True:
                 fail(f"{name}.VerifierReduction.PersistedStateTeardownFields.{field} must be true")
@@ -225,6 +266,16 @@ def validate_strict_same_container_reduction(proofs: dict[str, dict[str, Any]]) 
         survivors = persisted.get("PdockerTeardownSurvivors")
         if survivors not in ([], None):
             fail(f"{name}.VerifierReduction.PersistedStateTeardownFields.PdockerTeardownSurvivors must be empty")
+
+        log_binding = require_reduction_object(reduction, name, "LogBinding")
+        require_same_container_field(log_binding, name=name, field="LogBinding", cid=cid)
+        for field in [
+            "LifecycleLogsSameContainerId",
+            "ContainerLogsSameContainerId",
+            "LifecycleCommandArtifactsComplete",
+            "ContainerLogArtifactsComplete",
+        ]:
+            require_true(log_binding, name=name, prefix="LogBinding", field=field)
 
 
 def validate_planned_gap(artifact: dict[str, Any]) -> None:

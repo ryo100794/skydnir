@@ -137,7 +137,7 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
             with self.assertRaisesRegex(verifier.VerificationError, "planned-skip must never report Success=true"):
                 verifier.verify(artifact_path, input_path, require_container=False)
 
-    def test_accepts_planned_skip_only_as_optional_non_promoting_skip_evidence(self):
+    def test_rejects_planned_skip_even_when_optional_non_promoting_skip_evidence(self):
         artifact = {
             "Name": "ui-engine-exec-it",
             "Status": "planned-skip",
@@ -147,7 +147,8 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
         }
         tmp, artifact_path, input_path = self.write_case(artifact=artifact, events=None)
         with tmp:
-            verifier.verify(artifact_path, input_path, require_container=False)
+            with self.assertRaisesRegex(verifier.VerificationError, "requires a real container; planned-skip is not a pass"):
+                verifier.verify(artifact_path, input_path, require_container=False)
 
     def test_rejects_planned_skip_when_artifact_marks_hard_gate_even_without_cli_flag(self):
         artifact = {
@@ -159,7 +160,7 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
         }
         tmp, artifact_path, input_path = self.write_case(artifact=artifact, events=None)
         with tmp:
-            with self.assertRaisesRegex(verifier.VerificationError, "hard gate requires a real container"):
+            with self.assertRaisesRegex(verifier.VerificationError, "requires a real container"):
                 verifier.verify(artifact_path, input_path, require_container=False)
 
     def test_rejects_success_artifact_without_container_even_when_optional(self):

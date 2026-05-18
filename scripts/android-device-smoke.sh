@@ -979,27 +979,131 @@ inspect_pid_from_http() {
     | sed 's/.*://; s/[^0-9]//g'
 }
 
+inspect_running_from_http() {
+  grep -Eq '"Running"[[:space:]]*:[[:space:]]*true' "$1" 2>/dev/null
+}
+
+process_snapshot_has_pid() {
+  pid="$1"
+  process_snapshot="$2"
+  [ -n "$pid" ] && [ "$pid" != "0" ] && grep -Eq "(^|[[:space:]])$pid([[:space:]]|$)" "$process_snapshot" 2>/dev/null
+}
+
+json_bool_field_true() {
+  artifact="$1"
+  field="$2"
+  [ -f "$artifact" ] && grep -Eq '"'$field'"[[:space:]]*:[[:space:]]*true' "$artifact" 2>/dev/null
+}
+
+listener_snapshot_mentions_pid() {
+  pid="$1"
+  artifact="$2"
+  [ -n "$pid" ] && [ "$pid" != "0" ] && [ -f "$artifact" ] \
+    && grep -Eq "(pid=|pid[[:space:]]+|[,/[:space:]])$pid([,)/[:space:]]|$)" "$artifact" 2>/dev/null
+}
+
+executor_residue_has_entries() {
+  artifact="$1"
+  [ -f "$artifact" ] && awk 'NR > 1 && NF { found=1 } END { exit found ? 0 : 1 }' "$artifact" 2>/dev/null
+}
+
+state_field_number_cleared() {
+  artifact="$1"
+  field="$2"
+  [ -f "$artifact" ] && ! grep -Eq '"'$field'"[[:space:]]*:[[:space:]]*[1-9][0-9]*' "$artifact" 2>/dev/null
+}
+
+state_field_text_cleared() {
+  artifact="$1"
+  field="$2"
+  [ -f "$artifact" ] && ! grep -Eq '"'$field'"[[:space:]]*:[[:space:]]*"[^"]+"' "$artifact" 2>/dev/null
+}
+
+state_field_array_cleared() {
+  artifact="$1"
+  field="$2"
+  [ -f "$artifact" ] && ! grep -Eq '"'$field'"[[:space:]]*:[[:space:]]*\[[^]]*[0-9][^]]*\]' "$artifact" 2>/dev/null
+}
+
+state_teardown_no_orphans() {
+  artifact="$1"
+  [ -f "$artifact" ] && grep -Eq '"NoOrphanProcesses"[[:space:]]*:[[:space:]]*true' "$artifact" 2>/dev/null
+}
+
+state_teardown_survivors_empty() {
+  artifact="$1"
+  [ -f "$artifact" ] && grep -Eq '"Survivors"[[:space:]]*:[[:space:]]*\[[[:space:]]*\]' "$artifact" 2>/dev/null
+}
+
+write_live_identity_evidence() {
+  label="$1"
+  cid="$2"
+  identity_inspect_http="$3"
+  process_snapshot="$4"
+  pid="$(inspect_pid_from_http "$identity_inspect_http")"
+  running=false
+  inspect_running_from_http "$identity_inspect_http" && running=true
+  pid_present=false
+  process_snapshot_has_pid "$pid" "$process_snapshot" && pid_present=true
+  same_container=false
+  is_exact_engine_container_id "$cid" && json_id_field_equals "$cid" "$identity_inspect_http" && same_container=true
+  proven=false
+  [ "$same_container" = true ] && [ "$running" = true ] && [ "$pid_present" = true ] && proven=true
+  cat >"$DIAG/$label.json" <<JSON
+{
+  "SchemaVersion": 1,
+  "Kind": "runtime-teardown-live-identity-proof",
+  "ContainerId": $(json_string "$cid"),
+  "IdentityInspectHttp": $(json_string "files/$identity_inspect_http"),
+  "ProcessSnapshot": $(json_string "files/$process_snapshot"),
+  "InspectBeforePid": $(json_string "$pid"),
+  "LiveBeforeOperation": $(json_bool "$running"),
+  "PidPresentBeforeOperation": $(json_bool "$pid_present"),
+  "SameContainerId": $(json_bool "$same_container"),
+  "Proven": $(json_bool "$proven"),
+  "Contract": "Stale PID and direct-child absence must be anchored to the live pre-stop/pre-kill inspect identity for this exact Engine container ID; after-stop or after-rm State.Pid=0 is not enough."
+}
+JSON
+}
+
 write_pid_evidence() {
   label="$1"
   cid="$2"
-  inspect_http="$3"
+  identity_inspect_http="$3"
   process_snapshot="$4"
-  pid="$(inspect_pid_from_http "$inspect_http")"
+  observed_inspect_http="${5:-$identity_inspect_http}"
+  pid="$(inspect_pid_from_http "$identity_inspect_http")"
+  identity_running=false
+  inspect_running_from_http "$identity_inspect_http" && identity_running=true
+  identity_same=false
+  is_exact_engine_container_id "$cid" && json_id_field_equals "$cid" "$identity_inspect_http" && identity_same=true
   if [ -z "$pid" ] || [ "$pid" = "0" ]; then
     present="unknown"
-  elif grep -Eq "(^|[[:space:]])$pid([[:space:]]|$)" "$process_snapshot" 2>/dev/null; then
+  elif process_snapshot_has_pid "$pid" "$process_snapshot"; then
     present="true"
   else
     present="false"
   fi
+  anchored=false
+  [ "$identity_same" = true ] && [ "$identity_running" = true ] && [ -n "$pid" ] && [ "$pid" != "0" ] && anchored=true
+  stale_absent=false
+  [ "$anchored" = true ] && [ "$present" = false ] && stale_absent=true
   cat >"$DIAG/$label.json" <<JSON
 {
+  "SchemaVersion": 1,
+  "Kind": "runtime-teardown-stale-pid-proof",
   "ContainerId": $(json_string "$cid"),
-  "InspectHttp": $(json_string "files/$inspect_http"),
+  "IdentityInspectHttp": $(json_string "files/$identity_inspect_http"),
+  "ObservedInspectHttp": $(json_string "files/$observed_inspect_http"),
   "ProcessSnapshot": $(json_string "files/$process_snapshot"),
   "InspectPid": $(json_string "$pid"),
+  "LivePreOperationPid": $(json_string "$pid"),
+  "LivePreOperationIdentitySameContainerId": $(json_bool "$identity_same"),
+  "LivePreOperationIdentityRunning": $(json_bool "$identity_running"),
+  "AnchoredToLivePreOperationIdentity": $(json_bool "$anchored"),
   "PidStillPresentInSnapshot": $(json_string "$present"),
-  "Contract": "A stopped/killed/removed container is not proven torn down until its inspect PID/process tree and any stale PID references are absent for the same Engine container ID."
+  "StalePidAbsence": $(json_bool "$stale_absent"),
+  "Contract": "A stale PID proof must search the post-operation process table for the live pre-stop/pre-kill State.Pid of this exact Engine container ID; after-operation inspect PID clearing alone is not teardown proof."
 }
 JSON
 }
@@ -1007,9 +1111,16 @@ JSON
 write_process_tree_evidence() {
   label="$1"
   cid="$2"
-  inspect_http="$3"
+  identity_inspect_http="$3"
   process_snapshot="$4"
-  pid="$(inspect_pid_from_http "$inspect_http")"
+  observed_inspect_http="${5:-$identity_inspect_http}"
+  pid="$(inspect_pid_from_http "$identity_inspect_http")"
+  identity_running=false
+  inspect_running_from_http "$identity_inspect_http" && identity_running=true
+  identity_same=false
+  is_exact_engine_container_id "$cid" && json_id_field_equals "$cid" "$identity_inspect_http" && identity_same=true
+  anchored=false
+  [ "$identity_same" = true ] && [ "$identity_running" = true ] && [ -n "$pid" ] && [ "$pid" != "0" ] && anchored=true
   children="$DIAG/$label-direct-children.txt"
   : >"$children"
   if [ -n "$pid" ] && [ "$pid" != "0" ]; then
@@ -1017,23 +1128,31 @@ write_process_tree_evidence() {
   fi
   if [ -s "$children" ]; then
     direct_children_present="true"
-  elif [ -z "$pid" ] || [ "$pid" = "0" ]; then
-    direct_children_present="unknown"
-  else
+  elif [ "$anchored" = true ]; then
     direct_children_present="false"
+  else
+    direct_children_present="unknown"
   fi
+  direct_child_absence=false
+  [ "$anchored" = true ] && [ "$direct_children_present" = false ] && direct_child_absence=true
   cat >"$DIAG/$label.json" <<JSON
 {
   "SchemaVersion": 1,
   "Kind": "runtime-teardown-process-tree-proof",
   "ContainerId": $(json_string "$cid"),
-  "InspectHttp": $(json_string "files/$inspect_http"),
+  "IdentityInspectHttp": $(json_string "files/$identity_inspect_http"),
+  "ObservedInspectHttp": $(json_string "files/$observed_inspect_http"),
   "ProcessSnapshot": $(json_string "files/$process_snapshot"),
   "InspectPid": $(json_string "$pid"),
+  "LivePreOperationPid": $(json_string "$pid"),
+  "LivePreOperationIdentitySameContainerId": $(json_bool "$identity_same"),
+  "LivePreOperationIdentityRunning": $(json_bool "$identity_running"),
+  "AnchoredToLivePreOperationIdentity": $(json_bool "$anchored"),
   "DirectChildrenArtifact": $(json_string "files/$children"),
   "DirectChildrenPresent": $(json_string "$direct_children_present"),
+  "DirectChildAbsence": $(json_bool "$direct_child_absence"),
   "RequiredForDevicePass": true,
-  "Contract": "No device-pass may be claimed until the stopped/killed/removed Engine container ID has no live State.Pid and no direct children in the post-operation process table; HTTP 204 or CLI exit 0 is not direct-child proof."
+  "Contract": "No device-pass may be claimed until the live pre-stop/pre-kill State.Pid for this exact Engine container ID has no direct children in the post-operation process table; HTTP 204, CLI exit 0, or after-operation State.Pid=0 is not direct-child proof."
 }
 JSON
 }
@@ -1096,18 +1215,21 @@ write_same_id_evidence() {
   case "$operation" in
     stop-rm)
       lifecycle_op="stop"; lifecycle_rm="rm-stopped"
+      live_identity="$DIAG/stop-live-identity-before-stop.json"
       direct_children_after_operation="$DIAG/stop-process-tree-after-stop.json"
       direct_children_after_rm="$DIAG/stop-process-tree-after-rm.json"
       stale_name_after_rm="$DIAG/stop-stale-name-after-rm.json"
       ;;
     kill-rm)
       lifecycle_op="kill"; lifecycle_rm="rm-killed"
+      live_identity="$DIAG/kill-live-identity-before-kill.json"
       direct_children_after_operation="$DIAG/kill-process-tree-after-kill.json"
       direct_children_after_rm="$DIAG/kill-process-tree-after-rm.json"
       stale_name_after_rm="$DIAG/kill-stale-name-after-rm.json"
       ;;
     *)
       lifecycle_op="$operation"; lifecycle_rm="rm"
+      live_identity=""
       direct_children_after_operation=""
       direct_children_after_rm=""
       stale_name_after_rm=""
@@ -1147,12 +1269,29 @@ write_same_id_evidence() {
   direct_child_absence=false
   stale_pid_absence=false
   process_tree_clear=false
+  live_identity_same_container_id=false
+  stale_pid_anchored_to_live_identity=false
+  direct_child_anchored_to_live_identity=false
   listener_absence=false
+  listener_owner_same_container_id=false
   stale_name_absence=false
   residue_absence=false
+  gpu_media_executor_residue_same_container_id=false
   persisted_state_cleared=false
+  persisted_state_json_same_container_id=false
+  state_pid_cleared=false
+  pid_start_time_cleared=false
+  pdocker_known_pids_cleared=false
+  pdocker_launcher_pid_cleared=false
+  pdocker_launcher_pid_start_time_cleared=false
+  pdocker_launcher_pgid_cleared=false
+  pdocker_process_group_id_cleared=false
+  pdocker_teardown_no_orphan_processes=false
+  pdocker_teardown_survivors_empty=false
   lifecycle_logs_bound=false
+  lifecycle_logs_same_container_id=false
   container_logs_bound=false
+  container_logs_same_container_id=false
 
   if is_exact_engine_container_id "$cid"; then
     cid_exact=true
@@ -1203,6 +1342,13 @@ write_same_id_evidence() {
     add_gap_reason "Engine /containers/json after rm was missing or cannot be bound to an exact container ID"
   fi
 
+  pre_operation_pid="$(inspect_pid_from_http "$inspect_before")"
+  if json_bool_field_true "$live_identity" "Proven"; then
+    live_identity_same_container_id=true
+  else
+    add_gap_reason "live pre-stop/pre-kill identity is missing or not bound to the same Engine container ID"
+  fi
+
   if json_field_equals "$direct_children_after_operation" "DirectChildrenPresent" "true"; then
     add_fail_reason "direct children are still present after lifecycle operation"
     add_survivor "direct_children_after_operation=$(printf '%s' "$direct_children_after_operation")"
@@ -1215,27 +1361,49 @@ write_same_id_evidence() {
   elif ! json_field_equals "$direct_children_after_rm" "DirectChildrenPresent" "false"; then
     add_gap_reason "direct-child proof after rm is unknown or missing"
   fi
-  if json_field_equals "$direct_children_after_operation" "DirectChildrenPresent" "false" \
-    && json_field_equals "$direct_children_after_rm" "DirectChildrenPresent" "false"; then
+  if json_bool_field_true "$direct_children_after_operation" "AnchoredToLivePreOperationIdentity" \
+    && json_bool_field_true "$direct_children_after_rm" "AnchoredToLivePreOperationIdentity"; then
+    direct_child_anchored_to_live_identity=true
+  else
+    add_gap_reason "direct-child proof is not anchored to the live pre-stop/pre-kill identity"
+  fi
+  if json_bool_field_true "$direct_children_after_operation" "DirectChildAbsence" \
+    && json_bool_field_true "$direct_children_after_rm" "DirectChildAbsence"; then
     direct_child_absence=true
     process_tree_clear=true
   fi
 
   if json_field_equals "$stale_pid_after_operation" "PidStillPresentInSnapshot" "true"; then
-    add_fail_reason "stale inspect PID is still present after lifecycle operation"
+    add_fail_reason "stale live pre-operation PID is still present after lifecycle operation"
     add_survivor "stale_pid_after_operation=$(printf '%s' "$stale_pid_after_operation")"
   elif ! json_field_equals "$stale_pid_after_operation" "PidStillPresentInSnapshot" "false"; then
     add_gap_reason "stale PID proof after lifecycle operation is unknown or missing"
   fi
   if json_field_equals "$stale_pid_after_rm" "PidStillPresentInSnapshot" "true"; then
-    add_fail_reason "stale inspect PID is still present after rm"
+    add_fail_reason "stale live pre-operation PID is still present after rm"
     add_survivor "stale_pid_after_rm=$(printf '%s' "$stale_pid_after_rm")"
   elif ! json_field_equals "$stale_pid_after_rm" "PidStillPresentInSnapshot" "false"; then
     add_gap_reason "stale PID proof after rm is unknown or missing"
   fi
-  if json_field_equals "$stale_pid_after_operation" "PidStillPresentInSnapshot" "false" \
-    && json_field_equals "$stale_pid_after_rm" "PidStillPresentInSnapshot" "false"; then
+  if json_bool_field_true "$stale_pid_after_operation" "AnchoredToLivePreOperationIdentity" \
+    && json_bool_field_true "$stale_pid_after_rm" "AnchoredToLivePreOperationIdentity"; then
+    stale_pid_anchored_to_live_identity=true
+  else
+    add_gap_reason "stale PID proof is not anchored to the live pre-stop/pre-kill identity"
+  fi
+  if json_bool_field_true "$stale_pid_after_operation" "StalePidAbsence" \
+    && json_bool_field_true "$stale_pid_after_rm" "StalePidAbsence"; then
     stale_pid_absence=true
+  fi
+
+  if [ "$live_identity_same_container_id" = true ] && [ -n "$pre_operation_pid" ] && [ "$pre_operation_pid" != "0" ] \
+    && [ -f "$listener_after_operation" ] && [ -f "$listener_after_rm" ] \
+    && ! listener_snapshot_mentions_pid "$pre_operation_pid" "$listener_after_operation" \
+    && ! listener_snapshot_mentions_pid "$pre_operation_pid" "$listener_after_rm"; then
+    listener_absence=true
+    listener_owner_same_container_id=true
+  else
+    add_gap_reason "listener reducer did not prove absence for the live pre-operation PID and same Engine container ID"
   fi
 
   if json_field_equals "$stale_name_after_rm" "NameStillPresentAfterRemove" "true"; then
@@ -1247,25 +1415,97 @@ write_same_id_evidence() {
     add_gap_reason "stale-name proof after rm is unknown or missing"
   fi
 
+  if [ -f "$residue_after_operation" ] && [ -f "$residue_after_rm" ] \
+    && ! executor_residue_has_entries "$residue_after_operation" && ! executor_residue_has_entries "$residue_after_rm"; then
+    residue_absence=true
+    gpu_media_executor_residue_same_container_id=true
+  else
+    add_gap_reason "GPU/media executor residue reducer found entries or missing snapshots for the same Engine container ID"
+    executor_residue_has_entries "$residue_after_operation" && add_survivor "gpu_media_executor_residue_after_operation=$(printf '%s' "$residue_after_operation")"
+    executor_residue_has_entries "$residue_after_rm" && add_survivor "gpu_media_executor_residue_after_rm=$(printf '%s' "$residue_after_rm")"
+  fi
+
+  state_field_number_cleared "$state_after_operation" "Pid" && state_pid_cleared=true
+  state_field_text_cleared "$state_after_operation" "PidStartTime" && pid_start_time_cleared=true
+  state_field_array_cleared "$state_after_operation" "PdockerKnownPids" && pdocker_known_pids_cleared=true
+  state_field_number_cleared "$state_after_operation" "PdockerLauncherPid" && pdocker_launcher_pid_cleared=true
+  state_field_text_cleared "$state_after_operation" "PdockerLauncherPidStartTime" && pdocker_launcher_pid_start_time_cleared=true
+  state_field_number_cleared "$state_after_operation" "PdockerLauncherPgid" && pdocker_launcher_pgid_cleared=true
+  state_field_number_cleared "$state_after_operation" "PdockerProcessGroupId" && pdocker_process_group_id_cleared=true
+  state_teardown_no_orphans "$state_after_operation" && pdocker_teardown_no_orphan_processes=true
+  state_teardown_survivors_empty "$state_after_operation" && pdocker_teardown_survivors_empty=true
+  if [ "$cid_exact" = true ] && artifact_contains "$cid" "$state_after_operation" \
+    && [ "$state_pid_cleared" = true ] \
+    && [ "$pid_start_time_cleared" = true ] \
+    && [ "$pdocker_known_pids_cleared" = true ] \
+    && [ "$pdocker_launcher_pid_cleared" = true ] \
+    && [ "$pdocker_launcher_pid_start_time_cleared" = true ] \
+    && [ "$pdocker_launcher_pgid_cleared" = true ] \
+    && [ "$pdocker_process_group_id_cleared" = true ] \
+    && [ "$pdocker_teardown_no_orphan_processes" = true ] \
+    && [ "$pdocker_teardown_survivors_empty" = true ]; then
+    persisted_state_cleared=true
+    persisted_state_json_same_container_id=true
+  else
+    add_gap_reason "persisted state reducer did not prove cleared PID/launcher/process-group fields plus PdockerTeardown.NoOrphanProcesses=true and empty Survivors for the same Engine container ID"
+  fi
+
   if [ -f "$DIAG/$lifecycle_op.rc" ] && [ -f "$DIAG/$lifecycle_rm.rc" ]; then
     lifecycle_logs_bound=true
   else
     add_gap_reason "lifecycle command stdout/stderr/rc artifacts are incomplete"
   fi
-  if [ -f "$logs_before" ] && [ -f "$logs_after" ]; then
+  if [ "$lifecycle_logs_bound" = true ] && [ "$create_output_same" = true ] && [ "$inspect_before_same" = true ]; then
+    lifecycle_logs_same_container_id=true
+  else
+    add_gap_reason "lifecycle log binding is not reduced to the same Engine container ID"
+  fi
+  logs_before_rc="${logs_before%.out}.rc"
+  logs_after_rc="${logs_after%.out}.rc"
+  if [ -f "$logs_before" ] && [ -f "$logs_after" ] && [ -f "$logs_before_rc" ] && [ -f "$logs_after_rc" ]; then
     container_logs_bound=true
   else
     add_gap_reason "container log artifacts are incomplete"
   fi
-
-  add_gap_reason "listener absence is captured as raw snapshots but not yet reduced to same-container-ID ownership"
-  add_gap_reason "GPU/media executor residue is captured as raw snapshots but not yet reduced to this container ID"
-  add_gap_reason "persisted state is captured as raw state.json snapshots but not yet reduced to PdockerTeardown.NoOrphanProcesses=true"
+  if [ "$container_logs_bound" = true ] && [ "$cid_exact" = true ] && [ "$inspect_before_same" = true ]; then
+    container_logs_same_container_id=true
+  else
+    add_gap_reason "container log binding is not reduced to the same Engine container ID"
+  fi
 
   engine_inspect_same_container_id=false
   if [ "$create_output_same" = "true" ] && [ "$inspect_before_same" = "true" ] \
     && [ "$inspect_after_same" = "true" ] && [ "$inspect_after_rm_gone" = "true" ]; then
     engine_inspect_same_container_id=true
+  fi
+
+  proof_status="planned-gap"
+  proof_success=false
+  if [ "$engine_inspect_same_container_id" = true ] \
+    && [ "$engine_containers_after_absent" = true ] \
+    && [ "$live_identity_same_container_id" = true ] \
+    && [ "$process_tree_clear" = true ] \
+    && [ "$direct_child_absence" = true ] \
+    && [ "$direct_child_anchored_to_live_identity" = true ] \
+    && [ "$listener_absence" = true ] \
+    && [ "$listener_owner_same_container_id" = true ] \
+    && [ "$stale_pid_absence" = true ] \
+    && [ "$stale_pid_anchored_to_live_identity" = true ] \
+    && [ "$stale_name_absence" = true ] \
+    && [ "$residue_absence" = true ] \
+    && [ "$gpu_media_executor_residue_same_container_id" = true ] \
+    && [ "$persisted_state_cleared" = true ] \
+    && [ "$persisted_state_json_same_container_id" = true ] \
+    && [ "$lifecycle_logs_bound" = true ] \
+    && [ "$lifecycle_logs_same_container_id" = true ] \
+    && [ "$container_logs_bound" = true ] \
+    && [ "$container_logs_same_container_id" = true ] \
+    && [ ! -s "$gap_reasons" ] \
+    && [ ! -s "$fail_reasons" ] \
+    && [ ! -s "$mismatches" ] \
+    && [ ! -s "$survivors" ]; then
+    proof_status="device-pass"
+    proof_success=true
   fi
 
   cat >"$DIAG/$label.json" <<JSON
@@ -1274,9 +1514,21 @@ write_same_id_evidence() {
   "Kind": "same-container-id-teardown-proof",
   "ContainerId": $(json_string "$cid"),
   "Operation": $(json_string "$operation"),
-  "Status": "planned-gap",
-  "Success": false,
+  "Status": $(json_string "$proof_status"),
+  "Success": $(json_bool "$proof_success"),
   "VerifierReduction": {
+    "ReducedEngineContainerId": $( [ "$cid_exact" = true ] && json_string "$cid" || printf null ),
+    "SourceContainerIds": {
+      "EngineApiContainersJson": $( [ "$engine_containers_after_absent" = true ] && json_string "$cid" || printf null ),
+      "EngineApiInspect": $( [ "$engine_inspect_same_container_id" = true ] && json_string "$cid" || printf null ),
+      "PersistedStateJson": $( [ "$persisted_state_json_same_container_id" = true ] && json_string "$cid" || printf null ),
+      "ProcessTable": $( [ "$stale_pid_absence" = true ] && json_string "$cid" || printf null ),
+      "ProcessTree": $( [ "$process_tree_clear" = true ] && json_string "$cid" || printf null ),
+      "ListenerOwner": $( [ "$listener_owner_same_container_id" = true ] && json_string "$cid" || printf null ),
+      "GpuMediaExecutorResidue": $( [ "$gpu_media_executor_residue_same_container_id" = true ] && json_string "$cid" || printf null ),
+      "ContainerLogs": $( [ "$container_logs_same_container_id" = true ] && json_string "$cid" || printf null ),
+      "LifecycleLogs": $( [ "$lifecycle_logs_same_container_id" = true ] && json_string "$cid" || printf null )
+    },
     "EngineInspectSameContainerId": $(json_bool "$engine_inspect_same_container_id"),
     "EngineContainersAfterIdAbsent": $(json_bool "$engine_containers_after_absent"),
     "ProcessTreeClear": $(json_bool "$process_tree_clear"),
@@ -1288,6 +1540,54 @@ write_same_id_evidence() {
     "PersistedStateCleared": $(json_bool "$persisted_state_cleared"),
     "LifecycleLogsBound": $(json_bool "$lifecycle_logs_bound"),
     "ContainerLogsBound": $(json_bool "$container_logs_bound"),
+    "LivePreOperationIdentitySameContainerId": $(json_bool "$live_identity_same_container_id"),
+    "StalePidAnchoredToLiveIdentity": $(json_bool "$stale_pid_anchored_to_live_identity"),
+    "DirectChildProofAnchoredToLiveIdentity": $(json_bool "$direct_child_anchored_to_live_identity"),
+    "ListenerOwnerSameContainerId": $(json_bool "$listener_owner_same_container_id"),
+    "GpuMediaExecutorResidueSameContainerId": $(json_bool "$gpu_media_executor_residue_same_container_id"),
+    "PersistedStateJsonSameContainerId": $(json_bool "$persisted_state_json_same_container_id"),
+    "LifecycleLogsSameContainerId": $(json_bool "$lifecycle_logs_same_container_id"),
+    "ContainerLogsSameContainerId": $(json_bool "$container_logs_same_container_id"),
+    "LiveIdentity": {
+      "ContainerId": $( [ "$live_identity_same_container_id" = true ] && json_string "$cid" || printf null ),
+      "Artifact": $(json_string "files/$live_identity"),
+      "InspectBefore": $(json_string "files/$inspect_before"),
+      "InspectBeforePid": $(json_string "$pre_operation_pid"),
+      "LiveBeforeOperation": $(json_bool "$(inspect_running_from_http "$inspect_before" && printf true || printf false)"),
+      "PidPresentBeforeOperation": $(json_bool "$(process_snapshot_has_pid "$pre_operation_pid" "$process_after_start" && printf true || printf false)"),
+      "StalePidArtifactsAnchored": $(json_bool "$stale_pid_anchored_to_live_identity"),
+      "DirectChildArtifactsAnchored": $(json_bool "$direct_child_anchored_to_live_identity")
+    },
+    "ListenerReduction": {
+      "ContainerId": $( [ "$listener_owner_same_container_id" = true ] && json_string "$cid" || printf null ),
+      "ListenerOwnerSameContainerId": $(json_bool "$listener_owner_same_container_id"),
+      "LivePreOperationPid": $(json_string "$pre_operation_pid"),
+      "AfterOperationListenerForLivePidAbsent": $(json_bool "$([ -f "$listener_after_operation" ] && ! listener_snapshot_mentions_pid "$pre_operation_pid" "$listener_after_operation" && printf true || printf false)"),
+      "AfterRemoveListenerForLivePidAbsent": $(json_bool "$([ -f "$listener_after_rm" ] && ! listener_snapshot_mentions_pid "$pre_operation_pid" "$listener_after_rm" && printf true || printf false)"),
+      "Artifacts": [$(json_string "files/$listener_after_operation"), $(json_string "files/$listener_after_rm")]
+    },
+    "PersistedStateTeardownFields": {
+      "ContainerId": $( [ "$persisted_state_json_same_container_id" = true ] && json_string "$cid" || printf null ),
+      "StatePidCleared": $(json_bool "$state_pid_cleared"),
+      "PidStartTimeCleared": $(json_bool "$pid_start_time_cleared"),
+      "PdockerKnownPidsCleared": $(json_bool "$pdocker_known_pids_cleared"),
+      "PdockerLauncherPidCleared": $(json_bool "$pdocker_launcher_pid_cleared"),
+      "PdockerLauncherPidStartTimeCleared": $(json_bool "$pdocker_launcher_pid_start_time_cleared"),
+      "PdockerLauncherPgidCleared": $(json_bool "$pdocker_launcher_pgid_cleared"),
+      "PdockerProcessGroupIdCleared": $(json_bool "$pdocker_process_group_id_cleared"),
+      "PdockerTeardownNoOrphanProcesses": $(json_bool "$pdocker_teardown_no_orphan_processes"),
+      "PdockerTeardownSurvivorsEmpty": $(json_bool "$pdocker_teardown_survivors_empty"),
+      "PdockerTeardownSurvivors": [],
+      "Artifacts": [$(json_string "files/$state_after_operation"), $(json_string "files/$state_after_rm")]
+    },
+    "LogBinding": {
+      "ContainerId": $( [ "$lifecycle_logs_same_container_id" = true ] && [ "$container_logs_same_container_id" = true ] && json_string "$cid" || printf null ),
+      "LifecycleLogsSameContainerId": $(json_bool "$lifecycle_logs_same_container_id"),
+      "ContainerLogsSameContainerId": $(json_bool "$container_logs_same_container_id"),
+      "LifecycleCommandArtifactsComplete": $(json_bool "$lifecycle_logs_bound"),
+      "ContainerLogArtifactsComplete": $(json_bool "$container_logs_bound"),
+      "Artifacts": [$(json_string "files/$DIAG/$lifecycle_op.out"), $(json_string "files/$DIAG/$lifecycle_op.err"), $(json_string "files/$DIAG/$lifecycle_rm.out"), $(json_string "files/$DIAG/$lifecycle_rm.err"), $(json_string "files/$logs_before"), $(json_string "files/$logs_after")]
+    },
     "MismatchedContainerIds": $(write_json_string_array_from_file "$mismatches"),
     "Survivors": $(write_json_string_array_from_file "$survivors")
   },
@@ -1304,6 +1604,7 @@ write_same_id_evidence() {
     "EngineInspectBefore",
     "EngineInspectAfterOperation",
     "EngineInspectAfterRemove",
+    "LivePreOperationIdentity",
     "ProcessTreeBeforeAfter",
     "DirectChildAbsence",
     "ListenerAbsenceBeforeAfter",
@@ -1319,6 +1620,11 @@ write_same_id_evidence() {
       "Before": $(json_string "files/$inspect_before"),
       "AfterOperation": $(json_string "files/$inspect_after"),
       "AfterRemove": $(json_string "files/$inspect_after_rm")
+    },
+    "LivePreOperationIdentity": {
+      "Artifact": $(json_string "files/$live_identity"),
+      "InspectBefore": $(json_string "files/$inspect_before"),
+      "ProcessSnapshotBeforeOperation": $(json_string "files/$process_after_start")
     },
     "ProcessTree": {
       "Before": $(json_string "files/$process_before"),
@@ -1371,6 +1677,7 @@ write_same_id_evidence() {
     "EngineInspectBefore": $(json_string "files/$inspect_before"),
     "EngineInspectAfterOperation": $(json_string "files/$inspect_after"),
     "EngineInspectAfterRemove": $(json_string "files/$inspect_after_rm"),
+    "LivePreOperationIdentity": $(json_string "files/$live_identity"),
     "ProcessTreeBeforeAfter": [$(json_string "files/$process_before"), $(json_string "files/$process_after_start"), $(json_string "files/$process_after_operation"), $(json_string "files/$process_after_rm")],
     "ListenerAbsenceBeforeAfter": [$(json_string "files/$listener_before"), $(json_string "files/$listener_after_start"), $(json_string "files/$listener_after_operation"), $(json_string "files/$listener_after_rm")],
     "GpuMediaExecutorResidueBeforeAfter": [$(json_string "files/$residue_before"), $(json_string "files/$residue_after_start"), $(json_string "files/$residue_after_operation"), $(json_string "files/$residue_after_rm")],
@@ -1420,22 +1727,23 @@ snapshot_ps process-after-stop-start
 snapshot_listeners listeners-after-stop-start
 snapshot_executor_residue executor-residue-after-stop-start
 snapshot_state_json persisted-state-after-stop-start
+write_live_identity_evidence stop-live-identity-before-stop "$STOP_CID" "$DIAG/stop-inspect-before.http" "$DIAG/process-after-stop-start.txt"
 record_cmd stop docker stop -t 1 "$STOP_CID"
 http_get stop-inspect-after "/containers/$STOP_CID/json"
 record_cmd logs-stop-after docker logs "$STOP_CID"
 snapshot_ps process-after-stop
 snapshot_listeners listeners-after-stop
 snapshot_executor_residue executor-residue-after-stop
-write_pid_evidence stop-stale-pid-after-stop "$STOP_CID" "$DIAG/stop-inspect-after.http" "$DIAG/process-after-stop.txt"
-write_process_tree_evidence stop-process-tree-after-stop "$STOP_CID" "$DIAG/stop-inspect-after.http" "$DIAG/process-after-stop.txt"
+write_pid_evidence stop-stale-pid-after-stop "$STOP_CID" "$DIAG/stop-inspect-before.http" "$DIAG/process-after-stop.txt" "$DIAG/stop-inspect-after.http"
+write_process_tree_evidence stop-process-tree-after-stop "$STOP_CID" "$DIAG/stop-inspect-before.http" "$DIAG/process-after-stop.txt" "$DIAG/stop-inspect-after.http"
 snapshot_state_json persisted-state-after-stop
 record_cmd rm-stopped docker rm "$STOP_CID"
 http_get stop-inspect-after-rm "/containers/$STOP_CID/json"
 snapshot_ps process-after-rm-stopped
 snapshot_listeners listeners-after-rm-stopped
 snapshot_executor_residue executor-residue-after-rm-stopped
-write_pid_evidence stop-stale-pid-after-rm "$STOP_CID" "$DIAG/stop-inspect-after-rm.http" "$DIAG/process-after-rm-stopped.txt"
-write_process_tree_evidence stop-process-tree-after-rm "$STOP_CID" "$DIAG/stop-inspect-after-rm.http" "$DIAG/process-after-rm-stopped.txt"
+write_pid_evidence stop-stale-pid-after-rm "$STOP_CID" "$DIAG/stop-inspect-before.http" "$DIAG/process-after-rm-stopped.txt" "$DIAG/stop-inspect-after-rm.http"
+write_process_tree_evidence stop-process-tree-after-rm "$STOP_CID" "$DIAG/stop-inspect-before.http" "$DIAG/process-after-rm-stopped.txt" "$DIAG/stop-inspect-after-rm.http"
 snapshot_state_json persisted-state-after-rm-stopped
 record_cmd create-kill docker create --name "$KILL_NAME" "$IMAGE" sh -lc 'while true; do sleep 30; done'
 KILL_CID="$(container_id_from_out "$DIAG/create-kill.out")"
@@ -1446,22 +1754,23 @@ snapshot_ps process-after-kill-start
 snapshot_listeners listeners-after-kill-start
 snapshot_executor_residue executor-residue-after-kill-start
 snapshot_state_json persisted-state-after-kill-start
+write_live_identity_evidence kill-live-identity-before-kill "$KILL_CID" "$DIAG/kill-inspect-before.http" "$DIAG/process-after-kill-start.txt"
 record_cmd kill docker kill "$KILL_CID"
 http_get kill-inspect-after "/containers/$KILL_CID/json"
 record_cmd logs-kill-after docker logs "$KILL_CID"
 snapshot_ps process-after-kill
 snapshot_listeners listeners-after-kill
 snapshot_executor_residue executor-residue-after-kill
-write_pid_evidence kill-stale-pid-after-kill "$KILL_CID" "$DIAG/kill-inspect-after.http" "$DIAG/process-after-kill.txt"
-write_process_tree_evidence kill-process-tree-after-kill "$KILL_CID" "$DIAG/kill-inspect-after.http" "$DIAG/process-after-kill.txt"
+write_pid_evidence kill-stale-pid-after-kill "$KILL_CID" "$DIAG/kill-inspect-before.http" "$DIAG/process-after-kill.txt" "$DIAG/kill-inspect-after.http"
+write_process_tree_evidence kill-process-tree-after-kill "$KILL_CID" "$DIAG/kill-inspect-before.http" "$DIAG/process-after-kill.txt" "$DIAG/kill-inspect-after.http"
 snapshot_state_json persisted-state-after-kill
 record_cmd rm-killed docker rm "$KILL_CID"
 http_get kill-inspect-after-rm "/containers/$KILL_CID/json"
 snapshot_ps process-after-rm-killed
 snapshot_listeners listeners-after-rm-killed
 snapshot_executor_residue executor-residue-after-rm-killed
-write_pid_evidence kill-stale-pid-after-rm "$KILL_CID" "$DIAG/kill-inspect-after-rm.http" "$DIAG/process-after-rm-killed.txt"
-write_process_tree_evidence kill-process-tree-after-rm "$KILL_CID" "$DIAG/kill-inspect-after-rm.http" "$DIAG/process-after-rm-killed.txt"
+write_pid_evidence kill-stale-pid-after-rm "$KILL_CID" "$DIAG/kill-inspect-before.http" "$DIAG/process-after-rm-killed.txt" "$DIAG/kill-inspect-after-rm.http"
+write_process_tree_evidence kill-process-tree-after-rm "$KILL_CID" "$DIAG/kill-inspect-before.http" "$DIAG/process-after-rm-killed.txt" "$DIAG/kill-inspect-after-rm.http"
 snapshot_state_json persisted-state-after-rm-killed
 http_get engine-containers-after '/containers/json?all=1'
 write_name_residue_evidence stop-stale-name-after-rm "$STOP_CID" "$STOP_NAME" "$DIAG/engine-containers-after.http"
@@ -1492,6 +1801,19 @@ for cid in "$STOP_CID" "$KILL_CID"; do
 done
 printf '%s' "$CLEANUP_RC" >"$DIAG/cleanup-leftovers.rc"
 
+STOP_PROOF_PASS=false
+KILL_PROOF_PASS=false
+grep -Eq '"Status"[[:space:]]*:[[:space:]]*"device-pass"' "$DIAG/same-container-id-stop-rm.json" 2>/dev/null   && grep -Eq '"Success"[[:space:]]*:[[:space:]]*true' "$DIAG/same-container-id-stop-rm.json" 2>/dev/null   && STOP_PROOF_PASS=true
+grep -Eq '"Status"[[:space:]]*:[[:space:]]*"device-pass"' "$DIAG/same-container-id-kill-rm.json" 2>/dev/null   && grep -Eq '"Success"[[:space:]]*:[[:space:]]*true' "$DIAG/same-container-id-kill-rm.json" 2>/dev/null   && KILL_PROOF_PASS=true
+RUNTIME_TEARDOWN_STATUS="planned-gap"
+RUNTIME_TEARDOWN_SUCCESS=false
+RUNTIME_TEARDOWN_EXIT=2
+if [ "$STOP_PROOF_PASS" = true ] && [ "$KILL_PROOF_PASS" = true ]; then
+  RUNTIME_TEARDOWN_STATUS="device-pass"
+  RUNTIME_TEARDOWN_SUCCESS=true
+  RUNTIME_TEARDOWN_EXIT=0
+fi
+
 STOP_RC="$(cat "$DIAG/stop.rc" 2>/dev/null)"
 KILL_RC="$(cat "$DIAG/kill.rc" 2>/dev/null)"
 RM_STOP_RC="$(cat "$DIAG/rm-stopped.rc" 2>/dev/null)"
@@ -1506,8 +1828,8 @@ cat > "$LATEST" <<JSON
 {
   "SchemaVersion": 1,
   "Kind": "runtime-teardown",
-  "Status": "planned-gap",
-  "Success": false,
+  "Status": $(json_string "$RUNTIME_TEARDOWN_STATUS"),
+  "Success": $(json_bool "$RUNTIME_TEARDOWN_SUCCESS"),
   "Target": $(json_string "$TARGET"),
   "StartedAt": $(json_string "$STARTED_AT"),
   "CompletedAt": $(json_string "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"),
@@ -1527,6 +1849,7 @@ cat > "$LATEST" <<JSON
     "EngineApiInspect": ["files/$DIAG/stop-inspect-before.http", "files/$DIAG/stop-inspect-after.http", "files/$DIAG/stop-inspect-after-rm.http", "files/$DIAG/kill-inspect-before.http", "files/$DIAG/kill-inspect-after.http", "files/$DIAG/kill-inspect-after-rm.http"],
     "ProcessTable": ["files/$DIAG/process-before.txt", "files/$DIAG/process-after-stop-start.txt", "files/$DIAG/process-after-stop.txt", "files/$DIAG/process-after-rm-stopped.txt", "files/$DIAG/process-after-kill-start.txt", "files/$DIAG/process-after-kill.txt", "files/$DIAG/process-after-rm-killed.txt"],
     "ProcessTree": ["files/$DIAG/same-container-id-stop-rm.json", "files/$DIAG/same-container-id-kill-rm.json", "files/$DIAG/stop-process-tree-after-stop.json", "files/$DIAG/stop-process-tree-after-rm.json", "files/$DIAG/kill-process-tree-after-kill.json", "files/$DIAG/kill-process-tree-after-rm.json"],
+    "LivePreOperationIdentity": ["files/$DIAG/stop-live-identity-before-stop.json", "files/$DIAG/kill-live-identity-before-kill.json"],
     "DirectChildAbsence": ["files/$DIAG/stop-process-tree-after-stop.json", "files/$DIAG/stop-process-tree-after-rm.json", "files/$DIAG/kill-process-tree-after-kill.json", "files/$DIAG/kill-process-tree-after-rm.json", "files/$DIAG/stop-process-tree-after-stop-direct-children.txt", "files/$DIAG/kill-process-tree-after-kill-direct-children.txt"],
     "ListenerAbsence": ["files/$DIAG/listeners-before.txt", "files/$DIAG/listeners-after-stop.txt", "files/$DIAG/listeners-after-rm-stopped.txt", "files/$DIAG/listeners-after-kill.txt", "files/$DIAG/listeners-after-rm-killed.txt"],
     "StalePid": ["files/$DIAG/stop-stale-pid-after-stop.json", "files/$DIAG/stop-stale-pid-after-rm.json", "files/$DIAG/kill-stale-pid-after-kill.json", "files/$DIAG/kill-stale-pid-after-rm.json"],
@@ -1545,7 +1868,7 @@ cat > "$LATEST" <<JSON
     "DevicePassStatusRequires": [
       "adb device serial and package run-as context",
       "same Engine container ID across create/inspect/stop-or-kill/rm/logs",
-      "no live State.Pid and no direct children after stop/kill/rm",
+      "no live pre-stop/pre-kill State.Pid and no direct children after stop/kill/rm",
       "no pdocker-direct, service child, listener, GPU executor, media executor, camera/audio/Vulkan helper residue for that container",
       "no stale PID, stale state.json, stale name, duplicate-name, or previous-container-log ambiguity"
     ]
@@ -1572,8 +1895,8 @@ cat > "$LATEST" <<JSON
     "Engine inspect before/after operation/after remove for the same Engine container ID",
     "Process tree before/start/after operation/after remove for the same Engine container ID",
     "Listener absence from /proc/net/tcp, /proc/net/tcp6, ss -ltnp, and netstat -ltnp before/after",
-    "Stale PID absence from inspect State.Pid and post-operation process tables",
-    "Direct child absence for the inspect State.Pid in post-operation process tables",
+    "Stale PID absence anchored to the live pre-stop/pre-kill inspect State.Pid and post-operation process tables",
+    "Direct child absence anchored to the live pre-stop/pre-kill inspect State.Pid in post-operation process tables",
     "GPU/media executor residue before/start/after operation/after remove",
     "Stale container-name and duplicate-name absence from /containers/json after rm",
     "Persisted state.json before/start/after operation/after remove, including PdockerTeardown.NoOrphanProcesses=true and an empty PdockerTeardown.Survivors list after successful stop/kill",
@@ -1606,15 +1929,15 @@ cat > "$LATEST" <<JSON
   "TruthContract": "stop/kill/rm remains non-passing with no fake success until every teardown evidence source proves absence for the same Engine container ID; HTTP 204, CLI exit 0, stale state.json, configured name, listener absence alone, clean process table alone, previous logs, duplicate names, or mixed container IDs are never sufficient.",
   "Unresolved": [
     "HTTP/CLI acknowledgement is recorded but not accepted as proof of teardown.",
-    "The smoke does not yet map every observed process back to the Engine container ID/process tree.",
-    "Listener absence, stale PID absence, and GPU/media executor residue are collected but not yet reduced by a device verifier into a passing proof.",
+    "The smoke fails closed unless stale PID and direct-child absence are anchored to the live pre-stop/pre-kill identity.",
+    "Listener absence, persisted state, log binding, and GPU/media executor residue must reduce to the same Engine container ID before device-pass.",
     "This planned-gap artifact is explicitly not fake success.",
     "Device verifier promotion still needs to reduce raw stop/kill/rm evidence into a passing proof before this can pass."
   ]
 }
 JSON
 cat "$LATEST"
-exit 2
+exit "$RUNTIME_TEARDOWN_EXIT"
 REMOTE_RUNTIME_TEARDOWN
   run_adb push "$local_script" "$remote_script" >/dev/null
   rm -f "$local_script"
@@ -1851,7 +2174,7 @@ def fail(message: str) -> None:
 
 artifact = json.loads(artifact_path.read_text())
 if artifact.get("Status") == "planned-skip":
-    sys.exit(0)
+    fail("UI exec-it planned-skip is non-passing evidence; a real container is required")
 
 tail = str(artifact.get("OutputTail", ""))
 if tail.count("pdocker-ui-it-ok") != 1:
@@ -1930,17 +2253,9 @@ ui_engine_exec_it_selftest() {
   if [[ -z "$container_ref" ]]; then
     echo "[pdocker smoke] ui self-test engine exec -it planned-skip: no container id"
     write_ui_it_selftest_skip_artifact "no container id was available for UI exec-it self-test" "$require_container"
-    if ! validate_ui_it_selftest_artifact "$require_container"; then
-      if [[ "$require_container" == "1" ]]; then
-        echo "UI exec -it hard gate requires a real container; planned-skip is non-passing evidence" >&2
-      fi
-      return 1
-    fi
-    if [[ "$require_container" == "1" ]]; then
-      echo "UI exec -it hard gate requires a real container; planned-skip is non-passing evidence" >&2
-      return 1
-    fi
-    return 0
+    validate_ui_it_selftest_artifact "$require_container" || true
+    echo "UI exec -it gate requires a real container; planned-skip is non-passing evidence" >&2
+    return 1
   fi
   echo "[pdocker smoke] ui self-test engine exec -it container=$container_ref"
   clear_ui_it_selftest_artifacts
@@ -2118,8 +2433,6 @@ fi
 
 if [[ -n "${PDOCKER_UI_IT_SELFTEST_CONTAINER:-}" ]]; then
   ui_engine_exec_it_selftest "$PDOCKER_UI_IT_SELFTEST_CONTAINER" "${PDOCKER_UI_IT_SELFTEST_REQUIRE_CONTAINER:-1}"
-elif [[ "$MODE" == "quick" ]]; then
-  ui_engine_exec_it_selftest "" "${PDOCKER_UI_IT_SELFTEST_REQUIRE_CONTAINER:-0}"
 fi
 
 if [[ "$SINGLE_CONTAINER_ECHO_HI" -eq 1 ]]; then

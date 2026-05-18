@@ -228,9 +228,11 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('write_ui_it_selftest_skip_artifact "no container id was available', body)
         no_container_block = body[body.index('if [[ -z "$container_ref" ]]') : body.index('echo "[pdocker smoke] ui self-test engine exec -it container=$container_ref"')]
         self.assertIn('validate_ui_it_selftest_artifact "$require_container"', no_container_block)
-        self.assertLess(no_container_block.index('validate_ui_it_selftest_artifact "$require_container"'), no_container_block.index('return 0'))
-        self.assertIn('if [[ "$require_container" == "1" ]]', body)
+        self.assertIn('validate_ui_it_selftest_artifact "$require_container" || true', no_container_block)
+        self.assertNotIn('return 0', no_container_block)
         self.assertIn('planned-skip is non-passing evidence', body)
+        validate_body = _shell_function_body(self.android_smoke, "validate_ui_it_selftest_artifact")
+        self.assertIn('planned-skip is non-passing evidence; a real container is required', validate_body)
         self.assertIn('return 1', body)
         self.assertIn('return 0', body)
         self.assertIn('--es container "$container_ref"', body)
@@ -274,7 +276,7 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn('artifact.get("Success") is not True', verifier)
         self.assertIn("planned-skip must never report Success=true", verifier)
         self.assertIn('artifact.get("DeviceProofAttempted") is not True', verifier)
-        self.assertIn("hard gate requires a real container; planned-skip is not a pass", verifier)
+        self.assertIn("requires a real container; planned-skip is not a pass", verifier)
         self.assertIn('REQUIRED_EVIDENCE = [', verifier)
         self.assertIn('"enter-single-submit"', verifier)
         self.assertIn('"enter-no-duplicate-submit"', verifier)
@@ -312,15 +314,14 @@ class TerminalExecItContractTest(unittest.TestCase):
 
         self.assertIn('ui_engine_exec_it_selftest "$PDOCKER_UI_IT_SELFTEST_CONTAINER" "${PDOCKER_UI_IT_SELFTEST_REQUIRE_CONTAINER:-1}"', self.android_smoke)
         self.assertIn('ui_engine_exec_it_selftest "$CID" 1', self.android_smoke)
-        self.assertIn('ui_engine_exec_it_selftest "" "${PDOCKER_UI_IT_SELFTEST_REQUIRE_CONTAINER:-0}"', self.android_smoke)
+        self.assertNotIn('ui_engine_exec_it_selftest "" "${PDOCKER_UI_IT_SELFTEST_REQUIRE_CONTAINER:-0}"', self.android_smoke)
         self.assertNotIn('ui_engine_exec_it_selftest "$CID"\n', self.android_smoke)
 
     def test_ui_it_validator_rejects_fake_success_planned_skip_and_stream_started_resize(self):
         verifier = self.terminal_exec_it_verifier
 
-        # A planned-skip artifact is useful diagnostic evidence, but even an
-        # accidental/fabricated Success=true must be rejected before optional
-        # non-required skips are accepted.
+        # A planned-skip artifact is useful diagnostic evidence, but it must
+        # always be rejected as a pass after fake-success fields are checked.
         planned_skip_block = verifier[
             verifier.index('def _verify_planned_skip') : verifier.index('def _verify_success_json')
         ]

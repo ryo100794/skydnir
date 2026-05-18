@@ -48,14 +48,17 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
         self.smoke = SMOKE.read_text()
         self.body = _shell_function_body(self.smoke, "runtime_teardown_acceptance_entrypoint")
 
-    def test_runtime_teardown_mode_is_structured_non_passing_scaffold(self):
+    def test_runtime_teardown_mode_fails_closed_until_promoted_proofs_pass(self):
         self.assertIn("--runtime-teardown TARGET", self.smoke)
         self.assertIn('"Kind": "runtime-teardown"', self.body)
-        self.assertIn('"Status": "planned-gap"', self.body)
-        self.assertIn('"Success": false', self.body)
+        self.assertIn('RUNTIME_TEARDOWN_STATUS="planned-gap"', self.body)
+        self.assertIn('RUNTIME_TEARDOWN_SUCCESS=false', self.body)
+        self.assertIn('RUNTIME_TEARDOWN_STATUS="device-pass"', self.body)
+        self.assertIn('RUNTIME_TEARDOWN_SUCCESS=true', self.body)
+        self.assertIn('STOP_PROOF_PASS', self.body)
+        self.assertIn('KILL_PROOF_PASS', self.body)
         self.assertIn("HTTP/CLI acknowledgement is recorded but not accepted as proof", self.body)
         self.assertIn("fake success", self.body.lower())
-        self.assertNotIn('"Success": true', self.body)
 
     def test_runtime_teardown_collects_required_evidence_sources(self):
         for required in [
@@ -67,6 +70,8 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
             "write_process_tree_evidence",
             "write_name_residue_evidence",
             "write_same_id_evidence",
+            "write_live_identity_evidence",
+            "LivePreOperationIdentity",
             "EngineApiContainersJson",
             "EngineApiInspect",
             "ProcessTable",
@@ -123,6 +128,20 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
             '"AfterRemove"',
             '"SuccessInvariant"',
             '"VerifierReduction"',
+            '"ReducedEngineContainerId"',
+            '"SourceContainerIds"',
+            '"LiveIdentity"',
+            '"ListenerReduction"',
+            '"PersistedStateTeardownFields"',
+            '"LogBinding"',
+            '"LivePreOperationIdentitySameContainerId"',
+            '"StalePidAnchoredToLiveIdentity"',
+            '"DirectChildProofAnchoredToLiveIdentity"',
+            '"ListenerOwnerSameContainerId"',
+            '"GpuMediaExecutorResidueSameContainerId"',
+            '"PersistedStateJsonSameContainerId"',
+            '"LifecycleLogsSameContainerId"',
+            '"ContainerLogsSameContainerId"',
             "json_id_field_equals",
             '"GapReasons"',
             '"FailReasons"',
@@ -196,9 +215,41 @@ class RuntimeTeardownDeviceGateTest(unittest.TestCase):
             "kill-stale-name-after-rm.json",
             "duplicate-name",
             "previous-container-log",
-            "no live State.Pid and no direct children",
+            "IdentityInspectHttp",
+            "LivePreOperationPid",
+            "AnchoredToLivePreOperationIdentity",
+            "StalePidAbsence",
+            "DirectChildAbsence",
+            "live pre-stop/pre-kill State.Pid",
+            "no live pre-stop/pre-kill State.Pid and no direct children",
         ]:
             self.assertIn(required, self.body)
+
+    def test_runtime_teardown_reducer_fields_cover_promoted_evidence(self):
+        for required in [
+            "state_field_number_cleared",
+            "state_field_text_cleared",
+            "state_field_array_cleared",
+            "state_teardown_no_orphans",
+            "state_teardown_survivors_empty",
+            "listener_snapshot_mentions_pid",
+            "executor_residue_has_entries",
+            "LifecycleCommandArtifactsComplete",
+            "ContainerLogArtifactsComplete",
+            "AfterOperationListenerForLivePidAbsent",
+            "AfterRemoveListenerForLivePidAbsent",
+            "PdockerTeardownNoOrphanProcesses",
+            "PdockerTeardownSurvivorsEmpty",
+            "StatePidCleared",
+            "PidStartTimeCleared",
+            "PdockerKnownPidsCleared",
+            "PdockerLauncherPidCleared",
+            "PdockerLauncherPidStartTimeCleared",
+            "PdockerLauncherPgidCleared",
+            "PdockerProcessGroupIdCleared",
+        ]:
+            self.assertIn(required, self.body)
+
 
     def test_runtime_teardown_device_pass_is_adb_gated(self):
         for required in [

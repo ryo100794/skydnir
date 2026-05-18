@@ -4,10 +4,11 @@ Snapshot date: 2026-05-13.
 
 This gate defines the device evidence required before `docker stop`,
 `docker kill`, and `docker rm` can be treated as real runtime teardown. The
-focused lane currently accepts only a **non-passing scaffold**:
-`Status: planned-gap` and `Success: false`. The promotion verifier exists, but
-it requires external same-container-ID proof files before any device-pass can
-be accepted.
+focused lane fails closed as **non-passing evidence** unless both stop-rm and
+kill-rm proof files reduce to promoted same-container-ID evidence. The fallback
+remains `Status: planned-gap` and `Success: false`; `device-pass` is accepted
+only when the host verifier reloads the external proof files and all promoted
+reducer fields are complete.
 
 ## Entry point
 
@@ -57,18 +58,23 @@ for each lifecycle path:
 - `same-container-id-kill-rm.json`
 
 Each per-container proof file has `Kind: same-container-id-teardown-proof`,
-`Status: planned-gap`, `Success: false`, the exact Engine `ContainerId`, and a
-`BeforeAfterEvidence` object. The gate is only allowed to pass after all
+the exact Engine `ContainerId`, and a `BeforeAfterEvidence` object. It remains
+`Status: planned-gap` / `Success: false` until its own reducer can promote it to
+`Status: device-pass` / `Success: true`. The gate is only allowed to pass after all
 evidence agrees on the **same Engine container ID**.
 
-The Android smoke now also writes a conservative, non-promoting
-`VerifierReduction` object for each proof. It records the reducer-visible
-status of `ReducedEngineContainerId`, `SourceContainerIds`,
-`EngineInspectSameContainerId`, `ProcessTreeClear`,
+The Android smoke now writes a fail-closed `VerifierReduction` object for each
+proof. It records the reducer-visible status of `ReducedEngineContainerId`,
+`SourceContainerIds`, `EngineInspectSameContainerId`, `ProcessTreeClear`,
 `EngineContainersAfterIdAbsent`, `DirectChildAbsence`, `ListenerAbsence`,
 `StalePidAbsence`, `StaleNameAbsence`, `GpuMediaExecutorResidueAbsence`,
 `PersistedStateCleared`, `LifecycleLogsBound`, and `ContainerLogsBound`, plus
-`MismatchedContainerIds` and `Survivors`. Companion reduction artifacts
+`LivePreOperationIdentitySameContainerId`,
+`StalePidAnchoredToLiveIdentity`,
+`DirectChildProofAnchoredToLiveIdentity`, `ListenerOwnerSameContainerId`,
+`GpuMediaExecutorResidueSameContainerId`,
+`PersistedStateJsonSameContainerId`, `LifecycleLogsSameContainerId`, and
+`ContainerLogsSameContainerId`. Companion reduction artifacts
 (`*-gap-reasons.txt`, `*-fail-reasons.txt`,
 `*-mismatched-container-ids.txt`, and `*-survivors.txt`) explain why the proof
 is still planned-gap or what concrete residue was observed. For a promoted
@@ -76,13 +82,18 @@ is still planned-gap or what concrete residue was observed. For a promoted
 `state.json`, process table/process tree, listener owner, GPU/media-executor
 residue, lifecycle logs, and container logs to the proof `ContainerId` through
 `SourceContainerIds`; any missing, prefix-only, or mismatched Engine container
-ID is a hard failure. Promotion additionally requires
-`ListenerOwnerSameContainerId`, `GpuMediaExecutorResidueSameContainerId`,
-`PersistedStateJsonSameContainerId`, and a `PersistedStateTeardownFields`
-object for the same exact container ID proving all active PID/launcher/process
-group fields are cleared and `PdockerTeardown` has `NoOrphanProcesses: true`
-with no survivors. These fields are diagnostic only until every required flag
-is true and the top-level artifact is explicitly promoted to `device-pass`.
+ID is a hard failure. Promotion additionally requires a `LiveIdentity` object
+proving the live pre-stop/pre-kill inspect PID was running and present before
+the operation;
+stale-PID and direct-child absence must be anchored to that identity, not to an
+after-operation `State.Pid=0`. A `ListenerReduction` object must prove no
+listener remains for that live PID, `PersistedStateTeardownFields` must prove
+all active PID/launcher/process-group fields are cleared and `PdockerTeardown`
+has `NoOrphanProcesses: true` with no survivors, and `LogBinding` must prove
+lifecycle and container logs are complete and bound to the same exact Engine
+container ID. These fields are diagnostic only until every required flag is true
+and both per-container proofs plus the top-level artifact are explicitly
+promoted to `device-pass`.
 
 Required before/after evidence for that same ID:
 
@@ -93,11 +104,13 @@ Required before/after evidence for that same ID:
   remove.
 - Listener absence from `/proc/net/tcp`, `/proc/net/tcp6`, `ss -ltnp`, and
   `netstat -ltnp` snapshots.
-- Stale PID checks based on inspect `State.Pid` and the post-operation process
-  table.
-- `DirectChildAbsence` checks for inspect `State.Pid` in the post-operation
-  and post-remove process tables. A clean parent PID is not enough if any
-  direct child spawned by the runtime launcher remains alive.
+- Stale PID checks based on the live pre-stop/pre-kill inspect `State.Pid` and
+  the post-operation process table. After-operation PID clearing alone is not
+  accepted.
+- `DirectChildAbsence` checks for the live pre-stop/pre-kill inspect
+  `State.Pid` in the post-operation and post-remove process tables. A clean
+  after-operation parent PID is not enough if any direct child spawned by the
+  runtime launcher remains alive.
 - GPU/media executor residue scans for pdocker GPU, Vulkan, media, camera,
   audio, and executor helper processes.
 - `StaleName` and duplicate-name checks against `/containers/json?all=1` after
@@ -169,12 +182,13 @@ host-side reducer now reads the top-level artifact plus the referenced
 fake proof. It also rejects promoted artifacts where listener ownership,
 GPU/media executor residue, or persisted-state teardown fields are missing,
 stale, or bound to a different Engine container ID. The device smoke performs
-the first reduction pass for exact container IDs, create/inspect binding,
-`/containers/json` after-rm absence, stale-name absence, direct-child evidence,
-stale PID evidence, and lifecycle/log artifact presence while keeping listener,
-GPU/media executor, and persisted-state checks non-promoting until a real
-adb/run-as run emits those strict same-container-ID fields. The remaining
-device work is to complete those reductions and promote only when stop-rm and
-kill-rm both show no surviving process tree, no
-surviving listener, no stale PID reference, no GPU/media executor residue, and
-no stale state/log confusion for that exact Engine container ID.
+the reduction pass for exact container IDs, create/inspect binding,
+`/containers/json` after-rm absence, stale-name
+absence, stale PID and direct-child evidence anchored to live pre-stop/pre-kill
+identity, listener absence for that live PID, GPU/media executor residue,
+persisted-state teardown fields, and lifecycle/container log binding. It still
+fails closed: any missing, stale, mismatched, or prefix-only evidence keeps the
+proof and top-level artifact at planned-gap. Promotion occurs only when stop-rm
+and kill-rm both show no surviving process tree, no surviving listener, no
+stale PID reference, no GPU/media executor residue, and no stale state/log
+confusion for that exact Engine container ID.
