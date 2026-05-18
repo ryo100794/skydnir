@@ -168,7 +168,10 @@ def check_device_scenario_runner() -> None:
              "partial_image_inspect_rejected", "partial_image_create_rejected",
              "never_published_tag_rejected", "restored_tag_inspectable",
              "cleanup_removed_only_scenario_owned_paths",
-             "no_partial_or_corrupt_image_cache_survivors"} <= assertions)
+             "no_partial_or_corrupt_image_cache_survivors",
+             "live_pull_started_before_kill", "live_daemon_killed_and_restarted",
+             "live_partial_tag_not_published", "live_pull_stage_pruned",
+             "live_tmp_layers_pruned"} <= assertions)
     for command in data["commands"]:
         tokens = shlex.split(command)
         require(f"device scenario command is tokenizable: {command}", bool(tokens))
@@ -187,7 +190,11 @@ def check_device_scenario_runner() -> None:
         "image_inspect_after_restart",
         "never_image_inspect_after_restart",
     }
-    required_evidence.update({"partial_image_inspect_after_restart", "partial_image_create_after_restart", "post_restart_survivors"})
+    required_evidence.update({
+        "partial_image_inspect_after_restart", "partial_image_create_after_restart", "post_restart_survivors",
+        "live_pull_summary", "live_pull_output", "live_store_listing_before_kill",
+        "live_store_listing_after_restart", "live_image_inspect_after_restart",
+    })
     require("device scenario artifact schema records required evidence fields",
             required_evidence <= set(data.get("artifact_schema", {}).get("evidence", {}).keys()))
     negative = "\n".join(data.get("negative_expected_conditions", []))
@@ -197,8 +204,8 @@ def check_device_scenario_runner() -> None:
     require("device scenario records cleanup policy",
             all(term in cleanup.lower() for term in ["collect", "unrelated", "success=false"]))
     remaining = "\n".join(data.get("remaining_gap", []))
-    require("device scenario records remaining live-pull gap",
-            "Live registry pull interruption" in remaining
+    require("device scenario records fail-closed live-pull gate",
+            "Timed live-pull interruption" in remaining
             and "--execute-live-pull-interruption" in remaining
             and "scenario-owned" in remaining)
 
@@ -244,6 +251,9 @@ def check_device_scenario_runner() -> None:
             "kill-daemon" in side and "restart-and-probe" in side and "pkill -TERM -f pdockerd" in side)
     require("device-side runner probes restored, partial, and never-published tags",
             all(term in side for term in ["inspect-restored.raw", "inspect-never.raw", "inspect-partial.raw", "create-partial.raw"]))
+    require("device-side runner implements timed live pull interruption evidence",
+            all(term in side for term in ["timed-live-pull-interruption", "live-pull.raw", "live-pull-summary.json",
+                                          "live-store-after-restart.txt", "live-inspect.raw", "tmp_layers_pruned"]))
     require("device-side cleanup is scenario-token scoped",
             "rm -rf \\" in side and "$IMG_BASE" in side and "$NEVER_BASE" in side and "$TOKEN" in side)
     forbidden_cleanup = [

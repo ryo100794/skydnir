@@ -1,6 +1,6 @@
 # Image Pull Crash-Safety Device Gate
 
-Snapshot: 2026-05-13.
+Snapshot: 2026-05-18.
 
 This gate verifies that interrupted image-pull residue is not promoted into a
 valid image or reusable layer after the Android daemon is killed and restarted.
@@ -26,10 +26,11 @@ pass.
 
 ## Concrete phases
 
-The current device lane is a safe residue-recovery test. It does not pull a
+The default device lane is a safe residue-recovery test. It does not pull a
 large public image by default. Instead it creates scenario-owned residue under
 the app-private store, kills the daemon, restarts the app service, and probes
-the resulting store through the Engine API.
+the resulting store through the Engine API. A separate opt-in timed live-pull
+lane is available only with a safe scenario-owned/isolated fixture image.
 
 1. `prepare-residue`
    - Create a previous image backup as `.old-$TOKEN`.
@@ -57,8 +58,9 @@ the resulting store through the Engine API.
    - Attempt container create for the existing scenario-owned partial image and
      require a non-201 response.
    - Independently scan `store-after-restart.txt`; any scenario-owned `.pull-*`,
-     `.tmp-*`, `.old-*`, never-published tag, malformed layer, or partial-image
-     survivor fails the gate even if a summary boolean says it was rejected.
+     `.tmp-*`, `.old-*`, never-published tag, or malformed layer survivor fails
+     the gate even if a summary boolean says it was rejected. The deliberate
+     partial local image fixture may remain only if inspect/create both reject it.
 
 4. `cleanup`
    - Remove only paths containing the scenario token and known scenario names.
@@ -81,6 +83,11 @@ The top-level artifact records these booleans:
 - `daemon_restarted`
 - `cleanup_removed_only_scenario_owned_paths`
 - `no_partial_or_corrupt_image_cache_survivors`
+- `live_pull_started_before_kill` (only true when the live lane runs)
+- `live_daemon_killed_and_restarted` (only true when the live lane runs)
+- `live_partial_tag_not_published` (only true when the live lane runs)
+- `live_pull_stage_pruned` (only true when the live lane runs)
+- `live_tmp_layers_pruned` (only true when the live lane runs)
 
 All must be true for the concrete residue-recovery lane to pass. The survivor
 assertion is derived from the raw post-restart store listing on the host side,
@@ -109,21 +116,29 @@ The top-level artifact points at:
 - daemon process captures before kill and after restart
 - `post_restart_survivors` in the top-level artifact (must be an empty list for
   a pass)
+- `live-pull-summary.json`, `live-pull.raw`, `live-store-before-kill.txt`,
+  `live-store-after-restart.txt`, and `live-inspect.raw` when the timed live
+  lane runs
 
-## Timed live-pull interruption design gate
+## Timed live-pull interruption gate
 
 The live registry interruption lane is represented in the JSON artifact as
-`live_pull_interruption.phase = timed-live-pull-interruption`, but it is a
-planned gap in this safe-prep change. It must not run by default because killing
-a pull against a user-owned image or shared tag can leave destructive residue.
+`live_pull_interruption.phase = timed-live-pull-interruption`. It must not run
+by default because killing a pull against a user-owned image or shared tag can
+leave destructive residue. When fully opted in on a ready device, the runner
+starts a real Engine API `/images/create` request, sleeps for the configured
+delay, kills only `pdockerd`, restarts the app service, and proves the
+interrupted ref was not published and no newly introduced `.tmp-*` layer stages
+survived restart recovery.
 
-Minimum opt-in CLI for a future implementation:
+Minimum opt-in CLI:
 
 ```sh
 python3 scripts/verify/runner/image_pull_crash_safety_device.py \
   --serial <adb-serial> \
   --package io.github.ryo100794.pdocker.compat \
   --artifact docs/test/image-pull-crash-safety-latest.json \
+  --execute-device \
   --execute-live-pull-interruption \
   --live-image <scenario-owned-or-isolated-fixture-ref> \
   --live-fixture-owned \
@@ -143,27 +158,26 @@ Safety gates:
   rejected even if `--live-fixture-owned` is present.
 - `--live-fixture-owned` is the operator acknowledgement that the fixture is safe
   to interrupt and clean.
-- Until the device-side live phase exists, even the fully opted-in invocation
-  remains `success=false`, `coverage.live_interrupted_network_pull=false`, and
-  `live_pull_interruption.status=planned-gap`.
+- Without a ready device and `--execute-device`, the fully opted-in invocation
+  remains non-promoting (`success=false` and no live coverage artifact).
 
-Planned phase steps for `timed-live-pull-interruption`:
+Phase steps for `timed-live-pull-interruption`:
 
 1. Start a timed Engine API `/images/create` pull for `--live-image`.
 2. Sleep for `--live-interrupt-after-seconds` while transfer is active.
 3. Kill only `pdockerd` mid-transfer.
 4. Restart the daemon and wait for the socket.
-5. Assert partial image stages/layers are pruned and the interrupted ref is not
-   accidentally published.
-6. Cleanup only scenario-token-owned tags, stages, layer residue, and isolated
-   fixture artifacts.
+5. Capture pre/post store listings plus the live pull stream.
+6. Assert partial image stages are pruned, the interrupted ref is not
+   accidentally published/inspectable, and no newly introduced `.tmp-*` layer
+   stages survived.
+7. Cleanup only the scenario-owned/isolated fixture image path; do not clean
+   broad stores or unrelated workers' residues.
 
 ## Remaining gap
 
-The current lane intentionally avoids killing a live registry download by
-default. The remaining gap is a timed live-pull interruption test that starts an
-actual `/images/create` request, kills the daemon while the pull is in progress,
-and proves the same post-restart conditions. That future lane requires
-`--execute-live-pull-interruption`, `--live-image`, and `--live-fixture-owned`,
-and must still use a scenario-owned reference or an isolated registry fixture;
-it must not overwrite user images or clean broad stores.
+The remaining gap is environmental rather than runner logic: if no ready
+device or no safe fixture image is supplied, the runner records
+`planned-gap`/`blocked` and never promotes success. The timed live lane itself
+is implemented but remains opt-in and fail-closed; it must use a
+scenario-owned reference or an isolated registry fixture and must not overwrite user images or clean broad stores.

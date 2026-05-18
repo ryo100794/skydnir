@@ -9,6 +9,9 @@ PHASE=unset
 IMAGE=busybox:latest
 PACKAGE=io.github.ryo100794.pdocker.compat
 TOKEN=""
+LIVE_IMAGE=""
+LIVE_INTERRUPT_AFTER_SECONDS=3
+LIVE_TIMEOUT_SECONDS=120
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -17,6 +20,9 @@ while [ "$#" -gt 0 ]; do
     --package) PACKAGE="$2"; shift 2 ;;
     --token) TOKEN="$2"; shift 2 ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
+    --live-image) LIVE_IMAGE="$2"; shift 2 ;;
+    --live-interrupt-after-seconds) LIVE_INTERRUPT_AFTER_SECONDS="$2"; shift 2 ;;
+    --live-timeout-seconds) LIVE_TIMEOUT_SECONDS="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 64 ;;
   esac
 done
@@ -95,6 +101,64 @@ engine_post_json() {
   run_as_app "cd files && { printf 'POST $path HTTP/1.1\r\nHost: pdocker\r\nContent-Type: application/json\r\nContent-Length: $len\r\nConnection: close\r\n\r\n%s' '$body'; } | toybox nc -U -W 8 pdocker/pdockerd.sock" > "$OUT_DIR/$dest" 2> "$OUT_DIR/$dest.err" || true
 }
 
+normalize_image_ref() {
+  case "$1" in
+    *@*) printf '%s' "$1"; return ;;
+  esac
+  ref="$1"
+  last="${ref##*/}"
+  case "$last" in
+    *:*) ;;
+    *) ref="$ref:latest" ;;
+  esac
+  repo="${ref%:*}"
+  tag="${ref##*:}"
+  case "$repo" in
+    */*) ;;
+    *) repo="library/$repo" ;;
+  esac
+  first="${repo%%/*}"
+  case "$first" in
+    *.*|*:*) ;;
+    *) repo="docker.io/$repo" ;;
+  esac
+  printf '%s:%s' "$repo" "$tag"
+}
+
+image_path_name() {
+  printf '%s' "$1" | sed 's#[/:]#_#g'
+}
+
+live_tmp_layers() {
+  local dest="$1"
+  run_as_app "cd files && find pdocker/layers -maxdepth 1 -type d -name '*.tmp-*' 2>/dev/null | sort" > "$OUT_DIR/$dest" 2> "$OUT_DIR/$dest.err" || true
+}
+
+live_new_tmp_layers() {
+  before="$OUT_DIR/live-tmp-layers-before.txt"
+  after="$OUT_DIR/live-tmp-layers-after.txt"
+  if [ ! -s "$after" ]; then
+    : > "$OUT_DIR/live-tmp-layers-new.txt"
+    return 0
+  fi
+  if [ ! -s "$before" ]; then
+    cat "$after" > "$OUT_DIR/live-tmp-layers-new.txt"
+    return 0
+  fi
+  grep -F -x -v -f "$before" "$after" > "$OUT_DIR/live-tmp-layers-new.txt" || true
+}
+
+cleanup_live_image_paths() {
+  [ -n "$1" ] || return 0
+  # This is intentionally image-base scoped and is called only for a host-gated
+  # scenario-owned or isolated fixture reference.
+  run_as_app "cd files && rm -rf \
+    pdocker/images/$1 \
+    pdocker/images/$1.pull-* \
+    pdocker/images/$1.old-*" >/dev/null 2>&1 || return 1
+  return 0
+}
+
 http_status() {
   local file="$1"
   if [ ! -s "$OUT_DIR/$file" ]; then
@@ -107,7 +171,7 @@ http_status() {
 wait_socket() {
   i=0
   while [ "$i" -lt 45 ]; do
-    if run_as_app "test -S $SOCKET" >/dev/null 2>&1; then
+    if run_as_app "cd files && test -S pdocker/pdockerd.sock && { printf 'GET /_ping HTTP/1.1\r\nHost: pdocker\r\nConnection: close\r\n\r\n'; } | toybox nc -U -W 2 pdocker/pdockerd.sock | grep -q '^OK'" >/dev/null 2>&1; then
       return 0
     fi
     i=$((i + 1))
@@ -245,11 +309,77 @@ EOF
   return "$cleanup_rc"
 }
 
+phase_live_pull_interrupt() {
+  write_context
+  if [ -z "$LIVE_IMAGE" ]; then
+    echo "missing --live-image" >&2
+    return 64
+  fi
+  case "$LIVE_IMAGE" in
+    *[!A-Za-z0-9._:/@-]*)
+      echo "unsafe live image characters" >&2
+      return 64
+      ;;
+  esac
+  LIVE_NORM="$(normalize_image_ref "$LIVE_IMAGE")"
+  LIVE_BASE="$(image_path_name "$LIVE_NORM")"
+  cleanup_live_image_paths "$LIVE_BASE" || true
+  live_tmp_layers live-tmp-layers-before.txt
+  store_listing live-store-before-kill.txt
+
+  # Start a real Docker-compatible image create request, then kill pdockerd
+  # after the requested delay.  The nc/run-as process may die with pdockerd; its
+  # raw stream is preserved as evidence instead of treated as the pass signal.
+  run_as_app "cd files && { printf 'POST /images/create?fromImage=$LIVE_IMAGE HTTP/1.1\r\nHost: pdocker\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'; } | toybox nc -U -W $LIVE_TIMEOUT_SECONDS pdocker/pdockerd.sock" > "$OUT_DIR/live-pull.raw" 2> "$OUT_DIR/live-pull.err" &
+  pull_pid=$!
+  sleep "$LIVE_INTERRUPT_AFTER_SECONDS"
+  ps_capture live-ps-before-kill.txt
+  pull_started=0
+  if [ -s "$OUT_DIR/live-pull.raw" ] || ps -p "$pull_pid" >/dev/null 2>&1; then pull_started=1; fi
+  run_as_app "pkill -TERM -f pdockerd 2>/dev/null || true; sleep 1; pkill -KILL -f pdockerd 2>/dev/null || true" >/dev/null 2>&1 || true
+  wait "$pull_pid" >/dev/null 2>&1 || true
+  ps_capture live-ps-after-kill.txt
+
+  am start -n "$PACKAGE/$CLASS_PREFIX.MainActivity" -a "$ACTION_PREFIX.action.SMOKE_START" > "$OUT_DIR/live-am-start.txt" 2> "$OUT_DIR/live-am-start.err" || true
+  daemon_restarted=0
+  if wait_socket; then daemon_restarted=1; fi
+  sleep 2
+  store_listing live-store-after-restart.txt
+  live_tmp_layers live-tmp-layers-after.txt
+  live_new_tmp_layers
+  engine_get "/images/$LIVE_IMAGE/json" live-inspect.raw
+
+  if run_as_app "cd files && find pdocker/images -maxdepth 1 -type d \\( -name '$LIVE_BASE.pull-*' -o -name '$LIVE_BASE.old-*' \\) | grep -q ." >/dev/null 2>&1; then live_stage_rc=0; else live_stage_rc=1; fi
+  if run_as_app "test -e files/pdocker/images/$LIVE_BASE" >/dev/null 2>&1; then live_base_rc=0; else live_base_rc=1; fi
+  live_inspect_status="$(http_status live-inspect.raw)"
+  if [ -s "$OUT_DIR/live-tmp-layers-new.txt" ]; then live_tmp_new=1; else live_tmp_new=0; fi
+
+  cat > "$OUT_DIR/live-pull-summary.json" <<EOF
+{
+  "phase": "timed-live-pull-interruption",
+  "success": $( [ "$pull_started" = "1" ] && [ "$daemon_restarted" = "1" ] && [ "$live_stage_rc" != "0" ] && [ "$live_base_rc" != "0" ] && [ "$live_inspect_status" != "200" ] && [ "$live_tmp_new" = "0" ] && echo true || echo false ),
+  "live_image": "$LIVE_IMAGE",
+  "live_image_normalized": "$LIVE_NORM",
+  "live_image_base": "$LIVE_BASE",
+  "interrupt_after_seconds": "$LIVE_INTERRUPT_AFTER_SECONDS",
+  "timeout_seconds": "$LIVE_TIMEOUT_SECONDS",
+  "pull_started_before_kill": $(json_bool "$pull_started"),
+  "daemon_killed": true,
+  "daemon_restarted": $(json_bool "$daemon_restarted"),
+  "partial_tag_not_published": $( [ "$live_base_rc" != "0" ] && [ "$live_inspect_status" != "200" ] && echo true || echo false ),
+  "pull_stage_pruned": $( [ "$live_stage_rc" != "0" ] && echo true || echo false ),
+  "tmp_layers_pruned": $( [ "$live_tmp_new" = "0" ] && echo true || echo false ),
+  "inspect_status_after_restart": "$live_inspect_status"
+}
+EOF
+}
+
 case "$PHASE" in
   prepare-residue|prepare) phase_prepare ;;
   kill-daemon|kill) phase_kill ;;
   restart-and-probe|restart) phase_restart_probe ;;
   cleanup) phase_cleanup ;;
+  timed-live-pull-interruption|live-pull-interrupt|live) phase_live_pull_interrupt ;;
   all)
     phase_prepare
     phase_kill

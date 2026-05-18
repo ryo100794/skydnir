@@ -129,7 +129,7 @@ class ImagePullCrashSafetyVerifierTest(unittest.TestCase):
         self.assertEqual(data["phase_results"], [])
         self.assertIsNone(data["assertions"]["old_tag_restored"])
 
-    def test_live_pull_interruption_opt_in_stays_planned_gap_until_device_phase_exists(self):
+    def test_live_pull_interruption_opt_in_is_ready_but_non_promoting_without_device_execution(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact = Path(tmp) / "artifact.json"
             result = subprocess.run(
@@ -159,18 +159,19 @@ class ImagePullCrashSafetyVerifierTest(unittest.TestCase):
         self.assertEqual(data["status"], "planned-gap")
         self.assertFalse(data["success"])
         self.assertFalse(data["coverage"]["live_interrupted_network_pull"])
+        self.assertFalse(data["coverage"]["timed_live_interruption_artifact"])
         live = data["live_pull_interruption"]
         self.assertTrue(live["requested"])
         self.assertEqual(live["live_image"], "127.0.0.1:5000/pdocker-crash-safety-fixture:test")
         self.assertTrue(live["live_image_safe"])
-        self.assertEqual(live["live_image_safety_reason"], "scenario-owned fixture marker")
+        self.assertEqual(live["live_image_safety_reason"], "isolated local fixture registry")
         self.assertTrue(data["inputs"]["live_image_safe"])
         self.assertTrue(live["fixture_owned_or_isolated"])
         self.assertEqual(live["interrupt_after_seconds"], 1.5)
-        self.assertFalse(live["runnable"])
+        self.assertTrue(live["runnable"])
         self.assertFalse(live["success"])
-        self.assertEqual(live["status"], "planned-gap")
-        self.assertIn("device-side timed live pull interruption phase is not implemented", live["blocked_reason"])
+        self.assertEqual(live["status"], "ready")
+        self.assertIsNone(live["blocked_reason"])
 
     def test_unsafe_live_pull_reference_stays_non_promoting(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -199,6 +200,7 @@ class ImagePullCrashSafetyVerifierTest(unittest.TestCase):
         self.assertEqual(data["status"], "planned-gap")
         self.assertFalse(data["success"])
         self.assertFalse(data["coverage"]["live_interrupted_network_pull"])
+        self.assertFalse(data["coverage"]["timed_live_interruption_artifact"])
         live = data["live_pull_interruption"]
         self.assertTrue(live["requested"])
         self.assertFalse(live["live_image_safe"])
@@ -213,6 +215,8 @@ class ImagePullCrashSafetyVerifierTest(unittest.TestCase):
         for marker in [".pull-$TOKEN", ".old-$TOKEN", ".tmp-$TOKEN", "inspect-restored.raw", "inspect-never.raw"]:
             self.assertIn(marker, text)
         for marker in ["$PARTIAL_BASE", "inspect-partial.raw", "create-partial.raw", "partial_image_create_rejected"]:
+            self.assertIn(marker, text)
+        for marker in ["timed-live-pull-interruption", "live-pull.raw", "live-pull-summary.json", "live-store-after-restart.txt"]:
             self.assertIn(marker, text)
         self.assertIn("pkill -TERM -f pdockerd", text)
         self.assertIn("rm -rf \\", text)
@@ -258,7 +262,7 @@ class ImagePullCrashSafetyVerifierTest(unittest.TestCase):
         (local_dir / "cleanup-summary.json").write_text(json.dumps(cleanup))
         (local_dir / "store-after-restart.txt").write_text(store_after)
 
-    def test_device_evidence_evaluator_fails_on_partial_or_corrupt_survivors(self):
+    def test_device_evidence_evaluator_fails_on_interrupted_pull_or_cache_survivors(self):
         runner = load_runner_module()
         tmp_layer = "1" * 64
         partial_layer = "2" * 64
@@ -282,7 +286,6 @@ class ImagePullCrashSafetyVerifierTest(unittest.TestCase):
         self.assertIn("no_partial_or_corrupt_image_cache_survivors", failures)
         joined = "\n".join(evidence["post_restart_survivors"])
         self.assertIn(".pull-unit", joined)
-        self.assertIn("pdocker-crash-safety-partial", joined)
         self.assertIn(".tmp-unit", joined)
         self.assertIn(partial_layer, joined)
 
@@ -306,6 +309,30 @@ class ImagePullCrashSafetyVerifierTest(unittest.TestCase):
         self.assertTrue(assertions["no_partial_or_corrupt_image_cache_survivors"])
         self.assertEqual(failures, [])
         self.assertEqual(evidence["post_restart_survivors"], [])
+
+    def test_live_pull_evidence_evaluator_requires_no_partial_publication(self):
+        runner = load_runner_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            local_dir = Path(tmp)
+            (local_dir / "live-pull-summary.json").write_text(json.dumps({
+                "success": False,
+                "pull_started_before_kill": True,
+                "daemon_killed": True,
+                "daemon_restarted": True,
+                "partial_tag_not_published": False,
+                "pull_stage_pruned": True,
+                "tmp_layers_pruned": False,
+            }))
+            (local_dir / "live-pull.raw").write_text('{"status":"Pulling"}\n')
+            assertions, failures, evidence, summary = runner.evaluate_live_pull_evidence(local_dir)
+
+        self.assertTrue(assertions["live_pull_started_before_kill"])
+        self.assertFalse(assertions["live_partial_tag_not_published"])
+        self.assertFalse(assertions["live_tmp_layers_pruned"])
+        self.assertIn("live_partial_tag_not_published", failures)
+        self.assertIn("live_tmp_layers_pruned", failures)
+        self.assertEqual(summary["success"], False)
+        self.assertIn("live_pull_output", evidence)
 
     def test_prune_build_artifacts_removes_interrupted_cache_residue_and_restores_old_tag(self):
         with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as tmp:

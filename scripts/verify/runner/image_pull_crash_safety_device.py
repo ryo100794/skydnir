@@ -62,9 +62,10 @@ ARTIFACT_SCHEMA: dict[str, Any] = {
         "daemon_kill_restart": "boolean",
         "engine_negative_probe": "boolean",
         "live_interrupted_network_pull": "boolean",
+        "timed_live_interruption_artifact": "boolean",
     },
     "phases": ["prepare-residue", "kill-daemon", "restart-and-probe", "cleanup"],
-    "live_pull_interruption": "gated timed live registry pull interruption plan and status",
+    "live_pull_interruption": "gated timed live registry pull interruption plan/status/results",
     "phase_results": "per-phase return code/stdout/stderr summary",
     "evidence": {
         "device_evidence_dir": "local pulled evidence directory|null",
@@ -81,7 +82,12 @@ ARTIFACT_SCHEMA: dict[str, Any] = {
         "daemon_log_before_kill": "path|null",
         "daemon_log_after_restart": "path|null",
         "container_run_after_restart": "path|null",
-        "post_restart_survivors": "list of scenario-owned partial/corrupt image/cache paths still present after restart",
+        "post_restart_survivors": "list of scenario-owned interrupted pull/cache paths still present after restart",
+        "live_pull_summary": "path|null",
+        "live_pull_output": "path|null",
+        "live_store_listing_before_kill": "path|null",
+        "live_store_listing_after_restart": "path|null",
+        "live_image_inspect_after_restart": "path|null",
     },
     "assertions": {
         "old_tag_restored": "boolean|null",
@@ -95,6 +101,11 @@ ARTIFACT_SCHEMA: dict[str, Any] = {
         "restored_tag_inspectable": "boolean|null",
         "cleanup_removed_only_scenario_owned_paths": "boolean|null",
         "no_partial_or_corrupt_image_cache_survivors": "boolean|null",
+        "live_pull_started_before_kill": "boolean|null",
+        "live_daemon_killed_and_restarted": "boolean|null",
+        "live_partial_tag_not_published": "boolean|null",
+        "live_pull_stage_pruned": "boolean|null",
+        "live_tmp_layers_pruned": "boolean|null",
     },
     "negative_expected_conditions": ["strings that must not appear in evidence"],
     "cleanup_policy": ["cleanup steps safe to run after pass/fail/interrupt"],
@@ -110,7 +121,7 @@ NEGATIVE_EXPECTED_CONDITIONS = [
     "docker image inspect succeeds for a never-published interrupted tag",
     "partial image directory with incomplete layers is inspectable after restart",
     "docker run/create succeeds from a partial image or layer cache entry after restart",
-    "scenario-owned partial/corrupt image or cache residue survives in the post-restart store listing",
+    "scenario-owned interrupted pull/cache residue survives in the post-restart store listing",
     "cleanup deletes unrelated images, layers, containers, app data, or other workers' files",
 ]
 
@@ -123,8 +134,8 @@ CLEANUP_POLICY = [
 ]
 
 REMAINING_GAP = [
-    "Live registry pull interruption is not killed mid-download by default; this runner currently injects scenario-owned residue and proves restart recovery.",
-    "Timed live-pull interruption requires --execute-live-pull-interruption plus a scenario-owned --live-image and --live-fixture-owned acknowledgement before any future implementation may run.",
+    "Timed live-pull interruption runs only on a ready device when --execute-device, --execute-live-pull-interruption, --live-image, and --live-fixture-owned are all supplied.",
+    "Without a ready device or safe scenario-owned/isolated fixture image, the artifact remains fail-closed as planned-gap/blocked and never promotes success.",
     "Container run/create is attempted only for an existing scenario-owned partial local tag so missing public references are not auto-pulled.",
 ]
 
@@ -164,10 +175,12 @@ def classify_live_image_safety(ref: str | None) -> tuple[bool, str]:
     }
     if normalized in unsafe_names or normalized.startswith("library/"):
         return False, "common public/user image references are not scenario-owned"
-    if any(marker in normalized for marker in ("pdocker-crash-safety", "pdocker-live-pull-fixture", "pdocker-interrupt-fixture")):
-        return True, "scenario-owned fixture marker"
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._:/@-]{0,255}", normalized):
+        return False, "image reference contains characters outside the safe runner allow-list"
     if re.match(r"^(127\.0\.0\.1|localhost|\[::1\])(?::[0-9]+)?/", normalized):
         return True, "isolated local fixture registry"
+    if any(marker in normalized for marker in ("pdocker-crash-safety", "pdocker-live-pull-fixture", "pdocker-interrupt-fixture")):
+        return True, "scenario-owned fixture marker"
     return False, "image reference lacks a scenario-owned or isolated-fixture marker"
 
 
@@ -208,6 +221,7 @@ def scenario_commands(
     live_cmd = [
         "python3",
         "scripts/verify/runner/image_pull_crash_safety_device.py",
+        "--execute-device",
         "--execute-live-pull-interruption",
         "--live-image",
         live_image or "<scenario-owned-or-isolated-fixture-ref>",
@@ -308,7 +322,17 @@ def run_device_phase(args: argparse.Namespace, phase: str, token: str) -> subpro
         "--phase",
         phase,
     ]
-    return run_cmd(cmd, timeout=180 if phase == "restart-and-probe" else 60)
+    if phase == LIVE_PULL_PHASE:
+        cmd += [
+            "--live-image",
+            args.live_image or "",
+            "--live-interrupt-after-seconds",
+            str(args.live_interrupt_after_seconds),
+            "--live-timeout-seconds",
+            str(args.live_timeout_seconds),
+        ]
+    timeout = max(int(args.live_timeout_seconds) + 90, 180) if phase == LIVE_PULL_PHASE else (180 if phase == "restart-and-probe" else 60)
+    return run_cmd(cmd, timeout=timeout)
 
 
 def pull_device_evidence(args: argparse.Namespace, local_dir: Path) -> subprocess.CompletedProcess[str]:
@@ -339,13 +363,13 @@ def relative_or_none(path: Path | None) -> str | None:
 
 
 def post_restart_survivors(local_dir: Path) -> list[str]:
-    """Return scenario-owned partial/corrupt image/cache paths that survived restart.
+    """Return scenario-owned interrupted pull/cache paths that survived restart.
 
     The device shell writes boolean assertions, but the host evaluator also
     checks the raw store listing so a buggy device-side summary cannot turn
-    stale ``.pull-*``, ``.tmp-*``, malformed layer, or partial-image residue
+    stale ``.pull-*``, ``.tmp-*``, or malformed layer residue
     into a pass.  A restored base image is allowed; scenario-owned interrupted
-    stages, never-published tags, and incomplete image/cache entries are not.
+    stages, never-published tags, and incomplete layer/cache entries are not.
     """
     context = read_json(local_dir / "context.json") or {}
     listing_path = local_dir / "store-after-restart.txt"
@@ -357,7 +381,6 @@ def post_restart_survivors(local_dir: Path) -> list[str]:
     token = str(context.get("token") or "")
     image_base = str(context.get("image_base") or "")
     never_base = str(context.get("never_base") or "")
-    partial_base = str(context.get("partial_base") or "")
     tmp_layer = str(context.get("tmp_layer") or "")
     partial_layer = str(context.get("partial_layer") or "")
 
@@ -370,16 +393,9 @@ def post_restart_survivors(local_dir: Path) -> list[str]:
             forbidden = True
         if never_base and name == never_base:
             forbidden = True
-        if partial_base and name == partial_base:
-            forbidden = True
         if tmp_layer and name.startswith(f"{tmp_layer}.tmp-"):
             forbidden = True
         if partial_layer and name == partial_layer:
-            forbidden = True
-        # Be conservative if context.json was missing or truncated: any
-        # scenario-token path that still advertises partial/crash-safety residue
-        # after restart should fail the device gate.
-        if token_owned and "pdocker-crash-safety-partial" in name:
             forbidden = True
         if forbidden:
             survivors.append(line)
@@ -425,6 +441,26 @@ def evaluate_device_evidence(local_dir: Path) -> tuple[dict[str, bool | None], l
     return assertions, failures, evidence
 
 
+def evaluate_live_pull_evidence(local_dir: Path) -> tuple[dict[str, bool | None], list[str], dict[str, Any], dict[str, Any]]:
+    summary = read_json(local_dir / "live-pull-summary.json") or {}
+    assertions: dict[str, bool | None] = {
+        "live_pull_started_before_kill": summary.get("pull_started_before_kill"),
+        "live_daemon_killed_and_restarted": bool(summary.get("daemon_killed")) and bool(summary.get("daemon_restarted")),
+        "live_partial_tag_not_published": summary.get("partial_tag_not_published"),
+        "live_pull_stage_pruned": summary.get("pull_stage_pruned"),
+        "live_tmp_layers_pruned": summary.get("tmp_layers_pruned"),
+    }
+    failures = [name for name, value in assertions.items() if value is not True]
+    evidence = {
+        "live_pull_summary": relative_or_none(local_dir / "live-pull-summary.json"),
+        "live_pull_output": relative_or_none(local_dir / "live-pull.raw"),
+        "live_store_listing_before_kill": relative_or_none(local_dir / "live-store-before-kill.txt"),
+        "live_store_listing_after_restart": relative_or_none(local_dir / "live-store-after-restart.txt"),
+        "live_image_inspect_after_restart": relative_or_none(local_dir / "live-inspect.raw"),
+    }
+    return assertions, failures, evidence, summary
+
+
 def execute_device(args: argparse.Namespace, artifact_path: Path, token: str) -> tuple[str, bool, dict[str, Any], list[str], list[dict[str, Any]]]:
     notes: list[str] = []
     phase_results: list[dict[str, Any]] = []
@@ -452,6 +488,17 @@ def execute_device(args: argparse.Namespace, artifact_path: Path, token: str) ->
                     notes.append(f"Scoped cleanup after failed {phase} also failed with rc={cleanup_cp.returncode}.")
             break
 
+    live_requested = bool(args.execute_live_pull_interruption)
+    live_safe, live_reason = classify_live_image_safety(args.live_image)
+    if live_requested and cleanup_attempted and not any(r["returncode"] != 0 for r in phase_results if r["phase"] in PHASES):
+        if not (args.live_image and args.live_fixture_owned and live_safe):
+            notes.append(f"Timed live pull interruption was requested but is not safe/runnable: {live_reason}.")
+        else:
+            cp = run_device_phase(args, LIVE_PULL_PHASE, token)
+            phase_results.append(phase_result(LIVE_PULL_PHASE, cp))
+            if cp.returncode != 0:
+                notes.append(f"Device phase {LIVE_PULL_PHASE} failed with rc={cp.returncode}.")
+
     evidence_dir = artifact_path.parent / "image-pull-crash-safety-device"
     pulled = pull_device_evidence(args, evidence_dir)
     phase_results.append(phase_result("pull-evidence", pulled))
@@ -460,11 +507,28 @@ def execute_device(args: argparse.Namespace, artifact_path: Path, token: str) ->
         return "failed", False, {"device_evidence_dir": None}, notes, phase_results
 
     assertions, failures, evidence = evaluate_device_evidence(evidence_dir)
+    live_summary: dict[str, Any] | None = None
+    if live_requested and args.live_image and args.live_fixture_owned and live_safe:
+        live_assertions, live_failures, live_evidence, live_summary = evaluate_live_pull_evidence(evidence_dir)
+        assertions.update(live_assertions)
+        evidence.update(live_evidence)
+        failures.extend(live_failures)
+    elif live_requested:
+        failures.append("live_pull_safe_fixture")
     if failures:
         notes.append("Device evidence assertions failed: " + ", ".join(failures))
-        return "failed", False, {"assertions": assertions, "evidence": evidence}, notes, phase_results
-    notes.append("Concrete synthetic residue kill/restart crash-safety lane passed; live network-pull interruption remains a separate gap.")
-    return "passed", True, {"assertions": assertions, "evidence": evidence}, notes, phase_results
+        extra: dict[str, Any] = {"assertions": assertions, "evidence": evidence}
+        if live_summary is not None:
+            extra["live_summary"] = live_summary
+        return "failed", False, extra, notes, phase_results
+    if live_summary is not None:
+        notes.append("Concrete synthetic residue and timed live registry-pull interruption lanes passed.")
+    else:
+        notes.append("Concrete synthetic residue kill/restart crash-safety lane passed; timed live-pull interruption was not requested/runnable.")
+    extra = {"assertions": assertions, "evidence": evidence}
+    if live_summary is not None:
+        extra["live_summary"] = live_summary
+    return "passed", True, extra, notes, phase_results
 
 
 
@@ -495,16 +559,16 @@ def live_pull_interruption_plan(args: argparse.Namespace) -> tuple[dict[str, Any
         )
     else:
         notes.append(
-            "Timed live registry pull interruption was explicitly requested with a safe scenario-owned/isolated fixture, "
-            "but remains a planned gap until a device-side live phase can safely issue /images/create and kill pdockerd mid-transfer."
+            "Timed live registry pull interruption was explicitly requested with a safe scenario-owned/isolated fixture; "
+            "it will run only together with --execute-device on a ready Android device."
         )
 
     plan = {
         "phase": LIVE_PULL_PHASE,
         "requested": bool(args.execute_live_pull_interruption),
-        "runnable": False,
+        "runnable": not missing,
         "success": False,
-        "status": "planned-gap",
+        "status": "ready" if not missing else "planned-gap",
         "live_image": args.live_image,
         "live_image_safe": live_image_safe,
         "live_image_safety_reason": live_image_safety_reason,
@@ -513,6 +577,7 @@ def live_pull_interruption_plan(args: argparse.Namespace) -> tuple[dict[str, Any
         "interrupt_after_seconds": args.live_interrupt_after_seconds,
         "timeout_seconds": args.live_timeout_seconds,
         "required_cli": [
+            "--execute-device",
             "--execute-live-pull-interruption",
             "--live-image <scenario-owned-or-isolated-fixture-ref>",
             "--live-fixture-owned",
@@ -532,11 +597,7 @@ def live_pull_interruption_plan(args: argparse.Namespace) -> tuple[dict[str, Any
             "assert partial tag/layer residue is pruned and never published",
             "cleanup only scenario-owned fixture paths",
         ],
-        "blocked_reason": (
-            "missing " + ", ".join(missing)
-            if missing else
-            "device-side timed live pull interruption phase is not implemented in this safe-prep change"
-        ),
+        "blocked_reason": "missing " + ", ".join(missing) if missing else None,
     }
     return plan, notes
 
@@ -564,6 +625,11 @@ def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
         "daemon_restarted": None,
         "cleanup_removed_only_scenario_owned_paths": None,
         "no_partial_or_corrupt_image_cache_survivors": None,
+        "live_pull_started_before_kill": None,
+        "live_daemon_killed_and_restarted": None,
+        "live_partial_tag_not_published": None,
+        "live_pull_stage_pruned": None,
+        "live_tmp_layers_pruned": None,
     }
     evidence = {
         "device_evidence_dir": None,
@@ -581,6 +647,11 @@ def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
         "daemon_log_after_restart": None,
         "container_run_after_restart": None,
         "post_restart_survivors": [],
+        "live_pull_summary": None,
+        "live_pull_output": None,
+        "live_store_listing_before_kill": None,
+        "live_store_listing_after_restart": None,
+        "live_image_inspect_after_restart": None,
     }
 
     if args.execute_device and device.get("state") != "device":
@@ -592,6 +663,12 @@ def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
             assertions.update(extra["assertions"])
         if "evidence" in extra:
             evidence.update(extra["evidence"])
+        if "live_summary" in extra:
+            live_plan.update(extra["live_summary"])
+            live_plan["requested"] = True
+            live_plan["runnable"] = True
+            live_plan["success"] = bool(extra["live_summary"].get("success"))
+            live_plan["status"] = "passed" if live_plan["success"] else "failed"
     elif device.get("state") == "device":
         notes.append("Device is ready, but --execute-device was not requested; keeping planned-gap and command plan only.")
 
@@ -620,7 +697,8 @@ def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
             "residue_recovery": success,
             "daemon_kill_restart": success,
             "engine_negative_probe": success,
-            "live_interrupted_network_pull": False,
+            "live_interrupted_network_pull": bool(live_plan.get("success")),
+            "timed_live_interruption_artifact": bool(evidence.get("live_pull_summary")),
         },
         "phases": PHASES,
         "live_pull_interruption": live_plan,
