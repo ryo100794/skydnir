@@ -811,9 +811,22 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, source)
         icd = VULKAN_ICD.read_text()
+        self.assertIn('#define PDOCKER_VULKAN_ICD_BUILD_MARKER "vulkan-icd-feature-chain-marker-20260518"', icd)
         self.assertIn("requested_feature_mask_from_device_create_info", icd)
+        self.assertIn("feature_mask_from_pnext_chain", icd)
+        self.assertIn("VkDeviceCreateInfo::pNext and hang the actual 1.1/1.2/extension feature", icd)
+        self.assertIn("mask |= feature_mask_from_pnext_chain(pCreateInfo->pNext);", icd)
         self.assertIn("pipeline->requested_feature_mask", icd)
         self.assertIn("requested_feature_mask=%llu", icd)
+        for extension in [
+            "VK_KHR_8BIT_STORAGE_EXTENSION_NAME",
+            "VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME",
+            "VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME",
+            "ADD_DEVICE_EXTENSION(VK_KHR_8BIT_STORAGE_EXTENSION_NAME",
+            "ADD_DEVICE_EXTENSION(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME",
+            "ADD_DEVICE_EXTENSION(VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME",
+        ]:
+            self.assertIn(extension, icd)
         self.assertIn("rewrite_duplicate_descriptors=%u", icd)
         self.assertIn("mutable_cache=%u", icd)
         self.assertIn("q4k_safe_kernel=%u", icd)
@@ -1224,6 +1237,9 @@ class GpuAbiContractTest(unittest.TestCase):
             '"failed_event_count"',
             '"failure_event"',
             '"requested_feature_mask"',
+            '"spirv_required_feature_mask"',
+            '"spirv_requested_feature_missing_mask"',
+            '"spirv_requested_feature_mismatches"',
             '"spirv_feature_requirements"',
             '"android_vulkan_features"',
             '"android_vulkan_enabled_features"',

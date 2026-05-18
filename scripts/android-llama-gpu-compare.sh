@@ -51,7 +51,7 @@ WAIT_SERVER_CURL_TIMEOUT_SEC="${PDOCKER_LLAMA_WAIT_SERVER_CURL_TIMEOUT_SEC:-2}"
 COMPARE_ARTIFACT_DIR="${PDOCKER_LLAMA_COMPARE_ARTIFACT_DIR:-}"
 STOP_STALE_TARGET_BEFORE_PREFLIGHT="${PDOCKER_LLAMA_STOP_STALE_TARGET_BEFORE_PREFLIGHT:-1}"
 EXPECTED_GPU_EXECUTOR_MARKER="${PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER:-gpu-executor-enabled-features-20260518}"
-EXPECTED_VULKAN_ICD_MARKER="${PDOCKER_VULKAN_ICD_EXPECTED_MARKER:-vulkan-icd-runtime-marker-20260510}"
+EXPECTED_VULKAN_ICD_MARKER="${PDOCKER_VULKAN_ICD_EXPECTED_MARKER:-vulkan-icd-feature-chain-marker-20260518}"
 OP_ID="llama-gpu-compare-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 CURRENT_CONTAINER_ID=""
 
@@ -1073,7 +1073,7 @@ env = [
     f"LLAMA_ARG_PORT={port}",
     "LLAMA_LOG_FILE=/workspace/logs/llama-server.log",
     f"PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER={os.environ.get('PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER', 'gpu-executor-enabled-features-20260518')}",
-    f"PDOCKER_VULKAN_ICD_EXPECTED_MARKER={os.environ.get('PDOCKER_VULKAN_ICD_EXPECTED_MARKER', 'vulkan-icd-runtime-marker-20260510')}",
+    f"PDOCKER_VULKAN_ICD_EXPECTED_MARKER={os.environ.get('PDOCKER_VULKAN_ICD_EXPECTED_MARKER', 'vulkan-icd-feature-chain-marker-20260518')}",
 ]
 if model_url:
     set_env(env, f"LLAMA_MODEL_URL={model_url}")
@@ -2131,7 +2131,7 @@ config_propagation = {
     "checks": config_checks,
 }
 expected_executor_marker = os.environ.get("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", "gpu-executor-enabled-features-20260518")
-expected_icd_marker = os.environ.get("PDOCKER_VULKAN_ICD_EXPECTED_MARKER", "vulkan-icd-runtime-marker-20260510")
+expected_icd_marker = os.environ.get("PDOCKER_VULKAN_ICD_EXPECTED_MARKER", "vulkan-icd-feature-chain-marker-20260518")
 observed_executor_markers = sorted({
     str(e.get("executor_build_marker"))
     for e in executor_events
@@ -2481,6 +2481,9 @@ def compact_pre_q6_failure(generic_dispatch, q6_diagnostics):
             "requested_feature_mask",
             "requested_feature_mask_present",
             "strict_passthrough",
+            "spirv_required_feature_mask",
+            "spirv_requested_feature_missing_mask",
+            "spirv_requested_feature_mismatches",
             "spirv_feature_requirements",
             "spirv_feature_mismatch",
             "spirv_feature_mismatches",

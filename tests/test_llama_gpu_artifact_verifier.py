@@ -15,7 +15,7 @@ def runtime_marker():
         "summary": "pass",
         "expected_executor_marker": "gpu-executor-enabled-features-20260518",
         "observed_executor_markers": ["gpu-executor-enabled-features-20260518"],
-        "observed_icd_markers": ["vulkan-icd-runtime-marker-20260510"],
+        "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
         "executor_event_count": 1,
     }
 
@@ -315,7 +315,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "summary": "fail",
                         "expected_executor_marker": "gpu-executor-enabled-features-20260518",
                         "observed_executor_markers": [],
-                        "observed_icd_markers": ["vulkan-icd-runtime-marker-20260510"],
+                        "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                     },
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
@@ -837,6 +837,12 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                                 "requested_feature_mask": "0x0000000000000038",
                                 "requested_feature_mask_present": True,
                                 "strict_passthrough": True,
+                                "spirv_required_feature_mask": "0x0000000000000448",
+                                "spirv_requested_feature_missing_mask": "0x0000000000000440",
+                                "spirv_requested_feature_mismatches": [
+                                    "storageBuffer8BitAccess",
+                                    "shaderInt8",
+                                ],
                                 "pipeline_key": {
                                     "spirv_hash": "0xee4e8d4acf23ec08",
                                     "spec_hash": "0x4256e6bd7dad2e74",
@@ -888,6 +894,12 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(evidence["failure_event"]["error"], "create-generic-compute-pipeline")
         self.assertEqual(evidence["failure_event"]["vk_result"], -13)
         self.assertEqual(evidence["failure_event"]["spirv_hash"], "0xee4e8d4acf23ec08")
+        self.assertEqual(evidence["failure_event"]["spirv_required_feature_mask"], "0x0000000000000448")
+        self.assertEqual(evidence["failure_event"]["spirv_requested_feature_missing_mask"], "0x0000000000000440")
+        self.assertEqual(evidence["failure_event"]["spirv_requested_feature_mismatches"], [
+            "storageBuffer8BitAccess",
+            "shaderInt8",
+        ])
         self.assertEqual(evidence["failure_event"]["android_vulkan_enabled_features"]["shaderInt8"], 1)
         self.assertEqual(evidence["pipeline_key"]["spec_hash"], "0x4256e6bd7dad2e74")
         self.assertEqual(evidence["q6_reachability"]["blocker_class"], "not-reached")

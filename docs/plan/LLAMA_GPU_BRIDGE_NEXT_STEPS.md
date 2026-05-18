@@ -113,6 +113,18 @@ If the run stops before Q6_K, the artifact verifier now preserves bounded
 requirements, Android feature bits, and `q6_reachability`). Treat that as a
 pre-Q6 setup blocker, not as a Q6 correctness result.
 
+2026-05-18 update: the ICD/runtime freshness marker for this lane is now
+`vulkan-icd-feature-chain-marker-20260518`.  Re-run device artifacts after
+installing an APK with that marker before accepting any new pre-Q6 conclusion.
+The ICD now keeps the requested-feature mask tied to the full Vulkan
+`VkDeviceCreateInfo`/`VkPhysicalDeviceFeatures2` pNext chain and advertises the
+8-bit storage, shader-float16-int8, and storage-buffer-storage-class extension
+surface consistently with the feature bits it exposes.  If a pre-Q6
+`VK_ERROR_FEATURE_NOT_PRESENT` remains, compare `spirv_required_feature_mask`,
+`spirv_requested_feature_missing_mask`, `android_vulkan_features`, and
+`android_vulkan_enabled_features` first; do not jump to Q6_K oracle work until
+those fields prove the bridge setup is coherent.
+
 Milestone compare with CPU baseline should be run only after a correctness
 blocker changes, not after every small diagnostic edit.
 

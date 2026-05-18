@@ -31,6 +31,21 @@
 #define MFD_CLOEXEC 0x0001U
 #endif
 
+#ifndef VK_KHR_8BIT_STORAGE_EXTENSION_NAME
+#define VK_KHR_8BIT_STORAGE_EXTENSION_NAME "VK_KHR_8bit_storage"
+#define VK_KHR_8BIT_STORAGE_SPEC_VERSION 1
+#endif
+
+#ifndef VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME
+#define VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME "VK_KHR_shader_float16_int8"
+#define VK_KHR_SHADER_FLOAT16_INT8_SPEC_VERSION 1
+#endif
+
+#ifndef VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME
+#define VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME "VK_KHR_storage_buffer_storage_class"
+#define VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION 1
+#endif
+
 typedef struct {
     VK_LOADER_DATA loader;
 } PdockerVkInstance;
@@ -71,7 +86,7 @@ typedef struct PdockerVkFence PdockerVkFence;
 #define PDOCKER_VK_MAX_COPY_ALIASES 128
 #define PDOCKER_VK_ALIAS_MIN_SOURCE_BYTES (64ull * 1024ull * 1024ull)
 #define PDOCKER_VK_MAX_GUARDED_MEMORIES 256
-#define PDOCKER_VULKAN_ICD_BUILD_MARKER "vulkan-icd-runtime-marker-20260510"
+#define PDOCKER_VULKAN_ICD_BUILD_MARKER "vulkan-icd-feature-chain-marker-20260518"
 #define PDOCKER_VK_GUARDED_DEFAULT_MIN_BYTES (64ull * 1024ull * 1024ull)
 
 static uint64_t g_generic_dispatch_sequence = 0;
@@ -1590,11 +1605,17 @@ static uint64_t feature_mask_from_base_features(const VkPhysicalDeviceFeatures *
     return mask;
 }
 
-static uint64_t requested_feature_mask_from_device_create_info(
-        const VkDeviceCreateInfo *pCreateInfo) {
-    if (!pCreateInfo) return 0;
-    uint64_t mask = feature_mask_from_base_features(pCreateInfo->pEnabledFeatures);
-    for (const VkBaseInStructure *cur = (const VkBaseInStructure *)pCreateInfo->pNext;
+static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
+    uint64_t mask = 0;
+    /*
+     * Vulkan applications commonly pass VkPhysicalDeviceFeatures2 in
+     * VkDeviceCreateInfo::pNext and hang the actual 1.1/1.2/extension feature
+     * structs from Features2::pNext.  Treat the pNext list as one continuous
+     * VkBaseInStructure chain so requested_feature_mask mirrors what the app
+     * asked Vulkan to enable.  This mask is forwarded unchanged to the Android
+     * executor for strict passthrough validation.
+     */
+    for (const VkBaseInStructure *cur = (const VkBaseInStructure *)pNext;
          cur;
          cur = cur->pNext) {
         switch (cur->sType) {
@@ -1652,6 +1673,14 @@ static uint64_t requested_feature_mask_from_device_create_info(
                 break;
         }
     }
+    return mask;
+}
+
+static uint64_t requested_feature_mask_from_device_create_info(
+        const VkDeviceCreateInfo *pCreateInfo) {
+    if (!pCreateInfo) return 0;
+    uint64_t mask = feature_mask_from_base_features(pCreateInfo->pEnabledFeatures);
+    mask |= feature_mask_from_pnext_chain(pCreateInfo->pNext);
     return mask;
 }
 
@@ -2284,13 +2313,31 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkExtensionProperties *pProperties) {
     (void)physicalDevice;
     (void)pLayerName;
-    const VkExtensionProperties available[] = {
-        { VK_KHR_16BIT_STORAGE_EXTENSION_NAME, VK_KHR_16BIT_STORAGE_SPEC_VERSION },
+    VkExtensionProperties available[8];
+    uint32_t available_count = 0;
+#define ADD_DEVICE_EXTENSION(name, version) do { \
+        if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
+            memset(&available[available_count], 0, sizeof(available[available_count])); \
+            snprintf(available[available_count].extensionName, \
+                     sizeof(available[available_count].extensionName), "%s", (name)); \
+            available[available_count].specVersion = (version); \
+            available_count++; \
+        } \
+    } while (0)
+    if (advertised_storage16()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_16BIT_STORAGE_EXTENSION_NAME, VK_KHR_16BIT_STORAGE_SPEC_VERSION);
+    }
+    if (advertised_storage8()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_8BIT_STORAGE_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_SPEC_VERSION);
+        ADD_DEVICE_EXTENSION(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_KHR_SHADER_FLOAT16_INT8_SPEC_VERSION);
+    }
+    ADD_DEVICE_EXTENSION(VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
+                         VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION);
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
-        { VK_KHR_MAINTENANCE_4_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_SPEC_VERSION },
+    ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_4_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_SPEC_VERSION);
 #endif
-    };
-    copy_extension_properties(available, (uint32_t)(sizeof(available) / sizeof(available[0])), pPropertyCount, pProperties);
+#undef ADD_DEVICE_EXTENSION
+    copy_extension_properties(available, available_count, pPropertyCount, pProperties);
     return VK_SUCCESS;
 }
 
