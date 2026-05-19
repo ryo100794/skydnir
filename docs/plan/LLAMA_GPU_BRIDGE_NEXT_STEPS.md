@@ -1,6 +1,6 @@
 # llama.cpp GPU Bridge Next Steps
 
-Snapshot date: 2026-05-13.
+Snapshot date: 2026-05-19.
 
 This document is the handoff plan for continuing the llama.cpp GPU bridge work
 with a smaller or faster coding model.  It assumes the repository is on or
@@ -47,14 +47,17 @@ compare is allowed to start.
 
 ## Canonical Commands
 
-Use the connected device serial from the user when it changes.  The latest
-known device during this snapshot was `192.168.179.26:45443`.
+Use the connected device serial from the user when it changes.  ADB is not a
+persistent assumption: if the user says ADB is off, continue host-only checks
+and wait for a fresh endpoint before running device readiness or compare jobs.
+The latest observed device endpoints are historical evidence only.
 
 Fast local checks:
 
 ```bash
 cd /root/tl/pdocker-android
 python3 -m unittest tests.test_gpu_abi_contract tests.test_llama_gpu_artifact_verifier
+python3 -m unittest tests.test_llama_gpu_q6k_workflow
 python3 scripts/maintenance/summarize-llama-gpu-artifacts.py \
   --snapshot-date 2026-05-19 \
   --out docs/test/llama-gpu-artifact-sweep-latest.json
@@ -150,6 +153,13 @@ fail closed as `vulkan-pipeline-feature-evidence-missing` if a
 `VK_ERROR_FEATURE_NOT_PRESENT` blocker lacks required/requested feature masks
 or Android enabled-feature evidence.  This keeps the next device run from
 turning incomplete setup evidence into a false Q6_K conclusion.
+
+2026-05-19 workflow hardening: `scripts/android-llama-gpu-q6k-run.py` now
+persists the verifier stdout next to the workflow manifest as
+`*.verifier.stdout` and extracts JSON classification from the full output, not
+from the 8 KiB `stdout_tail`.  This prevents long verifier diagnostics from
+silently dropping `classification`/`next_action` in
+`docs/test/llama-gpu-q6k-workflow-latest.json`.
 
 Milestone compare with CPU baseline should be run only after a correctness
 blocker changes, not after every small diagnostic edit.
