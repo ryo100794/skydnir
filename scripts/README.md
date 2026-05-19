@@ -85,7 +85,7 @@ remain gitignored and intentionally absent from the inventory.
 
 | Path | Stability | Role |
 |---|---|---|
-| `scripts/copy-native.sh` | `stable-entrypoint` | Stages APK/runtime payloads consumed by Gradle packaging. |
+| `scripts/copy-native.sh` | `stable-entrypoint` | Stages APK/runtime payloads consumed by Gradle packaging; honors `PDOCKER_FDROID_NO_CRANE=1` to omit the prebuilt crane payload for F-Droid-oriented builds. |
 
 ### build-developer
 
@@ -94,6 +94,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/build-all.sh` | `stable-entrypoint` | Build, setup, or developer environment helper. |
 | `scripts/build-apk.sh` | `stable-entrypoint` | Build, setup, or developer environment helper. |
 | `scripts/build-gpu-shim.sh` | `stable-entrypoint` | Build, setup, or developer environment helper. |
+| `scripts/build-native-android-ndk.sh` | `stable-entrypoint` | Builds Android/Bionic native helper payloads for arm64-v8a and armeabi-v7a with the Android NDK path, without Termux or box64 in the standard path. |
 | `scripts/build-native-termux.sh` | `stable-entrypoint` | Build, setup, or developer environment helper. |
 | `scripts/fetch-xterm.sh` | `developer-helper` | Build, setup, or developer environment helper. |
 | `scripts/git-preflight.sh` | `developer-helper` | Build, setup, or developer environment helper. |
@@ -158,7 +159,8 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/verify-memory-pager-contract.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-memory-pager-design.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-metadata-index.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
-| `scripts/verify-native-rebuild-release.sh` | `stable-entrypoint` | Clean, rebuild, stage, assemble, and verify release-candidate native APK payloads with a dry-run default. |
+| `scripts/verify-native-payloads.py` | `test-helper` | Verifies staged native payload ELF class/architecture, APK inclusion, source-mirror byte identity, forbidden caches, and the F-Droid no-crane APK policy. |
+| `scripts/verify-native-rebuild-release.sh` | `stable-entrypoint` | Clean, rebuild, stage, assemble, and verify release-candidate native APK payloads with a dry-run default; records normal and `PDOCKER_FDROID_NO_CRANE=1` evidence. |
 | `scripts/verify-no-proot-runtime-truth-artifact.py` | `test-helper` | Host-side verifier for no-proot runtime truth gate artifacts. |
 | `scripts/verify-oom-lmk-survival-gate.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-project-library.py` | `test-helper` | Host-side verification/test driver or static contract gate. |

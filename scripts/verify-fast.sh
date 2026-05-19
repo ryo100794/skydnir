@@ -81,6 +81,9 @@ run bash -n \
 
 run env PDOCKER_NATIVE_REBUILD_UTC=verify-fast-dry-run \
   bash scripts/verify-native-rebuild-release.sh
+run env PDOCKER_NATIVE_REBUILD_UTC=verify-fast-fdroid-no-crane-dry-run \
+  PDOCKER_FDROID_NO_CRANE=1 \
+  bash scripts/verify-native-rebuild-release.sh
 
 run python3 docker-proot-setup/scripts/verify_runtime_contract.py
 run python3 scripts/verify_direct_syscall_contracts.py

@@ -37,6 +37,50 @@
           ]
         },
         {
+          "id": "native-rebuild-release-dry-run",
+          "argv": [
+            "bash",
+            "scripts/verify-native-rebuild-release.sh"
+          ],
+          "env": {
+            "PDOCKER_NATIVE_REBUILD_UTC": "test-driver-native-rebuild-dry-run"
+          },
+          "artifacts": [
+            "build/reports/native-rebuild-test-driver-native-rebuild-dry-run/plan.log",
+            "build/reports/native-rebuild-test-driver-native-rebuild-dry-run/environment.json"
+          ]
+        },
+        {
+          "id": "native-rebuild-release-fdroid-no-crane-dry-run",
+          "argv": [
+            "bash",
+            "scripts/verify-native-rebuild-release.sh"
+          ],
+          "env": {
+            "PDOCKER_NATIVE_REBUILD_UTC": "test-driver-fdroid-no-crane-dry-run",
+            "PDOCKER_FDROID_NO_CRANE": "1"
+          },
+          "artifacts": [
+            "build/reports/native-rebuild-test-driver-fdroid-no-crane-dry-run/plan.log",
+            "build/reports/native-rebuild-test-driver-fdroid-no-crane-dry-run/environment.json"
+          ]
+        },
+        {
+          "id": "verify-native-payloads",
+          "argv": [
+            "python3",
+            "scripts/verify-native-payloads.py",
+            "--apk",
+            "app/build/outputs/apk/compat/debug/app-compat-debug.apk",
+            "--apk-arm64-only",
+            "--write-artifact",
+            "docs/test/native-payloads-latest.json"
+          ],
+          "artifacts": [
+            "docs/test/native-payloads-latest.json"
+          ]
+        },
+        {
           "id": "verify-runtime-contract",
           "argv": [
             "python3",
@@ -964,6 +1008,35 @@
             "docs/release/RELEASE_READINESS.md",
             "docs/test/CI_GATE_LEDGER.md",
             "tests/test_driver_manifest.json"
+          ]
+        },
+        {
+          "id": "release-native-rebuild-release-dry-run",
+          "argv": [
+            "bash",
+            "scripts/verify-native-rebuild-release.sh"
+          ],
+          "env": {
+            "PDOCKER_NATIVE_REBUILD_UTC": "release-native-rebuild-dry-run"
+          },
+          "artifacts": [
+            "build/reports/native-rebuild-release-native-rebuild-dry-run/plan.log",
+            "build/reports/native-rebuild-release-native-rebuild-dry-run/environment.json"
+          ]
+        },
+        {
+          "id": "release-native-rebuild-fdroid-no-crane-dry-run",
+          "argv": [
+            "bash",
+            "scripts/verify-native-rebuild-release.sh"
+          ],
+          "env": {
+            "PDOCKER_NATIVE_REBUILD_UTC": "release-native-rebuild-fdroid-no-crane-dry-run",
+            "PDOCKER_FDROID_NO_CRANE": "1"
+          },
+          "artifacts": [
+            "build/reports/native-rebuild-release-native-rebuild-fdroid-no-crane-dry-run/plan.log",
+            "build/reports/native-rebuild-release-native-rebuild-fdroid-no-crane-dry-run/environment.json"
           ]
         }
       ]

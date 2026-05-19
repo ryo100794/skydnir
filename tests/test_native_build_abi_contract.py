@@ -1,5 +1,8 @@
+import json
+import os
 import pathlib
 import subprocess
+import tempfile
 import unittest
 import zipfile
 
@@ -121,6 +124,7 @@ class NativeBuildAbiContractTest(unittest.TestCase):
     def test_fdroid_no_crane_gate_is_wired_without_changing_normal_apk(self):
         copy_native = (ROOT / "scripts" / "copy-native.sh").read_text()
         gradle = (ROOT / "app" / "build.gradle.kts").read_text()
+        release_verifier = (ROOT / "scripts" / "verify-native-rebuild-release.sh").read_text()
         runtime = (
             ROOT
             / "app"
@@ -138,8 +142,78 @@ class NativeBuildAbiContractTest(unittest.TestCase):
         self.assertIn("rm -f \"$JNI_DIR/libcrane.so\"", copy_native)
         self.assertIn("PDOCKER_FDROID_NO_CRANE", gradle)
         self.assertIn("F-Droid no-crane build must not stage libcrane.so", gradle)
+        self.assertIn("FDROID_NO_CRANE=\"${PDOCKER_FDROID_NO_CRANE:-0}\"", release_verifier)
+        self.assertIn("fdroid_no_crane: %s", release_verifier)
+        self.assertIn("PDOCKER_FDROID_NO_CRANE=%q bash scripts/copy-native.sh", release_verifier)
+        self.assertIn("PDOCKER_FDROID_NO_CRANE=%q ./gradlew %q --no-daemon", release_verifier)
+        self.assertIn("VERIFY_NATIVE_PAYLOADS_ARGS+=(--fdroid-no-crane)", release_verifier)
+        self.assertIn("export PDOCKER_FDROID_NO_CRANE=\"$FDROID_NO_CRANE\"", release_verifier)
         self.assertIn('optionalLinkTo(File(nativeDir, "libcrane.so"), File(dockerBin, "crane"))', runtime)
         self.assertIn("PDOCKER_FDROID_NO_CRANE=1", release_doc)
+        verify_fast = (ROOT / "scripts" / "verify-fast.sh").read_text()
+        self.assertIn("verify-fast-fdroid-no-crane-dry-run", verify_fast)
+
+    def test_native_rebuild_dry_run_records_no_crane_mode(self):
+        env = {
+            **os.environ,
+            "PDOCKER_NATIVE_REBUILD_UTC": "unit-fdroid-no-crane",
+            "PDOCKER_FDROID_NO_CRANE": "1",
+        }
+        report = ROOT / "build" / "reports" / "native-rebuild-unit-fdroid-no-crane"
+        subprocess.run(
+            ["rm", "-rf", str(report)],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        result = subprocess.run(
+            ["bash", "scripts/verify-native-rebuild-release.sh"],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        self.assertIn("DRY-RUN", result.stdout)
+        plan = (report / "plan.log").read_text()
+        environment = json.loads((report / "environment.json").read_text())
+        self.assertIn("fdroid_no_crane: 1", plan)
+        self.assertIn("PDOCKER_FDROID_NO_CRANE: 1", plan)
+        self.assertIn("PDOCKER_FDROID_NO_CRANE=1 bash scripts/copy-native.sh", plan)
+        self.assertIn("--fdroid-no-crane", plan)
+        self.assertTrue(environment["fdroid_no_crane"])
+        self.assertEqual(environment["android"]["PDOCKER_FDROID_NO_CRANE_effective"], "1")
+
+    def test_native_rebuild_dry_run_default_omits_no_crane_verify_flag(self):
+        env = {
+            **os.environ,
+            "PDOCKER_NATIVE_REBUILD_UTC": "unit-normal-crane",
+        }
+        env.pop("PDOCKER_FDROID_NO_CRANE", None)
+        report = ROOT / "build" / "reports" / "native-rebuild-unit-normal-crane"
+        subprocess.run(
+            ["rm", "-rf", str(report)],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        subprocess.run(
+            ["bash", "scripts/verify-native-rebuild-release.sh"],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        plan = (report / "plan.log").read_text()
+        environment = json.loads((report / "environment.json").read_text())
+        self.assertIn("fdroid_no_crane: 0", plan)
+        self.assertIn("PDOCKER_FDROID_NO_CRANE=0 bash scripts/copy-native.sh", plan)
+        self.assertNotIn("--fdroid-no-crane --write-artifact", plan)
+        self.assertFalse(environment["fdroid_no_crane"])
+        self.assertEqual(environment["android"]["PDOCKER_FDROID_NO_CRANE_effective"], "0")
 
     def test_built_apk_payloads_match_runtime_sources(self):
         apk = ROOT / "app" / "build" / "outputs" / "apk" / "compat" / "debug" / "app-compat-debug.apk"
@@ -160,6 +234,76 @@ class NativeBuildAbiContractTest(unittest.TestCase):
                 any(name.startswith("assets/pdockerd/__pycache__/") for name in names),
                 "APK must not package pdockerd Python cache artifacts",
             )
+
+    def test_native_payload_verifier_enforces_no_crane_apk_policy(self):
+        arm64_dir = ROOT / "app" / "src" / "main" / "jniLibs" / "arm64-v8a"
+        required_libs = [
+            "libpdockerpty.so",
+            "libpdockerdirect.so",
+            "libpdockergpuexecutor.so",
+            "libpdockermediaexecutor.so",
+            "libpdockergpushim.so",
+            "libpdockervulkanicd.so",
+            "libpdockeropenclicd.so",
+            "libcow.so",
+        ]
+        if not all((arm64_dir / name).is_file() for name in required_libs):
+            self.skipTest("native payloads are not built")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            no_crane_apk = tmp_path / "no-crane.apk"
+            with zipfile.ZipFile(no_crane_apk, "w") as zf:
+                for name in required_libs:
+                    zf.write(arm64_dir / name, f"lib/arm64-v8a/{name}")
+                zf.write(
+                    ROOT / "docker-proot-setup" / "bin" / "pdockerd",
+                    "assets/pdockerd/pdockerd",
+                )
+            artifact = tmp_path / "no-crane.json"
+            ok = subprocess.run(
+                [
+                    "python3",
+                    "scripts/verify-native-payloads.py",
+                    "--apk",
+                    str(no_crane_apk),
+                    "--apk-arm64-only",
+                    "--fdroid-no-crane",
+                    "--write-artifact",
+                    str(artifact),
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(ok.returncode, 0, ok.stderr + ok.stdout)
+            data = json.loads(artifact.read_text())
+            self.assertTrue(data["apk"]["fdroid_no_crane"])
+            self.assertEqual(data["apk"]["forbidden_crane_entries"], [])
+
+            with_crane_apk = tmp_path / "with-crane.apk"
+            with zipfile.ZipFile(no_crane_apk) as src, zipfile.ZipFile(with_crane_apk, "w") as dst:
+                for info in src.infolist():
+                    dst.writestr(info, src.read(info.filename))
+                dst.write(arm64_dir / "libcrane.so", "lib/arm64-v8a/libcrane.so")
+            bad = subprocess.run(
+                [
+                    "python3",
+                    "scripts/verify-native-payloads.py",
+                    "--apk",
+                    str(with_crane_apk),
+                    "--apk-arm64-only",
+                    "--fdroid-no-crane",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(bad.returncode, 2)
+            self.assertIn("forbidden crane payload", bad.stderr)
 
 
 if __name__ == "__main__":

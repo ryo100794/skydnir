@@ -88,8 +88,10 @@ All native payloads shipped in the product APK need an auditable source path:
   the APK. A passing `native-payloads.json` must show the APK entry
   `lib/arm64-v8a/libcow.so` is byte-identical to `docker-proot-setup/lib/libcow.so`.
 - Until `crane` has a pinned source-build lane, F-Droid-oriented builds may use
-  the explicit no-crane gate: run `PDOCKER_FDROID_NO_CRANE=1 scripts/copy-native.sh`,
-  build with the same environment flag, and verify with
+  the explicit no-crane gate. The preferred evidence route is:
+  `PDOCKER_FDROID_NO_CRANE=1 PDOCKER_NATIVE_REBUILD_EXECUTE=1 bash scripts/verify-native-rebuild-release.sh`.
+  Its dry-run form records `fdroid_no_crane: 1`, exports the same flag for
+  `copy-native.sh` and Gradle, and runs
   `scripts/verify-native-payloads.py --fdroid-no-crane`. That flavor must omit
   `lib/arm64-v8a/libcrane.so` and expose image-pull limitations instead of
   silently bundling the prebuilt static Go binary.

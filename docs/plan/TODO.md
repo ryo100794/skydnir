@@ -158,8 +158,12 @@ issues, and deciding which planned gaps become hard gates.
     removes generated native outputs, rebuilds Android/Bionic helpers with NDK
     clang, rebuilds Linux/glibc aarch64 payloads with an explicit cross
     compiler, verifies ELF machine/interpreter/checksums, and resolves the
-    inventoried external `crane` source-build/exclusion blocker before calling
-    the lane reproducible. New design decision: the Google-distributed NDK in
+    remaining source-built `crane` lane before calling the normal APK lane
+    fully reproducible. The exclusion side of the blocker now has an explicit
+    F-Droid-oriented no-crane gate through `PDOCKER_FDROID_NO_CRANE=1`
+    `scripts/verify-native-rebuild-release.sh`; that path must continue to
+    expose image-pull limitations rather than silently bundling the prebuilt
+    static Go binary. New design decision: the Google-distributed NDK in
     this workspace has a `linux-x86_64` host prebuilt but no directly executable
     `linux-aarch64` NDK driver. The aarch64 glibc build therefore uses
     host-clang mode with NDK sysroot/compiler-rt. If a true aarch64-host Android

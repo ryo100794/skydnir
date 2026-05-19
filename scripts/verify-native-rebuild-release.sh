@@ -21,6 +21,8 @@ Environment:
   PDOCKER_NATIVE_REBUILD_EXECUTE=1        Actually clean/rebuild/verify. Default: dry-run.
   PDOCKER_NATIVE_REBUILD_BUILD_TYPE=debug Build type for compat APK: debug or release.
                                          Default: $PDOCKER_ANDROID_BUILD_TYPE or debug.
+  PDOCKER_FDROID_NO_CRANE=1               Build/verify the F-Droid-oriented APK without
+                                         the prebuilt crane payload.
   PDOCKER_NATIVE_REBUILD_UTC=STAMP        Override UTC report stamp for tests/re-runs.
 
 The script always writes release evidence JSON, including in dry-run mode:
@@ -34,10 +36,19 @@ fi
 
 EXECUTE="${PDOCKER_NATIVE_REBUILD_EXECUTE:-0}"
 BUILD_TYPE="${PDOCKER_NATIVE_REBUILD_BUILD_TYPE:-${PDOCKER_ANDROID_BUILD_TYPE:-debug}}"
+FDROID_NO_CRANE="${PDOCKER_FDROID_NO_CRANE:-0}"
 case "$BUILD_TYPE" in
     debug|release) ;;
     *)
         echo "ABORT: build type must be 'debug' or 'release' (got '$BUILD_TYPE')" >&2
+        exit 2
+        ;;
+esac
+case "$FDROID_NO_CRANE" in
+    0|"") FDROID_NO_CRANE=0 ;;
+    1) ;;
+    *)
+        echo "ABORT: PDOCKER_FDROID_NO_CRANE must be 0 or 1 (got '$FDROID_NO_CRANE')" >&2
         exit 2
         ;;
 esac
@@ -132,7 +143,8 @@ write_environment_json() {
     android_ndk_home="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-$HOME/android-ndk-r26d}}"
 
     python3 - "$ROOT" "$ENVIRONMENT_JSON" "$UTC_STAMP" "$mode" "$BUILD_TYPE" \
-        "$GRADLE_TASK" "$APK" "$UNSIGNED_APK" "$android_home" "$android_ndk_home" <<'PY'
+        "$GRADLE_TASK" "$APK" "$UNSIGNED_APK" "$android_home" "$android_ndk_home" \
+        "$FDROID_NO_CRANE" <<'PY'
 import json
 import os
 import subprocess
@@ -150,6 +162,7 @@ from pathlib import Path
     unsigned_apk_path,
     android_home,
     android_ndk_home,
+    fdroid_no_crane,
 ) = sys.argv[1:]
 root_path = Path(root)
 
@@ -189,6 +202,7 @@ data = {
     "utc": utc_stamp,
     "build_type": build_type,
     "execute_mode": mode,
+    "fdroid_no_crane": fdroid_no_crane == "1",
     "gradle_task": gradle_task,
     "apk": {
         "path": apk_path,
@@ -200,6 +214,8 @@ data = {
         "ANDROID_NDK_HOME": os.environ.get("ANDROID_NDK_HOME", ""),
         "ANDROID_NDK_ROOT": os.environ.get("ANDROID_NDK_ROOT", ""),
         "ANDROID_NDK_HOME_effective": android_ndk_home,
+        "PDOCKER_FDROID_NO_CRANE": os.environ.get("PDOCKER_FDROID_NO_CRANE", ""),
+        "PDOCKER_FDROID_NO_CRANE_effective": fdroid_no_crane,
     },
     "git": {
         "commit_hash": git_head["stdout"].strip() if git_head["exit_code"] == 0 else "",
@@ -228,11 +244,16 @@ write_plan() {
         printf 'utc: %s\n' "$UTC_STAMP"
         printf 'mode: %s\n' "$([[ "$EXECUTE" == "1" ]] && printf execute || printf dry-run)"
         printf 'build_type: %s\n' "$BUILD_TYPE"
+        printf 'fdroid_no_crane: %s\n' "$FDROID_NO_CRANE"
         printf 'gradle_task: %s\n' "$GRADLE_TASK"
         printf 'apk: %s\n' "$(relpath "$APK")"
         if [[ -n "$UNSIGNED_APK" ]]; then
             printf 'unsigned_apk_fallback: %s\n' "$(relpath "$UNSIGNED_APK")"
         fi
+        printf '\nenvironment:\n'
+        printf '  PDOCKER_ANDROID_FLAVOR: compat\n'
+        printf '  PDOCKER_ANDROID_BUILD_TYPE: %s\n' "$BUILD_TYPE"
+        printf '  PDOCKER_FDROID_NO_CRANE: %s\n' "$FDROID_NO_CRANE"
         printf '\nclean_paths:\n'
         local path
         for path in "${CLEAN_PATHS[@]}"; do
@@ -246,9 +267,13 @@ write_plan() {
         printf '  - bash scripts/build-native-android-ndk.sh\n'
         printf '  - make -C docker-proot-setup/src/overlay clean install CC=aarch64-linux-gnu-gcc\n'
         printf '  - bash scripts/build-gpu-shim.sh\n'
-        printf '  - bash scripts/copy-native.sh\n'
-        printf '  - ./gradlew %q --no-daemon\n' "$GRADLE_TASK"
-        printf '  - python3 scripts/verify-native-payloads.py --apk <apk> --apk-arm64-only --write-artifact %s\n' "$(relpath "$REPORT_DIR/native-payloads.json")"
+        printf '  - PDOCKER_FDROID_NO_CRANE=%q bash scripts/copy-native.sh\n' "$FDROID_NO_CRANE"
+        printf '  - PDOCKER_FDROID_NO_CRANE=%q ./gradlew %q --no-daemon\n' "$FDROID_NO_CRANE" "$GRADLE_TASK"
+        if [[ "$FDROID_NO_CRANE" == "1" ]]; then
+            printf '  - python3 scripts/verify-native-payloads.py --apk <apk> --apk-arm64-only --fdroid-no-crane --write-artifact %s\n' "$(relpath "$REPORT_DIR/native-payloads.json")"
+        else
+            printf '  - python3 scripts/verify-native-payloads.py --apk <apk> --apk-arm64-only --write-artifact %s\n' "$(relpath "$REPORT_DIR/native-payloads.json")"
+        fi
     } > "$PLAN_LOG"
 }
 
@@ -296,6 +321,7 @@ export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-$HOME/android-n
 export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 export PDOCKER_ANDROID_FLAVOR=compat
 export PDOCKER_ANDROID_BUILD_TYPE="$BUILD_TYPE"
+export PDOCKER_FDROID_NO_CRANE="$FDROID_NO_CRANE"
 
 log "EXECUTE=1: cleaning selected generated native outputs."
 clean_outputs
@@ -317,10 +343,16 @@ if [[ ! -f "$VERIFY_APK" ]]; then
     fi
     exit 1
 fi
-run_step verify-native-payloads python3 scripts/verify-native-payloads.py \
-    --apk "$VERIFY_APK" \
-    --apk-arm64-only \
-    --write-artifact "$REPORT_DIR/native-payloads.json"
+VERIFY_NATIVE_PAYLOADS_ARGS=(
+    python3 scripts/verify-native-payloads.py
+    --apk "$VERIFY_APK"
+    --apk-arm64-only
+)
+if [[ "$FDROID_NO_CRANE" == "1" ]]; then
+    VERIFY_NATIVE_PAYLOADS_ARGS+=(--fdroid-no-crane)
+fi
+VERIFY_NATIVE_PAYLOADS_ARGS+=(--write-artifact "$REPORT_DIR/native-payloads.json")
+run_step verify-native-payloads "${VERIFY_NATIVE_PAYLOADS_ARGS[@]}"
 
 log ""
 log "native rebuild verifier: PASS"
