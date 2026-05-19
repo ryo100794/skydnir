@@ -79,6 +79,9 @@ run bash -n \
   scripts/verify-native-rebuild-release.sh \
   scripts/verify-heavy.sh
 
+run env PDOCKER_NATIVE_REBUILD_UTC=verify-fast-dry-run \
+  bash scripts/verify-native-rebuild-release.sh
+
 run python3 docker-proot-setup/scripts/verify_runtime_contract.py
 run python3 scripts/verify_direct_syscall_contracts.py
 run python3 scripts/verify-memory-pager-design.py

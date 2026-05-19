@@ -23,6 +23,9 @@ Environment:
                                          Default: $PDOCKER_ANDROID_BUILD_TYPE or debug.
   PDOCKER_NATIVE_REBUILD_UTC=STAMP        Override UTC report stamp for tests/re-runs.
 
+The script always writes release evidence JSON, including in dry-run mode:
+  build/reports/native-rebuild-<UTC>/environment.json
+
 The script writes logs and verification artifacts under:
   build/reports/native-rebuild-<UTC>/
 USAGE
@@ -50,6 +53,7 @@ REPORT_DIR="$ROOT/build/reports/native-rebuild-$UTC_STAMP"
 mkdir -p "$REPORT_DIR"
 SUMMARY_LOG="$REPORT_DIR/summary.log"
 PLAN_LOG="$REPORT_DIR/plan.log"
+ENVIRONMENT_JSON="$REPORT_DIR/environment.json"
 : > "$SUMMARY_LOG"
 
 log() {
@@ -115,6 +119,108 @@ if [[ -n "$UNSIGNED_APK" ]]; then
     CLEAN_PATHS+=("$UNSIGNED_APK")
 fi
 
+
+write_environment_json() {
+    local mode android_home android_ndk_home
+    if [[ "$EXECUTE" == "1" ]]; then
+        mode="execute"
+    else
+        mode="dry-run"
+    fi
+    android_home="${ANDROID_HOME:-$HOME/android-sdk}"
+    android_ndk_home="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-$HOME/android-ndk-r26d}}"
+
+    python3 - "$ROOT" "$ENVIRONMENT_JSON" "$UTC_STAMP" "$mode" "$BUILD_TYPE" \
+        "$GRADLE_TASK" "$APK" "$UNSIGNED_APK" "$android_home" "$android_ndk_home" <<'PY'
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+(
+    root,
+    output_path,
+    utc_stamp,
+    mode,
+    build_type,
+    gradle_task,
+    apk_path,
+    unsigned_apk_path,
+    android_home,
+    android_ndk_home,
+) = sys.argv[1:]
+root_path = Path(root)
+
+def rel(path):
+    if not path:
+        return ""
+    try:
+        return str(Path(path).resolve().relative_to(root_path.resolve()))
+    except ValueError:
+        return path
+
+def run_command(args):
+    record = {"args": args, "exit_code": None, "stdout": "", "stderr": ""}
+    try:
+        completed = subprocess.run(
+            args,
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        record["exit_code"] = 127
+        record["stderr"] = str(exc)
+        return record
+    record["exit_code"] = completed.returncode
+    record["stdout"] = completed.stdout
+    record["stderr"] = completed.stderr
+    return record
+
+git_head = run_command(["git", "rev-parse", "HEAD"])
+git_status = run_command(["git", "status", "--porcelain"])
+
+data = {
+    "schema": "pdocker.native-rebuild-release.environment.v1",
+    "utc": utc_stamp,
+    "build_type": build_type,
+    "execute_mode": mode,
+    "gradle_task": gradle_task,
+    "apk": {
+        "path": apk_path,
+        "relative_path": rel(apk_path),
+    },
+    "android": {
+        "ANDROID_HOME": os.environ.get("ANDROID_HOME", ""),
+        "ANDROID_HOME_effective": android_home,
+        "ANDROID_NDK_HOME": os.environ.get("ANDROID_NDK_HOME", ""),
+        "ANDROID_NDK_ROOT": os.environ.get("ANDROID_NDK_ROOT", ""),
+        "ANDROID_NDK_HOME_effective": android_ndk_home,
+    },
+    "git": {
+        "commit_hash": git_head["stdout"].strip() if git_head["exit_code"] == 0 else "",
+        "status_porcelain": git_status["stdout"],
+        "commands": {
+            "rev_parse_head": git_head,
+            "status_porcelain": git_status,
+        },
+    },
+    "commands": {
+        "java_version": run_command(["java", "-version"]),
+        "gradle_version": run_command(["./gradlew", "--version"]),
+    },
+}
+if unsigned_apk_path:
+    data["apk"]["unsigned_fallback_path"] = unsigned_apk_path
+    data["apk"]["unsigned_fallback_relative_path"] = rel(unsigned_apk_path)
+
+Path(output_path).write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+}
+
 write_plan() {
     {
         printf 'schema: pdocker.native-rebuild-release.v1\n'
@@ -171,8 +277,10 @@ run_step() {
 }
 
 write_plan
+write_environment_json
 log "native rebuild report: $REPORT_DIR"
 log "plan: $(relpath "$PLAN_LOG")"
+log "environment: $(relpath "$ENVIRONMENT_JSON")"
 
 if [[ "$EXECUTE" != "1" ]]; then
     log "DRY-RUN: no files were removed and no build commands were executed."
