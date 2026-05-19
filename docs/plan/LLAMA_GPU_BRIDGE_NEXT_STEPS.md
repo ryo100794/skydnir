@@ -54,11 +54,11 @@ Fast local checks:
 
 ```bash
 cd /root/tl/pdocker-android
-python3 -m unittest tests.test_gpu_abi_contract
+python3 -m unittest tests.test_gpu_abi_contract tests.test_llama_gpu_artifact_verifier
 python3 scripts/maintenance/summarize-llama-gpu-artifacts.py \
-  --snapshot-date 2026-05-17 \
+  --snapshot-date 2026-05-19 \
   --out docs/test/llama-gpu-artifact-sweep-latest.json
-bash scripts/build-native-termux.sh
+bash scripts/build-native-android-ndk.sh
 ./gradlew :app:assembleCompatDebug
 ```
 

@@ -711,6 +711,11 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                                     "local_y1_sum": 3.75,
                                     "local_y_best": 0,
                                     "local_y_best_abs_error": 0.0,
+                                    "native_reduction_tree_available": True,
+                                    "native_reduction_tree_sum": 7.5,
+                                    "native_reduction_tree_with_accumulator": 7.5,
+                                    "native_reduction_tree_gpu_abs_error": 3.75,
+                                    "expected_gpu_abs_error": 3.75,
                                     "class": "local-y-partial",
                                 }
                             ],
@@ -727,6 +732,11 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["responsibility_boundary"], "q6-native-partial-store")
         self.assertEqual(report["q6_effective_blocker_class"], "native-q6-local-y-partial-store")
         self.assertEqual(report["q6_partial_signature_probe"]["summary"], "local-y-partial")
+        sample = report["q6_partial_signature_probe"]["samples"][0]
+        self.assertTrue(sample["native_reduction_tree_available"])
+        self.assertEqual(sample["native_reduction_tree_with_accumulator"], 7.5)
+        self.assertEqual(sample["native_reduction_tree_gpu_abs_error"], 3.75)
+        self.assertEqual(sample["expected_gpu_abs_error"], 3.75)
 
     def test_q6_partial_signature_probe_classifies_lane_partial_store(self):
         payload = {
