@@ -13,7 +13,7 @@ validate every runtime behavior.
 | Document | Scope |
 |---|---|
 | [`README.md`](README.md) | Local build commands, APK outputs, install commands, and build gates |
-| [`NATIVE_BUILD_ENVIRONMENT.md`](NATIVE_BUILD_ENVIRONMENT.md) | Native payload classes, standard NDK build path, legacy Termux fallback, and reproducible-build direction |
+| [`NATIVE_BUILD_ENVIRONMENT.md`](NATIVE_BUILD_ENVIRONMENT.md) | Native payload classes, standard NDK/glibc-host build path, legacy Termux mode, and reproducible-build direction |
 
 F-Droid/reproducible-build readiness planning lives in
 [`../release/FDROID_RELEASE_PROCESS.md`](../release/FDROID_RELEASE_PROCESS.md).
@@ -101,7 +101,7 @@ packaging.
 `scripts/build-apk.sh` still rebuilds Android native helper libraries by
 default. Its default native backend is the official NDK clang path documented
 in [`NATIVE_BUILD_ENVIRONMENT.md`](NATIVE_BUILD_ENVIRONMENT.md). The legacy
-Termux compiler path is available only by setting
+Termux compiler mode is available only by setting
 `PDOCKER_NATIVE_BUILD_BACKEND=termux`. The build orchestrator sets
 `PDOCKER_SKIP_NATIVE_BUILD=1` after it has already refreshed native helpers.
 

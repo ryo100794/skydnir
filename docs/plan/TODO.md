@@ -152,14 +152,19 @@ issues, and deciding which planned gaps become hard gates.
     payload builds so release/CI/F-Droid-oriented builds do not depend on
     Termux binaries. Current slice adds `scripts/build-native-android-ndk.sh`
     as the default Android/Bionic helper builder, keeps
-    `scripts/build-native-termux.sh` as an explicit legacy fallback, and
+    `scripts/build-native-termux.sh` as an explicit legacy local mode, and
     documents the artifact-class split in
     `docs/build/NATIVE_BUILD_ENVIRONMENT.md`. Remaining work: add CI that
     removes generated native outputs, rebuilds Android/Bionic helpers with NDK
     clang, rebuilds Linux/glibc aarch64 payloads with an explicit cross
     compiler, verifies ELF machine/interpreter/checksums, and resolves the
     inventoried external `crane` source-build/exclusion blocker before calling
-    the lane reproducible.
+    the lane reproducible. New design decision: the Google-distributed NDK in
+    this workspace has a `linux-x86_64` host prebuilt but no directly executable
+    `linux-aarch64` NDK driver. The aarch64 glibc build therefore uses
+    host-clang mode with NDK sysroot/compiler-rt. If a true aarch64-host Android
+    toolchain driver is required, add a separate AOSP LLVM source-build lane and
+    pin its outputs; do not import unofficial repacked NDK binaries.
 
 ### Next Queue Generated 2026-05-04
 

@@ -6,7 +6,7 @@ Snapshot date: 2026-05-19.
 
 This document defines the standard native build path for packaged native
 payloads. The project previously used a Termux-local compiler for part of the
-Android helper build. That path remains available only as a local fallback. The
+Android helper build. That path remains available only as a legacy local mode. The
 standard path is a reproducible glibc Linux host using the official Android NDK
 toolchain and explicit aarch64 Linux/glibc cross compilers where container-side
 payloads are required.
@@ -42,10 +42,18 @@ The script uses:
 - no Android device-local compiler
 
 On an aarch64 glibc development host where the installed official NDK prebuilt
-is `linux-x86_64` and therefore not directly executable, the script falls back
-to the host glibc `clang` while still using the NDK target, sysroot, and
-compiler-rt resource directory. That fallback requires `ld.lld` on `PATH`; it
-is still a glibc-host build and does not use Termux.
+is `linux-x86_64` and therefore not directly executable, the script uses
+**aarch64 glibc host-clang mode**: host glibc `clang` drives the compile while
+the Android target, sysroot, and compiler-rt resource directory still come from
+the NDK. This mode requires `ld.lld` on `PATH`; it is still a glibc-host build
+and does not use Termux.
+
+The current Google-distributed NDK package in this workspace provides a
+`linux-x86_64` host prebuilt. It does not provide a directly executable
+`linux-aarch64` NDK driver. If the project requires a true NDK-style driver
+binary for an aarch64 glibc host, the release lane should source-build the
+Android LLVM toolchain from AOSP and pin that toolchain as a generated build
+input. Do not use unofficial repacked NDK binaries.
 
 The output remains compatible with the existing packaging layout:
 
@@ -61,7 +69,7 @@ app/src/main/jniLibs/arm64-v8a/libpdockermediaexecutor.so
 `lib*.so`. Android extracts native libraries by name; the app later exposes
 them to the backend under executable names.
 
-## Legacy Termux Fallback
+## Legacy Termux Mode
 
 The legacy script remains:
 
@@ -69,10 +77,10 @@ The legacy script remains:
 bash scripts/build-native-termux.sh
 ```
 
-Use it only for local fallback on a device where the NDK host binaries cannot
-run. It is not the release or CI path.
+Use it only for local debugging on a device where no glibc host build
+environment is available. It is not the release or CI path.
 
-Select the fallback explicitly:
+Select the legacy mode explicitly:
 
 ```sh
 PDOCKER_NATIVE_BUILD_BACKEND=termux bash scripts/build-apk.sh
@@ -126,5 +134,7 @@ Before calling this F-Droid ready, the build lane still needs:
 3. Run the APK build twice in a clean pinned environment and compare outputs.
 4. Move local-only absolute paths such as custom `aapt2` overrides out of the
    repository-controlled default path.
-5. Keep `scripts/build-native-termux.sh` documented as legacy fallback only,
+5. Keep `scripts/build-native-termux.sh` documented as legacy local mode only,
    not as a normal packaging requirement.
+6. Decide whether to add an AOSP LLVM source-build lane for a true
+   aarch64-host Android toolchain driver.

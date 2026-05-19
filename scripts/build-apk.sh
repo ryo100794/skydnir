@@ -53,7 +53,7 @@ if [[ "$PDOCKER_SKIP_NATIVE_BUILD" == "0" ]]; then
             bash scripts/build-native-android-ndk.sh
             ;;
         termux)
-            # Legacy Android-device-local path kept only for local fallback/debugging.
+            # Legacy Android-device-local path kept only for local debugging.
             bash scripts/build-native-termux.sh
             ;;
         *)

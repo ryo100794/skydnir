@@ -48,8 +48,8 @@ if ! "$NDK_CLANG" --version >/dev/null 2>&1; then
     # Some local development machines are aarch64 glibc hosts while the
     # installed official NDK prebuilt is linux-x86_64. In that case use the
     # host glibc clang, but keep the NDK sysroot, Android target, and NDK
-    # compiler-rt resource directory. This remains a glibc-host build and does
-    # not fall back to Termux or device-local binaries.
+    # compiler-rt resource directory. This is the aarch64 glibc host-clang
+    # mode, not a Termux/device-local fallback.
     HOST_CLANG="${HOST_CLANG:-$(command -v clang || true)}"
     if [[ -z "$HOST_CLANG" || ! -x "$HOST_CLANG" ]]; then
         echo "ABORT: NDK clang is not executable on this host and host clang was not found" >&2
@@ -60,7 +60,7 @@ if ! "$NDK_CLANG" --version >/dev/null 2>&1; then
         exit 1
     fi
     if ! command -v ld.lld >/dev/null 2>&1; then
-        echo "ABORT: host clang fallback requires ld.lld on PATH" >&2
+        echo "ABORT: aarch64 glibc host-clang mode requires ld.lld on PATH" >&2
         echo "       Install lld or use an executable NDK prebuilt for this host." >&2
         exit 1
     fi
