@@ -1,5 +1,5 @@
 {
-  "artifact_count": 207,
+  "artifact_count": 210,
   "artifacts": [
     {
       "benchmark_claim_allowed": false,
@@ -1854,6 +1854,60 @@
       "runtime_freshness": null,
       "schema": "pdocker.llama.gpu.compare.v1",
       "speedup": null
+    },
+    {
+      "benchmark_claim_allowed": false,
+      "classification": "q6-native-output-layout-inconclusive",
+      "correctness": "fail",
+      "correctness_claim_allowed": false,
+      "device_memory_blocked": false,
+      "next_action": "continue Q6_K strict-passthrough split at the native-q6-output-layout-inconclusive boundary",
+      "path": "docs/test/llama-gpu-ngl1-q6-native-output-layout-20260519.json",
+      "q6_blocker_class": "native-q6-output-layout-inconclusive",
+      "q6_latest_status": "mismatch",
+      "q6_raw_blocker_class": "native-q6-output-layout-inconclusive",
+      "q6_row_indexed_writeback_verified": true,
+      "q6_writeback_summary": "pass",
+      "q6_writeback_verified_all": true,
+      "runtime_freshness": "pass",
+      "schema": "pdocker.llama.gpu.compare.v1",
+      "speedup": 1.033161556875769
+    },
+    {
+      "benchmark_claim_allowed": false,
+      "classification": "q6-native-device-execution-or-final-store",
+      "correctness": "not-run",
+      "correctness_claim_allowed": false,
+      "device_memory_blocked": false,
+      "next_action": "continue Q6_K strict-passthrough split at the native-q6-device-execution-or-final-store boundary",
+      "path": "docs/test/llama-gpu-ngl1-q6-native-output-layout-32sample-20260519.json",
+      "q6_blocker_class": "native-q6-device-execution-or-final-store",
+      "q6_latest_status": "mismatch",
+      "q6_raw_blocker_class": "native-q6-output-layout-inconclusive",
+      "q6_row_indexed_writeback_verified": true,
+      "q6_writeback_summary": "pass",
+      "q6_writeback_verified_all": true,
+      "runtime_freshness": "pass",
+      "schema": "pdocker.llama.gpu.compare.v1",
+      "speedup": 0.0
+    },
+    {
+      "benchmark_claim_allowed": false,
+      "classification": "q6-native-device-execution-or-final-store",
+      "correctness": "fail",
+      "correctness_claim_allowed": false,
+      "device_memory_blocked": false,
+      "next_action": "continue Q6_K strict-passthrough split at the native-q6-device-execution-or-final-store boundary",
+      "path": "docs/test/llama-gpu-ngl1-q6-row-provenance-20260519.json",
+      "q6_blocker_class": "native-q6-device-execution-or-final-store",
+      "q6_latest_status": "mismatch",
+      "q6_raw_blocker_class": "native-q6-device-execution-or-final-store",
+      "q6_row_indexed_writeback_verified": true,
+      "q6_writeback_summary": "pass",
+      "q6_writeback_verified_all": true,
+      "runtime_freshness": "pass",
+      "schema": "pdocker.llama.gpu.compare.v1",
+      "speedup": 0.9118320212424915
     },
     {
       "benchmark_claim_allowed": false,
@@ -3722,6 +3776,8 @@
     "icd-marker-not-observed": 25,
     "insufficient_memory": 3,
     "invalid-root": 1,
+    "q6-native-device-execution-or-final-store": 2,
+    "q6-native-output-layout-inconclusive": 1,
     "q6-workgroup-cleared-and-oracle-match": 1,
     "q6-workgroup-cleared-but-oracle-mismatch": 1,
     "vulkan-generic-spirv-dispatch": 2,
@@ -3736,14 +3792,16 @@
     "If writeback is verified and latest_status is mismatch, classify exactly one remaining blocker: workgroup-shape, Vulkan device-execution, or Q6 arithmetic/reduction/output-layout.",
     "Do not use served=true, speedup, or HTTP liveness as correctness evidence."
   ],
-  "q6_artifact_count": 34,
+  "q6_artifact_count": 37,
   "q6_classification_counts": {
     "executor-marker-not-observed": 29,
     "icd-marker-not-observed": 3,
+    "q6-native-device-execution-or-final-store": 2,
+    "q6-native-output-layout-inconclusive": 1,
     "q6-workgroup-cleared-and-oracle-match": 1,
     "q6-workgroup-cleared-but-oracle-mismatch": 1
   },
   "schema": "pdocker.llama.gpu.artifact-sweep.v1",
-  "snapshot_date": "2026-05-18",
+  "snapshot_date": "2026-05-19",
   "source_glob": "docs/test/llama-gpu-*.json"
 }
