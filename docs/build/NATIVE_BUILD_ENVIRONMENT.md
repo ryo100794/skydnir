@@ -57,9 +57,9 @@ is available.
 The current Google-distributed NDK package in this workspace provides a
 `linux-x86_64` host prebuilt. It does not provide a directly executable
 `linux-aarch64` NDK driver. If the project requires a true NDK-style driver
-binary for an aarch64 glibc host, the release lane should source-build the
-Android LLVM toolchain from AOSP and pin that toolchain as a generated build
-input. Do not use unofficial repacked NDK binaries.
+binary for an aarch64 glibc host, use the optional plan in
+[`AOSP_LLVM_AARCH64_HOST_PLAN.md`](AOSP_LLVM_AARCH64_HOST_PLAN.md). Do not use
+unofficial repacked NDK binaries.
 
 The output remains compatible with the existing packaging layout:
 
@@ -127,18 +127,22 @@ bash scripts/build-native-android-ndk.sh
 ## Linux/glibc Container Payloads
 
 Container-facing GPU and COW payloads must not be built with Android/Bionic
-headers. They need a Linux/glibc aarch64 compiler.
+headers. They need Linux/glibc cross compilers for the target container
+architectures.
 
 Required direction:
 
 ```sh
-CC=aarch64-linux-gnu-gcc bash scripts/build-gpu-shim.sh
+CC_ARM64=aarch64-linux-gnu-gcc CC_ARMHF=arm-linux-gnueabihf-gcc bash scripts/build-gpu-shim.sh
 CC=aarch64-linux-gnu-gcc make -C docker-proot-setup/src/overlay clean install
 ```
 
-The current GPU shim script accepts `CC`, but the release lane must still add
-ELF verification so an x86_64 host compiler cannot accidentally produce x86_64
-payloads.
+The GPU shim script verifies ELF class and architecture markers after each
+build so a host compiler cannot silently produce the wrong architecture. The
+armhf Vulkan ICD currently compiles with pointer-width warnings because the
+bridge stores some Vulkan handles as pointer-shaped integers; treat the armhf
+GPU payload as packaged experimental evidence until those handle abstractions
+are made pointer-width clean.
 
 ## Reproducibility Work Items
 

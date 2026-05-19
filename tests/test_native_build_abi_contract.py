@@ -1,5 +1,4 @@
 import pathlib
-import re
 import subprocess
 import unittest
 
@@ -50,6 +49,9 @@ class NativeBuildAbiContractTest(unittest.TestCase):
                     "libpdockerdirect.so",
                     "libpdockergpuexecutor.so",
                     "libpdockermediaexecutor.so",
+                    "libpdockergpushim.so",
+                    "libpdockervulkanicd.so",
+                    "libpdockeropenclicd.so",
                 ]:
                     path = abi_dir / name
                     self.assertTrue(path.is_file(), f"missing {path}")
@@ -70,6 +72,16 @@ class NativeBuildAbiContractTest(unittest.TestCase):
         self.assertIn("explicit unsupported-ABI", doc)
         self.assertIn("Port `pdocker-direct` to 32-bit ARM", doc)
         self.assertIn("unsupported-ABI executable", todo)
+        self.assertIn("armhf Vulkan ICD", doc)
+
+    def test_gpu_shim_script_builds_explicit_arm64_and_armhf_outputs(self):
+        script = (ROOT / "scripts" / "build-gpu-shim.sh").read_text()
+        self.assertIn("PDOCKER_GLIBC_ARCHES:-arm64 armhf", script)
+        self.assertIn("aarch64-linux-gnu-gcc", script)
+        self.assertIn("arm-linux-gnueabihf-gcc", script)
+        self.assertIn("verify_elf_arch", script)
+        self.assertIn("ELF 32-bit", script)
+        self.assertIn("ELF 64-bit", script)
 
 
 if __name__ == "__main__":

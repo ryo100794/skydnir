@@ -71,12 +71,14 @@ val verifyPackagedPayloadFresh by tasks.registering {
             requireFresh(abiDir.resolve("libpdockergpuexecutor.so"), appCppDir.resolve("pdocker_gpu_executor.c"), nativeHint)
             requireFresh(abiDir.resolve("libpdockermediaexecutor.so"), appCppDir.resolve("pdocker_media_executor.c"), nativeHint)
         }
+        androidNativeAbis.forEach { abi ->
+            val glibcPayloadDir = project.file("src/main/jniLibs/$abi")
+            requireFresh(glibcPayloadDir.resolve("libpdockergpushim.so"), gpuSrcDir.resolve("pdocker_gpu_shim.c"), gpuHint)
+            requireFresh(glibcPayloadDir.resolve("libpdockervulkanicd.so"), gpuSrcDir.resolve("pdocker_vulkan_icd.c"), gpuHint)
+            requireFresh(glibcPayloadDir.resolve("libpdockeropenclicd.so"), gpuSrcDir.resolve("pdocker_opencl_icd.c"), gpuHint)
+        }
 
         val abiDir = project.file("src/main/jniLibs/arm64-v8a")
-
-        requireFresh(abiDir.resolve("libpdockergpushim.so"), gpuSrcDir.resolve("pdocker_gpu_shim.c"), gpuHint)
-        requireFresh(abiDir.resolve("libpdockervulkanicd.so"), gpuSrcDir.resolve("pdocker_vulkan_icd.c"), gpuHint)
-        requireFresh(abiDir.resolve("libpdockeropenclicd.so"), gpuSrcDir.resolve("pdocker_opencl_icd.c"), gpuHint)
 
         requireFresh(abiDir.resolve("libcrane.so"), rootProject.file("docker-proot-setup/docker-bin/crane"), stageHint)
         requireFresh(abiDir.resolve("libcow.so"), backendLibDir.resolve("libcow.so"), stageHint)

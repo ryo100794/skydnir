@@ -168,7 +168,11 @@ issues, and deciding which planned gaps become hard gates.
     build now packages `armeabi-v7a` helpers as well; however, the 32-bit ARM
     `pdocker-direct` payload is an explicit unsupported-ABI executable until the
     ptrace/syscall layer is ported from AArch64 register conventions to ARM
-    EABI/OABI-safe handling with matching device tests.
+    EABI/OABI-safe handling with matching device tests. The Linux/glibc GPU shim
+    build now emits both arm64 and armhf payloads with ELF architecture
+    verification; the armhf Vulkan ICD is packaged only as experimental
+    evidence until pointer-width-clean handle abstractions replace current
+    pointer-shaped Vulkan handle casts.
 
 ### Next Queue Generated 2026-05-04
 

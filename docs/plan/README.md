@@ -16,6 +16,7 @@ which temporary accommodations must be replaced.
 | [`TODO.md`](TODO.md) | Live unfinished-work ledger and temporary workaround tracker |
 | [`LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](LLAMA_GPU_BRIDGE_NEXT_STEPS.md) | Active llama.cpp GPU bridge procedure, stage gates, and compact-model handoff |
 | [`VULKAN_ICD_LLAMA_LIMITS_GAP.md`](VULKAN_ICD_LLAMA_LIMITS_GAP.md) | Vulkan ICD advertised limits/features gap table for llama.cpp/ggml-vulkan bridge work |
+| [`ARM32_DIRECT_EXEC_PORTING.md`](ARM32_DIRECT_EXEC_PORTING.md) | Porting plan and promotion gates for replacing the `armeabi-v7a` unsupported direct-exec stub |
 | [`INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md`](INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md) | Consolidated P0/P1/P2 incomplete-work audit |
 | [`ISSUE_WORKFLOW.md`](ISSUE_WORKFLOW.md) | GitHub Issue workflow and TODO/timeline synchronization |
 | [`AGENT_COORDINATION.md`](AGENT_COORDINATION.md) | Multi-agent coordination ledger and ownership notes |
@@ -38,6 +39,9 @@ which temporary accommodations must be replaced.
 - Use [`VULKAN_ICD_LLAMA_LIMITS_GAP.md`](VULKAN_ICD_LLAMA_LIMITS_GAP.md) when
   deciding whether a Q6/llama GPU artifact is blocked by an advertised
   property/feature mismatch rather than shader or writeback behavior.
+- Use [`ARM32_DIRECT_EXEC_PORTING.md`](ARM32_DIRECT_EXEC_PORTING.md) before
+  changing the `armeabi-v7a` direct executor from explicit unsupported status
+  to real process execution.
 - Use GitHub Issues as the primary tracker for actionable work that can be
   assigned, discussed, validated, and closed. Mirror only short issue-linked
   summaries into [`TODO.md`](TODO.md).

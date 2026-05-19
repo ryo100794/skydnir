@@ -14,6 +14,7 @@ validate every runtime behavior.
 |---|---|
 | [`README.md`](README.md) | Local build commands, APK outputs, install commands, and build gates |
 | [`NATIVE_BUILD_ENVIRONMENT.md`](NATIVE_BUILD_ENVIRONMENT.md) | Native payload classes, standard NDK/glibc-host build path, legacy Termux mode, and reproducible-build direction |
+| [`AOSP_LLVM_AARCH64_HOST_PLAN.md`](AOSP_LLVM_AARCH64_HOST_PLAN.md) | Optional heavyweight plan for source-building a true AArch64-host Android LLVM toolchain |
 
 F-Droid/reproducible-build readiness planning lives in
 [`../release/FDROID_RELEASE_PROCESS.md`](../release/FDROID_RELEASE_PROCESS.md).

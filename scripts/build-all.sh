@@ -212,11 +212,14 @@ check_android_native_fresh() {
 }
 
 check_gpu_shim_fresh() {
-    local jni="$ROOT/app/src/main/jniLibs/arm64-v8a"
+    local abi jni
     local gpu="$ROOT/docker-proot-setup/src/gpu"
-    require_fresh "$jni/libpdockergpushim.so" "$gpu/pdocker_gpu_shim.c"
-    require_fresh "$jni/libpdockervulkanicd.so" "$gpu/pdocker_vulkan_icd.c"
-    require_fresh "$jni/libpdockeropenclicd.so" "$gpu/pdocker_opencl_icd.c"
+    for abi in arm64-v8a armeabi-v7a; do
+        jni="$ROOT/app/src/main/jniLibs/$abi"
+        require_fresh "$jni/libpdockergpushim.so" "$gpu/pdocker_gpu_shim.c"
+        require_fresh "$jni/libpdockervulkanicd.so" "$gpu/pdocker_vulkan_icd.c"
+        require_fresh "$jni/libpdockeropenclicd.so" "$gpu/pdocker_opencl_icd.c"
+    done
     require_fresh "$ROOT/docker-proot-setup/lib/pdocker-gpu-shim" "$gpu/pdocker_gpu_shim.c"
     require_fresh "$ROOT/docker-proot-setup/lib/pdocker-vulkan-icd.so" "$gpu/pdocker_vulkan_icd.c"
     require_fresh "$ROOT/docker-proot-setup/lib/pdocker-opencl-icd.so" "$gpu/pdocker_opencl_icd.c"

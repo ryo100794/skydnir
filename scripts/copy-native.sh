@@ -65,16 +65,17 @@ echo "staged libcow (glibc) -> $JNI_DIR/libcow.so"
 
 # --- jniLibs sanity ---
 # libpdockerpty.so, libpdockerdirect.so, libpdockergpuexecutor.so, and
-# libpdockermediaexecutor.so are built
-# natively by scripts/build-native-termux.sh. libpdockergpushim.so is the
-# Linux/glibc container shim built by scripts/build-gpu-shim.sh. Executable
-# helpers are intentionally named lib*.so so Android extracts them to
-# nativeLibraryDir.
-for lib in libpdockerpty.so libpdockerdirect.so libpdockergpuexecutor.so libpdockermediaexecutor.so libpdockergpushim.so libpdockervulkanicd.so libpdockeropenclicd.so; do
-    p="$APP/jniLibs/arm64-v8a/$lib"
-    if [[ ! -f "$p" ]]; then
-        echo "warn: $p missing — run scripts/build-native-termux.sh first" >&2
-    fi
+# libpdockermediaexecutor.so are built by scripts/build-native-android-ndk.sh.
+# libpdockergpushim.so and ICD payloads are Linux/glibc container payloads built
+# by scripts/build-gpu-shim.sh. Executable helpers are intentionally named
+# lib*.so so Android extracts them to nativeLibraryDir.
+for abi in arm64-v8a armeabi-v7a; do
+    for lib in libpdockerpty.so libpdockerdirect.so libpdockergpuexecutor.so libpdockermediaexecutor.so libpdockergpushim.so libpdockervulkanicd.so libpdockeropenclicd.so; do
+        p="$APP/jniLibs/$abi/$lib"
+        if [[ ! -f "$p" ]]; then
+            echo "warn: $p missing — run scripts/build-native-android-ndk.sh and scripts/build-gpu-shim.sh first" >&2
+        fi
+    done
 done
 
 echo "copy-native.sh: done"
