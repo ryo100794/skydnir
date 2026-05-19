@@ -31,6 +31,7 @@ run it, and where the latest result is stored.
 | [`compat-audit-latest.md`](compat-audit-latest.md) | Latest recorded compatibility audit result |
 | [`file-io-bench-latest.md`](file-io-bench-latest.md) | Latest file I/O benchmark result |
 | [`file-io-microbench-latest.md`](file-io-microbench-latest.md) | Latest file I/O microbenchmark result |
+| [`native-payloads-latest.json`](native-payloads-latest.json) | Latest host-side native payload ELF and optional APK entry verification artifact |
 | [`path-micro-profile-latest.md`](path-micro-profile-latest.md) | Latest seccomp path micro-profile result |
 | [`path-micro-profile-cached-latest.md`](path-micro-profile-cached-latest.md) | Latest cached path micro-profile result |
 | [`syscall-usecase-profile-latest.md`](syscall-usecase-profile-latest.md) | Latest seccomp syscall use-case profile result |

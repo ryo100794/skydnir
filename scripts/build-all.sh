@@ -147,6 +147,21 @@ require_cmd() {
     fi
 }
 
+require_gpu_shim_compilers() {
+    local arch cc
+    for arch in ${PDOCKER_GLIBC_ARCHES:-arm64 armhf}; do
+        case "$arch" in
+            arm64) cc="${CC_ARM64:-${CC:-aarch64-linux-gnu-gcc}}" ;;
+            armhf) cc="${CC_ARMHF:-arm-linux-gnueabihf-gcc}" ;;
+            *)
+                echo "ABORT: unsupported PDOCKER_GLIBC_ARCHES entry '$arch'" >&2
+                return 1
+                ;;
+        esac
+        require_cmd "$cc"
+    done
+}
+
 require_fresh() {
     local output="$1"
     shift
@@ -192,7 +207,7 @@ preflight() {
         fi
     fi
     if [[ "$DO_GPU_SHIM" == "1" ]]; then
-        require_cmd "${CC:-gcc}"
+        require_gpu_shim_compilers
     fi
 }
 

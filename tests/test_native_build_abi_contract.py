@@ -8,7 +8,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 class NativeBuildAbiContractTest(unittest.TestCase):
     def test_gradle_packages_64_and_32_bit_arm_abis(self):
         gradle = (ROOT / "app" / "build.gradle.kts").read_text()
-        self.assertRegex(gradle, r"abiFilters \+= listOf\([^\n]*\"arm64-v8a\"[^\n]*\"armeabi-v7a\"")
+        self.assertRegex(gradle, r"abiFilters \+= listOf\([^\n]*\"arm64-v8a\"")
+        self.assertNotRegex(gradle, r"abiFilters \+= listOf\([^\n]*\"armeabi-v7a\"")
         self.assertIn('listOf("arm64-v8a", "armeabi-v7a")', gradle)
 
     def test_ndk_script_has_no_termux_or_box64_dependency_in_standard_path(self):
@@ -82,6 +83,25 @@ class NativeBuildAbiContractTest(unittest.TestCase):
         self.assertIn("verify_elf_arch", script)
         self.assertIn("ELF 32-bit", script)
         self.assertIn("ELF 64-bit", script)
+
+    def test_default_apk_does_not_overclaim_incomplete_32_bit_runtime(self):
+        apk = ROOT / "app" / "build" / "outputs" / "apk" / "compat" / "debug" / "app-compat-debug.apk"
+        if not apk.is_file():
+            self.skipTest(f"APK not built: {apk}")
+        result = subprocess.run(
+            ["zipinfo", "-1", str(apk)],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        entries = set(result.stdout.splitlines())
+        self.assertIn("lib/arm64-v8a/libpdockerdirect.so", entries)
+        self.assertNotIn("lib/armeabi-v7a/libpdockerdirect.so", entries)
+        self.assertFalse(
+            any(entry.startswith("lib/armeabi-v7a/") for entry in entries),
+            "default APK must stay arm64-only until the 32-bit runtime is complete",
+        )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # F-Droid and Reproducible-Build Readiness Plan
 
-Snapshot date: 2026-05-05.
+Snapshot date: 2026-05-19.
 
 This document is a readiness plan for CI and F-Droid-style release builds. It
 does not claim that pdocker-android is ready for F-Droid submission. Treat it as
@@ -83,6 +83,12 @@ All native payloads shipped in the product APK need an auditable source path:
   checked in for local workflow reasons, the release process must delete and
   regenerate them before packaging, then compare the regenerated files to the
   checked-in copies.
+- Current build-lane policy: native generation may produce both `arm64-v8a`
+  and `armeabi-v7a` evidence payloads, but the product APK packaging lane
+  promotes only `arm64-v8a` until the 32-bit crane/libcow/direct-exec runtime
+  gate is complete. Inventory rows for `armeabi-v7a` document generated
+  evidence only; they do not make those payloads acceptable provenance for an
+  F-Droid-oriented APK.
 - Any checked-in binary under runtime payload directories must have a recorded
   source, license, version, checksum, and rebuild command.
 - PRoot, fakechroot, container runtimes, Docker-compatible helpers, and similar

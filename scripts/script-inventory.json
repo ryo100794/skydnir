@@ -503,6 +503,19 @@
       }
     },
     {
+      "path": "scripts/build-native-android-ndk.sh",
+      "category": "build-developer",
+      "stability": "stable-entrypoint",
+      "role": "Build Android/Bionic native helper payloads with the standard NDK/glibc-host lane.",
+      "migration": {
+        "target_dir": "scripts/build",
+        "candidate_path": "scripts/build/build-native-android-ndk.sh",
+        "phase": "phase-2-build-after-callsite-audit",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "wrapper required; permanent or long-lived stable entrypoint compatibility path"
+      }
+    },
+    {
       "path": "scripts/build-native-termux.sh",
       "category": "build-developer",
       "stability": "stable-entrypoint",
@@ -997,6 +1010,19 @@
       "migration": {
         "target_dir": "scripts/test",
         "candidate_path": "scripts/test/verify-metadata-index.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
+      "path": "scripts/verify-native-payloads.py",
+      "category": "test-verification",
+      "stability": "stable-entrypoint",
+      "role": "Verify native payload ELF architecture, loader policy, and optional APK native entries.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/verify-native-payloads.py",
         "phase": "phase-1-test-helpers-after-manifest-update",
         "action": "candidate-move-behind-wrapper",
         "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"

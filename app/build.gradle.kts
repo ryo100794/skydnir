@@ -126,7 +126,11 @@ android {
         manifestPlaceholders["pdockerDebugReceiverExported"] = "false"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            // Product APK currently promotes only the complete arm64 runtime.
+            // armeabi-v7a helper/glibc payloads are built as evidence artifacts,
+            // but must not be packaged until crane/libcow/direct-exec have a
+            // complete 32-bit runtime gate.
+            abiFilters += listOf("arm64-v8a")
         }
     }
 

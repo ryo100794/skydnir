@@ -43,6 +43,7 @@ run python3 -m py_compile \
   scripts/verify_direct_syscall_contracts.py \
   scripts/verify-memory-pager-design.py \
   scripts/verify-metadata-index.py \
+  scripts/verify-native-payloads.py \
   scripts/run_direct_syscall_scenarios.py \
   scripts/verify-project-library.py \
   scripts/verify-refactor-resilience.py \
@@ -102,6 +103,7 @@ run python3 scripts/verify-cow-overlay-bench-recovery.py --run-local
 run python3 scripts/verify-project-library.py
 run python3 scripts/verify-storage-metrics.py
 run python3 scripts/verify-script-inventory.py
+run python3 scripts/verify-native-payloads.py --write-artifact docs/test/native-payloads-latest.json
 run python3 scripts/verify-docs-maintenance.py
 run python3 scripts/verify-release-readiness.py
 tmp_storage_sequence="$(mktemp)"

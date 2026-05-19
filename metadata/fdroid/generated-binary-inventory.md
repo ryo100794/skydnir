@@ -1,6 +1,6 @@
 # Generated and Prebuilt Payload Inventory
 
-Snapshot date: 2026-05-18.
+Snapshot date: 2026-05-19.
 
 This is a release-readiness inventory, not F-Droid submission metadata. It
 records payloads that currently exist in the working tree and would need a
@@ -17,6 +17,9 @@ checkout and are audited as generated inventory entries rather than required
 checked-in files; the audit still fails if a non-generated source-tree payload
 row points to a missing file. A passing host-only audit does not mean the APK is
 source-built, reproducible, or ready for F-Droid submission.
+The current product packaging lane promotes only `arm64-v8a`; `armeabi-v7a`
+payloads are tracked here as generated evidence for review and must not be
+treated as F-Droid-ready provenance.
 
 For package review, keep three statuses distinct:
 
@@ -39,6 +42,13 @@ For package review, keep three statuses distinct:
 | `app/src/main/jniLibs/arm64-v8a/libpdockeropenclicd.so` | Built from `docker-proot-setup/src/gpu/pdocker_opencl_icd.c` by local GPU shim tooling. | Generated binary; must be rebuilt and compared before release. |
 | `app/src/main/jniLibs/arm64-v8a/libpdockerpty.so` | Built from `app/src/main/cpp/pty.c` by local native build tooling. | Generated binary; must be rebuilt and compared before release. |
 | `app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so` | Built from `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c` by local GPU shim tooling. | Generated binary; must be rebuilt and compared before release. |
+| `app/src/main/jniLibs/armeabi-v7a/libpdockerdirect.so` | Built from `app/src/main/cpp/pdocker_direct_unsupported.c` by local native build tooling. | Generated ARM32 evidence stub; not a complete direct runtime or F-Droid-ready provenance. |
+| `app/src/main/jniLibs/armeabi-v7a/libpdockergpuexecutor.so` | Built from `app/src/main/cpp/pdocker_gpu_executor.c` by local native build tooling. | Generated ARM32 evidence binary; must be rebuilt and compared before any packaging. |
+| `app/src/main/jniLibs/armeabi-v7a/libpdockergpushim.so` | Built from `docker-proot-setup/src/gpu/pdocker_gpu_shim.c` by local armhf Linux/glibc GPU shim tooling. | Generated experimental ARM32 container evidence; not promoted or F-Droid-ready provenance. |
+| `app/src/main/jniLibs/armeabi-v7a/libpdockermediaexecutor.so` | Built from `app/src/main/cpp/pdocker_media_executor.c` by local native build tooling. | Generated ARM32 evidence binary; must be rebuilt and compared before any packaging. |
+| `app/src/main/jniLibs/armeabi-v7a/libpdockeropenclicd.so` | Built from `docker-proot-setup/src/gpu/pdocker_opencl_icd.c` by local armhf Linux/glibc GPU shim tooling. | Generated experimental ARM32 container evidence; not promoted or F-Droid-ready provenance. |
+| `app/src/main/jniLibs/armeabi-v7a/libpdockerpty.so` | Built from `app/src/main/cpp/pty.c` by local native build tooling. | Generated ARM32 evidence binary; must be rebuilt and compared before any packaging. |
+| `app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so` | Built from `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c` by local armhf Linux/glibc GPU shim tooling. | Generated experimental ARM32 container evidence; not promoted or F-Droid-ready provenance. |
 | `docker-proot-setup/docker-bin/crane` | External go-containerregistry/crane payload. | Prebuilt external binary; blocker for F-Droid-oriented APK until source-built or excluded. |
 | `docker-proot-setup/docker-bin/docker` | External Docker CLI payload. | Prebuilt external binary; blocker for F-Droid-oriented APK until source-built or excluded. |
 | `docker-proot-setup/lib/libcow-musl.so` | Built from `docker-proot-setup/src/overlay/libcow.c` by local native build tooling. | Generated binary; must be rebuilt and compared before release. |

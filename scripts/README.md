@@ -19,8 +19,8 @@ Every inventory entry now also carries a `migration` object with a proposed dest
 | Category | Count | Meaning |
 |---|---:|---|
 | `runtime-package-needed` | 1 | Needed to stage runtime/APK payloads or otherwise part of packaging flow. |
-| `build-developer` | 8 | Build, setup, fetch, or developer environment helper. |
-| `test-verification` | 74 | Test, smoke, benchmark, contract, or device verification helper. |
+| `build-developer` | 9 | Build, setup, fetch, or developer environment helper. |
+| `test-verification` | 75 | Test, smoke, benchmark, contract, or device verification helper. |
 | `generated-maintenance` | 3 | Generated-doc/evidence maintenance or manifest data. |
 | `obsolete-suspect` | 3 | Unreferenced or weakly referenced candidate; not deleted without audit. |
 
