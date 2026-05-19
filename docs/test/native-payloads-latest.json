@@ -31,11 +31,11 @@
       {
         "entry": "lib/arm64-v8a/libcow.so",
         "same_bytes_as_source": true,
-        "sha256": "64596012b04474f82bc6460a9681f6b9e84dc3517061bc489d7fe380099d87dc",
-        "size": 73416,
+        "sha256": "43e998fb7b564c1bafa3aefc602fce2a06b2c5a31cf99ff88aea6d49b8431fb2",
+        "size": 73912,
         "source": "docker-proot-setup/lib/libcow.so",
         "source_exists": true,
-        "source_sha256": "64596012b04474f82bc6460a9681f6b9e84dc3517061bc489d7fe380099d87dc"
+        "source_sha256": "43e998fb7b564c1bafa3aefc602fce2a06b2c5a31cf99ff88aea6d49b8431fb2"
       },
       {
         "entry": "lib/arm64-v8a/libcrane.so",
@@ -292,19 +292,19 @@
     {
       "abi": "arm64-v8a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libcow.so: ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, BuildID[sha1]=a251f7354772d11526e3606704316f26f78e04fb, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libcow.so: ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, BuildID[sha1]=98ae17e88d60f912ccf3884968e8318cdfc2503f, not stripped",
       "has_android_linker": false,
       "has_glibc_loader": false,
       "name": "libcow.so",
       "path": "app/src/main/jniLibs/arm64-v8a/libcow.so",
       "readelf_header_has_machine": true,
       "role": "staged-runtime",
-      "sha256": "64596012b04474f82bc6460a9681f6b9e84dc3517061bc489d7fe380099d87dc",
-      "size": 73416,
+      "sha256": "43e998fb7b564c1bafa3aefc602fce2a06b2c5a31cf99ff88aea6d49b8431fb2",
+      "size": 73912,
       "source_mirror": "docker-proot-setup/lib/libcow.so",
       "source_mirror_exists": true,
       "source_mirror_same_bytes": true,
-      "source_mirror_sha256": "64596012b04474f82bc6460a9681f6b9e84dc3517061bc489d7fe380099d87dc"
+      "source_mirror_sha256": "43e998fb7b564c1bafa3aefc602fce2a06b2c5a31cf99ff88aea6d49b8431fb2"
     }
   ],
   "schema": "pdocker.native-payloads.v1",

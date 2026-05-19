@@ -83,6 +83,10 @@ All native payloads shipped in the product APK need an auditable source path:
   checked in for local workflow reasons, the release process must delete and
   regenerate them before packaging, then compare the regenerated files to the
   checked-in copies.
+- The native rebuild verifier deletes and rebuilds the glibc `libcow.so`
+  payload from `docker-proot-setup/src/overlay/libcow.c` before staging it into
+  the APK. A passing `native-payloads.json` must show the APK entry
+  `lib/arm64-v8a/libcow.so` is byte-identical to `docker-proot-setup/lib/libcow.so`.
 - Current build-lane policy: native generation may produce both `arm64-v8a`
   and `armeabi-v7a` evidence payloads, but the product APK packaging lane
   promotes only `arm64-v8a` until the 32-bit crane/libcow/direct-exec runtime

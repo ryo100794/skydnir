@@ -111,6 +111,7 @@ for lib in "${REMOVED_LEGACY_PAYLOADS[@]}"; do
     add_clean_path "app/src/compat/jniLibs/arm64-v8a/$lib"
 done
 add_clean_path "app/src/main/assets/pdockerd/pdockerd"
+add_clean_path "docker-proot-setup/lib/libcow.so"
 add_clean_path "docker-proot-setup/lib/pdocker-gpu-shim"
 add_clean_path "docker-proot-setup/lib/pdocker-vulkan-icd.so"
 add_clean_path "docker-proot-setup/lib/pdocker-opencl-icd.so"
@@ -243,6 +244,7 @@ write_plan() {
         done
         printf '\ncommands:\n'
         printf '  - bash scripts/build-native-android-ndk.sh\n'
+        printf '  - make -C docker-proot-setup/src/overlay clean install CC=aarch64-linux-gnu-gcc\n'
         printf '  - bash scripts/build-gpu-shim.sh\n'
         printf '  - bash scripts/copy-native.sh\n'
         printf '  - ./gradlew %q --no-daemon\n' "$GRADLE_TASK"
@@ -298,6 +300,8 @@ export PDOCKER_ANDROID_BUILD_TYPE="$BUILD_TYPE"
 log "EXECUTE=1: cleaning selected generated native outputs."
 clean_outputs
 run_step build-native-android-ndk bash scripts/build-native-android-ndk.sh
+run_step build-libcow-glibc env CC="${CC_LIBCOW:-aarch64-linux-gnu-gcc}" \
+    make -C docker-proot-setup/src/overlay clean install
 run_step build-gpu-shim bash scripts/build-gpu-shim.sh
 run_step copy-native bash scripts/copy-native.sh
 run_step gradle-assemble-compat ./gradlew "$GRADLE_TASK" --no-daemon
