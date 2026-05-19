@@ -139,6 +139,11 @@ typedef struct {
     double local_y_best_abs_error;
     double first16_sum;
     double second16_sum;
+    int native_reduction_tree_available;
+    double native_reduction_tree_sum;
+    double native_reduction_tree_with_accumulator;
+    double native_reduction_tree_gpu_abs_error;
+    double expected_gpu_abs_error;
     int best_lane;
     double best_lane_value;
     double best_lane_abs_error;
@@ -4424,6 +4429,11 @@ static void write_q6_partial_signature_probe(FILE *out, const CpuOracleReport *r
                 "\"local_y_best\":%d,"
                 "\"local_y_best_abs_error\":%.9g,"
                 "\"first16_sum\":%.9g,\"second16_sum\":%.9g,"
+                "\"native_reduction_tree_available\":%s,"
+                "\"native_reduction_tree_sum\":%.9g,"
+                "\"native_reduction_tree_with_accumulator\":%.9g,"
+                "\"native_reduction_tree_gpu_abs_error\":%.9g,"
+                "\"expected_gpu_abs_error\":%.9g,"
                 "\"best_lane\":%d,\"best_lane_value\":%.9g,"
                 "\"best_lane_abs_error\":%.9g,"
                 "\"class\":\"%s\"}",
@@ -4439,6 +4449,11 @@ static void write_q6_partial_signature_probe(FILE *out, const CpuOracleReport *r
                 sample->local_y_best_abs_error,
                 sample->first16_sum,
                 sample->second16_sum,
+                sample->native_reduction_tree_available ? "true" : "false",
+                sample->native_reduction_tree_sum,
+                sample->native_reduction_tree_with_accumulator,
+                sample->native_reduction_tree_gpu_abs_error,
+                sample->expected_gpu_abs_error,
                 sample->best_lane,
                 sample->best_lane_value,
                 sample->best_lane_abs_error,
@@ -5708,7 +5723,9 @@ static void q6k_record_partial_signature_probe_sample(
         size_t partial_count,
         const double *shader_like_partials64,
         size_t shader_like_count,
-        double accumulator_sum) {
+        double accumulator_sum,
+        int have_native_reduction_tree,
+        double native_reduction_tree_sum) {
     if (!report ||
         report->q6_partial_signature_probe_sample_count >=
             sizeof(report->q6_partial_signature_probe_samples) /
@@ -5726,6 +5743,15 @@ static void q6k_record_partial_signature_probe_sample(
     sample->best_lane = -1;
     sample->best_lane_abs_error = INFINITY;
     sample->local_y_best_abs_error = INFINITY;
+    sample->native_reduction_tree_available = have_native_reduction_tree ? 1 : 0;
+    sample->native_reduction_tree_sum = have_native_reduction_tree ? native_reduction_tree_sum : 0.0;
+    sample->native_reduction_tree_with_accumulator =
+        have_native_reduction_tree ? native_reduction_tree_sum + accumulator_sum : 0.0;
+    sample->native_reduction_tree_gpu_abs_error =
+        have_native_reduction_tree
+            ? fabs(sample->native_reduction_tree_with_accumulator - (double)gpu_at_dst)
+            : INFINITY;
+    sample->expected_gpu_abs_error = fabs((double)expected - (double)gpu_at_dst);
     snprintf(sample->klass, sizeof(sample->klass), "%s", "not-partial");
 
     if (partial_count >= 32 && partials) {
@@ -6160,7 +6186,9 @@ static void run_cpu_oracle_q6k_matvec_sample(
             have_partials ? 32u : 0u,
             have_shader_like_partials64 ? shader_like_partials64 : NULL,
             have_shader_like_partials64 ? (size_t)q6_diag_lanes : 0u,
-            accumulator_sum);
+            accumulator_sum,
+            have_native_reduction_tree,
+            native_reduction_tree_sum);
         if (q6k_oracle_writeback &&
             (size_t)dst_index * sizeof(float) + sizeof(float) <= bindings[idx2].size) {
             memcpy(dst_base + (size_t)dst_index * sizeof(float), &expected, sizeof(expected));
