@@ -1029,6 +1029,19 @@
       }
     },
     {
+      "path": "scripts/verify-native-rebuild-release.sh",
+      "category": "test-verification",
+      "stability": "stable-entrypoint",
+      "role": "Clean, rebuild, stage, assemble, and verify release-candidate native APK payloads with a dry-run default.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/verify-native-rebuild-release.sh",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
       "path": "scripts/verify-no-proot-runtime-truth-artifact.py",
       "category": "test-verification",
       "stability": "test-helper",

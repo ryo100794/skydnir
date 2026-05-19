@@ -106,7 +106,7 @@ def main() -> int:
     manifest_src = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
     require("app uses dedicated adaptive launcher icon", 'android:icon="@mipmap/ic_launcher"' in manifest_src and (ROOT / "app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml").exists() and (ROOT / "app/src/main/res/drawable/ic_launcher_foreground.xml").exists())
     require("gradle syncs pdockerd asset before apk packaging", "syncPdockerdAsset" in build_gradle_src and "docker-proot-setup/bin/pdockerd" in build_gradle_src and "merge" in build_gradle_src and "Assets" in build_gradle_src)
-    require("gradle rejects stale native payloads before apk packaging", "verifyPackagedPayloadFresh" in build_gradle_src and "libpdockerdirect.so" in build_gradle_src and "pdocker_direct_exec.c" in build_gradle_src and "build-native-termux.sh" in build_gradle_src and "NativeLibs" in build_gradle_src)
+    require("gradle rejects stale native payloads before apk packaging", "verifyPackagedPayloadFresh" in build_gradle_src and "libpdockerdirect.so" in build_gradle_src and "pdocker_direct_exec.c" in build_gradle_src and "build-native-android-ndk.sh" in build_gradle_src and "NativeLibs" in build_gradle_src)
     require("gradle rejects stale backend payloads before apk packaging", "libcrane.so" in build_gradle_src and "docker-bin/crane" in build_gradle_src and "libcow.so" in build_gradle_src and "copy-native.sh" in build_gradle_src and "requireSameBytes" in build_gradle_src)
     require("test-staged docker terminal helper remains diagnostic only", "private fun openDockerTerminal" in main_src and "startDaemon()" in main_src)
     require("diagnostic docker helper can wait for test-staged cli", "waiting for pdockerd" in main_src and "docker version >/dev/null" in main_src)

@@ -76,6 +76,7 @@ run bash -n \
   scripts/test/smoke-opencl-bridge.sh \
   scripts/test/smoke-vulkan-llama-init.sh \
   scripts/test/verify-device-llama-template.sh \
+  scripts/verify-native-rebuild-release.sh \
   scripts/verify-heavy.sh
 
 run python3 docker-proot-setup/scripts/verify_runtime_contract.py
@@ -103,7 +104,17 @@ run python3 scripts/verify-cow-overlay-bench-recovery.py --run-local
 run python3 scripts/verify-project-library.py
 run python3 scripts/verify-storage-metrics.py
 run python3 scripts/verify-script-inventory.py
-run python3 scripts/verify-native-payloads.py --write-artifact docs/test/native-payloads-latest.json
+native_payload_apk="app/build/outputs/apk/${PDOCKER_ANDROID_FLAVOR}/debug/app-${PDOCKER_ANDROID_FLAVOR}-debug.apk"
+if [ "$PDOCKER_ANDROID_FLAVOR" = "compat" ] && [ -f "$native_payload_apk" ]; then
+  run python3 scripts/verify-native-payloads.py \
+    --apk "$native_payload_apk" \
+    --apk-arm64-only \
+    --write-artifact docs/test/native-payloads-latest.json
+else
+  # Keep checked-in APK evidence stable when fast verification is run before an APK exists.
+  run python3 scripts/verify-native-payloads.py \
+    --write-artifact /tmp/pdocker-native-payloads-no-apk.json
+fi
 run python3 scripts/verify-docs-maintenance.py
 run python3 scripts/verify-release-readiness.py
 tmp_storage_sequence="$(mktemp)"

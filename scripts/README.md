@@ -20,7 +20,7 @@ Every inventory entry now also carries a `migration` object with a proposed dest
 |---|---:|---|
 | `runtime-package-needed` | 1 | Needed to stage runtime/APK payloads or otherwise part of packaging flow. |
 | `build-developer` | 9 | Build, setup, fetch, or developer environment helper. |
-| `test-verification` | 75 | Test, smoke, benchmark, contract, or device verification helper. |
+| `test-verification` | 76 | Test, smoke, benchmark, contract, or device verification helper. |
 | `generated-maintenance` | 3 | Generated-doc/evidence maintenance or manifest data. |
 | `obsolete-suspect` | 3 | Unreferenced or weakly referenced candidate; not deleted without audit. |
 
@@ -158,6 +158,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/verify-memory-pager-contract.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-memory-pager-design.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-metadata-index.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
+| `scripts/verify-native-rebuild-release.sh` | `stable-entrypoint` | Clean, rebuild, stage, assemble, and verify release-candidate native APK payloads with a dry-run default. |
 | `scripts/verify-no-proot-runtime-truth-artifact.py` | `test-helper` | Host-side verifier for no-proot runtime truth gate artifacts. |
 | `scripts/verify-oom-lmk-survival-gate.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-project-library.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
