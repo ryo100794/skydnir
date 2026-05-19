@@ -62,11 +62,12 @@ def run_step(
     argv: list[str],
     env: dict[str, str],
     dry_run: bool,
+    stdout_path: Path | None = None,
 ) -> dict[str, Any]:
     started = time.time()
     label = shlex.join(argv)
     if dry_run:
-        return {
+        record = {
             "id": step_id,
             "argv": argv,
             "command": label,
@@ -77,6 +78,10 @@ def run_step(
             "duration_seconds": 0.0,
             "stdout_tail": "",
         }
+        if stdout_path is not None:
+            record["stdout_path"] = rel(stdout_path)
+            record["stdout_size"] = 0
+        return record
     proc = subprocess.run(
         argv,
         cwd=ROOT,
@@ -87,7 +92,7 @@ def run_step(
         check=False,
     )
     ended = time.time()
-    return {
+    record = {
         "id": step_id,
         "argv": argv,
         "command": label,
@@ -98,6 +103,12 @@ def run_step(
         "duration_seconds": round(ended - started, 3),
         "stdout_tail": proc.stdout[-8000:],
     }
+    if stdout_path is not None:
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text(proc.stdout, encoding="utf-8")
+        record["stdout_path"] = rel(stdout_path)
+        record["stdout_size"] = len(proc.stdout.encode("utf-8"))
+    return record
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -108,6 +119,28 @@ def load_json(path: Path) -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def extract_json_object(text: str) -> dict[str, Any]:
+    """Return the first JSON object embedded in command output.
+
+    The verifier normally prints a single JSON document, but future diagnostics
+    may add log lines before or after it.  The workflow must not parse only the
+    tail of stdout: long verifier output can truncate the opening brace and
+    silently erase the classification from the manifest.
+    """
+
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    return {}
 
 
 def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
@@ -245,6 +278,7 @@ def main(argv: list[str]) -> int:
     )
     manifest["steps"].append(compare_step)
 
+    verify_stdout = manifest_out.with_suffix(".verifier.stdout")
     verify_step = run_step(
         "verify-q6k-workgroup-artifact",
         [
@@ -255,14 +289,12 @@ def main(argv: list[str]) -> int:
         ],
         env,
         args.dry_run,
+        stdout_path=verify_stdout,
     )
     manifest["steps"].append(verify_step)
-    classification = {}
-    if verify_step.get("stdout_tail"):
-        try:
-            classification = json.loads(verify_step["stdout_tail"])
-        except Exception:
-            classification = {}
+    classification = extract_json_object(verify_stdout.read_text(encoding="utf-8")) if verify_stdout.is_file() else {}
+    if not classification and verify_step.get("stdout_tail"):
+        classification = extract_json_object(verify_step["stdout_tail"])
     manifest["classification"] = classification
     manifest["status"] = "pass" if compare_step["exit_code"] == 0 and verify_step["exit_code"] == 0 else "fail"
     manifest["next_action"] = classification.get("next_action") or (
