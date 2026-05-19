@@ -15,20 +15,24 @@ It records `versionName` `0.5.3`, `versionCode` `24`, and build time
 `dd3ce31`; the build metadata file records `c194f2b3cd82` as the baseline used
 when the fixed build number was prepared.
 
-What is now green:
+What was green in that historical build record:
 
 - Compat and modern debug APKs built successfully.
 - Compat and modern unsigned release APKs built successfully.
 - Android quick smoke passed on device: APK install, Docker version path,
   direct runtime probe, and memory-pager probes.
-- Android full smoke passed on device: Dockerfile build, Compose up/down,
-  `docker exec`, and Engine API `exec -it`. The bracket argv regression did
-  not reproduce in this lane.
+- Android full smoke passed on device for the 2026-05-05 smoke route:
+  Dockerfile build, Compose up/down, `docker exec`, and a basic Engine API
+  `exec -it` path. The bracket argv regression did not reproduce in this lane.
 - JVM unit-test Gradle tasks completed successfully, with no current JVM test
   sources in those variants.
 
 What remains blocked or not release-complete:
 
+- This smoke record is historical evidence, not current promotion evidence for
+  terminal `exec -it`, service truth, teardown, image-pull crash safety, or
+  release-honesty gates. Those remain governed by the live TODO ledger and
+  require fresh named device artifacts before promotion.
 - `verify-fast`, scenario verification, and test-design criteria still fail at
   the literal test-density gate: `43154 / 257036 = 0.168x`, below the required
   `2.0x` threshold.
@@ -40,11 +44,12 @@ What remains blocked or not release-complete:
 
 ## Current Announcement Summary
 
-pdocker-android now has a fixed `20260505.1` build record with successful
+pdocker-android has a fixed `20260505.1` historical build record with successful
 compat/modern APK outputs and a full Android smoke pass covering build,
-Compose, direct execution, logs, and interactive exec. The build is suitable
-for honest tester-facing project news, but not for a no-caveat release claim:
-the test-density gate, host backend direct-executor lane, release signing, and
+Compose, direct execution, logs, and a basic interactive exec path. The build
+is suitable for honest tester-facing project news, but not for a no-caveat
+release claim: the current terminal/service-truth/teardown promotion gates,
+test-density gate, host backend direct-executor lane, release signing, and
 some warning cleanup remain open.
 
 ## Next Milestones
@@ -70,10 +75,11 @@ some warning cleanup remain open.
 ## Short GitHub Post Draft
 
 `pdocker-android` has a new fixed build record: `20260505.1` on the managed
-`dd3ce31` snapshot. Compat/modern APKs build, and the Android full smoke now
-passes Dockerfile build, Compose up/down, `docker exec`, and Engine API
-interactive exec on device. The remaining blockers are explicit: the
-test-density gate is still below target, host backend heavy checks need a
+`dd3ce31` snapshot. Compat/modern APKs build, and the 2026-05-05 Android smoke
+record passed Dockerfile build, Compose up/down, `docker exec`, and a basic
+Engine API interactive exec path on device. The remaining blockers are
+explicit: current terminal `exec -it` still needs fresh UI/JSONL evidence,
+the test-density gate is below target, host backend heavy checks need a
 host-compatible direct executor lane, release signing stays outside Git, and
 llama GPU work still needs real transformer-layer offload evidence. Next work
 focuses on llama GPU compare artifacts, direct-executor argv/PTY safety,

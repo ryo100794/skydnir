@@ -33,7 +33,7 @@ kept outside Git.
 | --- | --- | --- |
 | `gradle-unit-tests.log` | PASS | `testCompatDebugUnitTest` and `testModernDebugUnitTest` had no JVM test sources but Gradle completed successfully. |
 | `verify-heavy-android-quick.log` | PASS | Installed compat debug APK on `10.8.135.134:37669`; docker version, direct probe, and memory-pager probes passed. |
-| `verify-heavy-android-full.log` | PASS | Device Dockerfile build, Compose up/down, `docker exec`, and Engine API `exec -it` passed. The bracket argv regression did not reproduce. |
+| `verify-heavy-android-full.log` | PASS | Historical 2026-05-05 device Dockerfile build, Compose up/down, `docker exec`, and a basic Engine API `exec -it` path passed. The bracket argv regression did not reproduce. This does not promote current terminal/service-truth/teardown gates. |
 | `verify-fast.log` | FAIL | Fails only at the enforced literal test-density gate: 43154 / 257036 = 0.168x, below the required 2.0x. |
 | `verify-scenarios.log` | FAIL | Stops at the same literal test-density gate before later scenario steps. |
 | `verify-test-design-criteria.log` | FAIL | Same intentional quality gate failure; negative self-tests passed before the final ratio failure. |
@@ -56,5 +56,7 @@ kept outside Git.
 2. Split the backend host regression into metadata-only and process-exec lanes,
    or stage a real host-compatible `pdocker-direct` helper before expecting
    `verify_all.sh` to run containers.
-3. Keep `verify-heavy-android-full.log` as the current release-blocking device
-   smoke evidence for build 20260505.1.
+3. Keep `verify-heavy-android-full.log` as historical device smoke evidence
+   for build 20260505.1. Current release-blocking terminal, service-truth,
+   teardown, image-pull, and release-honesty gates still require newer named
+   promotion artifacts.

@@ -42,8 +42,10 @@ release notes, and demo captions until a newer verification record replaces
 
 - Build `20260505.1` has PASS records for compat/modern debug APKs and
   unsigned compat/modern release APKs. The verification commit is `dd3ce31`.
-- Android full smoke passed device Dockerfile build, Compose up/down,
-  `docker exec`, and Engine API `exec -it`.
+- The historical 2026-05-05 Android full smoke passed device Dockerfile build,
+  Compose up/down, `docker exec`, and a basic Engine API `exec -it` path. Do
+  not present this as current terminal promotion evidence; the live gate still
+  needs fresh UI/JSONL device artifacts.
 - Android quick smoke passed install, `docker version`, direct runtime probe,
   and memory-pager probes.
 - `verify-fast`, scenario, and test-design logs currently fail at the
@@ -232,10 +234,12 @@ templates.
 ### Evidence post
 
 Latest fixed record: pdocker-android build 20260505.1 passes APK build outputs
-and the Android full smoke route for Dockerfile build, Compose up/down,
-`docker exec`, and Engine API `exec -it`. The honest caveat: fast/design gates
-still fail on the current literal test-density threshold, and host backend
-regression needs its `pdocker-direct` helper lane split or staged.
+and the historical Android full smoke route for Dockerfile build, Compose
+up/down, `docker exec`, and a basic Engine API `exec -it` path. The honest
+caveat: current terminal/service-truth/teardown promotion gates still need
+fresh named device evidence, fast/design gates still fail on the current
+literal test-density threshold, and host backend regression needs its
+`pdocker-direct` helper lane split or staged.
 
 ### Tester call
 

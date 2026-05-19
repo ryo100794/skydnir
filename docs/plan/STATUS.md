@@ -17,18 +17,21 @@ copy and is committed at `dd3ce31`. Evidence is stored under
 summary in [`../release/RELEASE_NOTES_20260505.1.md`](../release/RELEASE_NOTES_20260505.1.md) and
 project-news copy in
 [`../showcase/NEWS_TIMELINE.md`](../showcase/NEWS_TIMELINE.md). Compat/modern
-APK outputs built, Android quick smoke passed, and Android full smoke passed
-Dockerfile build, Compose up/down, `docker exec`, and Engine API `exec -it`.
-The public blockers remain the literal test-density failure and the host
-backend direct-executor lane mismatch. Unsigned release artifacts and warning
-cleanup are release-process notes, with signing material kept outside Git.
+APK outputs built, Android quick smoke passed, and the historical Android full
+smoke passed Dockerfile build, Compose up/down, `docker exec`, and a basic
+Engine API `exec -it` path. This is fixed-build evidence, not current
+promotion evidence for terminal, service-truth, teardown, image-pull
+crash-safety, or release-honesty gates. The public blockers remain those live
+device gates, the literal test-density failure, and the host backend
+direct-executor lane mismatch. Unsigned release artifacts and warning cleanup
+are release-process notes, with signing material kept outside Git.
 
 ## At a glance
 
 | layer | size | status |
 |---|---|---|
 | **pdockerd** (Python single-file daemon, docker-proot-setup/bin) | 3500 LOC | Engine API 1.43-compatible, ~30 endpoints |
-| **APK** (pdocker-android) | 31 MB | install, foreground service, Engine API, image pull/browse/edit flows; Android direct container execution works for the current supported smoke paths |
+| **APK** (pdocker-android) | 31 MB | install, foreground service, Engine API, image pull/browse/edit flows; SDK28 compat smoke paths have historical device evidence, while modern/API29+, terminal, service truth, and teardown remain gated |
 | **Workspace UI** | native widgets + xterm.js 5.3 + JNI pty tabs + editor | Compose, Dockerfile, images, containers, and `-it`-style sessions share one console surface |
 
 ## Implementation overview

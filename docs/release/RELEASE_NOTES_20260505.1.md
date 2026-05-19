@@ -12,10 +12,13 @@ Build `20260505.1` is the current fixed Android build record for
 pdocker-android. It advances the public status to `versionName` `0.5.3` /
 `versionCode` `24` and records successful compat and modern APK outputs.
 
-The strongest release-news signal is the Android full smoke pass: Dockerfile
-build, Compose up/down, `docker exec`, and Engine API `exec -it` passed on the
-test device. The previously watched bracket argv symptom did not reproduce in
-that full Android lane.
+The strongest historical release-news signal is the Android full smoke pass:
+Dockerfile build, Compose up/down, `docker exec`, and a basic Engine API
+`exec -it` path passed on the test device. The previously watched bracket argv
+symptom did not reproduce in that full Android lane. This record does not close
+the current terminal, service-truth, teardown, image-pull crash-safety, or
+release-honesty gates; those still require the live TODO ledger's named
+promotion artifacts.
 
 ## Passed
 
@@ -25,8 +28,8 @@ that full Android lane.
 - Modern unsigned release APK built.
 - Android quick smoke passed: install, Docker version, direct probe, and
   memory-pager probes.
-- Android full smoke passed: Dockerfile build, Compose up/down, `docker exec`,
-  and Engine API interactive exec.
+- Android full smoke passed for the 2026-05-05 route: Dockerfile build,
+  Compose up/down, `docker exec`, and a basic Engine API interactive exec path.
 - Gradle unit-test tasks completed successfully for current variants.
 
 ## Still Open
@@ -47,8 +50,9 @@ that full Android lane.
 - Split host backend verification into metadata-only and process-exec lanes, or
   stage a host-compatible `pdocker-direct` helper before requiring container
   execution in that lane.
-- Keep `verify-heavy-android-full.log` as the current device release-blocking
-  smoke artifact until a newer full Android run supersedes it.
+- Keep `verify-heavy-android-full.log` as historical build evidence for
+  20260505.1. Do not treat it as current stable/release-promoting evidence for
+  terminal, service-truth, teardown, image-pull, or release-honesty gates.
 - Continue llama GPU work only from measured compare artifacts, with clear
   reporting for target status, GPU layer count, speedup, blocker, and device
   metadata.
