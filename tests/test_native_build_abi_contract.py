@@ -1,6 +1,7 @@
 import pathlib
 import subprocess
 import unittest
+import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -102,6 +103,38 @@ class NativeBuildAbiContractTest(unittest.TestCase):
             any(entry.startswith("lib/armeabi-v7a/") for entry in entries),
             "default APK must stay arm64-only until the 32-bit runtime is complete",
         )
+
+    def test_native_payload_verifier_covers_runtime_assets_and_forbidden_caches(self):
+        verifier = (ROOT / "scripts" / "verify-native-payloads.py").read_text()
+        for needle in [
+            "lib/arm64-v8a/libcrane.so",
+            "lib/arm64-v8a/libcow.so",
+            "assets/pdockerd/pdockerd",
+            "assets/pdockerd/__pycache__/",
+            "same_bytes_as_source",
+            "source_mirror_same_bytes",
+        ]:
+            self.assertIn(needle, verifier)
+
+    def test_built_apk_payloads_match_runtime_sources(self):
+        apk = ROOT / "app" / "build" / "outputs" / "apk" / "compat" / "debug" / "app-compat-debug.apk"
+        if not apk.is_file():
+            self.skipTest(f"APK not built: {apk}")
+        pairs = {
+            "lib/arm64-v8a/libcrane.so": ROOT / "docker-proot-setup" / "docker-bin" / "crane",
+            "lib/arm64-v8a/libcow.so": ROOT / "docker-proot-setup" / "lib" / "libcow.so",
+            "assets/pdockerd/pdockerd": ROOT / "docker-proot-setup" / "bin" / "pdockerd",
+        }
+        with zipfile.ZipFile(apk) as zf:
+            names = set(zf.namelist())
+            for entry, source in pairs.items():
+                with self.subTest(entry=entry):
+                    self.assertIn(entry, names)
+                    self.assertEqual(zf.read(entry), source.read_bytes())
+            self.assertFalse(
+                any(name.startswith("assets/pdockerd/__pycache__/") for name in names),
+                "APK must not package pdockerd Python cache artifacts",
+            )
 
 
 if __name__ == "__main__":

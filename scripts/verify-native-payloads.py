@@ -32,6 +32,13 @@ class PayloadSpec:
     required_in_apk: bool = True
 
 
+@dataclass(frozen=True)
+class ApkAssetSpec:
+    entry: str
+    source: str
+    role: str
+
+
 ANDROID_HELPERS = (
     "libpdockerpty.so",
     "libpdockerdirect.so",
@@ -42,6 +49,16 @@ GLIBC_GPU = (
     "libpdockergpushim.so",
     "libpdockervulkanicd.so",
     "libpdockeropenclicd.so",
+)
+STAGED_RUNTIME_PAYLOADS = (
+    PayloadSpec("arm64-v8a", "libcrane.so", "staged-runtime", "ELF 64-bit", "ARM aarch64"),
+    PayloadSpec("arm64-v8a", "libcow.so", "staged-runtime", "ELF 64-bit", "ARM aarch64"),
+)
+APK_ASSETS = (
+    ApkAssetSpec("assets/pdockerd/pdockerd", "docker-proot-setup/bin/pdockerd", "pdockerd-daemon"),
+)
+FORBIDDEN_APK_PREFIXES = (
+    "assets/pdockerd/__pycache__/",
 )
 
 SPECS: tuple[PayloadSpec, ...] = tuple(
@@ -56,7 +73,15 @@ SPECS: tuple[PayloadSpec, ...] = tuple(
 ) + tuple(
     PayloadSpec("armeabi-v7a", name, "linux-glibc-container-experimental", "ELF 32-bit", "ARM")
     for name in GLIBC_GPU
-)
+) + STAGED_RUNTIME_PAYLOADS
+SOURCE_MIRROR_BY_APK_ENTRY = {
+    "lib/arm64-v8a/libcrane.so": ROOT / "docker-proot-setup" / "docker-bin" / "crane",
+    "lib/arm64-v8a/libcow.so": ROOT / "docker-proot-setup" / "lib" / "libcow.so",
+}
+SOURCE_MIRROR_BY_PAYLOAD = {
+    ("arm64-v8a", "libcrane.so"): ROOT / "docker-proot-setup" / "docker-bin" / "crane",
+    ("arm64-v8a", "libcow.so"): ROOT / "docker-proot-setup" / "lib" / "libcow.so",
+}
 
 
 def sha256(path: Path) -> str:
@@ -93,7 +118,9 @@ def readelf_program_headers(path: Path) -> str:
 
 
 def expected_apk_entries() -> set[str]:
-    return {f"lib/{spec.abi}/{spec.name}" for spec in SPECS if spec.required_in_apk}
+    return {f"lib/{spec.abi}/{spec.name}" for spec in SPECS if spec.required_in_apk} | {
+        spec.entry for spec in APK_ASSETS
+    }
 
 
 def verify_payloads(apk: Path | None = None, apk_arm64_only: bool = False) -> dict[str, Any]:
@@ -125,6 +152,20 @@ def verify_payloads(apk: Path | None = None, apk_arm64_only: bool = False) -> di
                 "has_glibc_loader": "/lib/ld-linux" in f or "/lib/ld-linux" in ph,
             }
         )
+        mirror = SOURCE_MIRROR_BY_PAYLOAD.get((spec.abi, spec.name))
+        if mirror is not None:
+            mirror_exists = mirror.is_file()
+            entry["source_mirror"] = str(mirror.relative_to(ROOT))
+            entry["source_mirror_exists"] = mirror_exists
+            if mirror_exists:
+                entry["source_mirror_sha256"] = sha256(mirror)
+                entry["source_mirror_same_bytes"] = entry["source_mirror_sha256"] == entry["sha256"]
+                if not entry["source_mirror_same_bytes"]:
+                    errors.append(
+                        f"{path.relative_to(ROOT)} differs from source mirror {mirror.relative_to(ROOT)}"
+                    )
+            else:
+                errors.append(f"missing source mirror for {path.relative_to(ROOT)}: {mirror.relative_to(ROOT)}")
         if spec.elf_class not in f:
             errors.append(f"{path.relative_to(ROOT)} expected {spec.elf_class}: {f}")
         if spec.machine_marker not in f:
@@ -148,21 +189,63 @@ def verify_payloads(apk: Path | None = None, apk_arm64_only: bool = False) -> di
         if not apk_path.is_file():
             errors.append(f"missing APK: {apk_path}")
         else:
-            with zipfile.ZipFile(apk_path) as zf:
-                names = set(zf.namelist())
             expected = expected_apk_entries()
             if apk_arm64_only:
-                expected = {entry for entry in expected if entry.startswith("lib/arm64-v8a/")}
+                expected = {
+                    entry
+                    for entry in expected
+                    if entry.startswith("lib/arm64-v8a/") or not entry.startswith("lib/")
+                }
+            with zipfile.ZipFile(apk_path) as zf:
+                names = set(zf.namelist())
+                zip_sha: dict[str, str] = {}
+                zip_size: dict[str, int] = {}
+                for name in names:
+                    info = zf.getinfo(name)
+                    zip_size[name] = info.file_size
+                for name in expected & names:
+                    zip_sha[name] = hashlib.sha256(zf.read(name)).hexdigest()
             missing = sorted(expected - names)
             forbidden_32 = sorted(name for name in names if name.startswith("lib/armeabi-v7a/")) if apk_arm64_only else []
+            forbidden_prefix_entries = sorted(
+                name for name in names for prefix in FORBIDDEN_APK_PREFIXES if name.startswith(prefix)
+            )
+            apk_payload_details: list[dict[str, Any]] = []
+            for name in sorted(expected & names):
+                detail: dict[str, Any] = {
+                    "entry": name,
+                    "size": zip_size.get(name),
+                    "sha256": zip_sha.get(name),
+                }
+                source = SOURCE_MIRROR_BY_APK_ENTRY.get(name)
+                for asset_spec in APK_ASSETS:
+                    if asset_spec.entry == name:
+                        source = ROOT / asset_spec.source
+                        detail["role"] = asset_spec.role
+                        break
+                if source is not None:
+                    detail["source"] = str(source.relative_to(ROOT))
+                    detail["source_exists"] = source.is_file()
+                    if source.is_file():
+                        detail["source_sha256"] = sha256(source)
+                        detail["same_bytes_as_source"] = detail["source_sha256"] == detail["sha256"]
+                        if not detail["same_bytes_as_source"]:
+                            errors.append(f"APK entry {name} differs from source {source.relative_to(ROOT)}")
+                    else:
+                        errors.append(f"APK entry {name} source missing: {source.relative_to(ROOT)}")
+                apk_payload_details.append(detail)
             apk_info["missing_entries"] = missing
             apk_info["forbidden_armeabi_v7a_entries"] = forbidden_32
+            apk_info["forbidden_prefix_entries"] = forbidden_prefix_entries
             apk_info["checked_entries"] = sorted(expected)
+            apk_info["payload_details"] = apk_payload_details
             apk_info["policy"] = "arm64-only" if apk_arm64_only else "all-built-abis"
             if missing:
                 errors.append("APK missing native payload entries: " + ", ".join(missing))
             if forbidden_32:
                 errors.append("APK includes incomplete armeabi-v7a runtime entries: " + ", ".join(forbidden_32))
+            if forbidden_prefix_entries:
+                errors.append("APK includes forbidden generated cache entries: " + ", ".join(forbidden_prefix_entries))
 
     return {
         "schema": SCHEMA,

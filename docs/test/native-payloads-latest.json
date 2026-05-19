@@ -1,6 +1,9 @@
 {
   "apk": {
     "checked_entries": [
+      "assets/pdockerd/pdockerd",
+      "lib/arm64-v8a/libcow.so",
+      "lib/arm64-v8a/libcrane.so",
       "lib/arm64-v8a/libpdockerdirect.so",
       "lib/arm64-v8a/libpdockergpuexecutor.so",
       "lib/arm64-v8a/libpdockergpushim.so",
@@ -11,8 +14,74 @@
     ],
     "exists": true,
     "forbidden_armeabi_v7a_entries": [],
+    "forbidden_prefix_entries": [],
     "missing_entries": [],
     "path": "/root/tl/pdocker-android/app/build/outputs/apk/compat/debug/app-compat-debug.apk",
+    "payload_details": [
+      {
+        "entry": "assets/pdockerd/pdockerd",
+        "role": "pdockerd-daemon",
+        "same_bytes_as_source": true,
+        "sha256": "a5cff753cade036b128ee30439057634c63b53a96225f3699f743316170267a2",
+        "size": 390375,
+        "source": "docker-proot-setup/bin/pdockerd",
+        "source_exists": true,
+        "source_sha256": "a5cff753cade036b128ee30439057634c63b53a96225f3699f743316170267a2"
+      },
+      {
+        "entry": "lib/arm64-v8a/libcow.so",
+        "same_bytes_as_source": true,
+        "sha256": "64596012b04474f82bc6460a9681f6b9e84dc3517061bc489d7fe380099d87dc",
+        "size": 73416,
+        "source": "docker-proot-setup/lib/libcow.so",
+        "source_exists": true,
+        "source_sha256": "64596012b04474f82bc6460a9681f6b9e84dc3517061bc489d7fe380099d87dc"
+      },
+      {
+        "entry": "lib/arm64-v8a/libcrane.so",
+        "same_bytes_as_source": true,
+        "sha256": "34bdb2ae7a56139c69cf745ab5cad3d7368e69896d8980e7bcf1ca194854a2ef",
+        "size": 10354840,
+        "source": "docker-proot-setup/docker-bin/crane",
+        "source_exists": true,
+        "source_sha256": "34bdb2ae7a56139c69cf745ab5cad3d7368e69896d8980e7bcf1ca194854a2ef"
+      },
+      {
+        "entry": "lib/arm64-v8a/libpdockerdirect.so",
+        "sha256": "1a64b72716fe8e73670c1931cd74f976ce3e95656ba55c62597657c9429ecf41",
+        "size": 116552
+      },
+      {
+        "entry": "lib/arm64-v8a/libpdockergpuexecutor.so",
+        "sha256": "e720a41ea2a881b83ab3ecdc5a09d88fde7e044d7e62010681dde11a8cd7a1ae",
+        "size": 209176
+      },
+      {
+        "entry": "lib/arm64-v8a/libpdockergpushim.so",
+        "sha256": "870468e2eaeee5265e9c27cdb5f78992eb598c2f26c56a815f10e77274e3546c",
+        "size": 72856
+      },
+      {
+        "entry": "lib/arm64-v8a/libpdockermediaexecutor.so",
+        "sha256": "08d33d1a7be95765b758817ac396c0111bdd28106e77797f4d307a86b4d6ac66",
+        "size": 11976
+      },
+      {
+        "entry": "lib/arm64-v8a/libpdockeropenclicd.so",
+        "sha256": "194acb8ddf0174f1a2dea8b9f0be382fe76e59883dc7334bf34ad010a2326ab9",
+        "size": 73304
+      },
+      {
+        "entry": "lib/arm64-v8a/libpdockerpty.so",
+        "sha256": "ca62a4b9ea6d29d99d77efd635f88a5aa191365bdb32afff88e451c643d411d1",
+        "size": 10632
+      },
+      {
+        "entry": "lib/arm64-v8a/libpdockervulkanicd.so",
+        "sha256": "70a141006ef1db38cda0d63705cb3368f7f7d622f2a09524cf458dea63e5ef45",
+        "size": 77848
+      }
+    ],
     "policy": "arm64-only"
   },
   "errors": [],
@@ -202,6 +271,40 @@
       "role": "linux-glibc-container-experimental",
       "sha256": "47e2af72339fa15d211885c6c24d054a90c42a6ba905ddafb3492131f2ab29fd",
       "size": 72524
+    },
+    {
+      "abi": "arm64-v8a",
+      "exists": true,
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libcrane.so: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, Go BuildID=59UBo4WJukdi4k1ZK8Xm/TY34TLn5mkyUq-7etMEA/g-r4A-xGX9H0SHDSwEHz/sYKvjLDcp1NlG3JvyBtj, stripped",
+      "has_android_linker": false,
+      "has_glibc_loader": false,
+      "name": "libcrane.so",
+      "path": "app/src/main/jniLibs/arm64-v8a/libcrane.so",
+      "readelf_header_has_machine": true,
+      "role": "staged-runtime",
+      "sha256": "34bdb2ae7a56139c69cf745ab5cad3d7368e69896d8980e7bcf1ca194854a2ef",
+      "size": 10354840,
+      "source_mirror": "docker-proot-setup/docker-bin/crane",
+      "source_mirror_exists": true,
+      "source_mirror_same_bytes": true,
+      "source_mirror_sha256": "34bdb2ae7a56139c69cf745ab5cad3d7368e69896d8980e7bcf1ca194854a2ef"
+    },
+    {
+      "abi": "arm64-v8a",
+      "exists": true,
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libcow.so: ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, BuildID[sha1]=a251f7354772d11526e3606704316f26f78e04fb, not stripped",
+      "has_android_linker": false,
+      "has_glibc_loader": false,
+      "name": "libcow.so",
+      "path": "app/src/main/jniLibs/arm64-v8a/libcow.so",
+      "readelf_header_has_machine": true,
+      "role": "staged-runtime",
+      "sha256": "64596012b04474f82bc6460a9681f6b9e84dc3517061bc489d7fe380099d87dc",
+      "size": 73416,
+      "source_mirror": "docker-proot-setup/lib/libcow.so",
+      "source_mirror_exists": true,
+      "source_mirror_same_bytes": true,
+      "source_mirror_sha256": "64596012b04474f82bc6460a9681f6b9e84dc3517061bc489d7fe380099d87dc"
     }
   ],
   "schema": "pdocker.native-payloads.v1",
