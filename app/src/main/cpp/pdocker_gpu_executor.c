@@ -4244,6 +4244,122 @@ static void write_q6_row_indexed_f32_evidence(
     }
 }
 
+static void write_q6_row_provenance_probe(FILE *out, const CpuOracleReport *report) {
+    if (!cpu_oracle_report_is_q6(report) || !report || report->row_window_count == 0) {
+        return;
+    }
+    size_t same_row_match_count = 0;
+    size_t other_row_match_count = 0;
+    size_t mismatch_count = 0;
+    int have_delta = 0;
+    int consistent_delta = 1;
+    int64_t row_delta = 0;
+    for (size_t i = 0; i < report->row_window_count; ++i) {
+        const CpuOracleSample *sample = &report->row_window[i];
+        double best_abs_error = INFINITY;
+        size_t best_index = i;
+        for (size_t j = 0; j < report->row_window_count; ++j) {
+            const double err = fabs((double)sample->gpu -
+                                    (double)report->row_window[j].expected);
+            if (err < best_abs_error) {
+                best_abs_error = err;
+                best_index = j;
+            }
+        }
+        const int canonical = fabs((double)sample->gpu -
+                                   (double)sample->expected) <= 1.0e-3;
+        if (canonical) {
+            same_row_match_count++;
+            continue;
+        }
+        mismatch_count++;
+        if (best_index != i && best_abs_error <= 1.0e-3) {
+            other_row_match_count++;
+            const int64_t delta =
+                (int64_t)report->row_window[best_index].dst_index -
+                (int64_t)sample->dst_index;
+            if (!have_delta) {
+                row_delta = delta;
+                have_delta = 1;
+            } else if (row_delta != delta) {
+                consistent_delta = 0;
+            }
+        }
+    }
+    const char *summary = "inconclusive";
+    if (same_row_match_count == report->row_window_count) {
+        summary = "same-row-match";
+    } else if (mismatch_count >= 2 &&
+               other_row_match_count == mismatch_count &&
+               consistent_delta) {
+        summary = "other-row-match";
+    } else if (mismatch_count >= 16 &&
+               other_row_match_count == 0) {
+        summary = "not-row-provenance";
+    } else if (mismatch_count >= 16 &&
+               other_row_match_count > 0 &&
+               !consistent_delta) {
+        summary = "row-provenance-inconsistent";
+    }
+    fprintf(out,
+            ",\"q6_row_provenance_probe\":{\"summary\":\"%s\","
+            "\"search_row_base\":%llu,\"search_row_count\":%zu,"
+            "\"same_row_match_count\":%zu,"
+            "\"other_row_match_count\":%zu,"
+            "\"mismatch_count\":%zu,"
+            "\"consistent_row_delta\":%s,"
+            "\"row_delta\":%lld,"
+            "\"samples\":[",
+            summary,
+            (unsigned long long)report->row_window[0].dst_index,
+            report->row_window_count,
+            same_row_match_count,
+            other_row_match_count,
+            mismatch_count,
+            consistent_delta ? "true" : "false",
+            (long long)(have_delta ? row_delta : 0));
+    for (size_t i = 0; i < report->row_window_count; ++i) {
+        const CpuOracleSample *sample = &report->row_window[i];
+        double best_abs_error = INFINITY;
+        size_t best_index = i;
+        for (size_t j = 0; j < report->row_window_count; ++j) {
+            const double err = fabs((double)sample->gpu -
+                                    (double)report->row_window[j].expected);
+            if (err < best_abs_error) {
+                best_abs_error = err;
+                best_index = j;
+            }
+        }
+        const int canonical = fabs((double)sample->gpu -
+                                   (double)sample->expected) <= 1.0e-3;
+        const int other_row = !canonical && best_index != i && best_abs_error <= 1.0e-3;
+        const int64_t delta =
+            (int64_t)report->row_window[best_index].dst_index -
+            (int64_t)sample->dst_index;
+        const char *klass = canonical ? "same-row" : (other_row ? "other-row" : "not-row");
+        fprintf(out,
+                "%s{\"dst_index\":%llu,\"dst_row\":%llu,"
+                "\"gpu_at_dst\":%.9g,\"canonical_expected\":%.9g,"
+                "\"best_expected_row\":%llu,"
+                "\"best_expected_dst_index\":%llu,"
+                "\"best_expected_value\":%.9g,"
+                "\"best_expected_abs_error\":%.9g,"
+                "\"row_delta\":%lld,\"class\":\"%s\"}",
+                i ? "," : "",
+                (unsigned long long)sample->dst_index,
+                (unsigned long long)sample->dst_index,
+                sample->gpu,
+                sample->expected,
+                (unsigned long long)report->row_window[best_index].dst_index,
+                (unsigned long long)report->row_window[best_index].dst_index,
+                report->row_window[best_index].expected,
+                best_abs_error,
+                (long long)delta,
+                klass);
+    }
+    fprintf(out, "]}");
+}
+
 static void write_cpu_oracle_report(
         FILE *out,
         const CpuOracleReport *report) {
@@ -4375,6 +4491,7 @@ static void write_cpu_oracle_report(
         }
         fprintf(out, "]");
     }
+    write_q6_row_provenance_probe(out, report);
     if (report->q6_output_layout_probe_ran) {
         const char *summary = report->q6_output_layout_probe_summary[0]
             ? report->q6_output_layout_probe_summary

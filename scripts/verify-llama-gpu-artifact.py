@@ -1196,6 +1196,31 @@ def _q6_output_layout_fixed_offset_rejected(probe: dict[str, Any]) -> bool:
     )
 
 
+def _q6_row_provenance_probe(q6: Any) -> dict[str, Any]:
+    if not isinstance(q6, dict):
+        return {"summary": "not-run", "samples": []}
+    probe = q6.get("q6_row_provenance_probe")
+    if not isinstance(probe, dict):
+        return {
+            "summary": q6.get("q6_row_provenance_probe_summary") or "not-run",
+            "samples": [],
+        }
+    samples = probe.get("samples")
+    if not isinstance(samples, list):
+        samples = []
+    return {
+        "summary": str(probe.get("summary") or q6.get("q6_row_provenance_probe_summary") or "not-run"),
+        "samples": samples,
+        "same_row_match_count": probe.get("same_row_match_count"),
+        "other_row_match_count": probe.get("other_row_match_count"),
+        "mismatch_count": probe.get("mismatch_count"),
+        "consistent_row_delta": probe.get("consistent_row_delta"),
+        "row_delta": probe.get("row_delta"),
+        "search_row_base": probe.get("search_row_base"),
+        "search_row_count": probe.get("search_row_count"),
+    }
+
+
 def _pre_http_feature_evidence_missing(
     blocker: dict[str, Any],
     evidence: dict[str, Any],
@@ -1460,6 +1485,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_writeback_evidence = _q6_writeback_evidence(q6)
     q6_shader_like = _q6_shader_like_interpretation(q6)
     q6_output_layout = _q6_output_layout_probe(q6)
+    q6_row_provenance = _q6_row_provenance_probe(q6)
     if not q6:
         classification = "q6-not-reached"
         responsibility_boundary = "q6-not-reached"
@@ -1495,6 +1521,10 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 classification = "q6-native-output-layout"
                 responsibility_boundary = "q6-output-layout"
                 q6_blocker_class = "native-q6-output-layout"
+            elif q6_row_provenance.get("summary") == "other-row-match":
+                classification = "q6-native-other-row-output-layout"
+                responsibility_boundary = "q6-output-layout"
+                q6_blocker_class = "native-q6-other-row-output-layout"
             elif (
                 _q6_output_layout_fixed_offset_rejected(q6_output_layout)
                 and q6_shader_like["q6_shader_like_oracle_cleared"] is True
@@ -1545,12 +1575,14 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_workgroup_diagnostics": q6,
         "q6_shader_like_interpretation": q6_shader_like,
         "q6_output_layout_probe": q6_output_layout,
+        "q6_row_provenance_probe": q6_row_provenance,
         "q6_effective_blocker_class": (
             q6_blocker_class
             if classification in {
                 "q6-workgroup-cleared-but-oracle-mismatch",
                 "q6-native-output-layout",
                 "q6-native-output-layout-inconclusive",
+                "q6-native-other-row-output-layout",
                 "q6-native-device-execution-or-final-store",
                 "q6-native-reduction-or-device-execution",
             }
@@ -1624,6 +1656,7 @@ def main(argv: list[str]) -> int:
             "q6-workgroup-cleared-but-oracle-mismatch",
             "q6-native-output-layout",
             "q6-native-output-layout-inconclusive",
+            "q6-native-other-row-output-layout",
             "q6-native-device-execution-or-final-store",
             "q6-native-reduction-or-device-execution",
         } else 31

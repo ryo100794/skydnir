@@ -2758,7 +2758,13 @@ q6_output_layout_probe = (
     if isinstance(q6_latest_oracle.get("q6_output_layout_probe"), dict)
     else {}
 )
+q6_row_provenance_probe = (
+    q6_latest_oracle.get("q6_row_provenance_probe")
+    if isinstance(q6_latest_oracle.get("q6_row_provenance_probe"), dict)
+    else {}
+)
 q6_output_layout_probe_summary = q6_output_layout_probe.get("summary") or "not-run"
+q6_row_provenance_probe_summary = q6_row_provenance_probe.get("summary") or "not-run"
 try:
     q6_output_layout_mismatch_count = int(q6_output_layout_probe.get("mismatch_count") or 0)
 except (TypeError, ValueError):
@@ -2843,6 +2849,8 @@ q6_blocker_class = (
     if q6_writable_writeback_mismatches
     else "native-q6-output-layout"
     if q6_output_layout_probe_summary == "canonical-mismatch-found-elsewhere" and q6_writeback_verified_all
+    else "native-q6-other-row-output-layout"
+    if q6_row_provenance_probe_summary == "other-row-match" and q6_writeback_verified_all
     else "native-q6-device-execution-or-final-store"
     if q6_output_layout_fixed_offset_rejected and q6_shader_like_oracle_cleared and q6_writeback_verified_all
     else "native-q6-output-layout-inconclusive"
@@ -2887,6 +2895,8 @@ q6_workgroup_diagnostics = {
     "q6_output_layout_probe": q6_output_layout_probe,
     "q6_output_layout_probe_summary": q6_output_layout_probe_summary,
     "q6_output_layout_fixed_offset_rejected": q6_output_layout_fixed_offset_rejected,
+    "q6_row_provenance_probe": q6_row_provenance_probe,
+    "q6_row_provenance_probe_summary": q6_row_provenance_probe_summary,
     "q6_shader_like_oracle_cleared": q6_shader_like_oracle_cleared,
     "q6_shader_like_64_required": q6_shader_like_64_required,
     "q6_shader_like_clear_basis": q6_shader_like_clear_basis,

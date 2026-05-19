@@ -69,8 +69,11 @@ issues, and deciding which planned gaps become hard gates.
    writeback, matched the native reduction-tree oracle, and classified the
    remaining blocker as `q6-native-output-layout-inconclusive`. The follow-up
    32-sample probe rejected a simple fixed-offset layout explanation and now
-   classifies as `q6-native-device-execution-or-final-store`. This is still
-   non-promoting diagnostic evidence, not a benchmark or inference claim.
+   classifies as `q6-native-device-execution-or-final-store`. The row
+   provenance probe also found `same_row_match_count=0` and
+   `other_row_match_count=0`, so the observed GPU values are not merely another
+   sampled row's correct output. This is still non-promoting diagnostic
+   evidence, not a benchmark or inference claim.
 4. **[#11](https://github.com/ryo100794/pdocker-android/issues/11)
    Image-pull crash safety** `[P0 doing]`: partial pulls, `.pull-*`,
    `.tmp-*`, `.old-*`, interrupted layer extraction, tag publish, and startup
@@ -211,7 +214,8 @@ issues, and deciding which planned gaps become hard gates.
   so the current classifier moves the boundary to
   `q6-native-device-execution-or-final-store`. The safe-kernel Q6 match plus
   the native probe means the remaining GPU blocker is native llama Q6_K device
-  execution/final-store behavior, not bridge writeback or descriptor plumbing.
+  execution/final-store behavior, not bridge writeback, descriptor plumbing, or
+  simple other-row output placement.
   Environment propagation remains a first-class blocker:
   diagnostic flags used by the compare script, pdockerd defaults, UI/compose
   launches, and artifact verification must stay synchronized before a GPU
@@ -593,10 +597,11 @@ implementation change plus a focused verification artifact.
   2026-05-19 strict device artifact preserved those fields and first classified
   `q6-native-output-layout-inconclusive`; the 32-sample follow-up rejected a
   simple fixed-offset layout explanation and classifies
-  `q6-native-device-execution-or-final-store`. Bridge writeback/descriptors are
-  no longer the leading explanation. Next evidence should bisect the native
-  final store versus device execution without changing llama.cpp, Dockerfile,
-  model, or prompt. All
+  `q6-native-device-execution-or-final-store`. The row provenance follow-up
+  rejects simple other-row provenance as well. Bridge writeback/descriptors are
+  no longer the leading explanation. Next evidence should bisect local-y/partial
+  signatures and then native final store versus device execution without
+  changing llama.cpp, Dockerfile, model, or prompt. All
   readiness-blocked or oracle-mismatch artifacts stay non-promoting.
 
 ### Runtime / Compose-Up
