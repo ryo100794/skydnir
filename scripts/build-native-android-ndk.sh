@@ -6,7 +6,7 @@
 # aarch64 Linux hosts currently do not have a Google-distributed linux-aarch64
 # NDK prebuilt in this workspace, so they use host glibc clang with the NDK
 # target, sysroot, and compiler-rt. That mode is explicit and does not use
-# Termux, box64, or Android device-local compiler tools.
+# Termux or Android device-local compiler tools.
 #
 # Default ABIs:
 #   arm64-v8a    full current direct runtime helper set
@@ -36,10 +36,10 @@ pick_host_tag() {
     case "$os:$arch" in
         Linux:x86_64|Linux:amd64) candidate="linux-x86_64" ;;
         Darwin:x86_64) candidate="darwin-x86_64" ;;
-        Darwin:arm64) candidate="darwin-x86_64" ;; # official NDK uses Rosetta-capable host tag for older NDKs
-        *) candidate="linux-x86_64" ;;
+        Darwin:arm64) candidate="darwin-x86_64" ;; # official NDK host tag used by older NDKs
+        *) candidate="" ;;
     esac
-    if [[ -d "$NDK/toolchains/llvm/prebuilt/$candidate" ]]; then
+    if [[ -n "$candidate" && -d "$NDK/toolchains/llvm/prebuilt/$candidate" ]]; then
         printf '%s\n' "$candidate"
         return 0
     fi
