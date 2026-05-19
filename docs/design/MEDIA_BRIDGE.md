@@ -34,6 +34,12 @@ The Android side must use public APIs first:
   devices;
 - audio routing/inventory: AudioManager and AudioDeviceInfo, including USB
   multichannel inputs/outputs when Android reports them.
+- future Bluetooth and BLE: BluetoothAdapter/BluetoothManager, GATT APIs, and
+  explicit runtime permission flow, exposed through a broker rather than raw
+  HCI or `/dev` passthrough;
+- future GPS/location: Android LocationManager/Fused provider style broker with
+  explicit user permission, precision, and background-access policy. Containers
+  must not receive raw GNSS device nodes.
 
 ## Current Phase 1 Control Plane
 
@@ -68,6 +74,16 @@ Generic requests expand to specific target modes such as `video.camera2`,
 `camera.front`, `camera.rear`, `audio.capture`, `audio.playback`, and
 `audio.usb.multichannel`.
 
+The Engine/API truth surfaces for this phase are:
+
+- `GET /system/media` for APK-level media inventory, permission state, and
+  command-socket readiness.
+- `PdockerMedia` in `GET /containers/{id}/json` for the per-container media
+  request and injected environment result.
+
+Both are pdocker extensions. They document control-plane readiness only; they
+do not claim Linux `/dev/video*` or `/dev/snd/*` passthrough.
+
 ## Readiness Rules
 
 Readiness flags must stay false until an APK-owned executor implements real
@@ -94,3 +110,13 @@ Executor milestones:
 4. Add USB multichannel format negotiation and underrun/overrun diagnostics.
 5. Flip readiness flags only after command probes pass on the real Android API
    path.
+6. Add Bluetooth classic inventory/control-plane planning: paired devices,
+   profiles that Android exposes to apps, permission state, and a socket/env
+   contract that fails closed until a public-API broker exists.
+7. Add BLE planning: scan/connect/GATT read-write-notify operations through an
+   APK-owned broker, with rate limits, permission checks, and no raw HCI device
+   exposure.
+8. Add GPS/location planning: coarse/fine location permission state, provider
+   inventory, bounded update streaming, and explicit foreground/background
+   policy; readiness remains false until device probes prove real Android API
+   delivery.

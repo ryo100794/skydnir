@@ -207,6 +207,62 @@ tags such as `ubuntu:latest` are rejected even with the opt-in flag.
 | Events | Partial | `/events` now persists Docker-style JSONL lifecycle events and live-streams new events with basic `since`, `until`, and filter handling. It covers container/image/network/volume/build events, but does not yet reproduce every daemon-internal event emitted by Moby. |
 | APK data exchange | Good | Normal compat APK includes pdockerd, crane, libcow, pdocker-direct, xterm assets, and license notice asset. It omits PRoot, proot-loader, talloc, upstream Docker CLI, and upstream Docker Compose. The F-Droid-oriented no-crane build uses `PDOCKER_FDROID_NO_CRANE=1`, must omit `lib/arm64-v8a/libcrane.so`, and must surface image-pull limitations instead of silently bundling the prebuilt static Go payload. |
 
+### Implemented Engine API endpoint inventory
+
+pdockerd strips Docker API version prefixes such as `/v1.43` before routing.
+The current implemented Docker Engine API surface is:
+
+| Group | Implemented endpoints |
+|---|---|
+| Base | `GET /_ping`, `GET /version`, `GET /info` |
+| Images | `GET /images/json`, `POST /images/create`, `GET /images/get`, `POST /images/load`, `POST /images/prune`, `GET /images/{name}/history`, `GET /images/{name}/json`, `DELETE /images/{name}` |
+| Containers | `GET /containers/json`, `POST /containers/create`, `POST /containers/{id}/rename`, `GET /containers/{id}/json`, `POST /containers/{id}/start`, `POST /containers/{id}/attach`, `POST /containers/{id}/stop`, `POST /containers/{id}/kill`, `POST /containers/{id}/wait`, `DELETE /containers/{id}`, `GET /containers/{id}/logs`, `GET /containers/{id}/stats`, `HEAD/GET/PUT /containers/{id}/archive`, `POST /containers/{id}/exec` |
+| Exec | `POST /exec/{id}/start`, `POST /exec/{id}/resize`, `GET /exec/{id}/json` |
+| Build/prune | `POST /build`, `POST /build/prune`, `POST /containers/prune`, `POST /system/prune`, `GET /system/df` |
+| Networks | `GET /networks`, `POST /networks/create`, `POST /networks/prune`, `GET /networks/{name}`, `DELETE /networks/{name}`, `POST /networks/{name}/connect`, `POST /networks/{name}/disconnect` |
+| Volumes | `GET /volumes`, `POST /volumes/create`, `POST /volumes/prune`, `GET /volumes/{name}`, `DELETE /volumes/{name}` |
+| Events | `GET /events` |
+
+Unsupported Docker Engine API families include Swarm, plugins, secrets,
+configs, services, tasks, nodes, sessions, BuildKit/buildx control APIs,
+registries/auth endpoints beyond the current pull path, container checkpoint,
+container pause/unpause, container update, and full system info/debug endpoints
+outside the rows above.
+
+### OCI and registry compatibility status
+
+pdocker aims for practical Docker data exchange, not full OCI conformance yet.
+
+| OCI / registry area | Status | Notes |
+|---|---:|---|
+| OCI/Docker layer tar extraction | Partial | gzip-compressed layer tar extraction works for supported images, with content-addressed layer cache validation and startup cleanup of partial layers. |
+| OCI image config | Partial | The fields needed by image inspect, container create, rootfs layers, env/cmd/entrypoint, and common history are preserved. Unsupported or unknown fields may round-trip incompletely. |
+| Docker save/load tar | Partial | `/images/get` and `/images/load` support Docker-style tar exchange for the implemented flattened image format. |
+| Multi-platform OCI indexes / Docker manifest lists | Unsupported | Platform selection is accepted for pull metadata, but full OCI index preservation and multi-arch save/load are not implemented. |
+| zstd layers | Unsupported | gzip/plain tar paths are the supported lane. zstd-compressed OCI layers are not implemented. |
+| OCI artifact types, referrers, signatures, attestations, SBOM referrers | Unsupported | Not interpreted, preserved, or exposed as first-class objects. |
+| Distribution registry API parity | Partial | Image pull is supported through the current crane-backed path in normal APK builds; private registry auth, full token flows, push, catalog, tag listing, blob mount/cross-repo dedupe, and referrer APIs are not complete. |
+| OCI runtime spec | Unsupported as a kernel contract | pdocker does not implement runc namespaces, cgroups, mount propagation, Linux capabilities, seccomp profiles, or OCI hooks. Runtime configuration is mapped to the Android userspace executor subset. |
+
+### pdocker extension surfaces
+
+The following are pdocker-specific extensions. They are for the Android UI,
+diagnostics, and feature-specific control planes; they are not Docker or OCI
+standard APIs.
+
+| Extension surface | Purpose |
+|---|---|
+| `GET /system/operations`, `POST /system/operations` | UI-visible long-running operation records and diagnostic operation updates. |
+| `GET /system/memory-pressure` | Android/process memory pressure snapshot, optional container/pid focus, and active operation context. |
+| `GET /system/diagnostics` | Bounded abnormal-event and diagnostic records. |
+| `GET /system/python-memory` | Bounded pdockerd Python memory telemetry. |
+| `GET /system/host` | Host hardware/software/GPU/framework capability diagnostics. |
+| `GET /system/documents/status`, `POST /system/documents/sync-to-tree`, `POST /system/documents/sync-from-tree` | SAF/Documents mediator status and explicit synchronization control. |
+| `GET /system/media` | Camera/audio/media bridge capability inventory and permission/control-plane status. |
+| `PdockerNetwork`, `PdockerGpu`, `PdockerMedia`, `PdockerWarnings` in container inspect | Container-specific network truth, GPU bridge request/result metadata, media bridge metadata, and explicit limitation warnings. |
+| `State.PdockerRawReturnCode`, `State.PdockerSignal`, `State.PdockerMemory`, `State.PdockerTeardown` | Android executor return-code, signal, memory, and teardown diagnostics that Docker does not normally expose. |
+| `PdockerStorage` in list/df responses | UI storage accounting for shared layers, image views, container upper bytes, build cache, and stale metadata. |
+
 ## Protocol coverage
 
 The audit checks these protocol details directly or statically:

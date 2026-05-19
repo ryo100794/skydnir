@@ -178,6 +178,117 @@ issues, and deciding which planned gaps become hard gates.
     evidence until pointer-width-clean handle abstractions replace current
     pointer-shaped Vulkan handle casts.
 
+### Audit Synchronization 2026-05-19
+
+The May 19 multi-agent design/TODO reconciliation adds the following missing
+or under-specified gates.  These entries are deliberately phrased as gates, not
+implementation shortcuts: a feature is not complete until the corresponding
+evidence proves the real behavior or the limitation remains visible.
+
+1. **Layer GC reachability and repair** `[P0 next]`: image delete, tag
+   replacement, pull, load, build prune, `/images/prune`, and system prune must
+   share one reachability checker.  Treat live containers, image
+   manifests/rootfs trees, `cow_bind` lower roots, materialized container
+   roots, and active build-cache entries as roots before deleting layer
+   payloads.  Add startup/kill recovery tests for staged pull/load directories,
+   stale build-cache JSON, orphan temps, and missing layer payloads; recovery
+   must disable stale cache use and cleanup/quarantine metadata instead of
+   breaking live containers.
+2. **Storage-wide overlay repair and journal** `[P0 next]`: implement a repair
+   command that rebuilds overlay metadata from filesystem truth, validates
+   merged paths, reports before rewriting, and handles interrupted copy-up,
+   whiteout, rename, replace, archive PUT, DB/replica corruption, stale
+   hardlink/ring-tree accelerators, SAF grant revocation, ENOSPC/ENOMEM, and
+   kill/restart through a journal/quarantine model.  Repeated repair must be
+   idempotent.
+3. **Native allocation ownership gate** `[P0 next]`: native code that allocates
+   variable-size memory must pass the `MEMORY_OWNERSHIP.md` checklist: bounded
+   `malloc`/`calloc`/`strdup`, overflow checks, one owner/free path, no hidden
+   long-lived mutable buffers, and explicit `-EMSGSIZE`/`-ENOMEM` behavior.
+4. **Memory diagnostics and pager admission gate** `[P0 next]`: OOM/LMK and
+   pager artifacts must redact secret-bearing args/env, cap retained bytes,
+   expire old evidence, keep backing files separate from diagnostics, and fail
+   closed if kernel `mmap` succeeds but region registration or backing
+   reservation fails.  That partial-success case must inject `munmap`, return
+   an `ENOMEM`-style denial, and classify `allocation_denied_enomem`.
+5. **API29+ execution feasibility gate** `[P0 next]`: targetSdk 29+ APKs must
+   not enable `process-exec=1` by default/release until an artifact proves
+   Ubuntu `RUN`, `docker run`, logs, and inspect from the real app domain.  The
+   first executable must be APK-shipped code; app-data rootfs ELF must not be
+   directly `execve()`'d, and Docker/OCI image layout must remain upstream
+   compatible.  If the gate fails, API29+ remains metadata/UI/image management
+   or moves process execution to an explicitly separated compat/helper path.
+6. **Docker API versus pdocker extension boundary** `[P1 next]`: standard
+   Engine API responses must remain a Docker-compatible subset.  `/system/*`
+   endpoints and `Pdocker*` fields are Android diagnostics only and must not
+   hide unsupported OCI/runtime gaps.  Swarm, BuildKit/buildx, OCI hooks,
+   cgroups/namespaces, zstd layers, manifest-list preservation, registry push,
+   OCI artifacts/referrers/signatures, and related non-goals must stay
+   `unsupported` or `partial` in docs/API warnings until real support exists.
+7. **Metadata index identity/rebuild gate** `[P1 next]`: the SQLite index must
+   cover projects, compose files/services, containers, images/layers, volumes,
+   jobs/operation spool, and overlay paths with immutable real IDs.  Project,
+   compose, volume, and job UUIDs, Engine container IDs, and image/layer
+   digests are identity; names, tags, paths, and service names are labels only.
+   Rebuild must quarantine missing/duplicate UUID roots and emit diagnostics
+   for unjoinable rows instead of silently dropping them.
+8. **SAF UnixFS backend and external-edit contract** `[P1 next]`: implement
+   normalized lookup/list/read/write/mkdir/remove/rename/unlink plus traversal
+   rejection and Unix-like metadata sidecars.  Invalid paths (`..`, absolute,
+   backslash, empty/dot segments, NUL) must fail before fallback.  Startup,
+   grant changes, and repair must enumerate provider truth, join by document
+   identity/path/size/mtime/hash evidence, preserve both versions or quarantine
+   conflicts, and never delete SAF payload bytes solely because sidecar metadata
+   is missing.
+9. **Volume, bind, archive, and overlay shared matrix** `[P1 next]`: until
+   syscall mediation enforces read-only binds, UI/API must warn and must not
+   claim exact `:ro` parity.  Volume-backed archive/copy and UI browsing must
+   use the same traversal defenses as rootfs archive paths.  Shared tests must
+   cover lower read, upper write, copy-up edit, whiteouts, opaque directories
+   where supported, rename-over-lower/upper, file/directory replacement,
+   chmod/chown/xattr/truncate, symlink traversal and absolute symlinks,
+   hardlink isolation, archive GET/HEAD/PUT metadata, metadata DB rebuild, and
+   prune/dangling-reference recovery.
+10. **Terminal architecture gates** `[P1 next]`: the terminal UI surface must
+    stay generic.  `xterm/index.html` may use only generic bridge verbs; Docker
+    Engine endpoints, container IDs, command strings, and smoke artifact policy
+    in the terminal surface must fail a static host test.  `TerminalInputAdapter`
+    owns Android IME fallback; session diagnostics use a neutral envelope and
+    debug-only/redacted input byte logs.  Interactive Engine exec must advertise
+    `Tty=true` raw stream semantics, `TERM=xterm-256color`, optional
+    `COLORTERM=truecolor`, UTF-8 locale only when supported by the image, and
+    Docker exec resize ownership.
+11. **RuntimeBackend contract completion** `[P1 next]`: the backend selector
+    contract must cover start, exec, stop, wait, logs, attach, PTY, env,
+    workdir, signals, archive, and mounts/path mapping.  No-PRoot default
+    removal requires evidence that pull/list/image browse/Dockerfile-Compose
+    edit/log UI/non-interactive exec stay usable without PRoot payloads, while
+    runtime execution either works or returns explicit capability errors.
+12. **Resource/cgroup metadata compatibility** `[P1 next]`: parse/store common
+    Engine/Compose CPU, memory, pids, blkio, cpuset, and cgroup fields; inspect
+    and UI must show requested limits plus an Android-sandbox warning.  Stats
+    are best-effort from `/proc`/Android APIs; do not claim hard Docker cgroup
+    enforcement, OOMScoreAdj authority, or namespace parity.
+13. **GPU bridge large-buffer and affinity gate** `[P0/P1 next]`: GPU attempts
+    must report `backend_affinity`, `backend_impl`, buffer residency, fallback
+    reason, memory mode, and peak allocation estimates.  Same-API backends are
+    preferred; unsupported kernels fail closed rather than silently falling
+    back to incorrect CPU or bridge behavior.  Multi-GB model paths need
+    reusable registered/imported FDs or chunked-FD transfer, page-range dirty
+    tracking, and tunable fallback chunks before any performance claim.
+14. **Media/device broker extension plan** `[P1/P2 next]`: Android public-API
+    brokers are the only planned path for camera, audio, Bluetooth classic,
+    BLE, and GPS/location.  Do not expose raw `/dev/video*`, `/dev/snd*`, HCI,
+    or GNSS nodes.  Audio/video remain P1; Bluetooth/BLE/GPS are future
+    planned gaps with explicit permission, privacy, and capability reporting.
+15. **Project metadata Android validation** `[P1 next]`: device validation must
+    create a project, rename it, attach git metadata, create a container and
+    volume, delete the DB, rebuild, and prove the same real IDs survive.
+16. **Dirty-precision pager evidence** `[P1 next]`: memory-pager artifacts must
+    declare `write_fault_precise`, `conservative_page`, or
+    `region_conservative`, and must distinguish `dirty_pages_observed` from
+    `dirty_pages_written`.
+
 ### Next Queue Generated 2026-05-04
 
 - [doing] Cross-project incomplete implementation audit:
@@ -520,6 +631,12 @@ risk, not stable checkpoint credit.
   AudioTrack executor IPC exist, runtime permissions are requested, and a
   device artifact proves capture/playback commands without raw `/dev`
   passthrough.
+- [future] Bluetooth/BLE/GPS bridge planning: extend the media/device broker
+  design with Android public APIs only. Bluetooth classic and BLE must use
+  BluetoothManager/BluetoothAdapter/GATT-style app APIs with explicit runtime
+  permissions, bounded scans, and fail-closed readiness; GPS/location must use
+  Android location provider APIs with explicit precision/background policy. Do
+  not expose raw HCI, GNSS, vendor, or `/dev` nodes into containers.
 - [doing] Build context tar compatibility: Kotlin `DockerEngineClient.createTar`
   now has a host-gated metadata-preserving path for regular files,
   directories, symlinks, executable mode bits, mtimes, ustar prefixes, PAX

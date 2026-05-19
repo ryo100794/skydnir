@@ -56,6 +56,13 @@ def load_artifact(path: Path) -> tuple[Any, str | None]:
         return None, f"json-error: {exc}"
 
 
+def probe_summary(value: Any) -> str | None:
+    if isinstance(value, dict):
+        summary = value.get("summary")
+        return str(summary) if summary is not None else None
+    return None
+
+
 def artifact_digest(path: Path, verifier: Any) -> dict[str, Any]:
     payload, error = load_artifact(path)
     base: dict[str, Any] = {"path": rel(path)}
@@ -88,6 +95,9 @@ def artifact_digest(path: Path, verifier: Any) -> dict[str, Any]:
         q6_effective_blocker = "cleared"
     if not q6_effective_blocker:
         q6_effective_blocker = q6.get("blocker_class")
+    q6_output_layout = report.get("q6_output_layout_probe") or {}
+    q6_row_provenance = report.get("q6_row_provenance_probe") or {}
+    q6_partial_signature = report.get("q6_partial_signature_probe") or {}
 
     return base | {
         "schema": payload.get("schema"),
@@ -104,6 +114,16 @@ def artifact_digest(path: Path, verifier: Any) -> dict[str, Any]:
         "q6_writeback_summary": (report.get("q6_writeback_evidence") or {}).get("summary"),
         "q6_writeback_verified_all": q6.get("q6_writeback_verified_all"),
         "q6_row_indexed_writeback_verified": q6.get("q6_row_indexed_writeback_verified"),
+        "q6_output_layout_probe_summary": probe_summary(q6_output_layout)
+        or q6.get("q6_output_layout_probe_summary"),
+        "q6_output_layout_fixed_offset_rejected": q6.get("q6_output_layout_fixed_offset_rejected"),
+        "q6_row_provenance_probe_summary": probe_summary(q6_row_provenance)
+        or q6.get("q6_row_provenance_probe_summary"),
+        "q6_partial_signature_probe_summary": probe_summary(q6_partial_signature)
+        or q6.get("q6_partial_signature_probe_summary"),
+        "q6_native_reduction_tree_abs_delta": q6.get("q6_native_reduction_tree_abs_delta"),
+        "q6_native_reduction_tree_gpu_abs_error": q6.get("q6_native_reduction_tree_gpu_abs_error"),
+        "q6_native_reduction_tree_sum": q6.get("q6_native_reduction_tree_sum"),
         "runtime_freshness": (report.get("runtime_freshness") or {}).get("summary"),
     }
 

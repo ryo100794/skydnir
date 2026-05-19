@@ -32,6 +32,46 @@ def passing_config_propagation():
     }
 
 
+def q6_verified_writeback(hash_value="0x1111111111111111"):
+    return {
+        "local_size_resolved": [32, 2, 1],
+        "q6_writeback_verified_all": True,
+        "q6_row_indexed_sample_indices": [257],
+        "q6_row_indexed_writeback_verified": True,
+        "q6_row_indexed_writeback_evidence": [
+            {
+                "index": 2,
+                "binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "size": 607744,
+                "q6_row_indexed": True,
+                "q6_sample_indices": [257],
+                "f32_after_dispatch": [{"index": 257, "value": 1.25}],
+                "f32_after_writeback": [{"index": 257, "value": 1.25}],
+                "row_indexed_samples_match_oracle": True,
+            }
+        ],
+        "q6_writable_bindings": [
+            {
+                "index": 2,
+                "binding": 2,
+                "alias_rep": 2,
+                "offset": 0,
+                "size": 607744,
+                "readable": True,
+                "writable": True,
+                "gpu_after_dispatch_hash": hash_value,
+                "fd_after_hash": hash_value,
+                "writeback_verified": True,
+                "writeback_mismatch": False,
+            }
+        ],
+        "q6_writable_writeback_mismatches": [],
+        "q6_writable_writeback_unknown": [],
+    }
+
+
 class LlamaGpuArtifactSweepTest(unittest.TestCase):
     def test_sweep_handles_memory_blocker_and_non_object_artifact(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -117,11 +157,30 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                                         {
                                             "index": 2,
                                             "binding": 2,
+                                            "alias_rep": 2,
+                                            "offset": 0,
+                                            "size": 607744,
+                                            "readable": True,
                                             "writable": True,
                                             "gpu_after_dispatch_hash": "0x1111111111111111",
                                             "fd_after_hash": "0x1111111111111111",
                                             "writeback_verified": True,
                                             "writeback_mismatch": False,
+                                        }
+                                    ],
+                                    "q6_row_indexed_sample_indices": [257],
+                                    "q6_row_indexed_writeback_evidence": [
+                                        {
+                                            "index": 2,
+                                            "binding": 2,
+                                            "alias_rep": 2,
+                                            "offset": 0,
+                                            "size": 607744,
+                                            "q6_row_indexed": True,
+                                            "q6_sample_indices": [257],
+                                            "f32_after_dispatch": [{"index": 257, "value": 1.25}],
+                                            "f32_after_writeback": [{"index": 257, "value": 1.25}],
+                                            "row_indexed_samples_match_oracle": True,
                                         }
                                     ],
                                     "q6_writable_writeback_mismatches": [],
@@ -147,6 +206,85 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
             self.assertEqual(entry["q6_blocker_class"], "cleared")
             self.assertEqual(entry["q6_raw_blocker_class"], "stale-workgroup-shape")
 
+    def test_sweep_surfaces_q6_probe_details(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            artifact = root / "q6-final-store.json"
+            artifact.write_text(
+                json.dumps(
+                    {
+                        "schema": "pdocker.llama.gpu.compare.v1",
+                        "gpu": {
+                            "served": False,
+                            "diagnostics": {
+                                "runtime_freshness": {
+                                    "summary": "pass",
+                                    "expected_executor_marker": "gpu-executor-enabled-features-20260518",
+                                    "observed_executor_markers": ["gpu-executor-enabled-features-20260518"],
+                                    "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
+                                    "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
+                                    "executor_event_count": 1,
+                                },
+                                "config_propagation": passing_config_propagation(),
+                                "q6_workgroup_diagnostics": {
+                                    "event_count": 1,
+                                    "workgroup_shape_blocker": False,
+                                    "latest_status": "mismatch",
+                                    **q6_verified_writeback(),
+                                    "q6_shader_like_abs_delta": 1.0e-7,
+                                    "q6_native_reduction_tree_abs_delta": 7.0e-7,
+                                    "q6_native_reduction_tree_gpu_abs_error": 7.04,
+                                    "q6_native_reduction_tree_sum": 13.87,
+                                    "q6_output_layout_fixed_offset_rejected": True,
+                                    "q6_output_layout_probe": {
+                                        "summary": "canonical-mismatch-inconclusive",
+                                        "mismatch_count": 32,
+                                        "found_elsewhere_count": 3,
+                                        "consistent_relative_offset": False,
+                                        "samples": [
+                                            {
+                                                "dst_index": 0,
+                                                "expected": 13.87,
+                                                "gpu_at_dst": 6.83,
+                                                "canonical_match": False,
+                                                "found_elsewhere": False,
+                                            }
+                                        ],
+                                    },
+                                    "q6_row_provenance_probe": {
+                                        "summary": "not-row-provenance",
+                                        "same_row_match_count": 0,
+                                        "other_row_match_count": 0,
+                                        "mismatch_count": 32,
+                                    },
+                                    "q6_partial_signature_probe": {
+                                        "summary": "not-partial",
+                                        "mismatch_count": 32,
+                                    },
+                                },
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [str(SWEEP), str(artifact)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            entry = json.loads(result.stdout)["artifacts"][0]
+            self.assertEqual(entry["classification"], "q6-native-device-execution-or-final-store")
+            self.assertEqual(entry["q6_output_layout_probe_summary"], "canonical-mismatch-inconclusive")
+            self.assertTrue(entry["q6_output_layout_fixed_offset_rejected"])
+            self.assertEqual(entry["q6_row_provenance_probe_summary"], "not-row-provenance")
+            self.assertEqual(entry["q6_partial_signature_probe_summary"], "not-partial")
+            self.assertEqual(entry["q6_native_reduction_tree_gpu_abs_error"], 7.04)
+
     def test_committed_sweep_records_current_blocker_inventory(self):
         report = json.loads(LATEST.read_text(encoding="utf-8"))
         self.assertEqual(report["schema"], "pdocker.llama.gpu.artifact-sweep.v1")
@@ -159,6 +297,11 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
         checklist = "\n".join(report["next_device_run_checklist"])
         self.assertIn("config_propagation.summary == pass", checklist)
         self.assertIn("q6_writeback_verified_all", checklist)
+        q6_entries = [entry for entry in report["artifacts"] if entry.get("q6_blocker_class")]
+        self.assertTrue(
+            any(entry.get("q6_output_layout_probe_summary") for entry in q6_entries),
+            "committed sweep should expose Q6 output-layout probe summaries",
+        )
 
 
 if __name__ == "__main__":

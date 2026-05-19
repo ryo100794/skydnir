@@ -20,7 +20,7 @@ tradeoffs, accepted behavior, and non-goals.
 | [`RUNTIME_STRATEGY.md`](RUNTIME_STRATEGY.md) | Direct runtime direction and PRoot retirement plan |
 | [`API29_DIRECT_EXEC_FEASIBILITY.md`](API29_DIRECT_EXEC_FEASIBILITY.md) | API 29+ direct execution feasibility notes |
 | [`GPU_COMPAT.md`](GPU_COMPAT.md) | Android GPU, Vulkan, cuVK, and benchmark design direction |
-| [`MEDIA_BRIDGE.md`](MEDIA_BRIDGE.md) | Android Camera2/AudioRecord/AudioTrack media bridge contract |
+| [`MEDIA_BRIDGE.md`](MEDIA_BRIDGE.md) | Android Camera2/AudioRecord/AudioTrack media bridge contract, plus future Bluetooth/BLE/GPS public-API broker plan |
 | [`APK_MEMORY_PAGER.md`](APK_MEMORY_PAGER.md) | APK-scoped swap-like memory pager feasibility and page-fault strategy |
 | [`RUNTIME_OOM_SURVIVAL.md`](RUNTIME_OOM_SURVIVAL.md) | Runtime OOM survival, large-workload mode, and post-kill evidence strategy |
 | [`MEMORY_OWNERSHIP.md`](MEMORY_OWNERSHIP.md) | Native buffer ownership, dynamic allocation caps, leak/fragmentation/thread-safety rules |

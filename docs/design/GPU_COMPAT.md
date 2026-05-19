@@ -79,6 +79,18 @@ and ggml graph ownership stay in the container process. The bridge may execute
 GPU kernels, move buffers, and signal fences, but it must not replace
 `llama-server` with a host RPC inference service.
 
+The Engine/API truth surfaces for the GPU bridge are:
+
+- `PdockerGpu` in `GET /containers/{id}/json` for per-container GPU requests,
+  requested capabilities, injected environment, and bridge warnings.
+- `GET /system/host` for bounded host GPU/framework diagnostics such as
+  Vulkan/OpenCL/GL/NNAPI availability, driver/API versions where discoverable,
+  and APK-side executor capability state.
+
+Both are pdocker extensions. Docker-compatible request parsing still accepts
+common `HostConfig.DeviceRequests`, runtime, and label forms, but correctness
+and performance claims require separate llama/GPU artifacts.
+
 ## Vulkan Passthrough Terminology
 
 There are two different ideas that can both sound like "Vulkan passthrough":

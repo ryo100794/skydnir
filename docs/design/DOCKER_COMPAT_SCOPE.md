@@ -33,6 +33,28 @@ Compatibility has three tiers:
    - pdocker must not silently start fake listeners, mutate Dockerfile syntax,
      or run commands on the Android host when the user asked for a container.
 
+## pdocker Extension API Boundary
+
+Docker-compatible endpoints and pdocker extensions are intentionally separate:
+
+- Standard Docker clients should use the Docker Engine API subset documented in
+  [`../test/COMPATIBILITY.md`](../test/COMPATIBILITY.md). These endpoints keep
+  Docker response shapes where practical and must fail clearly when a Docker or
+  OCI feature is unsupported.
+- Android UI, diagnostics, and Android-only bridges may use pdocker extension
+  endpoints under `/system/*` and pdocker-prefixed response fields such as
+  `PdockerGpu`, `PdockerMedia`, `PdockerNetwork`, `PdockerStorage`, and
+  `PdockerWarnings`.
+- Extension fields must not be required for basic Docker CLI compatibility.
+  They exist to make Android-specific truth visible: storage accounting,
+  service ownership, GPU/media bridge status, memory pressure, Documents/SAF
+  mediation, and long-running operation state.
+- OCI/runtime gaps must be stated as unsupported or partial rather than hidden
+  behind pdocker extensions. In particular, pdocker extensions do not make
+  Swarm, BuildKit, OCI runtime hooks, cgroups, namespaces, zstd layers,
+  manifest-list preservation, registry push, OCI artifacts/referrers, or
+  signatures supported.
+
 ## Default Product Line
 
 pdocker should be positioned as:
