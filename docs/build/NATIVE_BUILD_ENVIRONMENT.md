@@ -15,7 +15,7 @@ payloads are required.
 
 | Class | Runtime | Examples | Standard builder |
 |---|---|---|---|
-| Android/Bionic helpers | Android app process or executable payload extracted by the APK | `libpdockerpty.so`, `libpdockerdirect.so`, `libpdockergpuexecutor.so`, `libpdockermediaexecutor.so` | `scripts/build-native-android-ndk.sh` |
+| Android/Bionic helpers | Android app process or executable payload extracted by the APK | `libpdockerpty.so`, `libpdockerdirect.so`, `libpdockergpuexecutor.so`, `libpdockermediaexecutor.so` for `arm64-v8a` and `armeabi-v7a` | `scripts/build-native-android-ndk.sh` |
 | Linux/glibc container payloads | Container rootfs / glibc userland | `libcow.so`, `pdocker-gpu-shim`, `pdocker-vulkan-icd.so`, `pdocker-opencl-icd.so` | aarch64 Linux/glibc cross compiler |
 | External/static tools | Backend helper tools that must be source-built or inventoried | `crane` | source build or explicit release blocker |
 
@@ -32,21 +32,27 @@ export ANDROID_NDK_HOME=/root/android-ndk-r26d
 bash scripts/build-native-android-ndk.sh
 ```
 
-The script uses:
+The script builds:
 
-- `$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang`
-- `arm64-v8a`
+- `arm64-v8a` with `aarch64-linux-android26-clang`
+- `armeabi-v7a` with `armv7a-linux-androideabi26-clang`
 - Android API level `26` by default
 - no Termux binaries
 - no box64
 - no Android device-local compiler
+
+On an x86_64 Linux development host, the normal official NDK driver is used
+directly. The script detects the NDK host tag instead of baking in project-only
+x86_64 behavior.
 
 On an aarch64 glibc development host where the installed official NDK prebuilt
 is `linux-x86_64` and therefore not directly executable, the script uses
 **aarch64 glibc host-clang mode**: host glibc `clang` drives the compile while
 the Android target, sysroot, and compiler-rt resource directory still come from
 the NDK. This mode requires `ld.lld` on `PATH`; it is still a glibc-host build
-and does not use Termux.
+and does not use Termux. This mode is not an x86_64 compatibility trick; it is
+the explicit local aarch64-host mode until an AOSP-built Android LLVM toolchain
+is available.
 
 The current Google-distributed NDK package in this workspace provides a
 `linux-x86_64` host prebuilt. It does not provide a directly executable
@@ -62,12 +68,22 @@ app/src/main/jniLibs/arm64-v8a/libpdockerpty.so
 app/src/main/jniLibs/arm64-v8a/libpdockerdirect.so
 app/src/main/jniLibs/arm64-v8a/libpdockergpuexecutor.so
 app/src/main/jniLibs/arm64-v8a/libpdockermediaexecutor.so
+app/src/main/jniLibs/armeabi-v7a/libpdockerpty.so
+app/src/main/jniLibs/armeabi-v7a/libpdockerdirect.so
+app/src/main/jniLibs/armeabi-v7a/libpdockergpuexecutor.so
+app/src/main/jniLibs/armeabi-v7a/libpdockermediaexecutor.so
 ```
 
 `libpdockerdirect.so`, `libpdockergpuexecutor.so`, and
 `libpdockermediaexecutor.so` are executable PIE files intentionally named
 `lib*.so`. Android extracts native libraries by name; the app later exposes
 them to the backend under executable names.
+
+The current `armeabi-v7a` `libpdockerdirect.so` is an explicit unsupported-ABI
+executable that exits with a capability error. The 32-bit ARM ptrace/syscall
+executor is a separate porting task because the current direct executor uses
+AArch64 register and syscall conventions. Packaging the 32-bit binary keeps ABI
+coverage visible without silently claiming full 32-bit process execution.
 
 ## Legacy Termux Mode
 
@@ -138,3 +154,5 @@ Before calling this F-Droid ready, the build lane still needs:
    not as a normal packaging requirement.
 6. Decide whether to add an AOSP LLVM source-build lane for a true
    aarch64-host Android toolchain driver.
+7. Port `pdocker-direct` to 32-bit ARM registers/syscalls before promoting
+   `armeabi-v7a` process-exec beyond explicit unsupported status.

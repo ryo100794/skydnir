@@ -170,11 +170,19 @@ preflight() {
     if [[ "$DO_APK" == "1" ]]; then
         require_cmd javac
         require_file "${ANDROID_HOME:-$HOME/android-sdk}/cmdline-tools/latest/bin/sdkmanager"
-        require_file "${ANDROID_NDK_HOME:-$HOME/android-ndk-r26d}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/stdio.h"
+        local ndk_root="${ANDROID_NDK_HOME:-$HOME/android-ndk-r26d}"
+        if [[ ! -d "$ndk_root/toolchains/llvm/prebuilt" ]]; then
+            echo "ABORT: NDK toolchain directory missing: $ndk_root/toolchains/llvm/prebuilt" >&2
+            return 1
+        fi
     fi
     if [[ "$DO_NATIVE" == "1" ]]; then
         if [[ "$NATIVE_BACKEND" == "ndk" ]]; then
-            require_file "${ANDROID_NDK_HOME:-$HOME/android-ndk-r26d}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
+            local ndk_root="${ANDROID_NDK_HOME:-$HOME/android-ndk-r26d}"
+            if [[ ! -d "$ndk_root/toolchains/llvm/prebuilt" ]]; then
+                echo "ABORT: NDK toolchain directory missing: $ndk_root/toolchains/llvm/prebuilt" >&2
+                return 1
+            fi
         else
             if [[ ! -x "${TERMUX_CLANG:-/data/data/com.termux/files/usr/bin/clang-21}" ]] \
                 && ! compgen -G "/data/data/com.termux/files/usr/bin/clang-[0-9]*" >/dev/null; then
@@ -189,11 +197,18 @@ preflight() {
 }
 
 check_android_native_fresh() {
-    local jni="$ROOT/app/src/main/jniLibs/arm64-v8a"
-    require_fresh "$jni/libpdockerpty.so" "$ROOT/app/src/main/cpp/pty.c"
-    require_fresh "$jni/libpdockerdirect.so" "$ROOT/app/src/main/cpp/pdocker_direct_exec.c"
-    require_fresh "$jni/libpdockergpuexecutor.so" "$ROOT/app/src/main/cpp/pdocker_gpu_executor.c"
-    require_fresh "$jni/libpdockermediaexecutor.so" "$ROOT/app/src/main/cpp/pdocker_media_executor.c"
+    local abi jni direct_source
+    for abi in arm64-v8a armeabi-v7a; do
+        jni="$ROOT/app/src/main/jniLibs/$abi"
+        direct_source="$ROOT/app/src/main/cpp/pdocker_direct_exec.c"
+        if [[ "$abi" == "armeabi-v7a" ]]; then
+            direct_source="$ROOT/app/src/main/cpp/pdocker_direct_unsupported.c"
+        fi
+        require_fresh "$jni/libpdockerpty.so" "$ROOT/app/src/main/cpp/pty.c"
+        require_fresh "$jni/libpdockerdirect.so" "$direct_source"
+        require_fresh "$jni/libpdockergpuexecutor.so" "$ROOT/app/src/main/cpp/pdocker_gpu_executor.c"
+        require_fresh "$jni/libpdockermediaexecutor.so" "$ROOT/app/src/main/cpp/pdocker_media_executor.c"
+    done
 }
 
 check_gpu_shim_fresh() {

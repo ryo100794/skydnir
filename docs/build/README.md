@@ -50,7 +50,8 @@ bash scripts/build-all.sh
 
 That default flow builds:
 
-- Android/Bionic helper libraries with `scripts/build-native-android-ndk.sh`.
+- Android/Bionic helper libraries for `arm64-v8a` and `armeabi-v7a` with
+  `scripts/build-native-android-ndk.sh`.
 - Linux/glibc GPU payloads with `scripts/build-gpu-shim.sh`, including the
   GPU shim, Vulkan ICD, and OpenCL ICD.
 - The `compat` debug APK through `scripts/build-apk.sh`.

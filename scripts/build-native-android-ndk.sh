@@ -1,81 +1,89 @@
 #!/usr/bin/env bash
-# build-native-android-ndk.sh — build Android/Bionic native helpers with the
-# official Android NDK clang from a normal glibc Linux host.
+# build-native-android-ndk.sh — build Android/Bionic native helpers with a
+# glibc-host Android toolchain configuration.
 #
-# This is the standard, reproducible native-build path for CI/release style
-# builds. It intentionally does not use Termux binaries, box64, or Android
-# device-local compiler tools.
+# Standard x86_64 Linux hosts use the official NDK clang driver directly.
+# aarch64 Linux hosts currently do not have a Google-distributed linux-aarch64
+# NDK prebuilt in this workspace, so they use host glibc clang with the NDK
+# target, sysroot, and compiler-rt. That mode is explicit and does not use
+# Termux, box64, or Android device-local compiler tools.
 #
-# Produces executable/library payloads under:
-#   app/src/main/jniLibs/arm64-v8a/
-#
-# Android packages extract only lib*.so files, so pdockerdirect,
-# pdockergpuexecutor, and pdockermediaexecutor are executable PIE binaries
-# deliberately named lib*.so. Kotlin later symlinks them to executable names.
+# Default ABIs:
+#   arm64-v8a    full current direct runtime helper set
+#   armeabi-v7a  packaged compatibility helper set; pdocker-direct is an
+#                explicit unsupported-ABI executable until the ptrace/syscall
+#                layer is ported to 32-bit ARM.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-/root/android-ndk-r26d}}"
-HOST_TAG="${ANDROID_NDK_HOST_TAG:-linux-x86_64}"
 API="${ANDROID_API:-26}"
-ABI="${ANDROID_ABI:-arm64-v8a}"
-TARGET_TRIPLE="aarch64-linux-android"
+if [[ -n "${ANDROID_ABI:-}" ]]; then
+    ABIS=("$ANDROID_ABI")
+else
+    # shellcheck disable=SC2206
+    ABIS=(${ANDROID_ABIS:-arm64-v8a armeabi-v7a})
+fi
+
+pick_host_tag() {
+    if [[ -n "${ANDROID_NDK_HOST_TAG:-}" ]]; then
+        printf '%s\n' "$ANDROID_NDK_HOST_TAG"
+        return 0
+    fi
+    local os arch candidate
+    os="$(uname -s)"
+    arch="$(uname -m)"
+    case "$os:$arch" in
+        Linux:x86_64|Linux:amd64) candidate="linux-x86_64" ;;
+        Darwin:x86_64) candidate="darwin-x86_64" ;;
+        Darwin:arm64) candidate="darwin-x86_64" ;; # official NDK uses Rosetta-capable host tag for older NDKs
+        *) candidate="linux-x86_64" ;;
+    esac
+    if [[ -d "$NDK/toolchains/llvm/prebuilt/$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+    find "$NDK/toolchains/llvm/prebuilt" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort | head -1
+}
+
+abi_target_triple() {
+    case "$1" in
+        arm64-v8a) printf 'aarch64-linux-android' ;;
+        armeabi-v7a) printf 'armv7a-linux-androideabi' ;;
+        *) echo "ABORT: unsupported Android ABI '$1'" >&2; return 2 ;;
+    esac
+}
+
+abi_sysroot_lib_triple() {
+    case "$1" in
+        arm64-v8a) printf 'aarch64-linux-android' ;;
+        armeabi-v7a) printf 'arm-linux-androideabi' ;;
+        *) echo "ABORT: unsupported Android ABI '$1'" >&2; return 2 ;;
+    esac
+}
+
+abi_direct_source() {
+    case "$1" in
+        arm64-v8a) printf '%s/app/src/main/cpp/pdocker_direct_exec.c' "$ROOT" ;;
+        armeabi-v7a) printf '%s/app/src/main/cpp/pdocker_direct_unsupported.c' "$ROOT" ;;
+        *) return 2 ;;
+    esac
+}
+
+HOST_TAG="$(pick_host_tag)"
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/$HOST_TAG"
-NDK_CLANG="$TOOLCHAIN/bin/${TARGET_TRIPLE}${API}-clang"
 SYSROOT="$TOOLCHAIN/sysroot"
 RESOURCE_DIR="$(find "$TOOLCHAIN/lib/clang" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -1)"
 STRIP="$TOOLCHAIN/bin/llvm-strip"
-JNI_DIR="$ROOT/app/src/main/jniLibs/$ABI"
 
-if [[ "$ABI" != "arm64-v8a" ]]; then
-    echo "ABORT: only arm64-v8a is currently supported (got $ABI)" >&2
-    exit 2
-fi
-if [[ ! -x "$NDK_CLANG" ]]; then
-    echo "ABORT: NDK clang driver not found: $NDK_CLANG" >&2
-    echo "       Set ANDROID_NDK_HOME and, if needed, ANDROID_NDK_HOST_TAG." >&2
+if [[ ! -d "$TOOLCHAIN" ]]; then
+    echo "ABORT: NDK toolchain host directory not found: $TOOLCHAIN" >&2
     exit 1
 fi
 if [[ ! -d "$SYSROOT/usr/include" ]]; then
     echo "ABORT: NDK sysroot missing: $SYSROOT" >&2
     exit 1
 fi
-
-CLANG_CMD=("$NDK_CLANG")
-CLANG_LABEL="$NDK_CLANG"
-EXTRA_TOOLCHAIN_FLAGS=()
-if ! "$NDK_CLANG" --version >/dev/null 2>&1; then
-    # Some local development machines are aarch64 glibc hosts while the
-    # installed official NDK prebuilt is linux-x86_64. In that case use the
-    # host glibc clang, but keep the NDK sysroot, Android target, and NDK
-    # compiler-rt resource directory. This is the aarch64 glibc host-clang
-    # mode, not a Termux/device-local fallback.
-    HOST_CLANG="${HOST_CLANG:-$(command -v clang || true)}"
-    if [[ -z "$HOST_CLANG" || ! -x "$HOST_CLANG" ]]; then
-        echo "ABORT: NDK clang is not executable on this host and host clang was not found" >&2
-        exit 1
-    fi
-    if [[ -z "$RESOURCE_DIR" || ! -d "$RESOURCE_DIR" ]]; then
-        echo "ABORT: NDK compiler-rt resource directory not found under $TOOLCHAIN/lib/clang" >&2
-        exit 1
-    fi
-    if ! command -v ld.lld >/dev/null 2>&1; then
-        echo "ABORT: aarch64 glibc host-clang mode requires ld.lld on PATH" >&2
-        echo "       Install lld or use an executable NDK prebuilt for this host." >&2
-        exit 1
-    fi
-    CLANG_CMD=("$HOST_CLANG")
-    CLANG_LABEL="$HOST_CLANG --target=${TARGET_TRIPLE}${API} --sysroot=$SYSROOT -resource-dir=$RESOURCE_DIR"
-    EXTRA_TOOLCHAIN_FLAGS=(
-        "--target=${TARGET_TRIPLE}${API}"
-        "--sysroot=$SYSROOT"
-        "-resource-dir=$RESOURCE_DIR"
-        "-rtlib=compiler-rt"
-        "-L$SYSROOT/usr/lib/$TARGET_TRIPLE/$API"
-    )
-fi
-
-mkdir -p "$JNI_DIR"
 
 COMMON_WARNINGS=(
     -Wall -Wextra -Wno-unused-parameter -Wno-unused-function
@@ -95,14 +103,6 @@ EXEC_FLAGS=(
     -U_FORTIFY_SOURCE
 )
 
-strip_if_requested() {
-    local path="$1"
-    if [[ "${PDOCKER_NATIVE_STRIP:-0}" == "1" ]]; then
-        [[ -x "$STRIP" ]] || { echo "ABORT: llvm-strip not found: $STRIP" >&2; exit 1; }
-        "$STRIP" --strip-unneeded "$path"
-    fi
-}
-
 show_elf() {
     local path="$1"
     file "$path" | head -1
@@ -111,44 +111,115 @@ show_elf() {
     fi
 }
 
+strip_if_requested() {
+    local path="$1"
+    if [[ "${PDOCKER_NATIVE_STRIP:-0}" == "1" ]]; then
+        if [[ -x "$STRIP" ]] && "$STRIP" --version >/dev/null 2>&1; then
+            "$STRIP" --strip-unneeded "$path"
+        else
+            local host_strip="${HOST_LLVM_STRIP:-$(command -v llvm-strip || true)}"
+            [[ -n "$host_strip" && -x "$host_strip" ]] || { echo "ABORT: llvm-strip not executable for host" >&2; exit 1; }
+            "$host_strip" --strip-unneeded "$path"
+        fi
+    fi
+}
+
+setup_compiler() {
+    local abi="$1" target="$2" lib_triple="$3"
+    local ndk_clang="$TOOLCHAIN/bin/${target}${API}-clang"
+    local -n out_cmd_ref="$4"
+    local -n out_extra_ref="$5"
+    local -n out_label_ref="$6"
+
+    if [[ ! -x "$ndk_clang" ]]; then
+        echo "ABORT: NDK clang driver not found: $ndk_clang" >&2
+        exit 1
+    fi
+
+    out_cmd_ref=("$ndk_clang")
+    out_extra_ref=()
+    out_label_ref="$ndk_clang"
+    if ! "$ndk_clang" --version >/dev/null 2>&1; then
+        local host_clang="${HOST_CLANG:-$(command -v clang || true)}"
+        if [[ -z "$host_clang" || ! -x "$host_clang" ]]; then
+            echo "ABORT: NDK clang is not executable on this host and host clang was not found" >&2
+            exit 1
+        fi
+        if [[ -z "$RESOURCE_DIR" || ! -d "$RESOURCE_DIR" ]]; then
+            echo "ABORT: NDK compiler-rt resource directory not found under $TOOLCHAIN/lib/clang" >&2
+            exit 1
+        fi
+        if ! command -v ld.lld >/dev/null 2>&1; then
+            echo "ABORT: host-clang mode for $abi requires ld.lld on PATH" >&2
+            exit 1
+        fi
+        out_cmd_ref=("$host_clang")
+        out_extra_ref=(
+            "--target=${target}${API}"
+            "--sysroot=$SYSROOT"
+            "-resource-dir=$RESOURCE_DIR"
+            "-rtlib=compiler-rt"
+            "-L$SYSROOT/usr/lib/$lib_triple/$API"
+        )
+        out_label_ref="$host_clang --target=${target}${API} --sysroot=$SYSROOT -resource-dir=$RESOURCE_DIR"
+    fi
+}
+
 build_shared() {
-    local out="$1"
-    shift
+    local out="$1"; shift
+    local -n cmd_ref="$1"; shift
+    local -n extra_ref="$1"; shift
     echo "==> building $(basename "$out")"
-    "${CLANG_CMD[@]}" "${EXTRA_TOOLCHAIN_FLAGS[@]}" "${LIB_FLAGS[@]}" -o "$out" "$@"
+    "${cmd_ref[@]}" "${extra_ref[@]}" "${LIB_FLAGS[@]}" -o "$out" "$@"
     strip_if_requested "$out"
     show_elf "$out"
 }
 
 build_exec() {
-    local out="$1"
-    shift
+    local out="$1"; shift
+    local -n cmd_ref="$1"; shift
+    local -n extra_ref="$1"; shift
     echo "==> building executable payload $(basename "$out")"
-    "${CLANG_CMD[@]}" "${EXTRA_TOOLCHAIN_FLAGS[@]}" "${EXEC_FLAGS[@]}" -o "$out" "$@"
+    "${cmd_ref[@]}" "${extra_ref[@]}" "${EXEC_FLAGS[@]}" -o "$out" "$@"
     strip_if_requested "$out"
     chmod 0755 "$out"
     show_elf "$out"
 }
 
-echo "==> compiler: $CLANG_LABEL"
-"${CLANG_CMD[@]}" --version | head -1
-echo "==> API: android$API ABI: $ABI host-tag: $HOST_TAG"
+echo "==> NDK: $NDK"
+echo "==> host-tag: $HOST_TAG API: android$API ABIs: ${ABIS[*]}"
 echo
 
-build_shared "$JNI_DIR/libpdockerpty.so" \
-    "$ROOT/app/src/main/cpp/pty.c" \
-    -llog
+for ABI in "${ABIS[@]}"; do
+    TARGET_TRIPLE="$(abi_target_triple "$ABI")"
+    LIB_TRIPLE="$(abi_sysroot_lib_triple "$ABI")"
+    JNI_DIR="$ROOT/app/src/main/jniLibs/$ABI"
+    mkdir -p "$JNI_DIR"
 
-build_exec "$JNI_DIR/libpdockerdirect.so" \
-    "$ROOT/app/src/main/cpp/pdocker_direct_exec.c"
+    CLANG_CMD=()
+    EXTRA_TOOLCHAIN_FLAGS=()
+    CLANG_LABEL=""
+    setup_compiler "$ABI" "$TARGET_TRIPLE" "$LIB_TRIPLE" CLANG_CMD EXTRA_TOOLCHAIN_FLAGS CLANG_LABEL
 
-build_exec "$JNI_DIR/libpdockergpuexecutor.so" \
-    "$ROOT/app/src/main/cpp/pdocker_gpu_executor.c" \
-    -lEGL -lGLESv3 -lvulkan -llog -ldl -lm
+    echo "==> ABI: $ABI"
+    echo "==> compiler: $CLANG_LABEL"
+    "${CLANG_CMD[@]}" --version | head -1
 
-build_exec "$JNI_DIR/libpdockermediaexecutor.so" \
-    "$ROOT/app/src/main/cpp/pdocker_media_executor.c"
+    build_shared "$JNI_DIR/libpdockerpty.so" CLANG_CMD EXTRA_TOOLCHAIN_FLAGS \
+        "$ROOT/app/src/main/cpp/pty.c" \
+        -llog
 
-echo
-echo "==> Android/Bionic native helpers ready:"
-ls -la "$JNI_DIR"/libpdocker{pty,direct,gpuexecutor,mediaexecutor}.so
+    build_exec "$JNI_DIR/libpdockerdirect.so" CLANG_CMD EXTRA_TOOLCHAIN_FLAGS \
+        "$(abi_direct_source "$ABI")"
+
+    build_exec "$JNI_DIR/libpdockergpuexecutor.so" CLANG_CMD EXTRA_TOOLCHAIN_FLAGS \
+        "$ROOT/app/src/main/cpp/pdocker_gpu_executor.c" \
+        -lEGL -lGLESv3 -lvulkan -llog -ldl -lm
+
+    build_exec "$JNI_DIR/libpdockermediaexecutor.so" CLANG_CMD EXTRA_TOOLCHAIN_FLAGS \
+        "$ROOT/app/src/main/cpp/pdocker_media_executor.c"
+
+    echo "==> Android/Bionic native helpers ready for $ABI:"
+    ls -la "$JNI_DIR"/libpdocker{pty,direct,gpuexecutor,mediaexecutor}.so
+    echo
+done

@@ -164,7 +164,11 @@ issues, and deciding which planned gaps become hard gates.
     `linux-aarch64` NDK driver. The aarch64 glibc build therefore uses
     host-clang mode with NDK sysroot/compiler-rt. If a true aarch64-host Android
     toolchain driver is required, add a separate AOSP LLVM source-build lane and
-    pin its outputs; do not import unofficial repacked NDK binaries.
+    pin its outputs; do not import unofficial repacked NDK binaries. The native
+    build now packages `armeabi-v7a` helpers as well; however, the 32-bit ARM
+    `pdocker-direct` payload is an explicit unsupported-ABI executable until the
+    ptrace/syscall layer is ported from AArch64 register conventions to ARM
+    EABI/OABI-safe handling with matching device tests.
 
 ### Next Queue Generated 2026-05-04
 

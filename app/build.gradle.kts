@@ -51,7 +51,6 @@ val verifyPackagedPayloadFresh by tasks.registering {
     }
 
     doLast {
-        val abiDir = project.file("src/main/jniLibs/arm64-v8a")
         val appCppDir = project.file("src/main/cpp")
         val gpuSrcDir = rootProject.file("docker-proot-setup/src/gpu")
         val backendLibDir = rootProject.file("docker-proot-setup/lib")
@@ -59,10 +58,21 @@ val verifyPackagedPayloadFresh by tasks.registering {
         val gpuHint = "bash scripts/build-gpu-shim.sh"
         val stageHint = "bash scripts/copy-native.sh"
 
-        requireFresh(abiDir.resolve("libpdockerpty.so"), appCppDir.resolve("pty.c"), nativeHint)
-        requireFresh(abiDir.resolve("libpdockerdirect.so"), appCppDir.resolve("pdocker_direct_exec.c"), nativeHint)
-        requireFresh(abiDir.resolve("libpdockergpuexecutor.so"), appCppDir.resolve("pdocker_gpu_executor.c"), nativeHint)
-        requireFresh(abiDir.resolve("libpdockermediaexecutor.so"), appCppDir.resolve("pdocker_media_executor.c"), nativeHint)
+        val androidNativeAbis = listOf("arm64-v8a", "armeabi-v7a")
+        androidNativeAbis.forEach { abi ->
+            val abiDir = project.file("src/main/jniLibs/$abi")
+            val directSource = if (abi == "armeabi-v7a") {
+                appCppDir.resolve("pdocker_direct_unsupported.c")
+            } else {
+                appCppDir.resolve("pdocker_direct_exec.c")
+            }
+            requireFresh(abiDir.resolve("libpdockerpty.so"), appCppDir.resolve("pty.c"), nativeHint)
+            requireFresh(abiDir.resolve("libpdockerdirect.so"), directSource, nativeHint)
+            requireFresh(abiDir.resolve("libpdockergpuexecutor.so"), appCppDir.resolve("pdocker_gpu_executor.c"), nativeHint)
+            requireFresh(abiDir.resolve("libpdockermediaexecutor.so"), appCppDir.resolve("pdocker_media_executor.c"), nativeHint)
+        }
+
+        val abiDir = project.file("src/main/jniLibs/arm64-v8a")
 
         requireFresh(abiDir.resolve("libpdockergpushim.so"), gpuSrcDir.resolve("pdocker_gpu_shim.c"), gpuHint)
         requireFresh(abiDir.resolve("libpdockervulkanicd.so"), gpuSrcDir.resolve("pdocker_vulkan_icd.c"), gpuHint)
@@ -114,7 +124,7 @@ android {
         manifestPlaceholders["pdockerDebugReceiverExported"] = "false"
 
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
     }
 
