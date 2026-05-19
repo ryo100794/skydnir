@@ -117,13 +117,20 @@ def readelf_program_headers(path: Path) -> str:
         return ""
 
 
-def expected_apk_entries() -> set[str]:
-    return {f"lib/{spec.abi}/{spec.name}" for spec in SPECS if spec.required_in_apk} | {
+def expected_apk_entries(*, fdroid_no_crane: bool = False) -> set[str]:
+    entries = {f"lib/{spec.abi}/{spec.name}" for spec in SPECS if spec.required_in_apk} | {
         spec.entry for spec in APK_ASSETS
     }
+    if fdroid_no_crane:
+        entries.discard("lib/arm64-v8a/libcrane.so")
+    return entries
 
 
-def verify_payloads(apk: Path | None = None, apk_arm64_only: bool = False) -> dict[str, Any]:
+def verify_payloads(
+    apk: Path | None = None,
+    apk_arm64_only: bool = False,
+    fdroid_no_crane: bool = False,
+) -> dict[str, Any]:
     errors: list[str] = []
     payloads: list[dict[str, Any]] = []
     for spec in SPECS:
@@ -189,7 +196,7 @@ def verify_payloads(apk: Path | None = None, apk_arm64_only: bool = False) -> di
         if not apk_path.is_file():
             errors.append(f"missing APK: {apk_path}")
         else:
-            expected = expected_apk_entries()
+            expected = expected_apk_entries(fdroid_no_crane=fdroid_no_crane)
             if apk_arm64_only:
                 expected = {
                     entry
@@ -207,6 +214,11 @@ def verify_payloads(apk: Path | None = None, apk_arm64_only: bool = False) -> di
                     zip_sha[name] = hashlib.sha256(zf.read(name)).hexdigest()
             missing = sorted(expected - names)
             forbidden_32 = sorted(name for name in names if name.startswith("lib/armeabi-v7a/")) if apk_arm64_only else []
+            forbidden_crane = (
+                sorted(name for name in names if name == "lib/arm64-v8a/libcrane.so")
+                if fdroid_no_crane
+                else []
+            )
             forbidden_prefix_entries = sorted(
                 name for name in names for prefix in FORBIDDEN_APK_PREFIXES if name.startswith(prefix)
             )
@@ -236,14 +248,18 @@ def verify_payloads(apk: Path | None = None, apk_arm64_only: bool = False) -> di
                 apk_payload_details.append(detail)
             apk_info["missing_entries"] = missing
             apk_info["forbidden_armeabi_v7a_entries"] = forbidden_32
+            apk_info["forbidden_crane_entries"] = forbidden_crane
             apk_info["forbidden_prefix_entries"] = forbidden_prefix_entries
             apk_info["checked_entries"] = sorted(expected)
             apk_info["payload_details"] = apk_payload_details
             apk_info["policy"] = "arm64-only" if apk_arm64_only else "all-built-abis"
+            apk_info["fdroid_no_crane"] = fdroid_no_crane
             if missing:
                 errors.append("APK missing native payload entries: " + ", ".join(missing))
             if forbidden_32:
                 errors.append("APK includes incomplete armeabi-v7a runtime entries: " + ", ".join(forbidden_32))
+            if forbidden_crane:
+                errors.append("F-Droid no-crane APK includes forbidden crane payload: " + ", ".join(forbidden_crane))
             if forbidden_prefix_entries:
                 errors.append("APK includes forbidden generated cache entries: " + ", ".join(forbidden_prefix_entries))
 
@@ -264,9 +280,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", type=Path, default=None, help="Optional APK to check for native payload entries")
     parser.add_argument("--apk-arm64-only", action="store_true", help="Require the APK to omit armeabi-v7a entries until the 32-bit runtime is complete")
+    parser.add_argument("--fdroid-no-crane", action="store_true", help="Require the APK to omit the prebuilt crane payload for F-Droid-oriented builds")
     parser.add_argument("--write-artifact", type=Path, default=None, help="Write JSON verification artifact")
     args = parser.parse_args(argv)
-    data = verify_payloads(args.apk, apk_arm64_only=args.apk_arm64_only)
+    data = verify_payloads(
+        args.apk,
+        apk_arm64_only=args.apk_arm64_only,
+        fdroid_no_crane=args.fdroid_no_crane,
+    )
     if args.write_artifact:
         out = args.write_artifact if args.write_artifact.is_absolute() else ROOT / args.write_artifact
         out.parent.mkdir(parents=True, exist_ok=True)

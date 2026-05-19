@@ -32,7 +32,14 @@ cp "$SUB/bin/pdockerd" "$APP/assets/pdockerd/pdockerd"
 JNI_DIR="$APP/jniLibs/arm64-v8a"
 COMPAT_JNI_DIR="$ROOT/app/src/compat/jniLibs/arm64-v8a"
 mkdir -p "$JNI_DIR" "$COMPAT_JNI_DIR"
-cp "$SUB/docker-bin/crane" "$JNI_DIR/libcrane.so"
+if [[ "${PDOCKER_FDROID_NO_CRANE:-0}" != "0" ]]; then
+    rm -f "$JNI_DIR/libcrane.so"
+    echo "fdroid-no-crane: removed $JNI_DIR/libcrane.so"
+else
+    cp "$SUB/docker-bin/crane" "$JNI_DIR/libcrane.so"
+    chmod 0755 "$JNI_DIR/libcrane.so"
+    echo "staged crane -> $JNI_DIR/libcrane.so"
+fi
 rm -f "$JNI_DIR/libproot.so" "$JNI_DIR/libproot-loader.so" "$JNI_DIR/libtalloc.so" \
       "$COMPAT_JNI_DIR/libproot.so" "$COMPAT_JNI_DIR/libproot-loader.so" \
       "$COMPAT_JNI_DIR/libtalloc.so"
@@ -54,10 +61,9 @@ if [[ -n "${PDOCKER_GLIBC_LOADER:-}" && -f "${PDOCKER_GLIBC_LOADER:-}" ]]; then
 else
     rm -f "$JNI_DIR/libpdocker-ld-linux-aarch64.so"
 fi
-chmod 0755 "$JNI_DIR/libcrane.so" "$JNI_DIR/libcow.so"
+chmod 0755 "$JNI_DIR/libcow.so"
 [[ -f "$JNI_DIR/libpdocker-rootfs-shim.so" ]] && chmod 0755 "$JNI_DIR/libpdocker-rootfs-shim.so"
 [[ -f "$JNI_DIR/libpdocker-ld-linux-aarch64.so" ]] && chmod 0755 "$JNI_DIR/libpdocker-ld-linux-aarch64.so"
-echo "staged crane -> $JNI_DIR/libcrane.so"
 echo "skipped external proot/talloc/proot-loader/docker-cli/docker-compose payloads"
 echo "staged libcow (glibc) -> $JNI_DIR/libcow.so"
 [[ -f "$JNI_DIR/libpdocker-rootfs-shim.so" ]] && echo "staged rootfs shim (glibc) -> $JNI_DIR/libpdocker-rootfs-shim.so"

@@ -69,7 +69,7 @@ nameserver 1.1.1.1
         // daemon after `adb install -r`.
         extractAsset(ctx, "pdockerd/pdockerd", File(bin, "pdockerd"), force = true)
 
-        linkTo(File(nativeDir, "libcrane.so"),         File(dockerBin, "crane"))
+        optionalLinkTo(File(nativeDir, "libcrane.so"), File(dockerBin, "crane"))
         optionalLinkTo(File(nativeDir, "libpdockerdirect.so"), File(dockerBin, "pdocker-direct"))
         optionalLinkTo(File(nativeDir, "libpdocker-ld-linux-aarch64.so"), File(dockerBin, "pdocker-ld-linux-aarch64"))
         optionalLinkTo(File(nativeDir, "libpdockergpuexecutor.so"), File(gpuBin, "pdocker-gpu-executor"))

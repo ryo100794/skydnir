@@ -111,10 +111,35 @@ class NativeBuildAbiContractTest(unittest.TestCase):
             "lib/arm64-v8a/libcow.so",
             "assets/pdockerd/pdockerd",
             "assets/pdockerd/__pycache__/",
+            "fdroid_no_crane",
+            "--fdroid-no-crane",
             "same_bytes_as_source",
             "source_mirror_same_bytes",
         ]:
             self.assertIn(needle, verifier)
+
+    def test_fdroid_no_crane_gate_is_wired_without_changing_normal_apk(self):
+        copy_native = (ROOT / "scripts" / "copy-native.sh").read_text()
+        gradle = (ROOT / "app" / "build.gradle.kts").read_text()
+        runtime = (
+            ROOT
+            / "app"
+            / "src"
+            / "main"
+            / "kotlin"
+            / "io"
+            / "github"
+            / "ryo100794"
+            / "pdocker"
+            / "PdockerdRuntime.kt"
+        ).read_text()
+        release_doc = (ROOT / "docs" / "release" / "FDROID_RELEASE_PROCESS.md").read_text()
+        self.assertIn("PDOCKER_FDROID_NO_CRANE", copy_native)
+        self.assertIn("rm -f \"$JNI_DIR/libcrane.so\"", copy_native)
+        self.assertIn("PDOCKER_FDROID_NO_CRANE", gradle)
+        self.assertIn("F-Droid no-crane build must not stage libcrane.so", gradle)
+        self.assertIn('optionalLinkTo(File(nativeDir, "libcrane.so"), File(dockerBin, "crane"))', runtime)
+        self.assertIn("PDOCKER_FDROID_NO_CRANE=1", release_doc)
 
     def test_built_apk_payloads_match_runtime_sources(self):
         apk = ROOT / "app" / "build" / "outputs" / "apk" / "compat" / "debug" / "app-compat-debug.apk"

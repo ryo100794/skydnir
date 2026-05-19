@@ -13,7 +13,9 @@
       "lib/arm64-v8a/libpdockervulkanicd.so"
     ],
     "exists": true,
+    "fdroid_no_crane": false,
     "forbidden_armeabi_v7a_entries": [],
+    "forbidden_crane_entries": [],
     "forbidden_prefix_entries": [],
     "missing_entries": [],
     "path": "/root/tl/pdocker-android/app/build/outputs/apk/compat/debug/app-compat-debug.apk",

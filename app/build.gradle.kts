@@ -80,7 +80,18 @@ val verifyPackagedPayloadFresh by tasks.registering {
 
         val abiDir = project.file("src/main/jniLibs/arm64-v8a")
 
-        requireFresh(abiDir.resolve("libcrane.so"), rootProject.file("docker-proot-setup/docker-bin/crane"), stageHint)
+        val fdroidNoCrane = System.getenv("PDOCKER_FDROID_NO_CRANE")?.let {
+            it.isNotBlank() && it != "0" && !it.equals("false", ignoreCase = true)
+        } ?: false
+        if (fdroidNoCrane) {
+            if (abiDir.resolve("libcrane.so").exists()) {
+                throw GradleException(
+                    "F-Droid no-crane build must not stage libcrane.so; run PDOCKER_FDROID_NO_CRANE=1 bash scripts/copy-native.sh"
+                )
+            }
+        } else {
+            requireFresh(abiDir.resolve("libcrane.so"), rootProject.file("docker-proot-setup/docker-bin/crane"), stageHint)
+        }
         requireFresh(abiDir.resolve("libcow.so"), backendLibDir.resolve("libcow.so"), stageHint)
         val rootfsShim = backendLibDir.resolve("pdocker-rootfs-shim.so")
         if (rootfsShim.isFile) {
