@@ -1,6 +1,6 @@
 # pdocker TODO ledger
 
-Snapshot date: 2026-05-18.
+Snapshot date: 2026-05-19.
 
 This is the working TODO list for unfinished items and deliberate temporary
 accommodations. Keep this file current whenever a workaround is added so it
@@ -62,8 +62,13 @@ issues, and deciding which planned gaps become hard gates.
    diagnostic was enabled/classified in `5dc330a`/`e1a806d`; the safe-kernel
    Q6 match clears bridge writeback/descriptors as the active explanation, so
    the remaining blocker is native llama Q6_K SPIR-V reduction/output-layout.
-   This is still non-promoting diagnostic evidence, not a benchmark or
-   inference claim.
+   Commit `3b8eecb` adds the bounded native layout probe and `be93398` refreshes
+   the artifact sweep. The 2026-05-19 strict device run
+   `docs/test/llama-gpu-ngl1-q6-native-output-layout-20260519.json` reached the
+   native Q6_K shader with fresh executor/ICD markers, verified row-indexed
+   writeback, matched the native reduction-tree oracle, and classified the
+   remaining blocker as `q6-native-output-layout-inconclusive`. This is still
+   non-promoting diagnostic evidence, not a benchmark or inference claim.
 4. **[#11](https://github.com/ryo100794/pdocker-android/issues/11)
    Image-pull crash safety** `[P0 doing]`: partial pulls, `.pull-*`,
    `.tmp-*`, `.old-*`, interrupted layer extraction, tag publish, and startup
@@ -162,16 +167,17 @@ issues, and deciding which planned gaps become hard gates.
   to a category README, inventory/manifest, verifier, or fast/heavy gate.
   Acceptance: `scripts/verify-docs-maintenance.py` or
   `scripts/verify-script-inventory.py` rejects unindexed durable docs/scripts.
-- [next] Script directory cleanup follow-up: register `scripts/verify/runner/*`
-  in the script inventory, keep the documented `__pycache__` cleanup policy in
-  `.gitignore` (`scripts/__pycache__` and nested bytecode caches stay ignored,
-  untracked, and outside script inventory), and align the remaining Vulkan smoke
-  helper with the `scripts/test` layout. Wrapper reference migration is already
-  committed as `0e9b33e`; when this lane is near-complete, auto-add wrapper
-  retirement after the compatibility window as a separate task. Acceptance:
-  `scripts/verify-script-inventory.py` and the docs-maintenance verifier reject
-  any unclassified script, stale top-level wrapper reference, or premature
-  wrapper removal.
+- [next] Script directory cleanup follow-up: `ed7cddd` recorded
+  `scripts/verify/runner/*` as subtree inventory entries and kept the
+  documented `__pycache__` cleanup policy in `.gitignore`
+  (`scripts/__pycache__` and nested bytecode caches stay ignored, untracked,
+  and outside script inventory). Remaining cleanup is to align
+  `scripts/smoke-vulkan-icd-bridge.sh` with the `scripts/test` layout, then
+  auto-add wrapper retirement after the compatibility window as a separate
+  task. Wrapper reference migration is already committed as `0e9b33e`.
+  Acceptance: `scripts/verify-script-inventory.py` and the docs-maintenance
+  verifier reject any unclassified script, stale top-level wrapper reference,
+  or premature wrapper removal.
 - [doing] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
   llama GPU bridge ABI: keep llama.cpp unmodified while expanding the
   pdocker Vulkan/OpenCL bridge from device discovery and model-buffer
@@ -195,9 +201,14 @@ issues, and deciding which planned gaps become hard gates.
   workgroup-clear evidence, Q6 safe-kernel diagnostics, and remaining Q6
   numeric mismatches so device results are not interpreted ad hoc. Commits
   `5dc330a` and `e1a806d` enabled the strict safe-kernel diagnostic and its
-  classifier; the safe-kernel Q6 match means the remaining GPU blocker is
-  native llama Q6_K SPIR-V reduction/output-layout, not bridge writeback or
-  descriptor plumbing. Environment propagation remains a first-class blocker:
+  classifier; `3b8eecb` added the bounded native Q6_K reduction/output-layout
+  probe, and `be93398` refreshed the artifact sweep. The 2026-05-19 device run
+  reached native Q6_K with writeback verified and reduction-tree math matching
+  the canonical oracle, but the output-layout probe was inconclusive
+  (`found_elsewhere_count=1/8`). The safe-kernel Q6 match plus the native probe
+  means the remaining GPU blocker is native llama Q6_K output-layout/device
+  execution around the final store, not bridge writeback or descriptor plumbing.
+  Environment propagation remains a first-class blocker:
   diagnostic flags used by the compare script, pdockerd defaults, UI/compose
   launches, and artifact verification must stay synchronized before a GPU
   result can be compared. This evidence is non-promoting until the native
@@ -573,8 +584,13 @@ implementation change plus a focused verification artifact.
   readiness/headroom check, env propagation diff, NGL=1 Q6_K oracle,
   NGL>=2 repeating-layer proof, artifact verifier classification, and finally
   benchmark reporting. The strict Q6 safe-kernel match narrows the active
-  blocker to native llama Q6_K SPIR-V reduction/output-layout; bridge
-  writeback/descriptors are no longer the leading explanation. All
+  blocker to native llama Q6_K SPIR-V reduction/output-layout; `3b8eecb` added
+  the bounded native layout probe and `be93398` refreshed the sweep ledger. The
+  2026-05-19 strict device artifact preserved those fields and classified
+  `q6-native-output-layout-inconclusive`; bridge writeback/descriptors are no
+  longer the leading explanation. Next evidence should bisect the native final
+  store/output layout versus device execution without changing llama.cpp,
+  Dockerfile, model, or prompt. All
   readiness-blocked or oracle-mismatch artifacts stay non-promoting.
 
 ### Runtime / Compose-Up

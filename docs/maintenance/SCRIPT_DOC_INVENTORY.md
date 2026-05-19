@@ -1,6 +1,6 @@
 # Script and Documentation Inventory Triage
 
-Snapshot date: 2026-05-18.
+Snapshot date: 2026-05-19.
 Status: low-risk triage ledger only; no scripts, docs, app code, tests, or native/GPU code are moved by this document.
 
 This note connects the stable script inventory in [`../../scripts/README.md`](../../scripts/README.md) with the documentation cleanup backlog in [`DOCUMENTATION_DEDUP_BACKLOG.md`](DOCUMENTATION_DEDUP_BACKLOG.md). It is intentionally small and records where the flat script layout and fragmented planning/test docs need follow-up.
@@ -22,6 +22,11 @@ This note connects the stable script inventory in [`../../scripts/README.md`](..
 - Wrapper migrations already exist for the OpenCL/Vulkan smoke helpers, the device llama template helper, and the llama GPU artifact summarizer.
 - The main duplication risk is not identical code; it is repeated one-off Android/GPU/device command setup across many small scripts. A shared helper should come before path reshuffling.
 - Inventory drift should be fixed in `scripts/script-inventory.json` and reflected in `scripts/README.md` before any script rename, move, or deletion.
+- As of `ed7cddd`, `scripts/verify/runner/*` is classified through
+  `subtree_entries`; `__pycache__` bytecode remains ignored and outside the
+  durable script inventory. The remaining directory-cleanup follow-up is the
+  `scripts/smoke-vulkan-icd-bridge.sh` wrapper/layout migration plus later
+  wrapper-retirement automation.
 
 ## Fragmented docs triage
 

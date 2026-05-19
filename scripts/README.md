@@ -1,6 +1,6 @@
 # Script Inventory
 
-Snapshot date: 2026-05-18.
+Snapshot date: 2026-05-19.
 
 This directory is intentionally kept with stable top-level entrypoints while the implementation is reorganized.  The machine-readable source of truth is [`script-inventory.json`](script-inventory.json).
 Every inventory entry now also carries a `migration` object with a proposed destination path, migration phase, action, and compatibility-wrapper policy.  This is a planning ledger only; no top-level script was moved in this stage.
@@ -58,7 +58,8 @@ inventory/README/verifier allowlist.
 
 These non-top-level runner helpers are tracked in `subtree_entries` so
 verification inventory audits classify them without changing stable public
-entrypoint counts.
+entrypoint counts. This classification landed in `ed7cddd`; bytecode caches
+remain gitignored and intentionally absent from the inventory.
 
 | Path | Category | Stability |
 |---|---|---|

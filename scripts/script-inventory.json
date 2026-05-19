@@ -1,6 +1,6 @@
 {
   "schema": "pdocker.script-inventory.v1",
-  "snapshot_date": "2026-05-18",
+  "snapshot_date": "2026-05-19",
   "policy": {
     "top_level_paths_are_stable": true,
     "move_rule": "Do not move top-level scripts directly. Add subfolder implementations only behind stable wrapper shims and update this inventory first.",

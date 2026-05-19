@@ -406,7 +406,10 @@
             "docs/test/python-coverage-latest.json"
           ]
         }
-      ]
+      ],
+      "checkpoint_class": "host-coverage-non-promoting",
+      "stable_checkpoint_eligible": false,
+      "promotion_condition": "Non-promoting coverage evidence only. Stable/release checkpoint credit still requires closed or explicitly scoped release blockers plus passing device-gated artifacts that satisfy docs/test/CI_GATE_LEDGER.md promotion conditions."
     },
     "test-suite-local": {
       "description": "Local dry-run of the bundled compose/Dockerfile test-suite scripts.",
@@ -415,7 +418,10 @@
           "id": "pdocker-test-suite-local",
           "shell": "tmpdir=$(mktemp -d); PDOCKER_TEST_SUITE_REPORT_DIR=\"$tmpdir/reports\" PDOCKER_DOCUMENTS_MOUNT=\"$tmpdir/documents\" PDOCKER_SHARED_DOCUMENTS_MOUNT=\"$tmpdir/shared\" PDOCKER_EXPORT_DIR=\"$tmpdir/documents/pdocker-exports\" PDOCKER_FAST_WORKDIR=\"$tmpdir/workspace\" app/src/main/assets/project-library/pdocker-test-suite/scripts/run-pdocker-test-suite.sh --scenario all; rm -rf \"$tmpdir\""
         }
-      ]
+      ],
+      "checkpoint_class": "local-test-suite-non-promoting",
+      "stable_checkpoint_eligible": false,
+      "promotion_condition": "Non-promoting local dry-run evidence only. Stable/release checkpoint credit requires the corresponding device test-suite lane and all required CI gate ledger promotion artifacts to pass."
     },
     "storage-layer-maintenance-ui": {
       "description": "Host-only, non-promoting storage graph/layer maintenance UI contract. It keeps cache references distinct from image references, requires size and reference-tree actions, and records stale/garbage cleanup evidence without claiming device promotion.",

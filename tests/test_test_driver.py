@@ -104,6 +104,14 @@ class TestDriverManifestTest(unittest.TestCase):
         storage_runner = (ROOT / "scripts" / "android-storage-metrics-sequence.sh").read_text(encoding="utf-8")
         self.assertIn("exit 2", storage_runner)
 
+    def test_local_evidence_lanes_are_non_promoting(self):
+        lanes = self.manifest["lanes"]
+        for lane_name in ["python-coverage", "test-suite-local"]:
+            lane = lanes[lane_name]
+            self.assertFalse(lane["stable_checkpoint_eligible"], lane_name)
+            self.assertIn("non-promoting", lane["checkpoint_class"], lane_name)
+            self.assertIn("Non-promoting", lane["promotion_condition"], lane_name)
+
     def test_verify_heavy_exposes_focused_device_lanes(self):
         heavy = (ROOT / "scripts" / "verify-heavy.sh").read_text(encoding="utf-8")
         for mode in [
