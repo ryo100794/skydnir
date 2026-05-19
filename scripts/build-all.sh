@@ -12,6 +12,7 @@ cd "$ROOT"
 
 FLAVOR="compat"
 BUILD_TYPE="${PDOCKER_ANDROID_BUILD_TYPE:-debug}"
+NATIVE_BACKEND="${PDOCKER_NATIVE_BUILD_BACKEND:-ndk}"
 DO_NATIVE=0
 DO_GPU_SHIM=0
 DO_APK=0
@@ -39,6 +40,9 @@ Flavor:
 
 Other:
   --build-type T  Gradle build type: debug or release. Default: debug.
+  --native-backend B
+                 Android native helper builder: ndk or termux. Default: ndk.
+                 ndk is the reproducible glibc-host path; termux is legacy.
   --dry-run       Print commands and freshness checks without running builds.
   -h, --help      Show this help.
 
@@ -78,6 +82,11 @@ while [[ $# -gt 0 ]]; do
             BUILD_TYPE="$2"
             shift
             ;;
+        --native-backend)
+            [[ $# -ge 2 ]] || { echo "ABORT: --native-backend requires ndk or termux" >&2; exit 2; }
+            NATIVE_BACKEND="$2"
+            shift
+            ;;
         --dry-run)
             DRY_RUN=1
             ;;
@@ -102,6 +111,11 @@ esac
 case "$BUILD_TYPE" in
     debug|release) ;;
     *) echo "ABORT: build type must be debug or release (got '$BUILD_TYPE')" >&2; exit 2 ;;
+esac
+
+case "$NATIVE_BACKEND" in
+    ndk|termux) ;;
+    *) echo "ABORT: native backend must be ndk or termux (got '$NATIVE_BACKEND')" >&2; exit 2 ;;
 esac
 
 if [[ "$STEP_FLAG_SEEN" == "0" ]]; then
@@ -159,10 +173,14 @@ preflight() {
         require_file "${ANDROID_NDK_HOME:-$HOME/android-ndk-r26d}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/stdio.h"
     fi
     if [[ "$DO_NATIVE" == "1" ]]; then
-        if [[ ! -x "${TERMUX_CLANG:-/data/data/com.termux/files/usr/bin/clang-21}" ]] \
-            && ! compgen -G "/data/data/com.termux/files/usr/bin/clang-[0-9]*" >/dev/null; then
-            echo "ABORT: Termux native clang not found. Install the existing Termux clang dependency first." >&2
-            return 1
+        if [[ "$NATIVE_BACKEND" == "ndk" ]]; then
+            require_file "${ANDROID_NDK_HOME:-$HOME/android-ndk-r26d}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
+        else
+            if [[ ! -x "${TERMUX_CLANG:-/data/data/com.termux/files/usr/bin/clang-21}" ]] \
+                && ! compgen -G "/data/data/com.termux/files/usr/bin/clang-[0-9]*" >/dev/null; then
+                echo "ABORT: Termux native clang not found. Install the existing Termux clang dependency first." >&2
+                return 1
+            fi
         fi
     fi
     if [[ "$DO_GPU_SHIM" == "1" ]]; then
@@ -197,11 +215,15 @@ check_backend_payload_inputs() {
 
 preflight
 
-echo "build-all: flavor=$FLAVOR build_type=$BUILD_TYPE dry_run=$DRY_RUN"
+echo "build-all: flavor=$FLAVOR build_type=$BUILD_TYPE native_backend=$NATIVE_BACKEND dry_run=$DRY_RUN"
 echo "build-all: steps native=$DO_NATIVE gpu_shim=$DO_GPU_SHIM apk=$DO_APK verify_fast=$DO_VERIFY_FAST"
 
 if [[ "$DO_NATIVE" == "1" ]]; then
-    run bash scripts/build-native-termux.sh
+    if [[ "$NATIVE_BACKEND" == "ndk" ]]; then
+        run bash scripts/build-native-android-ndk.sh
+    else
+        run bash scripts/build-native-termux.sh
+    fi
     if [[ "$DRY_RUN" == "0" ]]; then
         check_android_native_fresh
     else
@@ -229,10 +251,11 @@ if [[ "$DO_APK" == "1" ]]; then
         check_backend_payload_inputs
         PDOCKER_ANDROID_FLAVOR="$FLAVOR" \
         PDOCKER_ANDROID_BUILD_TYPE="$BUILD_TYPE" \
+        PDOCKER_NATIVE_BUILD_BACKEND="$NATIVE_BACKEND" \
         PDOCKER_SKIP_NATIVE_BUILD=1 \
             bash scripts/build-apk.sh
     else
-        echo "dry-run: PDOCKER_ANDROID_FLAVOR=$FLAVOR PDOCKER_ANDROID_BUILD_TYPE=$BUILD_TYPE PDOCKER_SKIP_NATIVE_BUILD=1 bash scripts/build-apk.sh"
+        echo "dry-run: PDOCKER_ANDROID_FLAVOR=$FLAVOR PDOCKER_ANDROID_BUILD_TYPE=$BUILD_TYPE PDOCKER_NATIVE_BUILD_BACKEND=$NATIVE_BACKEND PDOCKER_SKIP_NATIVE_BUILD=1 bash scripts/build-apk.sh"
     fi
 fi
 

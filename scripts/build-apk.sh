@@ -11,6 +11,7 @@ cd "$ROOT"
 : "${PDOCKER_ANDROID_FLAVOR:=compat}"
 : "${PDOCKER_ANDROID_BUILD_TYPE:=debug}"
 : "${PDOCKER_SKIP_NATIVE_BUILD:=0}"
+: "${PDOCKER_NATIVE_BUILD_BACKEND:=ndk}"
 export ANDROID_HOME ANDROID_NDK_HOME
 export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 
@@ -46,10 +47,20 @@ else
 fi
 
 if [[ "$PDOCKER_SKIP_NATIVE_BUILD" == "0" ]]; then
-    # Build Android/Bionic helper libs natively with Termux aarch64 clang.
-    # Bypasses the x86_64-only NDK toolchain (which would need box64 emulation
-    # on aarch64 hosts). Output goes directly to app/src/main/jniLibs/arm64-v8a/.
-    bash scripts/build-native-termux.sh
+    case "$PDOCKER_NATIVE_BUILD_BACKEND" in
+        ndk)
+            # Standard reproducible path: official NDK clang on a glibc Linux host.
+            bash scripts/build-native-android-ndk.sh
+            ;;
+        termux)
+            # Legacy Android-device-local path kept only for local fallback/debugging.
+            bash scripts/build-native-termux.sh
+            ;;
+        *)
+            echo "ABORT: PDOCKER_NATIVE_BUILD_BACKEND must be 'ndk' or 'termux' (got '$PDOCKER_NATIVE_BUILD_BACKEND')" >&2
+            exit 2
+            ;;
+    esac
 else
     echo "==> skipping Android native build (PDOCKER_SKIP_NATIVE_BUILD=$PDOCKER_SKIP_NATIVE_BUILD)"
 fi

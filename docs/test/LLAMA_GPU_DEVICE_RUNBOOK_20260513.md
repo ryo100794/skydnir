@@ -288,6 +288,27 @@ The verifier remains fail-closed: memory artifacts exit `20` unless
 `--allow-memory-blocker` is passed for workflow bookkeeping.  Even with that
 flag, `correctness_claim_allowed` and `benchmark_claim_allowed` stay `false`.
 
+### Pre-compare Memory Blocker Classification
+
+Classify memory before reading GPU compare results.  Any item in this section is
+an explicit memory blocker: the artifact may be retained as diagnostic evidence,
+but it must not set or promote `benchmark_claim_allowed: true`.
+
+| Class | Evidence | Required action |
+| --- | --- | --- |
+| `memory_headroom_blocked` | Readiness is `ready:false` / `gpu_run_allowed:false`, `error:"insufficient_memory"`, `device_memory_blocked:true`, or `MemAvailable` below the configured guard before compare starts. | Do not launch or interpret GPU compare. Capture diagnostics, free pdocker-owned work first, and rerun the same APK/image/model/prompt after headroom recovers. |
+| `runtime_memory_pressure` | Compare started but later reports `error:"runtime_memory_pressure"`, strict swap guard failure, PSI/vmstat pressure spike, or near-zero `SwapFree` with app-owned llama/pdockerd RSS still present. | Stop claim evaluation at the memory stage. Treat swap-only evidence as advisory unless a strict swap guard was configured, but keep `benchmark_claim_allowed:false` until a clean rerun. |
+| `oom_or_lmk_suspected` | The container/server/executor disappears, Android reports LMK/OOM-like kill evidence, the socket becomes stale, progress markers stop, or the OOM/LMK diagnostic artifact sets `lmk_suspected`/backend-death classification. | Classify as device/runtime loss, not GPU correctness or speed. Preserve last progress and memory diagnostics; rerun only after recovery proves the previous process state is not stale. |
+| `unsafe_dirty_writeback` | Dirty-page/writeback evidence is absent, unverified, mismatching, has unknown writable outputs, or reports unsafe dirty writeback/writeback mismatch for Q6/output buffers. | Do not benchmark. Keep the next action scoped to staging/cache/fd propagation or dirty-span writeback until hashes and writable-output evidence verify. |
+| `model_size_blocked` | The selected GGUF/model, GPU layer count, context, KV cache, or first-request warmup footprint is larger than the device headroom can safely hold, even if smaller probes or `ngl=0` work. | Classify as capacity/model-size blocked. Reduce model, `--n-gpu-layers`, context, or warmup scope for a separate run; do not compare its numbers with the blocked large-model attempt. |
+
+Claim rule: a benchmark claim requires a clean preflight plus a completed compare
+artifact with fresh executor/config evidence, CPU baseline accounting,
+correctness gates, speedup fields, and verified output writeback.  If a memory
+blocker is present anywhere in the preflight, readiness object, compare top
+level, embedded diagnostics, or Q6/writeback diagnostics, `benchmark_claim_allowed`
+must be absent or `false`; `--allow-memory-blocker` is only for bookkeeping.
+
 ### Executor Marker / Benchmark Claim Guards
 
 A compare artifact must include the expected executor build marker under

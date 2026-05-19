@@ -1221,6 +1221,27 @@ def _q6_row_provenance_probe(q6: Any) -> dict[str, Any]:
     }
 
 
+def _q6_partial_signature_probe(q6: Any) -> dict[str, Any]:
+    if not isinstance(q6, dict):
+        return {"summary": "not-run", "samples": []}
+    probe = q6.get("q6_partial_signature_probe")
+    if not isinstance(probe, dict):
+        return {
+            "summary": q6.get("q6_partial_signature_probe_summary") or "not-run",
+            "samples": [],
+        }
+    samples = probe.get("samples")
+    if not isinstance(samples, list):
+        samples = []
+    return {
+        "summary": str(probe.get("summary") or q6.get("q6_partial_signature_probe_summary") or "not-run"),
+        "samples": samples,
+        "mismatch_count": probe.get("mismatch_count"),
+        "local_y_partial_match_count": probe.get("local_y_partial_match_count"),
+        "lane_partial_match_count": probe.get("lane_partial_match_count"),
+    }
+
+
 def _pre_http_feature_evidence_missing(
     blocker: dict[str, Any],
     evidence: dict[str, Any],
@@ -1486,6 +1507,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_shader_like = _q6_shader_like_interpretation(q6)
     q6_output_layout = _q6_output_layout_probe(q6)
     q6_row_provenance = _q6_row_provenance_probe(q6)
+    q6_partial_signature = _q6_partial_signature_probe(q6)
     if not q6:
         classification = "q6-not-reached"
         responsibility_boundary = "q6-not-reached"
@@ -1525,6 +1547,14 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 classification = "q6-native-other-row-output-layout"
                 responsibility_boundary = "q6-output-layout"
                 q6_blocker_class = "native-q6-other-row-output-layout"
+            elif q6_partial_signature.get("summary") == "local-y-partial":
+                classification = "q6-native-local-y-partial-store"
+                responsibility_boundary = "q6-native-partial-store"
+                q6_blocker_class = "native-q6-local-y-partial-store"
+            elif q6_partial_signature.get("summary") == "lane-partial":
+                classification = "q6-native-lane-partial-store"
+                responsibility_boundary = "q6-native-partial-store"
+                q6_blocker_class = "native-q6-lane-partial-store"
             elif (
                 _q6_output_layout_fixed_offset_rejected(q6_output_layout)
                 and q6_shader_like["q6_shader_like_oracle_cleared"] is True
@@ -1576,6 +1606,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_shader_like_interpretation": q6_shader_like,
         "q6_output_layout_probe": q6_output_layout,
         "q6_row_provenance_probe": q6_row_provenance,
+        "q6_partial_signature_probe": q6_partial_signature,
         "q6_effective_blocker_class": (
             q6_blocker_class
             if classification in {
@@ -1583,6 +1614,8 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-native-output-layout",
                 "q6-native-output-layout-inconclusive",
                 "q6-native-other-row-output-layout",
+                "q6-native-local-y-partial-store",
+                "q6-native-lane-partial-store",
                 "q6-native-device-execution-or-final-store",
                 "q6-native-reduction-or-device-execution",
             }
@@ -1657,6 +1690,8 @@ def main(argv: list[str]) -> int:
             "q6-native-output-layout",
             "q6-native-output-layout-inconclusive",
             "q6-native-other-row-output-layout",
+            "q6-native-local-y-partial-store",
+            "q6-native-lane-partial-store",
             "q6-native-device-execution-or-final-store",
             "q6-native-reduction-or-device-execution",
         } else 31

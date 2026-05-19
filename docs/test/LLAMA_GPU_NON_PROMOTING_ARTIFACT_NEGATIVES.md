@@ -1,0 +1,43 @@
+# llama GPU/Q6/Memory Non-Promoting Artifact Negative Examples
+
+Date: 2026-05-19.
+
+This document defines negative examples for GPU, Q6, and memory artifacts that
+may be kept as diagnostic evidence but must not promote a benchmark or
+correctness claim.  For every case below, both claim fields must be absent or
+set to `false`:
+
+- `benchmark_claim_allowed: false`
+- `correctness_claim_allowed: false`
+
+A later artifact may become promotable only after it reruns the same intended
+scenario with fresh executor/config evidence and clears the relevant gate.
+
+## Negative Examples
+
+| Negative example | Typical evidence | Why `benchmark_claim_allowed` is not allowed | Why `correctness_claim_allowed` is not allowed |
+| --- | --- | --- | --- |
+| API prompt sanity missing | The artifact lacks the required `/completion` sanity record, omits the unchanged `addition` probe, mutates prompt `2+3=`, lacks expected prefix `5`, lacks HTTP result/content, or records verifier exit `38`. | Throughput could come from the wrong API path, stale server, wrong prompt, or incomplete request lifecycle, so speed numbers cannot be tied to the required benchmark scenario. | The artifact does not prove the served model answered the required sanity prompt, so it cannot establish end-to-end correctness even if lower-level GPU diagnostics look useful. |
+| Q6 oracle mismatch only | Q6 diagnostics reached the target event, but `latest_status` is `mismatch`, sample deltas differ from the CPU/shader-like oracle, or the artifact only restates a Q6 arithmetic/output-layout boundary. | A known mismatch means the GPU path is producing different data; benchmarking an incorrect path would promote a broken optimization. | The CPU/GPU oracle comparison failed, so the artifact is explicitly negative correctness evidence rather than a pass. |
+| Q6 writeback unverified | `latest_status` is `match` or partly matched, but `q6_writeback_verified_all` is not true, writable binding entries are missing, hashes are zero/invalid/missing, `gpu_after_dispatch_hash` and `fd_after_hash` are absent, or verifier exit `41` is reported. | Speed cannot be claimed when the measured GPU output was not proven to be the output observed by the host/container after writeback. | A Q6 match before writeback is insufficient; correctness requires verified propagation from GPU-visible output to the file-descriptor/container-visible result. |
+| Q6 writeback mismatch or unknown writable output | `q6_writable_writeback_mismatches` is non-empty, `q6_writable_writeback_unknown` is non-empty, a writable output reports `writeback_mismatch: true`, or verifier exit `40` is reported. | The benchmark would measure a path with unsafe or inconsistent output visibility, so any speedup could hide stale or corrupted data. | The final observable output is not proven identical to the GPU output, so the artifact cannot claim correctness. |
+| Memory blocked before compare | Readiness has `ready:false` or `gpu_run_allowed:false`, top-level error is `insufficient_memory`, `device_memory_blocked:true`, `MemAvailable` is below the guard, or verifier exit `20`/`21` is reported. | The GPU scenario did not safely run under the required device state; any timing is absent, partial, or dominated by memory recovery/blocking. | No completed comparable GPU execution exists, so correctness cannot be inferred from the blocked diagnostic artifact. |
+| Runtime memory pressure / OOM / LMK suspected | The run reports `runtime_memory_pressure`, strict swap failure, LMK/OOM-like process loss, stale socket, backend death, or stopped progress markers. | Timing from a pressured or killed runtime is not representative and may exclude failed phases or recovery delays. | The execution did not complete reliably, so final GPU output and API behavior are not trustworthy correctness evidence. |
+| Differential correctness missing | The artifact has speedup fields or GPU diagnostics but lacks a CPU baseline/oracle comparison, lacks compare schema evidence, omits CPU/GPU response comparison, or was run as GPU-only without reusable CPU correctness evidence. | Without comparison accounting, throughput cannot be promoted as a benchmark claim for the intended CPU-vs-GPU scenario. | Correctness requires a differential check against the accepted CPU/oracle result; GPU-only telemetry is diagnostic only. |
+| Differential correctness failed | CPU/GPU responses differ, token/content checks fail, oracle comparison fails outside an explicitly scoped diagnostic, or the compare summary records failed correctness. | A faster failed result is not a valid benchmark; speed claims require the correctness gate to pass first. | The artifact directly records a correctness failure, so the claim must remain false until a clean rerun passes. |
+| Dirty cache unsafe opt-in | Dirty/write-only/mutable/resident cache options are enabled without verified dirty-span writeback, use unsafe opt-in flags, report unsafe dirty writeback, or lack full output hash coverage. | Cache optimizations can skip required transfers or expose stale data; benchmarking them before safety proof would promote an unsafe path. | Correctness is not proven until dirty outputs are identified, synchronized, written back, and hash-verified at the observable boundary. |
+| Executor freshness missing | The expected GPU executor marker is missing from `gpu.diagnostics.runtime_freshness.observed_executor_markers`, only an ICD marker is present, or verifier exit `34` is reported. | Timings may come from stale code or the wrong executor, so they cannot support a benchmark claim for the current change. | The artifact cannot prove the intended executor implementation produced the observed output. |
+| Config propagation failed | `gpu.diagnostics.config_propagation.summary` is `fail`, requested env values are missing/mismatched, or verifier exit `35` is reported. | The measured run may not have used the requested Q6/cache/oracle/synchronization settings, invalidating performance interpretation. | A pass/fail cannot be attributed to the intended configuration, so correctness remains unproven. |
+| Unsupported or not-implemented GPU work accepted | Structured status/error/classification fields contain `unsupported`, `not-implemented`, `kernel-not-implemented-yet`, or verifier exit `36` is reported. | A benchmark cannot promote a path that did not implement or support the required GPU operation. | Unsupported work means the result is incomplete, fallback-only, or fail-closed diagnostic evidence, not a correctness pass. |
+| Oracle fail-closed or pending | Any structured event reports `oracle_fail_closed:true`, stage/fail_stage `cpu-oracle-required`, an `*-oracle-pending` status, or verifier exit `37`. | The benchmark gate depends on a completed oracle; pending/fail-closed oracle evidence blocks speed promotion. | The artifact explicitly says required oracle evidence is missing, so correctness cannot be claimed. |
+| Speedup accounting missing | `comparison.speedup`, target fields, bridge-overhead phase fields, or verifier exit `39` indicate missing speedup accounting. | A benchmark claim requires complete speedup and target accounting even when the CPU baseline is reused. | The artifact is an incomplete compare bundle for this negative case; without the required accounting record, reviewers cannot prove the correctness result belongs to the promoted benchmark scenario rather than a partial diagnostic run. |
+| CPU baseline missing for benchmark | A GPU-only run reused no CPU baseline, records no accepted CPU TPS/reference, or cannot identify the baseline artifact. | Benchmark promotion requires CPU comparison/baseline evidence; GPU-only numbers are diagnostic throughput only. | Correctness may only be considered if a separate CPU/oracle correctness gate is present.  In this negative example it is absent, so correctness also remains false. |
+| Readiness ignored | A compare/benchmark was launched even though the readiness artifact said `ready:false` or `gpu_run_allowed:false`. | The run violated the preflight contract, so any measured speed is invalid for promotion. | Running through a hard stop contaminates the evidence; the artifact must be rerun from a ready state before correctness can be accepted. |
+
+## Promotion Rule
+
+Do not promote around these negatives by combining partial evidence from multiple
+failed artifacts.  A promotable artifact must show, in one coherent run or an
+explicitly documented baseline-reuse flow, all required readiness, executor
+freshness, config propagation, API prompt sanity, CPU/oracle correctness,
+writeback safety, memory, and speedup-accounting evidence.

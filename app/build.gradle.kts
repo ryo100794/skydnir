@@ -55,7 +55,7 @@ val verifyPackagedPayloadFresh by tasks.registering {
         val appCppDir = project.file("src/main/cpp")
         val gpuSrcDir = rootProject.file("docker-proot-setup/src/gpu")
         val backendLibDir = rootProject.file("docker-proot-setup/lib")
-        val nativeHint = "bash scripts/build-native-termux.sh"
+        val nativeHint = "bash scripts/build-native-android-ndk.sh"
         val gpuHint = "bash scripts/build-gpu-shim.sh"
         val stageHint = "bash scripts/copy-native.sh"
 

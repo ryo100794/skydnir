@@ -123,6 +123,21 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("write_q6_row_provenance_probe", source)
         self.assertIn('\\"q6_row_provenance_probe\\":', source)
         self.assertIn("row-provenance-inconsistent", source)
+        self.assertIn("Q6PartialSignatureProbeSample", source)
+        self.assertIn("PDOCKER_GPU_Q6_PARTIAL_SIGNATURE_PROBE_MAX_SAMPLES 32u", source)
+        self.assertIn("q6k_record_partial_signature_probe_sample", source)
+        self.assertIn("q6k_finalize_partial_signature_probe", source)
+        self.assertIn("write_q6_partial_signature_probe", source)
+        self.assertIn('\\"q6_partial_signature_probe\\":', source)
+        self.assertIn("local-y-partial", source)
+        self.assertIn("lane-partial", source)
+        self.assertIn("q6k_decode_batch_index(base_work_group_y, ne02, ne12, broadcast2, broadcast3", source)
+        self.assertIn("weight_batch_stride_elements = load_le_u32(push, push_size, 4)", source)
+        self.assertIn("const uint32_t ne02 = load_le_u32(push, push_size, 9)", source)
+        self.assertIn("const uint32_t ne12 = load_le_u32(push, push_size, 10)", source)
+        self.assertIn("const uint32_t broadcast2 = load_le_u32(push, push_size, 11)", source)
+        self.assertIn("const uint32_t broadcast3 = load_le_u32(push, push_size, 12)", source)
+        self.assertIn("llama.cpp's push-constant contract exactly", source)
         self.assertIn("canonical-mismatch-inconclusive", source)
         self.assertIn('\\"consistent_relative_offset\\":%s', source)
         self.assertIn("q6k_native_reduction_tree_sum32", source)
@@ -815,6 +830,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE",
             "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
             "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
+            "PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE",
             "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
             "PDOCKER_GPU_MUTABLE_BUFFER_CACHE",
             "PDOCKER_GPU_VIRTUAL_MEMORY",
@@ -934,9 +950,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE",
             "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
             "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
+            "PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE",
             "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_SENTINEL",
             "writeonly_dirty_probe_enabled",
             "writeonly_dirty_writeback_enabled",
+            "Dirty writeback is a performance optimization, not a correctness",
             "has_writeonly_buffer_cache",
             "has_mutable_buffer_cache_max_bytes",
             "mutable_buffer_cache_candidate_with_max",

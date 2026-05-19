@@ -10,7 +10,11 @@ validate every runtime behavior.
 
 ## Contents
 
-This category currently has one canonical local build document: this README.
+| Document | Scope |
+|---|---|
+| [`README.md`](README.md) | Local build commands, APK outputs, install commands, and build gates |
+| [`NATIVE_BUILD_ENVIRONMENT.md`](NATIVE_BUILD_ENVIRONMENT.md) | Native payload classes, standard NDK build path, legacy Termux fallback, and reproducible-build direction |
+
 F-Droid/reproducible-build readiness planning lives in
 [`../release/FDROID_RELEASE_PROCESS.md`](../release/FDROID_RELEASE_PROCESS.md).
 
@@ -46,7 +50,7 @@ bash scripts/build-all.sh
 
 That default flow builds:
 
-- Android/Bionic helper libraries with `scripts/build-native-termux.sh`.
+- Android/Bionic helper libraries with `scripts/build-native-android-ndk.sh`.
 - Linux/glibc GPU payloads with `scripts/build-gpu-shim.sh`, including the
   GPU shim, Vulkan ICD, and OpenCL ICD.
 - The `compat` debug APK through `scripts/build-apk.sh`.
@@ -95,8 +99,11 @@ normal local builds because it also refreshes the glibc GPU shim/ICDs before
 packaging.
 
 `scripts/build-apk.sh` still rebuilds Android native helper libraries by
-default for compatibility with older instructions. The build orchestrator sets
-`PDOCKER_SKIP_NATIVE_BUILD=1` after it has already refreshed those helpers.
+default. Its default native backend is the official NDK clang path documented
+in [`NATIVE_BUILD_ENVIRONMENT.md`](NATIVE_BUILD_ENVIRONMENT.md). The legacy
+Termux compiler path is available only by setting
+`PDOCKER_NATIVE_BUILD_BACKEND=termux`. The build orchestrator sets
+`PDOCKER_SKIP_NATIVE_BUILD=1` after it has already refreshed native helpers.
 
 The `modern` flavor is useful for API 29+ metadata, image browsing, editing,
 and Engine API work, but it does not advertise `process-exec=1`.

@@ -127,6 +127,26 @@ typedef struct {
 
 #define PDOCKER_GPU_Q6_OUTPUT_LAYOUT_PROBE_MAX_SAMPLES 32u
 
+typedef struct {
+    uint64_t dst_index;
+    float expected;
+    float gpu_at_dst;
+    double local_y0_sum;
+    double local_y1_sum;
+    double local_y0_abs_error;
+    double local_y1_abs_error;
+    int local_y_best;
+    double local_y_best_abs_error;
+    double first16_sum;
+    double second16_sum;
+    int best_lane;
+    double best_lane_value;
+    double best_lane_abs_error;
+    char klass[32];
+} Q6PartialSignatureProbeSample;
+
+#define PDOCKER_GPU_Q6_PARTIAL_SIGNATURE_PROBE_MAX_SAMPLES 32u
+
 typedef struct CpuOracleReport CpuOracleReport;
 
 typedef struct {
@@ -2125,6 +2145,12 @@ static int writeonly_dirty_probe_enabled(void) {
 }
 
 static int writeonly_dirty_writeback_enabled(void) {
+    /*
+     * Dirty writeback is a performance optimization, not a correctness
+     * primitive.  The current sentinel/cache implementation can miss
+     * input-dependent write sets, so keep it behind an explicit unsafe opt-in.
+     */
+    if (!env_truthy("PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE", 0)) return 0;
     return env_truthy("PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK", 0);
 }
 
@@ -4085,6 +4111,14 @@ struct CpuOracleReport {
     Q6OutputLayoutProbeSample q6_output_layout_probe_samples[
         PDOCKER_GPU_Q6_OUTPUT_LAYOUT_PROBE_MAX_SAMPLES];
     size_t q6_output_layout_probe_sample_count;
+    int q6_partial_signature_probe_ran;
+    char q6_partial_signature_probe_summary[64];
+    size_t q6_partial_signature_probe_mismatch_count;
+    size_t q6_partial_signature_probe_local_y_match_count;
+    size_t q6_partial_signature_probe_lane_match_count;
+    Q6PartialSignatureProbeSample q6_partial_signature_probe_samples[
+        PDOCKER_GPU_Q6_PARTIAL_SIGNATURE_PROBE_MAX_SAMPLES];
+    size_t q6_partial_signature_probe_sample_count;
     int has_first_mismatch;
     CpuOracleSample first_mismatch;
     CpuOracleSample samples[8];
@@ -4360,6 +4394,59 @@ static void write_q6_row_provenance_probe(FILE *out, const CpuOracleReport *repo
     fprintf(out, "]}");
 }
 
+static void write_q6_partial_signature_probe(FILE *out, const CpuOracleReport *report) {
+    if (!cpu_oracle_report_is_q6(report) || !report ||
+        !report->q6_partial_signature_probe_ran) {
+        return;
+    }
+    const char *summary = report->q6_partial_signature_probe_summary[0]
+        ? report->q6_partial_signature_probe_summary
+        : "not-run";
+    fprintf(out,
+            ",\"q6_partial_signature_probe\":{\"summary\":\"%s\","
+            "\"mismatch_count\":%zu,"
+            "\"local_y_partial_match_count\":%zu,"
+            "\"lane_partial_match_count\":%zu,"
+            "\"samples\":[",
+            summary,
+            report->q6_partial_signature_probe_mismatch_count,
+            report->q6_partial_signature_probe_local_y_match_count,
+            report->q6_partial_signature_probe_lane_match_count);
+    for (size_t i = 0; i < report->q6_partial_signature_probe_sample_count; ++i) {
+        const Q6PartialSignatureProbeSample *sample =
+            &report->q6_partial_signature_probe_samples[i];
+        fprintf(out,
+                "%s{\"dst_index\":%llu,\"expected\":%.9g,"
+                "\"gpu_at_dst\":%.9g,"
+                "\"local_y0_sum\":%.9g,\"local_y1_sum\":%.9g,"
+                "\"local_y0_abs_error\":%.9g,"
+                "\"local_y1_abs_error\":%.9g,"
+                "\"local_y_best\":%d,"
+                "\"local_y_best_abs_error\":%.9g,"
+                "\"first16_sum\":%.9g,\"second16_sum\":%.9g,"
+                "\"best_lane\":%d,\"best_lane_value\":%.9g,"
+                "\"best_lane_abs_error\":%.9g,"
+                "\"class\":\"%s\"}",
+                i ? "," : "",
+                (unsigned long long)sample->dst_index,
+                sample->expected,
+                sample->gpu_at_dst,
+                sample->local_y0_sum,
+                sample->local_y1_sum,
+                sample->local_y0_abs_error,
+                sample->local_y1_abs_error,
+                sample->local_y_best,
+                sample->local_y_best_abs_error,
+                sample->first16_sum,
+                sample->second16_sum,
+                sample->best_lane,
+                sample->best_lane_value,
+                sample->best_lane_abs_error,
+                sample->klass);
+    }
+    fprintf(out, "]}");
+}
+
 static void write_cpu_oracle_report(
         FILE *out,
         const CpuOracleReport *report) {
@@ -4492,6 +4579,7 @@ static void write_cpu_oracle_report(
         fprintf(out, "]");
     }
     write_q6_row_provenance_probe(out, report);
+    write_q6_partial_signature_probe(out, report);
     if (report->q6_output_layout_probe_ran) {
         const char *summary = report->q6_output_layout_probe_summary[0]
             ? report->q6_output_layout_probe_summary
@@ -5611,6 +5699,108 @@ static void q6k_finalize_output_layout_probe(CpuOracleReport *report) {
              "%s", summary);
 }
 
+static void q6k_record_partial_signature_probe_sample(
+        CpuOracleReport *report,
+        uint64_t dst_index,
+        float expected,
+        float gpu_at_dst,
+        const double *partials,
+        size_t partial_count,
+        const double *shader_like_partials64,
+        size_t shader_like_count,
+        double accumulator_sum) {
+    if (!report ||
+        report->q6_partial_signature_probe_sample_count >=
+            sizeof(report->q6_partial_signature_probe_samples) /
+                sizeof(report->q6_partial_signature_probe_samples[0])) {
+        return;
+    }
+    Q6PartialSignatureProbeSample *sample =
+        &report->q6_partial_signature_probe_samples[
+            report->q6_partial_signature_probe_sample_count++];
+    memset(sample, 0, sizeof(*sample));
+    sample->dst_index = dst_index;
+    sample->expected = expected;
+    sample->gpu_at_dst = gpu_at_dst;
+    sample->local_y_best = -1;
+    sample->best_lane = -1;
+    sample->best_lane_abs_error = INFINITY;
+    sample->local_y_best_abs_error = INFINITY;
+    snprintf(sample->klass, sizeof(sample->klass), "%s", "not-partial");
+
+    if (partial_count >= 32 && partials) {
+        for (size_t lane = 0; lane < 32; ++lane) {
+            const double value = partials[lane] + accumulator_sum;
+            const double err = fabs(value - (double)gpu_at_dst);
+            if (err < sample->best_lane_abs_error) {
+                sample->best_lane_abs_error = err;
+                sample->best_lane = (int)lane;
+                sample->best_lane_value = value;
+            }
+            if (lane < 16) {
+                sample->first16_sum += partials[lane];
+            } else {
+                sample->second16_sum += partials[lane];
+            }
+        }
+        sample->first16_sum += accumulator_sum;
+        sample->second16_sum += accumulator_sum;
+    }
+
+    if (shader_like_count >= 64 && shader_like_partials64) {
+        for (size_t lane = 0; lane < 32; ++lane) {
+            sample->local_y0_sum += shader_like_partials64[lane];
+            sample->local_y1_sum += shader_like_partials64[lane + 32];
+        }
+        sample->local_y0_sum += accumulator_sum;
+        sample->local_y1_sum += accumulator_sum;
+        sample->local_y0_abs_error = fabs(sample->local_y0_sum - (double)gpu_at_dst);
+        sample->local_y1_abs_error = fabs(sample->local_y1_sum - (double)gpu_at_dst);
+        if (sample->local_y0_abs_error <= sample->local_y1_abs_error) {
+            sample->local_y_best = 0;
+            sample->local_y_best_abs_error = sample->local_y0_abs_error;
+        } else {
+            sample->local_y_best = 1;
+            sample->local_y_best_abs_error = sample->local_y1_abs_error;
+        }
+    } else {
+        sample->local_y0_abs_error = INFINITY;
+        sample->local_y1_abs_error = INFINITY;
+    }
+
+    report->q6_partial_signature_probe_ran = 1;
+    if (fabs((double)expected - (double)gpu_at_dst) > 1.0e-3) {
+        report->q6_partial_signature_probe_mismatch_count++;
+    }
+    if (sample->local_y_best_abs_error <= 1.0e-3) {
+        report->q6_partial_signature_probe_local_y_match_count++;
+        snprintf(sample->klass, sizeof(sample->klass), "%s", "local-y-partial");
+    } else if (sample->best_lane_abs_error <= 1.0e-3) {
+        report->q6_partial_signature_probe_lane_match_count++;
+        snprintf(sample->klass, sizeof(sample->klass), "%s", "lane-partial");
+    }
+}
+
+static void q6k_finalize_partial_signature_probe(CpuOracleReport *report) {
+    if (!report || !report->q6_partial_signature_probe_ran) return;
+    const size_t mismatches = report->q6_partial_signature_probe_mismatch_count;
+    const size_t local_y_matches = report->q6_partial_signature_probe_local_y_match_count;
+    const size_t lane_matches = report->q6_partial_signature_probe_lane_match_count;
+    const char *summary = "inconclusive";
+    if (mismatches >= 2 && local_y_matches == mismatches) {
+        summary = "local-y-partial";
+    } else if (mismatches >= 2 && lane_matches == mismatches) {
+        summary = "lane-partial";
+    } else if (mismatches >= 16 && local_y_matches == 0 && lane_matches == 0) {
+        summary = "not-partial";
+    } else if (mismatches >= 16 && (local_y_matches > 0 || lane_matches > 0)) {
+        summary = "partial-inconsistent";
+    }
+    snprintf(report->q6_partial_signature_probe_summary,
+             sizeof(report->q6_partial_signature_probe_summary),
+             "%s", summary);
+}
+
 static int q6k_accumulate_tid_partial(
         const int weight_fd,
         const int vector_fd,
@@ -5663,20 +5853,37 @@ static int q6k_accumulate_tid_partial(
 
 static int q6k_decode_batch_index(
         uint32_t base_work_group_y,
-        uint32_t ne11,
+        uint32_t ne02,
         uint32_t ne12,
-        uint32_t ne1,
-        uint32_t ne10,
+        uint32_t broadcast2,
+        uint32_t broadcast3,
         uint64_t *out_index) {
     if (!out_index) return 0;
-    if (base_work_group_y == 0) {
+    if (base_work_group_y == 0 || ne12 == 0) {
         *out_index = 0;
         return 1;
     }
-    if (ne11 == 0 || ne12 == 0 || ne1 == 0) return 0;
-    const uint32_t i13 = (base_work_group_y / ne11) / ne12;
-    const uint32_t i12 = (base_work_group_y % ne11) / ne1;
-    *out_index = (uint64_t)i13 * (uint64_t)ne10 + (uint64_t)i12;
+    if (ne02 == 0 || broadcast2 == 0 || broadcast3 == 0) return 0;
+    /*
+     * Keep this logic byte-for-byte conceptually aligned with llama.cpp
+     * ggml-vulkan mul_mat_vec_base.glsl:get_offsets():
+     *
+     *   batch_idx = gl_WorkGroupID.y + p.base_work_group_y;
+     *   i13 = batch_idx / p.ne12;
+     *   i12 = batch_idx % p.ne12;
+     *   i03 = i13 / p.broadcast3;
+     *   i02 = i12 / p.broadcast2;
+     *   batch_idx_a = i03 * p.ne02 + i02;
+     *
+     * The CPU oracle is diagnostic only, but when it does run it must consume
+     * llama.cpp's push-constant contract exactly; otherwise it can falsely
+     * accuse a passthrough dispatch.
+     */
+    const uint32_t i13 = base_work_group_y / ne12;
+    const uint32_t i12 = base_work_group_y % ne12;
+    const uint32_t i03 = i13 / broadcast3;
+    const uint32_t i02 = i12 / broadcast2;
+    *out_index = (uint64_t)i03 * (uint64_t)ne02 + (uint64_t)i02;
     return 1;
 }
 
@@ -5732,33 +5939,33 @@ static void run_cpu_oracle_q6k_matvec_sample(
     }
     const uint32_t ncols = load_le_u32(push, push_size, 0);
     const uint32_t stride_d = load_le_u32(push, push_size, 3);
-    const uint32_t weight_batch_stride_bytes = load_le_u32(push, push_size, 4);
+    const uint32_t weight_batch_stride_elements = load_le_u32(push, push_size, 4);
     const uint32_t batch_stride_b = load_le_u32(push, push_size, 5);
     const uint32_t batch_stride_d = load_le_u32(push, push_size, 6);
     const uint32_t accum_mask = load_le_u32(push, push_size, 7);
     const uint32_t base_work_group_y = load_le_u32(push, push_size, 8);
-    const uint32_t ne10 = load_le_u32(push, push_size, 9);
-    const uint32_t ne11 = load_le_u32(push, push_size, 10);
-    const uint32_t ne1 = load_le_u32(push, push_size, 11);
-    const uint32_t ne12 = load_le_u32(push, push_size, 12);
+    const uint32_t ne02 = load_le_u32(push, push_size, 9);
+    const uint32_t ne12 = load_le_u32(push, push_size, 10);
+    const uint32_t broadcast2 = load_le_u32(push, push_size, 11);
+    const uint32_t broadcast3 = load_le_u32(push, push_size, 12);
     if (ncols == 0 || ncols > 16384 || (ncols % 256u) != 0 ||
         bindings[idx1].size < (size_t)ncols * sizeof(float) ||
         bindings[idx2].size < sizeof(float) ||
         batch_stride_b == 0 || batch_stride_d == 0 ||
         (accum_mask & ~3u) != 0 ||
-        (weight_batch_stride_bytes % 256u) != 0) {
+        (weight_batch_stride_elements % 256u) != 0) {
         report->skipped = 1;
         snprintf(report->status, sizeof(report->status), "%s", "unsupported-q6k-layout");
         return;
     }
     uint64_t batch_index = 0;
-    if (!q6k_decode_batch_index(base_work_group_y, ne11, ne12, ne1, ne10, &batch_index)) {
+    if (!q6k_decode_batch_index(base_work_group_y, ne02, ne12, broadcast2, broadcast3, &batch_index)) {
         report->skipped = 1;
         snprintf(report->status, sizeof(report->status), "%s", "unsupported-q6k-batch-layout");
         return;
     }
     const uint64_t weight_base_blocks =
-        batch_index * (uint64_t)(weight_batch_stride_bytes / 256u);
+        batch_index * (uint64_t)(weight_batch_stride_elements / 256u);
     const uint64_t output_base_index =
         (uint64_t)base_work_group_y * (uint64_t)batch_stride_d;
     if ((accum_mask & 1u) &&
@@ -5944,6 +6151,16 @@ static void run_cpu_oracle_q6k_matvec_sample(
             dst_index,
             expected,
             gpu_before_oracle_writeback);
+        q6k_record_partial_signature_probe_sample(
+            report,
+            dst_index,
+            expected,
+            gpu_before_oracle_writeback,
+            have_partials ? partials : NULL,
+            have_partials ? 32u : 0u,
+            have_shader_like_partials64 ? shader_like_partials64 : NULL,
+            have_shader_like_partials64 ? (size_t)q6_diag_lanes : 0u,
+            accumulator_sum);
         if (q6k_oracle_writeback &&
             (size_t)dst_index * sizeof(float) + sizeof(float) <= bindings[idx2].size) {
             memcpy(dst_base + (size_t)dst_index * sizeof(float), &expected, sizeof(expected));
@@ -6045,6 +6262,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
         }
     }
     q6k_finalize_output_layout_probe(report);
+    q6k_finalize_partial_signature_probe(report);
     report->executed = 1;
     report->skipped = 0;
     snprintf(report->status, sizeof(report->status), "%s",
