@@ -1,8 +1,10 @@
 # pdocker-android: implementation status
 
-Snapshot at v0.5.3 / build 20260505.1. This document covers (1) what pdockerd actually
-implements today, (2) what works on the Android APK end-to-end, and
-(3) the known gaps vs upstream Docker Engine.
+Snapshot at v0.5.3 / build 20260505.1. This document covers fixed-build
+implementation evidence: (1) what pdockerd implemented for that build,
+(2) what worked on the Android APK end-to-end for recorded evidence, and
+(3) the known gaps vs upstream Docker Engine. It is not a live ADB/device
+status page.
 
 For the active unfinished-work list, especially temporary accommodations that
 must become real implementations later, see [`TODO.md`](TODO.md).
@@ -56,7 +58,7 @@ shape.
 
 ### 3. End-to-end Android verification
 
-What's been confirmed working on the current Android 15 test device:
+What was confirmed on the Android 15 test device for this fixed build:
 
 - `adb install pdocker-android.apk` → MainActivity launches → "Start pdockerd" → unix socket binds at `filesDir/pdocker/pdockerd.sock`
 - `curl --unix-socket .../pdockerd.sock http://d/_ping` → `OK`
@@ -247,12 +249,12 @@ pdocker-android/
 │   │   └── PtyNative.kt              — JNI wrapper around libpdockerpty.so
 │   ├── cpp/
 │   │   ├── pty.c                     — forkpty + TIOCSWINSZ + fd table
-│   │   └── CMakeLists.txt            — unused (we build via build-native-termux.sh)
+│   │   └── CMakeLists.txt            — unused (native helpers build via scripts/build-native-android-ndk.sh)
 │   ├── res/values*/strings.xml       — English / Japanese UI localization
 │   ├── jniLibs/arm64-v8a/             — auto-generated, .gitignored
 │   │   ├── libcow.so                 — host-glibc CoW shim (loaded inside container)
 │   │   ├── libcrane.so               — crane 0.20.3 (static Go)
-│   │   ├── libpdockerpty.so          — Termux-native build (Android JNI lib)
+│   │   ├── libpdockerpty.so          — Android NDK-built JNI/PTY helper
 │   │   └── libpdockerdirect.so       — Android direct userspace executor
 │   ├── python/pdockerd_bridge.py     — Chaquopy entry: env setup + CONNECT proxy + runpy
 │   └── assets/
@@ -266,7 +268,8 @@ pdocker-android/
 ├── docker-proot-setup/                — integrated backend source
 │   └── bin/pdockerd                   — the actual daemon (3500 LOC)
 └── scripts/
-    ├── build-native-termux.sh         — Termux clang → libpdockerpty.so
+    ├── build-native-android-ndk.sh    — Android NDK helper build path
+    ├── build-native-termux.sh         — legacy local Termux helper build path
     ├── copy-native.sh                 — backend + vendor/ → jniLibs
     ├── fetch-xterm.sh                 — pull xterm.js + FitAddon CDN
     └── build-apk.sh                   — orchestrator

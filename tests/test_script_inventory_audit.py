@@ -203,7 +203,7 @@ class ScriptInventoryAuditTest(unittest.TestCase):
         expected_replacements = {
             "scripts/android-terminal-it-repro.sh": "python3 scripts/pdocker-test-driver.py --lane android-terminal-exec-it",
             "scripts/verify-llama-startup-logging.py": "python3 scripts/verify-project-library.py",
-            "scripts/wrap-ndk-box64.sh": "bash scripts/build-native-termux.sh",
+            "scripts/wrap-ndk-box64.sh": "bash scripts/build-native-android-ndk.sh",
         }
 
         obsolete = {

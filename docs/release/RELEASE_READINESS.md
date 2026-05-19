@@ -31,8 +31,8 @@ documentation remains.
     `ngl>=1`; current artifacts show wrong-token or oracle mismatches. GPU
     acceleration must not be marketed as working inference.
   - Required evidence: passing CPU-vs-GPU correctness artifact with
-    `benchmark_claim_allowed=true`; Q6_K/local-size/descriptor evidence for the
-    active blocker; update
+    `benchmark_claim_allowed=true`; Q6_K/local-size/descriptor/final-store
+    evidence for the active blocker; current blocker details live in
     [`LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md).
 - **Service health truth — blocked**
   - Why it blocks: cards or metadata can look healthy without proof that the
@@ -191,8 +191,10 @@ unsupported/experimental wording.
 - [x] GPU compare workflow records correctness data and blocks benchmark claims
   when required probes fail.
 - [ ] `ngl=1` passes CPU-vs-GPU deterministic correctness.
-- [ ] Q6_K-like blocker `0x274f68a67dfef210` is resolved or replaced by a newer
-  documented blocker with artifact evidence.
+- [ ] The current Q6_K blocker is resolved or replaced by newer documented
+  blocker evidence in
+  [`LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md)
+  and the artifact sweep.
 - [ ] Q6_K workgroup/writeback diagnostics are paired with a matching Q6_K
   oracle before any benchmark or inference claim.
 - [ ] Any speedup claim is paired with a passing correctness artifact and device

@@ -27,6 +27,11 @@ run it, and where the latest result is stored.
 | [`SERVICE_TRUTH_DEVICE_GATE.md`](SERVICE_TRUTH_DEVICE_GATE.md) | Same-container-ID service truth device gate |
 | [`SERVICE_TRUTH_DEVICE_CAPTURE_20260513.md`](SERVICE_TRUTH_DEVICE_CAPTURE_20260513.md) | Sanitized 2026-05-13 service-truth device capture summary |
 | [`STORAGE_METRICS_SEQUENCE_RUNNER.md`](STORAGE_METRICS_SEQUENCE_RUNNER.md) | Android storage metrics sequence runner scaffold |
+| [`STORAGE_METRICS.md`](STORAGE_METRICS.md) | Storage metric semantics, overlap accounting, and verifier expectations |
+| [`TERMINAL_EXEC_IT_DEVICE_GATE.md`](TERMINAL_EXEC_IT_DEVICE_GATE.md) | Engine exec `-it` UI/device promotion gate and paired JSONL evidence requirements |
+| [`SAF_DIRECT_OUTPUT_GATE.md`](SAF_DIRECT_OUTPUT_GATE.md) | Documents/SAF direct-output promotion gate and fail-closed artifact contract |
+| [`OOM_LMK_SURVIVAL_GATE.md`](OOM_LMK_SURVIVAL_GATE.md) | OOM/LMK survival, telemetry, and non-promoting planned-gap evidence contract |
+| [`LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`](LLAMA_GPU_DEVICE_RUNBOOK_20260513.md) | Connected-device llama GPU runbook and non-promoting artifact capture procedure |
 | [`REFACTOR_RESILIENCE.md`](REFACTOR_RESILIENCE.md) | Refactor-resilience testing contract for external behavior |
 | [`compat-audit-latest.md`](compat-audit-latest.md) | Latest recorded compatibility audit result |
 | [`file-io-bench-latest.md`](file-io-bench-latest.md) | Latest file I/O benchmark result |

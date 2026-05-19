@@ -1295,8 +1295,8 @@
       "role": "Audited obsolete candidate; retained temporarily with replacement command and deletion precondition recorded.",
       "audit": {
         "date": "2026-05-18",
-        "reference_scan": "rg found no active caller; current build wrappers use build-native-termux.sh to avoid x86_64 NDK tool invocation on aarch64 hosts.",
-        "replacement_command": "bash scripts/build-native-termux.sh",
+        "reference_scan": "rg found no active caller; the standard native helper path is build-native-android-ndk.sh, and supported aarch64-host builds use glibc host-clang mode rather than box64-mutated NDK tools.",
+        "replacement_command": "bash scripts/build-native-android-ndk.sh",
         "decision": "keep as obsolete-suspect for now; future deletion is acceptable after confirming no supported aarch64-host build path depends on mutating the NDK with box64 shims."
       },
       "migration": {
