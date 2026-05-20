@@ -387,6 +387,7 @@ from the repository's canonical documentation.
 |---|---|
 | [PROJECT_DASHBOARD.md](PROJECT_DASHBOARD.md) | Generated status board for README, releases, and pinned issues |
 | [ROADMAP_TIMELINE.md](ROADMAP_TIMELINE.md) | Generated TODO-linked roadmap for public updates |
+| [NEWS_TIMELINE.md](NEWS_TIMELINE.md) | Curated public news and announcement timeline |
 | [WIKI_HOME.md](WIKI_HOME.md) | Source-controlled seed for the GitHub Wiki home page |
 
 The source of truth remains the repository itself: `README.md`, `docs/plan/`,

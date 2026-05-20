@@ -36,7 +36,7 @@ or teardown promotion without fresh device artifacts.
 | ADBOFF-013 | P1 | Refresh or rebuild stale APK-native payload evidence before using `verify-fast` as a full green signal. | `verify-fast` validates existing compat APK payload freshness when the APK exists and now prints the rebuild/removal remedy before the fail-closed native-payload check; the local compat APK was rebuilt and `docs/test/native-payloads-latest.json` refreshed. | Done in this slice. |
 | ADBOFF-014 | P1 | Pin the script inventory surface budget. | `verify-script-inventory.py` fails when top-level script count, subtree entry count, or category counts change without a focused verifier/README update; unit tests cover current and failing budgets. | Done in this slice. |
 | ADBOFF-015 | P1 | Improve root docs map discoverability. | Root `README.md` links every docs category README listed by `docs/README.md`, including release, showcase, and maintenance, without duplicating status claims. | Done in this slice. |
-| ADBOFF-016 | P1 | Fill test/showcase README index gaps. | `docs/test/README.md` links maintained test docs such as COW overlay bench recovery, direct syscall phase-2 coverage, and llama GPU root-cause/performance/correctness notes; generated showcase README changes must go through its producer. | Done for test README in this slice; showcase generator follow-up remains separate if needed. |
+| ADBOFF-016 | P1 | Fill test/showcase README index gaps. | `docs/test/README.md` links maintained test docs such as COW overlay bench recovery, direct syscall phase-2 coverage, and llama GPU root-cause/performance/correctness notes; generated `docs/showcase/README.md` now lists the curated news timeline through `scripts/update-showcase.py`. | Done. |
 
 ## Deferred Until ADB Returns
 
