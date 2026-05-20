@@ -268,7 +268,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("add_spirv_capability(&shader_code, &shader_size, 9)", source)
         icd_source = (ROOT / "docker-proot-setup/src/gpu/pdocker_vulkan_icd.c").read_text()
         self.assertIn("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", icd_source)
-        self.assertIn("add_float16_capability_for_storage16=%u", icd_source)
+        self.assertIn('"PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", "add_float16_capability_for_storage16"', icd_source)
         self.assertIn("pipeline->requested_feature_mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT16", icd_source)
         self.assertIn('\\"q4k_safe_kernel\\":%s', source)
         self.assertIn("kQ4kSafeSpv", source)
@@ -1052,19 +1052,25 @@ class GpuAbiContractTest(unittest.TestCase):
             "ADD_DEVICE_EXTENSION(VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME",
         ]:
             self.assertIn(extension, icd)
-        self.assertIn("rewrite_duplicate_descriptors=%u", icd)
-        self.assertIn("mutable_cache=%u", icd)
-        self.assertIn("q4k_safe_kernel=%u", icd)
-        self.assertIn("q4k_targeted_specialization=%u", icd)
-        self.assertIn("strict_passthrough=%u", icd)
-        self.assertIn("strict_reconciliation=%u", icd)
-        self.assertIn("strict_device_local_staging=%u", icd)
-        self.assertIn("materialize_specialization=%u", icd)
-        self.assertIn("disable_pipeline_optimization=%u", icd)
-        self.assertIn("skip_unused_descriptor_transfers=%u", icd)
-        self.assertIn("use_spirv_descriptor_access=%u", icd)
-        self.assertIn("disable_overlap_aliasing=%u", icd)
-        self.assertIn("cpu_oracle=%u", icd)
+        for env_name, option_name in [
+            ("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "rewrite_duplicate_descriptors"),
+            ("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_cache"),
+            ("PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel"),
+            ("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization"),
+            ("PDOCKER_GPU_STRICT_PASSTHROUGH", "strict_passthrough"),
+            ("PDOCKER_GPU_STRICT_RECONCILIATION", "strict_reconciliation"),
+            ("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", "strict_device_local_staging"),
+            ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
+            ("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "disable_pipeline_optimization"),
+            ("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", "skip_unused_descriptor_transfers"),
+            ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "use_spirv_descriptor_access"),
+            ("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", "disable_overlap_aliasing"),
+            ("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle"),
+            ("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", "disable_storage8"),
+            ("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE", "disable_storage16"),
+            ("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC", "disable_subgroup_arithmetic"),
+        ]:
+            self.assertIn(f'"{env_name}", "{option_name}"', icd)
         self.assertIn("api_offsets[binding_count]", icd)
         self.assertIn("api_descriptor_types[binding_count]", icd)
         self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_LOG", icd)
@@ -1077,9 +1083,6 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("growth is geometric and capped", icd)
         self.assertIn("if (next_cap < line_cap)", icd)
         self.assertIn("rc = -EOVERFLOW", icd)
-        self.assertIn("disable_storage8=%u", icd)
-        self.assertIn("disable_storage16=%u", icd)
-        self.assertIn("disable_subgroup_arithmetic=%u", icd)
         self.assertIn("advertised_subgroup_size", icd)
         self.assertIn("PDOCKER_VULKAN_SUBGROUP_SIZE", icd)
         self.assertIn("subgroupSize = advertised_subgroup_size()", icd)
@@ -1136,17 +1139,14 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, source)
         icd = VULKAN_ICD.read_text()
         for marker in [
-            "dirty_probe=%u",
-            "dirty_writeback=%u",
-            "writeonly_cache=%u",
-            "mutable_cache_max=%llu",
+            "PdockerVkBoolBridgeOption",
+            "bool_bridge_options[]",
+            '"PDOCKER_GPU_WRITEONLY_DIRTY_PROBE", "dirty_probe"',
+            '"PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK", "dirty_writeback"',
+            '"PDOCKER_GPU_WRITEONLY_BUFFER_CACHE", "writeonly_cache"',
+            '"PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES", "mutable_cache_max"',
             "profile=1",
-            "dirty_probe_min=%llu",
-            "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE",
-            "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
-            "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
-            "PDOCKER_GPU_WRITEONLY_BUFFER_CACHE",
-            "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
+            '"PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES", "dirty_probe_min"',
             "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
             "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
         ]:
@@ -1215,7 +1215,12 @@ class GpuAbiContractTest(unittest.TestCase):
 
         ui_compose_runtime_keys = verifier.LLAMA_GPU_UI_RUNTIME_ENV_KEYS
         for key in ui_compose_runtime_keys:
-            self.assertIn(f'"{key}": os.environ.get', pdockerd)
+            self.assertTrue(
+                f'"{key}": os.environ.get' in pdockerd
+                or any(key.startswith(prefix) for prefix in ("PDOCKER_GPU_", "PDOCKER_VULKAN_", "GGML_VK_"))
+                and "GPU_RUNTIME_ENV_PREFIXES" in pdockerd,
+                key,
+            )
             self.assertIn(key, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
             self.assertIn(key, next_steps)
 

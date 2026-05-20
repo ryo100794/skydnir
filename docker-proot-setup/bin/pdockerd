@@ -69,6 +69,22 @@ DIAGNOSTICS_DIR = os.path.join(LOGS_DIR, "diagnostics")
 PYTHON_MEMORY_DIAGNOSTICS_PATH = os.path.join(DIAGNOSTICS_DIR, "python-memory.jsonl")
 VOLUMES_DIR = os.path.join(PDOCKER_HOME, "volumes")
 NETWORKS_DIR = os.path.join(PDOCKER_HOME, "networks")
+GPU_RUNTIME_ENV_PREFIXES = (
+    "PDOCKER_GPU_",
+    "PDOCKER_VULKAN_",
+    "GGML_VK_",
+)
+GPU_RUNTIME_ENV_EXCLUDE_SUFFIXES = (
+    "_HOST_PATH",
+    "_HOST_DIR",
+)
+GPU_RUNTIME_ENV_EXCLUDE_KEYS = {
+    # These are host-side installation details.  The guest receives the
+    # matching container paths through the explicit defaults in _gpu_env().
+    "PDOCKER_GPU_SHIM_HOST_PATH",
+    "PDOCKER_VULKAN_ICD_HOST_PATH",
+    "PDOCKER_OPENCL_ICD_HOST_PATH",
+}
 # Staging for crane blob downloads, layer tars, image save/load etc. On
 # Android the process can't write to /tmp (system read-only); respect
 # $PDOCKER_TMP_DIR (or $TMPDIR) so the bridge can point us at the app's
@@ -3120,6 +3136,14 @@ def _gpu_env(state):
             "PDOCKER_OPENCL_ICD_READY": os.environ.get("PDOCKER_OPENCL_ICD_READY", "0"),
             "PDOCKER_OPENCL_API_VERSION": os.environ.get("PDOCKER_OPENCL_API_VERSION", "1.2"),
         })
+    for key, value in os.environ.items():
+        if not key.startswith(GPU_RUNTIME_ENV_PREFIXES):
+            continue
+        if key in GPU_RUNTIME_ENV_EXCLUDE_KEYS:
+            continue
+        if any(key.endswith(suffix) for suffix in GPU_RUNTIME_ENV_EXCLUDE_SUFFIXES):
+            continue
+        env.setdefault(key, value)
     return env
 
 

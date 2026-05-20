@@ -893,6 +893,11 @@ static void trace_vulkan_reconcile_evidence(
 }
 
 static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding);
+static int validate_descriptor_transport_shape(
+        const PdockerVkDescriptorBinding *binding,
+        uint32_t set_index,
+        uint32_t binding_index,
+        size_t *effective_size);
 static VkSubgroupFeatureFlags advertised_subgroup_operations(void);
 static uint32_t advertised_subgroup_size(void);
 static bool resolve_copy_alias(PdockerVkBuffer *buffer,
@@ -929,8 +934,9 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         for (uint32_t i = 0; i < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++i) {
             PdockerVkDescriptorBinding *binding = (PdockerVkDescriptorBinding *)&set->storage_buffers[i];
             if (!binding->buffer || !binding->buffer->memory) continue;
-            size_t bytes = descriptor_binding_size(binding);
-            if (bytes == 0) continue;
+            size_t bytes = 0;
+            int shape_rc = validate_descriptor_transport_shape(binding, set_index, i, &bytes);
+            if (shape_rc < 0) return shape_rc;
             if (binding_count >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return -E2BIG;
             api_descriptor_sets[binding_count] = set_index;
             bindings[binding_count] = i;
@@ -940,6 +946,20 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             if (copy_alias_enabled()) {
                 alias_hit = resolve_copy_alias(binding->buffer, binding->offset, bytes,
                                                &dispatch_memory, &dispatch_offset);
+            }
+            if (!dispatch_memory || dispatch_memory->fd < 0) return -EINVAL;
+            if (dispatch_offset > (VkDeviceSize)dispatch_memory->size ||
+                (VkDeviceSize)bytes > (VkDeviceSize)dispatch_memory->size - dispatch_offset) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: rejecting descriptor outside transport memory"
+                        " set=%u binding=%u dispatch_offset=%llu size=%zu memory_size=%zu alias=%u\n",
+                        set_index,
+                        i,
+                        (unsigned long long)dispatch_offset,
+                        bytes,
+                        dispatch_memory ? dispatch_memory->size : 0,
+                        alias_hit ? 1u : 0u);
+                return -ERANGE;
             }
             offsets[binding_count] = dispatch_offset;
             sizes[binding_count] = bytes;
@@ -1101,212 +1121,73 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
-    if (getenv("PDOCKER_GPU_WRITEONLY_DIRTY_PROBE")) {
+    typedef struct {
+        const char *env;
+        const char *option;
+        bool default_value;
+    } PdockerVkBoolBridgeOption;
+    static const PdockerVkBoolBridgeOption bool_bridge_options[] = {
+        {"PDOCKER_GPU_WRITEONLY_DIRTY_PROBE", "dirty_probe", false},
+        {"PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK", "dirty_writeback", false},
+        {"PDOCKER_GPU_WRITEONLY_BUFFER_CACHE", "writeonly_cache", false},
+        {"PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_cache", true},
+        {"PDOCKER_GPU_RESIDENT_CACHE", "resident_cache", true},
+        {"PDOCKER_GPU_STRICT_PASSTHROUGH", "strict_passthrough", false},
+        {"PDOCKER_GPU_STRICT_RECONCILIATION", "strict_reconciliation", false},
+        {"PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", "strict_device_local_staging", false},
+        {"PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "rewrite_duplicate_descriptors", true},
+        {"PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES", "materialize_descriptor_aliases", false},
+        {"PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization", true},
+        {"PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "disable_pipeline_optimization", true},
+        {"PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", "skip_unused_descriptor_transfers", true},
+        {"PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "use_spirv_descriptor_access", true},
+        {"PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", "disable_overlap_aliasing", false},
+        {"PDOCKER_GPU_CPU_ORACLE", "cpu_oracle", false},
+        {"PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", "q6k_oracle_writeback", false},
+        {"PDOCKER_GPU_Q6K_SAFE_KERNEL", "q6k_safe_kernel", false},
+        {"PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel", false},
+        {"PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization", false},
+        {"PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", "add_float16_capability_for_storage16", false},
+        {"PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", "disable_storage8", false},
+        {"PDOCKER_VULKAN_DISABLE_16BIT_STORAGE", "disable_storage16", false},
+        {"PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC", "disable_subgroup_arithmetic", false},
+    };
+    for (size_t i = 0; i < sizeof(bool_bridge_options) / sizeof(bool_bridge_options[0]); ++i) {
+        const PdockerVkBoolBridgeOption *option = &bool_bridge_options[i];
+        if (!getenv(option->env)) continue;
         n = snprintf(command + off, sizeof(command) - off,
-                     " dirty_probe=%u",
-                     env_truthy_default("PDOCKER_GPU_WRITEONLY_DIRTY_PROBE", false) ? 1u : 0u);
+                     " %s=%u",
+                     option->option,
+                     env_truthy_default(option->env, option->default_value) ? 1u : 0u);
         if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
-    if (getenv("PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " dirty_writeback=%u",
-                     env_truthy_default("PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_WRITEONLY_BUFFER_CACHE")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " writeonly_cache=%u",
-                     env_truthy_default("PDOCKER_GPU_WRITEONLY_BUFFER_CACHE", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_MUTABLE_BUFFER_CACHE")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " mutable_cache=%u",
-                     env_truthy_default("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    const char *mutable_cache_max = getenv("PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES");
-    if (mutable_cache_max && mutable_cache_max[0]) {
+
+    typedef struct {
+        const char *env;
+        const char *option;
+    } PdockerVkU64BridgeOption;
+    static const PdockerVkU64BridgeOption u64_bridge_options[] = {
+        {"PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES", "mutable_cache_max"},
+        {"PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES", "resident_cache_min"},
+        {"PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES", "dirty_probe_min"},
+    };
+    for (size_t i = 0; i < sizeof(u64_bridge_options) / sizeof(u64_bridge_options[0]); ++i) {
+        const PdockerVkU64BridgeOption *option = &u64_bridge_options[i];
+        const char *value = getenv(option->env);
+        if (!value || !value[0]) continue;
         char *end = NULL;
-        unsigned long long parsed = strtoull(mutable_cache_max, &end, 10);
-        if (end && *end == '\0') {
-            n = snprintf(command + off, sizeof(command) - off,
-                         " mutable_cache_max=%llu",
-                         parsed);
-            if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-            off += (size_t)n;
-        }
-    }
-    if (getenv("PDOCKER_GPU_RESIDENT_CACHE")) {
+        unsigned long long parsed = strtoull(value, &end, 10);
+        if (!end || *end != '\0') continue;
         n = snprintf(command + off, sizeof(command) - off,
-                     " resident_cache=%u",
-                     env_truthy_default("PDOCKER_GPU_RESIDENT_CACHE", true) ? 1u : 0u);
+                     " %s=%llu",
+                     option->option,
+                     parsed);
         if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
-    }
-    const char *resident_cache_min = getenv("PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES");
-    if (resident_cache_min && resident_cache_min[0]) {
-        char *end = NULL;
-        unsigned long long parsed = strtoull(resident_cache_min, &end, 10);
-        if (end && *end == '\0') {
-            n = snprintf(command + off, sizeof(command) - off,
-                         " resident_cache_min=%llu",
-                         parsed);
-            if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-            off += (size_t)n;
-        }
-    }
-    const char *dirty_probe_min = getenv("PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES");
-    if (dirty_probe_min && dirty_probe_min[0]) {
-        char *end = NULL;
-        unsigned long long parsed = strtoull(dirty_probe_min, &end, 10);
-        if (end && *end == '\0') {
-            n = snprintf(command + off, sizeof(command) - off,
-                         " dirty_probe_min=%llu",
-                         parsed);
-            if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-            off += (size_t)n;
-        }
     }
     if (trace_allocations() || env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", false)) {
         n = snprintf(command + off, sizeof(command) - off, " profile=1");
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_STRICT_PASSTHROUGH")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " strict_passthrough=%u",
-                     env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_STRICT_RECONCILIATION")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " strict_reconciliation=%u",
-                     env_truthy_default("PDOCKER_GPU_STRICT_RECONCILIATION", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " strict_device_local_staging=%u",
-                     env_truthy_default("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " rewrite_duplicate_descriptors=%u",
-                     env_truthy_default("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " materialize_descriptor_aliases=%u",
-                     env_truthy_default("PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " materialize_specialization=%u",
-                     env_truthy_default("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " disable_pipeline_optimization=%u",
-                     env_truthy_default("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " skip_unused_descriptor_transfers=%u",
-                     env_truthy_default("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " use_spirv_descriptor_access=%u",
-                     env_truthy_default("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " disable_overlap_aliasing=%u",
-                     env_truthy_default("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_CPU_ORACLE")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " cpu_oracle=%u",
-                     env_truthy_default("PDOCKER_GPU_CPU_ORACLE", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " q6k_oracle_writeback=%u",
-                     env_truthy_default("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_Q6K_SAFE_KERNEL")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " q6k_safe_kernel=%u",
-                     env_truthy_default("PDOCKER_GPU_Q6K_SAFE_KERNEL", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_Q4K_SAFE_KERNEL")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " q4k_safe_kernel=%u",
-                     env_truthy_default("PDOCKER_GPU_Q4K_SAFE_KERNEL", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " q4k_targeted_specialization=%u",
-                     env_truthy_default("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " add_float16_capability_for_storage16=%u",
-                     env_truthy_default("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " disable_storage8=%u",
-                     env_truthy_default("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " disable_storage16=%u",
-                     env_truthy_default("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
-        off += (size_t)n;
-    }
-    if (getenv("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC")) {
-        n = snprintf(command + off, sizeof(command) - off,
-                     " disable_subgroup_arithmetic=%u",
-                     env_truthy_default("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC", false) ? 1u : 0u);
         if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
@@ -1685,6 +1566,76 @@ static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding)
     return (size_t)binding->range < available_in_buffer
         ? (size_t)binding->range
         : available_in_buffer;
+}
+
+static int validate_descriptor_transport_shape(
+        const PdockerVkDescriptorBinding *binding,
+        uint32_t set_index,
+        uint32_t binding_index,
+        size_t *effective_size) {
+    if (effective_size) *effective_size = 0;
+    if (!binding || !binding->buffer || !binding->buffer->memory) return -EINVAL;
+
+    const PdockerVkBuffer *buffer = binding->buffer;
+    const PdockerVkMemory *memory = buffer->memory;
+    if (memory->fd < 0) return -EINVAL;
+
+    if (binding->offset > (VkDeviceSize)buffer->size) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: rejecting descriptor past buffer"
+                " set=%u binding=%u offset=%llu buffer_size=%zu\n",
+                set_index,
+                binding_index,
+                (unsigned long long)binding->offset,
+                buffer->size);
+        return -ERANGE;
+    }
+
+    const size_t available_in_buffer = buffer->size - (size_t)binding->offset;
+    size_t bytes = available_in_buffer;
+    if (binding->range != VK_WHOLE_SIZE) {
+        if (binding->range > (VkDeviceSize)available_in_buffer) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: rejecting descriptor range outside buffer"
+                    " set=%u binding=%u offset=%llu range=%llu buffer_size=%zu\n",
+                    set_index,
+                    binding_index,
+                    (unsigned long long)binding->offset,
+                    (unsigned long long)binding->range,
+                    buffer->size);
+            return -ERANGE;
+        }
+        bytes = (size_t)binding->range;
+    }
+    if (bytes == 0) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: rejecting empty descriptor"
+                " set=%u binding=%u offset=%llu range=%llu buffer_size=%zu\n",
+                set_index,
+                binding_index,
+                (unsigned long long)binding->offset,
+                (unsigned long long)binding->range,
+                buffer->size);
+        return -EINVAL;
+    }
+
+    if (buffer->memory_offset > (VkDeviceSize)memory->size ||
+        binding->offset > (VkDeviceSize)memory->size - buffer->memory_offset ||
+        (VkDeviceSize)bytes > (VkDeviceSize)memory->size - buffer->memory_offset - binding->offset) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: rejecting descriptor outside backing memory"
+                " set=%u binding=%u memory_offset=%llu offset=%llu size=%zu memory_size=%zu\n",
+                set_index,
+                binding_index,
+                (unsigned long long)buffer->memory_offset,
+                (unsigned long long)binding->offset,
+                bytes,
+                memory->size);
+        return -ERANGE;
+    }
+
+    if (effective_size) *effective_size = bytes;
+    return 0;
 }
 
 static uint32_t pdocker_api_version(void) {
