@@ -532,6 +532,7 @@ is explicit rather than implicit:
 - The compare driver must additionally forward diagnostic knobs that are too
   experimental or noisy to force into all UI/compose launches:
   `PDOCKER_GPU_CPU_ORACLE`, `PDOCKER_GPU_STRICT_PASSTHROUGH`,
+  `PDOCKER_GPU_STRICT_RECONCILIATION`,
   `PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING`,
   `PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC`,
   `PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION`,

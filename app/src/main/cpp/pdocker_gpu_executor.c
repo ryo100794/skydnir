@@ -877,6 +877,8 @@ typedef struct {
     int profile_response;
     int has_strict_passthrough;
     int strict_passthrough;
+    int has_strict_reconciliation;
+    int strict_reconciliation;
     int has_strict_device_local_staging;
     int strict_device_local_staging;
     int has_rewrite_duplicate_descriptors;
@@ -2101,6 +2103,13 @@ static int strict_vulkan_passthrough_requested(const VulkanDispatchOptions *opti
     return env_truthy("PDOCKER_GPU_STRICT_PASSTHROUGH", 0);
 }
 
+static int strict_vulkan_reconciliation_requested(const VulkanDispatchOptions *options) {
+    if (options && options->has_strict_reconciliation) {
+        return options->strict_reconciliation;
+    }
+    return env_truthy("PDOCKER_GPU_STRICT_RECONCILIATION", 0);
+}
+
 static void apply_vulkan_feature_policy(VulkanRuntime *rt) {
     if (!rt) return;
     if (env_truthy("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", 0)) {
@@ -2591,6 +2600,22 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
         }
         return -1;
     }
+    if (strncmp(token, "strict_reconciliation=", 22) == 0) {
+        const char *value = token + 22;
+        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+            options->has_strict_reconciliation = 1;
+            options->strict_reconciliation = 1;
+            return 0;
+        }
+        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+            options->has_strict_reconciliation = 1;
+            options->strict_reconciliation = 0;
+            return 0;
+        }
+        return -1;
+    }
     if (strncmp(token, "strict_device_local_staging=", 28) == 0) {
         const char *value = token + 28;
         if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
@@ -2912,6 +2937,54 @@ static uint64_t reconcile_dispatch_hash(uint32_t gx, uint32_t gy, uint32_t gz) {
 static const char *json_match_or_null(int present, int matched) {
     if (!present) return "null";
     return matched ? "true" : "false";
+}
+
+static int strict_reconciliation_has_mismatch(
+        const VulkanDispatchOptions *options,
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        uint64_t spirv_hash,
+        const VulkanDispatchSpecialization *specializations,
+        size_t specialization_count,
+        const uint8_t *specialization_data,
+        size_t specialization_data_size,
+        const uint8_t *push,
+        size_t push_size,
+        uint32_t gx,
+        uint32_t gy,
+        uint32_t gz,
+        const char **field_name) {
+    if (!options || !strict_vulkan_reconciliation_requested(options)) return 0;
+    const PdockerSenderReconcileEvidence *sender = &options->sender_reconcile;
+    if (sender->has_spirv_hash && sender->spirv_hash != spirv_hash) {
+        if (field_name) *field_name = "spirv_hash";
+        return 1;
+    }
+    if (sender->has_descriptor_hash &&
+        sender->descriptor_hash != reconcile_descriptor_hash(bindings, binding_count)) {
+        if (field_name) *field_name = "descriptor_hash";
+        return 1;
+    }
+    if (sender->has_push_hash &&
+        sender->push_hash != reconcile_bytes_hash(push, push_size)) {
+        if (field_name) *field_name = "push_hash";
+        return 1;
+    }
+    if (sender->has_spec_hash &&
+        sender->spec_hash != pipeline_specialization_hash(
+            specializations,
+            specialization_count,
+            specialization_data,
+            specialization_data_size)) {
+        if (field_name) *field_name = "specialization_hash";
+        return 1;
+    }
+    if (sender->has_dispatch_hash &&
+        sender->dispatch_hash != reconcile_dispatch_hash(gx, gy, gz)) {
+        if (field_name) *field_name = "dispatch_hash";
+        return 1;
+    }
+    return 0;
 }
 
 static void write_vulkan_reconciliation_report(
@@ -8392,6 +8465,7 @@ static int run_vulkan_dispatch_fd(
     int local_size_patched = 0;
     int float16_capability_added = 0;
     const int strict_passthrough = strict_vulkan_passthrough_requested(options);
+    const int strict_reconciliation = strict_vulkan_reconciliation_requested(options);
     const int strict_device_local_staging =
         strict_passthrough &&
         (options && options->has_strict_device_local_staging
@@ -8629,6 +8703,28 @@ static int run_vulkan_dispatch_fd(
     q4k_pipeline_retry_enabled = q4k_callsite_detected &&
         env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 1);
     dispatch_lifecycle_spirv_hash = original_spirv_hash;
+    const char *strict_reconciliation_field = NULL;
+    if (strict_reconciliation && strict_reconciliation_has_mismatch(
+            options,
+            bindings,
+            binding_count,
+            original_spirv_hash,
+            specializations,
+            specialization_count,
+            specialization_data,
+            specialization_data_size,
+            push,
+            push_size,
+            gx, gy, gz,
+            &strict_reconciliation_field)) {
+        fprintf(stderr,
+                "pdocker-gpu-executor: strict reconciliation mismatch field=%s dispatch_id=%llu\n",
+                strict_reconciliation_field ? strict_reconciliation_field : "unknown",
+                (unsigned long long)dispatch_lifecycle_id);
+        json_fail("vulkan-reconciliation", "strict reconciliation mismatch before dispatch");
+        ret = 64;
+        goto cleanup;
+    }
     if (dispatch_lifecycle_log) {
         fprintf(stderr,
                 "pdocker-gpu-executor: generic dispatch lifecycle: "

@@ -1937,6 +1937,7 @@ PDOCKER_LLAMA_RUNTIME_ABORT_JSON="$RUNTIME_ABORT_JSON" \
 PDOCKER_LLAMA_POST_READINESS_MEMORY_JSON="$GPU_POST_READINESS_MEMORY_JSON" \
 python3 - "$CPU_JSON" "$CPU_CORRECTNESS_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$CORRECTNESS_JSON" "$SERVICE_READINESS_JSON" "$STARTUP_JSON" "$RUNTIME_ENV_RECORD_JSON" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" "$ROOT/scripts/llama-gpu-env-manifest.json" <<'PY'
 import json
+import hashlib
 import math
 import os
 import re
@@ -2497,6 +2498,10 @@ def build_api_executor_reconciliation(events):
     blob cannot sneak through as correctness evidence.
     """
 
+    def canonical_sha256(value):
+        payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        return "sha256:" + hashlib.sha256(payload).hexdigest()
+
     records = []
     duplicate_dispatch_ids = []
     seen_dispatch_ids = set()
@@ -2528,7 +2533,7 @@ def build_api_executor_reconciliation(events):
             match_status = "mismatch"
         else:
             match_status = "diagnostic-unmatched"
-        records.append({
+        record = {
             "event_index": event_index,
             "dispatch_id": dispatch_id,
             "match_status": match_status,
@@ -2556,7 +2561,9 @@ def build_api_executor_reconciliation(events):
                 "dispatch_hash": received.get("dispatch_hash"),
             },
             "matches": matches,
-        })
+        }
+        record["diagnostic_record_sha256"] = canonical_sha256(record)
+        records.append(record)
     if not records:
         return {
             "schema": "pdocker.llama.api-executor-reconciliation.v1",
@@ -2573,7 +2580,7 @@ def build_api_executor_reconciliation(events):
         summary = "mismatch"
     else:
         summary = "diagnostic"
-    return {
+    result = {
         "schema": "pdocker.llama.api-executor-reconciliation.v1",
         "summary": summary,
         "proof_strength": "diagnostic",
@@ -2585,6 +2592,14 @@ def build_api_executor_reconciliation(events):
         "promotion_allowed": False,
         "promotion_blocker": "FNV-1a transport correlation is diagnostic only; require SHA-256/full proof or canonical raw fields before correctness claims",
     }
+    result["diagnostic_set_sha256"] = canonical_sha256({
+        "schema": result["schema"],
+        "summary": result["summary"],
+        "record_count": result["record_count"],
+        "duplicate_dispatch_ids": result["duplicate_dispatch_ids"],
+        "dispatches": result["dispatches"],
+    })
+    return result
 
 
 api_executor_reconciliation = build_api_executor_reconciliation(executor_events)

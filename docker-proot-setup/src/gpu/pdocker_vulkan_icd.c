@@ -1184,6 +1184,13 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
+    if (getenv("PDOCKER_GPU_STRICT_RECONCILIATION")) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " strict_reconciliation=%u",
+                     env_truthy_default("PDOCKER_GPU_STRICT_RECONCILIATION", false) ? 1u : 0u);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
+        off += (size_t)n;
+    }
     if (getenv("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " strict_device_local_staging=%u",
