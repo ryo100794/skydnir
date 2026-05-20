@@ -104,6 +104,16 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn("def _runtime_env_manifest_record", verifier)
         self.assertIn('"runtime_env_manifest": runtime_env_manifest', verifier)
 
+    def test_compare_collects_app_owned_logs_when_engine_log_api_is_unavailable(self):
+        compare = COMPARE.read_text(encoding="utf-8")
+
+        self.assertIn("pdocker direct log fallback", compare)
+        self.assertIn("llama workspace log fallback", compare)
+        self.assertIn("engine-inspect-unavailable", compare)
+        self.assertIn("container-state-not-found", compare)
+        self.assertIn("root / 'logs'", compare)
+        self.assertIn("llama-server.log", compare)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1194,9 +1194,83 @@ container_ref() {
 }
 
 container_logs() {
-  local ref
+  local ref raw
   ref="$(container_ref)"
-  engine_request GET "/containers/$(urlencode "$ref")/logs?stdout=1&stderr=1&tail=$LOG_TAIL_LINES" | decode_engine_logs || true
+  raw="$(engine_request GET "/containers/$(urlencode "$ref")/logs?stdout=1&stderr=1&tail=$LOG_TAIL_LINES" | decode_engine_logs || true)"
+  if [[ -n "$raw" ]]; then
+    printf "%s\n" "$raw"
+    return 0
+  fi
+  # Fallback for failure paths where the Engine socket is busy or the server
+  # has already disconnected the HTTP client.  Container logs and the llama
+  # workspace log are app-owned files; reading them directly through run-as
+  # keeps the compare artifact useful even when /containers/{id}/logs cannot
+  # answer at the exact crash boundary.
+  run_as "python3 - $(remote_quote "$ref") $(remote_quote "${DEVICE_WORKSPACE_HOST:-}") $(remote_quote "$LOG_TAIL_LINES") <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+ref = (sys.argv[1] or '').lstrip('/')
+workspace = sys.argv[2] if len(sys.argv) > 2 else ''
+try:
+    tail_lines = max(1, int(sys.argv[3]))
+except Exception:
+    tail_lines = 2000
+root = Path('files/pdocker')
+
+def read_tail(path: Path) -> str:
+    try:
+        text = path.read_text(encoding='utf-8', errors='replace')
+    except Exception:
+        return ''
+    lines = text.splitlines()
+    if len(lines) > tail_lines:
+        lines = lines[-tail_lines:]
+    return '\n'.join(lines)
+
+def state_matches(state: dict) -> bool:
+    cid = str(state.get('Id') or state.get('ID') or '')
+    name = str(state.get('Name') or '').lstrip('/')
+    return bool(ref and (cid.startswith(ref) or name == ref))
+
+candidate_ids = []
+if ref:
+    candidate_ids.append(ref)
+containers = root / 'containers'
+if containers.is_dir():
+    for state_path in containers.glob('*/state.json'):
+        try:
+            state = json.loads(state_path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        if state_matches(state):
+            cid = str(state.get('Id') or state_path.parent.name)
+            if cid not in candidate_ids:
+                candidate_ids.append(cid)
+
+emitted = False
+for cid in candidate_ids:
+    log_path = root / 'logs' / f'{cid}.log'
+    text = read_tail(log_path)
+    if text:
+        print(f'--- pdocker direct log fallback: {log_path} ---')
+        print(text)
+        emitted = True
+        break
+
+if workspace:
+    llama_log = Path(workspace) / 'logs' / 'llama-server.log'
+    text = read_tail(llama_log)
+    if text:
+        print(f'--- llama workspace log fallback: {llama_log} ---')
+        print(text)
+        emitted = True
+
+if not emitted:
+    print('--- pdocker log fallback: no app-owned container/workspace log found ---')
+PY" || true
 }
 
 container_archive_file() {
@@ -1242,9 +1316,48 @@ PY
 }
 
 container_state() {
-  local ref
+  local ref body
   ref="$(container_ref)"
-  engine_body GET "/containers/$(urlencode "$ref")/json" || true
+  body="$(engine_body GET "/containers/$(urlencode "$ref")/json" 2>/dev/null || true)"
+  if printf "%s" "$body" | engine_body_has_id >/dev/null 2>&1; then
+    printf "%s\n" "$body"
+    return 0
+  fi
+  run_as "python3 - $(remote_quote "$ref") <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+ref = (sys.argv[1] or '').lstrip('/')
+root = Path('files/pdocker')
+
+def state_matches(state: dict, path: Path) -> bool:
+    cid = str(state.get('Id') or state.get('ID') or path.parent.name)
+    name = str(state.get('Name') or '').lstrip('/')
+    return bool(ref and (cid.startswith(ref) or name == ref))
+
+for state_path in (root / 'containers').glob('*/state.json'):
+    try:
+        state = json.loads(state_path.read_text(encoding='utf-8'))
+    except Exception:
+        continue
+    if not state_matches(state, state_path):
+        continue
+    cid = str(state.get('Id') or state_path.parent.name)
+    out = dict(state)
+    out.setdefault('Id', cid)
+    out.setdefault('LogPath', str(root / 'logs' / f'{cid}.log'))
+    out['PdockerInspectFallback'] = True
+    out['PdockerInspectFallbackReason'] = 'engine-inspect-unavailable'
+    print(json.dumps(out, ensure_ascii=False, sort_keys=True))
+    raise SystemExit(0)
+print(json.dumps({
+    'Id': ref,
+    'PdockerInspectFallback': True,
+    'PdockerInspectFallbackReason': 'container-state-not-found',
+}, ensure_ascii=False, sort_keys=True))
+PY" || true
 }
 
 container_running() {

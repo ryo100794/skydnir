@@ -1361,10 +1361,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         )
         return _claim_base(
             completion_classification,
-            next_action=(
-                data.get("next_action")
-                or "inspect ICD/executor dispatch begin/end/stage evidence; HTTP /health and /v1/models passed but deterministic /completion did not return a valid response"
-            ),
+            next_action="inspect container log, llama workspace log, and executor dispatch evidence; HTTP /health and /v1/models passed but deterministic /completion did not return a valid response",
             runtime_freshness=runtime_freshness,
             runtime_env_manifest=runtime_env_manifest,
             responsibility_boundary="service-readiness",
