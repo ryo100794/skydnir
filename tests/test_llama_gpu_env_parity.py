@@ -70,6 +70,9 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn("record_manifest_runtime_env", compare)
         self.assertIn("pdocker.llama.gpu.runtime-env-record.v1", compare)
         self.assertIn("[pdocker llama compare] runtime env", compare)
+        self.assertIn("record_planned_container_payload_env", compare)
+        self.assertIn('"planned_container_env": planned_env', compare)
+        self.assertIn('"planned_container_env_keys": sorted(str(key) for key in planned_env)', compare)
         self.assertIn('"runtime_env_manifest": runtime_env_manifest', compare)
         self.assertIn("requested_env_missing_from_runtime", compare)
 
@@ -98,6 +101,8 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn('"config_propagation_env_keys": config_keys', compare)
         self.assertIn('"host_requested_env": dict(sorted(host_env.items()))', compare)
         self.assertIn('"host_echo_recorded": bool(runtime_env_record.get("echoed_to_log"))', compare)
+        self.assertIn('runtime_env_record.get("planned_container_env")', compare)
+        self.assertIn('effective_runtime_env.update({str(name): str(value) for name, value in planned_env.items()})', compare)
         self.assertIn('"runtime_env_observed_keys": sorted(effective_runtime_env)', compare)
         self.assertIn('"requested_env_observed_keys"', compare)
 

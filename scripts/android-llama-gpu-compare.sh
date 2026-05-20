@@ -225,6 +225,46 @@ for key, value in sorted(host_env.items()):
 PY
 }
 
+record_planned_container_payload_env() {
+  local mode="$1"
+  local payload="$2"
+  python3 - "$RUNTIME_ENV_RECORD_JSON" "$mode" "$payload" <<'PY' || true
+import json
+import os
+import sys
+from pathlib import Path
+
+record_path = Path(sys.argv[1])
+mode = sys.argv[2]
+payload_raw = sys.argv[3]
+try:
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+except Exception:
+    record = {"schema": "pdocker.llama.gpu.runtime-env-record.v1"}
+try:
+    payload = json.loads(payload_raw)
+except Exception:
+    payload = {}
+
+env = {}
+for entry in payload.get("Env") or []:
+    if not isinstance(entry, str) or "=" not in entry:
+        continue
+    key, value = entry.split("=", 1)
+    env[key] = value
+
+# This is not a substitute for executor/ICD runtime markers.  It is a
+# separately labelled copy of the Engine create payload so artifacts do not
+# lose the requested env surface when the device goes offline before inspect
+# or log collection can run.
+record["planned_container_mode"] = mode
+record["planned_container_env"] = dict(sorted(env.items()))
+tmp = record_path.with_suffix(record_path.suffix + ".tmp")
+tmp.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(tmp, record_path)
+PY
+}
+
 cleanup() {
   local status="$?"
   if [[ "$status" -ne 0 ]]; then
@@ -1474,6 +1514,7 @@ start_container_mode() {
   remove_container
   wait_container_absent || return 124
   payload="$(container_payload "$mode" "$ctx" "$gpu_layers")"
+  record_planned_container_payload_env "$mode" "$payload"
   echo "[pdocker llama compare] $mode: creating container" >&2
   if ! create_body="$(engine_request_with_host_timeout "$ENGINE_CREATE_TIMEOUT_SEC" POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload" | http_body)"; then
     echo "[pdocker llama compare] $mode: create request did not return within ${ENGINE_CREATE_TIMEOUT_SEC}s; probing named container" >&2
@@ -1996,7 +2037,11 @@ def container_env_snapshot(state_obj):
 state_obj = parse_container_state(state)
 runtime_env = container_env_snapshot(state_obj)
 startup_env = startup_diagnostics.get("env") if isinstance(startup_diagnostics.get("env"), dict) else {}
+planned_env = runtime_env_record.get("planned_container_env") if isinstance(runtime_env_record, dict) else {}
+if not isinstance(planned_env, dict):
+    planned_env = {}
 effective_runtime_env = dict(runtime_env)
+effective_runtime_env.update({str(name): str(value) for name, value in planned_env.items()})
 for name, value in startup_env.items():
     effective_runtime_env[str(name)] = str(value)
 manifest_forward_env_keys = env_manifest.get("compare_forward_env_keys")
@@ -2013,6 +2058,8 @@ runtime_env_manifest = {
     "compare_forward_env_keys": [str(key) for key in manifest_forward_env_keys if isinstance(key, str)],
     "host_requested_env": {str(k): str(v) for k, v in sorted(manifest_requested_env.items())},
     "host_echo_recorded": bool(runtime_env_record.get("echoed_to_log")) if isinstance(runtime_env_record, dict) else False,
+    "planned_container_mode": runtime_env_record.get("planned_container_mode") if isinstance(runtime_env_record, dict) else None,
+    "planned_container_env_keys": sorted(str(key) for key in planned_env),
     "runtime_env_observed_keys": sorted(effective_runtime_env),
     "requested_env_observed_keys": sorted(
         key for key in manifest_requested_env if str(key) in effective_runtime_env
@@ -3635,6 +3682,7 @@ result = {
         "runtime_env": effective_runtime_env,
         "runtime_env_manifest": runtime_env_manifest,
         "container_config_env": runtime_env,
+        "planned_container_env": planned_env,
         "startup_diagnostics": startup_diagnostics,
         "service_readiness": service_readiness,
         "post_readiness_memory": post_readiness_memory,

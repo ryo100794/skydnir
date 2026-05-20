@@ -225,6 +225,46 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["responsibility_boundary"], "service-readiness")
         self.assertFalse(report["service_readiness"]["post_completion_health_ok"])
 
+    def test_completion_wrong_output_precedes_missing_executor_marker(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "served": True,
+                "service_readiness": {
+                    "schema": "pdocker.llama.service-readiness.v1",
+                    "summary": {"health": "pass", "models": "pass", "completion": "pass"},
+                    "health": {"ok": True, "status": "pass"},
+                    "models": {"ok": True, "status": "pass"},
+                    "completion": {
+                        "ok": True,
+                        "status": "pass",
+                        "status_code": 200,
+                        "duration_ms": 47771.432,
+                        "prompt": "2+3=",
+                        "expected": ["5"],
+                        "content": " Marvel",
+                        "content_excerpt": " Marvel",
+                        "passed": False,
+                    },
+                },
+                "diagnostics": {
+                    "runtime_freshness": {
+                        "summary": "fail",
+                        "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                        "observed_executor_markers": [],
+                        "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
+                        "observed_icd_markers": [],
+                    }
+                },
+            },
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 22, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "llama-completion-wrong-output")
+        self.assertEqual(report["responsibility_boundary"], "gpu-correctness")
+        self.assertEqual(report["service_readiness"]["completion_content_excerpt"], " Marvel")
+
     def test_memory_blocker_preserves_artifact_diagnostics(self):
         payload = {
             "error": "runtime_memory_pressure",

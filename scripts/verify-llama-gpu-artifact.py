@@ -921,6 +921,7 @@ def _service_completion_timeout(data: dict[str, Any]) -> dict[str, Any]:
     health_ok = summary.get("health") == "pass" or health.get("ok") is True
     models_ok = summary.get("models") == "pass" or models.get("ok") is True
     completion_ok = summary.get("completion") == "pass" or completion.get("ok") is True
+    completion_passed = completion.get("passed")
     error = str(completion.get("error") or "")
     timed_out = "timed out" in error.lower() or "timeouterror" in error.lower()
     disconnected = "remotedisconnected" in error.lower() or "closed connection" in error.lower()
@@ -941,6 +942,8 @@ def _service_completion_timeout(data: dict[str, Any]) -> dict[str, Any]:
         "health_ok": bool(health_ok),
         "models_ok": bool(models_ok),
         "completion_ok": bool(completion_ok),
+        "completion_passed": completion_passed if isinstance(completion_passed, bool) else None,
+        "completion_content_excerpt": completion.get("content_excerpt") or completion.get("content"),
         "health_status": health.get("status") or summary.get("health"),
         "health_duration_ms": health.get("duration_ms"),
         "health_error": health.get("error"),
@@ -1378,6 +1381,23 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             "runtime_env": nested(data, "gpu", "runtime_env") or {},
         }
 
+    if (
+        completion_readiness.get("health_ok") is True
+        and completion_readiness.get("models_ok") is True
+        and completion_readiness.get("completion_ok") is True
+        and completion_readiness.get("completion_passed") is False
+    ):
+        return _claim_base(
+            "llama-completion-wrong-output",
+            next_action="keep the current image/model/prompt fixed and inspect GPU numeric/layout/readback evidence; deterministic /completion returned an HTTP response but failed the required prompt check",
+            runtime_freshness=runtime_freshness,
+            runtime_env_manifest=runtime_env_manifest,
+            responsibility_boundary="gpu-correctness",
+        ) | {
+            "service_readiness": completion_readiness,
+            "runtime_env": nested(data, "gpu", "runtime_env") or {},
+        }
+
     if not _observed_executor_marker_ok(runtime_freshness):
         return _claim_base(
             "executor-marker-not-observed",
@@ -1702,7 +1722,12 @@ def main(argv: list[str]) -> int:
         return 0 if args.allow_memory_blocker else 20
     if classification == "readiness-blocked":
         return 21
-    if classification in {"llama-completion-timeout", "llama-completion-disconnected", "llama-completion-failed"}:
+    if classification in {
+        "llama-completion-timeout",
+        "llama-completion-disconnected",
+        "llama-completion-failed",
+        "llama-completion-wrong-output",
+    }:
         return 22
     if classification == "executor-marker-not-observed":
         return 34
