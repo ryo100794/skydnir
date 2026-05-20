@@ -28,7 +28,7 @@ Current TODO counters:
 
 ## Timeline
 
-### Now: 2026-05-19 to 2026-05-22
+### Now: 2026-05-20 to 2026-05-23
 
 Keep the UI compose path truthful and visible while closing regressions that block demos.
 
@@ -37,7 +37,7 @@ Keep the UI compose path truthful and visible while closing regressions that blo
 - [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from device discovery and...
 - [#6](https://github.com/ryo100794/pdocker-android/issues/6) Service truth same-container-ID device gate: the listener health and ID/label truth work are one gate. Probe default workspace...
 
-### Next: 2026-05-23 to 2026-05-29
+### Next: 2026-05-24 to 2026-05-30
 
 Turn the remaining high-value TODOs into repeatable device checks and public artifacts.
 
@@ -46,7 +46,7 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 - Mobile-resource residency constraints for MoE: keep a concise design note with device RAM/headroom, thermal, storage bandwidth, SAF/app-private backing, cache eviction, and correctness...
 - [#8](https://github.com/ryo100794/pdocker-android/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built...
 
-### Then: 2026-05-30 to 2026-06-09
+### Then: 2026-05-31 to 2026-06-10
 
 Use benchmark evidence to harden compatibility and publish tester-ready releases.
 
