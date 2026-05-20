@@ -269,6 +269,37 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertIn('"PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": os.environ.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0")', PDOCKERD.read_text())
 
+    def test_spirv_local_size_patch_uses_execution_mode_id_not_workgroup_builtin(self):
+        source = GPU_EXECUTOR.read_text()
+        self.assertIn("local_size_spec_id[3]", source)
+        self.assertIn("local_size_spec_id_valid[3]", source)
+        self.assertIn("op == 331 && word_count >= 6 && code[i + 2] == 38", source)
+        self.assertIn("op == 71 && word_count >= 4 && code[i + 2] == 1", source)
+        self.assertIn("summary->local_size_spec_id_valid[i]", source)
+        self.assertIn("summary->local_size_spec_id[i]", source)
+        self.assertIn('\\"spirv_local_size_spec_id\\":[%u,%u,%u]', source)
+        function = re.search(
+            r"static int patch_spirv_literal_local_size_from_spec\(.*?\n}\n\nstatic int rewrite_duplicate_descriptor_bindings",
+            source,
+            re.S,
+        )
+        self.assertIsNotNone(function)
+        body = function.group(0)
+        self.assertIn("summarize_spirv(code, bytes)", body)
+        self.assertIn("summary.local_size_spec_id_valid[dim]", body)
+        self.assertIn("summary.local_size_spec_id[dim]", body)
+        self.assertNotIn("code[i + 2] == 11 && code[i + 3] == 25", body)
+        self.assertNotIn("dim,", body)
+        self.assertIn("constant_id=1 for NUM_ROWS, not LocalSizeY", source)
+        summarize = re.search(
+            r"static SpirvTraceSummary summarize_spirv\(.*?\n}\n\nstatic void log_vulkan_feature_trace",
+            source,
+            re.S,
+        )
+        self.assertIsNotNone(summarize)
+        self.assertNotIn("calloc", summarize.group(0))
+        self.assertNotIn("free(", summarize.group(0))
+
     def test_vulkan_duplicate_binding_rewrite_avoids_passed_bindings(self):
         source = GPU_EXECUTOR.read_text()
         self.assertIn("const VulkanDispatchBinding *bindings", source)

@@ -1050,6 +1050,8 @@ typedef struct {
     uint32_t bound;
     uint32_t local_size[3];
     uint32_t local_size_id[3];
+    uint32_t local_size_spec_id[3];
+    uint8_t local_size_spec_id_valid[3];
     uint32_t capability_count;
     uint32_t capabilities[24];
     int requires_float16;
@@ -1102,6 +1104,8 @@ static SpirvTraceSummary summarize_spirv(const uint32_t *code, size_t bytes) {
     memset(&s, 0, sizeof(s));
     s.local_size[0] = s.local_size[1] = s.local_size[2] = 0;
     s.local_size_id[0] = s.local_size_id[1] = s.local_size_id[2] = 0;
+    s.local_size_spec_id[0] = s.local_size_spec_id[1] = s.local_size_spec_id[2] = 0;
+    s.local_size_spec_id_valid[0] = s.local_size_spec_id_valid[1] = s.local_size_spec_id_valid[2] = 0;
     s.hash = 1469598103934665603ull;
     if (!code) return s;
     const uint8_t *raw = (const uint8_t *)code;
@@ -1157,6 +1161,23 @@ static SpirvTraceSummary summarize_spirv(const uint32_t *code, size_t bytes) {
             s.local_size_id[2] = code[i + 5];
         }
         i += word_count;
+    }
+    if (s.local_size_id[0] || s.local_size_id[1] || s.local_size_id[2]) {
+        for (size_t i = 5; i < words;) {
+            uint32_t inst = code[i];
+            uint16_t word_count = (uint16_t)(inst >> 16);
+            uint16_t op = (uint16_t)(inst & 0xffffu);
+            if (word_count == 0 || i + word_count > words) break;
+            if (op == 71 && word_count >= 4 && code[i + 2] == 1) {
+                for (uint32_t dim = 0; dim < 3; ++dim) {
+                    if (s.local_size_id[dim] && code[i + 1] == s.local_size_id[dim]) {
+                        s.local_size_spec_id[dim] = code[i + 3];
+                        s.local_size_spec_id_valid[dim] = 1;
+                    }
+                }
+            }
+            i += word_count;
+        }
     }
     return s;
 }
@@ -1310,6 +1331,7 @@ static void log_spirv_trace(
     fprintf(stderr,
             "pdocker-gpu-executor: SPIR-V trace valid=%u truncated=%u hash=0x%016llx "
             "magic=0x%08x version=0x%08x bound=%u local_size=%u,%u,%u local_size_id=%u,%u,%u "
+            "local_size_spec_id=%u,%u,%u "
             "dispatch=%u,%u,%u push=%zu bindings=%zu caps=",
             summary->valid,
             summary->truncated,
@@ -1323,6 +1345,9 @@ static void log_spirv_trace(
             summary->local_size_id[0],
             summary->local_size_id[1],
             summary->local_size_id[2],
+            summary->local_size_spec_id_valid[0] ? summary->local_size_spec_id[0] : UINT32_MAX,
+            summary->local_size_spec_id_valid[1] ? summary->local_size_spec_id[1] : UINT32_MAX,
+            summary->local_size_spec_id_valid[2] ? summary->local_size_spec_id[2] : UINT32_MAX,
             gx,
             gy,
             gz,
@@ -1489,13 +1514,13 @@ static void resolve_spirv_local_size(
     if (!summary) return;
     for (uint32_t i = 0; i < 3; ++i) {
         uint64_t value = summary->local_size[i] ? summary->local_size[i] : 1;
-        if (summary->local_size_id[i]) {
+        if (summary->local_size_spec_id_valid[i]) {
             uint64_t spec_value = 0;
             if (specialization_value_for_id(specializations,
                                             specialization_count,
                                             specialization_data,
                                             specialization_data_size,
-                                            summary->local_size_id[i],
+                                            summary->local_size_spec_id[i],
                                             &spec_value)) {
                 value = spec_value;
             }
@@ -1587,6 +1612,7 @@ static void write_spirv_execution_report(
             "\"spirv_valid\":%s,\"spirv_truncated\":%u,"
             "\"spirv_local_size\":[%u,%u,%u],"
             "\"spirv_local_size_id\":[%u,%u,%u],"
+            "\"spirv_local_size_spec_id\":[%u,%u,%u],"
             "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
             "\"spirv_local_size_consistent\":%s,",
             (unsigned long long)summary->hash,
@@ -1598,6 +1624,9 @@ static void write_spirv_execution_report(
             summary->local_size_id[0],
             summary->local_size_id[1],
             summary->local_size_id[2],
+            summary->local_size_spec_id_valid[0] ? summary->local_size_spec_id[0] : UINT32_MAX,
+            summary->local_size_spec_id_valid[1] ? summary->local_size_spec_id[1] : UINT32_MAX,
+            summary->local_size_spec_id_valid[2] ? summary->local_size_spec_id[2] : UINT32_MAX,
             (unsigned long long)resolved_local_size[0],
             (unsigned long long)resolved_local_size[1],
             (unsigned long long)resolved_local_size[2],
@@ -3077,32 +3106,28 @@ static int patch_spirv_literal_local_size_from_spec(
         return 0;
     }
     const size_t words = bytes / sizeof(uint32_t);
-    int has_workgroup_size_builtin = 0;
-    for (size_t i = 5; i < words;) {
-        uint32_t inst = code[i];
-        uint16_t word_count = (uint16_t)(inst >> 16);
-        uint16_t op = (uint16_t)(inst & 0xffffu);
-        if (word_count == 0 || i + word_count > words) return 0;
-        if (op == 71 && word_count >= 4 && code[i + 2] == 11 && code[i + 3] == 25) {
-            has_workgroup_size_builtin = 1;
-            break;
-        }
-        i += word_count;
+    const SpirvTraceSummary summary = summarize_spirv(code, bytes);
+    if (!summary.valid || summary.truncated) return 0;
+    if (!summary.local_size_id[0] && !summary.local_size_id[1] &&
+        !summary.local_size_id[2]) {
+        return 0;
     }
-    if (!has_workgroup_size_builtin) return 0;
     uint64_t local_size[3] = {1, 1, 1};
     int found_local_size_spec = 0;
     for (uint32_t dim = 0; dim < 3; ++dim) {
-        uint64_t value = 1;
-        if (specialization_value_for_id(specializations,
-                                        specialization_count,
-                                        specialization_data,
-                                        specialization_data_size,
-                                        dim,
-                                        &value)) {
-            if (value == 0 || value > 1024) return 0;
-            local_size[dim] = value;
-            found_local_size_spec = 1;
+        local_size[dim] = summary.local_size[dim] ? summary.local_size[dim] : 1;
+        if (summary.local_size_spec_id_valid[dim]) {
+            uint64_t value = local_size[dim];
+            if (specialization_value_for_id(specializations,
+                                            specialization_count,
+                                            specialization_data,
+                                            specialization_data_size,
+                                            summary.local_size_spec_id[dim],
+                                            &value)) {
+                if (value == 0 || value > 1024) return 0;
+                local_size[dim] = value;
+                found_local_size_spec = 1;
+            }
         }
     }
     if (!found_local_size_spec) return 0;
@@ -8145,13 +8170,13 @@ static int run_vulkan_dispatch_fd(
         env_truthy("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", 1);
     if (legalize_workgroup_size_from_spec) {
         /*
-         * ggml's Vulkan shaders encode the workgroup size as a specialization
-         * constant decorated BuiltIn WorkgroupSize while leaving the literal
-         * OpExecutionMode LocalSize at 1,1,1.  Some Android drivers compile
-         * that module but execute only one local invocation, which is a silent
-         * math corruption path for Q6_K matvec.  This pass does not replace the
-         * kernel or alter descriptor/data bytes; it legalizes the execution
-         * mode to the same specialization values the application supplied.
+         * Some SPIR-V modules expose LocalSize through OpExecutionModeId while
+         * still carrying a literal OpExecutionMode LocalSize 1,1,1.  Legalize
+         * that literal only from the actual LocalSizeId operands and their
+         * OpDecorate SpecId mappings.  Do not infer dimensions from BuiltIn
+         * WorkgroupSize composites or from constant IDs 0/1/2: ggml Q6_K uses
+         * constant_id=1 for NUM_ROWS, not LocalSizeY.  This legalizes the execution
+         * mode without replacing kernels or changing descriptor/data bytes.
          */
         local_size_patched = patch_spirv_literal_local_size_from_spec(
             shader_code,
