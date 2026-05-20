@@ -17,9 +17,11 @@ run it, and where the latest result is stored.
 | [`EVIDENCE_INDEX.md`](EVIDENCE_INDEX.md) | How to interpret high-churn `latest` artifacts, non-promoting evidence, and canonical owners |
 | [`TEST_DESIGN_STANDARD.md`](TEST_DESIGN_STANDARD.md) | Minimum test design criteria and the automated gate that enforces them |
 | [`SCENARIOS.md`](SCENARIOS.md) | Feature-level scenario ledger and combined test runner |
+| [`COW_OVERLAY_BENCH_RECOVERY.md`](COW_OVERLAY_BENCH_RECOVERY.md) | Host-side COW/overlay benchmark and recovery gate |
 | [`COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md`](COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md) | Android device-gated COW/overlay daemon/helper kill-at-step evidence contract |
 | [`COPY_WILDCARD_REGRESSION.md`](COPY_WILDCARD_REGRESSION.md) | Dockerfile `COPY` wildcard regression procedure and evidence |
 | [`DEV_WORKSPACE_HEALTH_GATE.md`](DEV_WORKSPACE_HEALTH_GATE.md) | Default VS Code workspace compose/build/run health gate |
+| [`DIRECT_SYSCALL_PHASE2_COVERAGE.md`](DIRECT_SYSCALL_PHASE2_COVERAGE.md) | Phase-2 direct syscall coverage plan and remaining device-gated cases |
 | [`DOCKER_CP_E2E_DEVICE_GATE.md`](DOCKER_CP_E2E_DEVICE_GATE.md) | Device-gated `docker cp` end-to-end promotion procedure |
 | [`IMAGE_PULL_CRASH_SAFETY_DEVICE_GATE.md`](IMAGE_PULL_CRASH_SAFETY_DEVICE_GATE.md) | Device-gated interrupted image-pull crash-safety procedure |
 | [`NO_PROOT_RUNTIME_TRUTH_GATE.md`](NO_PROOT_RUNTIME_TRUTH_GATE.md) | No-PRoot/direct-runtime truth gate for fail-closed execution, health, and port evidence |
@@ -50,7 +52,10 @@ run it, and where the latest result is stored.
 | [`gpu-host-native-latest.md`](gpu-host-native-latest.md) | Latest Android native CPU/Vulkan executor baseline, independent of container state |
 | [`gpu-host-container-comparison-latest.md`](gpu-host-container-comparison-latest.md) | Latest host/container bridge overhead comparison |
 | [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md) | llama.cpp CPU/GPU benchmark history and current blockers |
+| [`LLAMA_GPU_CORRECTNESS_20260507.md`](LLAMA_GPU_CORRECTNESS_20260507.md) | 2026-05-07 llama GPU correctness investigation snapshot |
+| [`LLAMA_GPU_PERFORMANCE_20260507.md`](LLAMA_GPU_PERFORMANCE_20260507.md) | 2026-05-07 llama GPU performance investigation snapshot |
 | [`LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md`](LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md) | Negative examples for GPU/Q6/memory artifacts that cannot promote benchmark or correctness claims |
+| [`llama-gpu-bridge-root-cause-20260509.md`](llama-gpu-bridge-root-cause-20260509.md) | 2026-05-09 llama GPU bridge root-cause analysis snapshot |
 | `scripts/verify-archive-api-compat.py` | Host-only fail-closed Docker archive API / `docker cp` compatibility gate |
 | `scripts/test/smoke-vulkan-llama-init.sh` | Lightweight llama.cpp-oriented Vulkan ICD initialization smoke |
 | `scripts/test/smoke-vulkan-icd-bridge.sh` | Lightweight Vulkan ICD dispatch smoke through the pdocker GPU executor socket; planned-skip when the local executor Vulkan preflight is unavailable |
