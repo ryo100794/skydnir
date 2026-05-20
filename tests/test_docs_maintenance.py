@@ -318,6 +318,19 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
         with self.assertRaises(verifier.CheckFailure):
             verifier.check_latest_evidence_files_have_owner(self.tmp)
 
+    def test_latest_evidence_file_rejects_manifest_only_owner(self):
+        artifact = self.tmp / "docs" / "test" / "manifest-only-latest.log"
+        artifact.write_text("log\n", encoding="utf-8")
+        manifest = self.tmp / "tests" / "test_driver_manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            '{"outputs": ["docs/test/manifest-only-latest.log"]}\n',
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_latest_evidence_files_have_owner(self.tmp)
+
     def test_root_documentation_map_matches_docs_categories(self):
         verifier.check_root_documentation_map_matches_docs_categories(self.tmp)
 

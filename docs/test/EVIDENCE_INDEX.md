@@ -27,7 +27,7 @@ record to say that the artifact is promotable.
 | Memory / OOM / pager | `apk-memory-pager-managed-latest.json`, `apk-memory-pager-transparent-latest.json`, `oom-lmk-survival-latest.json` | [`APK_MEMORY_PAGER_PROBE.md`](APK_MEMORY_PAGER_PROBE.md), [`OOM_LMK_SURVIVAL_GATE.md`](OOM_LMK_SURVIVAL_GATE.md) |
 | Test-design quality | `test-design-criteria-latest.json`, `input-validation-latest.json`, `abnormal-events-latest.json`, `refactor-resilience-latest.json`, `stress-regression-latest.json`, `python-coverage-latest.json` | [`TEST_DESIGN_STANDARD.md`](TEST_DESIGN_STANDARD.md), [`SCENARIOS.md`](SCENARIOS.md), [`REFACTOR_RESILIENCE.md`](REFACTOR_RESILIENCE.md) |
 | Performance profiles | `syscall-usecase-profile-latest.json`, `syscall-usecase-profile-syscall-latest.json`, `path-micro-profile-latest.json`, `path-micro-profile-latest.md`, `path-micro-profile-cached-latest.json`, `path-micro-profile-cached-latest.md`, `gpu-bridge-bench-latest.json`, `gpu-host-native-latest.json`, `gpu-host-container-comparison-latest.json` | [`DIRECT_SYSCALL_COVERAGE.md`](DIRECT_SYSCALL_COVERAGE.md), [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md), [`STORAGE_METRICS.md`](STORAGE_METRICS.md) |
-| Native / release hygiene | `native-payloads-latest.json`, `android-blas-cmake-build-latest.json` | [`../release/RELEASE_READINESS.md`](../release/RELEASE_READINESS.md), [`../build/NATIVE_BUILD_ENVIRONMENT.md`](../build/NATIVE_BUILD_ENVIRONMENT.md) |
+| Native / release hygiene | `native-payloads-latest.json`, `android-blas-cmake-build-latest.json`, `android-blas-cmake-build-latest.log` | [`../release/RELEASE_READINESS.md`](../release/RELEASE_READINESS.md), [`../build/NATIVE_BUILD_ENVIRONMENT.md`](../build/NATIVE_BUILD_ENVIRONMENT.md) |
 
 ## Rules For New Evidence
 

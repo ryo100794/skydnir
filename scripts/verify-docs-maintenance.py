@@ -85,6 +85,11 @@ LATEST_EVIDENCE_OWNER_FILES = (
     "tests/abnormal_event_cases.json",
     "tests/input_grammar_coverage.json",
 )
+LATEST_EVIDENCE_DOC_OWNER_FILES = (
+    "docs/test/EVIDENCE_INDEX.md",
+    "docs/test/README.md",
+    "docs/test/CI_GATE_LEDGER.md",
+)
 
 
 class CheckFailure(Exception):
@@ -274,6 +279,16 @@ def latest_evidence_owner_tokens_from_docs(root: Path = ROOT) -> set[str]:
     return tokens
 
 
+def latest_evidence_doc_owner_tokens(root: Path = ROOT) -> set[str]:
+    tokens: set[str] = set()
+    for relative in LATEST_EVIDENCE_DOC_OWNER_FILES:
+        path = root / relative
+        if path.is_file():
+            for match in OWNER_TOKEN_RE.finditer(path.read_text(encoding="utf-8")):
+                tokens.add(match.group(0).strip("`'\".,;:)[]"))
+    return tokens
+
+
 def latest_evidence_owner_tokens(path: Path, docs_test: Path) -> set[str]:
     """Return evidence-owner tokens that may document a latest artifact."""
 
@@ -300,14 +315,19 @@ def check_latest_evidence_files_have_owner(root: Path = ROOT) -> None:
         return
     owner_tokens = latest_evidence_owner_tokens_from_docs(root)
     missing: list[str] = []
+    manifest_only: list[str] = []
+    doc_tokens = latest_evidence_doc_owner_tokens(root)
     for path in sorted(docs_test.rglob("*")):
         if not path.is_file():
             continue
         relative = path.relative_to(docs_test).as_posix()
         if "latest" not in relative:
             continue
-        if latest_evidence_owner_tokens(path, docs_test).isdisjoint(owner_tokens):
+        evidence_tokens = latest_evidence_owner_tokens(path, docs_test)
+        if evidence_tokens.isdisjoint(owner_tokens):
             missing.append(rel(path, root))
+        elif evidence_tokens.isdisjoint(doc_tokens):
+            manifest_only.append(rel(path, root))
     if missing:
         rendered = ", ".join(missing[:20])
         suffix = "" if len(missing) <= 20 else f", ... and {len(missing) - 20} more"
@@ -316,6 +336,15 @@ def check_latest_evidence_files_have_owner(root: Path = ROOT) -> None:
             "docs/test/** latest file, or its latest-artifact directory, from "
             "EVIDENCE_INDEX.md, docs/test/README.md, CI_GATE_LEDGER.md, or a "
             "registered test manifest: "
+            f"{rendered}{suffix}"
+        )
+    if manifest_only:
+        rendered = ", ".join(manifest_only[:20])
+        suffix = "" if len(manifest_only) <= 20 else f", ... and {len(manifest_only) - 20} more"
+        fail(
+            "latest evidence docs-facing ownership check failed; manifest-only "
+            "latest artifacts must also be indexed from EVIDENCE_INDEX.md, "
+            "docs/test/README.md, or CI_GATE_LEDGER.md: "
             f"{rendered}{suffix}"
         )
 

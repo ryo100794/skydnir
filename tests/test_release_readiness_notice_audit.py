@@ -164,6 +164,12 @@ class ReleaseReadinessWorkflowTriggerTest(unittest.TestCase):
             "metadata/fdroid/**",
             "THIRD_PARTY_NOTICES.md",
             "app/src/main/assets/oss-licenses/THIRD_PARTY_NOTICES.md",
+            "app/src/main/assets/pdockerd/**",
+            "app/src/main/jniLibs/**",
+            "app/src/compat/jniLibs/**",
+            "docker-proot-setup/bin/**",
+            "docker-proot-setup/docker-bin/**",
+            "docker-proot-setup/lib/**",
             "scripts/verify-release-readiness.py",
         }
 
