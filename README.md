@@ -215,6 +215,12 @@ Compatibility and compliance records are maintained under
 - [`docs/build/`](docs/build/): local build, signing, install, and APK gates
 - [`docs/test/`](docs/test/): repeatable test scenarios and audit outputs
 - [`docs/plan/`](docs/plan/): live status, TODOs, and steering records
+- [`docs/release/`](docs/release/): release gates, fixed build evidence, and
+  distribution process
+- [`docs/showcase/`](docs/showcase/): generated GitHub-facing dashboard,
+  roadmap timeline, and Wiki seed
+- [`docs/maintenance/`](docs/maintenance/): documentation inventory,
+  deduplication backlog, and cleanup sequencing
 
 Root-level standards:
 
