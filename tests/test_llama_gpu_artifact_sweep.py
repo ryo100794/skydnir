@@ -125,8 +125,8 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                             "diagnostics": {
                                 "runtime_freshness": {
                                     "summary": "pass",
-                                    "expected_executor_marker": "gpu-executor-enabled-features-20260518",
-                                    "observed_executor_markers": ["gpu-executor-enabled-features-20260518"],
+                                    "expected_executor_marker": "gpu-executor-local-size-specid-20260520",
+                                    "observed_executor_markers": ["gpu-executor-local-size-specid-20260520"],
                                     "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                                     "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                                     "executor_event_count": 1,
@@ -219,8 +219,8 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                             "diagnostics": {
                                 "runtime_freshness": {
                                     "summary": "pass",
-                                    "expected_executor_marker": "gpu-executor-enabled-features-20260518",
-                                    "observed_executor_markers": ["gpu-executor-enabled-features-20260518"],
+                                    "expected_executor_marker": "gpu-executor-local-size-specid-20260520",
+                                    "observed_executor_markers": ["gpu-executor-local-size-specid-20260520"],
                                     "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                                     "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                                     "executor_event_count": 1,

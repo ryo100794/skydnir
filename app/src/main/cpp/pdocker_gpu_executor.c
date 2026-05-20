@@ -963,7 +963,7 @@ typedef struct {
 
 static VulkanRuntime g_vulkan_runtime;
 
-#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-enabled-features-20260518"
+#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-local-size-specid-20260520"
 
 static uint32_t choose_vulkan_instance_api_version(void) {
     uint32_t supported = VK_API_VERSION_1_0;

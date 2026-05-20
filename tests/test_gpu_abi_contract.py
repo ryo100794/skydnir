@@ -1140,8 +1140,8 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-enabled-features-20260518",
-                        "observed_executor_markers": ["gpu-executor-enabled-features-20260518"],
+                        "expected_executor_marker": "gpu-executor-local-size-specid-20260520",
+                        "observed_executor_markers": ["gpu-executor-local-size-specid-20260520"],
                     },
                     "config_propagation": {
                         "summary": "fail",
@@ -1253,7 +1253,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-enabled-features-20260518",
+                        "expected_executor_marker": "gpu-executor-local-size-specid-20260520",
                         "observed_executor_markers": [],
                     },
                 },
@@ -1295,7 +1295,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-enabled-features-20260518",
+                        "expected_executor_marker": "gpu-executor-local-size-specid-20260520",
                         "observed_executor_markers": [],
                     },
                 },
@@ -1318,8 +1318,8 @@ class GpuAbiContractTest(unittest.TestCase):
                     "blocker_detail": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-enabled-features-20260518",
-                        "observed_executor_markers": ["gpu-executor-enabled-features-20260518"],
+                        "expected_executor_marker": "gpu-executor-local-size-specid-20260520",
+                        "observed_executor_markers": ["gpu-executor-local-size-specid-20260520"],
                     },
                     "config_propagation": {"summary": "pass", "checks": []},
                 },
@@ -1364,7 +1364,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "enabled_ext_8bit_storage",
             "enabled_ext_shader_float16_int8",
             "enabled_ext_storage_buffer_storage_class",
-            "#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER \"gpu-executor-enabled-features-20260518\"",
+            "#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER \"gpu-executor-local-size-specid-20260520\"",
         ]:
             self.assertIn(marker, source)
         failure_body = source.split("if (ret != 0) {", 1)[1].split("if (fence) vkDestroyFence", 1)[0]
