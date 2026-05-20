@@ -2579,6 +2579,27 @@ service_completion_wrong_output = (
     and completion_ready
     and service_completion.get("passed") is False
 )
+service_prompt_sanity = {
+    "summary": (
+        "fail"
+        if service_completion_wrong_output
+        else "pass"
+        if bool(int(gpu_served_s)) and health_ready and models_ready and completion_ready
+        else "not-run"
+    ),
+    "health_ready": health_ready,
+    "models_ready": models_ready,
+    "completion_ready": completion_ready,
+    "completion_passed": (
+        service_completion.get("passed")
+        if isinstance(service_completion.get("passed"), bool)
+        else None
+    ),
+    "prompt": service_completion.get("prompt"),
+    "expected": service_completion.get("expected"),
+    "content_excerpt": service_completion.get("content_excerpt") or service_completion.get("content"),
+    "duration_ms": service_completion.get("duration_ms"),
+}
 if evidence["buffer_range_assert_blocker"]:
     blocker_class = "vulkan_buffer_range_accounting"
     blocker_detail = "scheduler warmup hit ggml_backend_buffer_get_alloc_size"
@@ -3383,6 +3404,16 @@ diagnostic_bisection = {
             "routes": {"pass": "performance_only", "fail": "token_probability_boundary"},
         },
         {
+            "id": "service_prompt_sanity",
+            "question": "Does the forced Vulkan service return the required deterministic API prompt before any deeper oracle evidence is considered?",
+            "state": service_prompt_sanity["summary"],
+            "routes": {
+                "pass": "gpu_server_output",
+                "fail": "numeric_layout_or_readback",
+                "not-run": "collect_service_boundary_evidence",
+            },
+        },
+        {
             "id": "token_probability_boundary",
             "question": "Do CPU and GPU agree on selected/top token probabilities before sampling policy can hide the error?",
             "state": "pass" if differential_probabilities.get("summary") == "pass" else "fail" if differential_probabilities.get("summary") == "fail" else "not-run",
@@ -3452,6 +3483,8 @@ diagnostic_bisection = {
         if finite_f32_sample_count and gpu_correctness_summary == "fail"
         else
         "numeric_layout_or_readback"
+        if service_prompt_sanity["summary"] == "fail"
+        else "numeric_layout_or_readback"
         if finite_f32_sample_count and differential_probabilities.get("summary") == "fail"
         else "icd_or_executor_submit"
         if generic_spirv_attempted and not valid_spirv_events
@@ -3475,6 +3508,7 @@ diagnostic_bisection = {
         "binding_count": final_projection_candidate.get("bindings"),
     } if final_projection_candidate else {},
     "q6_workgroup_diagnostics": q6_workgroup_diagnostics,
+    "service_prompt_sanity": service_prompt_sanity,
 }
 failure_axes = {
     "advertised_limits": {
@@ -3719,6 +3753,7 @@ result = {
             "runtime_freshness": runtime_freshness,
             "config_propagation": config_propagation,
             "api_understanding": api_understanding,
+            "service_prompt_sanity": service_prompt_sanity,
             "diagnostic_bisection": diagnostic_bisection,
             "q6_workgroup_diagnostics": q6_workgroup_diagnostics,
         },

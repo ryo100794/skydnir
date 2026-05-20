@@ -128,8 +128,11 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         compare = COMPARE.read_text(encoding="utf-8")
 
         self.assertIn("service_completion_wrong_output", compare)
+        self.assertIn("service_prompt_sanity", compare)
         self.assertIn('blocker_class = "llama_completion_wrong_output"', compare)
         self.assertIn("deterministic /completion returned", compare)
+        self.assertIn('"id": "service_prompt_sanity"', compare)
+        self.assertIn('"service_prompt_sanity": service_prompt_sanity', compare)
         self.assertLess(
             compare.index('blocker_class = "llama_completion_wrong_output"'),
             compare.index('blocker_class = "runtime_freshness_mismatch"'),
