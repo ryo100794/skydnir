@@ -185,12 +185,19 @@ def validate_artifact_path(path: Path) -> None:
 def check_current_artifact_is_non_promoting(path: Path) -> None:
     data = read_json(path)
     status = data.get("status")
+    promotes = (
+        data.get("stable_checkpoint_eligible", False) is True
+        or data.get("promotes_app_virtual_memory", False) is True
+        or data.get("promotes_memory_pager", False) is True
+    )
+    # Device PoCs may now pass their narrow managed/transparent probe.  A pass
+    # only proves that bounded test case, not product-wide transparent memory
+    # expansion.  Promotion still requires a separate feasibility artifact with
+    # the full syscall/fallback capability evidence validated above.
     require(
-        f"{path.relative_to(ROOT)} is non-promoting planned-gap/dry-run evidence",
-        status in NON_PROMOTING_STATUSES
-        and data.get("stable_checkpoint_eligible", False) is not True
-        and data.get("promotes_app_virtual_memory", False) is not True
-        and data.get("promotes_memory_pager", False) is not True,
+        f"{path.relative_to(ROOT)} is PoC evidence and does not promote app virtual memory",
+        status in (NON_PROMOTING_STATUSES | PASS_STATUSES)
+        and not promotes,
     )
 
 

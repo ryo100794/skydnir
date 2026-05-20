@@ -391,19 +391,27 @@ evidence proves the real behavior or the limitation remains visible.
   the `pdocker-llama-correctness` result. Benchmark claims are blocked when the
   correctness report fails or is missing.
 - [next] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
-  MoE-aware GPU residency layer research and design: after the dense llama GPU
-  bridge is correct, evaluate a pdocker-owned residency layer for MoE models
-  without modifying llama.cpp, Dockerfiles, models, or prompts.  Prior art to
-  track: EdgeMoE external-storage expert loading, Cache-Conditional Experts
-  mobile routing/cache locality, MoE-Infinity activation-aware expert caching
-  and prefetch, HOBBIT mixed-precision expert offload, and llama.cpp/ik_llama
-  `--cpu-moe` / `--n-cpu-moe` / tensor override workflows.  pdocker-specific
-  goal: observe expert-like tensor/buffer access through the GPU bridge,
-  maintain hot expert buffers in a GPU-resident cache, back cold experts with
-  app-private mmap/virtual-memory storage or SAF exchange storage when
-  explicitly configured, expose cache hit/page-in/page-out/transfer metrics in
-  the UI, and fail closed rather than claiming acceleration when correctness or
-  residency evidence is missing.
+  MoE-aware out-of-core LLM execution and GPU residency layer: start this work
+  in parallel with dense llama GPU correctness instead of waiting for the final
+  10x path.  The first target is running a model larger than physical RAM by
+  keeping GGUF/model tensors file-backed, indexing tensor/expert ranges,
+  paging only hot expert-like ranges into app-private managed memory, and
+  retaining hot GPU buffers across token steps.  Preserve the base policy:
+  do not modify llama.cpp, Dockerfiles, models, or prompts for the default
+  compatibility path.  Prior art to track: EdgeMoE external-storage expert
+  loading, Cache-Conditional Experts mobile routing/cache locality,
+  MoE-Infinity activation-aware expert caching and prefetch, HOBBIT
+  mixed-precision expert offload, and llama.cpp/ik_llama `--cpu-moe` /
+  `--n-cpu-moe` / tensor override workflows.  pdocker-specific implementation
+  slices: (1) GGUF tensor/expert range index, (2) access telemetry that maps
+  page faults or GPU buffer dispatches back to model ranges, (3) hot/cold
+  expert cache with app-private backing and optional SAF exchange storage,
+  (4) GPU resident expert cache with correctness-first fallback, (5) UI
+  metrics for model size, resident RAM, GPU resident bytes, page-in/page-out,
+  expert/cache hit rate, transfer stall time, and tokens/sec.  Acceptance:
+  first prove CPU out-of-core correctness against an in-memory/small fixture,
+  then prove GPU-resident expert reuse improves latency; all non-green runs
+  remain non-promoting diagnostics.
 - [next] Mobile-resource residency constraints for MoE: keep a concise design
   note with device RAM/headroom, thermal, storage bandwidth, SAF/app-private
   backing, cache eviction, and correctness evidence requirements before any
@@ -882,6 +890,21 @@ implementation change plus a focused verification artifact.
   mmap/userfault capability lives in issue
   [#13](https://github.com/ryo100794/pdocker-android/issues/13) and the memory
   diagnostics gates; this row is only the ownership/status pointer.
+  Task H virtual memory feasibility gate is explicitly
+  planned-gap/non-promoting until connected-device evidence proves every
+  required kernel/userspace primitive: mmap fixed mapping,
+  mprotect on exact managed pages, SIGSEGV handler or userfaultfd fault
+  delivery, file-backed spill and restore, and safe fallback on unsupported Android kernels.
+  No native pager code is promoted by this gate; it only
+  prevents PoC, dry-run, or failed artifacts from being mistaken for a
+  transparent memory-expansion feature.
+  General application memory expansion remains in scope: normal glibc
+  processes should eventually be able to opt into transparent large anonymous
+  mmap management, fail-closed ENOMEM behavior for unsupported mappings,
+  bounded dirty page eviction, and UI-visible page-fault/page-in/page-out
+  telemetry.  This must not change ordinary Docker/Compose semantics unless a
+  project, service label, or environment variable explicitly enables
+  large-workload memory management.
 - [next] Revisit Dockerfile build memory pressure without changing upstream
   Dockerfiles. The managed-region pager remains explicit and opt-in; ordinary
   toolchain heap allocations such as `cc1plus` are not yet under pdocker memory

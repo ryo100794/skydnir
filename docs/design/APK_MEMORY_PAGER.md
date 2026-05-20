@@ -617,6 +617,40 @@ does not own ahead of time, so the managed pager cannot safely reclaim those
 regions transparently. Build-time memory control must stay outside the
 managed-region pager contract unless a process explicitly opts in.
 
+## MoE Out-of-Core Model Contract
+
+Running MoE LLMs larger than physical RAM is an explicit product goal for the
+memory-pager line. The intended fast path is not global Android swap. It is a
+model-aware residency layer that keeps cold model/expert data file-backed and
+loads only hot ranges into RAM or Android GPU resources.
+
+The first implementation must preserve Docker/llama.cpp compatibility:
+
+1. Do not modify llama.cpp, the model, the prompt, or library Dockerfiles for
+   the default path.
+2. Keep GGUF files mmap-friendly and avoid copying a whole model into an
+   anonymous buffer.
+3. Build a pdocker-owned GGUF tensor range index that records tensor names,
+   offsets, sizes, quantization metadata, and expert-like grouping when it can
+   be inferred from names or metadata.
+4. Map page faults, file reads, and GPU bridge dispatch buffers back to those
+   model ranges so pdocker can report which tensor/expert ranges are hot.
+5. Cache hot ranges in app-private managed memory and, after GPU correctness is
+   green, in reusable GPU resident buffers.
+6. Use SAF/Documents storage only when the project explicitly configures it for
+   model exchange or cold backing. Internal app-private storage remains the
+   default for pager metadata and performance-sensitive backing.
+7. Fail closed: if the range index, residency evidence, or correctness check is
+   missing, the run is diagnostic and must not claim out-of-core or GPU
+   acceleration.
+
+General application memory expansion remains a sibling feature, not a shortcut
+around the MoE contract. Ordinary glibc processes may opt into large anonymous
+mapping management, but unsupported file-backed mappings, executable mappings,
+fixed-address mappings, partial unmaps, or uncertain fault semantics must
+pass through or fail with structured diagnostics instead of pretending that
+pdocker expanded memory safely.
+
 ## GPU Bridge Virtual Memory Contract
 
 llama.cpp reads GGUF model files with mmap by default. The pdocker llama
