@@ -9,6 +9,9 @@ storage accounting contract separate from broad compatibility and UI checks, so
 the expectations can run quickly from JSON and then be repeated on an Android
 device when storage behavior changes.
 
+Storage artifact ownership and retention are indexed in
+[`STORAGE_EVIDENCE_INDEX.md`](STORAGE_EVIDENCE_INDEX.md).
+
 ## Fast Fixture Check
 
 Run the offline fixture validator from the repository root:

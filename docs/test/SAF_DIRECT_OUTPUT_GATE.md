@@ -11,6 +11,9 @@ This SAF direct-output gate is evidence-first: it must prove the selected
 Documents backend received the bytes directly, or it must record a non-passing
 fallback reason.
 
+Storage artifact ownership and retention are indexed in
+[`STORAGE_EVIDENCE_INDEX.md`](STORAGE_EVIDENCE_INDEX.md).
+
 ## Driver
 
 Run:

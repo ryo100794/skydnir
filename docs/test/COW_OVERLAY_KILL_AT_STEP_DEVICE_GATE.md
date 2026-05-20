@@ -13,6 +13,9 @@ This gate is the external Android counterpart to the host-local
 HTTP acknowledgement, shell exit zero, or synthetic JSON.  A passing artifact
 must show that the harness:
 
+Storage artifact ownership and retention are indexed in
+[`STORAGE_EVIDENCE_INDEX.md`](STORAGE_EVIDENCE_INDEX.md).
+
 1. reaches a deterministic mutation checkpoint inside the APK/daemon/helper;
 2. records the operation id, process target, pid, and pre-kill state;
 3. kills that exact daemon/helper process at the checkpoint;

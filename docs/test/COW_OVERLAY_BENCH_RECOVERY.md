@@ -5,6 +5,9 @@ Snapshot date: 2026-05-15.
 This gate covers the materialized-rootfs `libcow` fallback.  It is deliberately
 separate from SAF direct mediator work and from GPU work.
 
+Storage artifact ownership and retention are indexed in
+[`STORAGE_EVIDENCE_INDEX.md`](STORAGE_EVIDENCE_INDEX.md).
+
 ## Scope
 
 The local gate records two JSON artifacts:

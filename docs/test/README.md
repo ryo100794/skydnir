@@ -19,6 +19,7 @@ run it, and where the latest result is stored.
 | [`SCENARIOS.md`](SCENARIOS.md) | Feature-level scenario ledger and combined test runner |
 | [`COW_OVERLAY_BENCH_RECOVERY.md`](COW_OVERLAY_BENCH_RECOVERY.md) | Host-side COW/overlay benchmark and recovery gate |
 | [`COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md`](COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md) | Android device-gated COW/overlay daemon/helper kill-at-step evidence contract |
+| [`STORAGE_EVIDENCE_INDEX.md`](STORAGE_EVIDENCE_INDEX.md) | Storage/COW/SAF/archive artifact ownership and retention index before evidence moves |
 | [`COPY_WILDCARD_REGRESSION.md`](COPY_WILDCARD_REGRESSION.md) | Dockerfile `COPY` wildcard regression procedure and evidence |
 | [`DEV_WORKSPACE_HEALTH_GATE.md`](DEV_WORKSPACE_HEALTH_GATE.md) | Default VS Code workspace compose/build/run health gate |
 | [`DIRECT_SYSCALL_PHASE2_COVERAGE.md`](DIRECT_SYSCALL_PHASE2_COVERAGE.md) | Phase-2 direct syscall coverage plan and remaining device-gated cases |
@@ -92,6 +93,8 @@ run it, and where the latest result is stored.
 - Use [`EVIDENCE_INDEX.md`](EVIDENCE_INDEX.md) to interpret `latest` artifacts
   and to decide whether a host-only, planned-gap, historical, or device-gated
   record can promote anything.
+- Use [`STORAGE_EVIDENCE_INDEX.md`](STORAGE_EVIDENCE_INDEX.md) before pruning,
+  moving, or reclassifying storage/COW/SAF/archive evidence artifacts.
 - Use [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md) as the human-readable
   benchmark history, with JSON files kept as machine-readable artifacts.
 - Use [`LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`](LLAMA_GPU_DEVICE_RUNBOOK_20260513.md)
