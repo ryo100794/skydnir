@@ -27,7 +27,7 @@ Every inventory entry now also carries a `migration` object with a proposed dest
 | `build-developer` | 9 | Build, setup, fetch, or developer environment helper. |
 | `test-verification` | 76 | Test, smoke, benchmark, contract, or device verification helper. |
 | `generated-maintenance` | 3 | Generated-doc/evidence maintenance or manifest data. |
-| `obsolete-suspect` | 3 | Unreferenced or weakly referenced candidate; not deleted without audit. |
+| `obsolete-suspect` | 2 | Unreferenced or weakly referenced candidate; not deleted without audit. |
 
 ## Move Candidate Targets
 
@@ -200,7 +200,6 @@ remain gitignored and intentionally absent from the inventory.
 | Path | Stability | Reference scan | Replacement command | Decision |
 |---|---|---|---|---|
 | `scripts/android-terminal-it-repro.sh` | `legacy-audit` | No runtime callers found outside inventory/README/verifier allowlist and the script itself; pycache-only hits ignored. | `python3 scripts/pdocker-test-driver.py --lane android-terminal-exec-it` | Keep for now; do not delete until paired UI self-test and Engine exec-input JSONL artifacts fully replace the ad-hoc repro. |
-| `scripts/verify-llama-startup-logging.py` | `legacy-audit` | No active caller found; llama startup contract is covered by `scripts/verify-project-library.py` static checks and `tests/test_gpu_abi_contract.py` markers. | `python3 scripts/verify-project-library.py` | Keep for now; deletion is acceptable only after its early-tee/startup-json assertions are represented in maintained tests. |
 | `scripts/wrap-ndk-box64.sh` | `legacy-audit` | No active caller found; the standard native helper path is `scripts/build-native-android-ndk.sh`, and the supported aarch64-host fallback is glibc host-clang mode rather than box64-mutated NDK tools. | `bash scripts/build-native-android-ndk.sh` | Keep for now; deletion is acceptable after confirming no supported aarch64-host build path depends on mutating the NDK with box64 shims. |
 
 ## Cleanup Plan

@@ -154,6 +154,7 @@ run python3 -m unittest \
   tests.test_android_storage_metrics_sequence \
   tests.test_saf_direct_output_contract \
   tests.storage_metrics.test_verify_storage_metrics \
+  tests.test_llama_startup_logging_contract \
   tests.test_llama_gpu_env_parity \
   tests.test_llama_gpu_readiness_contract \
   tests.test_llama_gpu_artifact_verifier \

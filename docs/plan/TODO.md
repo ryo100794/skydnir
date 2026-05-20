@@ -504,10 +504,13 @@ evidence proves the real behavior or the limitation remains visible.
   generated/maintenance, and obsolete-suspect buckets. Future moves must keep
   top-level compatibility wrappers until references migrate. The 2026-05-18
   focused audit found no active callers for `scripts/android-terminal-it-repro.sh`,
-  `scripts/verify-llama-startup-logging.py`, or `scripts/wrap-ndk-box64.sh`;
-  each remains retained as `obsolete-suspect` with a replacement command and
-  explicit deletion precondition in the inventory/README rather than being
-  removed in this cleanup slice.
+  the former `scripts/verify-llama-startup-logging.py`, or
+  `scripts/wrap-ndk-box64.sh`. The llama startup helper was later retired after
+  `tests.test_llama_startup_logging_contract` took over its early-tee,
+  startup-json, and KV-offload guard assertions. The two remaining scripts stay
+  retained as `obsolete-suspect` with replacement commands and explicit deletion
+  preconditions in the inventory/README rather than being removed in a broad
+  cleanup slice.
 - [done] F-Droid/reproducible-build readiness is captured in
   `docs/release/FDROID_RELEASE_PROCESS.md`, including the distinction between
   user-directed container/image/package downloads and hidden APK self-extension.

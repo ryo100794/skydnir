@@ -54,17 +54,16 @@ ALLOWED_MIGRATION_ACTIONS = {
 }
 KNOWN_OBSOLETE_SUSPECTS = {
     "scripts/android-terminal-it-repro.sh",
-    "scripts/verify-llama-startup-logging.py",
     "scripts/wrap-ndk-box64.sh",
 }
-EXPECTED_TOP_LEVEL_SCRIPT_COUNT = 92
+EXPECTED_TOP_LEVEL_SCRIPT_COUNT = 91
 EXPECTED_SUBTREE_ENTRY_COUNT = 4
 EXPECTED_CATEGORY_COUNTS = {
     "runtime-package-needed": 1,
     "build-developer": 9,
     "test-verification": 76,
     "generated-maintenance": 3,
-    "obsolete-suspect": 3,
+    "obsolete-suspect": 2,
 }
 
 REFERENCE_SCAN_PREFIXES = (

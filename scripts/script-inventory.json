@@ -958,25 +958,6 @@
       }
     },
     {
-      "path": "scripts/verify-llama-startup-logging.py",
-      "category": "obsolete-suspect",
-      "stability": "legacy-audit",
-      "role": "Audited obsolete candidate; retained temporarily with replacement command and deletion precondition recorded.",
-      "audit": {
-        "date": "2026-05-18",
-        "reference_scan": "rg found no active caller; llama startup contract is now covered by verify-project-library.py static checks and test_gpu_abi_contract markers.",
-        "replacement_command": "python3 scripts/verify-project-library.py",
-        "decision": "keep as obsolete-suspect for now; future deletion is acceptable only after its early-tee/startup-json assertions are represented in maintained tests."
-      },
-      "migration": {
-        "target_dir": "scripts/obsolete-candidates",
-        "candidate_path": "scripts/obsolete-candidates/verify-llama-startup-logging.py",
-        "phase": "audit-before-move-or-delete",
-        "action": "audit-delete-or-archive",
-        "compat_wrapper": "no compatibility wrapper until audit chooses archive-over-delete; prefer deletion over moved wrapper when safe"
-      }
-    },
-    {
       "path": "scripts/verify-memory-pager-contract.py",
       "category": "test-verification",
       "stability": "test-helper",
