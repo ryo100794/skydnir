@@ -85,6 +85,11 @@ class EngineBaseRouteContractTest(unittest.TestCase):
         self.assertIn('path == "/version" and method == "GET"', self.pdockerd)
         self.assertIn('path == "/info" and method == "GET"', self.pdockerd)
 
+    def test_network_dynamic_routes_fail_closed_for_unsupported_post(self):
+        self.assertIn('if sub and method != "POST":', self.pdockerd)
+        self.assertIn('unsupported network route: {path}', self.pdockerd)
+        self.assertNotIn('if method == "POST":\n                self.send_response(200); self.end_headers()', self.pdockerd)
+
 
 if __name__ == "__main__":
     unittest.main()

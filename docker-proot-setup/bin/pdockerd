@@ -8817,6 +8817,9 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             net_name = m.group(1)
             sub = m.group(2)
             np_ = os.path.join(NETWORKS_DIR, net_name)
+            if sub and method != "POST":
+                self._send_json(404, {"message": f"unsupported network route: {path}"})
+                return
             if method == "GET":
                 # Built-in 'bridge' is always present; user networks must
                 # exist on disk. Returning 200 for missing networks fools
@@ -8869,7 +8872,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 self.send_response(200); self.end_headers()
                 return
             if method == "POST":
-                self.send_response(200); self.end_headers()
+                self._send_json(404, {"message": f"unsupported network route: {path}"})
                 return
             return
 

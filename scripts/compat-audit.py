@@ -158,12 +158,18 @@ def check_protocol_smoke() -> list[Check]:
 
         probes = [
             ("GET", "/_ping", 200),
+            ("HEAD", "/_ping", 200),
             ("GET", "/version", 200),
             ("GET", "/info", 200),
+            ("POST", "/version", 404),
+            ("POST", "/info", 404),
             ("GET", "/containers/json?all=1", 200),
             ("GET", "/images/json", 200),
             ("GET", "/volumes", 200),
             ("GET", "/networks", 200),
+            ("POST", "/networks/bridge", 404),
+            ("GET", "/networks/bridge/connect", 404),
+            ("POST", "/networks/bridge/unsupported", 404),
             ("GET", "/system/host", 200),
             ("GET", "/events?since=0&until=0", 200),
             ("GET", "/v1.43/version", 200),
