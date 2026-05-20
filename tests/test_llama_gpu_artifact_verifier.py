@@ -202,6 +202,10 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                 check=False,
             )
 
+    def assert_claims_blocked(self, report):
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
     def test_memory_blocker_is_structured_and_optionally_allowed(self):
         payload = {
             "error": "insufficient_memory",
@@ -291,8 +295,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             "gpu.diagnostics.api_executor_reconciliation",
             report["api_executor_reconciliation"]["missing"],
         )
-        self.assertFalse(report["correctness_claim_allowed"])
-        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assert_claims_blocked(report)
 
     def test_completion_wrong_output_with_passed_reconciliation_and_fresh_markers(self):
         payload = wrong_completion_payload(api_executor_reconciliation())
@@ -303,8 +306,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["responsibility_boundary"], "reconciled-gpu-correctness")
         self.assertEqual(report["service_readiness"]["completion_content_excerpt"], " Marvel")
         self.assertEqual(report["api_executor_reconciliation"]["summary"], "pass")
-        self.assertFalse(report["correctness_claim_allowed"])
-        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assert_claims_blocked(report)
 
     def test_completion_wrong_output_rejects_empty_reconciliation_pass(self):
         payload = wrong_completion_payload({"summary": "pass"})
@@ -313,8 +315,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["classification"], "api-executor-reconciliation-ambiguous")
         self.assertIn("lacks substantive", json.dumps(report["api_executor_reconciliation"]["ambiguous"]))
-        self.assertFalse(report["correctness_claim_allowed"])
-        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assert_claims_blocked(report)
 
     def test_completion_wrong_output_rejects_fnv_only_reconciliation_pass(self):
         payload = wrong_completion_payload(
@@ -335,8 +336,32 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["classification"], "api-executor-reconciliation-ambiguous")
         self.assertIn("diagnostic-only", json.dumps(report["api_executor_reconciliation"]["ambiguous"]))
-        self.assertFalse(report["correctness_claim_allowed"])
-        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assert_claims_blocked(report)
+
+    def test_completion_wrong_output_treats_producer_diagnostic_reconciliation_as_ambiguous(self):
+        payload = wrong_completion_payload(
+            {
+                "schema": "pdocker.llama.api-executor-reconciliation.v1",
+                "summary": "diagnostic",
+                "proof_strength": "diagnostic",
+                "hash_algorithm": "fnv1a64",
+                "canonical_raw_fields_present": False,
+                "dispatches": [
+                    {
+                        "dispatch_id": "1",
+                        "match_status": "diagnostic-match",
+                        "sender": {"spirv_hash": "0xaaaaaaaaaaaaaaaa"},
+                        "received": {"spirv_hash": "0xaaaaaaaaaaaaaaaa"},
+                    }
+                ],
+            }
+        )
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 45, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "api-executor-reconciliation-ambiguous")
+        self.assertIn("unrecognized summary", json.dumps(report["api_executor_reconciliation"]["ambiguous"]))
+        self.assert_claims_blocked(report)
 
     def test_completion_wrong_output_with_reconciliation_still_requires_fresh_executor_marker(self):
         payload = wrong_completion_payload(api_executor_reconciliation())
@@ -353,8 +378,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["classification"], "executor-marker-not-observed")
         self.assertEqual(report["observed_service_failure"], "llama-completion-wrong-output")
         self.assertEqual(report["api_executor_reconciliation"]["summary"], "pass")
-        self.assertFalse(report["correctness_claim_allowed"])
-        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assert_claims_blocked(report)
 
     def test_completion_wrong_output_mismatch_reconciliation_hash_blocks_classification(self):
         payload = wrong_completion_payload(

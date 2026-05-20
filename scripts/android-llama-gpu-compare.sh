@@ -2486,6 +2486,108 @@ api_understanding = {
     "effective_offset_mismatch_count": api_trace_effective_offset_mismatches,
     "binding_samples": api_trace_binding_samples,
 }
+
+
+def build_api_executor_reconciliation(events):
+    """Build typed non-promoting API/executor reconciliation evidence.
+
+    This object is intentionally diagnostic until the producer can attach a
+    collision-resistant canonical API-output-to-dispatch proof.  It still
+    prevents a worse failure mode: a bare `summary: pass` or an untyped FNV
+    blob cannot sneak through as correctness evidence.
+    """
+
+    records = []
+    duplicate_dispatch_ids = []
+    seen_dispatch_ids = set()
+    for event_index, event in enumerate(events):
+        if not isinstance(event, dict):
+            continue
+        reconciliation = event.get("reconciliation")
+        if not isinstance(reconciliation, dict):
+            continue
+        sender = reconciliation.get("sender") if isinstance(reconciliation.get("sender"), dict) else {}
+        received = reconciliation.get("received") if isinstance(reconciliation.get("received"), dict) else {}
+        matches = reconciliation.get("matches") if isinstance(reconciliation.get("matches"), dict) else {}
+        receive = reconciliation.get("receive") if isinstance(reconciliation.get("receive"), dict) else {}
+        dispatch_id = sender.get("dispatch_id") if sender.get("dispatch_id_present") is True else event.get("dispatch_id")
+        if dispatch_id in (None, ""):
+            dispatch_id = f"event-{event_index}"
+        dispatch_id = str(dispatch_id)
+        if dispatch_id in seen_dispatch_ids:
+            duplicate_dispatch_ids.append(dispatch_id)
+        seen_dispatch_ids.add(dispatch_id)
+        comparable = {
+            key: value
+            for key, value in matches.items()
+            if isinstance(value, bool)
+        }
+        if comparable and all(comparable.values()):
+            match_status = "diagnostic-match"
+        elif any(value is False for value in comparable.values()):
+            match_status = "mismatch"
+        else:
+            match_status = "diagnostic-unmatched"
+        records.append({
+            "event_index": event_index,
+            "dispatch_id": dispatch_id,
+            "match_status": match_status,
+            "hash_algorithm": "fnv1a64",
+            "proof_strength": "diagnostic",
+            "canonical_raw_fields_present": False,
+            "transport": {
+                "msg_trunc": receive.get("msg_trunc"),
+                "msg_ctrunc": receive.get("msg_ctrunc"),
+                "scm_rights_fd_count_copied": receive.get("scm_rights_fd_count_copied", receive.get("scm_rights_fd_count")),
+            },
+            "sender": {
+                "core_command_hash": sender.get("core_command_hash"),
+                "spirv_hash": sender.get("spirv_hash"),
+                "descriptor_hash": sender.get("descriptor_hash"),
+                "push_hash": sender.get("push_hash"),
+                "specialization_hash": sender.get("spec_hash"),
+                "dispatch_hash": sender.get("dispatch_hash"),
+            },
+            "received": {
+                "spirv_hash": received.get("spirv_hash"),
+                "descriptor_hash": received.get("descriptor_hash"),
+                "push_hash": received.get("push_hash"),
+                "specialization_hash": received.get("specialization_hash"),
+                "dispatch_hash": received.get("dispatch_hash"),
+            },
+            "matches": matches,
+        })
+    if not records:
+        return {
+            "schema": "pdocker.llama.api-executor-reconciliation.v1",
+            "summary": "missing",
+            "proof_strength": "none",
+            "hash_algorithm": "none",
+            "canonical_raw_fields_present": False,
+            "missing": ["executor reconciliation records"],
+            "dispatches": [],
+        }
+    if duplicate_dispatch_ids:
+        summary = "ambiguous"
+    elif any(record.get("match_status") == "mismatch" for record in records):
+        summary = "mismatch"
+    else:
+        summary = "diagnostic"
+    return {
+        "schema": "pdocker.llama.api-executor-reconciliation.v1",
+        "summary": summary,
+        "proof_strength": "diagnostic",
+        "hash_algorithm": "fnv1a64",
+        "canonical_raw_fields_present": False,
+        "record_count": len(records),
+        "duplicate_dispatch_ids": duplicate_dispatch_ids,
+        "dispatches": records[-16:],
+        "promotion_allowed": False,
+        "promotion_blocker": "FNV-1a transport correlation is diagnostic only; require SHA-256/full proof or canonical raw fields before correctness claims",
+    }
+
+
+api_executor_reconciliation = build_api_executor_reconciliation(executor_events)
 android_feature_trace = parse_android_feature_trace(log)
 spirv_traces = parse_spirv_traces(log)
 generic_spirv_attempted = (
@@ -3758,6 +3860,7 @@ result = {
             "spirv_hashes": spirv_hashes[-4:],
             "runtime_freshness": runtime_freshness,
             "config_propagation": config_propagation,
+            "api_executor_reconciliation": api_executor_reconciliation,
             "api_understanding": api_understanding,
             "service_prompt_sanity": service_prompt_sanity,
             "diagnostic_bisection": diagnostic_bisection,
