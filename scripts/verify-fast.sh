@@ -37,6 +37,7 @@ run python3 -m py_compile \
   scripts/verify-image-pull-crash-safety.py \
   scripts/verify-input-grammar-coverage.py \
   scripts/verify-input-validation.py \
+  scripts/verify-llama-gpu-artifact.py \
   scripts/verify-release-readiness.py \
   scripts/verify-stress-regression.py \
   scripts/verify-test-design-criteria.py \
@@ -45,6 +46,8 @@ run python3 -m py_compile \
   scripts/verify-memory-pager-design.py \
   scripts/verify-metadata-index.py \
   scripts/verify-native-payloads.py \
+  scripts/verify-no-proot-runtime-truth-artifact.py \
+  scripts/verify-oom-lmk-survival-gate.py \
   scripts/run_direct_syscall_scenarios.py \
   scripts/verify-project-library.py \
   scripts/verify-refactor-resilience.py \
@@ -61,6 +64,7 @@ run python3 -m py_compile \
   scripts/verify-terminal-exec-it-artifact.py \
   scripts/verify_terminal_editor_contracts.py \
   scripts/verify-cow-overlay-bench-recovery.py \
+  scripts/verify/runner/cow_overlay_kill_at_step_device.py \
   scripts/maintenance/summarize-llama-gpu-artifacts.py \
   scripts/update-showcase.py \
   docker-proot-setup/scripts/verify_runtime_contract.py
@@ -90,6 +94,7 @@ run python3 docker-proot-setup/scripts/verify_runtime_contract.py
 run python3 scripts/verify_direct_syscall_contracts.py
 run python3 scripts/verify-memory-pager-contract.py
 run python3 scripts/verify-memory-pager-design.py
+run python3 scripts/verify-oom-lmk-survival-gate.py
 run python3 scripts/verify-metadata-index.py
 run python3 -m unittest discover -s tests/metadata_index -p 'test_*.py'
 run python3 scripts/run_direct_syscall_scenarios.py --lane local
@@ -109,6 +114,9 @@ run python3 scripts/verify-archive-api-compat.py
 run python3 scripts/verify-build-context-tar-compat.py
 run python3 scripts/verify-image-pull-crash-safety.py
 run python3 scripts/verify-cow-overlay-bench-recovery.py --run-local
+run python3 scripts/verify/runner/cow_overlay_kill_at_step_device.py --validate-artifact docs/test/cow-overlay-kill-at-step-latest.json
+run python3 scripts/verify-llama-gpu-artifact.py docs/test/llama-gpu-workgroup3d-preflight-20260513.json --allow-memory-blocker
+run python3 scripts/verify-no-proot-runtime-truth-artifact.py docs/test/no-proot-runtime-truth-latest.json
 run python3 scripts/verify-project-library.py
 run python3 scripts/verify-storage-metrics.py
 run python3 scripts/verify-script-inventory.py
@@ -153,8 +161,13 @@ run python3 -m unittest \
   tests.test_dockerfile_run_changed_paths \
   tests.test_image_pull_crash_safety_verifier \
   tests.test_runtime_single_container_artifact_verifier \
+  tests.test_no_proot_runtime_truth_artifact_verifier \
   tests.test_android_storage_metrics_sequence \
+  tests.test_memory_pager_contract \
   tests.test_apk_memory_pager_contract \
+  tests.test_oom_lmk_survival_gate \
+  tests.test_media_bridge_contract \
+  tests.test_service_truth_artifact_contract \
   tests.test_saf_direct_output_contract \
   tests.storage_metrics.test_verify_storage_metrics \
   tests.test_llama_startup_logging_contract \
