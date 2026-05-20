@@ -81,6 +81,7 @@ run bash -n \
   scripts/test/smoke-opencl-bridge.sh \
   scripts/test/smoke-vulkan-llama-init.sh \
   scripts/test/verify-device-llama-template.sh \
+  scripts/verify/runner/cow-overlay-kill-at-step-device.sh \
   scripts/verify-native-rebuild-release.sh \
   scripts/verify-heavy.sh
 
@@ -160,10 +161,12 @@ run python3 -m unittest \
   tests.test_dev_workspace_compose_artifact_verifier \
   tests.test_dockerfile_run_changed_paths \
   tests.test_image_pull_crash_safety_verifier \
+  tests.test_cow_overlay_kill_at_step_device \
   tests.test_runtime_single_container_artifact_verifier \
   tests.test_no_proot_runtime_truth_artifact_verifier \
   tests.test_android_storage_metrics_sequence \
   tests.test_memory_pager_contract \
+  tests.test_memory_layer_ui_contract \
   tests.test_apk_memory_pager_contract \
   tests.test_oom_lmk_survival_gate \
   tests.test_media_bridge_contract \
@@ -171,6 +174,7 @@ run python3 -m unittest \
   tests.test_saf_direct_output_contract \
   tests.storage_metrics.test_verify_storage_metrics \
   tests.test_llama_startup_logging_contract \
+  tests.test_gpu_abi_contract \
   tests.test_llama_gpu_env_parity \
   tests.test_llama_gpu_readiness_contract \
   tests.test_llama_gpu_artifact_verifier \
