@@ -50,6 +50,16 @@ PDOCKER_FIELD_RE = re.compile(r"\bPdocker[A-Za-z0-9_]*\b")
 DISCOVERABILITY_OWNER_PATTERNS = {
     "docs/test/runs/*/summary.md": "docs/test/README.md",
 }
+LATEST_EVIDENCE_OWNER_FILES = (
+    "docs/test/EVIDENCE_INDEX.md",
+    "docs/test/README.md",
+    "docs/test/CI_GATE_LEDGER.md",
+    "tests/test_driver_manifest.json",
+    "tests/feature_scenarios.json",
+    "tests/stress_regression_cases.json",
+    "tests/abnormal_event_cases.json",
+    "tests/input_grammar_coverage.json",
+)
 
 
 class CheckFailure(Exception):
@@ -225,6 +235,39 @@ def check_doc_discoverability(root: Path = ROOT) -> None:
         fail(
             "docs discoverability check failed; add each durable Markdown file "
             "to its category README or DISCOVERABILITY_OWNER_PATTERNS: "
+            f"{rendered}{suffix}"
+        )
+
+
+def latest_evidence_owner_corpus(root: Path = ROOT) -> str:
+    parts: list[str] = []
+    for relative in LATEST_EVIDENCE_OWNER_FILES:
+        path = root / relative
+        if path.is_file():
+            parts.append(path.read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
+
+def check_latest_evidence_files_have_owner(root: Path = ROOT) -> None:
+    """Ensure committed docs/test/*latest* pointers have an owner reference."""
+
+    docs_test = root / "docs" / "test"
+    if not docs_test.is_dir():
+        return
+    corpus = latest_evidence_owner_corpus(root)
+    missing: list[str] = []
+    for path in sorted(docs_test.glob("*latest*")):
+        if path.is_dir():
+            continue
+        if path.name not in corpus:
+            missing.append(rel(path, root))
+    if missing:
+        rendered = ", ".join(missing[:20])
+        suffix = "" if len(missing) <= 20 else f", ... and {len(missing) - 20} more"
+        fail(
+            "latest evidence ownership check failed; link each committed "
+            "docs/test/*latest* file from EVIDENCE_INDEX.md, docs/test/README.md, "
+            "CI_GATE_LEDGER.md, or a registered test manifest: "
             f"{rendered}{suffix}"
         )
 
@@ -482,6 +525,7 @@ def run(root: Path = ROOT) -> None:
     check_backlog(root)
     check_links(root)
     check_doc_discoverability(root)
+    check_latest_evidence_files_have_owner(root)
     check_root_documentation_map_matches_docs_categories(root)
     check_historical_agent_assignments(root)
     check_todo_roadmap_source_quality(root)

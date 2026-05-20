@@ -234,6 +234,26 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
 
         verifier.check_doc_discoverability(self.tmp)
 
+    def test_latest_evidence_file_accepts_index_owner(self):
+        artifact = self.tmp / "docs" / "test" / "example-latest.json"
+        artifact.write_text("{}", encoding="utf-8")
+        evidence_index = self.tmp / "docs" / "test" / "EVIDENCE_INDEX.md"
+        evidence_index.write_text(
+            "| Family | Representative latest files | Canonical owner |\n"
+            "|---|---|---|\n"
+            "| Fixture | `example-latest.json` | [`README.md`](README.md) |\n",
+            encoding="utf-8",
+        )
+
+        verifier.check_latest_evidence_files_have_owner(self.tmp)
+
+    def test_latest_evidence_file_rejects_unowned_pointer(self):
+        artifact = self.tmp / "docs" / "test" / "unowned-latest.json"
+        artifact.write_text("{}", encoding="utf-8")
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_latest_evidence_files_have_owner(self.tmp)
+
     def test_root_documentation_map_matches_docs_categories(self):
         verifier.check_root_documentation_map_matches_docs_categories(self.tmp)
 
