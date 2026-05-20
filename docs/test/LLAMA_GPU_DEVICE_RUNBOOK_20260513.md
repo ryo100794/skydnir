@@ -125,7 +125,7 @@ artifact.
 ```bash
 cd /root/tl/pdocker-android
 python3 -m unittest tests.test_gpu_abi_contract
-bash scripts/build-native-termux.sh
+bash scripts/build-native-android-ndk.sh
 ./gradlew :app:assembleCompatDebug
 ANDROID_SERIAL=192.168.179.26:37683 \
   adb install -r app/build/outputs/apk/compat/debug/app-compat-debug.apk

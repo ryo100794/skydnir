@@ -154,7 +154,7 @@ aarch64-linux-gnu-gcc -O2 -Wall -Wextra -static \
   -o "$BIN" tools/pdocker_fileio_microbench.c
 
 echo "[pdocker file-io microbench] building direct executor"
-bash scripts/build-native-termux.sh >/dev/null
+bash scripts/build-native-android-ndk.sh >/dev/null
 cp app/src/main/jniLibs/arm64-v8a/libpdockerdirect.so "$DIRECT"
 
 "$ADB" push "$BIN" "/data/local/tmp/$(basename "$BIN")" >/dev/null

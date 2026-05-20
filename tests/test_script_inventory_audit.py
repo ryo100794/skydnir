@@ -164,7 +164,7 @@ class ScriptInventoryAuditTest(unittest.TestCase):
             {
                 "runtime-package-needed": 1,
                 "build-developer": 10,
-                "test-verification": 75,
+                "test-verification": 76,
                 "generated-maintenance": 3,
                 "obsolete-suspect": 3,
             }
@@ -192,7 +192,7 @@ class ScriptInventoryAuditTest(unittest.TestCase):
             doc.parent.mkdir(parents=True)
             doc.write_text(
                 "Runtime packaging | 1 top-level script\n"
-                "Build | 9 top-level scripts\n"
+                "Build | 8 top-level scripts\n"
                 "Test | 75 top-level scripts\n"
                 "Generated maintenance | 3 entries\n"
                 "Unused or legacy candidates | 1 tracked candidate\n"
@@ -218,8 +218,8 @@ class ScriptInventoryAuditTest(unittest.TestCase):
             doc.parent.mkdir(parents=True)
             doc.write_text(
                 "Runtime packaging | 1 top-level script\n"
-                "Build | 9 top-level scripts\n"
-                "Test | 76 top-level scripts\n"
+                "Build | 8 top-level scripts\n"
+                "Test | 77 top-level scripts\n"
                 "Generated maintenance | 3 entries\n"
                 "Unused or legacy candidates | 1 tracked candidate\n"
                 "stale-terminal-repro.sh\n",

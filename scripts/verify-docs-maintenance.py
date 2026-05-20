@@ -495,6 +495,32 @@ def iter_section_lines(text: str, title: str) -> list[tuple[int, str]]:
     return result
 
 
+
+def check_agent_compaction_protocol(root: Path = ROOT) -> None:
+    """Keep low-context handoff safeguards visible in the canonical agent guide."""
+
+    coordination = root / AGENT_COORDINATION
+    text = read_text(coordination, root)
+    required = {
+        "section": "## Compaction-Safe Handoff Protocol",
+        "stop": "Stop before opening a large new seam",
+        "summarize": "Summarize first",
+        "checkpoint": "Checkpoint deliberately",
+        "delegate": "Delegate instead of expanding context",
+        "budget": "### Low-Context Patch Budget Rule",
+        "no_large_patch": "No large new patch may start when context budget is low",
+        "artifacts": "### Concise Agent Artifact Reporting",
+        "changed_paths": "changed paths",
+        "validation": "validation commands",
+        "artifact_paths": "durable artifact paths",
+    }
+    missing = [name for name, token in required.items() if token not in text]
+    if missing:
+        fail(
+            f"{AGENT_COORDINATION} is missing compaction-safe handoff safeguard "
+            f"token(s): {', '.join(missing)}"
+        )
+
 def check_historical_agent_assignments(root: Path = ROOT) -> None:
     plan_dir = root / "docs" / "plan"
     if not plan_dir.is_dir():
@@ -662,6 +688,7 @@ def run(root: Path = ROOT) -> None:
     check_latest_evidence_files_have_owner(root)
     check_adboff_queue_completion_ledger(root)
     check_root_documentation_map_matches_docs_categories(root)
+    check_agent_compaction_protocol(root)
     check_historical_agent_assignments(root)
     check_agent_obsolete_suspect_count_language(root)
     check_todo_roadmap_source_quality(root)

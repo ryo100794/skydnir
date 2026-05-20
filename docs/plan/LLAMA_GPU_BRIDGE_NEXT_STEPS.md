@@ -178,6 +178,25 @@ after the compare wait window, but a `2+3=` completion probe still timed out.
 Treat this as runtime/startup latency plus the existing Q6_K correctness
 blocker, not as proof of correct or fast GPU inference.
 
+2026-05-20 llama call-site correlation: the current pre-Q6 pipeline failure
+`0xf3cd7d18f0276b42` was matched against upstream llama.cpp sources without
+changing llama.cpp.  It is `ggml-vulkan.cpp` creating
+`mul_mat_vec_q4_k_f32_f32` from `vulkan-shaders/mul_mat_vec_q4_k.comp` with
+`vk_mat_vec_push_constants`, five descriptor buffers
+`A/B/D/Fuse0/Fuse1`, and specialization constants
+`{ BLOCK_SIZE=32, NUM_ROWS=2, NUM_COLS=1/2 }`.  The shader deliberately
+declares three typed views of binding 0 for the same Q4_K block
+(`block_q4_K`, `block_q4_K_packed16`, `block_q4_K_packed32`); this is the
+llama.cpp Q4_K ABI, not a Q5/Q6 dispatch mix-up.  The pdocker-side
+diagnostic classifier now recognizes the original hash, the Float16-capability
+insertion hash `0x853c49b4900eed3c`, and the duplicate-descriptor-materialized
+hash `0x22ab0152b230e983` as Q4_K matvec variants.  `PDOCKER_GPU_Q4K_SAFE_KERNEL`
+remains an explicit diagnostic override and is available under strict
+passthrough for isolating driver compilation rejection from descriptor/call-site
+ABI correctness; it is not a benchmarkable product optimization.
+Fresh APK/device evidence for this lane must show executor marker
+`gpu-executor-llama-q4k-callsite-20260520`.
+
 Milestone compare with CPU baseline should be run only after a correctness
 blocker changes, not after every small diagnostic edit.
 

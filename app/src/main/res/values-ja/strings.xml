@@ -53,8 +53,16 @@
     <string name="detail_run_memory_pager_selftest">managed と transparent SIGSEGV pager の probe を実行し、この可視化を更新します</string>
     <string name="memory_layers_os_summary_fmt">OS: RAM 使用 %1$s / 空き %2$s, swap 使用 %3$s / 空き %4$s</string>
     <string name="memory_layers_pdocker_share_fmt">OS 内で pdocker が占める量: RSS %1$s (RAM 全体の %2$s, 使用中 RAM の %3$s), swap %4$s (使用中 swap の %5$s), processes %6$d</string>
-    <string name="memory_layers_app_summary_fmt">アプリ: VmSize %1$s, RSS %2$s, Java heap %3$s / %4$s</string>
+    <string name="memory_layers_app_summary_fmt">アプリ: VmSize %1$s, RSS %2$s, Java heap %3$s / %4$s; app Vm metrics %5$s</string>
     <string name="memory_layers_artifact_summary_fmt">Pager データソース: %1$s、経過 %2$s、status %3$s (past self-test。live /proc ではありません)</string>
+    <string name="widget_virtual_memory_pager">仮想記憶 pager</string>
+    <string name="memory_pager_state_active">稼働中</string>
+    <string name="memory_pager_state_armed">待機中</string>
+    <string name="memory_pager_state_idle">未使用</string>
+    <string name="memory_pager_value_fmt">%1$s: guest %2$s / resident %3$s (%4$s headroom)</string>
+    <string name="memory_pager_detail_fmt">backing %1$s; page ops %2$d (%3$s); bytes in/out %4$s/%5$s; dirty outs %6$d; SIGSEGV stops %7$d; source %8$s age %9$s; %10$s</string>
+    <string name="memory_pager_telemetry_note_selftest">過去の self-test artifact のみ — live workload telemetry ではありません</string>
+    <string name="memory_pager_telemetry_note_live_gap">live pager workload telemetry source は未接続です</string>
     <string name="memory_layers_pager_summary_fmt">pdocker のメモリ拡張: ゲストには %2$s の reserve を見せ、Android 上の resident 窓は %3$s に抑え、追い出しページは %4$s の backing に退避します。page in/out %5$d/%6$d, bytes in/out %7$s/%8$s, dirty outs %9$d (%1$s)</string>
     <string name="memory_layers_perf_summary_fmt">Pager 性能: %1$s, %2$s, SIGSEGV stop %3$d。transparent mmap %4$s, pending %5$s, max resident pages %6$d, bytes in/out %7$s/%8$s, dirty outs %9$d</string>
     <string name="debug_resource_app_files">App files</string>
@@ -117,7 +125,14 @@
     <string name="storage_scanning">計算中...</string>
     <string name="detail_storage_scanning">pdocker の使用容量を計算しています</string>
     <string name="storage_total_fmt">pdocker %1$s / ファイルシステム %2$s</string>
-    <string name="storage_detail_fmt">重複除外: 共有 layers %1$s, image views %2$s, container private %3$s, 空き %4$s</string>
+    <string name="storage_detail_fmt">物理割り当て(app-private): images %1$s (layers %2$s + image metadata/rootfs views %3$s); Images タブは論理 image-layer views %4$s (共有 layer 参照の重複 %5$s); containers %6$s; cache %7$s; logs %8$s; metadata %9$s; other %10$s (projects/workspaces/models/volumes/document mirrors を含む場合あり; documents %11$s, %12$s); 空き %13$s</string>
+    <string name="storage_reconcile_fmt">照合: total %1$s = images %2$s + containers %3$s + cache %4$s + logs %5$s + metadata %6$s + other %7$s; delta %8$s; checksum %9$s</string>
+    <string name="widget_storage_top_consumers">app-private ストレージ使用量 上位</string>
+    <string name="storage_top_consumers_value_fmt">%1$d groups / 最大 %2$s</string>
+    <string name="storage_top_consumer_row_fmt">%1$s: %2$s — %3$s</string>
+    <string name="storage_documents_scope_none">document mount 未選択</string>
+    <string name="storage_documents_scope_included_fmt">pdocker app data 内に含む: %1$s (%2$s)</string>
+    <string name="storage_documents_scope_external_fmt">外部 SAF/direct mount のため pdocker app data には含まない: %1$s</string>
     <string name="widget_host_environment">ホスト環境</string>
     <string name="host_environment_loading">読み込み中...</string>
     <string name="detail_host_environment_loading">pdockerd が動いているホストのハード、ソフト、ランタイム、GPU bridge の諸元を読み込んでいます</string>
@@ -228,6 +243,9 @@
     <string name="image_reference_legend_image">image/base</string>
     <string name="image_reference_legend_cache">cache/shared layer</string>
     <string name="image_reference_legend_reference">compose/container reference</string>
+    <string name="widget_image_storage_scope">Image storage scope</string>
+    <string name="image_storage_scope_value_fmt">physical %1$s / logical views %2$s</string>
+    <string name="image_storage_scope_detail_fmt">Images tab lists per-image logical view size. Shared layers are stored once physically: unique referenced layers %1$s, duplicate shared-layer references %2$s, logical row total %3$s.</string>
     <string name="image_storage_detail_fmt">view %1$s / unique image %2$s / shared cache %3$s</string>
     <string name="image_version_detail_fmt">version/tag %1$s</string>
     <string name="image_reference_image_detail_fmt">view %1$s / unique image %2$s / %3$d layers</string>

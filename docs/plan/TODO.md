@@ -143,9 +143,9 @@ issues, and deciding which planned gaps become hard gates.
 11. **glibc-host native build lane** `[P1 doing]`: standardize packaged native
     payload builds so release/CI/F-Droid-oriented builds do not depend on
     Termux binaries. Current slice adds `scripts/build-native-android-ndk.sh`
-    as the default Android/Bionic helper builder, keeps
-    `scripts/build-native-termux.sh` as an explicit legacy local mode, and
-    documents the artifact-class split in
+    as the default Android/Bionic helper builder, retires the legacy Termux
+    native-build entrypoint from packaged build flows, and documents the
+    artifact-class split in
     `docs/build/NATIVE_BUILD_ENVIRONMENT.md`. Remaining work: add CI that
     removes generated native outputs, rebuilds Android/Bionic helpers with NDK
     clang, rebuilds Linux/glibc aarch64 payloads with an explicit cross
@@ -180,6 +180,7 @@ listed command or artifact.
 | Phase | Lane | Status | Owner | Acceptance evidence |
 |---|---|---|---|---|
 | T0 | Host/static truth | `[doing]` keep fast checks green after each small slice; fix flaky host smoke failures instead of ignoring them. | Main | `bash scripts/verify-fast.sh`, `python3 scripts/verify-docs-maintenance.py`, `python3 scripts/verify-release-readiness.py`, `git diff --check` |
+| T0-H | Context handoff hygiene | `[doing]` stop, summarize, checkpoint, and delegate before detailed risky work when context is near compaction; never start a large patch with low context budget. | Main/agent | `docs/plan/AGENT_COORDINATION.md#compaction-safe-handoff-protocol`; `python3 scripts/verify-docs-maintenance.py` |
 | T1 | Fast-gate coverage | `[doing]` keep CI-ledger fast/static commands represented in `scripts/verify-fast.sh`; add explicit host-only unittests before relying on prose. | Main/agent | `python3 -m unittest tests.test_ci_gate_ledger`; `scripts/verify-fast.sh` contains the command/module |
 | T2 | Llama GPU host prep | `[doing]` guard the Q6_K workflow wrapper and local artifact classification without changing llama.cpp, Dockerfiles, models, or prompts. | Main | `python3 -m unittest tests.test_gpu_abi_contract tests.test_llama_gpu_artifact_verifier tests.test_llama_gpu_q6k_workflow` |
 | T3 | Llama GPU device run | `[blocked-adb]` collect fresh readiness and strict NGL=1 Q6_K artifact only when device memory/readiness is green. | Main | `docs/test/llama-gpu-device-readiness-latest.json`, `docs/test/llama-gpu-q6k-workflow-latest.json`, strict `scripts/verify-llama-gpu-artifact.py` output |
@@ -324,6 +325,11 @@ evidence proves the real behavior or the limitation remains visible.
   source/age telemetry, and service-health executable acceptance criteria.
   Acceptance: live assignments move to `docs/plan/AGENT_COORDINATION.md` and
   historical timeline snapshots do not retain operational `running` statuses.
+- [done] Compaction-safe handoff protocol: `docs/plan/AGENT_COORDINATION.md`
+  now defines when to stop before risky detailed work, how to summarize and
+  checkpoint, the no-large-new-patch low-context budget rule, and concise agent
+  artifact reporting. Acceptance: `python3 scripts/verify-docs-maintenance.py`
+  guards the protocol section so future sessions keep the handoff rules visible.
 - [done] Documentation/script sprawl guard: commit `f053df0` pushed the
   script/doc drift guard. New docs or scripts are durable only when connected
   to a category README, inventory/manifest, verifier, or fast/heavy gate.
@@ -1282,7 +1288,7 @@ Real implementation needed:
    - Keep a comparison bench path for existing proot/proot-like commands when
      the user supplies one, but do not download or bundle PRoot/fakechroot.
 10. Keep the fast native verification loop documented and working:
-   `scripts/build-native-termux.sh`, `adb push libpdockerdirect.so`, then
+   `scripts/build-native-android-ndk.sh`, `adb push libpdockerdirect.so`, then
    replace `files/pdocker-runtime/docker-bin/pdocker-direct` via `run-as`.
    APK rebuilds are for final packaging checks, not every runtime iteration.
 

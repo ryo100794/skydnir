@@ -1,6 +1,7 @@
 import json
 import importlib.util
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -274,7 +275,97 @@ class GpuAbiContractTest(unittest.TestCase):
             "const int q6k_safe_kernel_requested =\n        strict_passthrough ? 0 :",
             source,
         )
+        self.assertIn("PDOCKER_GPU_Q4K_SAFE_KERNEL is an explicit diagnostic override", source)
+        self.assertNotIn(
+            "const int q4k_safe_kernel_requested =\n        strict_passthrough ? 0 :",
+            source,
+        )
+        q4_body = re.search(
+            r"static int is_q4k_matvec_hash\(uint64_t spirv_hash\) \{(?P<body>.*?)\n}\n\nstatic const char \*cpu_oracle_kernel_hint",
+            source,
+            re.S,
+        ).group("body")
+        q6_body = re.search(
+            r"static int is_q6k_matvec_hash\(uint64_t spirv_hash\) \{(?P<body>.*?)\n}\n\nstatic int is_q4k_matvec_hash",
+            source,
+            re.S,
+        ).group("body")
+        for q4_hash in [
+            "0xf3cd7d18f0276b42ull",
+            "0x853c49b4900eed3cull",
+            "0x22ab0152b230e983ull",
+        ]:
+            self.assertIn(q4_hash, q4_body)
+            self.assertNotIn(q4_hash, q6_body)
+        self.assertIn('return "mul-mat-vec-q4-k-large";', source)
+        self.assertIn("q4k_safe_kernel_used || is_q4k_matvec_hash(original_spirv_hash)", source)
+        q4_safe_block = re.search(
+            r"const int q4k_safe_kernel_requested =(?P<body>.*?)if \(q4k_safe_kernel_requested && is_q4k_matvec_hash",
+            source,
+            re.S,
+        ).group("body")
+        self.assertNotIn("strict_passthrough", q4_safe_block)
+        self.assertIn('env_truthy("PDOCKER_GPU_Q4K_SAFE_KERNEL", 0)', q4_safe_block)
         self.assertIn('"PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": os.environ.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0")', PDOCKERD.read_text())
+
+    def test_llama_gpu_lane_marker_and_scope_are_pinned(self):
+        source = GPU_EXECUTOR.read_text()
+        marker = re.search(
+            r'#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "([^"]+)"',
+            source,
+        ).group(1)
+        self.assertEqual(marker, "gpu-executor-llama-q4k-callsite-20260520")
+        stale = "gpu-executor-" + "float16-cap-diagnostic-20260520"
+        for path in [
+            GPU_EXECUTOR,
+            LLAMA_COMPARE,
+            ROOT / "tests" / "test_gpu_abi_contract.py",
+            ROOT / "tests" / "test_llama_gpu_artifact_verifier.py",
+            ROOT / "tests" / "test_llama_gpu_artifact_sweep.py",
+            LLAMA_GPU_NEXT_STEPS,
+        ]:
+            text = path.read_text()
+            self.assertIn(marker, text)
+            self.assertNotIn(stale, text)
+        compare = LLAMA_COMPARE.read_text()
+        self.assertIn(f'EXPECTED_GPU_EXECUTOR_MARKER="${{PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER:-{marker}}}"', compare)
+        self.assertIn(f"PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER={{os.environ.get('PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER', '{marker}')}}", compare)
+        self.assertIn(f'expected_executor_marker = os.environ.get("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", "{marker}")', compare)
+        self.assertIn('"llama_cpp_modified": False', compare)
+        self.assertIn('"gpu_entry": "standard Vulkan loader through pdocker-vulkan-icd.so"', compare)
+
+        diff = subprocess.run(
+            ["git", "diff", "--name-only"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+        ).stdout.splitlines()
+        forbidden_changed_paths = [
+            path for path in diff
+            if "llama.cpp" in path
+            or path.endswith("Dockerfile")
+            or "/Dockerfile" in path
+        ]
+        self.assertEqual([], forbidden_changed_paths)
+
+    def test_q4k_callsite_handoff_records_required_evidence(self):
+        doc = LLAMA_GPU_NEXT_STEPS.read_text()
+        for evidence in [
+            "gpu-executor-llama-q4k-callsite-20260520",
+            "mul_mat_vec_q4_k_f32_f32",
+            "vulkan-shaders/mul_mat_vec_q4_k.comp",
+            "vk_mat_vec_push_constants",
+            "A/B/D/Fuse0/Fuse1",
+            "0xf3cd7d18f0276b42",
+            "0x853c49b4900eed3c",
+            "0x22ab0152b230e983",
+            "explicit diagnostic override",
+            "not a benchmarkable product optimization",
+            "without changing llama.cpp",
+            "Dockerfile",
+        ]:
+            self.assertIn(evidence, doc)
 
     def test_spirv_local_size_patch_uses_execution_mode_id_not_workgroup_builtin(self):
         source = GPU_EXECUTOR.read_text()
@@ -1147,8 +1238,8 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-float16-cap-diagnostic-20260520",
-                        "observed_executor_markers": ["gpu-executor-float16-cap-diagnostic-20260520"],
+                        "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                        "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
                     },
                     "config_propagation": {
                         "summary": "fail",
@@ -1260,7 +1351,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-float16-cap-diagnostic-20260520",
+                        "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
                         "observed_executor_markers": [],
                     },
                 },
@@ -1302,7 +1393,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-float16-cap-diagnostic-20260520",
+                        "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
                         "observed_executor_markers": [],
                     },
                 },
@@ -1325,8 +1416,8 @@ class GpuAbiContractTest(unittest.TestCase):
                     "blocker_detail": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-float16-cap-diagnostic-20260520",
-                        "observed_executor_markers": ["gpu-executor-float16-cap-diagnostic-20260520"],
+                        "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                        "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
                     },
                     "config_propagation": {"summary": "pass", "checks": []},
                 },
@@ -1371,7 +1462,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "enabled_ext_8bit_storage",
             "enabled_ext_shader_float16_int8",
             "enabled_ext_storage_buffer_storage_class",
-            "#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER \"gpu-executor-float16-cap-diagnostic-20260520\"",
+            "#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER \"gpu-executor-llama-q4k-callsite-20260520\"",
         ]:
             self.assertIn(marker, source)
         failure_body = source.split("if (ret != 0) {", 1)[1].split("if (fence) vkDestroyFence", 1)[0]

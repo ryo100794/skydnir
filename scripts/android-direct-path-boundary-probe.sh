@@ -25,7 +25,7 @@ aarch64-linux-gnu-gcc -O2 -Wall -Wextra -static \
   -o "$PROBE" tools/pdocker_path_boundary_probe.c
 
 echo "[pdocker path-boundary] building direct executor"
-bash scripts/build-native-termux.sh >/dev/null
+bash scripts/build-native-android-ndk.sh >/dev/null
 cp app/src/main/jniLibs/arm64-v8a/libpdockerdirect.so "$DIRECT"
 
 "$ADB" push "$PROBE" "/data/local/tmp/$(basename "$PROBE")" >/dev/null

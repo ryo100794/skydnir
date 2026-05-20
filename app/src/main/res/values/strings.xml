@@ -53,8 +53,16 @@
     <string name="detail_run_memory_pager_selftest">Run managed and transparent SIGSEGV pager probes, then refresh this visualization</string>
     <string name="memory_layers_os_summary_fmt">OS: RAM used %1$s / available %2$s, swap used %3$s / free %4$s</string>
     <string name="memory_layers_pdocker_share_fmt">pdocker footprint inside OS: RSS %1$s (%2$s of RAM, %3$s of used RAM), swap %4$s (%5$s of used swap), processes %6$d</string>
-    <string name="memory_layers_app_summary_fmt">App: VmSize %1$s, RSS %2$s, Java heap %3$s / %4$s</string>
+    <string name="memory_layers_app_summary_fmt">App: VmSize %1$s, RSS %2$s, Java heap %3$s / %4$s; app Vm metrics %5$s</string>
     <string name="memory_layers_artifact_summary_fmt">Pager data source: %1$s, age %2$s, status %3$s (past self-test; not live /proc)</string>
+    <string name="widget_virtual_memory_pager">Virtual memory pager</string>
+    <string name="memory_pager_state_active">active</string>
+    <string name="memory_pager_state_armed">armed</string>
+    <string name="memory_pager_state_idle">idle</string>
+    <string name="memory_pager_value_fmt">%1$s: guest %2$s / resident %3$s (%4$s headroom)</string>
+    <string name="memory_pager_detail_fmt">backing %1$s; page ops %2$d (%3$s); bytes in/out %4$s/%5$s; dirty outs %6$d; SIGSEGV stops %7$d; source %8$s age %9$s; %10$s</string>
+    <string name="memory_pager_telemetry_note_selftest">past self-test artifact only — not live workload telemetry</string>
+    <string name="memory_pager_telemetry_note_live_gap">no live pager workload telemetry source connected</string>
     <string name="memory_layers_pager_summary_fmt">pdocker memory illusion: guest-visible reserve %2$s while Android resident window is %3$s; evicted pages are parked in %4$s backing, page in/out %5$d/%6$d, bytes in/out %7$s/%8$s, dirty outs %9$d (%1$s)</string>
     <string name="memory_layers_perf_summary_fmt">Pager performance: %1$s, %2$s, SIGSEGV stops %3$d; transparent mmap %4$s, pending %5$s, max resident pages %6$d, bytes in/out %7$s/%8$s, dirty outs %9$d</string>
     <string name="debug_resource_app_files">App files</string>
@@ -116,8 +124,15 @@
     <string name="widget_storage">Storage</string>
     <string name="storage_scanning">scanning...</string>
     <string name="detail_storage_scanning">Calculating pdocker storage usage</string>
-    <string name="storage_total_fmt">pdocker %1$s / filesystem %2$s</string>
-    <string name="storage_detail_fmt">deduped: shared layers %1$s, image views %2$s, container private %3$s, free %4$s</string>
+    <string name="storage_total_fmt">app-private allocated pdocker %1$s / filesystem %2$s</string>
+    <string name="storage_detail_fmt">physical allocated app-private: images %1$s (layers %2$s + image metadata/rootfs views %3$s); Images tab is logical image-layer views %4$s (%5$s duplicate shared-layer references); containers %6$s; cache %7$s; logs %8$s; metadata %9$s; other %10$s (projects/workspaces/models/volumes/document mirrors may appear here; documents %11$s, %12$s); free %13$s</string>
+    <string name="storage_reconcile_fmt">reconcile: total %1$s = images %2$s + containers %3$s + cache %4$s + logs %5$s + metadata %6$s + other %7$s; delta %8$s; checksum %9$s</string>
+    <string name="widget_storage_top_consumers">Top app-private storage consumers</string>
+    <string name="storage_top_consumers_value_fmt">%1$d allocated-block groups / largest %2$s</string>
+    <string name="storage_top_consumer_row_fmt">%1$s: %2$s — %3$s</string>
+    <string name="storage_documents_scope_none">no document mount selected</string>
+    <string name="storage_documents_scope_included_fmt">included under pdocker app data: %1$s (%2$s)</string>
+    <string name="storage_documents_scope_external_fmt">external SAF/direct mount not counted in pdocker app data: %1$s</string>
     <string name="widget_host_environment">Host environment</string>
     <string name="host_environment_loading">loading...</string>
     <string name="detail_host_environment_loading">Reading pdockerd host hardware, software, runtime, and GPU bridge details</string>
@@ -228,6 +243,9 @@
     <string name="image_reference_legend_image">image/base</string>
     <string name="image_reference_legend_cache">cache/shared layer</string>
     <string name="image_reference_legend_reference">compose/container reference</string>
+    <string name="widget_image_storage_scope">Image storage scope</string>
+    <string name="image_storage_scope_value_fmt">physical %1$s / logical views %2$s</string>
+    <string name="image_storage_scope_detail_fmt">Images tab lists per-image logical view size. Shared layers are stored once physically: unique referenced layers %1$s, duplicate shared-layer references %2$s, logical row total %3$s.</string>
     <string name="image_storage_detail_fmt">view %1$s / unique image %2$s / shared cache %3$s</string>
     <string name="image_version_detail_fmt">version/tag %1$s</string>
     <string name="image_reference_image_detail_fmt">view %1$s / unique image %2$s / %3$d layers</string>

@@ -517,19 +517,6 @@
       }
     },
     {
-      "path": "scripts/build-native-termux.sh",
-      "category": "build-developer",
-      "stability": "stable-entrypoint",
-      "role": "Build, setup, or developer environment helper.",
-      "migration": {
-        "target_dir": "scripts/build",
-        "candidate_path": "scripts/build/build-native-termux.sh",
-        "phase": "phase-2-build-after-callsite-audit",
-        "action": "candidate-move-behind-wrapper",
-        "compat_wrapper": "wrapper required; permanent or long-lived stable entrypoint compatibility path"
-      }
-    },
-    {
       "path": "scripts/compat-audit.py",
       "category": "test-verification",
       "stability": "test-helper",
@@ -579,6 +566,19 @@
         "phase": "phase-2-build-after-callsite-audit",
         "action": "candidate-move-behind-wrapper",
         "compat_wrapper": "stable entrypoints keep wrappers; developer helpers keep temporary wrappers while docs/CI references migrate"
+      }
+    },
+    {
+      "path": "scripts/gguf-tensor-range-index.py",
+      "category": "test-verification",
+      "stability": "developer-helper",
+      "role": "Generate GGUF tensor/range diagnostic indexes for memory-pager and MoE residency investigations.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/gguf-tensor-range-index.py",
+        "phase": "phase-3-test-after-manifest-lane",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "wrapper required; keep stable while tests and design docs reference the top-level path"
       }
     },
     {

@@ -965,7 +965,7 @@ typedef struct {
 
 static VulkanRuntime g_vulkan_runtime;
 
-#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-float16-cap-diagnostic-20260520"
+#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-llama-q4k-callsite-20260520"
 
 static uint32_t choose_vulkan_instance_api_version(void) {
     uint32_t supported = VK_API_VERSION_1_0;
@@ -4140,7 +4140,25 @@ static int is_q6k_matvec_hash(uint64_t spirv_hash) {
 }
 
 static int is_q4k_matvec_hash(uint64_t spirv_hash) {
-    return spirv_hash == 0x97482974523e1b0cull;
+    return spirv_hash == 0x97482974523e1b0cull ||
+           /*
+            * llama.cpp ggml-vulkan call-site:
+            *   pipeline: mul_mat_vec_q4_k_f32_f32
+            *   shader:   mul_mat_vec_q4_k.comp
+            *   bindings: A/B/D/Fuse0/Fuse1 (5 descriptors)
+            *   push:     vk_mat_vec_push_constants
+            *   specs:    { BLOCK_SIZE=32, NUM_ROWS=2, NUM_COLS=1/2 }
+            *
+            * This optimized SPIR-V declares three typed views of binding 0
+            * (block_q4_K, block_q4_K_packed16, block_q4_K_packed32), which is
+            * exactly what mul_mat_vec_iface.glsl emits for DATA_A_Q4_K.  It is
+            * not a llama.cpp ABI change and not a Q5/Q6 mis-route.
+            */
+           spirv_hash == 0xf3cd7d18f0276b42ull ||
+           /* Same call-site after pdocker diagnostic Float16 capability insertion. */
+           spirv_hash == 0x853c49b4900eed3cull ||
+           /* Same call-site after duplicate descriptor materialization. */
+           spirv_hash == 0x22ab0152b230e983ull;
 }
 
 static const char *cpu_oracle_kernel_hint(uint64_t spirv_hash) {
@@ -8122,6 +8140,9 @@ static int run_vulkan_dispatch_fd(
             : env_truthy("PDOCKER_GPU_CPU_ORACLE", 0);
     int q6k_safe_kernel_used = 0;
     int q4k_safe_kernel_used = 0;
+    int q4k_callsite_detected = 0;
+    int q4k_pipeline_retry_enabled = 0;
+    int q4k_pipeline_retry_attempted = 0;
     int q4k_targeted_specialization_materialized = 0;
     CpuOracleReport cpu_oracle_report;
     init_cpu_oracle_report(&cpu_oracle_report, cpu_oracle_requested, 0);
@@ -8327,6 +8348,9 @@ static int run_vulkan_dispatch_fd(
     }
     SpirvTraceSummary source_spirv_summary = summarize_spirv(shader_code, shader_size);
     const uint64_t original_spirv_hash = source_spirv_summary.hash;
+    q4k_callsite_detected = is_q4k_matvec_hash(original_spirv_hash);
+    q4k_pipeline_retry_enabled = q4k_callsite_detected &&
+        env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 1);
     dispatch_lifecycle_spirv_hash = original_spirv_hash;
     if (dispatch_lifecycle_log) {
         fprintf(stderr,
@@ -8343,8 +8367,14 @@ static int run_vulkan_dispatch_fd(
         fflush(stderr);
         dispatch_lifecycle_begin_logged = 1;
     }
+    /*
+     * PDOCKER_GPU_Q4K_SAFE_KERNEL is an explicit diagnostic override, not a
+     * default optimization.  Keep it available even when strict passthrough is
+     * requested so we can split "llama.cpp call-site/descriptor ABI is intact"
+     * from "the Android Vulkan driver accepts llama.cpp's optimized Q4_K
+     * SPIR-V" without modifying llama.cpp, Dockerfiles, models, or prompts.
+     */
     const int q4k_safe_kernel_requested =
-        strict_passthrough ? 0 :
         options && options->has_q4k_safe_kernel
             ? options->q4k_safe_kernel
             : env_truthy("PDOCKER_GPU_Q4K_SAFE_KERNEL", 0);
@@ -8381,6 +8411,7 @@ static int run_vulkan_dispatch_fd(
         if (q4k_targeted_specialization_materialized) {
             specialization_materialized = 1;
             source_spirv_summary = summarize_spirv(shader_code, shader_size);
+            q4k_callsite_detected = 1;
         }
     }
     /*
@@ -8871,8 +8902,9 @@ static int run_vulkan_dispatch_fd(
         if (rc != VK_SUCCESS &&
             specialization_count > 0 &&
             !specialization_materialized &&
-            !strict_passthrough &&
-            env_truthy("PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION", 0)) {
+            (!strict_passthrough || q4k_pipeline_retry_enabled) &&
+            (env_truthy("PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION", 0) ||
+             q4k_pipeline_retry_enabled)) {
             /*
              * Some Android Vulkan drivers reject ggml pipelines only for a
              * particular specialization tuple even though the same SPIR-V
@@ -8882,7 +8914,13 @@ static int run_vulkan_dispatch_fd(
              * compatibility lowering: it does not change descriptor memory,
              * object identity, or llama.cpp code, but it gives the driver a
              * plain OpConstant module instead of OpSpecConstant operations.
+             *
+             * For the known llama.cpp Q4_K matvec call-site this retry is part
+             * of the bridge compatibility ladder even in strict passthrough:
+             * it preserves descriptor bytes, push constants, buffer object
+             * ranges, and the specialization values requested by llama.cpp.
              */
+            q4k_pipeline_retry_attempted = q4k_pipeline_retry_enabled;
             if (shader) {
                 vkDestroyShaderModule(rt->device, shader, NULL);
                 shader = VK_NULL_HANDLE;
@@ -9598,6 +9636,9 @@ static int run_vulkan_dispatch_fd(
                 "\"disable_pipeline_optimization\":%s,"
                 "\"specialization_materialized\":%s,"
                 "\"q4k_targeted_specialization_materialized\":%s,"
+                "\"q4k_callsite_detected\":%s,"
+                "\"q4k_pipeline_retry_ladder\":%s,"
+                "\"q4k_pipeline_retry_attempted\":%s,"
                 "\"local_size_patched\":%s,"
                 "\"float16_capability_added\":%s,"
                 "\"spirv_local_size\":[%u,%u,%u],"
@@ -9644,6 +9685,9 @@ static int run_vulkan_dispatch_fd(
                 disable_pipeline_optimization ? "true" : "false",
                 specialization_materialized ? "true" : "false",
                 q4k_targeted_specialization_materialized ? "true" : "false",
+                q4k_callsite_detected ? "true" : "false",
+                q4k_pipeline_retry_enabled ? "true" : "false",
+                q4k_pipeline_retry_attempted ? "true" : "false",
                 local_size_patched ? "true" : "false",
                 float16_capability_added ? "true" : "false",
                 spirv_summary.local_size[0],
@@ -9747,6 +9791,9 @@ static int run_vulkan_dispatch_fd(
             "\"disable_pipeline_optimization\":%s,"
             "\"specialization_materialized\":%s,"
             "\"q4k_targeted_specialization_materialized\":%s,"
+            "\"q4k_callsite_detected\":%s,"
+            "\"q4k_pipeline_retry_ladder\":%s,"
+            "\"q4k_pipeline_retry_attempted\":%s,"
             "\"local_size_patched\":%s,"
             "\"float16_capability_added\":%s,"
             "\"spirv_local_size\":[%u,%u,%u],"
@@ -9804,6 +9851,9 @@ static int run_vulkan_dispatch_fd(
             disable_pipeline_optimization ? "true" : "false",
             specialization_materialized ? "true" : "false",
             q4k_targeted_specialization_materialized ? "true" : "false",
+            q4k_callsite_detected ? "true" : "false",
+            q4k_pipeline_retry_enabled ? "true" : "false",
+            q4k_pipeline_retry_attempted ? "true" : "false",
             local_size_patched ? "true" : "false",
             float16_capability_added ? "true" : "false",
             spirv_summary.local_size[0],
@@ -9960,6 +10010,9 @@ cleanup:
                 "\"materialize_specialization\":%s,"
                 "\"specialization_materialized\":%s,"
                 "\"q4k_targeted_specialization_materialized\":%s,"
+                "\"q4k_callsite_detected\":%s,"
+                "\"q4k_pipeline_retry_ladder\":%s,"
+                "\"q4k_pipeline_retry_attempted\":%s,"
                 "\"float16_capability_added\":%s,"
                 "\"q4k_safe_kernel\":%s,"
                 "\"oracle_fail_closed\":%s,"
@@ -9988,6 +10041,9 @@ cleanup:
                 materialize_specialization_constants ? "true" : "false",
                 specialization_materialized ? "true" : "false",
                 q4k_targeted_specialization_materialized ? "true" : "false",
+                q4k_callsite_detected ? "true" : "false",
+                q4k_pipeline_retry_enabled ? "true" : "false",
+                q4k_pipeline_retry_attempted ? "true" : "false",
                 float16_capability_added ? "true" : "false",
                 q4k_safe_kernel_used ? "true" : "false",
                 oracle_fail_closed ? "true" : "false",

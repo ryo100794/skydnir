@@ -101,11 +101,10 @@ normal local builds because it also refreshes the glibc GPU shim/ICDs before
 packaging.
 
 `scripts/build-apk.sh` still rebuilds Android native helper libraries by
-default. Its default native backend is the official NDK clang path documented
-in [`NATIVE_BUILD_ENVIRONMENT.md`](NATIVE_BUILD_ENVIRONMENT.md). The legacy
-Termux compiler mode is available only by setting
-`PDOCKER_NATIVE_BUILD_BACKEND=termux`. The build orchestrator sets
-`PDOCKER_SKIP_NATIVE_BUILD=1` after it has already refreshed native helpers.
+default using the official NDK clang path documented in
+[`NATIVE_BUILD_ENVIRONMENT.md`](NATIVE_BUILD_ENVIRONMENT.md). The build
+orchestrator sets `PDOCKER_SKIP_NATIVE_BUILD=1` after it has already refreshed
+native helpers.
 
 The `modern` flavor is useful for API 29+ metadata, image browsing, editing,
 and Engine API work, but it does not advertise `process-exec=1`.

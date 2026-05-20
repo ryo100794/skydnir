@@ -85,36 +85,24 @@ executor is a separate porting task because the current direct executor uses
 AArch64 register and syscall conventions. Packaging the 32-bit binary keeps ABI
 coverage visible without silently claiming full 32-bit process execution.
 
-## Legacy Termux Mode
+## Packaged Native Build Path
 
-The legacy script remains:
-
-```sh
-bash scripts/build-native-termux.sh
-```
-
-Use it only for local debugging on a device where no glibc host build
-environment is available. It is not the release or CI path.
-
-Select the legacy mode explicitly:
+The only supported packaged Android/Bionic native helper build is the NDK path:
 
 ```sh
-PDOCKER_NATIVE_BUILD_BACKEND=termux bash scripts/build-apk.sh
-bash scripts/build-all.sh --native-backend termux
+bash scripts/build-native-android-ndk.sh
 ```
+
+`scripts/build-apk.sh` and `scripts/build-all.sh` use this path for native
+helper refreshes. Historical local Termux-device build notes may exist in old
+test evidence, but they are not an active packaging or release path.
 
 ## Orchestrated Build
 
-The default local orchestrator now chooses the NDK native backend:
+The default local orchestrator builds with the NDK native backend:
 
 ```sh
 bash scripts/build-all.sh
-```
-
-Equivalent explicit form:
-
-```sh
-bash scripts/build-all.sh --native-backend ndk
 ```
 
 APK-only packaging still checks that generated payloads are fresh. If a native
@@ -154,9 +142,7 @@ Before calling this F-Droid ready, the build lane still needs:
 3. Run the APK build twice in a clean pinned environment and compare outputs.
 4. Move local-only absolute paths such as custom `aapt2` overrides out of the
    repository-controlled default path.
-5. Keep `scripts/build-native-termux.sh` documented as legacy local mode only,
-   not as a normal packaging requirement.
-6. Decide whether to add an AOSP LLVM source-build lane for a true
+5. Decide whether to add an AOSP LLVM source-build lane for a true
    aarch64-host Android toolchain driver.
-7. Port `pdocker-direct` to 32-bit ARM registers/syscalls before promoting
+6. Port `pdocker-direct` to 32-bit ARM registers/syscalls before promoting
    `armeabi-v7a` process-exec beyond explicit unsupported status.

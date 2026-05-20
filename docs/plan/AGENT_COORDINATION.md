@@ -59,6 +59,57 @@ Everything else must be reduced into source files, tests, focused docs, or this
 ledger. If a future session needs details, it should open the referenced file or
 artifact instead of relying on retained chat history.
 
+## Compaction-Safe Handoff Protocol
+
+Use this protocol whenever the next step would be detailed, risky, or broad and
+the remaining conversation context is no longer enough to carry the plan, diff,
+validation output, and rollback notes without compaction. Treat device/runtime,
+GPU, Dockerfile, llama.cpp, and cleanup work as risky by default.
+
+1. **Stop before opening a large new seam.** Do not begin a new multi-file patch,
+   long device run, refactor, or ambiguous investigation when a compaction notice
+   has appeared, when raw logs/diffs are crowding out decision context, or when
+   you cannot still reserve room for a clear handoff and validation summary.
+2. **Summarize first.** Update this ledger or the canonical task document with:
+   lane, owner, write scope, current diff/commit, commands already run, failing
+   evidence, blockers, and the next smallest safe action.
+3. **Checkpoint deliberately.** If you are the integrator and the slice is
+   reviewed, commit the small completed checkpoint after focused validation. If
+   the slice is not ready to commit, leave the tree in the smallest reviewable
+   state and record exact changed paths plus unfinished commands; do not start
+   another risky seam to “make it worth committing.”
+4. **Delegate instead of expanding context.** Split follow-up work into a narrow
+   agent lane with disjoint write ownership and an acceptance artifact, then let
+   the next session recover from this ledger rather than from raw chat history.
+
+### Low-Context Patch Budget Rule
+
+No large new patch may start when context budget is low. “Large” means any
+change that spans multiple ownership surfaces, touches runtime/GPU/Dockerfile or
+device-gated behavior, requires long logs to understand, or cannot be described
+with rollback notes in ten concise bullets. In that state, only do one of these:
+
+- write or refresh a handoff/checklist entry in `docs/plan/AGENT_COORDINATION.md`,
+  `docs/plan/TODO.md`, or the relevant canonical gate doc;
+- run/read a short verifier whose output can be summarized in a few lines;
+- land an already-reviewed small checkpoint;
+- delegate a scoped follow-up instead of continuing locally.
+
+### Concise Agent Artifact Reporting
+
+Agents should not flood the main context with transcripts. Report a compact
+artifact bundle instead:
+
+- changed paths, commit SHA if any, and one-sentence purpose;
+- exact validation commands and PASS/FAIL/blocked status;
+- durable artifact paths such as `docs/test/*latest*.json`, focused run
+  summaries, or task-ledger rows;
+- at most three blockers/next actions.
+
+Raw logs, giant diffs, screenshots, and exploratory notes belong in durable
+artifacts or focused docs only when they are needed for repeatability; otherwise
+record the path or command that can reproduce them.
+
 ## Active Lanes
 
 | Lane | Owner | Write scope | Expected deliverable | Integration risks |

@@ -779,7 +779,7 @@ Local evidence completed without ADB:
 
 - `python3 -m unittest tests.test_gpu_abi_contract` passed.
 - `bash scripts/build-gpu-shim.sh` passed.
-- `bash scripts/build-native-termux.sh` passed.
+- Historical note: the then-active native helper build passed. Current builds use `bash scripts/build-native-android-ndk.sh`.
 - `./gradlew :app:assembleCompatDebug` passed.
 
 When ADB is available again, the first device run should be the existing strict
@@ -819,7 +819,7 @@ The executor now treats this as an API contract issue:
 Local evidence:
 
 - `python3 -m unittest tests.test_gpu_abi_contract` passed.
-- `bash scripts/build-native-termux.sh` passed.
+- Historical note: the then-active native helper build passed. Current builds use `bash scripts/build-native-android-ndk.sh`.
 - `./gradlew :app:assembleCompatDebug` passed.
 - The compat debug APK was installed on `10.79.130.150:35389`.
 - Device preflight refused the heavy llama run before daemon startup and wrote

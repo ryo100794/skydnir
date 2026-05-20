@@ -33,6 +33,7 @@ import android.text.Editable
 import android.text.TextUtils
 import android.text.TextWatcher
 import android.util.Base64
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -59,6 +60,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.zip.CRC32
 import kotlin.concurrent.thread
 import org.json.JSONArray
 import org.json.JSONObject
@@ -101,7 +103,27 @@ class MainActivity : AppCompatActivity() {
         val pdockerBytes: Long,
         val layersBytes: Long,
         val imageViewBytes: Long,
+        val imageLogicalViewBytes: Long,
+        val imageSharedDuplicateBytes: Long,
         val containerPrivateBytes: Long,
+        val cacheBytes: Long,
+        val logsBytes: Long,
+        val metadataBytes: Long,
+        val otherBytes: Long,
+        val documentsBytes: Long,
+        val documentsScope: String,
+        val reconciliationChecksum: String,
+        val topConsumers: List<StorageConsumer>,
+    ) {
+        val imagesPhysicalBytes: Long get() = layersBytes + imageViewBytes
+        val reconciledBytes: Long get() = imagesPhysicalBytes + containerPrivateBytes + cacheBytes + logsBytes + metadataBytes + otherBytes
+        val reconciliationDeltaBytes: Long get() = pdockerBytes - reconciledBytes
+    }
+
+    private data class StorageConsumer(
+        val label: String,
+        val bytes: Long,
+        val path: String,
     )
 
     private data class DaemonOperation(
@@ -456,6 +478,7 @@ class MainActivity : AppCompatActivity() {
     )
 
     companion object {
+        private const val LOG_TAG = "PdockerStorage"
         private const val REQUEST_POST_NOTIFICATIONS = 100
         private const val REQUEST_DOCUMENTS_TREE = 101
         private const val REQUEST_EXTERNAL_STORAGE = 102
@@ -1249,6 +1272,7 @@ class MainActivity : AppCompatActivity() {
         val images = imageDirs()
         val imageInfos = imageReferenceInfos(images)
         renderImageCacheHealth(imageInfos)
+        renderImageStorageScope(imageInfos)
         if (images.isEmpty()) {
             addMessage(getString(R.string.message_no_pulled_images))
             return
@@ -2177,6 +2201,8 @@ class MainActivity : AppCompatActivity() {
         val appVmData: Long,
         val appVmStk: Long,
         val appVmSwap: Long,
+        val appVmMetricsAvailable: Boolean,
+        val appVmMetricsReason: String,
         val javaHeapMax: Long,
         val javaHeapUsed: Long,
         val managedReserveBytes: Long,
@@ -2199,6 +2225,7 @@ class MainActivity : AppCompatActivity() {
         val artifactCreatedAtEpoch: Long,
         val artifactStatus: String,
         val artifactAgeSeconds: Long,
+        val artifactPresent: Boolean,
         val source: String,
     )
 
@@ -2212,11 +2239,21 @@ class MainActivity : AppCompatActivity() {
     private fun renderMemoryLayerVisualization() {
         val snapshot = memoryLayerSnapshot()
         addSection(getString(R.string.section_memory_layers))
+        addWidget(
+            getString(R.string.widget_virtual_memory_pager),
+            memoryPagerValue(snapshot),
+            memoryPagerDetail(snapshot),
+            detailLines = 5,
+        ) {
+            openTextToolAsync(getString(R.string.section_memory_layers), getString(R.string.action_debug_memory_layers)) {
+                memoryLayerSnapshotText(memoryLayerSnapshot())
+            }
+        }
         content.addView(MemoryLayerView(this).apply {
             setSnapshot(snapshot)
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
-            dp(430),
+            dp(720),
         ))
         addMessage(memoryLayerSummary(snapshot))
         addAction(getString(R.string.action_debug_memory_layers), getString(R.string.detail_debug_memory_layers)) {
@@ -2260,6 +2297,13 @@ class MainActivity : AppCompatActivity() {
         } else {
             "live /proc only"
         }
+        val appVmKeys = listOf("VmSize", "VmRSS", "VmData", "VmStk", "VmSwap")
+        val appVmMetricsAvailable = proc.isNotEmpty() && appVmKeys.any { proc.containsKey(it) }
+        val appVmMetricsReason = when {
+            proc.isEmpty() -> "N/A: /proc/${android.os.Process.myPid()}/status is not readable"
+            !appVmMetricsAvailable -> "N/A: Vm* fields are not exposed in /proc/${android.os.Process.myPid()}/status"
+            else -> "available from /proc/${android.os.Process.myPid()}/status"
+        }
         return MemoryLayerSnapshot(
             memTotal = mem["MemTotal"] ?: 0L,
             memAvailable = mem["MemAvailable"] ?: mem["MemFree"] ?: 0L,
@@ -2274,6 +2318,8 @@ class MainActivity : AppCompatActivity() {
             appVmData = procStatusBytes(proc, "VmData"),
             appVmStk = procStatusBytes(proc, "VmStk"),
             appVmSwap = procStatusBytes(proc, "VmSwap"),
+            appVmMetricsAvailable = appVmMetricsAvailable,
+            appVmMetricsReason = appVmMetricsReason,
             javaHeapMax = runtime.maxMemory(),
             javaHeapUsed = runtime.totalMemory() - runtime.freeMemory(),
             managedReserveBytes = maxOf(managedReserve, transparentLastMmapLen, transparentPendingAfterEntry),
@@ -2296,9 +2342,58 @@ class MainActivity : AppCompatActivity() {
             artifactCreatedAtEpoch = displayArtifact.createdAtEpoch,
             artifactStatus = displayArtifact.status,
             artifactAgeSeconds = artifactAgeSeconds,
+            artifactPresent = displayArtifact.present,
             source = artifactLabel,
         )
     }
+
+    private fun memoryPagerState(snapshot: MemoryLayerSnapshot): String =
+        when {
+            snapshot.transparentRegistered &&
+                (snapshot.managedPageIns + snapshot.managedPageOuts + snapshot.transparentSigsegvStops) > 0L ->
+                getString(R.string.memory_pager_state_active)
+            snapshot.managedReserveBytes > 0L || snapshot.transparentRegistered ->
+                getString(R.string.memory_pager_state_armed)
+            else -> getString(R.string.memory_pager_state_idle)
+        }
+
+    private fun memoryPagerAmplification(snapshot: MemoryLayerSnapshot): String {
+        val resident = snapshot.managedResidentBytes.coerceAtLeast(0L)
+        val reserve = snapshot.managedReserveBytes.coerceAtLeast(0L)
+        if (reserve <= 0L || resident <= 0L) return "N/A"
+        return String.format("%.1f×", reserve.toDouble() / resident.toDouble())
+    }
+
+    private fun memoryPagerValue(snapshot: MemoryLayerSnapshot): String =
+        getString(
+            R.string.memory_pager_value_fmt,
+            memoryPagerState(snapshot),
+            formatBytes(snapshot.managedReserveBytes),
+            formatBytes(snapshot.managedResidentBytes),
+            memoryPagerAmplification(snapshot),
+        )
+
+    private fun memoryPagerDetail(snapshot: MemoryLayerSnapshot): String =
+        getString(
+            R.string.memory_pager_detail_fmt,
+            formatBytes(snapshot.managedBackingBytes),
+            snapshot.managedPageIns + snapshot.managedPageOuts,
+            formatPagerRate(snapshot.managedPageIns + snapshot.managedPageOuts, snapshot.managedElapsedNs),
+            formatBytes(snapshot.managedBytesIn),
+            formatBytes(snapshot.managedBytesOut),
+            snapshot.managedDirtyPageOuts,
+            snapshot.transparentSigsegvStops,
+            snapshot.source,
+            formatArtifactAge(snapshot.artifactAgeSeconds, snapshot.artifactCreatedAtEpoch),
+            memoryPagerTelemetryNote(snapshot),
+        )
+
+    private fun memoryPagerTelemetryNote(snapshot: MemoryLayerSnapshot): String =
+        if (snapshot.artifactPresent) {
+            getString(R.string.memory_pager_telemetry_note_selftest)
+        } else {
+            getString(R.string.memory_pager_telemetry_note_live_gap)
+        }
 
     private fun memoryLayerSummary(snapshot: MemoryLayerSnapshot): String =
         listOf(
@@ -2320,10 +2415,11 @@ class MainActivity : AppCompatActivity() {
             ),
             getString(
                 R.string.memory_layers_app_summary_fmt,
-                formatBytes(snapshot.appVmSize),
-                formatBytes(snapshot.appVmRss),
+                if (snapshot.appVmMetricsAvailable) formatBytes(snapshot.appVmSize) else "N/A",
+                if (snapshot.appVmMetricsAvailable) formatBytes(snapshot.appVmRss) else "N/A",
                 formatBytes(snapshot.javaHeapUsed),
                 formatBytes(snapshot.javaHeapMax),
+                snapshot.appVmMetricsReason,
             ),
             getString(
                 R.string.memory_layers_artifact_summary_fmt,
@@ -2363,6 +2459,8 @@ class MainActivity : AppCompatActivity() {
         appendLine("artifact.created_at_epoch=${snapshot.artifactCreatedAtEpoch}")
         appendLine("artifact.age=${formatArtifactAge(snapshot.artifactAgeSeconds, snapshot.artifactCreatedAtEpoch)}")
         appendLine("artifact.status=${snapshot.artifactStatus.ifBlank { "unknown" }}")
+        appendLine("artifact.present=${snapshot.artifactPresent}")
+        appendLine("telemetry.note=${memoryPagerTelemetryNote(snapshot)}")
         appendLine()
         appendLine("== OS-governed memory ==")
         appendLine("physical.total=${formatBytes(snapshot.memTotal)}")
@@ -2380,11 +2478,13 @@ class MainActivity : AppCompatActivity() {
         appendLine("pdocker.VmSwap.percent_of_used_swap=${formatPercent(snapshot.pdockerSwap, (snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L))}")
         appendLine()
         appendLine("== App process allocation view ==")
-        appendLine("VmSize=${formatBytes(snapshot.appVmSize)}")
-        appendLine("VmRSS=${formatBytes(snapshot.appVmRss)}")
-        appendLine("VmData=${formatBytes(snapshot.appVmData)}")
-        appendLine("VmStk=${formatBytes(snapshot.appVmStk)}")
-        appendLine("VmSwap=${formatBytes(snapshot.appVmSwap)}")
+        appendLine("app.vm_metrics=${if (snapshot.appVmMetricsAvailable) "available" else "N/A"}")
+        appendLine("app.vm_metrics.reason=${snapshot.appVmMetricsReason}")
+        appendLine("VmSize=${if (snapshot.appVmMetricsAvailable) formatBytes(snapshot.appVmSize) else "N/A"}")
+        appendLine("VmRSS=${if (snapshot.appVmMetricsAvailable) formatBytes(snapshot.appVmRss) else "N/A"}")
+        appendLine("VmData=${if (snapshot.appVmMetricsAvailable) formatBytes(snapshot.appVmData) else "N/A"}")
+        appendLine("VmStk=${if (snapshot.appVmMetricsAvailable) formatBytes(snapshot.appVmStk) else "N/A"}")
+        appendLine("VmSwap=${if (snapshot.appVmMetricsAvailable) formatBytes(snapshot.appVmSwap) else "N/A"}")
         appendLine("JavaHeap.used=${formatBytes(snapshot.javaHeapUsed)}")
         appendLine("JavaHeap.max=${formatBytes(snapshot.javaHeapMax)}")
         appendLine()
@@ -2694,19 +2794,61 @@ class MainActivity : AppCompatActivity() {
             )
             return
         }
+        val detail = getString(
+            R.string.storage_detail_fmt,
+            formatBytes(metrics.imagesPhysicalBytes),
+            formatBytes(metrics.layersBytes),
+            formatBytes(metrics.imageViewBytes),
+            formatBytes(metrics.imageLogicalViewBytes),
+            formatBytes(metrics.imageSharedDuplicateBytes),
+            formatBytes(metrics.containerPrivateBytes),
+            formatBytes(metrics.cacheBytes),
+            formatBytes(metrics.logsBytes),
+            formatBytes(metrics.metadataBytes),
+            formatBytes(metrics.otherBytes),
+            formatBytes(metrics.documentsBytes),
+            metrics.documentsScope,
+            formatBytes(metrics.fsFreeBytes),
+        ) + "\n" + getString(
+            R.string.storage_reconcile_fmt,
+            formatBytes(metrics.pdockerBytes),
+            formatBytes(metrics.imagesPhysicalBytes),
+            formatBytes(metrics.containerPrivateBytes),
+            formatBytes(metrics.cacheBytes),
+            formatBytes(metrics.logsBytes),
+            formatBytes(metrics.metadataBytes),
+            formatBytes(metrics.otherBytes),
+            formatBytes(metrics.reconciliationDeltaBytes),
+            metrics.reconciliationChecksum,
+        )
         addWidget(
             getString(R.string.widget_storage),
             getString(R.string.storage_total_fmt, formatBytes(metrics.pdockerBytes), formatBytes(metrics.fsTotalBytes)),
-            getString(
-                R.string.storage_detail_fmt,
-                formatBytes(metrics.layersBytes),
-                formatBytes(metrics.imageViewBytes),
-                formatBytes(metrics.containerPrivateBytes),
-                formatBytes(metrics.fsFreeBytes),
-            ),
-            detailLines = 4,
+            detail,
+            detailLines = 8,
         ) {
             refreshStorageMetricsAsync(force = true)
+        }
+        if (metrics.topConsumers.isNotEmpty()) {
+            addWidget(
+                getString(R.string.widget_storage_top_consumers),
+                getString(
+                    R.string.storage_top_consumers_value_fmt,
+                    metrics.topConsumers.size,
+                    formatBytes(metrics.topConsumers.first().bytes),
+                ),
+                metrics.topConsumers.joinToString("\n") { consumer ->
+                    getString(
+                        R.string.storage_top_consumer_row_fmt,
+                        consumer.label,
+                        formatBytes(consumer.bytes),
+                        consumer.path,
+                    )
+                },
+                detailLines = metrics.topConsumers.size.coerceIn(3, 8),
+            ) {
+                refreshStorageMetricsAsync(force = true)
+            }
         }
     }
 
@@ -2716,20 +2858,15 @@ class MainActivity : AppCompatActivity() {
         if (!force && storageMetrics != null && now - lastStorageMetricsAt < 30_000L) return
         storageMetricsScanning = true
         thread(isDaemon = true, name = "pdocker-storage-metrics") {
-            val layerUsage = diskUsage(layerRoot)
-            val imageUsage = diskUsage(imageRoot, excludeInodes = layerUsage.inodeKeys)
-            val containerUsage = diskUsage(
-                containerRoot,
-                excludeInodes = layerUsage.inodeKeys + imageUsage.inodeKeys,
-            )
-            val pdockerUsage = diskUsage(pdockerHome)
-            val metrics = StorageMetrics(
-                fsTotalBytes = pdockerHome.totalSpace,
-                fsFreeBytes = pdockerHome.freeSpace,
-                pdockerBytes = pdockerUsage.bytes,
-                layersBytes = layerUsage.bytes,
-                imageViewBytes = imageUsage.bytes,
-                containerPrivateBytes = containerUsage.bytes,
+            val metrics = collectStorageMetrics()
+            Log.i(
+                LOG_TAG,
+                "storage reconcile checksum=${metrics.reconciliationChecksum} total=${metrics.pdockerBytes} " +
+                    "images=${metrics.imagesPhysicalBytes} containers=${metrics.containerPrivateBytes} " +
+                    "cache=${metrics.cacheBytes} logs=${metrics.logsBytes} metadata=${metrics.metadataBytes} " +
+                    "other=${metrics.otherBytes} delta=${metrics.reconciliationDeltaBytes} " +
+                    "imageLogical=${metrics.imageLogicalViewBytes} sharedDuplicate=${metrics.imageSharedDuplicateBytes} " +
+                    "documents=${metrics.documentsBytes} scope=${metrics.documentsScope}",
             )
             ui.post {
                 storageMetrics = metrics
@@ -2957,6 +3094,165 @@ class MainActivity : AppCompatActivity() {
             "loader missing"
         }
         return "$api, $loaderText"
+    }
+
+    private fun collectStorageMetrics(): StorageMetrics {
+        var accountedInodes = emptySet<String>()
+        fun account(root: File): DiskUsage {
+            val usage = diskUsage(root, excludeInodes = accountedInodes)
+            accountedInodes = accountedInodes + usage.inodeKeys
+            return usage
+        }
+
+        val layerUsage = account(layerRoot)
+        val imageUsage = account(imageRoot)
+        val containerUsage = account(containerRoot)
+        val cacheUsage = listOf(
+            File(File(pdockerHome, "meta"), "build-cache"),
+            File(pdockerHome, "tmp"),
+            File(pdockerHome, "cache"),
+        ).fold(DiskUsage(0L, emptySet())) { acc, root ->
+            val usage = account(root)
+            DiskUsage(acc.bytes + usage.bytes, acc.inodeKeys + usage.inodeKeys)
+        }
+        val logUsage = account(File(pdockerHome, "logs"))
+        val metadataUsage = listOf(
+            File(pdockerHome, "meta"),
+            File(pdockerHome, "diagnostics"),
+            File(pdockerHome, "jobs.json"),
+            File(pdockerHome, "state"),
+        ).fold(DiskUsage(0L, emptySet())) { acc, root ->
+            val usage = account(root)
+            DiskUsage(acc.bytes + usage.bytes, acc.inodeKeys + usage.inodeKeys)
+        }
+        val documentsRoot = documentsStorageRootForAccounting()
+        // Documents are annotated for scope clarity. If the active document storage is under
+        // pdockerHome, keep it in "other" so the public reconciliation remains
+        // total = images + containers + cache + logs + metadata + other and avoids
+        // counting a projects/volumes/documents mirror a second time.
+        val documentsUsage = documentsRoot?.takeIf { isUnderPdockerHome(it) }
+            ?.let { diskUsage(it, excludeInodes = accountedInodes) }
+            ?: DiskUsage(0L, emptySet())
+        val otherUsage = diskUsage(pdockerHome, excludeInodes = accountedInodes)
+        val imageLogical = imageReferenceInfos(imageDirs())
+        val logicalViewBytes = imageLogical.sumOf { it.viewBytes }
+        val uniqueReferencedLayerBytes = imageLogical
+            .flatMap { it.diffIds }
+            .map { it.removePrefix("sha256:") }
+            .distinct()
+            .sumOf { layerSize(it) }
+        val sharedDuplicateBytes = (logicalViewBytes - uniqueReferencedLayerBytes).coerceAtLeast(0L)
+        val imagesPhysicalBytes = layerUsage.bytes + imageUsage.bytes
+        val pdockerUsage = diskUsage(pdockerHome)
+        val documentsScope = documentsStorageScopeForAccounting(documentsRoot, documentsUsage.bytes)
+        val metrics = StorageMetrics(
+            fsTotalBytes = pdockerHome.totalSpace,
+            fsFreeBytes = pdockerHome.freeSpace,
+            pdockerBytes = pdockerUsage.bytes,
+            layersBytes = layerUsage.bytes,
+            imageViewBytes = imageUsage.bytes,
+            imageLogicalViewBytes = logicalViewBytes,
+            imageSharedDuplicateBytes = sharedDuplicateBytes,
+            containerPrivateBytes = containerUsage.bytes,
+            cacheBytes = cacheUsage.bytes,
+            logsBytes = logUsage.bytes,
+            metadataBytes = metadataUsage.bytes,
+            otherBytes = otherUsage.bytes,
+            documentsBytes = documentsUsage.bytes,
+            documentsScope = documentsScope,
+            reconciliationChecksum = storageReconciliationChecksum(
+                pdockerUsage.bytes,
+                imagesPhysicalBytes,
+                containerUsage.bytes,
+                cacheUsage.bytes,
+                logUsage.bytes,
+                metadataUsage.bytes,
+                otherUsage.bytes,
+            ),
+            topConsumers = topStorageConsumers(),
+        )
+        return metrics
+    }
+
+    private fun topStorageConsumers(limit: Int = 8): List<StorageConsumer> {
+        var accountedInodes = emptySet<String>()
+        fun consumer(label: String, file: File): StorageConsumer? {
+            if (!isUnderPdockerHome(file)) return null
+            val usage = diskUsage(file, excludeInodes = accountedInodes)
+            accountedInodes = accountedInodes + usage.inodeKeys
+            return if (usage.bytes <= 0L) null else StorageConsumer(label, usage.bytes, relativePdockerPath(file))
+        }
+
+        val roots = mutableListOf(
+            "layers" to layerRoot,
+            "images" to imageRoot,
+            "containers" to containerRoot,
+            "tmp" to File(pdockerHome, "tmp"),
+            "cache" to File(pdockerHome, "cache"),
+            "build-cache" to File(File(pdockerHome, "meta"), "build-cache"),
+            "logs" to File(pdockerHome, "logs"),
+            "metadata" to File(pdockerHome, "meta"),
+            "diagnostics" to File(pdockerHome, "diagnostics"),
+            "projects" to (projectRoot.takeIf { isUnderPdockerHome(it) } ?: legacyProjectRoot),
+            "workspaces" to File(pdockerHome, "workspaces"),
+            "models" to File(pdockerHome, "models"),
+            "volumes" to File(pdockerHome, "volumes"),
+            "networks" to File(pdockerHome, "networks"),
+            "state" to File(pdockerHome, "state"),
+        )
+        documentsStorageRootForAccounting()?.takeIf { isUnderPdockerHome(it) }?.let {
+            roots += "document-volumes" to File(File(it, "pdocker"), "volumes")
+            roots += "documents-mirror" to it
+        }
+        val safMirror = File(pdockerHome, "documents-saf-mediated/mirror")
+        if (safMirror.exists()) roots += "documents-mirror" to safMirror
+        val safSidecar = File(pdockerHome, "documents-saf-mediated/sidecar")
+        if (safSidecar.exists()) roots += "documents-sidecar" to safSidecar
+
+        return roots
+            .distinctBy { it.second.absolutePath }
+            .mapNotNull { (label, file) -> consumer(label, file) }
+            .sortedByDescending { it.bytes }
+            .take(limit)
+    }
+
+    private fun relativePdockerPath(file: File): String {
+        val root = pdockerHome.absoluteFile
+        val target = file.absoluteFile
+        return runCatching {
+            val rootPath = root.toPath().normalize()
+            val targetPath = target.toPath().normalize()
+            if (targetPath.startsWith(rootPath)) {
+                "pdocker/" + rootPath.relativize(targetPath).toString().ifBlank { "." }
+            } else {
+                target.absolutePath
+            }
+        }.getOrDefault(target.absolutePath)
+    }
+
+    private fun documentsStorageRootForAccounting(): File? {
+        val metadata = runCatching { documentsTreeMetadata() }.getOrNull() ?: return null
+        return metadata.activeHostPath.takeIf { it.isNotBlank() }?.let { File(it) }
+    }
+
+    private fun documentsStorageScopeForAccounting(root: File?, accountedBytes: Long): String = when {
+        root == null -> getString(R.string.storage_documents_scope_none)
+        isUnderPdockerHome(root) -> getString(R.string.storage_documents_scope_included_fmt, root.absolutePath, formatBytes(accountedBytes))
+        else -> getString(R.string.storage_documents_scope_external_fmt, root.absolutePath)
+    }
+
+    private fun isUnderPdockerHome(file: File): Boolean = runCatching {
+        val home = pdockerHome.canonicalFile.toPath()
+        file.canonicalFile.toPath().startsWith(home)
+    }.getOrDefault(false)
+
+    private fun storageReconciliationChecksum(vararg values: Long): String {
+        val crc = CRC32()
+        values.forEach { value ->
+            val text = "$value;".toByteArray(Charsets.UTF_8)
+            crc.update(text, 0, text.size)
+        }
+        return crc.value.toString(16).padStart(8, '0')
     }
 
     private fun diskUsage(root: File, excludeInodes: Set<String> = emptySet()): DiskUsage {
@@ -5834,6 +6130,8 @@ class MainActivity : AppCompatActivity() {
             appVmData = 0,
             appVmStk = 0,
             appVmSwap = 0,
+            appVmMetricsAvailable = false,
+            appVmMetricsReason = "N/A: not initialized",
             javaHeapMax = 0,
             javaHeapUsed = 0,
             managedReserveBytes = 0,
@@ -5856,6 +6154,7 @@ class MainActivity : AppCompatActivity() {
             artifactCreatedAtEpoch = 0,
             artifactStatus = "",
             artifactAgeSeconds = 0,
+            artifactPresent = false,
             source = "live /proc only",
         )
 
@@ -5875,21 +6174,12 @@ class MainActivity : AppCompatActivity() {
             val pad = 16f * density
             val barLeft = pad
             val barRight = width - pad
-            val globalScaleBytes = maxOf(
-                snapshot.memTotal,
-                snapshot.swapTotal,
-                snapshot.pdockerVmSize,
-                snapshot.appVmSize,
-                snapshot.javaHeapMax,
-                snapshot.managedReserveBytes,
-                snapshot.managedBackingBytes,
-                1L,
-            )
             var y = pad + 18f * density
             drawHud(canvas, barLeft, barRight, y)
-            y += 52f * density
-            drawTitle(canvas, "OS-governed allocation", y)
-            y += 8f * density
+            y += 58f * density
+            drawTitle(canvas, "OS-governed allocation (additive; each row has its own scale)", y)
+            y += 10f * density
+            val ramAnchorY = y + 25f * density
             y = drawBar(
                 canvas,
                 y,
@@ -5902,8 +6192,9 @@ class MainActivity : AppCompatActivity() {
                 ),
                 barLeft,
                 barRight,
-                globalScaleBytes,
-            ) + 13f * density
+                snapshot.memTotal,
+                "scale: this RAM row only; do not compare width to swap/app/pager rows",
+            ) + 14f * density
             y = drawBar(
                 canvas,
                 y,
@@ -5916,64 +6207,73 @@ class MainActivity : AppCompatActivity() {
                 ),
                 barLeft,
                 barRight,
-                globalScaleBytes,
-            ) + 22f * density
-            drawTitle(canvas, "App process view", y)
-            y += 8f * density
-            y = drawBar(
+                snapshot.swapTotal,
+                "scale: this swap row only; zero means swap metrics unavailable/disabled",
+            ) + 26f * density
+            val appTitleY = y
+            drawHierarchyConnector(canvas, barRight - 34f * density, ramAnchorY, barRight - 34f * density, appTitleY - 12f * density, "process subset")
+            drawTitle(canvas, "App process view (non-additive lanes)", y)
+            y += 10f * density
+            val appAnchorY = y + 36f * density
+            if (snapshot.appVmMetricsAvailable) {
+                y = drawLaneGroup(
+                    canvas,
+                    y,
+                    listOf(
+                        Segment("VmSize", snapshot.appVmSize, 0xff707070.toInt()),
+                        Segment("RSS", snapshot.appVmRss, 0xff8e6bd8.toInt()),
+                        Segment("VmSwap", snapshot.appVmSwap, 0xffcc7c5a.toInt()),
+                        Segment("Java heap", snapshot.javaHeapUsed, 0xff5ba8c7.toInt()),
+                    ),
+                    barLeft,
+                    barRight,
+                    maxOf(snapshot.appVmSize, snapshot.javaHeapMax, snapshot.appVmRss, snapshot.appVmSwap, snapshot.javaHeapUsed, 1L),
+                    "separate process scale: VmSize/Java max; lanes are not stacked",
+                ) + 26f * density
+            } else {
+                drawUnavailableBox(canvas, y, barLeft, barRight, snapshot.appVmMetricsReason)
+                y += 62f * density
+            }
+            val pagerTitleY = y
+            drawHierarchyConnector(canvas, barLeft + 30f * density, appAnchorY, barLeft + 30f * density, pagerTitleY - 12f * density, "pager wraps selected mappings")
+            drawTitle(canvas, "pdocker managed virtual-memory skin (separate scales)", y)
+            y += 10f * density
+            val pagerAnchorY = y + 36f * density
+            y = drawLaneGroup(
                 canvas,
                 y,
-                "process",
-                maxOf(snapshot.appVmSize, snapshot.javaHeapMax, 1L),
-                listOf(
-                    Segment("RSS", snapshot.appVmRss, 0xff8e6bd8.toInt()),
-                    Segment("Java heap", snapshot.javaHeapUsed, 0xff5ba8c7.toInt()),
-                    Segment("VmSwap", snapshot.appVmSwap, 0xffcc7c5a.toInt()),
-                ),
-                barLeft,
-                barRight,
-                globalScaleBytes,
-            ) + 22f * density
-            drawTitle(canvas, "pdocker managed virtual-memory skin", y)
-            y += 8f * density
-            val pagerBarTop = y
-            y = drawBar(
-                canvas,
-                y,
-                if (snapshot.transparentRegistered) "SIGSEGV pager" else "pager model",
-                maxOf(snapshot.managedReserveBytes, snapshot.managedBackingBytes, snapshot.managedResidentBytes, 1L),
                 listOf(
                     Segment("reserved VA", snapshot.managedReserveBytes, 0xff707070.toInt()),
-                    Segment("resident", snapshot.managedResidentBytes, 0xff4cc2a0.toInt()),
-                    Segment("backing", snapshot.managedBackingBytes, 0xffd6904d.toInt()),
+                    Segment("resident window", snapshot.managedResidentBytes, 0xff4cc2a0.toInt()),
+                    Segment("backing file", snapshot.managedBackingBytes, 0xffd6904d.toInt()),
                 ),
                 barLeft,
                 barRight,
-                globalScaleBytes,
+                maxOf(snapshot.managedReserveBytes, snapshot.managedBackingBytes, snapshot.managedResidentBytes, 1L),
+                "pager scale: virtual reserve, resident RAM, and backing are parallel lanes",
             )
-            val footerY = (height - pad - 2f * density).coerceAtLeast(y + 18f * density)
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 2.2f * density
             paint.color = if (snapshot.transparentRegistered) 0xff58ffd2.toInt() else 0xff888888.toInt()
-            val midX = (barLeft + barRight) / 2f
             paint.setShadowLayer(10f, 0f, 0f, paint.color)
-            canvas.drawLine(midX, (pagerBarTop - 6f * density).coerceAtLeast(pad), midX, footerY - 16f * density, paint)
+            canvas.drawLine((barLeft + barRight) / 2f, pagerAnchorY, (barLeft + barRight) / 2f, y + 4f * density, paint)
             paint.clearShadowLayer()
+            val footerY = y + 22f * density
             val sourceLabel = if (snapshot.artifactCreatedAtEpoch > 0L) {
                 "past self-test: ${snapshot.source}, age ${formatAgeForChart(snapshot.artifactAgeSeconds, snapshot.artifactCreatedAtEpoch)}"
             } else {
                 "source: ${snapshot.source}"
             }
             canvas.drawText(
-                "$sourceLabel; ${(snapshot.managedPageIns + snapshot.managedPageOuts)} page ops / ${compactNs(snapshot.managedElapsedNs)}",
+                ellipsizeForWidth("$sourceLabel; ${(snapshot.managedPageIns + snapshot.managedPageOuts)} page ops / ${compactNs(snapshot.managedElapsedNs)}", barRight - barLeft),
                 barLeft,
-                footerY - 12f * density,
+                footerY,
                 smallTextPaint,
             )
             canvas.drawText(
-                "wrapper: PROT_NONE → resident window → backing file; transparent bytes in/out ${compactBytes(snapshot.transparentBytesIn)}/${compactBytes(snapshot.transparentBytesOut)}",
+                ellipsizeForWidth("wrapper: PROT_NONE → resident window → backing file; transparent bytes in/out ${compactBytes(snapshot.transparentBytesIn)}/${compactBytes(snapshot.transparentBytesOut)}", barRight - barLeft),
                 barLeft,
-                footerY + 2f * density,
+                footerY + 14f * density,
                 smallTextPaint,
             )
         }
@@ -6014,7 +6314,13 @@ class MainActivity : AppCompatActivity() {
             val resident = snapshot.managedResidentBytes.coerceAtLeast(1L)
             val reserve = snapshot.managedReserveBytes.coerceAtLeast(0L)
             val multiplier = if (reserve > 0L) reserve.toDouble() / resident.toDouble() else 0.0
-            val title = "Guest memory illusion"
+            val activeOps = snapshot.managedPageIns + snapshot.managedPageOuts + snapshot.transparentSigsegvStops
+            val state = when {
+                snapshot.transparentRegistered && activeOps > 0L -> "active self-test sample"
+                snapshot.managedReserveBytes > 0L || snapshot.transparentRegistered -> "armed"
+                else -> "idle"
+            }
+            val title = "Guest memory illusion — pager $state"
             val detail = if (reserve > 0L) {
                 "container sees ${compactBytes(reserve)}; Android keeps ${compactBytes(snapshot.managedResidentBytes)} hot (${String.format("%.1f×", multiplier)} headroom); pdocker RSS ${compactBytes(snapshot.pdockerRss)}"
             } else {
@@ -6043,9 +6349,10 @@ class MainActivity : AppCompatActivity() {
             left: Float,
             right: Float,
             scaleTotal: Long,
+            scaleLabel: String,
         ): Float {
             val density = resources.displayMetrics.density
-            val top = y + 14f * density
+            val top = y + 16f * density
             val bottom = top + 22f * density
             val depthX = 11f * density
             val depthY = -7f * density
@@ -6062,11 +6369,72 @@ class MainActivity : AppCompatActivity() {
             }
             glowPaint.color = 0x88aeeaff.toInt()
             canvas.drawLine(left, top, right + depthX, top + depthY, glowPaint)
-            val totalRatio = total.coerceAtLeast(0L).toDouble() / scale
-            canvas.drawText("$label  total ${compactBytes(total)} (${String.format("%.1f%%", totalRatio * 100.0)} of chart scale)", left, top - 4f, smallTextPaint)
+            canvas.drawText("$label total ${compactBytes(total)}", left, top - 5f, smallTextPaint)
+            canvas.drawText(ellipsizeForWidth(scaleLabel, right - left), left, bottom + 14f * density, smallTextPaint)
             val detail = segments.joinToString("  ") { "${it.label}: ${compactBytes(it.bytes)}" }
-            canvas.drawText(ellipsizeForWidth(detail, right - left), left, bottom + 15f * density, smallTextPaint)
-            return bottom + 17f * density
+            canvas.drawText(ellipsizeForWidth(detail, right - left), left, bottom + 28f * density, smallTextPaint)
+            return bottom + 30f * density
+        }
+
+        private fun drawLaneGroup(
+            canvas: Canvas,
+            y: Float,
+            lanes: List<Segment>,
+            left: Float,
+            right: Float,
+            scaleTotal: Long,
+            scaleLabel: String,
+        ): Float {
+            val density = resources.displayMetrics.density
+            val laneHeight = 12f * density
+            val gap = 8f * density
+            val depthX = 8f * density
+            val depthY = -5f * density
+            var cursor = y + 18f * density
+            canvas.drawText(ellipsizeForWidth(scaleLabel, right - left), left, cursor - 6f * density, smallTextPaint)
+            val scale = scaleTotal.coerceAtLeast(1L).toDouble()
+            lanes.forEach { lane ->
+                drawPrism(canvas, left, cursor, right, cursor + laneHeight, depthX, depthY, 0xff263040.toInt())
+                val laneWidth = ((right - left) * lane.bytes.coerceAtLeast(0L).toDouble() / scale).toFloat().coerceIn(0f, right - left)
+                if (laneWidth > 0.5f) drawPrism(canvas, left, cursor, left + laneWidth, cursor + laneHeight, depthX, depthY, lane.color)
+                val label = "${lane.label}: ${compactBytes(lane.bytes)} (${String.format("%.1f%%", lane.bytes.coerceAtLeast(0L) * 100.0 / scale)} of lane scale)"
+                canvas.drawText(ellipsizeForWidth(label, right - left), left, cursor + laneHeight + 12f * density, smallTextPaint)
+                cursor += laneHeight + 22f * density + gap
+            }
+            return cursor
+        }
+
+        private fun drawUnavailableBox(canvas: Canvas, y: Float, left: Float, right: Float, reason: String) {
+            val density = resources.displayMetrics.density
+            val top = y + 12f * density
+            val bottom = top + 42f * density
+            paint.style = Paint.Style.FILL
+            paint.color = 0x33263040
+            canvas.drawRoundRect(left, top, right, bottom, 12f * density, 12f * density, paint)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1.2f * density
+            paint.color = 0xff607080.toInt()
+            canvas.drawRoundRect(left, top, right, bottom, 12f * density, 12f * density, paint)
+            canvas.drawText("App-level virtual memory metrics: N/A", left + 12f * density, top + 17f * density, textPaint)
+            canvas.drawText(ellipsizeForWidth(reason, right - left - 24f * density), left + 12f * density, top + 34f * density, smallTextPaint)
+        }
+
+        private fun drawHierarchyConnector(canvas: Canvas, x1: Float, y1: Float, x2: Float, y2: Float, label: String) {
+            val density = resources.displayMetrics.density
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1.4f * density
+            paint.color = 0x99aeeaff.toInt()
+            val midY = (y1 + y2) / 2f
+            val path = Path().apply {
+                moveTo(x1, y1)
+                lineTo(x1, midY)
+                lineTo(x2, midY)
+                lineTo(x2, y2)
+            }
+            canvas.drawPath(path, paint)
+            paint.style = Paint.Style.FILL
+            paint.color = 0xffd0d0d0.toInt()
+            canvas.drawText(label, minOf(x1, x2) + 8f * density, midY - 3f * density, smallTextPaint)
         }
 
         private fun formatAgeForChart(ageSeconds: Long, createdAtEpoch: Long): String {
@@ -6253,6 +6621,28 @@ class MainActivity : AppCompatActivity() {
                 totalLayerBytes = uniqueLayerBytes + sharedLayerBytes,
             )
         }.sortedBy { it.displayRef }
+    }
+
+    private fun renderImageStorageScope(images: List<ImageReferenceInfo>) {
+        if (images.isEmpty()) return
+        val logicalViewBytes = images.sumOf { it.viewBytes }
+        val uniqueReferencedLayerBytes = images
+            .flatMap { it.diffIds }
+            .map { it.removePrefix("sha256:") }
+            .distinct()
+            .sumOf { layerSize(it) }
+        val duplicateSharedBytes = (logicalViewBytes - uniqueReferencedLayerBytes).coerceAtLeast(0L)
+        addWidget(
+            getString(R.string.widget_image_storage_scope),
+            getString(R.string.image_storage_scope_value_fmt, formatBytes(uniqueReferencedLayerBytes), formatBytes(logicalViewBytes)),
+            getString(
+                R.string.image_storage_scope_detail_fmt,
+                formatBytes(uniqueReferencedLayerBytes),
+                formatBytes(duplicateSharedBytes),
+                formatBytes(logicalViewBytes),
+            ),
+            detailLines = 4,
+        )
     }
 
     private fun renderImageCacheHealth(images: List<ImageReferenceInfo>) {

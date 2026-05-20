@@ -272,7 +272,6 @@ pdocker-android/
 │   └── bin/pdockerd                   — the actual daemon (3500 LOC)
 └── scripts/
     ├── build-native-android-ndk.sh    — Android NDK helper build path
-    ├── build-native-termux.sh         — legacy local Termux helper build path
     ├── copy-native.sh                 — backend + vendor/ → jniLibs
     ├── fetch-xterm.sh                 — pull xterm.js + FitAddon CDN
     └── build-apk.sh                   — orchestrator

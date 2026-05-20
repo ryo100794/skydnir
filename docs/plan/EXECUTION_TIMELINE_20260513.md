@@ -30,6 +30,7 @@ Primary sources:
    device/manual record that can be repeated.
 5. **llama.cpp stays unmodified.** GPU bridge work remains in pdocker
    ICD/executor/transport/tests, not upstream model/runtime sources.
+6. **Compaction-safe handoff.** Before context exhaustion or compaction, stop detailed risky work, summarize the lane in `AGENT_COORDINATION.md`, checkpoint only reviewed small slices, delegate the next narrow action, and never start a large new patch with low context budget.
 
 ## Release Gates
 
@@ -54,6 +55,7 @@ Primary sources:
 | T0-C | agent: memory UI | Show pager artifact source/age/status, transparent metrics, and stale/planned-gap state without confusing them with live `/proc` or success. | Static contract test covers source/age, transparent metrics, and no live-success wording without an artifact. |
 | T0-D | agent: service truth plan | Convert service health/runtime teardown planned gaps into executable acceptance checks. | Feature scenario entries contain concrete commands, evidence, and exit criteria. |
 | T0-E | manager | Align TODO, CI gate ledger, scenario ledger, and test driver manifest so planned-gap/device-gated items are non-promoting. | `release-honesty` lane exists, manifest lanes declare stable-checkpoint exclusion, and release docs link residual blockers instead of counting them as stable. |
+| T0-F | manager/agent | Apply the compaction-safe handoff protocol before risky detailed work when context is low. | `AGENT_COORDINATION.md` records stop/summarize/checkpoint/delegate rules, the low-context no-large-patch rule, and concise artifact reporting; `python3 scripts/verify-docs-maintenance.py` guards those terms. |
 
 ### T1 - P0 Truth, Recovery, and GPU Correctness
 

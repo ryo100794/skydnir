@@ -87,8 +87,8 @@ EXPECTED_TOP_LEVEL_SCRIPT_COUNT = 90
 EXPECTED_SUBTREE_ENTRY_COUNT = 4
 EXPECTED_CATEGORY_COUNTS = {
     "runtime-package-needed": 1,
-    "build-developer": 9,
-    "test-verification": 76,
+    "build-developer": 8,
+    "test-verification": 77,
     "generated-maintenance": 3,
     "obsolete-suspect": 1,
 }

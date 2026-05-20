@@ -125,8 +125,8 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                             "diagnostics": {
                                 "runtime_freshness": {
                                     "summary": "pass",
-                                    "expected_executor_marker": "gpu-executor-float16-cap-diagnostic-20260520",
-                                    "observed_executor_markers": ["gpu-executor-float16-cap-diagnostic-20260520"],
+                                    "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                                    "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
                                     "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                                     "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                                     "executor_event_count": 1,
@@ -219,8 +219,8 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                             "diagnostics": {
                                 "runtime_freshness": {
                                     "summary": "pass",
-                                    "expected_executor_marker": "gpu-executor-float16-cap-diagnostic-20260520",
-                                    "observed_executor_markers": ["gpu-executor-float16-cap-diagnostic-20260520"],
+                                    "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                                    "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
                                     "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                                     "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                                     "executor_event_count": 1,

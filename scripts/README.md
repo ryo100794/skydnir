@@ -24,8 +24,8 @@ Every inventory entry now also carries a `migration` object with a proposed dest
 | Category | Count | Meaning |
 |---|---:|---|
 | `runtime-package-needed` | 1 | Needed to stage runtime/APK payloads or otherwise part of packaging flow. |
-| `build-developer` | 9 | Build, setup, fetch, or developer environment helper. |
-| `test-verification` | 76 | Test, smoke, benchmark, contract, or device verification helper. |
+| `build-developer` | 8 | Build, setup, fetch, or developer environment helper. |
+| `test-verification` | 77 | Test, smoke, benchmark, contract, or device verification helper. |
 | `generated-maintenance` | 3 | Generated-doc/evidence maintenance or manifest data. |
 | `obsolete-suspect` | 1 | Unreferenced or weakly referenced candidate; not deleted without audit. |
 
@@ -112,7 +112,6 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/build-apk.sh` | `stable-entrypoint` | Build, setup, or developer environment helper. |
 | `scripts/build-gpu-shim.sh` | `stable-entrypoint` | Build, setup, or developer environment helper. |
 | `scripts/build-native-android-ndk.sh` | `stable-entrypoint` | Builds Android/Bionic native helper payloads for arm64-v8a and armeabi-v7a with the Android NDK path, without Termux or box64 in the standard path. |
-| `scripts/build-native-termux.sh` | `stable-entrypoint` | Build, setup, or developer environment helper. |
 | `scripts/fetch-xterm.sh` | `developer-helper` | Build, setup, or developer environment helper. |
 | `scripts/git-preflight.sh` | `developer-helper` | Build, setup, or developer environment helper. |
 | `scripts/setup-env.sh` | `developer-helper` | Build, setup, or developer environment helper. |
@@ -150,6 +149,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/bench-gpu-bridge.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/compat-audit.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/container-direct-probe.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
+| `scripts/gguf-tensor-range-index.py` | `developer-helper` | Generate GGUF tensor/range diagnostic indexes for memory-pager and MoE residency investigations. |
 | `scripts/pdocker-test-driver.py` | `stable-entrypoint` | Host-side verification/test driver or static contract gate. |
 | `scripts/run-python-coverage.sh` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/run_direct_syscall_scenarios.py` | `test-helper` | Host-side verification/test driver or static contract gate. |

@@ -424,6 +424,43 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
         with self.assertRaises(verifier.CheckFailure):
             verifier.check_agent_obsolete_suspect_count_language(self.tmp)
 
+
+    def write_compaction_protocol(self, extra=""):
+        coordination = self.tmp / "docs" / "plan" / "AGENT_COORDINATION.md"
+        coordination.write_text(
+            "# Agent Coordination Ledger\n\n"
+            "## Compaction-Safe Handoff Protocol\n\n"
+            "1. **Stop before opening a large new seam.** Stop risky work.\n"
+            "2. **Summarize first.** Record status.\n"
+            "3. **Checkpoint deliberately.** Commit only reviewed small slices.\n"
+            "4. **Delegate instead of expanding context.** Split narrow work.\n\n"
+            "### Low-Context Patch Budget Rule\n\n"
+            "No large new patch may start when context budget is low.\n\n"
+            "### Concise Agent Artifact Reporting\n\n"
+            "Report changed paths, validation commands, and durable artifact paths.\n"
+            + extra,
+            encoding="utf-8",
+        )
+
+    def test_agent_compaction_protocol_accepts_required_safeguards(self):
+        self.write_compaction_protocol()
+
+        verifier.check_agent_compaction_protocol(self.tmp)
+
+    def test_agent_compaction_protocol_rejects_missing_low_context_rule(self):
+        self.write_compaction_protocol()
+        coordination = self.tmp / "docs" / "plan" / "AGENT_COORDINATION.md"
+        coordination.write_text(
+            coordination.read_text(encoding="utf-8").replace(
+                "No large new patch may start when context budget is low.",
+                "Keep going if possible.",
+            ),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_agent_compaction_protocol(self.tmp)
+
     def test_historical_plan_rejects_live_running_assignment_section(self):
         timeline = self.tmp / "docs" / "plan" / "EXECUTION_TIMELINE_20260513.md"
         timeline.write_text(
