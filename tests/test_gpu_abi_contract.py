@@ -235,6 +235,7 @@ class GpuAbiContractTest(unittest.TestCase):
             ("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", "cpu_oracle.oracle_writeback"),
             ("PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel"),
             ("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization_materialized"),
+            ("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", "float16_capability_added"),
             ("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_buffer_cache.enabled"),
             ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
             ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "spirv_descriptor_access"),
@@ -259,6 +260,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('env_truthy("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", 0)', source)
         self.assertIn('\\"mutable_buffer_cache\\":{\\"enabled\\":%s,\\"max_bytes\\":%zu}', source)
         self.assertIn('\\"q4k_targeted_specialization_materialized\\":%s', source)
+        self.assertIn('\\"float16_capability_added\\":%s', source)
+        self.assertIn("add_spirv_capability(&shader_code, &shader_size, 9)", source)
+        icd_source = (ROOT / "docker-proot-setup/src/gpu/pdocker_vulkan_icd.c").read_text()
+        self.assertIn("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", icd_source)
+        self.assertIn("add_float16_capability_for_storage16=%u", icd_source)
+        self.assertIn("pipeline->requested_feature_mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT16", icd_source)
         self.assertIn('\\"q4k_safe_kernel\\":%s', source)
         self.assertIn("kQ4kSafeSpv", source)
         self.assertIn("kQ6kSafeSpv", source)
@@ -1140,8 +1147,8 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-local-size-specid-20260520",
-                        "observed_executor_markers": ["gpu-executor-local-size-specid-20260520"],
+                        "expected_executor_marker": "gpu-executor-float16-cap-diagnostic-20260520",
+                        "observed_executor_markers": ["gpu-executor-float16-cap-diagnostic-20260520"],
                     },
                     "config_propagation": {
                         "summary": "fail",
@@ -1253,7 +1260,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-local-size-specid-20260520",
+                        "expected_executor_marker": "gpu-executor-float16-cap-diagnostic-20260520",
                         "observed_executor_markers": [],
                     },
                 },
@@ -1295,7 +1302,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-local-size-specid-20260520",
+                        "expected_executor_marker": "gpu-executor-float16-cap-diagnostic-20260520",
                         "observed_executor_markers": [],
                     },
                 },
@@ -1318,8 +1325,8 @@ class GpuAbiContractTest(unittest.TestCase):
                     "blocker_detail": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-local-size-specid-20260520",
-                        "observed_executor_markers": ["gpu-executor-local-size-specid-20260520"],
+                        "expected_executor_marker": "gpu-executor-float16-cap-diagnostic-20260520",
+                        "observed_executor_markers": ["gpu-executor-float16-cap-diagnostic-20260520"],
                     },
                     "config_propagation": {"summary": "pass", "checks": []},
                 },
@@ -1364,7 +1371,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "enabled_ext_8bit_storage",
             "enabled_ext_shader_float16_int8",
             "enabled_ext_storage_buffer_storage_class",
-            "#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER \"gpu-executor-local-size-specid-20260520\"",
+            "#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER \"gpu-executor-float16-cap-diagnostic-20260520\"",
         ]:
             self.assertIn(marker, source)
         failure_body = source.split("if (ret != 0) {", 1)[1].split("if (fence) vkDestroyFence", 1)[0]

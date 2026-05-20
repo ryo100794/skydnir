@@ -874,6 +874,8 @@ typedef struct {
     int q4k_safe_kernel;
     int has_q4k_targeted_specialization;
     int q4k_targeted_specialization;
+    int has_add_float16_capability_for_storage16;
+    int add_float16_capability_for_storage16;
     int disable_storage8;
     int disable_storage16;
     int disable_subgroup_arithmetic;
@@ -963,7 +965,7 @@ typedef struct {
 
 static VulkanRuntime g_vulkan_runtime;
 
-#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-local-size-specid-20260520"
+#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-float16-cap-diagnostic-20260520"
 
 static uint32_t choose_vulkan_instance_api_version(void) {
     uint32_t supported = VK_API_VERSION_1_0;
@@ -2602,6 +2604,22 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
         }
         return -1;
     }
+    if (strncmp(token, "add_float16_capability_for_storage16=", 37) == 0) {
+        const char *value = token + 37;
+        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+            options->has_add_float16_capability_for_storage16 = 1;
+            options->add_float16_capability_for_storage16 = 1;
+            return 0;
+        }
+        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+            options->has_add_float16_capability_for_storage16 = 1;
+            options->add_float16_capability_for_storage16 = 0;
+            return 0;
+        }
+        return -1;
+    }
     if (strncmp(token, "disable_storage8=", 17) == 0) {
         const char *value = token + 17;
         options->disable_storage8 =
@@ -3150,6 +3168,75 @@ static int patch_spirv_literal_local_size_from_spec(
     return 0;
 }
 
+static int spirv_has_capability(const uint32_t *code, size_t bytes, uint32_t capability) {
+    if (!code || bytes < 20 || (bytes % sizeof(uint32_t)) != 0 ||
+        code[0] != 0x07230203u) {
+        return 0;
+    }
+    const size_t words = bytes / sizeof(uint32_t);
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = code[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == 17 && word_count >= 2 && code[i + 1] == capability) return 1;
+        i += word_count;
+    }
+    return 0;
+}
+
+static int spirv_uses_float16_type(const uint32_t *code, size_t bytes) {
+    if (!code || bytes < 20 || (bytes % sizeof(uint32_t)) != 0 ||
+        code[0] != 0x07230203u) {
+        return 0;
+    }
+    const size_t words = bytes / sizeof(uint32_t);
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = code[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == 22 && word_count >= 3 && code[i + 2] == 16) return 1;
+        i += word_count;
+    }
+    return 0;
+}
+
+static int add_spirv_capability(
+        uint32_t **code,
+        size_t *bytes,
+        uint32_t capability) {
+    if (!code || !*code || !bytes || *bytes < 20 ||
+        (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u) {
+        return 0;
+    }
+    if (spirv_has_capability(*code, *bytes, capability)) return 0;
+    const size_t words = *bytes / sizeof(uint32_t);
+    size_t insert = 5;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = (*code)[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == 17) {
+            insert = i + word_count;
+            i += word_count;
+            continue;
+        }
+        break;
+    }
+    uint32_t *expanded = (uint32_t *)malloc((words + 2) * sizeof(uint32_t));
+    if (!expanded) return 0;
+    memcpy(expanded, *code, insert * sizeof(uint32_t));
+    expanded[insert] = (2u << 16) | 17u;
+    expanded[insert + 1] = capability;
+    memcpy(expanded + insert + 2, *code + insert, (words - insert) * sizeof(uint32_t));
+    free(*code);
+    *code = expanded;
+    *bytes = (words + 2) * sizeof(uint32_t);
+    return 1;
+}
+
 static int rewrite_duplicate_descriptor_bindings(
         uint32_t *code,
         size_t bytes,
@@ -3438,6 +3525,7 @@ static uint64_t vulkan_pipeline_policy_hash(
         int rewrite_duplicate_descriptors,
         int materialize_specialization_constants,
         int specialization_materialized,
+        int float16_capability_added,
         int disable_pipeline_optimization,
         int skip_unused_descriptor_transfers,
         int use_spirv_descriptor_access,
@@ -3456,6 +3544,7 @@ static uint64_t vulkan_pipeline_policy_hash(
         (unsigned char)(rewrite_duplicate_descriptors ? 1 : 0),
         (unsigned char)(materialize_specialization_constants ? 1 : 0),
         (unsigned char)(specialization_materialized ? 1 : 0),
+        (unsigned char)(float16_capability_added ? 1 : 0),
         (unsigned char)(disable_pipeline_optimization ? 1 : 0),
         (unsigned char)(skip_unused_descriptor_transfers ? 1 : 0),
         (unsigned char)(use_spirv_descriptor_access ? 1 : 0),
@@ -8006,6 +8095,7 @@ static int run_vulkan_dispatch_fd(
     int have_spirv_summary = 0;
     int specialization_materialized = 0;
     int local_size_patched = 0;
+    int float16_capability_added = 0;
     const int strict_passthrough = strict_vulkan_passthrough_requested(options);
     const int strict_device_local_staging =
         strict_passthrough &&
@@ -8186,6 +8276,25 @@ static int run_vulkan_dispatch_fd(
             specialization_data,
             specialization_data_size);
     }
+    const int add_float16_capability_for_storage16 =
+        options && options->has_add_float16_capability_for_storage16
+            ? options->add_float16_capability_for_storage16
+            : env_truthy("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", 0);
+    if (add_float16_capability_for_storage16 &&
+        spirv_uses_float16_type(shader_code, shader_size) &&
+        !spirv_has_capability(shader_code, shader_size, 9)) {
+        /*
+         * Diagnostic Android-driver compatibility lowering.  Some ggml
+         * shaders use 16-bit float objects solely through storage-buffer
+         * access and therefore validate without OpCapability Float16.  A few
+         * Android compilers nevertheless route the presence of OpTypeFloat 16
+         * through their shaderFloat16 feature gate at pipeline creation time.
+         * This knob adds only the capability declaration; it does not rewrite
+         * descriptor bytes, arithmetic, push constants, or llama.cpp code.
+         */
+        float16_capability_added =
+            add_spirv_capability(&shader_code, &shader_size, 9);
+    }
     const int rewrite_duplicate_descriptors =
         strict_passthrough ? 0 :
         options && options->has_rewrite_duplicate_descriptors
@@ -8295,6 +8404,7 @@ static int run_vulkan_dispatch_fd(
         rewrite_duplicate_descriptors,
         materialize_specialization_constants,
         specialization_materialized,
+        float16_capability_added,
         disable_pipeline_optimization,
         skip_unused_descriptor_transfers,
         use_spirv_descriptor_access,
@@ -9489,6 +9599,7 @@ static int run_vulkan_dispatch_fd(
                 "\"specialization_materialized\":%s,"
                 "\"q4k_targeted_specialization_materialized\":%s,"
                 "\"local_size_patched\":%s,"
+                "\"float16_capability_added\":%s,"
                 "\"spirv_local_size\":[%u,%u,%u],"
                 "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
                 "\"spirv_local_size_consistent\":%s,"
@@ -9534,6 +9645,7 @@ static int run_vulkan_dispatch_fd(
                 specialization_materialized ? "true" : "false",
                 q4k_targeted_specialization_materialized ? "true" : "false",
                 local_size_patched ? "true" : "false",
+                float16_capability_added ? "true" : "false",
                 spirv_summary.local_size[0],
                 spirv_summary.local_size[1],
                 spirv_summary.local_size[2],
@@ -9636,6 +9748,7 @@ static int run_vulkan_dispatch_fd(
             "\"specialization_materialized\":%s,"
             "\"q4k_targeted_specialization_materialized\":%s,"
             "\"local_size_patched\":%s,"
+            "\"float16_capability_added\":%s,"
             "\"spirv_local_size\":[%u,%u,%u],"
             "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
             "\"spirv_local_size_consistent\":%s,"
@@ -9692,6 +9805,7 @@ static int run_vulkan_dispatch_fd(
             specialization_materialized ? "true" : "false",
             q4k_targeted_specialization_materialized ? "true" : "false",
             local_size_patched ? "true" : "false",
+            float16_capability_added ? "true" : "false",
             spirv_summary.local_size[0],
             spirv_summary.local_size[1],
             spirv_summary.local_size[2],
@@ -9846,6 +9960,7 @@ cleanup:
                 "\"materialize_specialization\":%s,"
                 "\"specialization_materialized\":%s,"
                 "\"q4k_targeted_specialization_materialized\":%s,"
+                "\"float16_capability_added\":%s,"
                 "\"q4k_safe_kernel\":%s,"
                 "\"oracle_fail_closed\":%s,"
                 "\"strict_passthrough\":%s,"
@@ -9873,6 +9988,7 @@ cleanup:
                 materialize_specialization_constants ? "true" : "false",
                 specialization_materialized ? "true" : "false",
                 q4k_targeted_specialization_materialized ? "true" : "false",
+                float16_capability_added ? "true" : "false",
                 q4k_safe_kernel_used ? "true" : "false",
                 oracle_fail_closed ? "true" : "false",
                 strict_passthrough ? "true" : "false",

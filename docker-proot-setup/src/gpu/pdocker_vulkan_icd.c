@@ -1035,6 +1035,13 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
         off += (size_t)n;
     }
+    if (getenv("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16")) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " add_float16_capability_for_storage16=%u",
+                     env_truthy_default("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", false) ? 1u : 0u);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        off += (size_t)n;
+    }
     if (getenv("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " disable_storage8=%u",
@@ -2702,6 +2709,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
         pipeline->layout = (PdockerVkPipelineLayout *)pCreateInfos[i].layout;
         pipeline->requested_feature_mask =
             device ? ((PdockerVkDevice *)device)->requested_feature_mask : 0;
+        if (env_truthy_default("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", false)) {
+            /*
+             * Keep strict executor validation aligned with the explicit
+             * Android-driver compatibility lowering.  The lowering only adds
+             * OpCapability Float16 for shaders that already contain 16-bit
+             * float storage types; if requested here, the forwarded feature
+             * contract must include shaderFloat16 as well.
+             */
+            pipeline->requested_feature_mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT16;
+        }
         pipeline->local_size_x = 128;
         const char *entry_name = pCreateInfos[i].stage.pName ? pCreateInfos[i].stage.pName : "main";
         snprintf(pipeline->entry_name, sizeof(pipeline->entry_name), "%s", entry_name);
