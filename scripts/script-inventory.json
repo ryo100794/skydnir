@@ -427,7 +427,8 @@
         "date": "2026-05-18",
         "reference_scan": "rg found no runtime callers outside script inventory/README/verifier allowlist and the script file itself; pycache-only hits are ignored.",
         "replacement_command": "python3 scripts/pdocker-test-driver.py --lane android-terminal-exec-it",
-        "decision": "keep as obsolete-suspect for now; do not delete until paired UI self-test and engine-exec-input JSONL device artifacts have fully replaced this ad-hoc repro."
+        "decision": "keep as obsolete-suspect for now; do not delete until paired UI self-test and engine-exec-input JSONL device artifacts have fully replaced this ad-hoc repro.",
+        "retirement_condition": "Delete only after docs/test/ui-it-selftest-latest.json and docs/test/engine-exec-input-latest.jsonl exist from a fresh ADB run and pass python3 scripts/verify-terminal-exec-it-artifact.py docs/test/ui-it-selftest-latest.json docs/test/engine-exec-input-latest.jsonl --require-container."
       },
       "migration": {
         "target_dir": "scripts/obsolete-candidates",

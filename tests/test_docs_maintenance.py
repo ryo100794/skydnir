@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import shutil
 import sys
 import tempfile
@@ -247,6 +248,15 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
 
         verifier.check_latest_evidence_files_have_owner(self.tmp)
 
+    def test_latest_evidence_file_rejects_accidental_suffix_substring_owner(self):
+        artifact = self.tmp / "docs" / "test" / "unowned-latest.json"
+        artifact.write_text("{}", encoding="utf-8")
+        evidence_index = self.tmp / "docs" / "test" / "EVIDENCE_INDEX.md"
+        evidence_index.write_text("`some-unowned-latest.json`\n", encoding="utf-8")
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_latest_evidence_files_have_owner(self.tmp)
+
     def test_latest_evidence_nested_file_accepts_latest_artifact_directory_owner(self):
         artifact_dir = self.tmp / "docs" / "test" / "example-latest-artifacts"
         artifact_dir.mkdir()
@@ -260,6 +270,38 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
         )
 
         verifier.check_latest_evidence_files_have_owner(self.tmp)
+
+    def test_latest_evidence_nested_file_accepts_exact_full_path_owner(self):
+        artifact_dir = self.tmp / "docs" / "test" / "example-latest-artifacts"
+        artifact_dir.mkdir()
+        (artifact_dir / "wait-server.jsonl").write_text("{}", encoding="utf-8")
+        evidence_index = self.tmp / "docs" / "test" / "EVIDENCE_INDEX.md"
+        evidence_index.write_text(
+            "`docs/test/example-latest-artifacts/wait-server.jsonl`\n",
+            encoding="utf-8",
+        )
+
+        verifier.check_latest_evidence_files_have_owner(self.tmp)
+
+    def test_latest_evidence_nested_file_rejects_accidental_directory_substring_owner(self):
+        artifact_dir = self.tmp / "docs" / "test" / "example-latest-artifacts"
+        artifact_dir.mkdir()
+        (artifact_dir / "wait-server.jsonl").write_text("{}", encoding="utf-8")
+        evidence_index = self.tmp / "docs" / "test" / "EVIDENCE_INDEX.md"
+        evidence_index.write_text("`example-latest-artifacts-old`\n", encoding="utf-8")
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_latest_evidence_files_have_owner(self.tmp)
+
+    def test_latest_evidence_nested_file_rejects_generic_child_basename_owner(self):
+        artifact_dir = self.tmp / "docs" / "test" / "unowned-latest-artifacts"
+        artifact_dir.mkdir()
+        (artifact_dir / "wait-server.jsonl").write_text("{}", encoding="utf-8")
+        evidence_index = self.tmp / "docs" / "test" / "EVIDENCE_INDEX.md"
+        evidence_index.write_text("`wait-server.jsonl`\n", encoding="utf-8")
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_latest_evidence_files_have_owner(self.tmp)
 
     def test_latest_evidence_nested_file_rejects_unowned_latest_path(self):
         artifact_dir = self.tmp / "docs" / "test" / "unowned-latest-artifacts"
@@ -305,6 +347,69 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
 
         with self.assertRaises(verifier.CheckFailure):
             verifier.check_root_documentation_map_matches_docs_categories(self.tmp)
+
+    def write_adboff_queue(self, highest: int, prose_highest: int | None = None):
+        prose_highest = highest if prose_highest is None else prose_highest
+        queue = self.tmp / "docs" / "plan" / "ADB_OFF_TASK_QUEUE_20260520.md"
+        rows = [
+            "| ID | Priority | Task | Host-only acceptance | Status |\n",
+            "|---|---:|---|---|---|\n",
+        ]
+        for index in range(1, highest + 1):
+            status = "Done."
+            if index == 6:
+                status = (
+                    "Ongoing maintenance; current queue items ADBOFF-001 through "
+                    f"ADBOFF-{prose_highest:03d} have landed."
+                )
+            rows.append(f"| ADBOFF-{index:03d} | P1 | Task | Acceptance | {status} |\n")
+        queue.write_text(
+            "# ADB-Off Task Queue\n\n"
+            f"ADBOFF-001 through ADBOFF-{prose_highest:03d} have landed.\n\n"
+            + "".join(rows),
+            encoding="utf-8",
+        )
+
+    def test_adboff_queue_completion_ledger_accepts_matching_range(self):
+        self.write_adboff_queue(6)
+
+        verifier.check_adboff_queue_completion_ledger(self.tmp)
+
+    def test_adboff_queue_completion_ledger_rejects_stale_range(self):
+        self.write_adboff_queue(7, prose_highest=6)
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_adboff_queue_completion_ledger(self.tmp)
+
+    def write_script_inventory(self, obsolete_count=1):
+        scripts = self.tmp / "scripts"
+        scripts.mkdir(exist_ok=True)
+        entries = [
+            {"path": f"scripts/obsolete-{index}.sh", "category": "obsolete-suspect"}
+            for index in range(obsolete_count)
+        ]
+        (scripts / "script-inventory.json").write_text(
+            json.dumps({"entries": entries}),
+            encoding="utf-8",
+        )
+
+    def test_agent_obsolete_suspect_count_language_accepts_current_count(self):
+        self.write_script_inventory(obsolete_count=1)
+        coordination = self.tmp / "docs" / "plan" / "AGENT_COORDINATION.md"
+        coordination.write_text("Only one obsolete suspect remains.\n", encoding="utf-8")
+
+        verifier.check_agent_obsolete_suspect_count_language(self.tmp)
+
+    def test_agent_obsolete_suspect_count_language_rejects_stale_count(self):
+        self.write_script_inventory(obsolete_count=1)
+        coordination = self.tmp / "docs" / "plan" / "AGENT_COORDINATION.md"
+        coordination.write_text(
+            "The old transition updated counts from three to two obsolete suspects.\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_agent_obsolete_suspect_count_language(self.tmp)
 
     def test_historical_plan_rejects_live_running_assignment_section(self):
         timeline = self.tmp / "docs" / "plan" / "EXECUTION_TIMELINE_20260513.md"

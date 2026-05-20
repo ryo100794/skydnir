@@ -413,6 +413,7 @@ class ScriptInventoryAuditTest(unittest.TestCase):
             entry for entry in entries if entry["category"] == "obsolete-suspect"
         )["audit"]
         audit.pop("replacement_command")
+        audit.pop("retirement_condition", None)
 
         with self.assertRaises(SystemExit):
             verify_script_inventory.validate_obsolete_suspect_audit(entries)

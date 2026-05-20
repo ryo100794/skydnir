@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import json
 import re
 import sys
 from dataclasses import dataclass
@@ -42,6 +43,30 @@ SYSTEM_ROUTE_RE = re.compile(
     r'path\s*==\s*"(?P<path>/system/[^"]+)"\s+and\s+method\s*==\s*"(?P<method>[A-Z]+)"'
 )
 PDOCKER_FIELD_RE = re.compile(r"\bPdocker[A-Za-z0-9_]*\b")
+OWNER_TOKEN_RE = re.compile(
+    r"docs/test/[A-Za-z0-9._/@+=:-]+(?:/[A-Za-z0-9._/@+=:-]+)*"
+    r"|[A-Za-z0-9._@+=:-]*latest[A-Za-z0-9._@+=:-]*"
+    r"(?:/[A-Za-z0-9._@+=:-]+)*"
+)
+ADBOFF_ROW_RE = re.compile(r"^\|\s*ADBOFF-(?P<id>\d{3})\s*\|.*$", re.MULTILINE)
+OBSOLETE_COUNT_RE = re.compile(
+    r"\b(?:(?P<word>zero|one|two|three|four|five|six|seven|eight|nine|ten)"
+    r"|(?P<number>\d+))\s+(?:tracked\s+)?obsolete[- ]suspects?\b",
+    re.IGNORECASE,
+)
+COUNT_WORDS = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
 
 # Durable Markdown documents must be discoverable from an index.  Test-run
 # summaries are addressed by the test-driver manifest convention documented in
@@ -239,24 +264,23 @@ def check_doc_discoverability(root: Path = ROOT) -> None:
         )
 
 
-def latest_evidence_owner_corpus(root: Path = ROOT) -> str:
-    parts: list[str] = []
+def latest_evidence_owner_tokens_from_docs(root: Path = ROOT) -> set[str]:
+    tokens: set[str] = set()
     for relative in LATEST_EVIDENCE_OWNER_FILES:
         path = root / relative
         if path.is_file():
-            parts.append(path.read_text(encoding="utf-8"))
-    return "\n".join(parts)
+            for match in OWNER_TOKEN_RE.finditer(path.read_text(encoding="utf-8")):
+                tokens.add(match.group(0).strip("`'\".,;:)[]"))
+    return tokens
 
 
 def latest_evidence_owner_tokens(path: Path, docs_test: Path) -> set[str]:
     """Return evidence-owner tokens that may document a latest artifact."""
 
     relative_to_docs_test = path.relative_to(docs_test).as_posix()
-    tokens = {
-        path.name,
-        relative_to_docs_test,
-        f"docs/test/{relative_to_docs_test}",
-    }
+    tokens = {relative_to_docs_test, f"docs/test/{relative_to_docs_test}"}
+    if "/" not in relative_to_docs_test:
+        tokens.add(path.name)
     for parent in path.relative_to(docs_test).parents:
         if parent == Path("."):
             continue
@@ -274,7 +298,7 @@ def check_latest_evidence_files_have_owner(root: Path = ROOT) -> None:
     docs_test = root / "docs" / "test"
     if not docs_test.is_dir():
         return
-    corpus = latest_evidence_owner_corpus(root)
+    owner_tokens = latest_evidence_owner_tokens_from_docs(root)
     missing: list[str] = []
     for path in sorted(docs_test.rglob("*")):
         if not path.is_file():
@@ -282,7 +306,7 @@ def check_latest_evidence_files_have_owner(root: Path = ROOT) -> None:
         relative = path.relative_to(docs_test).as_posix()
         if "latest" not in relative:
             continue
-        if not any(token in corpus for token in latest_evidence_owner_tokens(path, docs_test)):
+        if latest_evidence_owner_tokens(path, docs_test).isdisjoint(owner_tokens):
             missing.append(rel(path, root))
     if missing:
         rendered = ", ".join(missing[:20])
@@ -293,6 +317,63 @@ def check_latest_evidence_files_have_owner(root: Path = ROOT) -> None:
             "EVIDENCE_INDEX.md, docs/test/README.md, CI_GATE_LEDGER.md, or a "
             "registered test manifest: "
             f"{rendered}{suffix}"
+        )
+
+
+def check_adboff_queue_completion_ledger(root: Path = ROOT) -> None:
+    queue = root / "docs" / "plan" / "ADB_OFF_TASK_QUEUE_20260520.md"
+    if not queue.is_file():
+        return
+    text = queue.read_text(encoding="utf-8")
+    ids = sorted({int(match.group("id")) for match in ADBOFF_ROW_RE.finditer(text)})
+    if not ids:
+        return
+    expected = f"ADBOFF-001 through ADBOFF-{ids[-1]:03d} have landed"
+    if expected not in text:
+        fail(f"{rel(queue, root)} completion prose must say: {expected}")
+    row_006 = next(
+        (match.group(0) for match in ADBOFF_ROW_RE.finditer(text) if match.group("id") == "006"),
+        "",
+    )
+    if row_006 and expected not in row_006:
+        fail(f"{rel(queue, root)} ADBOFF-006 status must mention: {expected}")
+
+
+def obsolete_suspect_count(root: Path = ROOT) -> int | None:
+    manifest = root / "scripts" / "script-inventory.json"
+    if not manifest.is_file():
+        return None
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    return sum(
+        1
+        for entry in data.get("entries", [])
+        if isinstance(entry, dict) and entry.get("category") == "obsolete-suspect"
+    )
+
+
+def obsolete_count_value(match: re.Match[str]) -> int:
+    if match.group("number") is not None:
+        return int(match.group("number"))
+    return COUNT_WORDS[match.group("word").lower()]
+
+
+def check_agent_obsolete_suspect_count_language(root: Path = ROOT) -> None:
+    count = obsolete_suspect_count(root)
+    if count is None:
+        return
+    path = root / AGENT_COORDINATION
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    stale = [
+        match.group(0)
+        for match in OBSOLETE_COUNT_RE.finditer(text)
+        if obsolete_count_value(match) != count
+    ]
+    if stale:
+        fail(
+            f"{rel(path, root)} obsolete-suspect count wording disagrees with "
+            f"scripts/script-inventory.json ({count}): " + ", ".join(stale[:5])
         )
 
 
@@ -550,8 +631,10 @@ def run(root: Path = ROOT) -> None:
     check_links(root)
     check_doc_discoverability(root)
     check_latest_evidence_files_have_owner(root)
+    check_adboff_queue_completion_ledger(root)
     check_root_documentation_map_matches_docs_categories(root)
     check_historical_agent_assignments(root)
+    check_agent_obsolete_suspect_count_language(root)
     check_todo_roadmap_source_quality(root)
     check_historical_evidence_language(root)
     check_pdocker_extension_surface(root)

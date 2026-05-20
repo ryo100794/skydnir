@@ -199,7 +199,7 @@ remain gitignored and intentionally absent from the inventory.
 
 | Path | Stability | Reference scan | Replacement command | Decision |
 |---|---|---|---|---|
-| `scripts/android-terminal-it-repro.sh` | `legacy-audit` | No runtime callers found outside inventory/README/verifier allowlist and the script itself; pycache-only hits ignored. | `python3 scripts/pdocker-test-driver.py --lane android-terminal-exec-it` | Keep for now; do not delete until paired UI self-test and Engine exec-input JSONL artifacts fully replace the ad-hoc repro. |
+| `scripts/android-terminal-it-repro.sh` | `legacy-audit` | No runtime callers found outside inventory/README/verifier allowlist and the script itself; pycache-only hits ignored. | `python3 scripts/pdocker-test-driver.py --lane android-terminal-exec-it` | Keep for now; delete only after `docs/test/ui-it-selftest-latest.json` and `docs/test/engine-exec-input-latest.jsonl` come from a fresh ADB run and pass `python3 scripts/verify-terminal-exec-it-artifact.py docs/test/ui-it-selftest-latest.json docs/test/engine-exec-input-latest.jsonl --require-container`. |
 
 ## Cleanup Plan
 
