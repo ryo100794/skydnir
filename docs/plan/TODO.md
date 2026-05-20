@@ -412,6 +412,12 @@ evidence proves the real behavior or the limitation remains visible.
   first prove CPU out-of-core correctness against an in-memory/small fixture,
   then prove GPU-resident expert reuse improves latency; all non-green runs
   remain non-promoting diagnostics.
+  2026-05-20 update: the first pdocker-owned GGUF range indexer exists as a
+  read-only diagnostic tool and now streams the GGUF header/tensor table without
+  loading tensor payloads. It also supports byte-range lookup so future page
+  fault, file-read, or GPU-dispatch telemetry can be mapped back to
+  tensor/expert-like ranges. This is evidence plumbing only; it does not modify
+  llama.cpp, Dockerfiles, models, prompts, or runtime behavior.
 - [next] Mobile-resource residency constraints for MoE: keep a concise design
   note with device RAM/headroom, thermal, storage bandwidth, SAF/app-private
   backing, cache eviction, and correctness evidence requirements before any

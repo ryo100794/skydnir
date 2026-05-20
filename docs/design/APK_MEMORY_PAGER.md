@@ -634,7 +634,11 @@ The first implementation must preserve Docker/llama.cpp compatibility:
    offsets, sizes, quantization metadata, and expert-like grouping when it can
    be inferred from names or metadata.
 4. Map page faults, file reads, and GPU bridge dispatch buffers back to those
-   model ranges so pdocker can report which tensor/expert ranges are hot.
+   model ranges so pdocker can report which tensor/expert ranges are hot. The
+   first diagnostic implementation is `scripts/gguf-tensor-range-index.py`,
+   which streams the GGUF header/tensor table without loading tensor payloads
+   and can reverse-map an absolute or payload-relative byte range to matching
+   tensor/expert-like ranges.
 5. Cache hot ranges in app-private managed memory and, after GPU correctness is
    green, in reusable GPU resident buffers.
 6. Use SAF/Documents storage only when the project explicitly configures it for

@@ -17,7 +17,7 @@ import struct
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 
 SCHEMA = "pdocker.gguf-range-index.v1"
@@ -85,13 +85,15 @@ class GgufError(ValueError):
 
 @dataclass
 class Reader:
-    data: bytes
+    fp: BinaryIO
     pos: int = 0
 
     def read(self, size: int) -> bytes:
-        if size < 0 or self.pos + size > len(self.data):
+        if size < 0:
+            raise GgufError("negative read size")
+        out = self.fp.read(size)
+        if len(out) != size:
             raise GgufError("unexpected EOF while reading GGUF")
-        out = self.data[self.pos:self.pos + size]
         self.pos += size
         return out
 
@@ -195,46 +197,47 @@ def infer_expert(name: str) -> dict[str, Any]:
 
 
 def build_index(path: Path) -> dict[str, Any]:
-    data = path.read_bytes()
-    r = Reader(data)
-    magic = r.read(4)
-    if magic != b"GGUF":
-        raise GgufError("not a GGUF file")
-    version = r.u32()
-    if version not in (2, 3):
-        raise GgufError(f"unsupported GGUF version: {version}")
-    tensor_count = r.u64()
-    metadata_count = r.u64()
-    if tensor_count > 2_000_000 or metadata_count > 1_000_000:
-        raise GgufError("unreasonable GGUF table counts")
+    file_size = path.stat().st_size
+    with path.open("rb") as fp:
+        r = Reader(fp)
+        magic = r.read(4)
+        if magic != b"GGUF":
+            raise GgufError("not a GGUF file")
+        version = r.u32()
+        if version not in (2, 3):
+            raise GgufError(f"unsupported GGUF version: {version}")
+        tensor_count = r.u64()
+        metadata_count = r.u64()
+        if tensor_count > 2_000_000 or metadata_count > 1_000_000:
+            raise GgufError("unreasonable GGUF table counts")
 
-    metadata: dict[str, Any] = {}
-    for _ in range(metadata_count):
-        key = r.string()
-        value_type = r.u32()
-        metadata[key] = parse_value(r, value_type)
+        metadata: dict[str, Any] = {}
+        for _ in range(metadata_count):
+            key = r.string()
+            value_type = r.u32()
+            metadata[key] = parse_value(r, value_type)
 
-    tensors = []
-    for _ in range(tensor_count):
-        name = r.string()
-        n_dims = r.u32()
-        if n_dims > 16:
-            raise GgufError(f"unreasonable tensor dimension count for {name}: {n_dims}")
-        shape = [r.u64() for _ in range(n_dims)]
-        ggml_type = r.u32()
-        offset = r.u64()
-        nbytes = tensor_nbytes(shape, ggml_type)
-        type_name = GGML_TYPES.get(ggml_type, (f"UNKNOWN_{ggml_type}", 1, 0))[0]
-        expert = infer_expert(name)
-        tensors.append({
-            "name": name,
-            "offset": offset,
-            "nbytes": nbytes,
-            "ggml_type": type_name,
-            "ggml_type_id": ggml_type,
-            "shape": shape,
-            **expert,
-        })
+        tensors = []
+        for _ in range(tensor_count):
+            name = r.string()
+            n_dims = r.u32()
+            if n_dims > 16:
+                raise GgufError(f"unreasonable tensor dimension count for {name}: {n_dims}")
+            shape = [r.u64() for _ in range(n_dims)]
+            ggml_type = r.u32()
+            offset = r.u64()
+            nbytes = tensor_nbytes(shape, ggml_type)
+            type_name = GGML_TYPES.get(ggml_type, (f"UNKNOWN_{ggml_type}", 1, 0))[0]
+            expert = infer_expert(name)
+            tensors.append({
+                "name": name,
+                "offset": offset,
+                "nbytes": nbytes,
+                "ggml_type": type_name,
+                "ggml_type_id": ggml_type,
+                "shape": shape,
+                **expert,
+            })
 
     alignment = int(metadata.get("general.alignment") or 32)
     data_start = align_up(r.pos, alignment)
@@ -247,7 +250,7 @@ def build_index(path: Path) -> dict[str, Any]:
         "schema": SCHEMA,
         "diagnostic_only": True,
         "model_path": str(path),
-        "model_size": len(data),
+        "model_size": file_size,
         "gguf_version": version,
         "alignment": alignment,
         "tensor_count": tensor_count,
@@ -260,13 +263,70 @@ def build_index(path: Path) -> dict[str, Any]:
     }
 
 
+def lookup_ranges(index: dict[str, Any], offset: int, length: int, *, space: str) -> dict[str, Any]:
+    if offset < 0:
+        raise GgufError("lookup offset must be non-negative")
+    if length <= 0:
+        raise GgufError("lookup length must be positive")
+    data_start = int(index.get("data_start") or 0)
+    absolute_start = offset + data_start if space == "payload" else offset
+    absolute_end = absolute_start + length
+    matches = []
+    covered = 0
+    for tensor in index.get("tensors", []):
+        tensor_start = int(tensor.get("absolute_offset") or 0)
+        tensor_end = int(tensor.get("absolute_end") or tensor_start)
+        overlap_start = max(absolute_start, tensor_start)
+        overlap_end = min(absolute_end, tensor_end)
+        if overlap_start >= overlap_end:
+            continue
+        overlap = overlap_end - overlap_start
+        covered += overlap
+        matches.append({
+            "name": tensor.get("name"),
+            "ggml_type": tensor.get("ggml_type"),
+            "layer": tensor.get("layer"),
+            "expert_id": tensor.get("expert_id"),
+            "expert_group": tensor.get("expert_group"),
+            "expert_like": tensor.get("expert_like"),
+            "tensor_absolute_offset": tensor_start,
+            "tensor_absolute_end": tensor_end,
+            "overlap_absolute_offset": overlap_start,
+            "overlap_nbytes": overlap,
+        })
+    return {
+        "schema": "pdocker.gguf-range-lookup.v1",
+        "diagnostic_only": True,
+        "model_path": index.get("model_path"),
+        "lookup_space": space,
+        "lookup_offset": offset,
+        "lookup_length": length,
+        "absolute_offset": absolute_start,
+        "absolute_end": absolute_end,
+        "matched_tensor_count": len(matches),
+        "covered_nbytes": covered,
+        "coverage_ratio": covered / length,
+        "matches": matches,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("model", type=Path)
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--lookup-offset", type=lambda value: int(value, 0))
+    parser.add_argument("--lookup-length", type=lambda value: int(value, 0), default=1)
+    parser.add_argument("--lookup-space", choices=("absolute", "payload"), default="absolute")
     args = parser.parse_args()
     try:
         index = build_index(args.model)
+        if args.lookup_offset is not None:
+            index = lookup_ranges(
+                index,
+                args.lookup_offset,
+                args.lookup_length,
+                space=args.lookup_space,
+            )
     except Exception as exc:
         error = {
             "schema": SCHEMA,

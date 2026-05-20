@@ -83,6 +83,121 @@ class GgufTensorRangeIndexTest(unittest.TestCase):
         self.assertGreaterEqual(expert["absolute_offset"], data["data_start"])
         self.assertEqual(expert["absolute_end"], expert["absolute_offset"] + expert["nbytes"])
 
+    def test_lookup_maps_absolute_range_back_to_expert_tensor(self):
+        with tempfile.TemporaryDirectory() as td:
+            model = Path(td) / "tiny.gguf"
+            model.write_bytes(synthetic_gguf())
+            index_result = subprocess.run(
+                [sys.executable, str(INDEXER), str(model)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+            )
+            self.assertEqual(index_result.returncode, 0, index_result.stdout + index_result.stderr)
+            index = json.loads(index_result.stdout)
+            expert_offset = index["tensors"][0]["absolute_offset"] + 16
+
+            lookup_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(INDEXER),
+                    str(model),
+                    "--lookup-offset",
+                    str(expert_offset),
+                    "--lookup-length",
+                    "64",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+            )
+            self.assertEqual(lookup_result.returncode, 0, lookup_result.stdout + lookup_result.stderr)
+            lookup = json.loads(lookup_result.stdout)
+
+        self.assertEqual(lookup["schema"], "pdocker.gguf-range-lookup.v1")
+        self.assertEqual(lookup["matched_tensor_count"], 1)
+        self.assertEqual(lookup["covered_nbytes"], 64)
+        self.assertEqual(lookup["matches"][0]["name"], "blk.0.ffn_gate_exps.3.weight")
+        self.assertEqual(lookup["matches"][0]["expert_id"], 3)
+
+    def test_lookup_supports_payload_relative_ranges_and_gaps(self):
+        with tempfile.TemporaryDirectory() as td:
+            model = Path(td) / "tiny.gguf"
+            model.write_bytes(synthetic_gguf())
+            lookup_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(INDEXER),
+                    str(model),
+                    "--lookup-space",
+                    "payload",
+                    "--lookup-offset",
+                    "0",
+                    "--lookup-length",
+                    "16",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+            )
+            self.assertEqual(lookup_result.returncode, 0, lookup_result.stdout + lookup_result.stderr)
+            payload_lookup = json.loads(lookup_result.stdout)
+
+            gap_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(INDEXER),
+                    str(model),
+                    "--lookup-offset",
+                    "8",
+                    "--lookup-length",
+                    "8",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+            )
+            self.assertEqual(gap_result.returncode, 0, gap_result.stdout + gap_result.stderr)
+            gap_lookup = json.loads(gap_result.stdout)
+
+        self.assertEqual(payload_lookup["matched_tensor_count"], 1)
+        self.assertEqual(payload_lookup["matches"][0]["name"], "blk.0.ffn_gate_exps.3.weight")
+        self.assertEqual(gap_lookup["matched_tensor_count"], 0)
+        self.assertEqual(gap_lookup["coverage_ratio"], 0)
+
+    def test_lookup_fails_closed_for_invalid_range(self):
+        with tempfile.TemporaryDirectory() as td:
+            model = Path(td) / "tiny.gguf"
+            model.write_bytes(synthetic_gguf())
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(INDEXER),
+                    str(model),
+                    "--lookup-offset",
+                    "0",
+                    "--lookup-length",
+                    "0",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+        self.assertFalse(data["success"])
+        self.assertIn("lookup length must be positive", data["error"])
+
     def test_indexer_fails_closed_for_non_gguf(self):
         with tempfile.TemporaryDirectory() as td:
             model = Path(td) / "bad.gguf"
