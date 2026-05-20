@@ -25,13 +25,16 @@ Confirmed facts:
 | `ngl=1` small add shader | CPU oracle matches | `0x11c0523df6c795b8`, `mismatch_count=0` |
 | `ngl=1` RoPE/Yarn shader | CPU oracle executes and matches | `0xac41e8033a67af4a`, `docs/test/llama-gpu-ngl1-rope-yarn-oracle-20260509.json` |
 | `ngl=1` RMSNorm shader | CPU oracle executes and matches | `0xf2f988b94bd3e0dc`, `docs/test/llama-gpu-ngl1-rms-norm-oracle-20260509.json` |
-| `ngl=1` Q6_K/final-projection shader | Sampled oracle executes and mismatches | `0x274f68a67dfef210`, Q6_K strict passthrough/workgroup/device-execution semantics |
+| `ngl=1` Q6_K/final-projection shader | Row-indexed writeback verified; workgroup shape and native reduction sum clear; final output still mismatches | `docs/test/llama-gpu-ngl1-q6-row-provenance-20260519.json`, `blocker_class=native-q6-device-execution-or-final-store` |
 | current device readiness | Heavy compare is memory-gated | readiness requires sufficient `MemAvailable`; low Android zram `SwapFree` is advisory unless a strict swap gate is explicitly configured |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
-HTTP alone.  Correctness is currently blocked at the Q6_K / final-projection
-path, and the current device lane must also pass memory readiness before a heavy
-compare is allowed to start.
+HTTP alone.  The latest strict row-provenance artifact still fails required
+correctness and has `benchmark_claim_allowed=false`; Q6_K is narrowed to
+`native-q6-device-execution-or-final-store` after row-indexed writeback,
+workgroup shape, and a native reduction/shader-like sum were cleared.  The
+memory readiness gate is still required before heavy compare or benchmark evidence can
+promote anything.
 
 ## Non-Negotiable Rules
 
@@ -204,7 +207,7 @@ Current `ngl=1` front-blocker candidates:
 |---|---|---|
 | `0xac41e8033a67af4a` | RoPE/Yarn | completed; oracle matches in `docs/test/llama-gpu-ngl1-rope-yarn-oracle-20260509.json` |
 | `0xf2f988b94bd3e0dc` | RMSNorm with optional multiply | oracle matches in `docs/test/llama-gpu-ngl1-rms-norm-oracle-20260509.json` |
-| `0x274f68a67dfef210` | `mul_mat_vec_q6_k`-like large quantized matvec / final projection | sampled Q6_K oracle executes and currently mismatches |
+| `0x274f68a67dfef210` | `mul_mat_vec_q6_k`-like large quantized matvec / final projection | row-indexed writeback verified; current blocker `native-q6-device-execution-or-final-store` |
 
 Procedure:
 
@@ -288,10 +291,12 @@ correctness probe still fails, so `0x274f68a67dfef210` is now the next primary
 blocker.
 
 Current blocker statement: keep Q6_K strict passthrough as the fidelity
-baseline.  The next fix must explain the sampled mismatch for
+baseline.  The next fix must explain the
+`native-q6-device-execution-or-final-store` blocker for
 `0x274f68a67dfef210` without changing llama.cpp, the Dockerfile, the model, or
-the prompts.  Prioritize workgroup shape, descriptor-view identity, Android
-Vulkan device-execution semantics, and memory-readiness gating before any
+the prompts.  Workgroup shape and row-indexed writeback are currently clear;
+focus on executor/Vulkan device execution, also recorded as
+`Vulkan device-execution`, versus final output store before any
 performance claim.
 
 Procedure:
@@ -415,22 +420,21 @@ Pass criteria:
   `q6-writeback-unverified`.  This prevents a pre-writeback oracle match from
   being promoted into a correctness claim when the container-visible fd boundary
   has not been proven.
-- The strict safe-kernel control now matches under the same bridge/object graph,
-  so the next native diagnostic is a bounded Q6_K reduction/output-layout probe
-  in the APK executor.  It emits `source_spirv_hash`,
-  `effective_spirv_hash`, `q6_native_reduction_tree_*`, and
-  `q6_output_layout_probe` fields without modifying llama.cpp, Dockerfiles,
-  models, prompts, or descriptor data.  A verified writeback plus multiple
-  mismatched rows found at the same non-canonical relative offset classifies as
-  native output layout; mixed or single-hit layout probes stay inconclusive. A
-  verified writeback plus `canonical-mismatch-not-found` with shader-like
-  arithmetic cleared classifies as native reduction/device-execution.
+- The bounded native Q6_K reduction/output-layout probes have now run through
+  `docs/test/llama-gpu-ngl1-q6-row-provenance-20260519.json`. Row-indexed
+  writeback is verified, workgroup shape is clear, and the native reduction /
+  shader-like sum clears, but final output still mismatches. The artifact
+  rejects a stable fixed output-layout offset and row-provenance explanation.
+  Current blocker: `native-q6-device-execution-or-final-store`; next work should
+  narrow executor/Vulkan device execution versus final output store, not
+  recollect a generic row-indexed artifact.
 
 #### Row-indexed Q6_K device-run decision tree
 
-After the next strict `ngl=1` device artifact with row-indexed Q6_K writeback
-evidence, decide the next C-side blocker in this order.  Do not change native
-code until the artifact lands in exactly one branch.
+For strict `ngl=1` device artifacts with row-indexed Q6_K writeback evidence,
+decide the C-side blocker in this order. The latest row-provenance artifact has
+already landed past the generic row-indexed gate; use this tree for regressions
+or reruns, not as a request to collect another generic row-indexed artifact.
 
 1. **If memory-blocked**: if the artifact reports `insufficient_memory`,
    `runtime_memory_pressure`, `device_memory_blocked:true`, or a runtime abort
@@ -673,11 +677,12 @@ Suggested first Spark task:
 ```text
 Continue the Q6_K strict-passthrough blocker for 0x274f68a67dfef210.  Do not
 modify llama.cpp, Dockerfiles, the model, or prompt probes.  Acceptance:
-the next row-indexed device artifact either memory-blocks before Q6_K and is
-rerun unchanged after memory recovers, or shows row-indexed writeback verified
-and then names exactly one remaining C-side blocker: workgroup-shape, Vulkan
-device-execution, or Q6 arithmetic/reduction/output-layout.  A sampled mismatch
-without row-indexed writeback evidence is not progress.
+preserve the row-indexed writeback/workgroup-shape evidence from
+docs/test/llama-gpu-ngl1-q6-row-provenance-20260519.json, then narrow
+native-q6-device-execution-or-final-store to either executor/Vulkan device
+execution or final output store. A rerun that loses row-indexed writeback
+verification or workgroup-shape clarity is a setup/regression artifact, not
+progress.
 ```
 
 If Spark gets lost, it should run:

@@ -58,22 +58,14 @@ issues, and deciding which planned gaps become hard gates.
    readiness/headroom artifact before model load; (c) NGL=1 Q6_K
    workgroup/writeback oracle run; (d) artifact classification that keeps
    memory blockers and Q6_K mismatches non-promoting; and (e) only after a
-   matching oracle, CPU/GPU benchmark reporting. The strict Q6 safe-kernel
-   diagnostic was enabled/classified in `5dc330a`/`e1a806d`; the safe-kernel
-   Q6 match clears bridge writeback/descriptors as the active explanation, so
-   the remaining blocker is native llama Q6_K SPIR-V reduction/output-layout.
-   Commit `3b8eecb` adds the bounded native layout probe and `be93398` refreshes
-   the artifact sweep. The 2026-05-19 strict device run
-   `docs/test/llama-gpu-ngl1-q6-native-output-layout-20260519.json` reached the
-   native Q6_K shader with fresh executor/ICD markers, verified row-indexed
-   writeback, matched the native reduction-tree oracle, and classified the
-   remaining blocker as `q6-native-output-layout-inconclusive`. The follow-up
-   32-sample probe rejected a simple fixed-offset layout explanation and now
-   classifies as `q6-native-device-execution-or-final-store`. The row
-   provenance probe also found `same_row_match_count=0` and
-   `other_row_match_count=0`, so the observed GPU values are not merely another
-   sampled row's correct output. This is still non-promoting diagnostic
-   evidence, not a benchmark or inference claim.
+   matching oracle, CPU/GPU benchmark reporting. The current non-promoting
+   diagnostic artifact is
+   `docs/test/llama-gpu-ngl1-q6-row-provenance-20260519.json`; it classifies
+   the remaining blocker as `q6-native-device-execution-or-final-store` after
+   rejecting bridge writeback/descriptors, simple fixed-offset output layout,
+   and simple other-row provenance as sufficient explanations. This artifact is
+   diagnostic only: it is not benchmark evidence, inference correctness
+   evidence, or device-success promotion.
 4. **[#11](https://github.com/ryo100794/pdocker-android/issues/11)
    Image-pull crash safety** `[P0 doing]`: partial pulls, `.pull-*`,
    `.tmp-*`, `.old-*`, interrupted layer extraction, tag publish, and startup
@@ -350,47 +342,18 @@ evidence proves the real behavior or the limitation remains visible.
   or premature wrapper removal.
 - [doing] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
   llama GPU bridge ABI: keep llama.cpp unmodified while expanding the
-  pdocker Vulkan/OpenCL bridge from device discovery and model-buffer
-  allocation toward generic ggml SPIR-V dispatch, persistent command transport,
-  and measured CPU-vs-GPU comparison artifacts. Current slice: `VULKAN_DISPATCH_V2`
-  carries the compute entry point and specialization constants across the
-  container/APK bridge, serves the forced-GPU HTTP probe, and now exposes
-  bridge upload/copy overhead as a performance blocker. Current correctness
-  gate: NGL=0 default is green, SPIR-V materialization is opt-in, and the
-  `small-f32-indexing`, `rope-yarn`, and `rms-norm` oracles match for the
-  observed NGL=1 front-blocker hashes. NGL=1 still fails required probes; the
-  next primary blocker is `0x274f68a67dfef210`, now classified as a
-  `mul_mat_vec_q6_k`-like large quantized matvec. The bounded sample oracle now
-  executes and mismatches 8/8 sampled rows, so the next split is Q6_K
-  decode/math vs descriptor-view/local-size execution semantics. Current slice:
-  main is working the GPU Q6 classifier/oracle boundary: the executor preserves
-  three-dimensional specialized local size (`32x2x1` instead of a collapsed
-  `32x1x1`), emits Q6_K 64-lane diagnostic evidence, and the compare runner
-  refuses llama GPU starts when Android swap headroom is unsafe.
-  `scripts/verify-llama-gpu-artifact.py` classifies memory blockers, Q6
-  workgroup-clear evidence, Q6 safe-kernel diagnostics, and remaining Q6
-  numeric mismatches so device results are not interpreted ad hoc. Commits
-  `5dc330a` and `e1a806d` enabled the strict safe-kernel diagnostic and its
-  classifier; `3b8eecb` added the bounded native Q6_K reduction/output-layout
-  probe, and `be93398` refreshed the artifact sweep. The 2026-05-19 device run
-  reached native Q6_K with writeback verified and reduction-tree math matching
-  the canonical oracle, but the output-layout probe was inconclusive. The
-  expanded 32-sample probe found only inconsistent value-only elsewhere hits,
-  so the current classifier moves the boundary to
-  `q6-native-device-execution-or-final-store`. The safe-kernel Q6 match plus
-  the native probe means the remaining GPU blocker is native llama Q6_K device
-  execution/final-store behavior, not bridge writeback, descriptor plumbing, or
-  simple other-row output placement.
-  Environment propagation remains a first-class blocker:
-  diagnostic flags used by the compare script, pdockerd defaults, UI/compose
-  launches, and artifact verification must stay synchronized before a GPU
-  result can be compared. This evidence is non-promoting until the native
-  Q6_K path matches and `benchmark_claim_allowed=true`; it must not be used for
-  benchmark or inference claims by itself. Device-side validation steps are
-  maintained in
-  `docs/test/LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`.
-  Stage gates and compact-model handoff are maintained in
-  `docs/plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`.
+  pdocker Vulkan/OpenCL bridge from discovery and model-buffer allocation toward
+  generic ggml SPIR-V dispatch and measured CPU-vs-GPU comparison artifacts.
+  Canonical current classifier:
+  `q6-native-device-execution-or-final-store`, with diagnostic evidence in
+  `docs/test/llama-gpu-ngl1-q6-row-provenance-20260519.json` and the active
+  stage gates in `docs/plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`. Environment
+  propagation remains first-class: compare script, pdockerd defaults,
+  UI/compose launches, and artifact verification must stay synchronized before
+  results can be compared. Remaining work is native llama Q6_K final-store
+  versus device-execution bisection. This lane is non-promoting until native
+  Q6_K matches and `benchmark_claim_allowed=true`; do not use current artifacts
+  for benchmark, inference, or device-success claims.
 - [next] [#10](https://github.com/ryo100794/pdocker-android/issues/10)
   / [#5](https://github.com/ryo100794/pdocker-android/issues/5) runtime
   teardown and terminal exec-it scheduling: gate hardening landed as `2ce8396`
@@ -760,25 +723,15 @@ implementation change plus a focused verification artifact.
   survivors remain, clears stale active PID fields only after no survivors, and
   keeps the device evidence contract in
   `docs/test/runtime-teardown-latest.json`.
-- [next] llama GPU layer evidence: the old `--gpu-layers 1` /
-  `--n-gpu-layers 1` probe offloaded only the output layer. The llama template
-  and compare script now default to at least `--n-gpu-layers 2`; next device
-  evidence must show `offloading N repeating layers` before treating the result
-  as meaningful transformer-layer acceleration. Break the device run into:
-  readiness/headroom check, env propagation diff, NGL=1 Q6_K oracle,
-  NGL>=2 repeating-layer proof, artifact verifier classification, and finally
-  benchmark reporting. The strict Q6 safe-kernel match narrows the active
-  blocker to native llama Q6_K SPIR-V reduction/output-layout; `3b8eecb` added
-  the bounded native layout probe and `be93398` refreshed the sweep ledger. The
-  2026-05-19 strict device artifact preserved those fields and first classified
-  `q6-native-output-layout-inconclusive`; the 32-sample follow-up rejected a
-  simple fixed-offset layout explanation and classifies
-  `q6-native-device-execution-or-final-store`. The row provenance follow-up
-  rejects simple other-row provenance as well. Bridge writeback/descriptors are
-  no longer the leading explanation. Next evidence should bisect local-y/partial
-  signatures and then native final store versus device execution without
-  changing llama.cpp, Dockerfile, model, or prompt. All
-  readiness-blocked or oracle-mismatch artifacts stay non-promoting.
+- [next] llama GPU layer evidence sub-gate for
+  [#4](https://github.com/ryo100794/pdocker-android/issues/4): keep NGL>=2
+  repeating-layer proof blocked behind the current Q6_K classifier. Ordered
+  gate: readiness/headroom check, env propagation diff, NGL=1 Q6_K correctness
+  proof, NGL>=2 `offloading N repeating layers` evidence, artifact verifier
+  classification, then benchmark reporting. No benchmark or acceleration claim
+  is allowed without both Q6_K correctness and layer-depth proof. Any
+  readiness-blocked, oracle-mismatch, or layer-missing artifact remains
+  non-promoting.
 
 ### Runtime / Compose-Up
 
@@ -917,69 +870,18 @@ implementation change plus a focused verification artifact.
   is supplied; do not download or bundle external PRoot/fakechroot. Acceptance:
   any comparison artifact records the operator-supplied command path and proves
   no external PRoot/fakechroot payload was downloaded or packaged.
-- [doing] Prototype APK-scoped memory pager. System swap/zram tuning is blocked
-  on production devices (`adb root` unavailable, `swapon` not permitted), so the
-  viable path is opt-in managed regions under pdocker control. The SDK28 compat
-  APK now proves the ptrace fallback PoC: reserved `PROT_NONE` page, SIGSEGV
-  stop, generic aarch64 `svc; brk` syscall injection for tracee `mprotect`,
-  page write, register restore, and original-instruction resume. Compose memory
-  keys (`mem_limit`, `memswap_limit`, `deploy.resources.limits.memory`) now feed
-  Engine metadata, while `PDOCKER_MEMORY_PAGER=managed` or
-  `io.pdocker.memory-pager=managed` remains the explicit pager opt-in. The
-  direct executor now writes bounded app-private memory telemetry artifacts
-  (`memory-ring.jsonl` and `memory-summary.json`) with operation/container IDs,
-  atomic rename publication, and partial-record rejection; the transparent APK
-  PoC script captures those artifacts and the canonical test driver has a
-  dedicated `android-memory-pager` lane. Canonical status: this lane is
-  device-evidence-only but non-promoting for stable/release credit until managed
-  pager probes and controlled OOM/LMK replay both pass on a connected device.
-  Remaining app-level virtual memory/low-memory audit items stay TODO/test-plan
-  only until promoted by device evidence:
-  - Large allocation guard: define the admission threshold from requested bytes,
-    Android low-memory headroom, container/operation identity, and explicit
-    large-workload or pager opt-in; unsafe allocations must return an
-    `ENOMEM`-style error with `allocation_denied_enomem` diagnostics rather than
-    starting work that Android LMK is likely to kill. Docker/Compose memory keys
-    remain budgets only and must not imply host swap or pager success.
-  - OOM/LMK diagnostics: every suspected backend death must retain the last
-    RSS/PSS/swap/headroom sample, last progress marker, pid/exit status or
-    signal, classifier reason (`lmk_suspected`, `not_lmk_suspected`, `unknown`),
-    and bounded ring/summary paths; UI/API state must fail closed instead of
-    showing stale `Up` or successful completion.
-  - UI memory visualization evidence: memory cards must display artifact
-    source, creation age, status, and whether data came from a past self-test vs
-    live `/proc`; promotion needs a replayable artifact/screenshot pair proving
-    stale, missing, or planned-gap evidence is not rendered as live success.
-  - Future mmap/userfault pager gate: keep `mmap`/`mprotect`/`sigaction`/`munmap`
-    interception and any `userfaultfd` backend behind explicit capability checks
-    plus opt-in labels/env. Unsupported mappings, executable/shared/stack/GPU
-    exclusions, unresolved faults, or missing kernel support must pass through
-    unmanaged when safe or fail closed with non-promoting diagnostics.
-  - Task H virtual memory feasibility gate: app-level virtual memory and pager
-    claims remain a planned-gap/non-promoting result unless a host/static
-    verifier plus future connected-device artifact proves every required
-    syscall capability: mmap fixed mapping or equivalent same-address replay,
-    mprotect on exact managed pages, SIGSEGV handler or userfaultfd fault-event
-    availability, file-backed spill/writeback/restore, and safe fallback on unsupported Android kernels.
-    `scripts/verify-memory-pager-contract.py`
-    rejects promotion artifacts missing any of those proofs; dry-run,
-    planned-gap, or host-only artifacts must set `success=false` and
-    `stable_checkpoint_eligible=false`. No native pager code is promoted by this gate.
-  Next slice: fill the runtime counters from the managed-region table, add
-  thread/signal guardrails, and run synthetic fault-latency/stress evidence
-  before any llama/container opt-in. Smaller executable proof units:
-  1. managed-pager PoC artifact proving explicit opt-in, managed-region table
-     counters, page materialization, dirty/writeback accounting, and fallback
-     denial fields;
-  2. transparent-pager PoC artifact proving unsupported mappings are excluded or
-     passed through safely instead of being claimed as managed;
-  3. OOM/LMK replay artifact proving allocation denial, backend-death
-     classifier, ring/summary retention, and operation/container identity;
-  4. UI evidence artifact/screenshot proving stale, missing, blocked-device, or
-     planned-gap memory data is not rendered as live success; and
-  5. future mmap/userfault capability artifact. Units 1-5 remain
-     non-promoting for stable/release credit until the connected-device pager
-     plus controlled OOM/LMK replay promotion condition passes.
+- [doing] Prototype APK-scoped memory pager. System swap/zram tuning remains
+  unavailable on production devices, and Docker/Compose memory keys are metadata
+  budgets only. The managed pager stays explicit opt-in via
+  `PDOCKER_MEMORY_PAGER=managed` or `io.pdocker.memory-pager=managed`; host and
+  static contracts track required ptrace, telemetry, large-allocation, and UI
+  evidence fields but promote nothing by themselves. Existing dry-run,
+  planned-gap, and host-only artifacts must remain `success=false` and
+  `stable_checkpoint_eligible=false`. Detailed acceptance for managed-region
+  counters, OOM/LMK replay, UI stale-evidence rejection, and future
+  mmap/userfault capability lives in issue
+  [#13](https://github.com/ryo100794/pdocker-android/issues/13) and the memory
+  diagnostics gates; this row is only the ownership/status pointer.
 - [next] Revisit Dockerfile build memory pressure without changing upstream
   Dockerfiles. The managed-region pager remains explicit and opt-in; ordinary
   toolchain heap allocations such as `cc1plus` are not yet under pdocker memory
