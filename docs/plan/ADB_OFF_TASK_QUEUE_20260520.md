@@ -19,7 +19,7 @@ or teardown promotion without fresh device artifacts.
 
 ## Completed ADB-Off Landing Ledger
 
-ADBOFF-001 through ADBOFF-027 have landed. Keep this table as the
+ADBOFF-001 through ADBOFF-030 have landed. Keep this table as the
 completion ledger for the 2026-05-20 ADB-off maintenance burst; append new
 rows only when fresh host-only work is intentionally queued.
 
@@ -30,7 +30,7 @@ rows only when fresh host-only work is intentionally queued.
 | ADBOFF-003 | P0 | Preserve llama GPU Q6 probe details in committed sweep evidence. | `tests.test_llama_gpu_artifact_sweep` and `tests.test_llama_gpu_artifact_verifier` pass; sweep JSON exposes Q6 output-layout, row-provenance, partial-signature, and native-reduction fields. | Done in `eefae1d`. |
 | ADBOFF-004 | P0 | Add a static stale-evidence guard to prevent repeat docs regressions. | `tests.test_docs_maintenance` covers forbidden current-evidence phrases and compatibility rows that combine promoting status with open/non-promoting notes. | Done in `5946442`. |
 | ADBOFF-005 | P1 | Source marker audit while device is unavailable. | Explorer output says app UI source has no uncovered actionable TODO/FIXME/HACK markers; native/runtime findings are either covered or low-risk naming cleanup. | Done; recorded in `AGENT_COORDINATION.md` in this slice. |
-| ADBOFF-006 | P1 | Maintain this ADB-off queue and plan index. | This document remains linked from `docs/plan/README.md` and referenced by the coordination ledger. | Ongoing maintenance; current queue items ADBOFF-001 through ADBOFF-027 have landed. |
+| ADBOFF-006 | P1 | Maintain this ADB-off queue and plan index. | This document remains linked from `docs/plan/README.md` and referenced by the coordination ledger. | Ongoing maintenance; current queue items ADBOFF-001 through ADBOFF-030 have landed. |
 | ADBOFF-007 | P1 | Keep release/readiness checks green after docs maintenance. | `verify-docs-maintenance`, `verify-release-readiness`, `tests.test_docs_maintenance`, and `git diff --check` pass. | Done for `5946442`; rerun after each maintenance slice. |
 | ADBOFF-008 | P1 | Add static pdocker extension API boundary guard. | Docs distinguish Docker-standard `GET /system/df` and `POST /system/prune` from pdocker-only `/system/*` routes, and every public `Pdocker*` field observed in pdockerd is documented. | Done in `50edf2f`. |
 | ADBOFF-009 | P1 | Review Engine route method strictness from static audit. | Host-only follow-up should document or test broad base-route methods and the generic `POST /networks/{name}` fallback before any runtime behavior change. | Done: base routes are method-scoped and unsupported network subroutes fail closed in host protocol smoke. |
@@ -52,6 +52,9 @@ rows only when fresh host-only work is intentionally queued.
 | ADBOFF-025 | P1 | Promote obsolete-suspect audit metadata to an executable inventory guard. | `verify-script-inventory.py` now rejects obsolete-suspect entries without dated reference-scan evidence, a delete/archive/retire decision, and a replacement or retirement condition; unit tests cover missing audit metadata, vague scans, missing replacements, and condition-free decisions. | Done in this slice. |
 | ADBOFF-026 | P1 | Make latest-evidence ownership matching exact instead of substring-based. | `verify-docs-maintenance.py` extracts normalized owner tokens from evidence owner docs/manifests, refuses accidental suffix/directory substring matches, and rejects generic nested child basename ownership unless the full path or latest-artifact directory is documented. | Done in this slice. |
 | ADBOFF-027 | P1 | Guard ADB-off ledger and obsolete-suspect count wording against drift. | `verify-docs-maintenance.py` checks the highest ADBOFF row against the completion prose and ADBOFF-006 status, and rejects stale numeric obsolete-suspect wording in `AGENT_COORDINATION.md` when it disagrees with `scripts/script-inventory.json`. | Done in this slice. |
+| ADBOFF-028 | P1 | Guard release-readiness CI trigger coverage. | `.github/workflows/release-readiness.yml` runs on release docs, notices, metadata, verifier, workflow, and native/staged payload input changes; `tests.test_release_readiness_notice_audit` checks each required path is present for both pull request and main push triggers. | Done in `83e775e` and tightened in `199c394`. |
+| ADBOFF-029 | P1 | Require docs-facing ownership for committed latest evidence. | `verify-docs-maintenance.py` rejects `docs/test/**latest*` artifacts that are only manifest-owned, unit tests cover the failure mode, and `docs/test/EVIDENCE_INDEX.md` indexes `android-blas-cmake-build-latest.log` under Native / release hygiene. | Done in `199c394`. |
+| ADBOFF-030 | P1 | Wire the APK memory pager contract into the fast host gate. | `scripts/verify-fast.sh` now py-compiles and runs `scripts/verify-memory-pager-contract.py` and includes `tests.test_apk_memory_pager_contract`, matching the Task H TODO claim that this verifier guards the pager evidence contract. | Done in this slice. |
 
 ## Deferred Until ADB Returns
 

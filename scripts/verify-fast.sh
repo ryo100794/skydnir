@@ -41,6 +41,7 @@ run python3 -m py_compile \
   scripts/verify-stress-regression.py \
   scripts/verify-test-design-criteria.py \
   scripts/verify_direct_syscall_contracts.py \
+  scripts/verify-memory-pager-contract.py \
   scripts/verify-memory-pager-design.py \
   scripts/verify-metadata-index.py \
   scripts/verify-native-payloads.py \
@@ -87,6 +88,7 @@ run env PDOCKER_NATIVE_REBUILD_UTC=verify-fast-fdroid-no-crane-dry-run \
 
 run python3 docker-proot-setup/scripts/verify_runtime_contract.py
 run python3 scripts/verify_direct_syscall_contracts.py
+run python3 scripts/verify-memory-pager-contract.py
 run python3 scripts/verify-memory-pager-design.py
 run python3 scripts/verify-metadata-index.py
 run python3 -m unittest discover -s tests/metadata_index -p 'test_*.py'
@@ -152,6 +154,7 @@ run python3 -m unittest \
   tests.test_image_pull_crash_safety_verifier \
   tests.test_runtime_single_container_artifact_verifier \
   tests.test_android_storage_metrics_sequence \
+  tests.test_apk_memory_pager_contract \
   tests.test_saf_direct_output_contract \
   tests.storage_metrics.test_verify_storage_metrics \
   tests.test_llama_startup_logging_contract \
