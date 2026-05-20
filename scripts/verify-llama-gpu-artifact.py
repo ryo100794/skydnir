@@ -913,6 +913,11 @@ def _service_completion_timeout(data: dict[str, Any]) -> dict[str, Any]:
     health = readiness.get("health") if isinstance(readiness.get("health"), dict) else {}
     models = readiness.get("models") if isinstance(readiness.get("models"), dict) else {}
     completion = readiness.get("completion") if isinstance(readiness.get("completion"), dict) else {}
+    post_completion_health = (
+        readiness.get("post_completion_health")
+        if isinstance(readiness.get("post_completion_health"), dict)
+        else {}
+    )
     health_ok = summary.get("health") == "pass" or health.get("ok") is True
     models_ok = summary.get("models") == "pass" or models.get("ok") is True
     completion_ok = summary.get("completion") == "pass" or completion.get("ok") is True
@@ -946,6 +951,9 @@ def _service_completion_timeout(data: dict[str, Any]) -> dict[str, Any]:
         "completion_status": completion.get("status") or summary.get("completion"),
         "completion_duration_ms": completion.get("duration_ms"),
         "completion_timeout_sec": completion.get("timeout_sec") or readiness.get("completion_timeout_sec"),
+        "post_completion_health_ok": post_completion_health.get("ok"),
+        "post_completion_health_status": post_completion_health.get("status"),
+        "post_completion_health_error": post_completion_health.get("error"),
         "runtime_freshness": _runtime_freshness(data),
     }
 

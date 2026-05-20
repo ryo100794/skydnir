@@ -1770,11 +1770,20 @@ report = {
     "models": get_json("/v1/models", min(timeout_sec, 10)),
     "completion": post_json("/completion", completion_body, timeout_sec),
 }
+if not report["completion"]["ok"]:
+    report["post_completion_health"] = get_json("/health", min(timeout_sec, 10))
 report["summary"] = {
     "health": "pass" if report["health"]["ok"] else "fail",
     "models": "pass" if report["models"]["ok"] else "fail",
     "liveness": "pass" if report["health"]["ok"] and report["models"]["ok"] else "fail",
     "completion": "pass" if report["completion"]["ok"] else "fail",
+    "server_alive_after_completion": (
+        "pass"
+        if report.get("post_completion_health", {}).get("ok")
+        else "fail"
+        if "post_completion_health" in report
+        else "not-checked"
+    ),
     "ready": bool(report["health"]["ok"] and report["models"]["ok"] and report["completion"]["ok"]),
 }
 with open(out_path, "w", encoding="utf-8") as f:

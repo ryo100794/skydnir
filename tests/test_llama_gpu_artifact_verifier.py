@@ -203,6 +203,11 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "error": "RemoteDisconnected: Remote end closed connection without response",
                         "timeout_sec": 180,
                     },
+                    "post_completion_health": {
+                        "ok": False,
+                        "status": "fail",
+                        "error": "ConnectionRefusedError: refused",
+                    },
                 },
             },
             "runtime_freshness": {
@@ -218,6 +223,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["classification"], "llama-completion-disconnected")
         self.assertEqual(report["responsibility_boundary"], "service-readiness")
+        self.assertFalse(report["service_readiness"]["post_completion_health_ok"])
 
     def test_memory_blocker_preserves_artifact_diagnostics(self):
         payload = {
