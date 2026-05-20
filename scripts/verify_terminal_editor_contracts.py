@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -48,6 +49,29 @@ def main() -> int:
     require("terminal selection suppresses ime", "suppressImeForSelection" in source["terminal"] and "selectionSuppressesIme()" in source["terminal"] and "inputmode', 'none'" in source["terminal"])
     require("readonly selection actions keep ime suppressed", "runSelectionAction" in source["terminal"] and "if (readOnly) suppressImeForSelection()" in source["terminal"] and "if (readOnly || selectionSuppressesIme()) suppressImeForSelection()" in source["terminal"])
     require("terminal starts bridge-owned initial command", "fun startInitial()" in source["bridge"] and "PdockerBridge.startInitial()" in source["terminal"] and "PdockerBridge.start(PdockerBridge.initialCommand())" not in source["terminal"])
+    forbidden_terminal_routing = [
+        r"Bridge\.ENGINE_EXEC_PREFIX",
+        r"ENGINE_EXEC_PREFIX",
+        r"/containers/[^\n\r]*exec",
+        r"/exec/[^\n\r]*start",
+        r"/exec/[^\n\r]*resize",
+        r"docker\s+exec",
+        r"PtyNative",
+        r"createEngineExec",
+        r"startEngineExecStream",
+        r"ui-it-selftest-latest\.json",
+        r"engine-exec-input-latest\.jsonl",
+        r"PDOCKER_UI_IT_SELFTEST",
+    ]
+    require(
+        "terminal surface stays session-neutral",
+        all(re.search(pattern, source["terminal"], flags=re.IGNORECASE) is None for pattern in forbidden_terminal_routing),
+    )
+    terminal_bridge_calls = set(re.findall(r"PdockerBridge\.([A-Za-z_][A-Za-z0-9_]*)\(", source["terminal"]))
+    require(
+        "terminal surface uses only generic bridge calls",
+        terminal_bridge_calls <= {"readOnly", "copyToClipboard", "input", "resize", "startInitial"},
+    )
     require("readonly build logs preserve carriage-return progress lines", "terminalDisplayText" in source["main"] and "index < text.lastIndex" in source["main"] and "\\u001B[2K" in source["main"] and "term.options.disableStdin = true" in source["terminal"])
 
     require("editor exposes visible whitespace transformer", "VisibleWhitespaceTransformation" in source["editor"])

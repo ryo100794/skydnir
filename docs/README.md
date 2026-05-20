@@ -19,7 +19,7 @@ repository-level overview.
 | Test | Repeatable checks, audits, debug workflows, and recorded results | [`test/README.md`](test/README.md) |
 | Plan | Current status, TODOs, and historical steering snapshots | [`plan/README.md`](plan/README.md) |
 | Release | Release gates, fixed build evidence, distribution process, and announcements | [`release/README.md`](release/README.md) |
-| Showcase | GitHub-facing generated dashboard, roadmap timeline, and Wiki seed | [`showcase/README.md`](showcase/README.md) |
+| Showcase | Generated or curated GitHub-facing dashboard, roadmap, news, and Wiki seed pages | [`showcase/README.md`](showcase/README.md) |
 | Maintenance | Documentation inventory, deduplication backlog, and safe cleanup sequencing | [`maintenance/README.md`](maintenance/README.md) |
 | License/compliance | Repository-root policy and notices; no duplicate docs source of truth | [`../LICENSE`](../LICENSE), [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) |
 

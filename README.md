@@ -217,8 +217,8 @@ Compatibility and compliance records are maintained under
 - [`docs/plan/`](docs/plan/README.md): live status, TODOs, and steering records
 - [`docs/release/`](docs/release/README.md): release gates, fixed build evidence, and
   distribution process
-- [`docs/showcase/`](docs/showcase/README.md): generated GitHub-facing dashboard,
-  roadmap timeline, and Wiki seed
+- [`docs/showcase/`](docs/showcase/README.md): generated or curated
+  GitHub-facing dashboard, roadmap, news, and Wiki seed pages
 - [`docs/maintenance/`](docs/maintenance/README.md): documentation inventory,
   deduplication backlog, and cleanup sequencing
 
