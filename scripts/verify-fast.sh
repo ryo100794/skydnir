@@ -112,6 +112,8 @@ run python3 scripts/verify-storage-metrics.py
 run python3 scripts/verify-script-inventory.py
 native_payload_apk="app/build/outputs/apk/${PDOCKER_ANDROID_FLAVOR}/debug/app-${PDOCKER_ANDROID_FLAVOR}-debug.apk"
 if [ "$PDOCKER_ANDROID_FLAVOR" = "compat" ] && [ -f "$native_payload_apk" ]; then
+  printf '\n==> existing compat APK found; validating packaged payload freshness\n'
+  printf '%s\n' "If this fails after native/runtime source changes, rebuild with './gradlew :app:assembleCompatDebug --no-daemon' or remove the stale APK for host-only verification."
   run python3 scripts/verify-native-payloads.py \
     --apk "$native_payload_apk" \
     --apk-arm64-only \

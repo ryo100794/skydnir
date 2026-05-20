@@ -24,11 +24,11 @@
         "entry": "assets/pdockerd/pdockerd",
         "role": "pdockerd-daemon",
         "same_bytes_as_source": true,
-        "sha256": "a5cff753cade036b128ee30439057634c63b53a96225f3699f743316170267a2",
-        "size": 390375,
+        "sha256": "f24ea36face8e214d3078ea6b7043238be00f3b575778fc99cab336f880bef13",
+        "size": 390658,
         "source": "docker-proot-setup/bin/pdockerd",
         "source_exists": true,
-        "source_sha256": "a5cff753cade036b128ee30439057634c63b53a96225f3699f743316170267a2"
+        "source_sha256": "f24ea36face8e214d3078ea6b7043238be00f3b575778fc99cab336f880bef13"
       },
       {
         "entry": "lib/arm64-v8a/libcow.so",
