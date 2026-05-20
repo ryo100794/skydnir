@@ -1818,6 +1818,7 @@ report["summary"] = {
     "models": "pass" if report["models"]["ok"] else "fail",
     "liveness": "pass" if report["health"]["ok"] and report["models"]["ok"] else "fail",
     "completion": "pass" if report["completion"]["ok"] else "fail",
+    "prompt_sanity": "pass" if report["completion"].get("passed") is True else "fail",
     "server_alive_after_completion": (
         "pass"
         if report.get("post_completion_health", {}).get("ok")
@@ -1825,7 +1826,12 @@ report["summary"] = {
         if "post_completion_health" in report
         else "not-checked"
     ),
-    "ready": bool(report["health"]["ok"] and report["models"]["ok"] and report["completion"]["ok"]),
+    "ready": bool(
+        report["health"]["ok"]
+        and report["models"]["ok"]
+        and report["completion"]["ok"]
+        and report["completion"].get("passed") is True
+    ),
 }
 with open(out_path, "w", encoding="utf-8") as f:
     json.dump(report, f, indent=2, ensure_ascii=False)

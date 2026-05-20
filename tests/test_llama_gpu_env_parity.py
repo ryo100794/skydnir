@@ -131,6 +131,8 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn("service_prompt_sanity", compare)
         self.assertIn('blocker_class = "llama_completion_wrong_output"', compare)
         self.assertIn("deterministic /completion returned", compare)
+        self.assertIn('"prompt_sanity": "pass" if report["completion"].get("passed") is True else "fail"', compare)
+        self.assertIn('and report["completion"].get("passed") is True', compare)
         self.assertIn('"id": "service_prompt_sanity"', compare)
         self.assertIn('"service_prompt_sanity": service_prompt_sanity', compare)
         self.assertLess(
