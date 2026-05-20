@@ -251,7 +251,9 @@ pdocker aims for practical Docker data exchange, not full OCI conformance yet.
 
 The following are pdocker-specific extensions. They are for the Android UI,
 diagnostics, and feature-specific control planes; they are not Docker or OCI
-standard APIs.
+standard APIs. Docker-standard system endpoints remain listed in the Engine API
+inventory as `GET /system/df` and `POST /system/prune`; the pdocker-only
+extension boundary starts with the selected `/system/*` routes below.
 
 | Extension surface | Purpose |
 |---|---|
@@ -263,7 +265,10 @@ standard APIs.
 | `GET /system/documents/status`, `POST /system/documents/sync-to-tree`, `POST /system/documents/sync-from-tree` | SAF/Documents mediator status and explicit synchronization control. |
 | `GET /system/media` | Camera/audio/media bridge capability inventory and permission/control-plane status. |
 | `PdockerNetwork`, `PdockerGpu`, `PdockerMedia`, `PdockerWarnings` in container inspect | Container-specific network truth, GPU bridge request/result metadata, media bridge metadata, and explicit limitation warnings. |
+| `PdockerWarning` in network responses | Host-network limitation warning for Compose-compatible network stubs. |
+| `PdockerHome`, `PdockerOperationId` | Host/operation diagnostics used by the Android UI and long-running operation records. |
 | `State.PdockerRawReturnCode`, `State.PdockerSignal`, `State.PdockerMemory`, `State.PdockerTeardown` | Android executor return-code, signal, memory, and teardown diagnostics that Docker does not normally expose. |
+| `State.PdockerKnownPids`, `State.PdockerLastKnownPids`, `State.PdockerLastPid`, `State.PdockerLauncherPid`, `State.PdockerLauncherPidStartTime`, `State.PdockerLauncherPgid`, `State.PdockerLastLauncherPid`, `State.PdockerProcessGroupId`, `State.PdockerLastProcessGroupId`, `State.Health.PdockerStopped` | Process-group, launcher, and stopped-health diagnostics for service-truth and teardown gates. |
 | `PdockerStorage` in list/df responses | UI storage accounting for shared layers, image views, container upper bytes, build cache, and stale metadata. |
 
 ## Protocol coverage

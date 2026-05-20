@@ -42,9 +42,10 @@ Docker-compatible endpoints and pdocker extensions are intentionally separate:
   Docker response shapes where practical and must fail clearly when a Docker or
   OCI feature is unsupported.
 - Android UI, diagnostics, and Android-only bridges may use pdocker extension
-  endpoints under `/system/*` and pdocker-prefixed response fields such as
-  `PdockerGpu`, `PdockerMedia`, `PdockerNetwork`, `PdockerStorage`, and
-  `PdockerWarnings`.
+  endpoints under selected `/system/*` paths, excluding Docker-standard
+  `GET /system/df` and `POST /system/prune`, and pdocker-prefixed response
+  fields such as `PdockerGpu`, `PdockerMedia`, `PdockerNetwork`,
+  `PdockerStorage`, and `PdockerWarnings`.
 - Extension fields must not be required for basic Docker CLI compatibility.
   They exist to make Android-specific truth visible: storage accounting,
   service ownership, GPU/media bridge status, memory pressure, Documents/SAF

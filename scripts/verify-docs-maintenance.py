@@ -34,6 +34,14 @@ FORBIDDEN_CURRENT_EVIDENCE_PHRASES = (
     "current release-blocking device smoke evidence",
     "current device release-blocking smoke artifact",
 )
+STANDARD_DOCKER_SYSTEM_ENDPOINTS = {
+    ("GET", "/system/df"),
+    ("POST", "/system/prune"),
+}
+SYSTEM_ROUTE_RE = re.compile(
+    r'path\s*==\s*"(?P<path>/system/[^"]+)"\s+and\s+method\s*==\s*"(?P<method>[A-Z]+)"'
+)
+PDOCKER_FIELD_RE = re.compile(r"\bPdocker[A-Za-z0-9_]*\b")
 
 # Durable Markdown documents must be discoverable from an index.  Test-run
 # summaries are addressed by the test-driver manifest convention documented in
@@ -355,6 +363,59 @@ def check_historical_evidence_language(root: Path = ROOT) -> None:
                 )
 
 
+def implemented_system_routes(source: str) -> set[tuple[str, str]]:
+    return {
+        (match.group("method"), match.group("path"))
+        for match in SYSTEM_ROUTE_RE.finditer(source)
+    }
+
+
+def check_pdocker_extension_surface(root: Path = ROOT) -> None:
+    """Keep pdocker-only extension routes and fields documented as extensions."""
+
+    pdockerd = root / "docker-proot-setup" / "bin" / "pdockerd"
+    compatibility = root / "docs" / "test" / "COMPATIBILITY.md"
+    scope = root / "docs" / "design" / "DOCKER_COMPAT_SCOPE.md"
+    source = read_text(pdockerd, root)
+    compat_text = read_text(compatibility, root)
+    scope_text = read_text(scope, root)
+
+    routes = implemented_system_routes(source)
+    if not STANDARD_DOCKER_SYSTEM_ENDPOINTS.issubset(routes):
+        missing = sorted(STANDARD_DOCKER_SYSTEM_ENDPOINTS - routes)
+        fail(f"{rel(pdockerd, root)} is missing documented standard /system route(s): {missing}")
+
+    for method, path in sorted(routes - STANDARD_DOCKER_SYSTEM_ENDPOINTS):
+        token = f"`{method} {path}`"
+        if token not in compat_text:
+            fail(
+                f"{rel(compatibility, root)} must document pdocker extension route {token}"
+            )
+
+    for method, path in sorted(STANDARD_DOCKER_SYSTEM_ENDPOINTS):
+        token = f"`{method} {path}`"
+        if token not in compat_text:
+            fail(
+                f"{rel(compatibility, root)} must document standard Docker system route {token}"
+            )
+
+    normalized_scope = re.sub(r"\s+", " ", scope_text)
+    if "excluding Docker-standard `GET /system/df` and `POST /system/prune`" not in normalized_scope:
+        fail(
+            f"{rel(scope, root)} must distinguish pdocker-only /system extensions "
+            "from Docker-standard /system endpoints"
+        )
+
+    implemented_fields = set(PDOCKER_FIELD_RE.findall(source))
+    documented_fields = set(PDOCKER_FIELD_RE.findall(compat_text))
+    missing_fields = sorted(implemented_fields - documented_fields)
+    if missing_fields:
+        fail(
+            f"{rel(compatibility, root)} must document pdocker extension field(s): "
+            + ", ".join(missing_fields)
+        )
+
+
 def run(root: Path = ROOT) -> None:
     check_backlog(root)
     check_links(root)
@@ -362,6 +423,7 @@ def run(root: Path = ROOT) -> None:
     check_historical_agent_assignments(root)
     check_todo_roadmap_source_quality(root)
     check_historical_evidence_language(root)
+    check_pdocker_extension_surface(root)
 
 
 def main(argv: list[str] | None = None) -> int:

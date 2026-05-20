@@ -24,10 +24,12 @@ or teardown promotion without fresh device artifacts.
 | ADBOFF-001 | P0 | Separate historical device evidence from current promotion claims. | Docs use historical/non-promoting wording, and docs maintenance rejects `Good`/`PASS` rows whose notes say a gate remains open. | Done in `3b151a6`; static guard added in the next maintenance slice. |
 | ADBOFF-002 | P0 | Keep design/TODO/API boundaries synchronized. | `docs/plan/TODO.md`, compatibility docs, and design docs list Docker API subset, pdocker extensions, unsupported OCI features, and Bluetooth/BLE/GPS future broker scope. | Done in `eefae1d`. |
 | ADBOFF-003 | P0 | Preserve llama GPU Q6 probe details in committed sweep evidence. | `tests.test_llama_gpu_artifact_sweep` and `tests.test_llama_gpu_artifact_verifier` pass; sweep JSON exposes Q6 output-layout, row-provenance, partial-signature, and native-reduction fields. | Done in `eefae1d`. |
-| ADBOFF-004 | P0 | Add a static stale-evidence guard to prevent repeat docs regressions. | `tests.test_docs_maintenance` covers forbidden current-evidence phrases and compatibility rows that combine promoting status with open/non-promoting notes. | In progress. |
+| ADBOFF-004 | P0 | Add a static stale-evidence guard to prevent repeat docs regressions. | `tests.test_docs_maintenance` covers forbidden current-evidence phrases and compatibility rows that combine promoting status with open/non-promoting notes. | Done in `5946442`. |
 | ADBOFF-005 | P1 | Source marker audit while device is unavailable. | Explorer output says app UI source has no uncovered actionable TODO/FIXME/HACK markers; native/runtime findings are either covered or low-risk naming cleanup. | Done; recorded in `AGENT_COORDINATION.md` in this slice. |
 | ADBOFF-006 | P1 | Maintain this ADB-off queue and plan index. | This document is linked from `docs/plan/README.md` and referenced by the coordination ledger. | In progress. |
-| ADBOFF-007 | P1 | Keep release/readiness checks green after docs maintenance. | `verify-docs-maintenance`, `verify-release-readiness`, `tests.test_docs_maintenance`, and `git diff --check` pass. | Pending final run. |
+| ADBOFF-007 | P1 | Keep release/readiness checks green after docs maintenance. | `verify-docs-maintenance`, `verify-release-readiness`, `tests.test_docs_maintenance`, and `git diff --check` pass. | Done for `5946442`; rerun after each maintenance slice. |
+| ADBOFF-008 | P1 | Add static pdocker extension API boundary guard. | Docs distinguish Docker-standard `GET /system/df` and `POST /system/prune` from pdocker-only `/system/*` routes, and every public `Pdocker*` field observed in pdockerd is documented. | In progress. |
+| ADBOFF-009 | P1 | Review Engine route method strictness from static audit. | Host-only follow-up should document or test broad base-route methods and the generic `POST /networks/{name}` fallback before any runtime behavior change. | Next. |
 
 ## Deferred Until ADB Returns
 

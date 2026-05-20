@@ -322,6 +322,67 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
         with self.assertRaises(verifier.CheckFailure):
             verifier.check_historical_evidence_language(self.tmp)
 
+    def write_extension_surface_fixture(self, compatibility_extra=""):
+        pdockerd = self.tmp / "docker-proot-setup" / "bin" / "pdockerd"
+        pdockerd.parent.mkdir(parents=True)
+        pdockerd.write_text(
+            'if path == "/system/df" and method == "GET": pass\n'
+            'if path == "/system/prune" and method == "POST": pass\n'
+            'if path == "/system/host" and method == "GET": pass\n'
+            '"PdockerGpu": {}, "PdockerWarning": "host-network"\n',
+            encoding="utf-8",
+        )
+        compatibility = self.tmp / "docs" / "test" / "COMPATIBILITY.md"
+        compatibility.write_text(
+            "Standard Docker system endpoints: `GET /system/df`, `POST /system/prune`.\n"
+            "pdocker extensions: `GET /system/host`.\n"
+            "Fields: `PdockerGpu`, `PdockerWarning`.\n"
+            + compatibility_extra,
+            encoding="utf-8",
+        )
+        scope = self.tmp / "docs" / "design" / "DOCKER_COMPAT_SCOPE.md"
+        scope.write_text(
+            "pdocker-only extension endpoints use selected `/system/*` paths, "
+            "excluding Docker-standard `GET /system/df` and `POST /system/prune`.\n",
+            encoding="utf-8",
+        )
+
+    def test_extension_surface_accepts_documented_routes_and_fields(self):
+        self.write_extension_surface_fixture()
+
+        verifier.check_pdocker_extension_surface(self.tmp)
+
+    def test_extension_surface_rejects_undocumented_pdocker_route(self):
+        self.write_extension_surface_fixture()
+        pdockerd = self.tmp / "docker-proot-setup" / "bin" / "pdockerd"
+        pdockerd.write_text(
+            pdockerd.read_text(encoding="utf-8")
+            + 'if path == "/system/media" and method == "GET": pass\n',
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_pdocker_extension_surface(self.tmp)
+
+    def test_extension_surface_rejects_undocumented_pdocker_field(self):
+        self.write_extension_surface_fixture()
+        pdockerd = self.tmp / "docker-proot-setup" / "bin" / "pdockerd"
+        pdockerd.write_text(
+            pdockerd.read_text(encoding="utf-8") + '"PdockerHidden": true\n',
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_pdocker_extension_surface(self.tmp)
+
+    def test_extension_surface_rejects_scope_without_standard_system_exception(self):
+        self.write_extension_surface_fixture()
+        scope = self.tmp / "docs" / "design" / "DOCKER_COMPAT_SCOPE.md"
+        scope.write_text("pdocker extensions live under `/system/*`.\n", encoding="utf-8")
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_pdocker_extension_surface(self.tmp)
+
 
 if __name__ == "__main__":
     unittest.main()
