@@ -1508,6 +1508,12 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_output_layout = _q6_output_layout_probe(q6)
     q6_row_provenance = _q6_row_provenance_probe(q6)
     q6_partial_signature = _q6_partial_signature_probe(q6)
+    q6_native_vs_writeback_split = (
+        q6.get("q6_native_vs_writeback_split")
+        if isinstance(q6.get("q6_native_vs_writeback_split"), dict)
+        else {}
+    )
+    q6_blocker_class = None
     if not q6:
         classification = "q6-not-reached"
         responsibility_boundary = "q6-not-reached"
@@ -1522,6 +1528,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     elif q6_writeback_evidence.get("summary") == "mismatch":
         classification = "q6-writeback-mismatch"
         responsibility_boundary = "q6-writeback"
+        q6_blocker_class = "writeback"
         next_action = "fix Q6_K writable output writeback before accepting correctness or benchmark claims"
     elif q6_writeback_evidence.get("summary") != "pass":
         classification = "q6-writeback-unverified"
@@ -1539,7 +1546,15 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         responsibility_boundary = "q6-oracle"
         q6_blocker_class = str(q6.get("blocker_class") or "descriptor-memory-synchronization-or-q6-arithmetic")
         if q6_writeback_evidence.get("summary") == "pass":
-            if q6_output_layout.get("summary") == "canonical-mismatch-found-elsewhere":
+            if q6_native_vs_writeback_split.get("summary") == "executor-final-writeback":
+                classification = "q6-writeback-mismatch"
+                responsibility_boundary = "q6-writeback"
+                q6_blocker_class = "executor-final-writeback"
+            elif q6_native_vs_writeback_split.get("summary") == "native-final-store-or-readback":
+                classification = "q6-native-final-store-or-readback"
+                responsibility_boundary = "q6-native-final-store-readback"
+                q6_blocker_class = "native-q6-final-store-or-readback"
+            elif q6_output_layout.get("summary") == "canonical-mismatch-found-elsewhere":
                 classification = "q6-native-output-layout"
                 responsibility_boundary = "q6-output-layout"
                 q6_blocker_class = "native-q6-output-layout"
@@ -1607,15 +1622,18 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_output_layout_probe": q6_output_layout,
         "q6_row_provenance_probe": q6_row_provenance,
         "q6_partial_signature_probe": q6_partial_signature,
+        "q6_native_vs_writeback_split": q6_native_vs_writeback_split,
         "q6_effective_blocker_class": (
             q6_blocker_class
             if classification in {
                 "q6-workgroup-cleared-but-oracle-mismatch",
+                "q6-writeback-mismatch",
                 "q6-native-output-layout",
                 "q6-native-output-layout-inconclusive",
                 "q6-native-other-row-output-layout",
                 "q6-native-local-y-partial-store",
                 "q6-native-lane-partial-store",
+                "q6-native-final-store-or-readback",
                 "q6-native-device-execution-or-final-store",
                 "q6-native-reduction-or-device-execution",
             }
@@ -1692,6 +1710,7 @@ def main(argv: list[str]) -> int:
             "q6-native-other-row-output-layout",
             "q6-native-local-y-partial-store",
             "q6-native-lane-partial-store",
+            "q6-native-final-store-or-readback",
             "q6-native-device-execution-or-final-store",
             "q6-native-reduction-or-device-execution",
         } else 31

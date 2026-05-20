@@ -236,6 +236,7 @@ class GpuAbiContractTest(unittest.TestCase):
             ("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", "cpu_oracle.oracle_writeback"),
             ("PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel"),
             ("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization_materialized"),
+            ("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", "q4k_pipeline_retry_ladder"),
             ("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", "float16_capability_added"),
             ("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_buffer_cache.enabled"),
             ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
@@ -306,6 +307,25 @@ class GpuAbiContractTest(unittest.TestCase):
         ).group("body")
         self.assertNotIn("strict_passthrough", q4_safe_block)
         self.assertIn('env_truthy("PDOCKER_GPU_Q4K_SAFE_KERNEL", 0)', q4_safe_block)
+        self.assertIn("q4k_pipeline_retry_enabled = q4k_callsite_detected &&", source)
+        self.assertIn('env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 1)', source)
+        self.assertGreaterEqual(source.count('\\"q4k_pipeline_retry_ladder\\":%s'), 3)
+        self.assertGreaterEqual(source.count('\\"q4k_pipeline_retry_attempted\\":%s'), 3)
+        q4_retry_block = re.search(
+            r"if \(rc != VK_SUCCESS &&(?P<body>.*?)materialize_spirv_specialization_constants",
+            source,
+            re.S,
+        ).group("body")
+        self.assertIn("(!strict_passthrough || q4k_pipeline_retry_enabled)", q4_retry_block)
+        self.assertIn("q4k_pipeline_retry_enabled", q4_retry_block)
+        self.assertIn("strict passthrough", q4_retry_block)
+        self.assertIn("Q4_K", q4_retry_block)
+        self.assertIn("callsite_gated_config_envs", compare)
+        self.assertIn('"PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER"', compare)
+        self.assertIn('observed_event_values(executor_events, "q4k_callsite_detected")', compare)
+        self.assertIn("FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC", compare)
+        self.assertIn("PDOCKER_LLAMA_FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC", compare)
+        self.assertIn('wait_server "$FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC" "Forced Vulkan"', compare)
         self.assertIn('"PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": os.environ.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0")', PDOCKERD.read_text())
 
     def test_llama_gpu_lane_marker_and_scope_are_pinned(self):
@@ -908,7 +928,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record_wait_server_event", compare)
         self.assertIn("wait-server.jsonl", compare)
         self.assertIn("toybox nc -U -W $OPERATION_NOTIFY_TIMEOUT_SEC", compare)
-        self.assertIn('wait_server 120 "Forced Vulkan"', compare)
+        self.assertIn('FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC="${PDOCKER_LLAMA_FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC:-240}"', compare)
+        self.assertIn('wait_server "$FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC" "Forced Vulkan"', compare)
         self.assertIn("waiting for $phase server", compare)
         self.assertIn("$mode: creating container", compare)
         self.assertIn('engine_request_with_host_timeout "$ENGINE_CLEANUP_TIMEOUT_SEC" DELETE', compare)

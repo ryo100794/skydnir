@@ -857,6 +857,97 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(result.returncode, 40, result.stdout)
         self.assertEqual(json.loads(result.stdout)["classification"], "q6-writeback-mismatch")
 
+    def test_q6_native_vs_writeback_split_classifies_native_final_store(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "local_size_resolved": [32, 2, 1],
+                        "q6_shader_like_abs_delta": 0.0,
+                        "q6_shader_like_oracle_cleared": True,
+                        "q6_output_layout_probe": {
+                            "summary": "canonical-mismatch-inconclusive",
+                            "mismatch_count": 16,
+                            "found_elsewhere_count": 4,
+                            "consistent_relative_offset": False,
+                        },
+                        "q6_native_vs_writeback_split": {
+                            "summary": "native-final-store-or-readback",
+                            "oracle_writeback": False,
+                            "joined_sample_count": 1,
+                            "samples": [
+                                {
+                                    "dst_index": 257,
+                                    "expected": 1.25,
+                                    "native_gpu_at_dst": 0.5,
+                                    "fd_after_writeback": 0.5,
+                                    "native_matches_expected": False,
+                                    "writeback_matches_native": True,
+                                    "writeback_matches_expected": False,
+                                }
+                            ],
+                        },
+                        **q6_verified_writeback(),
+                    },
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-native-final-store-or-readback")
+        self.assertEqual(report["responsibility_boundary"], "q6-native-final-store-readback")
+        self.assertEqual(report["q6_effective_blocker_class"], "native-q6-final-store-or-readback")
+
+    def test_q6_native_vs_writeback_split_classifies_executor_writeback(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "local_size_resolved": [32, 2, 1],
+                        "q6_output_layout_probe": {
+                            "summary": "canonical-mismatch-inconclusive",
+                        },
+                        "q6_native_vs_writeback_split": {
+                            "summary": "executor-final-writeback",
+                            "oracle_writeback": False,
+                            "joined_sample_count": 1,
+                            "samples": [
+                                {
+                                    "dst_index": 257,
+                                    "expected": 1.25,
+                                    "native_gpu_at_dst": 1.25,
+                                    "fd_after_writeback": 0.5,
+                                    "native_matches_expected": True,
+                                    "writeback_matches_native": False,
+                                    "writeback_matches_expected": False,
+                                }
+                            ],
+                        },
+                        **q6_verified_writeback(),
+                    },
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 40, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-writeback-mismatch")
+        self.assertEqual(report["responsibility_boundary"], "q6-writeback")
+        self.assertEqual(report["q6_effective_blocker_class"], "executor-final-writeback")
+
     def test_q6_non_expected_local_size_fails_closed_as_shape_blocker(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",

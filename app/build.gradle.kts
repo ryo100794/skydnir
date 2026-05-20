@@ -1,4 +1,7 @@
 import java.util.Properties
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 plugins {
     id("com.android.application")
@@ -120,6 +123,36 @@ fun pdockerVersionValue(name: String): String =
 fun buildConfigString(value: String): String =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+fun nonBlankEnv(name: String): String? =
+    System.getenv(name)?.takeIf { it.isNotBlank() }
+
+fun gitOutput(vararg args: String): String? {
+    return try {
+        val process = ProcessBuilder(*args)
+            .directory(rootProject.projectDir)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().readText().trim()
+        if (process.waitFor() == 0 && output.isNotBlank()) output else null
+    } catch (_: Exception) {
+        null
+    }
+}
+
+val pdockerBuildInstant = Instant.now()
+val pdockerBuildTimeUtc =
+    nonBlankEnv("PDOCKER_BUILD_TIME_UTC")
+        ?: DateTimeFormatter.ISO_INSTANT.format(pdockerBuildInstant)
+val pdockerBuildCommit =
+    nonBlankEnv("PDOCKER_BUILD_COMMIT")
+        ?: gitOutput("git", "rev-parse", "--short=12", "HEAD")
+        ?: pdockerVersionValue("buildCommit")
+val pdockerBuildNumber =
+    nonBlankEnv("PDOCKER_BUILD_NUMBER")
+        ?: DateTimeFormatter.ofPattern("yyyyMMdd.HHmmss")
+            .withZone(ZoneOffset.UTC)
+            .format(pdockerBuildInstant)
+
 android {
     namespace = "io.github.ryo100794.pdocker"
     compileSdk = 34
@@ -131,9 +164,9 @@ android {
         targetSdk = 34
         versionCode = pdockerVersionValue("versionCode").toInt()
         versionName = pdockerVersionValue("versionName")
-        buildConfigField("String", "BUILD_TIME_UTC", buildConfigString(pdockerVersionValue("buildTimeUtc")))
-        buildConfigField("String", "BUILD_GIT_COMMIT", buildConfigString(pdockerVersionValue("buildCommit")))
-        buildConfigField("String", "BUILD_NUMBER", buildConfigString(pdockerVersionValue("buildNumber")))
+        buildConfigField("String", "BUILD_TIME_UTC", buildConfigString(pdockerBuildTimeUtc))
+        buildConfigField("String", "BUILD_GIT_COMMIT", buildConfigString(pdockerBuildCommit))
+        buildConfigField("String", "BUILD_NUMBER", buildConfigString(pdockerBuildNumber))
         manifestPlaceholders["pdockerDebugReceiverExported"] = "false"
 
         ndk {

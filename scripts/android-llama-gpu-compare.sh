@@ -27,6 +27,9 @@ TRACE_ALLOC="${PDOCKER_LLAMA_TRACE_ALLOC:-0}"
 CORRECTNESS="${PDOCKER_LLAMA_CORRECTNESS:-1}"
 CORRECTNESS_TIMEOUT_SEC="${PDOCKER_LLAMA_CORRECTNESS_TIMEOUT_SEC:-180}"
 COMPLETION_READY_TIMEOUT_SEC="${PDOCKER_LLAMA_COMPLETION_READY_TIMEOUT_SEC:-180}"
+CPU_WAIT_SERVER_TIMEOUT_SEC="${PDOCKER_LLAMA_CPU_WAIT_SERVER_TIMEOUT_SEC:-90}"
+FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC="${PDOCKER_LLAMA_FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC:-240}"
+CPU_RESTORE_WAIT_SERVER_TIMEOUT_SEC="${PDOCKER_LLAMA_CPU_RESTORE_WAIT_SERVER_TIMEOUT_SEC:-90}"
 LOG_TAIL_LINES="${PDOCKER_LLAMA_LOG_TAIL_LINES:-2000}"
 RESTART_APP_DAEMON="${PDOCKER_LLAMA_RESTART_APP_DAEMON:-1}"
 MIN_FREE_MB="${PDOCKER_LLAMA_MIN_FREE_MB:-512}"
@@ -1684,7 +1687,7 @@ if [[ "$RUN_CPU" -eq 1 ]]; then
   CURRENT_STAGE="CPU baseline"
   operation_notify "running" "CPU baseline: starting"
   start_cpu >/dev/null
-  if ! wait_server 90 "CPU baseline"; then
+  if ! wait_server "$CPU_WAIT_SERVER_TIMEOUT_SEC" "CPU baseline"; then
     operation_notify "failed" "CPU server did not become reachable" 1
     echo "CPU server did not become reachable" >&2
     container_state >&2
@@ -1737,7 +1740,7 @@ GPU_JSON="$TMP/gpu.json"
 CORRECTNESS_JSON="$TMP/correctness.json"
 SERVICE_READINESS_JSON="$TMP/service-readiness.json"
 STARTUP_JSON="$TMP/llama-startup.json"
-if wait_server 120 "Forced Vulkan"; then
+if wait_server "$FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC" "Forced Vulkan"; then
   operation_notify "running" "Forced Vulkan liveness passed; checking completion readiness"
   if probe_service_readiness "vulkan-forced-ngl-$GPU_LAYERS" "$SERVICE_READINESS_JSON" >/dev/null; then
     operation_notify "running" "Forced Vulkan completion ready; recording HTTP benchmark"
@@ -2179,6 +2182,13 @@ for item in config_expectations_raw:
         raise SystemExit(f"invalid config_propagation_env_fields entry in llama GPU env manifest: {manifest_path}")
     config_expectations.append((str(item["env"]), str(item["executor_field"])))
 config_checks = []
+callsite_gated_config_envs = {
+    "PDOCKER_GPU_Q6K_SAFE_KERNEL",
+    "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
+    "PDOCKER_GPU_Q4K_SAFE_KERNEL",
+    "PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION",
+    "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER",
+}
 for env_name, event_field in config_expectations:
     expected = env_bool(env_name)
     observed = observed_event_values(executor_events, event_field)
@@ -2186,12 +2196,19 @@ for env_name, event_field in config_expectations:
         status = "not-requested"
     elif not observed:
         status = "missing-evidence"
-    elif env_name in {
-        "PDOCKER_GPU_Q6K_SAFE_KERNEL",
-        "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
-        "PDOCKER_GPU_Q4K_SAFE_KERNEL",
-        "PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION",
-    } and expected in observed:
+    elif env_name in callsite_gated_config_envs and expected in observed:
+        status = "pass"
+    elif (
+        env_name == "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER"
+        and expected is True
+        and observed
+        and not any(bool(value) for value in observed_event_values(executor_events, "q4k_callsite_detected"))
+    ):
+        # The Q4_K pipeline retry ladder is enabled only after the executor
+        # sees a known Q4_K call-site.  Earlier shaders legitimately report
+        # q4k_pipeline_retry_ladder=false even though the environment variable
+        # was forwarded.  Do not turn "Q4_K not reached" into a false
+        # config-propagation mismatch.
         status = "pass"
     elif all(value == expected for value in observed):
         status = "pass"
@@ -2870,6 +2887,139 @@ q6_native_spirv_identity = {
     if isinstance(q6_latest.get("pipeline_key"), dict)
     else None,
 }
+
+
+def finite_number(value):
+    return isinstance(value, (int, float)) and math.isfinite(float(value))
+
+
+def values_close(a, b, tolerance=1.0e-3):
+    if not finite_number(a) or not finite_number(b):
+        return False
+    return abs(float(a) - float(b)) <= tolerance
+
+
+def samples_by_index(samples):
+    result = {}
+    if not isinstance(samples, list):
+        return result
+    for sample in samples:
+        if not isinstance(sample, dict):
+            continue
+        try:
+            index = int(sample.get("index"))
+        except (TypeError, ValueError):
+            continue
+        result[index] = sample.get("value")
+    return result
+
+
+def build_q6_native_vs_writeback_split():
+    if not q6_oracle_events:
+        return {
+            "summary": "not-reached",
+            "oracle_writeback": bool(q6_latest_oracle.get("oracle_writeback")),
+            "samples": [],
+        }
+    if q6_latest_oracle.get("oracle_writeback") is True:
+        return {
+            "summary": "masked-by-oracle-writeback",
+            "oracle_writeback": True,
+            "samples": [],
+        }
+    layout_samples = q6_output_layout_probe.get("samples")
+    if not isinstance(layout_samples, list):
+        return {
+            "summary": "inconclusive",
+            "oracle_writeback": False,
+            "reason": "missing-q6-output-layout-samples",
+            "samples": [],
+        }
+
+    fd_after_by_index = {}
+    for evidence in q6_row_indexed_writeback_evidence:
+        if not isinstance(evidence, dict):
+            continue
+        fd_after_by_index.update(samples_by_index(evidence.get("f32_after_writeback")))
+
+    joined = []
+    class_counts = {
+        "native-final-store-or-readback": 0,
+        "executor-final-writeback": 0,
+        "pass": 0,
+        "mixed-or-inconclusive": 0,
+    }
+    for sample in layout_samples:
+        if not isinstance(sample, dict):
+            continue
+        try:
+            dst_index = int(sample.get("dst_index"))
+        except (TypeError, ValueError):
+            continue
+        if dst_index not in fd_after_by_index:
+            continue
+        expected = sample.get("expected")
+        native_gpu_at_dst = sample.get("gpu_at_dst")
+        fd_after = fd_after_by_index.get(dst_index)
+        native_matches_expected = values_close(native_gpu_at_dst, expected)
+        writeback_matches_native = values_close(fd_after, native_gpu_at_dst)
+        writeback_matches_expected = values_close(fd_after, expected)
+        if not (
+            finite_number(expected)
+            and finite_number(native_gpu_at_dst)
+            and finite_number(fd_after)
+        ):
+            sample_class = "mixed-or-inconclusive"
+        elif native_matches_expected and writeback_matches_expected:
+            sample_class = "pass"
+        elif (not native_matches_expected) and writeback_matches_native:
+            sample_class = "native-final-store-or-readback"
+        elif native_matches_expected and (not writeback_matches_native):
+            sample_class = "executor-final-writeback"
+        else:
+            sample_class = "mixed-or-inconclusive"
+        class_counts[sample_class] = class_counts.get(sample_class, 0) + 1
+        joined.append({
+            "dst_index": dst_index,
+            "expected": expected,
+            "native_gpu_at_dst": native_gpu_at_dst,
+            "fd_after_writeback": fd_after,
+            "native_matches_expected": native_matches_expected,
+            "writeback_matches_native": writeback_matches_native,
+            "writeback_matches_expected": writeback_matches_expected,
+            "sample_class": sample_class,
+            "source_spirv_hash": q6_native_spirv_identity.get("source_spirv_hash"),
+            "effective_spirv_hash": q6_native_spirv_identity.get("effective_spirv_hash"),
+        })
+
+    if not joined:
+        summary = "inconclusive"
+        reason = "no-joined-q6-layout-and-writeback-samples"
+    elif class_counts["native-final-store-or-readback"] == len(joined):
+        summary = "native-final-store-or-readback"
+        reason = None
+    elif class_counts["executor-final-writeback"] == len(joined):
+        summary = "executor-final-writeback"
+        reason = None
+    elif class_counts["pass"] == len(joined):
+        summary = "pass"
+        reason = None
+    else:
+        summary = "inconclusive"
+        reason = "mixed-sample-classes"
+    result = {
+        "summary": summary,
+        "oracle_writeback": False,
+        "joined_sample_count": len(joined),
+        "class_counts": class_counts,
+        "samples": joined[:32],
+    }
+    if reason:
+        result["reason"] = reason
+    return result
+
+
+q6_native_vs_writeback_split = build_q6_native_vs_writeback_split()
 q6_safe_kernel_used = q6_latest.get("q6k_safe_kernel") is True
 q6_expected_local_size = [1, 1, 1] if q6_safe_kernel_used else [32, 2, 1]
 q6_workgroup_shape_blocker = bool(
@@ -2931,6 +3081,10 @@ q6_blocker_class = (
     if q6_readonly_dispatch_mutations
     else "writeback"
     if q6_writable_writeback_mismatches
+    else "executor-final-writeback"
+    if q6_native_vs_writeback_split.get("summary") == "executor-final-writeback"
+    else "native-q6-final-store-or-readback"
+    if q6_native_vs_writeback_split.get("summary") == "native-final-store-or-readback"
     else "native-q6-output-layout"
     if q6_output_layout_probe_summary == "canonical-mismatch-found-elsewhere" and q6_writeback_verified_all
     else "native-q6-other-row-output-layout"
@@ -2980,6 +3134,7 @@ q6_workgroup_diagnostics = {
     "q6_native_reduction_tree_abs_delta": q6_latest_partial.get("q6_native_reduction_tree_abs_delta"),
     "q6_native_reduction_tree_gpu_abs_error": q6_latest_partial.get("q6_native_reduction_tree_gpu_abs_error"),
     "q6_native_spirv_identity": q6_native_spirv_identity,
+    "q6_native_vs_writeback_split": q6_native_vs_writeback_split,
     "q6_output_layout_probe": q6_output_layout_probe,
     "q6_output_layout_probe_summary": q6_output_layout_probe_summary,
     "q6_output_layout_fixed_offset_rejected": q6_output_layout_fixed_offset_rejected,
@@ -3448,7 +3603,7 @@ if [[ "$RESTORE_CPU" -eq 1 ]]; then
   CURRENT_STAGE="restore CPU server"
   operation_notify "running" "Restoring CPU llama server"
   if start_cpu >/dev/null; then
-    wait_server 90 "CPU restore" >/dev/null || true
+    wait_server "$CPU_RESTORE_WAIT_SERVER_TIMEOUT_SEC" "CPU restore" >/dev/null || true
   else
     operation_notify "failed" "$SUMMARY; CPU restore failed; compare artifact preserved" 1
     echo "[pdocker llama compare] CPU restore failed; compare artifact preserved" >&2

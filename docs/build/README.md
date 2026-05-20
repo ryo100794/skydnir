@@ -83,10 +83,26 @@ reported payload first or use the default `build-all.sh` flow.
 
 ## APK Builds
 
-Build metadata is fixed in the repository root `version.properties`. Update
-that file intentionally when cutting a managed build so local APK rebuilds do
-not silently change `versionCode`, `versionName`, build time, build number, or
-the recorded source baseline.
+`versionCode` and `versionName` are fixed in the repository root
+`version.properties` and should be updated intentionally when cutting a managed
+build.  The UI-visible build time, build number, and git commit are generated
+for each Gradle APK build so local reinstall loops show the actual packaged
+artifact instead of a stale manual timestamp.
+
+For reproducible release packaging, pass explicit metadata through the build
+environment:
+
+```sh
+PDOCKER_BUILD_TIME_UTC=2026-05-20T00:00:00Z \
+PDOCKER_BUILD_COMMIT="$(git rev-parse --short=12 HEAD)" \
+PDOCKER_BUILD_NUMBER=20260520.1 \
+bash scripts/build-apk.sh
+```
+
+When those environment variables are absent, Gradle uses the current UTC time
+for `BUILD_TIME_UTC`/`BUILD_NUMBER` and `git rev-parse --short=12 HEAD` for
+`BUILD_GIT_COMMIT`, falling back to `version.properties` only if git metadata
+is unavailable.
 
 Build only the default configured APK package step:
 
