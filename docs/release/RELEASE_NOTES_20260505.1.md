@@ -4,7 +4,7 @@ Date: 2026-05-05 UTC
 
 Managed source snapshot: `dd3ce31`
 
-Evidence: [`builds/20260505.1/`](builds/20260505.1/)
+Canonical build evidence: [`builds/20260505.1/README.md`](builds/20260505.1/README.md)
 
 ## Summary
 
