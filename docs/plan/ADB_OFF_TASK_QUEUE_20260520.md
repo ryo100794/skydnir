@@ -38,6 +38,7 @@ or teardown promotion without fresh device artifacts.
 | ADBOFF-015 | P1 | Improve root docs map discoverability. | Root `README.md` links every docs category README listed by `docs/README.md`, including release, showcase, and maintenance, without duplicating status claims. | Done in this slice. |
 | ADBOFF-016 | P1 | Fill test/showcase README index gaps. | `docs/test/README.md` links maintained test docs such as COW overlay bench recovery, direct syscall phase-2 coverage, and llama GPU root-cause/performance/correctness notes; generated `docs/showcase/README.md` now lists the curated news timeline through `scripts/update-showcase.py`. | Done. |
 | ADBOFF-017 | P1 | Guard root docs map against category drift. | `verify-docs-maintenance.py` compares `docs/README.md` category indexes with root `README.md` Documentation map entries after normalizing directory links to category READMEs; tests cover matching, missing, and extra entries. | Done in this slice. |
+| ADBOFF-018 | P1 | Add a small synthetic fixture for APK native-payload packaging policy. | `tests.test_native_payload_verifier_synthetic` exercises required asset presence, source-byte freshness, and forbidden `__pycache__` packaging without depending on a built APK artifact; `verify-fast.sh` runs it with the host-only suite. | Done in this slice. |
 
 ## Deferred Until ADB Returns
 
@@ -56,8 +57,8 @@ These remain intentionally blocked from promotion:
 
 Use these when the current queue drains and ADB is still off:
 
-1. Add narrow synthetic fixtures for any verifier that currently relies on a
-   large generated artifact.
+1. Add narrow synthetic fixtures for any remaining verifier that currently
+   relies on a large generated artifact.
 2. Improve docs/readme discoverability and reduce duplicate status wording.
 3. Add static checks for API extension boundaries: `/system/*` and `Pdocker*`
    fields must remain documented as pdocker-only diagnostics.

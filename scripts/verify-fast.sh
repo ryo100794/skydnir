@@ -141,6 +141,7 @@ run python3 -m unittest \
   tests.test_release_readiness_notice_audit \
   tests.test_script_inventory_audit \
   tests.test_docs_maintenance \
+  tests.test_native_payload_verifier_synthetic \
   tests.test_terminal_exec_it_artifact_verifier \
   tests.test_service_truth_device_gate \
   tests.test_runtime_teardown_device_gate \
