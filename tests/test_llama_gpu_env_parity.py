@@ -113,6 +113,9 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn("container-state-not-found", compare)
         self.assertIn("root / 'logs'", compare)
         self.assertIn("llama-server.log", compare)
+        self.assertIn("post_readiness_memory", compare)
+        self.assertIn("COMPARE_RESULT_READY=1", compare)
+        self.assertIn('"$COMPARE_RESULT_READY" != "1"', compare)
 
 
 if __name__ == "__main__":

@@ -61,6 +61,7 @@ EXPECTED_GPU_EXECUTOR_MARKER="${PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER:-gpu-execut
 EXPECTED_VULKAN_ICD_MARKER="${PDOCKER_VULKAN_ICD_EXPECTED_MARKER:-vulkan-icd-feature-chain-marker-20260518}"
 OP_ID="llama-gpu-compare-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 CURRENT_CONTAINER_ID=""
+COMPARE_RESULT_READY=0
 
 usage() {
   cat <<EOF
@@ -232,7 +233,7 @@ cleanup() {
       mkdir -p "$(dirname "$OUT")"
       cp "$RUNTIME_ABORT_JSON" "$OUT" >/dev/null 2>&1 || true
     fi
-    if [[ "$STOP_ON_FAILURE" == "1" ]]; then
+    if [[ "$STOP_ON_FAILURE" == "1" && "$COMPARE_RESULT_READY" != "1" ]]; then
       remove_container_after_failure >/dev/null 2>&1 || true
     fi
   fi
@@ -1850,6 +1851,7 @@ start_gpu >/dev/null
 GPU_LOG="$TMP/gpu.log"
 GPU_STATE="$TMP/gpu-state.txt"
 GPU_JSON="$TMP/gpu.json"
+GPU_POST_READINESS_MEMORY_JSON="$TMP/gpu-post-readiness-memory.json"
 CORRECTNESS_JSON="$TMP/correctness.json"
 SERVICE_READINESS_JSON="$TMP/service-readiness.json"
 STARTUP_JSON="$TMP/llama-startup.json"
@@ -1870,11 +1872,13 @@ else
   operation_notify "running" "Forced Vulkan did not serve; collecting container logs"
   gpu_served=0
 fi
+memory_snapshot_json > "$GPU_POST_READINESS_MEMORY_JSON" || true
 container_state > "$GPU_STATE"
 container_archive_file "/workspace/logs/llama-startup.json" "$STARTUP_JSON"
 container_logs > "$GPU_LOG"
 
 PDOCKER_LLAMA_RUNTIME_ABORT_JSON="$RUNTIME_ABORT_JSON" \
+PDOCKER_LLAMA_POST_READINESS_MEMORY_JSON="$GPU_POST_READINESS_MEMORY_JSON" \
 python3 - "$CPU_JSON" "$CPU_CORRECTNESS_JSON" "$GPU_JSON" "$GPU_LOG" "$GPU_STATE" "$CORRECTNESS_JSON" "$SERVICE_READINESS_JSON" "$STARTUP_JSON" "$RUNTIME_ENV_RECORD_JSON" "$OUT" "$gpu_served" "$GPU_LAYERS" "$GPU_CTX" "$PREDICT" "$REPEAT" "$WARMUP_DISCARD" "$TRACE_ALLOC" "$MODEL_PATH" "$MODEL_URL" "$ROOT/scripts/llama-gpu-env-manifest.json" <<'PY'
 import json
 import math
@@ -1928,6 +1932,13 @@ if runtime_abort_path and Path(runtime_abort_path).is_file() and Path(runtime_ab
         runtime_abort = json.load(open(runtime_abort_path, encoding="utf-8"))
     except Exception:
         runtime_abort = {}
+post_readiness_memory = {}
+post_readiness_memory_path = os.environ.get("PDOCKER_LLAMA_POST_READINESS_MEMORY_JSON", "")
+if post_readiness_memory_path and Path(post_readiness_memory_path).is_file() and Path(post_readiness_memory_path).stat().st_size:
+    try:
+        post_readiness_memory = json.load(open(post_readiness_memory_path, encoding="utf-8"))
+    except Exception:
+        post_readiness_memory = {}
 cpu_correctness = {}
 if Path(cpu_correctness_path).is_file() and Path(cpu_correctness_path).stat().st_size:
     try:
@@ -3617,6 +3628,7 @@ result = {
         "container_config_env": runtime_env,
         "startup_diagnostics": startup_diagnostics,
         "service_readiness": service_readiness,
+        "post_readiness_memory": post_readiness_memory,
         "evidence": evidence,
         "runtime_abort": runtime_abort,
         "allocation_trace_bytes": allocations[-32:],
@@ -3682,6 +3694,7 @@ Path(out_path).write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n
 print(json.dumps(result["comparison"], indent=2))
 print("next_blocker:", result["next_blocker"])
 PY
+COMPARE_RESULT_READY=1
 
 SUMMARY="$(python3 - "$OUT" <<'PY'
 import json
@@ -3703,12 +3716,12 @@ PY
 operation_notify "running" "$SUMMARY"
 
 DEVICE_NAME="$(basename "$OUT")"
-"$ADB" push "$OUT" "/data/local/tmp/$DEVICE_NAME" >/dev/null
-run_as "mkdir -p files/pdocker/bench && cp /data/local/tmp/$DEVICE_NAME files/pdocker/bench/$DEVICE_NAME"
+"$ADB" push "$OUT" "/data/local/tmp/$DEVICE_NAME" >/dev/null || true
+run_as "mkdir -p files/pdocker/bench && cp /data/local/tmp/$DEVICE_NAME files/pdocker/bench/$DEVICE_NAME" || true
 if [[ -s "$CORRECTNESS_JSON" ]]; then
   CORRECTNESS_DEVICE_NAME="llama-correctness-$(date -u +%Y%m%dT%H%M%SZ).json"
-  "$ADB" push "$CORRECTNESS_JSON" "/data/local/tmp/$CORRECTNESS_DEVICE_NAME" >/dev/null
-  run_as "mkdir -p files/pdocker/bench && cp /data/local/tmp/$CORRECTNESS_DEVICE_NAME files/pdocker/bench/$CORRECTNESS_DEVICE_NAME"
+  "$ADB" push "$CORRECTNESS_JSON" "/data/local/tmp/$CORRECTNESS_DEVICE_NAME" >/dev/null || true
+  run_as "mkdir -p files/pdocker/bench && cp /data/local/tmp/$CORRECTNESS_DEVICE_NAME files/pdocker/bench/$CORRECTNESS_DEVICE_NAME" || true
 fi
 
 if [[ "$RESTORE_CPU" -eq 1 ]]; then
