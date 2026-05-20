@@ -56,9 +56,18 @@ run it, and where the latest result is stored.
 | [`LLAMA_GPU_PERFORMANCE_20260507.md`](LLAMA_GPU_PERFORMANCE_20260507.md) | 2026-05-07 llama GPU performance investigation snapshot |
 | [`LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md`](LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md) | Negative examples for GPU/Q6/memory artifacts that cannot promote benchmark or correctness claims |
 | [`llama-gpu-bridge-root-cause-20260509.md`](llama-gpu-bridge-root-cause-20260509.md) | 2026-05-09 llama GPU bridge root-cause analysis snapshot |
-| `scripts/verify-archive-api-compat.py` | Host-only fail-closed Docker archive API / `docker cp` compatibility gate |
-| `scripts/test/smoke-vulkan-llama-init.sh` | Lightweight llama.cpp-oriented Vulkan ICD initialization smoke |
-| `scripts/test/smoke-vulkan-icd-bridge.sh` | Lightweight Vulkan ICD dispatch smoke through the pdocker GPU executor socket; planned-skip when the local executor Vulkan preflight is unavailable |
+
+## Related verification scripts
+
+- `scripts/verify-archive-api-compat.py` — Host-only fail-closed Docker archive
+  API / `docker cp` compatibility gate.
+- `scripts/test/smoke-opencl-bridge.sh` — Lightweight OpenCL bridge smoke
+  through the pdocker GPU executor socket.
+- `scripts/test/smoke-vulkan-icd-bridge.sh` — Lightweight Vulkan ICD dispatch
+  smoke through the pdocker GPU executor socket; planned-skip when the local
+  executor Vulkan preflight is unavailable.
+- `scripts/test/smoke-vulkan-llama-init.sh` — Lightweight llama.cpp-oriented
+  Vulkan ICD initialization smoke.
 
 ## Canonical Sources
 

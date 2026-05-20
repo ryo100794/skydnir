@@ -73,6 +73,7 @@ Canonical owners:
 - Active bridge plan: [`../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md)
 - Benchmark history: [`../test/LLAMA_BENCHMARKS.md`](../test/LLAMA_BENCHMARKS.md)
 - Device procedure: [`../test/LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`](../test/LLAMA_GPU_DEVICE_RUNBOOK_20260513.md)
+- High-churn artifact classes: [`../test/EVIDENCE_INDEX.md`](../test/EVIDENCE_INDEX.md)
 
 Scattered or repeated in:
 
@@ -84,7 +85,9 @@ Scattered or repeated in:
 
 Backlog:
 
-- Add a llama/GPU evidence index before moving artifacts into subdirectories.
+- Use the shared evidence index for current artifact classes; add a
+  topic-specific llama/GPU subindex only before moving artifacts into
+  subdirectories.
 - Keep `*-latest.*` pointers stable until producers and verifier paths are
   updated together.
 
@@ -116,8 +119,9 @@ Canonical owners:
 
 Backlog:
 
-- Introduce a storage evidence index before moving file I/O, path profile, and
-  syscall profile artifacts.
+- Use the shared evidence index for current storage/COW/path-profile classes;
+  add a topic-specific storage subindex only before moving file I/O, path
+  profile, and syscall profile artifacts.
 - Keep storage design constraints out of generated benchmark result files.
 
 ### 5. Runtime, direct syscall, API29, and Android self-debug material
@@ -154,11 +158,13 @@ Backlog:
 Canonical owners:
 
 - Test category rules: [`../test/README.md`](../test/README.md)
+- High-churn artifact classes: [`../test/EVIDENCE_INDEX.md`](../test/EVIDENCE_INDEX.md)
 - Compatibility matrix: [`../test/COMPATIBILITY.md`](../test/COMPATIBILITY.md)
 - CI gate classification: [`../test/CI_GATE_LEDGER.md`](../test/CI_GATE_LEDGER.md)
 - Test design quality bar: [`../test/TEST_DESIGN_STANDARD.md`](../test/TEST_DESIGN_STANDARD.md)
 
-Exact duplicate payloads observed on 2026-05-18:
+Representative duplicate pointer/evidence patterns last manually sampled on
+2026-05-18:
 
 - [`../test/llama-bench-latest.json`](../test/llama-bench-latest.json) and [`../test/llama-bench-cpu-repeat3.json`](../test/llama-bench-cpu-repeat3.json)
 - [`../test/test-run-latest.json`](../test/test-run-latest.json) and [`../test/runs/20260515T040154Z-90aa939-host-smoke/manifest.json`](../test/runs/20260515T040154Z-90aa939-host-smoke/manifest.json)
@@ -168,6 +174,8 @@ Exact duplicate payloads observed on 2026-05-18:
 Backlog:
 
 - Treat `*-latest.*` files as mutable pointers, not accidental duplicates.
+- Keep the shared evidence index current; remaining dedup work is
+  topic-specific subindexing before path moves or pruning.
 - Do not prune evidence merely because payloads repeat: first ensure each
   artifact is indexed by the test README, gate/runbook, run manifest, or release
   record; otherwise retain it or classify the path as generated/cache-excluded.

@@ -39,6 +39,7 @@ or teardown promotion without fresh device artifacts.
 | ADBOFF-016 | P1 | Fill test/showcase README index gaps. | `docs/test/README.md` links maintained test docs such as COW overlay bench recovery, direct syscall phase-2 coverage, and llama GPU root-cause/performance/correctness notes; generated `docs/showcase/README.md` now lists the curated news timeline through `scripts/update-showcase.py`. | Done. |
 | ADBOFF-017 | P1 | Guard root docs map against category drift. | `verify-docs-maintenance.py` compares `docs/README.md` category indexes with root `README.md` Documentation map entries after normalizing directory links to category READMEs; tests cover matching, missing, and extra entries. | Done in this slice. |
 | ADBOFF-018 | P1 | Add a small synthetic fixture for APK native-payload packaging policy. | `tests.test_native_payload_verifier_synthetic` exercises required asset presence, source-byte freshness, and forbidden `__pycache__` packaging without depending on a built APK artifact; `verify-fast.sh` runs it with the host-only suite. | Done in this slice. |
+| ADBOFF-019 | P2 | Clean stale docs wording now that the shared test evidence index exists. | Maintenance docs link `docs/test/EVIDENCE_INDEX.md`, describe duplicate/latest records as representative pointer/evidence patterns, and `docs/test/README.md` keeps raw script paths in a related-script section instead of the document table. | Done in this slice. |
 
 ## Deferred Until ADB Returns
 
