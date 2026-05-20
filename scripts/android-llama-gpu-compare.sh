@@ -43,6 +43,10 @@ RUNTIME_MIN_SWAP_FREE_MB="${PDOCKER_LLAMA_RUNTIME_MIN_SWAP_FREE_MB:-0}"
 RUNTIME_SWAP_ADVISORY_MB="${PDOCKER_LLAMA_RUNTIME_SWAP_ADVISORY_MB:-512}"
 STOP_ON_FAILURE="${PDOCKER_LLAMA_STOP_ON_FAILURE:-1}"
 ENGINE_START_TIMEOUT_SEC="${PDOCKER_LLAMA_ENGINE_START_TIMEOUT_SEC:-15}"
+ENGINE_CREATE_TIMEOUT_SEC="${PDOCKER_LLAMA_ENGINE_CREATE_TIMEOUT_SEC:-120}"
+ENGINE_CREATE_SETTLE_TIMEOUT_SEC="${PDOCKER_LLAMA_ENGINE_CREATE_SETTLE_TIMEOUT_SEC:-60}"
+ENGINE_CREATE_POLL_INTERVAL_SEC="${PDOCKER_LLAMA_ENGINE_CREATE_POLL_INTERVAL_SEC:-2}"
+ENGINE_CLEANUP_TIMEOUT_SEC="${PDOCKER_LLAMA_ENGINE_CLEANUP_TIMEOUT_SEC:-60}"
 RUN_AS_TIMEOUT_SEC="${PDOCKER_LLAMA_RUN_AS_TIMEOUT_SEC:-30}"
 RUN_AS_CLEANUP_TIMEOUT_SEC="${PDOCKER_LLAMA_RUN_AS_CLEANUP_TIMEOUT_SEC:-5}"
 OPERATION_NOTIFY_TIMEOUT_SEC="${PDOCKER_LLAMA_OPERATION_NOTIFY_TIMEOUT_SEC:-3}"
@@ -226,7 +230,7 @@ cleanup() {
       cp "$RUNTIME_ABORT_JSON" "$OUT" >/dev/null 2>&1 || true
     fi
     if [[ "$STOP_ON_FAILURE" == "1" ]]; then
-      remove_container >/dev/null 2>&1 || true
+      remove_container_after_failure >/dev/null 2>&1 || true
     fi
   fi
   rm -rf "$TMP"
@@ -1263,8 +1267,81 @@ PY
 }
 
 remove_container() {
-  engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" DELETE "/containers/$(urlencode "$CONTAINER")?force=true" >/dev/null || true
+  engine_request_with_host_timeout "$ENGINE_CLEANUP_TIMEOUT_SEC" DELETE "/containers/$(urlencode "$CONTAINER")?force=true" >/dev/null || true
   CURRENT_CONTAINER_ID=""
+}
+
+inspect_container_body() {
+  local ref="$1"
+  engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" GET "/containers/$(urlencode "$ref")/json" | http_body || true
+}
+
+poll_container_after_create_timeout() {
+  local mode="$1"
+  local deadline now body start elapsed=0
+  start="$(date +%s)"
+  deadline=$(( start + ENGINE_CREATE_SETTLE_TIMEOUT_SEC ))
+  while :; do
+    body="$(inspect_container_body "$CONTAINER")"
+    if [[ -n "$body" ]] && printf "%s" "$body" | engine_body_has_id; then
+      echo "[pdocker llama compare] $mode: delayed create became inspectable after ${elapsed}s" >&2
+      printf "%s" "$body"
+      return 0
+    fi
+    now="$(date +%s)"
+    if (( now >= deadline )); then
+      break
+    fi
+    elapsed=$(( now - start ))
+    echo "[pdocker llama compare] $mode: waiting for delayed create visibility (${elapsed}/${ENGINE_CREATE_SETTLE_TIMEOUT_SEC}s)" >&2
+    sleep "$ENGINE_CREATE_POLL_INTERVAL_SEC"
+  done
+  return 1
+}
+
+wait_container_absent() {
+  local deadline now body start elapsed=0
+  start="$(date +%s)"
+  deadline=$(( start + ENGINE_CLEANUP_TIMEOUT_SEC ))
+  while :; do
+    body="$(inspect_container_body "$CONTAINER")"
+    if [[ -z "$body" ]] || ! printf "%s" "$body" | engine_body_has_id; then
+      return 0
+    fi
+    now="$(date +%s)"
+    if (( now >= deadline )); then
+      echo "[pdocker llama compare] stale target container still inspectable after ${ENGINE_CLEANUP_TIMEOUT_SEC}s" >&2
+      return 1
+    fi
+    elapsed=$(( now - start ))
+    echo "[pdocker llama compare] waiting for stale target removal (${elapsed}/${ENGINE_CLEANUP_TIMEOUT_SEC}s)" >&2
+    sleep "$ENGINE_CREATE_POLL_INTERVAL_SEC"
+  done
+}
+
+remove_container_after_failure() {
+  local deadline now body cid start
+  remove_container
+  start="$(date +%s)"
+  deadline=$(( start + ENGINE_CREATE_SETTLE_TIMEOUT_SEC ))
+  while :; do
+    body="$(inspect_container_body "$CONTAINER")"
+    if [[ -n "$body" ]] && printf "%s" "$body" | engine_body_has_id; then
+      cid="$(printf "%s" "$body" | parse_engine_id 2>/dev/null || true)"
+      if [[ -n "$cid" ]]; then
+        engine_request_with_host_timeout "$ENGINE_CLEANUP_TIMEOUT_SEC" DELETE "/containers/$cid?force=true" >/dev/null || true
+      else
+        remove_container
+      fi
+      return 0
+    fi
+    now="$(date +%s)"
+    if (( now >= deadline )); then
+      break
+    fi
+    sleep "$ENGINE_CREATE_POLL_INTERVAL_SEC"
+  done
+  return 0
 }
 
 start_container_mode() {
@@ -1278,12 +1355,13 @@ start_container_mode() {
   ensure_memory_headroom "starting $mode container"
   echo "[pdocker llama compare] $mode: removing stale target container" >&2
   remove_container
+  wait_container_absent || return 124
   payload="$(container_payload "$mode" "$ctx" "$gpu_layers")"
   echo "[pdocker llama compare] $mode: creating container" >&2
-  if ! create_body="$(engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload" | http_body)"; then
-    echo "[pdocker llama compare] $mode: create request did not return within ${ENGINE_START_TIMEOUT_SEC}s; probing named container" >&2
+  if ! create_body="$(engine_request_with_host_timeout "$ENGINE_CREATE_TIMEOUT_SEC" POST "/containers/create?name=$(urlencode "$CONTAINER")" "$payload" | http_body)"; then
+    echo "[pdocker llama compare] $mode: create request did not return within ${ENGINE_CREATE_TIMEOUT_SEC}s; probing named container" >&2
     operation_notify "running" "$mode: container create timed out; probing named container"
-    create_body="$(engine_request_with_host_timeout "$ENGINE_START_TIMEOUT_SEC" GET "/containers/$(urlencode "$CONTAINER")/json" | http_body || true)"
+    create_body="$(poll_container_after_create_timeout "$mode" || true)"
     if [[ -z "$create_body" ]] || ! printf "%s" "$create_body" | engine_body_has_id; then
       echo "[pdocker llama compare] $mode: create timeout left no inspectable named container" >&2
       return 124

@@ -15,6 +15,7 @@ tmp/
 docs/test/device-logs/
 docs/test/device-captures/
 docs/test/llama-gpu-*.json
+docs/test/llama-gpu-*.verifier.stdout
 docs/test/llama-gpu-*-artifacts/
 docs/test/llama-cpu-gpu-compare-*.json
 docs/test/llama-api-prompt-*.md

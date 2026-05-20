@@ -1556,7 +1556,15 @@ Tasks:
    a virtual buffer table: reserve large logical buffer ranges, materialize
    touched pages or spans lazily, track dirty ranges, and pin bridge-visible
    pages while a command is in flight so huge model buffers do not require
-   whole-buffer copies or duplicate OOM-sized allocations.
+   whole-buffer copies or duplicate OOM-sized allocations.  2026-05-20
+   follow-up: the latest Q6_K workflow on `192.168.179.26:41503` reached the
+   known `native-q6-device-execution-or-final-store` blocker again after the
+   compare script stopped treating slow Engine container creation as a fatal
+   GPU result.  The created container became `/pdocker-llama-cpp`
+   `3d02cf0782c5` and later reported healthy, but the compare wait window
+   timed out before benchmark/completion data and an immediate `2+3=` API probe
+   timed out.  Next GPU work remains correctness-first: explain the Q6_K final
+   store/device-execution mismatch before using any speed number as a claim.
 7. **[next] Establish small-model GPU green path.**
    Use the same unmodified llama.cpp container with a small GGUF model to prove
    model load, first token, and `llama-bench -ngl 1` before returning to 8B.

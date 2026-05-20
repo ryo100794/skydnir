@@ -1,6 +1,6 @@
 # llama.cpp GPU Bridge Next Steps
 
-Snapshot date: 2026-05-19.
+Snapshot date: 2026-05-20.
 
 This document is the handoff plan for continuing the llama.cpp GPU bridge work
 with a smaller or faster coding model.  It assumes the repository is on or
@@ -27,6 +27,7 @@ Confirmed facts:
 | `ngl=1` RMSNorm shader | CPU oracle executes and matches | `0xf2f988b94bd3e0dc`, `docs/test/llama-gpu-ngl1-rms-norm-oracle-20260509.json` |
 | `ngl=1` Q6_K/final-projection shader | Row-indexed writeback verified; workgroup shape and native reduction sum clear; final output still mismatches | `docs/test/llama-gpu-ngl1-q6-row-provenance-20260519.json`, `blocker_class=native-q6-device-execution-or-final-store` |
 | current device readiness | Heavy compare is memory-gated | readiness requires sufficient `MemAvailable`; low Android zram `SwapFree` is advisory unless a strict swap gate is explicitly configured |
+| 2026-05-20 Q6_K workflow | Device workflow reaches the known Q6_K blocker again; create-timeout race is no longer the blocker | `docs/test/llama-gpu-q6k-adb41503-20260520T110352Z.json` (ignored runtime evidence), workflow `classification=q6-native-device-execution-or-final-store` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest strict row-provenance artifact still fails required
@@ -163,6 +164,19 @@ persists the verifier stdout next to the workflow manifest as
 from the 8 KiB `stdout_tail`.  This prevents long verifier diagnostics from
 silently dropping `classification`/`next_action` in
 `docs/test/llama-gpu-q6k-workflow-latest.json`.
+
+2026-05-20 device-run hardening: the compare script now treats
+`POST /containers/create` as a heavier Engine operation than start/inspect.  A
+host-side create timeout no longer immediately becomes a false GPU failure:
+the script polls the named container until a delayed create becomes inspectable,
+waits for stale targets to disappear before recreating them, and retries
+late-created target cleanup on failure.  The first retest on
+`192.168.179.26:41503` created and started `3d02cf0782c5`
+(`/pdocker-llama-cpp`) and the verifier returned the previous real blocker,
+`q6-native-device-execution-or-final-store`; the HTTP server became healthy
+after the compare wait window, but a `2+3=` completion probe still timed out.
+Treat this as runtime/startup latency plus the existing Q6_K correctness
+blocker, not as proof of correct or fast GPU inference.
 
 Milestone compare with CPU baseline should be run only after a correctness
 blocker changes, not after every small diagnostic edit.
