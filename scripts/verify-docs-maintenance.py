@@ -27,6 +27,13 @@ ROADMAP_CUE_RE = re.compile(
     re.IGNORECASE,
 )
 TABLE_SEPARATOR_RE = re.compile(r"^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$")
+MARKDOWN_TABLE_ROW_RE = re.compile(r"^\|(.+)\|$")
+OPEN_GAP_RE = re.compile(r"\b(remains open|remain open|non-promoting|planned-gap|still need|still needs)\b", re.IGNORECASE)
+PROMOTING_STATUS_RE = re.compile(r"^\s*(good|pass|green)\s*$", re.IGNORECASE)
+FORBIDDEN_CURRENT_EVIDENCE_PHRASES = (
+    "current release-blocking device smoke evidence",
+    "current device release-blocking smoke artifact",
+)
 
 # Durable Markdown documents must be discoverable from an index.  Test-run
 # summaries are addressed by the test-driver manifest convention documented in
@@ -304,12 +311,57 @@ def check_todo_roadmap_source_quality(root: Path = ROOT) -> None:
             )
 
 
+def iter_markdown_table_rows(text: str) -> list[tuple[int, list[str]]]:
+    rows: list[tuple[int, list[str]]] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if not line.startswith("|") or TABLE_SEPARATOR_RE.match(line):
+            continue
+        match = MARKDOWN_TABLE_ROW_RE.match(line)
+        if not match:
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if cells:
+            rows.append((line_no, cells))
+    return rows
+
+
+def check_historical_evidence_language(root: Path = ROOT) -> None:
+    """Reject docs that present open/device-gated evidence as current success."""
+
+    for path in sorted((root / "docs").rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        lower = text.lower()
+        for phrase in FORBIDDEN_CURRENT_EVIDENCE_PHRASES:
+            if phrase in lower:
+                fail(
+                    f"{rel(path, root)} contains forbidden current-evidence phrase "
+                    f"{phrase!r}; describe stale device records as historical/non-promoting"
+                )
+
+    compatibility = root / "docs" / "test" / "COMPATIBILITY.md"
+    if compatibility.is_file():
+        text = compatibility.read_text(encoding="utf-8")
+        for line_no, cells in iter_markdown_table_rows(text):
+            if len(cells) < 3:
+                continue
+            if normalize_table_cell(cells[0]) in {"area", "---"}:
+                continue
+            status = cells[1].strip()
+            notes = cells[2]
+            if PROMOTING_STATUS_RE.match(status) and OPEN_GAP_RE.search(notes):
+                fail(
+                    f"{rel(compatibility, root)}:{line_no} marks a row {status!r} "
+                    "while its notes describe an open/non-promoting gap"
+                )
+
+
 def run(root: Path = ROOT) -> None:
     check_backlog(root)
     check_links(root)
     check_doc_discoverability(root)
     check_historical_agent_assignments(root)
     check_todo_roadmap_source_quality(root)
+    check_historical_evidence_language(root)
 
 
 def main(argv: list[str] | None = None) -> int:

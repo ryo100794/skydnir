@@ -1,6 +1,6 @@
 # Agent Coordination Ledger
 
-Last updated: 2026-05-19
+Last updated: 2026-05-20
 
 This ledger records active delegation lanes and integration risks for the main
 agent. The main agent owns waiting on agents, closing lanes, and integrating
@@ -72,6 +72,7 @@ artifact instead of relying on retained chat history.
 | Terminal exec-it | Committed gate slice | Terminal exec/UI/session docs/scripts/tests/artifacts already landed outside this docs-only follow-up | Gate hardening committed as `2ce8396`; CI Showcase succeeded; next deliverable is raw JSONL plus UI artifact evidence before promotion | Future edits still conflict on `scripts/android-device-smoke.sh`; serialize with runtime/service-smoke coordination |
 | Modern/no-PRoot runtime truth | Committed gate slice | `docs/test/NO_PROOT_RUNTIME_TRUTH_GATE.md`, `docs/test/no-proot-runtime-truth-latest.json`, and verifier/scripts already landed outside this docs-only follow-up | Truth gate added and pushed in `e0612a3`; ledger sync landed in `753670c`; next deliverable is real no-PRoot executor evidence or explicit runtime capability-error evidence before promotion | Do not let metadata-only flavors claim RUN, Compose service health, or published-port success without executor evidence |
 | Low-conflict docs backlog | Pauli-derived queue | docs-only scopes under release/test/plan/maintenance README ownership | Delegate release dedup, GPU/storage evidence indexes, memory/terminal link cleanup, F-Droid consistency, test evidence retention, and plan/status cross-link hygiene as independent tasks | Avoid touching GPU/runtime implementation while these docs lanes run |
+| ADB-off host-only queue | Main agent plus short explorer agents | `docs/plan/ADB_OFF_TASK_QUEUE_20260520.md`, docs-maintenance verifier/tests, docs wording | Continue deterministic docs/test/verifier work while ADB is unavailable, without promoting device-gated runtime/terminal/GPU/SAF claims | Must keep historical evidence separate from current promotion evidence |
 
 ## Recently Recovered Agent Results
 
@@ -100,6 +101,9 @@ artifact instead of relying on retained chat history.
 | Runtime teardown / terminal evidence gates | Main agent | `2ce8396` | CI Showcase succeeded; both gates remain non-promoting until fresh device evidence lands |
 | No-PRoot runtime truth gate | Main agent/Herschel | `e0612a3` then ledger sync `753670c` | Gate and planned-gap artifact pushed; promotion still requires no-PRoot executor evidence or explicit capability-error artifact |
 | Llama Q6 safe-kernel/native layout diagnostics | Main agent | `5dc330a` / `e1a806d` / `3b8eecb` / `be93398` plus 2026-05-19 device artifacts | Strict safe-kernel diagnostic is enabled and classified; `3b8eecb` adds the native Q6_K reduction/output-layout probe and `be93398` refreshes the sweep. Local ignored/generated artifacts first classified the native lane as `q6-native-output-layout-inconclusive`; the 32-sample and row-provenance follow-ups now classify `q6-native-device-execution-or-final-store`. Next code work should bisect local-y/partial signatures before a final-store sentinel |
+| Design/TODO/API reconciliation | Bernoulli/Tesla/Hubble/Linnaeus/Russell | `eefae1d` | Docker API inventory, pdocker extension boundary, unsupported OCI scope, media Bluetooth/BLE/GPS planning, and design/TODO gaps landed. Q6 sweep now preserves native probe details. | Keep API extension fields diagnostic-only; unsupported OCI/runtime gaps must stay visible |
+| Stale evidence wording audit | Euclid | `3b151a6` plus static guard follow-up | Historical 2026-05-05 smoke evidence no longer reads as current terminal/service-truth/teardown/image-pull promotion. Static docs guard now rejects the same class of contradiction. | Do not regress release/showcase copy into current-promotion language without new artifacts |
+| Source marker audit under ADB-off | Hubble/Confucius | read-only, recorded in `ADB_OFF_TASK_QUEUE_20260520.md` | App UI source had no uncovered actionable TODO/FIXME/HACK markers. Native/runtime findings were covered or low-risk: disabled merged-usr legacy body, temp context extraction, storage wrapper temp file, GPU scratch buffer naming. | Treat as backlog hygiene; do not change runtime semantics without focused host tests |
 
 ## Intake Rule
 

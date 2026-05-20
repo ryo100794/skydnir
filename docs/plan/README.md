@@ -1,6 +1,6 @@
 # Plan Documents
 
-Snapshot date: 2026-05-13.
+Snapshot date: 2026-05-20.
 
 ## Purpose
 
@@ -14,6 +14,7 @@ which temporary accommodations must be replaced.
 |---|---|
 | [`STATUS.md`](STATUS.md) | Current implementation status summary |
 | [`TODO.md`](TODO.md) | Live unfinished-work ledger and temporary workaround tracker |
+| [`ADB_OFF_TASK_QUEUE_20260520.md`](ADB_OFF_TASK_QUEUE_20260520.md) | Host-only task queue to use while ADB/device access is unavailable |
 | [`LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](LLAMA_GPU_BRIDGE_NEXT_STEPS.md) | Active llama.cpp GPU bridge procedure, stage gates, and compact-model handoff |
 | [`VULKAN_ICD_LLAMA_LIMITS_GAP.md`](VULKAN_ICD_LLAMA_LIMITS_GAP.md) | Vulkan ICD advertised limits/features gap table for llama.cpp/ggml-vulkan bridge work |
 | [`ARM32_DIRECT_EXEC_PORTING.md`](ARM32_DIRECT_EXEC_PORTING.md) | Porting plan and promotion gates for replacing the `armeabi-v7a` unsupported direct-exec stub |
@@ -34,6 +35,9 @@ which temporary accommodations must be replaced.
   as the source list for P0/P1/P2 unfinished-work classification.
 - Use [`TODO.md`](TODO.md) for active work, temporary accommodations, blockers,
   and acceptance checks.
+- Use [`ADB_OFF_TASK_QUEUE_20260520.md`](ADB_OFF_TASK_QUEUE_20260520.md) when
+  ADB is unavailable so host-only maintenance can continue without promoting
+  device-gated features.
 - Use [`LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](LLAMA_GPU_BRIDGE_NEXT_STEPS.md) for
   the current llama.cpp GPU bridge continuation plan and handoff instructions.
 - Use [`VULKAN_ICD_LLAMA_LIMITS_GAP.md`](VULKAN_ICD_LLAMA_LIMITS_GAP.md) when

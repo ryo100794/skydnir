@@ -289,6 +289,39 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
 
         verifier.check_todo_roadmap_source_quality(self.tmp)
 
+    def test_historical_evidence_language_rejects_good_row_with_open_gap(self):
+        compat = self.tmp / "docs" / "test" / "COMPATIBILITY.md"
+        compat.write_text(
+            "| Area | Current status | Notes |\n"
+            "|---|---:|---|\n"
+            "| Container lifecycle | Good | Basic APIs exist, but teardown remains open. |\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_historical_evidence_language(self.tmp)
+
+    def test_historical_evidence_language_accepts_partial_row_with_open_gap(self):
+        compat = self.tmp / "docs" / "test" / "COMPATIBILITY.md"
+        compat.write_text(
+            "| Area | Current status | Notes |\n"
+            "|---|---:|---|\n"
+            "| Container lifecycle | Partial / teardown-gated | Basic APIs exist, but teardown remains open. |\n",
+            encoding="utf-8",
+        )
+
+        verifier.check_historical_evidence_language(self.tmp)
+
+    def test_historical_evidence_language_rejects_current_release_blocking_phrase(self):
+        release = self.tmp / "docs" / "release" / "BUILD.md"
+        release.write_text(
+            "Keep this as the current release-blocking device smoke evidence.\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_historical_evidence_language(self.tmp)
+
 
 if __name__ == "__main__":
     unittest.main()
