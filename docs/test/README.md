@@ -1,6 +1,6 @@
 # Test Documents
 
-Snapshot date: 2026-05-15.
+Snapshot date: 2026-05-20.
 
 ## Purpose
 
@@ -14,6 +14,7 @@ run it, and where the latest result is stored.
 |---|---|
 | [`COMPATIBILITY.md`](COMPATIBILITY.md) | Docker API, data exchange, protocol, APK payload, and UI compatibility coverage |
 | [`CI_GATE_LEDGER.md`](CI_GATE_LEDGER.md) | P0/P1 service truth, teardown, image-pull, OOM/LMK, terminal `-it`, and llama GPU gate classification |
+| [`EVIDENCE_INDEX.md`](EVIDENCE_INDEX.md) | How to interpret high-churn `latest` artifacts, non-promoting evidence, and canonical owners |
 | [`TEST_DESIGN_STANDARD.md`](TEST_DESIGN_STANDARD.md) | Minimum test design criteria and the automated gate that enforces them |
 | [`SCENARIOS.md`](SCENARIOS.md) | Feature-level scenario ledger and combined test runner |
 | [`COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md`](COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md) | Android device-gated COW/overlay daemon/helper kill-at-step evidence contract |
@@ -74,6 +75,9 @@ run it, and where the latest result is stored.
   design, check density, random/stress process, and build-set artifacts.
 - Use [`compat-audit-latest.md`](compat-audit-latest.md) as the latest generated
   compatibility snapshot.
+- Use [`EVIDENCE_INDEX.md`](EVIDENCE_INDEX.md) to interpret `latest` artifacts
+  and to decide whether a host-only, planned-gap, historical, or device-gated
+  record can promote anything.
 - Use [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md) as the human-readable
   benchmark history, with JSON files kept as machine-readable artifacts.
 - Fixed release-candidate build evidence lives under

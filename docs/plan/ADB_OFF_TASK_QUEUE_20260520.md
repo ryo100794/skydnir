@@ -30,6 +30,7 @@ or teardown promotion without fresh device artifacts.
 | ADBOFF-007 | P1 | Keep release/readiness checks green after docs maintenance. | `verify-docs-maintenance`, `verify-release-readiness`, `tests.test_docs_maintenance`, and `git diff --check` pass. | Done for `5946442`; rerun after each maintenance slice. |
 | ADBOFF-008 | P1 | Add static pdocker extension API boundary guard. | Docs distinguish Docker-standard `GET /system/df` and `POST /system/prune` from pdocker-only `/system/*` routes, and every public `Pdocker*` field observed in pdockerd is documented. | Done in `50edf2f`. |
 | ADBOFF-009 | P1 | Review Engine route method strictness from static audit. | Host-only follow-up should document or test broad base-route methods and the generic `POST /networks/{name}` fallback before any runtime behavior change. | Done: base routes are method-scoped and unsupported network subroutes fail closed in host protocol smoke. |
+| ADBOFF-010 | P1 | Add a high-churn test evidence index. | `docs/test/EVIDENCE_INDEX.md` classifies `latest` artifacts as host/static, device-gated, non-promoting, or historical and links each family to canonical gate docs. | In progress. |
 
 ## Deferred Until ADB Returns
 
