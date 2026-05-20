@@ -19,7 +19,7 @@ or teardown promotion without fresh device artifacts.
 
 ## Completed ADB-Off Landing Ledger
 
-ADBOFF-001 through ADBOFF-038 have landed. Keep this table as the
+ADBOFF-001 through ADBOFF-039 have landed. Keep this table as the
 completion ledger for the 2026-05-20 ADB-off maintenance burst; append new
 rows only when fresh host-only work is intentionally queued.
 
@@ -30,7 +30,7 @@ rows only when fresh host-only work is intentionally queued.
 | ADBOFF-003 | P0 | Preserve llama GPU Q6 probe details in committed sweep evidence. | `tests.test_llama_gpu_artifact_sweep` and `tests.test_llama_gpu_artifact_verifier` pass; sweep JSON exposes Q6 output-layout, row-provenance, partial-signature, and native-reduction fields. | Done in `eefae1d`. |
 | ADBOFF-004 | P0 | Add a static stale-evidence guard to prevent repeat docs regressions. | `tests.test_docs_maintenance` covers forbidden current-evidence phrases and compatibility rows that combine promoting status with open/non-promoting notes. | Done in `5946442`. |
 | ADBOFF-005 | P1 | Source marker audit while device is unavailable. | Explorer output says app UI source has no uncovered actionable TODO/FIXME/HACK markers; native/runtime findings are either covered or low-risk naming cleanup. | Done; recorded in `AGENT_COORDINATION.md` in this slice. |
-| ADBOFF-006 | P1 | Maintain this ADB-off queue and plan index. | This document remains linked from `docs/plan/README.md` and referenced by the coordination ledger. | Ongoing maintenance; current queue items ADBOFF-001 through ADBOFF-038 have landed. |
+| ADBOFF-006 | P1 | Maintain this ADB-off queue and plan index. | This document remains linked from `docs/plan/README.md` and referenced by the coordination ledger. | Ongoing maintenance; current queue items ADBOFF-001 through ADBOFF-039 have landed. |
 | ADBOFF-007 | P1 | Keep release/readiness checks green after docs maintenance. | `verify-docs-maintenance`, `verify-release-readiness`, `tests.test_docs_maintenance`, and `git diff --check` pass. | Done for `5946442`; rerun after each maintenance slice. |
 | ADBOFF-008 | P1 | Add static pdocker extension API boundary guard. | Docs distinguish Docker-standard `GET /system/df` and `POST /system/prune` from pdocker-only `/system/*` routes, and every public `Pdocker*` field observed in pdockerd is documented. | Done in `50edf2f`. |
 | ADBOFF-009 | P1 | Review Engine route method strictness from static audit. | Host-only follow-up should document or test broad base-route methods and the generic `POST /networks/{name}` fallback before any runtime behavior change. | Done: base routes are method-scoped and unsupported network subroutes fail closed in host protocol smoke. |
@@ -63,6 +63,7 @@ rows only when fresh host-only work is intentionally queued.
 | ADBOFF-036 | P1 | Add missing exact CI-ledger contract unit tests to the fast host gate. | `scripts/verify-fast.sh` includes `tests.test_memory_pager_contract` and `tests.test_service_truth_artifact_contract`, matching the OOM/LMK CI ledger fast/static contract row. | Done in this slice. |
 | ADBOFF-037 | P1 | Mirror terminal session-neutrality in the lightweight terminal/editor contract script. | `scripts/verify_terminal_editor_contracts.py` rejects Docker/Engine/PTY/session-routing tokens in the generic xterm surface and allows only generic bridge calls, matching the existing focused unittest boundary. | Done in this slice. |
 | ADBOFF-038 | P2 | Normalize Showcase category wording in hand-maintained docs indexes. | Root `README.md` and `docs/README.md` describe Showcase as generated or curated dashboard, roadmap, news, and Wiki seed pages while leaving generated `docs/showcase/README.md` untouched. | Done in this slice. |
+| ADBOFF-039 | P1 | Add CI ledger to fast-gate parity guard. | `tests.test_ci_gate_ledger` parses the CI gate table's fast/static commands and fails when script paths or unittest modules are not represented in `scripts/verify-fast.sh`, unless a reasoned exemption is added. | Done in this slice. |
 
 ## Deferred Until ADB Returns
 
