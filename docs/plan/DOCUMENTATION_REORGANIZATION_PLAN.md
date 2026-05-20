@@ -1,13 +1,23 @@
 # Documentation Reorganization Plan
 
 Date: 2026-05-17
-Status: proposed
-Owner: Codex coordination queue
+Status: historical
+Owner: Documentation maintenance backlog
+Historical as of: 2026-05-20
 
-This plan records the documentation cleanup findings so the work does not get
-lost while implementation work continues.  The immediate rule is conservative:
-move and index first, then remove duplicated prose only after links and generated
-showcase files have been checked.
+Historical note: this file is retained as the 2026-05-17 cleanup planning
+snapshot. Do not refresh it with live documentation routing, active ownership,
+or current artifact status. Use
+[`../maintenance/DOCUMENTATION_DEDUP_BACKLOG.md`](../maintenance/DOCUMENTATION_DEDUP_BACKLOG.md)
+for current deduplication routing and canonical owners, and use category README
+files for current indexes. Keep `*-latest.*` benchmark/artifact paths stable
+until their producers and verifiers are updated in the same change.
+
+This historical plan records the documentation cleanup findings captured on
+2026-05-17 so the work would not get lost while implementation work continued.
+The conservative rule remains useful background: move and index first, then
+remove duplicated prose only after links and generated showcase files have been
+checked.
 
 ## Current documentation families
 

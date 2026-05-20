@@ -94,6 +94,11 @@ run it, and where the latest result is stored.
   record can promote anything.
 - Use [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md) as the human-readable
   benchmark history, with JSON files kept as machine-readable artifacts.
+- Use [`LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`](LLAMA_GPU_DEVICE_RUNBOOK_20260513.md)
+  for connected-device llama/GPU procedure and non-promoting capture rules.
+- Use [`EVIDENCE_INDEX.md`](EVIDENCE_INDEX.md) for high-churn llama/GPU artifact
+  ownership and `latest` pointer retention; do not hand-edit benchmark or
+  artifact JSON in documentation ownership changes.
 - Fixed release-candidate build evidence lives under
   [`../release/builds/`](../release/builds/) so immutable release records do not
   mix with mutable `latest` test outputs.

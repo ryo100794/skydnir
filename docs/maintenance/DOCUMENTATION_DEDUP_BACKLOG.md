@@ -69,11 +69,19 @@ Backlog:
 
 Canonical owners:
 
-- GPU design boundary: [`../design/GPU_COMPAT.md`](../design/GPU_COMPAT.md)
-- Active bridge plan: [`../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md)
-- Benchmark history: [`../test/LLAMA_BENCHMARKS.md`](../test/LLAMA_BENCHMARKS.md)
-- Device procedure: [`../test/LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`](../test/LLAMA_GPU_DEVICE_RUNBOOK_20260513.md)
-- High-churn artifact classes: [`../test/EVIDENCE_INDEX.md`](../test/EVIDENCE_INDEX.md)
+- Android GPU design boundary, Vulkan/ICD/cuVK direction, product non-goals, and
+  correctness/performance claim rules: [`../design/GPU_COMPAT.md`](../design/GPU_COMPAT.md)
+- Backend GPU request/env/inspect contract:
+  [`../../docker-proot-setup/docs/GPU_COMPAT.md`](../../docker-proot-setup/docs/GPU_COMPAT.md)
+- Active llama.cpp bridge execution plan and stage gates:
+  [`../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md)
+- Current implementation TODOs and blockers: [`../plan/TODO.md`](../plan/TODO.md)
+- Benchmark history and human-readable performance summary:
+  [`../test/LLAMA_BENCHMARKS.md`](../test/LLAMA_BENCHMARKS.md)
+- Connected-device procedure and non-promoting capture rules:
+  [`../test/LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`](../test/LLAMA_GPU_DEVICE_RUNBOOK_20260513.md)
+- High-churn artifact classes and `latest` pointer retention:
+  [`../test/EVIDENCE_INDEX.md`](../test/EVIDENCE_INDEX.md)
 
 Scattered or repeated in:
 
@@ -90,6 +98,9 @@ Backlog:
   subdirectories.
 - Keep `*-latest.*` pointers stable until producers and verifier paths are
   updated together.
+- Do not move, rename, or hand-edit `docs/test/llama-*.json`,
+  `docs/test/gpu-*.json`, `*-latest.*`, or latest artifact directories in an
+  ownership-only documentation pass.
 
 ### 3. Memory, OOM, and APK pager material
 

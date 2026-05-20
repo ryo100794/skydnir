@@ -41,9 +41,12 @@ tradeoffs, accepted behavior, and non-goals.
 - Treat [`STORAGE_LAYER_ARCHITECTURE.md`](STORAGE_LAYER_ARCHITECTURE.md) and
   [`PROJECT_METADATA_INDEX.md`](PROJECT_METADATA_INDEX.md) as the storage
   architecture and rebuildable metadata-index contracts.
-- Treat [`GPU_COMPAT.md`](GPU_COMPAT.md) as the Android GPU design entry point,
-  with backend request/env details delegated to
-  [`../../docker-proot-setup/docs/GPU_COMPAT.md`](../../docker-proot-setup/docs/GPU_COMPAT.md).
+- Treat [`GPU_COMPAT.md`](GPU_COMPAT.md) as the Android GPU design entry point
+  for Vulkan/ICD/cuVK direction, APK/executor boundaries, product non-goals, and
+  correctness/performance claim rules. Backend request/env details are delegated
+  to [`../../docker-proot-setup/docs/GPU_COMPAT.md`](../../docker-proot-setup/docs/GPU_COMPAT.md).
+  Active bridge tasks belong in [`../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md);
+  measured evidence belongs in [`../test/README.md`](../test/README.md).
 - Treat [`MEDIA_BRIDGE.md`](MEDIA_BRIDGE.md) as the media contract; test files
   should record probes and link back here for readiness rules.
 - Treat [`APK_MEMORY_PAGER.md`](APK_MEMORY_PAGER.md) as the feasibility boundary
