@@ -13,6 +13,11 @@ Every inventory entry now also carries a `migration` object with a proposed dest
 - **package rule**: Root scripts are host-side unless category is runtime-package-needed; APK-bundled runtime scripts live under app/src/main/assets/**/scripts.
 - **compat wrapper rule**: Future moves keep the existing top-level path as a thin wrapper until all repository references and documented commands are migrated.
 - **first stage rule**: This inventory records categories and move candidates only; it must not rename or move files by itself.
+- **surface budget rule**: `scripts/verify-script-inventory.py` intentionally
+  pins the top-level entry count, subtree entry count, and category counts.
+  Adding, deleting, or reclassifying scripts is allowed only in a focused
+  inventory/README/verifier update so reviewers see the public script surface
+  change.
 
 ## Category Summary
 

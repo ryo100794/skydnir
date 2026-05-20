@@ -2,6 +2,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 
 
@@ -121,6 +122,58 @@ class ScriptInventoryAuditTest(unittest.TestCase):
                 self.assertEqual(migration["action"], "candidate-move-behind-wrapper")
                 self.assertIn("scripts/verify/runner", migration["compat_wrapper"])
                 self.assertIn(path, self.readme)
+
+    def test_script_surface_budget_is_intentional(self):
+        categories = Counter(entry["category"] for entry in self.inventory["entries"])
+        self.assertEqual(
+            verify_script_inventory.EXPECTED_TOP_LEVEL_SCRIPT_COUNT,
+            len(self.inventory["entries"]),
+        )
+        self.assertEqual(
+            verify_script_inventory.EXPECTED_SUBTREE_ENTRY_COUNT,
+            len(self.inventory.get("subtree_entries", [])),
+        )
+        self.assertEqual(
+            verify_script_inventory.EXPECTED_CATEGORY_COUNTS,
+            dict(categories),
+        )
+        verify_script_inventory.validate_script_surface_budget(
+            self.inventory["entries"],
+            self.inventory.get("subtree_entries", []),
+            categories,
+        )
+
+    def test_script_surface_budget_rejects_extra_top_level_entry(self):
+        entries = list(self.inventory["entries"]) + [
+            {
+                "path": "scripts/new-helper.sh",
+                "category": "test-verification",
+            }
+        ]
+        categories = Counter(entry["category"] for entry in entries)
+        with self.assertRaises(SystemExit):
+            verify_script_inventory.validate_script_surface_budget(
+                entries,
+                self.inventory.get("subtree_entries", []),
+                categories,
+            )
+
+    def test_script_surface_budget_rejects_category_drift(self):
+        categories = Counter(
+            {
+                "runtime-package-needed": 1,
+                "build-developer": 10,
+                "test-verification": 75,
+                "generated-maintenance": 3,
+                "obsolete-suspect": 3,
+            }
+        )
+        with self.assertRaises(SystemExit):
+            verify_script_inventory.validate_script_surface_budget(
+                self.inventory["entries"],
+                self.inventory.get("subtree_entries", []),
+                categories,
+            )
 
     def test_migrated_wrappers_have_no_retirement_blocking_references(self):
         migrated_paths = {

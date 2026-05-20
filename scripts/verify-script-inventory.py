@@ -57,6 +57,15 @@ KNOWN_OBSOLETE_SUSPECTS = {
     "scripts/verify-llama-startup-logging.py",
     "scripts/wrap-ndk-box64.sh",
 }
+EXPECTED_TOP_LEVEL_SCRIPT_COUNT = 92
+EXPECTED_SUBTREE_ENTRY_COUNT = 4
+EXPECTED_CATEGORY_COUNTS = {
+    "runtime-package-needed": 1,
+    "build-developer": 9,
+    "test-verification": 76,
+    "generated-maintenance": 3,
+    "obsolete-suspect": 3,
+}
 
 REFERENCE_SCAN_PREFIXES = (
     "docs/",
@@ -182,6 +191,41 @@ def validate_candidate_duplicate_consistency(entries: Iterable[dict[str, Any]]) 
         )
 
 
+def validate_script_surface_budget(
+    entries: list[dict[str, Any]],
+    subtree_entries: Any,
+    categories: Counter[str],
+) -> None:
+    """Fail when the script inventory surface changes without a focused update.
+
+    This is intentionally a small, explicit budget rather than an automatic
+    count.  Adding a new top-level entrypoint, moving helpers into subtrees, or
+    reclassifying categories is allowed, but the same commit must update this
+    budget and the scripts README so reviewers see the changed public surface.
+    """
+
+    if len(entries) != EXPECTED_TOP_LEVEL_SCRIPT_COUNT:
+        fail(
+            "top-level script inventory count changed without a verifier "
+            f"budget update: expected={EXPECTED_TOP_LEVEL_SCRIPT_COUNT} "
+            f"observed={len(entries)}"
+        )
+    if not isinstance(subtree_entries, list):
+        fail("subtree_entries must be a list")
+    if len(subtree_entries) != EXPECTED_SUBTREE_ENTRY_COUNT:
+        fail(
+            "subtree script inventory count changed without a verifier "
+            f"budget update: expected={EXPECTED_SUBTREE_ENTRY_COUNT} "
+            f"observed={len(subtree_entries)}"
+        )
+    observed = {category: categories.get(category, 0) for category in REQUIRED_CATEGORIES}
+    if observed != EXPECTED_CATEGORY_COUNTS:
+        fail(
+            "script category budget changed without a verifier update: "
+            f"expected={EXPECTED_CATEGORY_COUNTS} observed={observed}"
+        )
+
+
 def is_executable(path: Path) -> bool:
     return path.stat().st_mode & 0o111 != 0
 
@@ -258,6 +302,7 @@ def main() -> int:
     entries = data.get("entries")
     if not isinstance(entries, list):
         fail("entries must be a list")
+    subtree_entries = data.get("subtree_entries", [])
     category_targets = data.get("category_targets")
     if not isinstance(category_targets, dict):
         fail("category_targets must describe planned move destinations")
@@ -354,6 +399,7 @@ def main() -> int:
     if "runtime-package-needed" not in categories:
         fail("runtime package staging category is empty")
 
+    validate_script_surface_budget(entries, subtree_entries, categories)
     validate_candidate_duplicate_consistency(entries)
     validate_migrated_wrapper_reference_scan(migrated_wrapper_paths)
 
