@@ -124,6 +124,17 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn("COMPARE_RESULT_READY=1", compare)
         self.assertIn('"$COMPARE_RESULT_READY" != "1"', compare)
 
+    def test_compare_prioritizes_wrong_completion_output_over_stale_marker(self):
+        compare = COMPARE.read_text(encoding="utf-8")
+
+        self.assertIn("service_completion_wrong_output", compare)
+        self.assertIn('blocker_class = "llama_completion_wrong_output"', compare)
+        self.assertIn("deterministic /completion returned", compare)
+        self.assertLess(
+            compare.index('blocker_class = "llama_completion_wrong_output"'),
+            compare.index('blocker_class = "runtime_freshness_mismatch"'),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

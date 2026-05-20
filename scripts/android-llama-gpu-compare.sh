@@ -2572,6 +2572,13 @@ completion_timeout = (
     and not completion_ready
     and "timed out" in str(service_completion.get("error") or "").lower()
 )
+service_completion_wrong_output = (
+    bool(int(gpu_served_s))
+    and health_ready
+    and models_ready
+    and completion_ready
+    and service_completion.get("passed") is False
+)
 if evidence["buffer_range_assert_blocker"]:
     blocker_class = "vulkan_buffer_range_accounting"
     blocker_detail = "scheduler warmup hit ggml_backend_buffer_get_alloc_size"
@@ -2587,6 +2594,12 @@ elif generic_spirv_dispatch_blocker:
 elif completion_timeout:
     blocker_class = "llama_completion_timeout"
     blocker_detail = "HTTP /health and /v1/models passed, but deterministic /completion did not finish during readiness probing"
+elif service_completion_wrong_output:
+    blocker_class = "llama_completion_wrong_output"
+    blocker_detail = (
+        "HTTP /health, /v1/models, and deterministic /completion returned, "
+        "but the required prompt check failed at the service boundary"
+    )
 elif runtime_freshness["summary"] == "fail":
     blocker_class = "runtime_freshness_mismatch"
     blocker_detail = "expected GPU executor build marker was not observed; test may be running stale native code or missing executor evidence"
@@ -3625,6 +3638,8 @@ next_action = (
     if blocker_class == "vulkan_pipeline_feature"
     else "inspect ICD/executor dispatch begin/end evidence; liveness passed but /completion timed out before a benchmarkable token"
     if blocker_class == "llama_completion_timeout"
+    else "inspect GPU numeric/layout/readback evidence; liveness and /completion returned but the deterministic prompt result was wrong"
+    if blocker_class == "llama_completion_wrong_output"
     else "lower generic SPIR-V dispatch into the Android Vulkan executor or clamp advertised capabilities"
     if blocker_class in {"vulkan_generic_spirv_dispatch", "vulkan_queue_submit_feature"}
     else "inspect traced Android Vulkan feature/SPIR-V mismatch"
