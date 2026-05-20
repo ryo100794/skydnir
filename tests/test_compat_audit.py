@@ -71,5 +71,20 @@ class StopProcessAndCollectStderrTest(unittest.TestCase):
         self.assertEqual(stderr, "daemon ignored terminate")
 
 
+class EngineBaseRouteContractTest(unittest.TestCase):
+    def setUp(self):
+        self.pdockerd = (ROOT / "docker-proot-setup" / "bin" / "pdockerd").read_text(encoding="utf-8")
+        self.asset = (ROOT / "app" / "src" / "main" / "assets" / "pdockerd" / "pdockerd").read_text(encoding="utf-8")
+
+    def test_staged_asset_matches_pdockerd_source(self):
+        self.assertEqual(self.pdockerd, self.asset)
+
+    def test_base_engine_routes_are_method_scoped(self):
+        self.assertIn('path == "/_ping" and method in ("GET", "HEAD")', self.pdockerd)
+        self.assertIn('if method == "GET":\n                self.wfile.write(b"OK")', self.pdockerd)
+        self.assertIn('path == "/version" and method == "GET"', self.pdockerd)
+        self.assertIn('path == "/info" and method == "GET"', self.pdockerd)
+
+
 if __name__ == "__main__":
     unittest.main()

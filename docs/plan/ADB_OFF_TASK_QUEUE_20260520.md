@@ -28,8 +28,8 @@ or teardown promotion without fresh device artifacts.
 | ADBOFF-005 | P1 | Source marker audit while device is unavailable. | Explorer output says app UI source has no uncovered actionable TODO/FIXME/HACK markers; native/runtime findings are either covered or low-risk naming cleanup. | Done; recorded in `AGENT_COORDINATION.md` in this slice. |
 | ADBOFF-006 | P1 | Maintain this ADB-off queue and plan index. | This document is linked from `docs/plan/README.md` and referenced by the coordination ledger. | In progress. |
 | ADBOFF-007 | P1 | Keep release/readiness checks green after docs maintenance. | `verify-docs-maintenance`, `verify-release-readiness`, `tests.test_docs_maintenance`, and `git diff --check` pass. | Done for `5946442`; rerun after each maintenance slice. |
-| ADBOFF-008 | P1 | Add static pdocker extension API boundary guard. | Docs distinguish Docker-standard `GET /system/df` and `POST /system/prune` from pdocker-only `/system/*` routes, and every public `Pdocker*` field observed in pdockerd is documented. | In progress. |
-| ADBOFF-009 | P1 | Review Engine route method strictness from static audit. | Host-only follow-up should document or test broad base-route methods and the generic `POST /networks/{name}` fallback before any runtime behavior change. | Next. |
+| ADBOFF-008 | P1 | Add static pdocker extension API boundary guard. | Docs distinguish Docker-standard `GET /system/df` and `POST /system/prune` from pdocker-only `/system/*` routes, and every public `Pdocker*` field observed in pdockerd is documented. | Done in `50edf2f`. |
+| ADBOFF-009 | P1 | Review Engine route method strictness from static audit. | Host-only follow-up should document or test broad base-route methods and the generic `POST /networks/{name}` fallback before any runtime behavior change. | Base routes fixed; network fallback remains next. |
 
 ## Deferred Until ADB Returns
 

@@ -7781,7 +7781,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             path = m.group(1)
 
         # --- Basic ---
-        if path in ("/_ping",):
+        if path == "/_ping" and method in ("GET", "HEAD"):
             self.send_response(200)
             self.send_header("Api-Version", self.API_VERSION)
             self.send_header("Ostype", "linux")
@@ -7789,10 +7789,11 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain")
             self.send_header("Content-Length", "2")
             self.end_headers()
-            self.wfile.write(b"OK")
+            if method == "GET":
+                self.wfile.write(b"OK")
             return
 
-        if path == "/version":
+        if path == "/version" and method == "GET":
             self._send_json(200, {
                 "Platform": {"Name": "pdockerd"},
                 "Components": [
@@ -7816,7 +7817,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
             })
             return
 
-        if path == "/info":
+        if path == "/info" and method == "GET":
             self._send_json(200, {
                 "ID": runtime_info_id(),
                 "Containers": len(list_containers(all_=True)),
