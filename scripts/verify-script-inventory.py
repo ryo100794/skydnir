@@ -152,6 +152,36 @@ def validate_migrated_wrapper_reference_scan(migrated_paths: Iterable[str]) -> N
         )
 
 
+def validate_candidate_duplicate_consistency(entries: Iterable[dict[str, Any]]) -> None:
+    """Fail when a planned move already has a duplicate implementation.
+
+    A top-level script and its candidate path may coexist only when the
+    inventory marks the top-level file as a compatibility wrapper
+    (`migrated-behind-wrapper`).  Otherwise duplicate implementations can drift
+    silently: callers may hit the old top-level file while maintainers edit the
+    new categorized path, or vice versa.
+    """
+
+    duplicates: list[str] = []
+    for entry in entries:
+        path = entry.get("path")
+        migration = entry.get("migration") if isinstance(entry, dict) else None
+        if not isinstance(path, str) or not isinstance(migration, dict):
+            continue
+        candidate_path = migration.get("candidate_path")
+        action = migration.get("action")
+        if not isinstance(candidate_path, str):
+            continue
+        if (ROOT / candidate_path).is_file() and action != "migrated-behind-wrapper":
+            duplicates.append(f"{path} -> {candidate_path} action={action!r}")
+    if duplicates:
+        fail(
+            "candidate implementation exists but inventory does not mark the "
+            "top-level file as a migrated compatibility wrapper: "
+            + "; ".join(sorted(duplicates))
+        )
+
+
 def is_executable(path: Path) -> bool:
     return path.stat().st_mode & 0o111 != 0
 
@@ -324,6 +354,7 @@ def main() -> int:
     if "runtime-package-needed" not in categories:
         fail("runtime package staging category is empty")
 
+    validate_candidate_duplicate_consistency(entries)
     validate_migrated_wrapper_reference_scan(migrated_wrapper_paths)
 
     readme = README.read_text(encoding="utf-8")

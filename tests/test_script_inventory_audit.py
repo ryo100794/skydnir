@@ -134,6 +134,62 @@ class ScriptInventoryAuditTest(unittest.TestCase):
         )
         self.assertEqual({}, references)
 
+    def test_candidate_duplicate_guard_accepts_current_inventory(self):
+        verify_script_inventory.validate_candidate_duplicate_consistency(
+            self.inventory["entries"]
+        )
+
+    def test_candidate_duplicate_guard_rejects_unmigrated_duplicate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            (tmp_root / "scripts" / "test").mkdir(parents=True)
+            (tmp_root / "scripts" / "foo.sh").write_text(
+                "#!/usr/bin/env bash\n", encoding="utf-8"
+            )
+            (tmp_root / "scripts" / "test" / "foo.sh").write_text(
+                "#!/usr/bin/env bash\n", encoding="utf-8"
+            )
+            entry = {
+                "path": "scripts/foo.sh",
+                "migration": {
+                    "candidate_path": "scripts/test/foo.sh",
+                    "action": "candidate-move-behind-wrapper",
+                },
+            }
+            previous_root = verify_script_inventory.ROOT
+            try:
+                verify_script_inventory.ROOT = tmp_root
+                with self.assertRaises(SystemExit):
+                    verify_script_inventory.validate_candidate_duplicate_consistency(
+                        [entry]
+                    )
+            finally:
+                verify_script_inventory.ROOT = previous_root
+
+    def test_candidate_duplicate_guard_allows_migrated_wrapper_duplicate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            (tmp_root / "scripts" / "test").mkdir(parents=True)
+            (tmp_root / "scripts" / "foo.sh").write_text(
+                "#!/usr/bin/env bash\n", encoding="utf-8"
+            )
+            (tmp_root / "scripts" / "test" / "foo.sh").write_text(
+                "#!/usr/bin/env bash\n", encoding="utf-8"
+            )
+            entry = {
+                "path": "scripts/foo.sh",
+                "migration": {
+                    "candidate_path": "scripts/test/foo.sh",
+                    "action": "migrated-behind-wrapper",
+                },
+            }
+            previous_root = verify_script_inventory.ROOT
+            try:
+                verify_script_inventory.ROOT = tmp_root
+                verify_script_inventory.validate_candidate_duplicate_consistency([entry])
+            finally:
+                verify_script_inventory.ROOT = previous_root
+
     def test_reference_scan_scope_and_allowlist(self):
         self.assertTrue(
             verify_script_inventory.is_reference_scan_path("docs/manual/README.md")
