@@ -1268,25 +1268,6 @@
         "action": "candidate-move-behind-wrapper",
         "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
       }
-    },
-    {
-      "path": "scripts/wrap-ndk-box64.sh",
-      "category": "obsolete-suspect",
-      "stability": "legacy-audit",
-      "role": "Audited obsolete candidate; retained temporarily with replacement command and deletion precondition recorded.",
-      "audit": {
-        "date": "2026-05-18",
-        "reference_scan": "rg found no active caller; the standard native helper path is build-native-android-ndk.sh, and supported aarch64-host builds use glibc host-clang mode rather than box64-mutated NDK tools.",
-        "replacement_command": "bash scripts/build-native-android-ndk.sh",
-        "decision": "keep as obsolete-suspect for now; future deletion is acceptable after confirming no supported aarch64-host build path depends on mutating the NDK with box64 shims."
-      },
-      "migration": {
-        "target_dir": "scripts/obsolete-candidates",
-        "candidate_path": "scripts/obsolete-candidates/wrap-ndk-box64.sh",
-        "phase": "audit-before-move-or-delete",
-        "action": "audit-delete-or-archive",
-        "compat_wrapper": "no compatibility wrapper until audit chooses archive-over-delete; prefer deletion over moved wrapper when safe"
-      }
     }
   ]
 }

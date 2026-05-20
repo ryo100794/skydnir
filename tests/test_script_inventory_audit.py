@@ -194,9 +194,8 @@ class ScriptInventoryAuditTest(unittest.TestCase):
                 "Build | 9 top-level scripts\n"
                 "Test | 75 top-level scripts\n"
                 "Generated maintenance | 3 entries\n"
-                "Unused or legacy candidates | 2 tracked candidates\n"
-                "android-terminal-it-repro.sh "
-                "wrap-ndk-box64.sh\n",
+                "Unused or legacy candidates | 1 tracked candidate\n"
+                "android-terminal-it-repro.sh\n",
                 encoding="utf-8",
             )
             previous_doc = verify_script_inventory.SCRIPT_DOC_INVENTORY
@@ -221,8 +220,8 @@ class ScriptInventoryAuditTest(unittest.TestCase):
                 "Build | 9 top-level scripts\n"
                 "Test | 76 top-level scripts\n"
                 "Generated maintenance | 3 entries\n"
-                "Unused or legacy candidates | 2 tracked candidates\n"
-                "android-terminal-it-repro.sh\n",
+                "Unused or legacy candidates | 1 tracked candidate\n"
+                "stale-terminal-repro.sh\n",
                 encoding="utf-8",
             )
             previous_doc = verify_script_inventory.SCRIPT_DOC_INVENTORY
@@ -372,7 +371,6 @@ class ScriptInventoryAuditTest(unittest.TestCase):
     def test_obsolete_suspects_have_audit_decisions_and_replacements(self):
         expected_replacements = {
             "scripts/android-terminal-it-repro.sh": "python3 scripts/pdocker-test-driver.py --lane android-terminal-exec-it",
-            "scripts/wrap-ndk-box64.sh": "bash scripts/build-native-android-ndk.sh",
         }
 
         obsolete = {

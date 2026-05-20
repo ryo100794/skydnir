@@ -43,6 +43,7 @@ or teardown promotion without fresh device artifacts.
 | ADBOFF-020 | P1 | Guard committed `docs/test/*latest*` evidence discoverability. | `verify-docs-maintenance.py` fails if any top-level committed latest artifact lacks an owner reference in `EVIDENCE_INDEX.md`, the test README, CI gate ledger, or registered scenario/test manifests; unit tests cover indexed and unowned fixtures. | Done in this slice. |
 | ADBOFF-021 | P2 | Guard script maintenance triage against inventory drift. | `verify-script-inventory.py` now checks that `docs/maintenance/SCRIPT_DOC_INVENTORY.md` carries the current category counts and obsolete-suspect candidates from `scripts/script-inventory.json`; unit tests cover stale counts and names. | Done in this slice. |
 | ADBOFF-022 | P2 | Retire the obsolete llama startup logging helper after maintained unittest coverage. | `tests.test_llama_startup_logging_contract` now owns the fake-profile, early-tee, startup-json, resolved env, memory, and KV-offload guard checks; `scripts/verify-llama-startup-logging.py` is deleted and script inventory/docs counts are updated. | Done in this slice. |
+| ADBOFF-023 | P2 | Retire the obsolete box64 NDK wrapper. | `scripts/wrap-ndk-box64.sh` is deleted because the supported native-build path is `scripts/build-native-android-ndk.sh` with host-clang/aarch64 coverage and no box64 mutation; inventory/docs counts now leave only the terminal repro obsolete suspect. | Done in this slice. |
 
 ## Deferred Until ADB Returns
 

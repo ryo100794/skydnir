@@ -54,16 +54,15 @@ ALLOWED_MIGRATION_ACTIONS = {
 }
 KNOWN_OBSOLETE_SUSPECTS = {
     "scripts/android-terminal-it-repro.sh",
-    "scripts/wrap-ndk-box64.sh",
 }
-EXPECTED_TOP_LEVEL_SCRIPT_COUNT = 91
+EXPECTED_TOP_LEVEL_SCRIPT_COUNT = 90
 EXPECTED_SUBTREE_ENTRY_COUNT = 4
 EXPECTED_CATEGORY_COUNTS = {
     "runtime-package-needed": 1,
     "build-developer": 9,
     "test-verification": 76,
     "generated-maintenance": 3,
-    "obsolete-suspect": 2,
+    "obsolete-suspect": 1,
 }
 
 REFERENCE_SCAN_PREFIXES = (
@@ -253,7 +252,10 @@ def validate_maintenance_doc_sync(
         "build-developer": f"{categories.get('build-developer', 0)} top-level scripts",
         "test-verification": f"{categories.get('test-verification', 0)} top-level scripts",
         "generated-maintenance": f"{categories.get('generated-maintenance', 0)} entries",
-        "obsolete-suspect": f"{categories.get('obsolete-suspect', 0)} tracked candidates",
+        "obsolete-suspect": (
+            f"{categories.get('obsolete-suspect', 0)} tracked "
+            f"{'candidate' if categories.get('obsolete-suspect', 0) == 1 else 'candidates'}"
+        ),
     }
     missing_phrases = sorted(
         f"{category}: {phrase}"
