@@ -918,10 +918,21 @@ def _service_completion_timeout(data: dict[str, Any]) -> dict[str, Any]:
     completion_ok = summary.get("completion") == "pass" or completion.get("ok") is True
     error = str(completion.get("error") or "")
     timed_out = "timed out" in error.lower() or "timeouterror" in error.lower()
-    timeout = bool(health_ok and models_ok and not completion_ok and timed_out)
+    disconnected = "remotedisconnected" in error.lower() or "closed connection" in error.lower()
+    completion_failed_after_liveness = bool(health_ok and models_ok and not completion_ok)
+    timeout = bool(completion_failed_after_liveness and timed_out)
+    summary_value = (
+        "timeout" if timeout
+        else "disconnected" if completion_failed_after_liveness and disconnected
+        else "failed" if completion_failed_after_liveness
+        else "ready" if completion_ok
+        else "not-ready"
+    )
     return {
-        "summary": "timeout" if timeout else "ready" if completion_ok else "not-ready",
+        "summary": summary_value,
         "timeout": timeout,
+        "completion_failed_after_liveness": completion_failed_after_liveness,
+        "disconnected": disconnected,
         "health_ok": bool(health_ok),
         "models_ok": bool(models_ok),
         "completion_ok": bool(completion_ok),
@@ -1340,12 +1351,19 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     runtime_env_manifest = _runtime_env_manifest_record(data)
 
     completion_readiness = _service_completion_timeout(data)
-    if completion_readiness.get("timeout") is True:
+    if completion_readiness.get("completion_failed_after_liveness") is True:
+        completion_classification = (
+            "llama-completion-timeout"
+            if completion_readiness.get("timeout") is True
+            else "llama-completion-disconnected"
+            if completion_readiness.get("disconnected") is True
+            else "llama-completion-failed"
+        )
         return _claim_base(
-            "llama-completion-timeout",
+            completion_classification,
             next_action=(
                 data.get("next_action")
-                or "inspect ICD/executor dispatch begin/end/stage evidence; HTTP /health and /v1/models passed but deterministic /completion timed out"
+                or "inspect ICD/executor dispatch begin/end/stage evidence; HTTP /health and /v1/models passed but deterministic /completion did not return a valid response"
             ),
             runtime_freshness=runtime_freshness,
             runtime_env_manifest=runtime_env_manifest,
@@ -1679,6 +1697,8 @@ def main(argv: list[str]) -> int:
         return 0 if args.allow_memory_blocker else 20
     if classification == "readiness-blocked":
         return 21
+    if classification in {"llama-completion-timeout", "llama-completion-disconnected", "llama-completion-failed"}:
+        return 22
     if classification == "executor-marker-not-observed":
         return 34
     if classification == "icd-marker-not-observed":
