@@ -45,7 +45,7 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 |---|---|
 | doing | Cross-project incomplete implementation audit: `docs/plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md` now tracks unfinished, partial, temporary, or insufficiently verified work across... |
 | doing | Execution timeline and delegated task control: `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged gates, current agent assignments, merge checklists, and... |
-| doing | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from device discovery and... |
+| doing | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from discovery and model-buffer... |
 | next | [#10](https://github.com/ryo100794/pdocker-android/issues/10) / [#5](https://github.com/ryo100794/pdocker-android/issues/5) runtime teardown and terminal exec-it scheduling: gate hardening... |
 | next | [#5](https://github.com/ryo100794/pdocker-android/issues/5) Terminal `-it` interactive path: refactor the terminal stack according to `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`. The UI... |
 | doing | [#6](https://github.com/ryo100794/pdocker-android/issues/6) Service truth same-container-ID device gate: the listener health and ID/label truth work are one gate. Probe default workspace... |
