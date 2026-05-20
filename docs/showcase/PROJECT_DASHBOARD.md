@@ -22,9 +22,9 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 | Signal | Value |
 |---|---:|
 | Project-library templates | 6 |
-| TODO done entries | 64 |
+| TODO done entries | 65 |
 | TODO doing entries | 20 |
-| TODO next entries | 34 |
+| TODO next entries | 33 |
 | Compatibility audit PASS | 69 |
 | Compatibility audit FAIL | 0 |
 
@@ -45,7 +45,6 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 |---|---|
 | doing | Cross-project incomplete implementation audit: `docs/plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md` now tracks unfinished, partial, temporary, or insufficiently verified work across... |
 | doing | Execution timeline and delegated task control: `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged gates, current agent assignments, merge checklists, and... |
-| next | Script directory cleanup follow-up: `ed7cddd` recorded `scripts/verify/runner/*` as subtree inventory entries and kept the documented `__pycache__` cleanup policy in `.gitignore`... |
 | doing | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from device discovery and... |
 | next | [#10](https://github.com/ryo100794/pdocker-android/issues/10) / [#5](https://github.com/ryo100794/pdocker-android/issues/5) runtime teardown and terminal exec-it scheduling: gate hardening... |
 | next | [#5](https://github.com/ryo100794/pdocker-android/issues/5) Terminal `-it` interactive path: refactor the terminal stack according to `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`. The UI... |
@@ -53,6 +52,7 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 | next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU performance workflow after Vulkan clamp: keep CPU fallback hiding Vulkan devices, force Vulkan only for measured GPU... |
 | next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) MoE-aware GPU residency layer research and design: after the dense llama GPU bridge is correct, evaluate a pdocker-owned... |
 | next | Mobile-resource residency constraints for MoE: keep a concise design note with device RAM/headroom, thermal, storage bandwidth, SAF/app-private backing, cache eviction, and correctness... |
+| doing | [#7](https://github.com/ryo100794/pdocker-android/issues/7) Android storage metrics verification: add device smoke/manual coverage that layer, image-view, container-private, total, and... |
 
 ## Timeline
 
