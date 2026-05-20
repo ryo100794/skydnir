@@ -109,12 +109,17 @@ There are 8 active deduplication backlog groups in this inventory.
 class DocsMaintenanceVerifierTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="pdocker-docs-maint-test-"))
+        (self.tmp / "docs" / "manual").mkdir(parents=True)
         (self.tmp / "docs" / "maintenance").mkdir(parents=True)
         (self.tmp / "docs" / "release").mkdir(parents=True)
         (self.tmp / "docs" / "design").mkdir(parents=True)
         (self.tmp / "docs" / "test").mkdir(parents=True)
         (self.tmp / "docs" / "plan").mkdir(parents=True)
         for path in [
+            "docs/manual/README.md",
+            "docs/README.md",
+            "LICENSE",
+            "docs/design/README.md",
             "docs/release/RELEASE_READINESS.md",
             "docs/design/GPU_COMPAT.md",
             "docs/design/APK_MEMORY_PAGER.md",
@@ -136,6 +141,26 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
         )
         (self.tmp / "docs" / "maintenance" / "README.md").write_text(
             "[`DOCUMENTATION_DEDUP_BACKLOG.md`](DOCUMENTATION_DEDUP_BACKLOG.md)\n",
+            encoding="utf-8",
+        )
+        (self.tmp / "docs" / "README.md").write_text(
+            "# Docs\n\n"
+            "## Contents\n\n"
+            "| Category | Purpose | Index |\n"
+            "|---|---|---|\n"
+            "| Manual | User docs | [`manual/README.md`](manual/README.md) |\n"
+            "| Design | Architecture | [`design/README.md`](design/README.md) |\n"
+            "| Test | Test docs | [`test/README.md`](test/README.md) |\n"
+            "| License/compliance | Root policy | [`../LICENSE`](../LICENSE) |\n",
+            encoding="utf-8",
+        )
+        (self.tmp / "README.md").write_text(
+            "# Root\n\n"
+            "## Documentation map\n\n"
+            "- [`docs/README.md`](docs/README.md): documentation index\n"
+            "- [`docs/manual/`](docs/manual/): user docs\n"
+            "- [`docs/design/README.md`](docs/design/README.md): architecture\n"
+            "- [`docs/test/README.md`](docs/test/README.md): tests\n",
             encoding="utf-8",
         )
 
@@ -208,6 +233,36 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
         (run_dir / "summary.md").write_text("# Run summary\n", encoding="utf-8")
 
         verifier.check_doc_discoverability(self.tmp)
+
+    def test_root_documentation_map_matches_docs_categories(self):
+        verifier.check_root_documentation_map_matches_docs_categories(self.tmp)
+
+    def test_root_documentation_map_rejects_missing_docs_category(self):
+        (self.tmp / "README.md").write_text(
+            "# Root\n\n"
+            "## Documentation map\n\n"
+            "- [`docs/README.md`](docs/README.md): documentation index\n"
+            "- [`docs/manual/`](docs/manual/): user docs\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_root_documentation_map_matches_docs_categories(self.tmp)
+
+    def test_root_documentation_map_rejects_extra_docs_category(self):
+        (self.tmp / "docs" / "stale").mkdir()
+        (self.tmp / "docs" / "stale" / "README.md").write_text(
+            "# Stale\n", encoding="utf-8"
+        )
+        readme = self.tmp / "README.md"
+        readme.write_text(
+            readme.read_text(encoding="utf-8")
+            + "- [`docs/stale/`](docs/stale/): stale category\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_root_documentation_map_matches_docs_categories(self.tmp)
 
     def test_historical_plan_rejects_live_running_assignment_section(self):
         timeline = self.tmp / "docs" / "plan" / "EXECUTION_TIMELINE_20260513.md"

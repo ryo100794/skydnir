@@ -205,21 +205,21 @@ ANDROID_SERIAL=<host:port> bash scripts/android-runtime-bench.sh
 ```
 
 Compatibility and compliance records are maintained under
-[`docs/test/`](docs/test/).
+[`docs/test/`](docs/test/README.md).
 
 ## Documentation map
 
 - [`docs/README.md`](docs/README.md): documentation index and maintenance rules
-- [`docs/manual/`](docs/manual/): user-facing workflows and promotion assets
-- [`docs/design/`](docs/design/): architecture, scope, feasibility, GPU design
-- [`docs/build/`](docs/build/): local build, signing, install, and APK gates
-- [`docs/test/`](docs/test/): repeatable test scenarios and audit outputs
-- [`docs/plan/`](docs/plan/): live status, TODOs, and steering records
-- [`docs/release/`](docs/release/): release gates, fixed build evidence, and
+- [`docs/manual/`](docs/manual/README.md): user-facing workflows and promotion assets
+- [`docs/design/`](docs/design/README.md): architecture, scope, feasibility, GPU design
+- [`docs/build/`](docs/build/README.md): local build, signing, install, and APK gates
+- [`docs/test/`](docs/test/README.md): repeatable test scenarios and audit outputs
+- [`docs/plan/`](docs/plan/README.md): live status, TODOs, and steering records
+- [`docs/release/`](docs/release/README.md): release gates, fixed build evidence, and
   distribution process
-- [`docs/showcase/`](docs/showcase/): generated GitHub-facing dashboard,
+- [`docs/showcase/`](docs/showcase/README.md): generated GitHub-facing dashboard,
   roadmap timeline, and Wiki seed
-- [`docs/maintenance/`](docs/maintenance/): documentation inventory,
+- [`docs/maintenance/`](docs/maintenance/README.md): documentation inventory,
   deduplication backlog, and cleanup sequencing
 
 Root-level standards:

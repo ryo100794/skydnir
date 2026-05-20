@@ -229,6 +229,68 @@ def check_doc_discoverability(root: Path = ROOT) -> None:
         )
 
 
+def normalize_docs_category_target(base: Path, target: str, root: Path) -> str | None:
+    if not target or target.startswith("#") or is_external_or_nonlocal(target):
+        return None
+    path_part = unquote(target.split("#", 1)[0])
+    if not path_part:
+        return None
+    candidate = (base / path_part).resolve()
+    if candidate.is_dir() or path_part.endswith("/"):
+        candidate = candidate / "README.md"
+    try:
+        relative = candidate.relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+    if re.match(r"^docs/[^/]+/README\.md$", relative) and candidate.is_file():
+        return relative
+    return None
+
+
+def docs_readme_category_indexes(root: Path = ROOT) -> set[str]:
+    docs_readme = root / "docs" / "README.md"
+    text = read_text(docs_readme, root)
+    indexes: set[str] = set()
+    for _, line in iter_section_lines(text, "Contents"):
+        for _, target in iter_markdown_link_targets(line):
+            relative = normalize_docs_category_target(docs_readme.parent, target, root)
+            if relative:
+                indexes.add(relative)
+    return indexes
+
+
+def root_readme_documentation_map_indexes(root: Path = ROOT) -> set[str]:
+    readme = root / "README.md"
+    text = read_text(readme, root)
+    indexes: set[str] = set()
+    for _, line in iter_section_lines(text, "Documentation map"):
+        for _, target in iter_markdown_link_targets(line):
+            relative = normalize_docs_category_target(readme.parent, target, root)
+            if relative:
+                indexes.add(relative)
+    indexes.discard("docs/README.md")
+    return indexes
+
+
+def check_root_documentation_map_matches_docs_categories(root: Path = ROOT) -> None:
+    """Keep the root README documentation map aligned with docs/README."""
+
+    expected = docs_readme_category_indexes(root)
+    actual = root_readme_documentation_map_indexes(root)
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing or extra:
+        parts: list[str] = []
+        if missing:
+            parts.append("missing " + ", ".join(missing))
+        if extra:
+            parts.append("extra " + ", ".join(extra))
+        fail(
+            "root README Documentation map must match docs/README.md Contents "
+            "category indexes: " + "; ".join(parts)
+        )
+
+
 def normalize_table_cell(text: str) -> str:
     return text.strip().strip("`*_ ").lower()
 
@@ -420,6 +482,7 @@ def run(root: Path = ROOT) -> None:
     check_backlog(root)
     check_links(root)
     check_doc_discoverability(root)
+    check_root_documentation_map_matches_docs_categories(root)
     check_historical_agent_assignments(root)
     check_todo_roadmap_source_quality(root)
     check_historical_evidence_language(root)
