@@ -9,9 +9,11 @@ exists and all references are migrated.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from collections import Counter
+from datetime import date
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -55,6 +57,32 @@ ALLOWED_MIGRATION_ACTIONS = {
 KNOWN_OBSOLETE_SUSPECTS = {
     "scripts/android-terminal-it-repro.sh",
 }
+
+OBSOLETE_AUDIT_REQUIRED_FIELDS = (
+    "date",
+    "reference_scan",
+    "decision",
+)
+OBSOLETE_AUDIT_REPLACEMENT_FIELDS = (
+    "replacement_command",
+    "replacement_path",
+    "retirement_condition",
+)
+OBSOLETE_AUDIT_DECISION_WORDS = (
+    "archive",
+    "delete",
+    "deletion",
+    "remove",
+    "retire",
+    "retirement",
+)
+OBSOLETE_AUDIT_CONDITION_WORDS = (
+    "after",
+    "if ",
+    "once",
+    "until",
+    "when",
+)
 EXPECTED_TOP_LEVEL_SCRIPT_COUNT = 90
 EXPECTED_SUBTREE_ENTRY_COUNT = 4
 EXPECTED_CATEGORY_COUNTS = {
@@ -158,6 +186,78 @@ def validate_migrated_wrapper_reference_scan(migrated_paths: Iterable[str]) -> N
             "migrate docs, workflows, or test manifests before retiring wrappers: "
             + " | ".join(details)
         )
+
+
+def is_nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def validate_obsolete_suspect_audit(entries: Iterable[dict[str, Any]]) -> None:
+    """Require actionable audit metadata before obsolete candidates linger.
+
+    Obsolete-suspect entries are intentionally not moved or deleted until a
+    focused audit proves the safe follow-up.  The inventory must therefore keep
+    enough metadata for reviewers to understand the scan evidence and the
+    replacement/retirement condition; otherwise a legacy repro can silently lose
+    the reason it is still retained.
+    """
+
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict) or entry.get("category") != "obsolete-suspect":
+            continue
+        path = entry.get("path", f"entry {index}")
+        audit = entry.get("audit")
+        if not isinstance(audit, dict):
+            fail(f"{path} obsolete-suspect entry must include audit metadata")
+
+        missing_fields = [
+            field
+            for field in OBSOLETE_AUDIT_REQUIRED_FIELDS
+            if not is_nonempty_string(audit.get(field))
+        ]
+        if missing_fields:
+            fail(
+                f"{path} obsolete-suspect audit has missing/empty field(s): "
+                + ", ".join(missing_fields)
+            )
+
+        audit_date = audit["date"].strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", audit_date):
+            fail(f"{path} obsolete-suspect audit date must use YYYY-MM-DD")
+        try:
+            date.fromisoformat(audit_date)
+        except ValueError:
+            fail(f"{path} obsolete-suspect audit date is not a valid calendar date")
+
+        reference_scan = audit["reference_scan"].strip().lower()
+        if len(reference_scan) < 20 or not any(
+            word in reference_scan for word in ("caller", "reference", "rg", "scan")
+        ):
+            fail(f"{path} obsolete-suspect audit reference_scan is not descriptive")
+
+        replacement_fields = [
+            field
+            for field in OBSOLETE_AUDIT_REPLACEMENT_FIELDS
+            if is_nonempty_string(audit.get(field))
+        ]
+        if not replacement_fields:
+            fail(
+                f"{path} obsolete-suspect audit must include a replacement command/path "
+                "or explicit retirement_condition"
+            )
+
+        decision = audit["decision"].strip().lower()
+        if not any(word in decision for word in OBSOLETE_AUDIT_DECISION_WORDS):
+            fail(
+                f"{path} obsolete-suspect audit decision must name delete/archive/retire handling"
+            )
+        if not any(word in decision for word in OBSOLETE_AUDIT_CONDITION_WORDS) and not is_nonempty_string(
+            audit.get("retirement_condition")
+        ):
+            fail(
+                f"{path} obsolete-suspect audit decision must include a retention or "
+                "retirement condition"
+            )
 
 
 def validate_candidate_duplicate_consistency(entries: Iterable[dict[str, Any]]) -> None:
@@ -459,6 +559,7 @@ def main() -> int:
         fail("runtime package staging category is empty")
 
     validate_script_surface_budget(entries, subtree_entries, categories)
+    validate_obsolete_suspect_audit(entries)
     validate_candidate_duplicate_consistency(entries)
     validate_migrated_wrapper_reference_scan(migrated_wrapper_paths)
     validate_maintenance_doc_sync(entries, categories)

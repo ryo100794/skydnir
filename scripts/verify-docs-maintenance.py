@@ -248,26 +248,50 @@ def latest_evidence_owner_corpus(root: Path = ROOT) -> str:
     return "\n".join(parts)
 
 
+def latest_evidence_owner_tokens(path: Path, docs_test: Path) -> set[str]:
+    """Return evidence-owner tokens that may document a latest artifact."""
+
+    relative_to_docs_test = path.relative_to(docs_test).as_posix()
+    tokens = {
+        path.name,
+        relative_to_docs_test,
+        f"docs/test/{relative_to_docs_test}",
+    }
+    for parent in path.relative_to(docs_test).parents:
+        if parent == Path("."):
+            continue
+        parent_text = parent.as_posix()
+        if "latest" in parent_text:
+            tokens.add(parent.name)
+            tokens.add(parent_text)
+            tokens.add(f"docs/test/{parent_text}")
+    return tokens
+
+
 def check_latest_evidence_files_have_owner(root: Path = ROOT) -> None:
-    """Ensure committed docs/test/*latest* pointers have an owner reference."""
+    """Ensure committed docs/test/** latest pointers have an owner reference."""
 
     docs_test = root / "docs" / "test"
     if not docs_test.is_dir():
         return
     corpus = latest_evidence_owner_corpus(root)
     missing: list[str] = []
-    for path in sorted(docs_test.glob("*latest*")):
-        if path.is_dir():
+    for path in sorted(docs_test.rglob("*")):
+        if not path.is_file():
             continue
-        if path.name not in corpus:
+        relative = path.relative_to(docs_test).as_posix()
+        if "latest" not in relative:
+            continue
+        if not any(token in corpus for token in latest_evidence_owner_tokens(path, docs_test)):
             missing.append(rel(path, root))
     if missing:
         rendered = ", ".join(missing[:20])
         suffix = "" if len(missing) <= 20 else f", ... and {len(missing) - 20} more"
         fail(
             "latest evidence ownership check failed; link each committed "
-            "docs/test/*latest* file from EVIDENCE_INDEX.md, docs/test/README.md, "
-            "CI_GATE_LEDGER.md, or a registered test manifest: "
+            "docs/test/** latest file, or its latest-artifact directory, from "
+            "EVIDENCE_INDEX.md, docs/test/README.md, CI_GATE_LEDGER.md, or a "
+            "registered test manifest: "
             f"{rendered}{suffix}"
         )
 

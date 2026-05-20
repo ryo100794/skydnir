@@ -1,3 +1,4 @@
+import copy
 import importlib.util
 import json
 import tempfile
@@ -379,6 +380,9 @@ class ScriptInventoryAuditTest(unittest.TestCase):
             if entry["category"] == "obsolete-suspect"
         }
         self.assertEqual(set(expected_replacements), obsolete)
+        verify_script_inventory.validate_obsolete_suspect_audit(
+            self.inventory["entries"]
+        )
 
         for path, replacement in expected_replacements.items():
             with self.subTest(path=path):
@@ -392,6 +396,47 @@ class ScriptInventoryAuditTest(unittest.TestCase):
                 self.assertRegex(audit["decision"].lower(), r"delet(e|ion)")
                 self.assertIn(path, self.readme)
                 self.assertIn(replacement, self.readme)
+
+    def test_obsolete_audit_validator_rejects_missing_audit_metadata(self):
+        entries = copy.deepcopy(self.inventory["entries"])
+        entry = next(
+            entry for entry in entries if entry["category"] == "obsolete-suspect"
+        )
+        del entry["audit"]
+
+        with self.assertRaises(SystemExit):
+            verify_script_inventory.validate_obsolete_suspect_audit(entries)
+
+    def test_obsolete_audit_validator_rejects_missing_replacement_or_retirement(self):
+        entries = copy.deepcopy(self.inventory["entries"])
+        audit = next(
+            entry for entry in entries if entry["category"] == "obsolete-suspect"
+        )["audit"]
+        audit.pop("replacement_command")
+
+        with self.assertRaises(SystemExit):
+            verify_script_inventory.validate_obsolete_suspect_audit(entries)
+
+    def test_obsolete_audit_validator_rejects_undated_or_vague_reference_scan(self):
+        entries = copy.deepcopy(self.inventory["entries"])
+        audit = next(
+            entry for entry in entries if entry["category"] == "obsolete-suspect"
+        )["audit"]
+        audit["date"] = "2026-99-99"
+        audit["reference_scan"] = "checked"
+
+        with self.assertRaises(SystemExit):
+            verify_script_inventory.validate_obsolete_suspect_audit(entries)
+
+    def test_obsolete_audit_validator_rejects_decision_without_retirement_condition(self):
+        entries = copy.deepcopy(self.inventory["entries"])
+        audit = next(
+            entry for entry in entries if entry["category"] == "obsolete-suspect"
+        )["audit"]
+        audit["decision"] = "keep legacy repro"
+
+        with self.assertRaises(SystemExit):
+            verify_script_inventory.validate_obsolete_suspect_audit(entries)
 
 
 if __name__ == "__main__":

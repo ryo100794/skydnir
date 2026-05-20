@@ -247,6 +247,28 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
 
         verifier.check_latest_evidence_files_have_owner(self.tmp)
 
+    def test_latest_evidence_nested_file_accepts_latest_artifact_directory_owner(self):
+        artifact_dir = self.tmp / "docs" / "test" / "example-latest-artifacts"
+        artifact_dir.mkdir()
+        (artifact_dir / "wait-server.jsonl").write_text("{}", encoding="utf-8")
+        evidence_index = self.tmp / "docs" / "test" / "EVIDENCE_INDEX.md"
+        evidence_index.write_text(
+            "| Family | Representative latest files | Canonical owner |\n"
+            "|---|---|---|\n"
+            "| Fixture | `example-latest-artifacts` | [`README.md`](README.md) |\n",
+            encoding="utf-8",
+        )
+
+        verifier.check_latest_evidence_files_have_owner(self.tmp)
+
+    def test_latest_evidence_nested_file_rejects_unowned_latest_path(self):
+        artifact_dir = self.tmp / "docs" / "test" / "unowned-latest-artifacts"
+        artifact_dir.mkdir()
+        (artifact_dir / "wait-server.jsonl").write_text("{}", encoding="utf-8")
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_latest_evidence_files_have_owner(self.tmp)
+
     def test_latest_evidence_file_rejects_unowned_pointer(self):
         artifact = self.tmp / "docs" / "test" / "unowned-latest.json"
         artifact.write_text("{}", encoding="utf-8")

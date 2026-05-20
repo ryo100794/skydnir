@@ -21,7 +21,7 @@ record to say that the artifact is promotable.
 | Family | Representative latest files | Canonical owner |
 |---|---|---|
 | Compatibility/API | `compat-audit-latest.md`, `build-context-tar-compat-latest.json` | [`COMPATIBILITY.md`](COMPATIBILITY.md), [`../design/DOCKER_COMPAT_SCOPE.md`](../design/DOCKER_COMPAT_SCOPE.md) |
-| Llama/GPU | `llama-bench-latest.json`, `llama-build-route-apk-latest.log`, `llama-build-route-apk-sha256-latest.txt`, `llama-device-template-latest.log`, `llama-gpu-compare-latest.json`, `llama-gpu-compare-20260508-ngl1-no-dup-latest.json`, `llama-gpu-device-readiness-latest.json`, `llama-gpu-artifact-sweep-latest.json`, `llama-gpu-q6k-row-indexed-latest.json`, `llama-gpu-q6k-workflow-latest.json`, `llama-gpu-startup-diagnosis-latest.json`, `llama-correctness-latest.json` | [`LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`](LLAMA_GPU_DEVICE_RUNBOOK_20260513.md), [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md), [`LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md`](LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md) |
+| Llama/GPU | `llama-bench-latest.json`, `llama-build-route-apk-latest.log`, `llama-build-route-apk-sha256-latest.txt`, `llama-device-template-latest.log`, `llama-gpu-compare-latest.json`, `llama-gpu-compare-latest-artifacts`, `llama-gpu-compare-20260508-ngl1-no-dup-latest.json`, `llama-gpu-device-readiness-latest.json`, `llama-gpu-artifact-sweep-latest.json`, `llama-gpu-q6k-row-indexed-latest.json`, `llama-gpu-q6k-row-indexed-latest-artifacts`, `llama-gpu-q6k-workflow-latest.json`, `llama-gpu-startup-diagnosis-latest.json`, `llama-correctness-latest.json` | [`LLAMA_GPU_DEVICE_RUNBOOK_20260513.md`](LLAMA_GPU_DEVICE_RUNBOOK_20260513.md), [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md), [`LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md`](LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md) |
 | Runtime / no-PRoot / terminal | `no-proot-runtime-truth-latest.json`, `test-run-latest.json` | [`NO_PROOT_RUNTIME_TRUTH_GATE.md`](NO_PROOT_RUNTIME_TRUTH_GATE.md), [`TERMINAL_EXEC_IT_DEVICE_GATE.md`](TERMINAL_EXEC_IT_DEVICE_GATE.md), [`RUNTIME_SINGLE_CONTAINER_GATE.md`](RUNTIME_SINGLE_CONTAINER_GATE.md) |
 | Storage / COW / archive | `cow-overlay-recovery-latest.json`, `cow-overlay-bench-latest.json`, `cow-overlay-kill-at-step-latest.json`, `file-io-bench-latest.json`, `file-io-microbench-latest.json` | [`COW_OVERLAY_BENCH_RECOVERY.md`](COW_OVERLAY_BENCH_RECOVERY.md), [`COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md`](COW_OVERLAY_KILL_AT_STEP_DEVICE_GATE.md), [`STORAGE_METRICS.md`](STORAGE_METRICS.md) |
 | Memory / OOM / pager | `apk-memory-pager-managed-latest.json`, `apk-memory-pager-transparent-latest.json`, `oom-lmk-survival-latest.json` | [`APK_MEMORY_PAGER_PROBE.md`](APK_MEMORY_PAGER_PROBE.md), [`OOM_LMK_SURVIVAL_GATE.md`](OOM_LMK_SURVIVAL_GATE.md) |
@@ -34,8 +34,8 @@ record to say that the artifact is promotable.
 1. Prefer immutable run directories under `docs/test/runs/<run-id>/` for test
    driver executions and release records under `docs/release/builds/` for fixed
    builds.
-2. If a `latest` file is committed, link it from this index, the owning gate
-   document, or the test README.
+2. If a `latest` file or `latest` artifact directory is committed, link it
+   from this index, the owning gate document, or the test README.
 3. If an artifact is `planned-gap`, `blocked`, `skip`, `success=false`, or
    host-only evidence for a device gate, describe the residual blocker instead
    of calling the run green.

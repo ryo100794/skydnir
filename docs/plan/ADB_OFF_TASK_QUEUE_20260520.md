@@ -17,7 +17,11 @@ or teardown promotion without fresh device artifacts.
 - Run `python3 scripts/verify-docs-maintenance.py`, relevant unit tests, and
   `git diff --check` before committing docs/test maintenance.
 
-## Active ADB-Off Task List
+## Completed ADB-Off Landing Ledger
+
+ADBOFF-001 through ADBOFF-025 have landed. Keep this table as the
+completion ledger for the 2026-05-20 ADB-off maintenance burst; append new
+rows only when fresh host-only work is intentionally queued.
 
 | ID | Priority | Task | Host-only acceptance | Status |
 |---|---:|---|---|---|
@@ -26,7 +30,7 @@ or teardown promotion without fresh device artifacts.
 | ADBOFF-003 | P0 | Preserve llama GPU Q6 probe details in committed sweep evidence. | `tests.test_llama_gpu_artifact_sweep` and `tests.test_llama_gpu_artifact_verifier` pass; sweep JSON exposes Q6 output-layout, row-provenance, partial-signature, and native-reduction fields. | Done in `eefae1d`. |
 | ADBOFF-004 | P0 | Add a static stale-evidence guard to prevent repeat docs regressions. | `tests.test_docs_maintenance` covers forbidden current-evidence phrases and compatibility rows that combine promoting status with open/non-promoting notes. | Done in `5946442`. |
 | ADBOFF-005 | P1 | Source marker audit while device is unavailable. | Explorer output says app UI source has no uncovered actionable TODO/FIXME/HACK markers; native/runtime findings are either covered or low-risk naming cleanup. | Done; recorded in `AGENT_COORDINATION.md` in this slice. |
-| ADBOFF-006 | P1 | Maintain this ADB-off queue and plan index. | This document is linked from `docs/plan/README.md` and referenced by the coordination ledger. | In progress. |
+| ADBOFF-006 | P1 | Maintain this ADB-off queue and plan index. | This document remains linked from `docs/plan/README.md` and referenced by the coordination ledger. | Ongoing maintenance; current queue items ADBOFF-001 through ADBOFF-025 have landed. |
 | ADBOFF-007 | P1 | Keep release/readiness checks green after docs maintenance. | `verify-docs-maintenance`, `verify-release-readiness`, `tests.test_docs_maintenance`, and `git diff --check` pass. | Done for `5946442`; rerun after each maintenance slice. |
 | ADBOFF-008 | P1 | Add static pdocker extension API boundary guard. | Docs distinguish Docker-standard `GET /system/df` and `POST /system/prune` from pdocker-only `/system/*` routes, and every public `Pdocker*` field observed in pdockerd is documented. | Done in `50edf2f`. |
 | ADBOFF-009 | P1 | Review Engine route method strictness from static audit. | Host-only follow-up should document or test broad base-route methods and the generic `POST /networks/{name}` fallback before any runtime behavior change. | Done: base routes are method-scoped and unsupported network subroutes fail closed in host protocol smoke. |
@@ -44,6 +48,8 @@ or teardown promotion without fresh device artifacts.
 | ADBOFF-021 | P2 | Guard script maintenance triage against inventory drift. | `verify-script-inventory.py` now checks that `docs/maintenance/SCRIPT_DOC_INVENTORY.md` carries the current category counts and obsolete-suspect candidates from `scripts/script-inventory.json`; unit tests cover stale counts and names. | Done in this slice. |
 | ADBOFF-022 | P2 | Retire the obsolete llama startup logging helper after maintained unittest coverage. | `tests.test_llama_startup_logging_contract` now owns the fake-profile, early-tee, startup-json, resolved env, memory, and KV-offload guard checks; `scripts/verify-llama-startup-logging.py` is deleted and script inventory/docs counts are updated. | Done in this slice. |
 | ADBOFF-023 | P2 | Retire the obsolete box64 NDK wrapper. | `scripts/wrap-ndk-box64.sh` is deleted because the supported native-build path is `scripts/build-native-android-ndk.sh` with host-clang/aarch64 coverage and no box64 mutation; inventory/docs counts now leave only the terminal repro obsolete suspect. | Done in this slice. |
+| ADBOFF-024 | P1 | Guard nested `docs/test/**latest*` evidence ownership. | `verify-docs-maintenance.py` scans latest files recursively, accepts documented latest-artifact directories, and unit tests cover nested owned/unowned artifacts; the ADB-off queue is reframed as a completed maintenance ledger. | Done in this slice. |
+| ADBOFF-025 | P1 | Promote obsolete-suspect audit metadata to an executable inventory guard. | `verify-script-inventory.py` now rejects obsolete-suspect entries without dated reference-scan evidence, a delete/archive/retire decision, and a replacement or retirement condition; unit tests cover missing audit metadata, vague scans, missing replacements, and condition-free decisions. | Done in this slice. |
 
 ## Deferred Until ADB Returns
 
@@ -58,15 +64,16 @@ These remain intentionally blocked from promotion:
 - llama GPU correctness/performance device compare and native Q6_K final-store
   investigation.
 
-## Next Host-Only Candidates
+## Future Host-Only Maintenance Candidates
 
 Use these when the current queue drains and ADB is still off:
 
 1. Add narrow synthetic fixtures for any remaining verifier that currently
    relies on a large generated artifact.
-2. Improve docs/readme discoverability and reduce duplicate status wording.
-3. Add static checks for API extension boundaries: `/system/*` and `Pdocker*`
-   fields must remain documented as pdocker-only diagnostics.
+2. Keep docs/readme discoverability under the existing maintenance guards and
+   add only focused link/index updates when new maintained docs appear.
+3. Extend API extension boundary checks only when new `/system/*` routes or
+   `Pdocker*` fields are introduced.
 4. Review low-risk naming noise such as GPU `temporary` scratch buffers, but
    avoid runtime behavior changes unless a focused host test already covers the
    path.
