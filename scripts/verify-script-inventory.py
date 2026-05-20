@@ -79,6 +79,7 @@ REFERENCE_SCAN_ALLOWLIST = {
     "scripts/verify-script-inventory.py",
     "tests/test_script_inventory_audit.py",
 }
+SCRIPT_DOC_INVENTORY = ROOT / "docs" / "maintenance" / "SCRIPT_DOC_INVENTORY.md"
 
 
 def is_reference_scan_path(path: str) -> bool:
@@ -223,6 +224,63 @@ def validate_script_surface_budget(
         fail(
             "script category budget changed without a verifier update: "
             f"expected={EXPECTED_CATEGORY_COUNTS} observed={observed}"
+        )
+
+
+def display_path(path: Path) -> str:
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def validate_maintenance_doc_sync(
+    entries: list[dict[str, Any]],
+    categories: Counter[str],
+) -> None:
+    """Keep the maintenance triage doc aligned with inventory drift.
+
+    The maintenance note is intentionally prose, but it contains counts and
+    obsolete-candidate names that reviewers use during cleanup.  If the public
+    script surface changes, stale triage wording is almost as confusing as stale
+    executable wrappers, so make the coupling explicit.
+    """
+
+    if not SCRIPT_DOC_INVENTORY.is_file():
+        fail(f"missing maintenance script inventory doc: {display_path(SCRIPT_DOC_INVENTORY)}")
+    text = SCRIPT_DOC_INVENTORY.read_text(encoding="utf-8")
+    expected_phrases = {
+        "runtime-package-needed": f"{categories.get('runtime-package-needed', 0)} top-level script",
+        "build-developer": f"{categories.get('build-developer', 0)} top-level scripts",
+        "test-verification": f"{categories.get('test-verification', 0)} top-level scripts",
+        "generated-maintenance": f"{categories.get('generated-maintenance', 0)} entries",
+        "obsolete-suspect": f"{categories.get('obsolete-suspect', 0)} tracked candidates",
+    }
+    missing_phrases = sorted(
+        f"{category}: {phrase}"
+        for category, phrase in expected_phrases.items()
+        if phrase not in text
+    )
+    if missing_phrases:
+        fail(
+            f"{display_path(SCRIPT_DOC_INVENTORY)} category count wording is stale: "
+            + "; ".join(missing_phrases)
+        )
+
+    obsolete_paths = [
+        entry["path"]
+        for entry in entries
+        if entry.get("category") == "obsolete-suspect"
+    ]
+    missing_obsolete = sorted(
+        path
+        for path in obsolete_paths
+        if Path(path).name not in text and path not in text
+    )
+    if missing_obsolete:
+        fail(
+            f"{display_path(SCRIPT_DOC_INVENTORY)} omits obsolete-suspect "
+            "candidate(s): " + ", ".join(missing_obsolete)
         )
 
 
@@ -402,6 +460,7 @@ def main() -> int:
     validate_script_surface_budget(entries, subtree_entries, categories)
     validate_candidate_duplicate_consistency(entries)
     validate_migrated_wrapper_reference_scan(migrated_wrapper_paths)
+    validate_maintenance_doc_sync(entries, categories)
 
     readme = README.read_text(encoding="utf-8")
     for category, count in categories.items():

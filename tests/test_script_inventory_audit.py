@@ -175,6 +175,67 @@ class ScriptInventoryAuditTest(unittest.TestCase):
                 categories,
             )
 
+    def test_script_doc_inventory_matches_counts_and_obsolete_suspects(self):
+        categories = Counter(entry["category"] for entry in self.inventory["entries"])
+
+        verify_script_inventory.validate_maintenance_doc_sync(
+            self.inventory["entries"],
+            categories,
+        )
+
+    def test_script_doc_inventory_rejects_stale_category_count(self):
+        categories = Counter(entry["category"] for entry in self.inventory["entries"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            doc = tmp_root / "docs" / "maintenance" / "SCRIPT_DOC_INVENTORY.md"
+            doc.parent.mkdir(parents=True)
+            doc.write_text(
+                "Runtime packaging | 1 top-level script\n"
+                "Build | 9 top-level scripts\n"
+                "Test | 75 top-level scripts\n"
+                "Generated maintenance | 3 entries\n"
+                "Unused or legacy candidates | 3 tracked candidates\n"
+                "android-terminal-it-repro.sh verify-llama-startup-logging.py "
+                "wrap-ndk-box64.sh\n",
+                encoding="utf-8",
+            )
+            previous_doc = verify_script_inventory.SCRIPT_DOC_INVENTORY
+            try:
+                verify_script_inventory.SCRIPT_DOC_INVENTORY = doc
+                with self.assertRaises(SystemExit):
+                    verify_script_inventory.validate_maintenance_doc_sync(
+                        self.inventory["entries"],
+                        categories,
+                    )
+            finally:
+                verify_script_inventory.SCRIPT_DOC_INVENTORY = previous_doc
+
+    def test_script_doc_inventory_rejects_stale_obsolete_candidate_names(self):
+        categories = Counter(entry["category"] for entry in self.inventory["entries"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            doc = tmp_root / "docs" / "maintenance" / "SCRIPT_DOC_INVENTORY.md"
+            doc.parent.mkdir(parents=True)
+            doc.write_text(
+                "Runtime packaging | 1 top-level script\n"
+                "Build | 9 top-level scripts\n"
+                "Test | 76 top-level scripts\n"
+                "Generated maintenance | 3 entries\n"
+                "Unused or legacy candidates | 3 tracked candidates\n"
+                "android-terminal-it-repro.sh verify-llama-startup-logging.py\n",
+                encoding="utf-8",
+            )
+            previous_doc = verify_script_inventory.SCRIPT_DOC_INVENTORY
+            try:
+                verify_script_inventory.SCRIPT_DOC_INVENTORY = doc
+                with self.assertRaises(SystemExit):
+                    verify_script_inventory.validate_maintenance_doc_sync(
+                        self.inventory["entries"],
+                        categories,
+                    )
+            finally:
+                verify_script_inventory.SCRIPT_DOC_INVENTORY = previous_doc
+
     def test_migrated_wrappers_have_no_retirement_blocking_references(self):
         migrated_paths = {
             entry["path"]

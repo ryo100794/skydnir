@@ -41,6 +41,7 @@ or teardown promotion without fresh device artifacts.
 | ADBOFF-018 | P1 | Add a small synthetic fixture for APK native-payload packaging policy. | `tests.test_native_payload_verifier_synthetic` exercises required asset presence, source-byte freshness, and forbidden `__pycache__` packaging without depending on a built APK artifact; `verify-fast.sh` runs it with the host-only suite. | Done in this slice. |
 | ADBOFF-019 | P2 | Clean stale docs wording now that the shared test evidence index exists. | Maintenance docs link `docs/test/EVIDENCE_INDEX.md`, describe duplicate/latest records as representative pointer/evidence patterns, and `docs/test/README.md` keeps raw script paths in a related-script section instead of the document table. | Done in this slice. |
 | ADBOFF-020 | P1 | Guard committed `docs/test/*latest*` evidence discoverability. | `verify-docs-maintenance.py` fails if any top-level committed latest artifact lacks an owner reference in `EVIDENCE_INDEX.md`, the test README, CI gate ledger, or registered scenario/test manifests; unit tests cover indexed and unowned fixtures. | Done in this slice. |
+| ADBOFF-021 | P2 | Guard script maintenance triage against inventory drift. | `verify-script-inventory.py` now checks that `docs/maintenance/SCRIPT_DOC_INVENTORY.md` carries the current category counts and obsolete-suspect candidates from `scripts/script-inventory.json`; unit tests cover stale counts and names. | Done in this slice. |
 
 ## Deferred Until ADB Returns
 
