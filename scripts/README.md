@@ -60,6 +60,17 @@ inventory/README/verifier allowlist.
 | `scripts/verify-device-llama-template.sh` | `scripts/test/verify-device-llama-template.sh` |
 | `scripts/summarize-llama-gpu-artifacts.py` | `scripts/maintenance/summarize-llama-gpu-artifacts.py` |
 
+## Subdirectory READMEs
+
+The subdirectory READMEs document current non-top-level script pockets only;
+they do not change inventory counts, stable entrypoints, or wrapper policy.
+
+- [`git-hooks/README.md`](git-hooks/README.md)
+- [`maintenance/README.md`](maintenance/README.md)
+- [`test/README.md`](test/README.md)
+- [`verify/README.md`](verify/README.md)
+- [`verify/runner/README.md`](verify/runner/README.md)
+
 ## Subtree Entries
 
 These non-top-level runner helpers are tracked in `subtree_entries` so

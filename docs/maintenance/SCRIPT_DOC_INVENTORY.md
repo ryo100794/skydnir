@@ -27,6 +27,13 @@ This note connects the stable script inventory in [`../../scripts/README.md`](..
   durable script inventory. The Vulkan ICD smoke wrapper/layout migration is
   complete; the remaining directory-cleanup follow-up is later
   wrapper-retirement automation after the compatibility window.
+- Subdirectory READMEs now document non-top-level script pockets without
+  changing the stable script surface:
+  [`../../scripts/git-hooks/README.md`](../../scripts/git-hooks/README.md),
+  [`../../scripts/maintenance/README.md`](../../scripts/maintenance/README.md),
+  [`../../scripts/test/README.md`](../../scripts/test/README.md),
+  [`../../scripts/verify/README.md`](../../scripts/verify/README.md), and
+  [`../../scripts/verify/runner/README.md`](../../scripts/verify/runner/README.md).
 
 ## Fragmented docs triage
 
@@ -39,7 +46,8 @@ This note connects the stable script inventory in [`../../scripts/README.md`](..
 
 ## Immediate follow-up checklist
 
-1. Keep `scripts/script-inventory.json`, `scripts/README.md`, and this triage note in sync when adding or classifying scripts.
+1. Keep `scripts/script-inventory.json`, `scripts/README.md`, subdirectory
+   READMEs, and this triage note in sync when adding or classifying scripts.
 2. Run `python3 scripts/verify-script-inventory.py` after script inventory edits.
 3. Run `python3 scripts/verify-docs-maintenance.py` after adding durable documentation.
 4. Do not delete weakly referenced scripts or test evidence without a focused audit, replacement command, and link/producer check.
