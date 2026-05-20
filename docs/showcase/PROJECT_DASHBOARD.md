@@ -50,7 +50,7 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 | next | [#5](https://github.com/ryo100794/pdocker-android/issues/5) Terminal `-it` interactive path: refactor the terminal stack according to `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`. The UI... |
 | doing | [#6](https://github.com/ryo100794/pdocker-android/issues/6) Service truth same-container-ID device gate: the listener health and ID/label truth work are one gate. Probe default workspace... |
 | next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU performance workflow after Vulkan clamp: keep CPU fallback hiding Vulkan devices, force Vulkan only for measured GPU... |
-| next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) MoE-aware GPU residency layer research and design: after the dense llama GPU bridge is correct, evaluate a pdocker-owned... |
+| next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) MoE-aware out-of-core LLM execution and GPU residency layer: start this work in parallel with dense llama GPU correctness instead... |
 | next | Mobile-resource residency constraints for MoE: keep a concise design note with device RAM/headroom, thermal, storage bandwidth, SAF/app-private backing, cache eviction, and correctness... |
 | doing | [#7](https://github.com/ryo100794/pdocker-android/issues/7) Android storage metrics verification: add device smoke/manual coverage that layer, image-view, container-private, total, and... |
 
