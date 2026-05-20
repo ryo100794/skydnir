@@ -1,6 +1,6 @@
 # pdocker TODO ledger
 
-Snapshot date: 2026-05-19.
+Snapshot date: 2026-05-20.
 
 This is the working TODO list for unfinished items and deliberate temporary
 accommodations. Keep this file current whenever a workaround is added so it
@@ -177,6 +177,31 @@ issues, and deciding which planned gaps become hard gates.
     verification; the armhf Vulkan ICD is packaged only as experimental
     evidence until pointer-width-clean handle abstractions replace current
     pointer-shaped Vulkan handle casts.
+
+### Execution Timeline 2026-05-20
+
+This timeline is the current cross-check between the active TODO board, the
+ADB-off completion ledger, the CI gate ledger, and the llama GPU bridge handoff.
+It is intentionally evidence-first: a row is not closed by intent, only by the
+listed command or artifact.
+
+| Phase | Lane | Status | Owner | Acceptance evidence |
+|---|---|---|---|---|
+| T0 | Host/static truth | `[doing]` keep fast checks green after each small slice; fix flaky host smoke failures instead of ignoring them. | Main | `bash scripts/verify-fast.sh`, `python3 scripts/verify-docs-maintenance.py`, `python3 scripts/verify-release-readiness.py`, `git diff --check` |
+| T1 | Fast-gate coverage | `[doing]` keep CI-ledger fast/static commands represented in `scripts/verify-fast.sh`; add explicit host-only unittests before relying on prose. | Main/agent | `python3 -m unittest tests.test_ci_gate_ledger`; `scripts/verify-fast.sh` contains the command/module |
+| T2 | Llama GPU host prep | `[doing]` guard the Q6_K workflow wrapper and local artifact classification without changing llama.cpp, Dockerfiles, models, or prompts. | Main | `python3 -m unittest tests.test_gpu_abi_contract tests.test_llama_gpu_artifact_verifier tests.test_llama_gpu_q6k_workflow` |
+| T3 | Llama GPU device run | `[blocked-adb]` collect fresh readiness and strict NGL=1 Q6_K artifact only when device memory/readiness is green. | Main | `docs/test/llama-gpu-device-readiness-latest.json`, `docs/test/llama-gpu-q6k-workflow-latest.json`, strict `scripts/verify-llama-gpu-artifact.py` output |
+| T4 | Service truth | `[blocked-adb]` prove UI cards, `docker ps`, Engine API, state, process, listener, and logs all name the same current Engine container ID. | Agent | `docs/test/service-truth-latest.json`; `bash scripts/verify-heavy.sh --android-service-truth` |
+| T5 | Runtime teardown | `[blocked-adb]` prove stop/kill removes direct children, executor helpers, listeners, stale PIDs, and state for the same container ID. | Agent | `docs/test/runtime-teardown-latest.json`; `python3 scripts/verify-runtime-teardown-artifact.py docs/test/runtime-teardown-latest.json` |
+| T6 | Terminal `exec -it` | `[blocked-adb]` prove Enter, Ctrl-C, arrows, `top`, `q`, resize, and JP/EN IME behavior through UI-driven JSONL evidence. | Agent | `ui-it-selftest-latest.json`, `engine-exec-input-latest.jsonl`, `scripts/verify-terminal-exec-it-artifact.py --require-container` |
+| T7 | COW/overlay recovery | `[doing-host]` keep host recovery/bench green; device kill-at-step evidence remains non-promoting until replayed on adb/run-as. | Agent | `python3 scripts/verify-cow-overlay-bench-recovery.py --run-local`, `docs/test/cow-overlay-kill-at-step-latest.json` |
+| T8 | Image pull crash safety | `[doing-host]` maintain static/synthetic crash-residue coverage; live pull interruption is still device-gated. | Agent | `python3 scripts/verify-image-pull-crash-safety.py`, future live artifact under `docs/test/` |
+| T9 | SAF UnixFS/Documents | `[next]` validate sidecar metadata, unsafe-path rejection, direct write, fallback, and layer-boundary proof. | Agent | `tests.test_saf_direct_output_contract`, future `docs/test/saf-direct-output-latest.json` |
+| T10 | Memory pager/OOM-LMK | `[next]` keep opt-in pager and ENOMEM/LMK diagnostics non-promoting until exact device capability proofs exist. | Agent | `python3 scripts/verify-memory-pager-contract.py`, `python3 scripts/verify-oom-lmk-survival-gate.py` |
+| T11 | Layer GC/storage repair | `[next]` add one reachability checker and idempotent repair/journal model before UI prune claims expand. | Agent | New host fixture and verifier recorded under `docs/test/`; TODO row updated with command |
+| T12 | Native build/release | `[next]` keep NDK/glibc payload build reproducibility explicit and F-Droid no-crane limits visible. | Main/agent | `scripts/verify-native-rebuild-release.sh`, `PDOCKER_FDROID_NO_CRANE=1 scripts/verify-native-rebuild-release.sh` |
+| T13 | Docs/scripts inventory | `[doing]` migrate cleanup into canonical category trees; avoid moving evidence before producer/verifier paths move with it. | Agent | `python3 scripts/verify-script-inventory.py`, `python3 scripts/verify-docs-maintenance.py`, `python3 scripts/update-showcase.py --check` |
+| T14 | Release/public timeline | `[blocked]` publish only after P0 planned-gap/device lanes stop being described as stable checkpoints. | Main | `python3 scripts/verify-release-readiness.py`; generated `docs/showcase/ROADMAP_TIMELINE.md` |
 
 ### Audit Synchronization 2026-05-19
 

@@ -175,6 +175,7 @@ run python3 -m unittest \
   tests.test_llama_gpu_readiness_contract \
   tests.test_llama_gpu_artifact_verifier \
   tests.test_llama_gpu_artifact_sweep \
+  tests.test_llama_gpu_q6k_workflow \
   tests.test_vulkan_icd_feature_chain \
   tests.test_ci_gate_ledger \
   tests.test_test_driver

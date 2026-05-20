@@ -78,7 +78,17 @@ def uds_request(sock_path: Path, method: str, path: str) -> tuple[int, dict[str,
     req = f"{method} {path} HTTP/1.1\r\nHost: docker\r\nConnection: close\r\n\r\n".encode()
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.settimeout(10)
-        s.connect(str(sock_path))
+        deadline = time.monotonic() + 10
+        last_error: OSError | None = None
+        while True:
+            try:
+                s.connect(str(sock_path))
+                break
+            except (ConnectionRefusedError, FileNotFoundError) as exc:
+                last_error = exc
+                if time.monotonic() >= deadline:
+                    raise last_error
+                time.sleep(0.05)
         s.sendall(req)
         chunks: list[bytes] = []
         while True:

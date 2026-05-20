@@ -1,5 +1,7 @@
 import json
+import contextlib
 import importlib.util
+import io
 import subprocess
 import tempfile
 import unittest
@@ -107,6 +109,62 @@ class LlamaGpuQ6KWorkflowTest(unittest.TestCase):
             self.assertGreater(record["stdout_size"], 9000)
             extracted = workflow.extract_json_object(out.read_text())
             self.assertEqual(extracted["classification"]["responsibility"], "q6-native-device-execution")
+
+    def test_ready_workflow_invokes_compare_script_without_argv_drift(self):
+        workflow = load_workflow_module()
+        captured: list[tuple[str, list[str]]] = []
+        original_run_step = workflow.run_step
+        original_load_json = workflow.load_json
+
+        def fake_run_step(step_id, argv, env, dry_run, stdout_path=None):
+            captured.append((step_id, list(argv)))
+            if stdout_path is not None:
+                stdout_path.parent.mkdir(parents=True, exist_ok=True)
+                stdout_path.write_text(
+                    json.dumps(
+                        {
+                            "status": "pass",
+                            "next_action": "q6k compare command captured",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            return {
+                "id": step_id,
+                "argv": list(argv),
+                "command": " ".join(argv),
+                "exit_code": 0,
+                "status": "pass",
+                "stdout_tail": "",
+            }
+
+        def fake_load_json(path):
+            return {"ready": True}
+
+        workflow.run_step = fake_run_step
+        workflow.load_json = fake_load_json
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    rc = workflow.main(
+                        [
+                            "--skip-local-checks",
+                            "--manifest-out",
+                            str(Path(tmpdir) / "workflow.json"),
+                            "--readiness-out",
+                            str(Path(tmpdir) / "readiness.json"),
+                            "--out",
+                            str(Path(tmpdir) / "compare.json"),
+                        ]
+                    )
+        finally:
+            workflow.run_step = original_run_step
+            workflow.load_json = original_load_json
+
+        self.assertEqual(rc, 0)
+        compare_argv = dict(captured)["compare-ngl1-q6k-workgroup"]
+        self.assertEqual(compare_argv[:2], ["bash", "scripts/android-llama-gpu-compare.sh"])
+        self.assertNotEqual(compare_argv[:3], ["bash", "bash", "scripts/android-llama-gpu-compare.sh"])
 
 
 if __name__ == "__main__":
