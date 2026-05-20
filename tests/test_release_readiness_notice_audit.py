@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "verify-release-readiness.py"
 NOTICE_ENTRY = "assets/oss-licenses/THIRD_PARTY_NOTICES.md"
+RELEASE_READINESS_WORKFLOW = ROOT / ".github" / "workflows" / "release-readiness.yml"
 
 spec = importlib.util.spec_from_file_location("verify_release_readiness", SCRIPT)
 assert spec and spec.loader
@@ -152,6 +153,27 @@ class ReleaseReadinessNoticeAuditTest(unittest.TestCase):
 
         with self.assertRaises(verifier.CheckFailure):
             self.audit(apk)
+
+
+class ReleaseReadinessWorkflowTriggerTest(unittest.TestCase):
+    def test_workflow_path_filter_covers_release_readiness_inputs(self):
+        workflow = RELEASE_READINESS_WORKFLOW.read_text(encoding="utf-8")
+        required_paths = {
+            "docs/build/**",
+            "docs/release/**",
+            "metadata/fdroid/**",
+            "THIRD_PARTY_NOTICES.md",
+            "app/src/main/assets/oss-licenses/THIRD_PARTY_NOTICES.md",
+            "scripts/verify-release-readiness.py",
+        }
+
+        for path in required_paths:
+            with self.subTest(path=path):
+                self.assertGreaterEqual(
+                    workflow.count(f"- {path}"),
+                    2,
+                    f"{path} must trigger release-readiness on pull_request and push",
+                )
 
 
 if __name__ == "__main__":

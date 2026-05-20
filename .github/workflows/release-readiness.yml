@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - docs/build/**
+      - docs/release/**
+      - THIRD_PARTY_NOTICES.md
+      - app/src/main/assets/oss-licenses/THIRD_PARTY_NOTICES.md
       - metadata/fdroid/**
       - scripts/verify-release-readiness.py
       - .github/workflows/release-readiness.yml
@@ -12,6 +15,9 @@ on:
       - main
     paths:
       - docs/build/**
+      - docs/release/**
+      - THIRD_PARTY_NOTICES.md
+      - app/src/main/assets/oss-licenses/THIRD_PARTY_NOTICES.md
       - metadata/fdroid/**
       - scripts/verify-release-readiness.py
       - .github/workflows/release-readiness.yml
