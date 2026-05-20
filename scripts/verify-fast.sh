@@ -159,7 +159,7 @@ run python3 -m unittest \
   tests.test_ci_gate_ledger \
   tests.test_test_driver
 run bash scripts/test/smoke-vulkan-llama-init.sh
-run bash scripts/smoke-vulkan-icd-bridge.sh
+run bash scripts/test/smoke-vulkan-icd-bridge.sh
 run python3 scripts/compat-audit.py
 run python3 scripts/update-showcase.py --check
 

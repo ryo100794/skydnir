@@ -347,7 +347,7 @@
       "id": "gpu.bridge.smoke",
       "area": "gpu-bridge",
       "lane": "fast-local",
-      "command": "bash scripts/smoke-vulkan-icd-bridge.sh",
+      "command": "bash scripts/test/smoke-vulkan-icd-bridge.sh",
       "status": "runnable",
       "docs": [
         "docs/design/GPU_COMPAT.md"

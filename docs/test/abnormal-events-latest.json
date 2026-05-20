@@ -235,7 +235,7 @@
       "git_commit": "90aa9392b853",
       "kind": "abnormal-event-case",
       "observed_signal": null,
-      "reproduction_command": "bash scripts/smoke-vulkan-icd-bridge.sh",
+      "reproduction_command": "bash scripts/test/smoke-vulkan-icd-bridge.sh",
       "retention": "Keep latest artifact in docs/test and preserve release-candidate artifacts with the build set.",
       "schema": 1,
       "severity": "error",

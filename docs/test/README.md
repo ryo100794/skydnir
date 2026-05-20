@@ -53,7 +53,7 @@ run it, and where the latest result is stored.
 | [`LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md`](LLAMA_GPU_NON_PROMOTING_ARTIFACT_NEGATIVES.md) | Negative examples for GPU/Q6/memory artifacts that cannot promote benchmark or correctness claims |
 | `scripts/verify-archive-api-compat.py` | Host-only fail-closed Docker archive API / `docker cp` compatibility gate |
 | `scripts/test/smoke-vulkan-llama-init.sh` | Lightweight llama.cpp-oriented Vulkan ICD initialization smoke |
-| `scripts/smoke-vulkan-icd-bridge.sh` | Lightweight Vulkan ICD dispatch smoke through the pdocker GPU executor socket; planned-skip when the local executor Vulkan preflight is unavailable |
+| `scripts/test/smoke-vulkan-icd-bridge.sh` | Lightweight Vulkan ICD dispatch smoke through the pdocker GPU executor socket; planned-skip when the local executor Vulkan preflight is unavailable |
 
 ## Canonical Sources
 

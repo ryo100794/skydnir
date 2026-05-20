@@ -24,9 +24,9 @@ This note connects the stable script inventory in [`../../scripts/README.md`](..
 - Inventory drift should be fixed in `scripts/script-inventory.json` and reflected in `scripts/README.md` before any script rename, move, or deletion.
 - As of `ed7cddd`, `scripts/verify/runner/*` is classified through
   `subtree_entries`; `__pycache__` bytecode remains ignored and outside the
-  durable script inventory. The remaining directory-cleanup follow-up is the
-  `scripts/smoke-vulkan-icd-bridge.sh` wrapper/layout migration plus later
-  wrapper-retirement automation.
+  durable script inventory. The Vulkan ICD smoke wrapper/layout migration is
+  complete; the remaining directory-cleanup follow-up is later
+  wrapper-retirement automation after the compatibility window.
 
 ## Fragmented docs triage
 

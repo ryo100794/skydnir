@@ -693,7 +693,7 @@
         "target_dir": "scripts/test",
         "candidate_path": "scripts/test/smoke-vulkan-icd-bridge.sh",
         "phase": "phase-1-test-helpers-after-manifest-update",
-        "action": "candidate-move-behind-wrapper",
+        "action": "migrated-behind-wrapper",
         "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
       }
     },

@@ -69,7 +69,7 @@ def main() -> int:
     api29_feasibility_src = (ROOT / "scripts/android-api29-direct-feasibility.sh").read_text()
     device_llama_template_src = read_script_with_migrated_body(ROOT / "scripts/verify-device-llama-template.sh")
     llama_compare_src = (ROOT / "scripts/android-llama-gpu-compare.sh").read_text()
-    vulkan_smoke_src = (ROOT / "scripts/smoke-vulkan-icd-bridge.sh").read_text()
+    vulkan_smoke_src = read_script_with_migrated_body(ROOT / "scripts/smoke-vulkan-icd-bridge.sh")
     vulkan_llama_init_src = read_script_with_migrated_body(ROOT / "scripts/smoke-vulkan-llama-init.sh")
     opencl_smoke_src = read_script_with_migrated_body(ROOT / "scripts/smoke-opencl-bridge.sh")
     compat_audit_src = (ROOT / "scripts/compat-audit.py").read_text()

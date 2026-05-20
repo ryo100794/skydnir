@@ -752,7 +752,7 @@ default.
   device-local memory and staging/output buffers in host-visible memory.
 - Bridge ABI progress: `VULKAN_DISPATCH_V2` preserves the compute shader entry
   point and bounded specialization constants across the glibc ICD to Android
-  executor boundary. `scripts/smoke-vulkan-icd-bridge.sh` now verifies a
+  executor boundary. `scripts/test/smoke-vulkan-icd-bridge.sh` now verifies a
   minimal storage-buffer compute dispatch through the same socket path when the
   local executor Vulkan preflight is available, and reports a planned preflight
   skip instead of hanging when native Vulkan is unavailable. `scripts/verify-fast.sh`

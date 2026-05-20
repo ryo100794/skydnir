@@ -51,6 +51,7 @@ inventory/README/verifier allowlist.
 |---|---|
 | `scripts/smoke-opencl-bridge.sh` | `scripts/test/smoke-opencl-bridge.sh` |
 | `scripts/smoke-vulkan-llama-init.sh` | `scripts/test/smoke-vulkan-llama-init.sh` |
+| `scripts/smoke-vulkan-icd-bridge.sh` | `scripts/test/smoke-vulkan-icd-bridge.sh` |
 | `scripts/verify-device-llama-template.sh` | `scripts/test/verify-device-llama-template.sh` |
 | `scripts/summarize-llama-gpu-artifacts.py` | `scripts/maintenance/summarize-llama-gpu-artifacts.py` |
 

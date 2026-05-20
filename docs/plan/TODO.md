@@ -312,14 +312,14 @@ evidence proves the real behavior or the limitation remains visible.
   to a category README, inventory/manifest, verifier, or fast/heavy gate.
   Acceptance: `scripts/verify-docs-maintenance.py` or
   `scripts/verify-script-inventory.py` rejects unindexed durable docs/scripts.
-- [next] Script directory cleanup follow-up: `ed7cddd` recorded
+- [done] Script directory cleanup follow-up: `ed7cddd` recorded
   `scripts/verify/runner/*` as subtree inventory entries and kept the
   documented `__pycache__` cleanup policy in `.gitignore`
   (`scripts/__pycache__` and nested bytecode caches stay ignored, untracked,
-  and outside script inventory). Remaining cleanup is to align
-  `scripts/smoke-vulkan-icd-bridge.sh` with the `scripts/test` layout, then
-  auto-add wrapper retirement after the compatibility window as a separate
-  task. Wrapper reference migration is already committed as `0e9b33e`.
+  and outside script inventory). The Vulkan ICD smoke helper implementation now
+  lives under `scripts/test/` behind a stable top-level wrapper.
+  Auto-add wrapper retirement remains a separate compatibility-window task.
+  Wrapper reference migration is already committed as `0e9b33e`.
   Acceptance: `scripts/verify-script-inventory.py` and the docs-maintenance
   verifier reject any unclassified script, stale top-level wrapper reference,
   or premature wrapper removal.
@@ -1681,7 +1681,7 @@ Current 2026-05-04 blocker:
   executor contract, and load the HTTP server. `VULKAN_DISPATCH_V2` now
   preserves `VkPipelineShaderStageCreateInfo::pName` and bounded
   `VkSpecializationInfo` data without modifying llama.cpp, and
-  `scripts/smoke-vulkan-icd-bridge.sh` verifies a minimal ICD dispatch through
+  `scripts/test/smoke-vulkan-icd-bridge.sh` verifies a minimal ICD dispatch through
   the executor command socket when local executor Vulkan preflight is available
   and reports a planned skip otherwise. It still cannot serve tokens reliably:
   prompt processing reaches a later generic SPIR-V dispatch where Android

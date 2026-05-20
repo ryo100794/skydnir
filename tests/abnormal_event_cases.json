@@ -195,7 +195,7 @@
       "failure_oracle": "GPU bridge smoke fails if unsupported work is accepted without a diagnostic.",
       "expected_exit_code": 0,
       "evidence_source": "docs/test/abnormal-events-latest.json",
-      "reproduction_command": "bash scripts/smoke-vulkan-icd-bridge.sh",
+      "reproduction_command": "bash scripts/test/smoke-vulkan-icd-bridge.sh",
       "retention": "Keep latest artifact in docs/test and preserve release-candidate artifacts with the build set."
     },
     {

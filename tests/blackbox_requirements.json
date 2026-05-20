@@ -183,7 +183,7 @@
         "when": "The bridge smoke test dispatches the supported vector workload.",
         "then": "The output matches the CPU reference within tolerance.",
         "evidence": [
-          "bash scripts/smoke-vulkan-icd-bridge.sh"
+          "bash scripts/test/smoke-vulkan-icd-bridge.sh"
         ]
       },
       "negative": {
