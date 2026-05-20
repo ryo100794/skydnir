@@ -828,6 +828,35 @@ typedef struct {
 } VulkanDispatchBinding;
 
 typedef struct {
+    int valid;
+    size_t raw_command_bytes;
+    uint64_t raw_command_hash;
+    size_t command_bytes;
+    uint64_t command_hash;
+    int msg_flags;
+    size_t scm_rights_fd_count_copied;
+    int msg_trunc;
+    int msg_ctrunc;
+} PdockerReceiveEvidence;
+
+typedef struct {
+    int has_dispatch_id;
+    uint64_t dispatch_id;
+    int has_core_command_hash;
+    uint64_t core_command_hash;
+    int has_spirv_hash;
+    uint64_t spirv_hash;
+    int has_descriptor_hash;
+    uint64_t descriptor_hash;
+    int has_push_hash;
+    uint64_t push_hash;
+    int has_spec_hash;
+    uint64_t spec_hash;
+    int has_dispatch_hash;
+    uint64_t dispatch_hash;
+} PdockerSenderReconcileEvidence;
+
+typedef struct {
     int has_dirty_probe;
     int dirty_probe;
     int has_dirty_probe_min_bytes;
@@ -881,6 +910,9 @@ typedef struct {
     int disable_subgroup_arithmetic;
     int has_requested_feature_mask;
     uint64_t requested_feature_mask;
+    int has_receive_evidence;
+    PdockerReceiveEvidence receive_evidence;
+    PdockerSenderReconcileEvidence sender_reconcile;
 } VulkanDispatchOptions;
 
 typedef struct {
@@ -2255,8 +2287,75 @@ static size_t count_dirty_probe_pages(
     return pages;
 }
 
+static int parse_u64_token_value(const char *value, uint64_t *out) {
+    if (!value || !value[0] || !out) return -1;
+    char *end = NULL;
+    errno = 0;
+    unsigned long long parsed = strtoull(value, &end, 0);
+    if (errno == ERANGE || !end || *end != '\0') return -1;
+    *out = (uint64_t)parsed;
+    return 0;
+}
+
 static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const char *token) {
     if (!options || !token || !token[0]) return -1;
+    if (strncmp(token, "reconcile_dispatch_id=", 22) == 0 ||
+        strncmp(token, "sender_dispatch_id=", 19) == 0 ||
+        strncmp(token, "icd_dispatch_id=", 16) == 0 ||
+        strncmp(token, "dispatch_id=", 12) == 0) {
+        const char *value = strchr(token, '=');
+        if (!value || parse_u64_token_value(value + 1, &options->sender_reconcile.dispatch_id) != 0) return -1;
+        options->sender_reconcile.has_dispatch_id = 1;
+        return 0;
+    }
+    if (strncmp(token, "sender_core_command_hash=", 25) == 0 ||
+        strncmp(token, "sender_command_hash=", 20) == 0 ||
+        strncmp(token, "command_hash=", 13) == 0 ||
+        strncmp(token, "raw_command_hash=", 17) == 0) {
+        const char *value = strchr(token, '=');
+        if (!value || parse_u64_token_value(value + 1, &options->sender_reconcile.core_command_hash) != 0) return -1;
+        options->sender_reconcile.has_core_command_hash = 1;
+        return 0;
+    }
+    if (strncmp(token, "sender_spirv_hash=", 18) == 0 ||
+        strncmp(token, "spirv_hash=", 11) == 0 ||
+        strncmp(token, "shader_hash=", 12) == 0) {
+        const char *value = strchr(token, '=');
+        if (!value || parse_u64_token_value(value + 1, &options->sender_reconcile.spirv_hash) != 0) return -1;
+        options->sender_reconcile.has_spirv_hash = 1;
+        return 0;
+    }
+    if (strncmp(token, "sender_descriptor_hash=", 23) == 0 ||
+        strncmp(token, "descriptor_hash=", 16) == 0 ||
+        strncmp(token, "descriptors_hash=", 17) == 0) {
+        const char *value = strchr(token, '=');
+        if (!value || parse_u64_token_value(value + 1, &options->sender_reconcile.descriptor_hash) != 0) return -1;
+        options->sender_reconcile.has_descriptor_hash = 1;
+        return 0;
+    }
+    if (strncmp(token, "sender_push_hash=", 17) == 0 ||
+        strncmp(token, "push_hash=", 10) == 0) {
+        const char *value = strchr(token, '=');
+        if (!value || parse_u64_token_value(value + 1, &options->sender_reconcile.push_hash) != 0) return -1;
+        options->sender_reconcile.has_push_hash = 1;
+        return 0;
+    }
+    if (strncmp(token, "sender_specialization_hash=", 27) == 0 ||
+        strncmp(token, "sender_spec_hash=", 17) == 0 ||
+        strncmp(token, "specialization_hash=", 20) == 0 ||
+        strncmp(token, "spec_hash=", 10) == 0) {
+        const char *value = strchr(token, '=');
+        if (!value || parse_u64_token_value(value + 1, &options->sender_reconcile.spec_hash) != 0) return -1;
+        options->sender_reconcile.has_spec_hash = 1;
+        return 0;
+    }
+    if (strncmp(token, "sender_dispatch_hash=", 21) == 0 ||
+        strncmp(token, "dispatch_hash=", 14) == 0) {
+        const char *value = strchr(token, '=');
+        if (!value || parse_u64_token_value(value + 1, &options->sender_reconcile.dispatch_hash) != 0) return -1;
+        options->sender_reconcile.has_dispatch_hash = 1;
+        return 0;
+    }
     if (strncmp(token, "dirty_probe=", 12) == 0) {
         const char *value = token + 12;
         if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
@@ -2757,6 +2856,184 @@ static uint64_t pipeline_specialization_hash(
         }
     }
     return hash;
+}
+
+static uint64_t reconcile_bytes_hash(const void *data, size_t size) {
+    if (!data && size > 0) return 0;
+    uint64_t hash = 1469598103934665603ull;
+    return fnv1a64_update(hash, data, size);
+}
+
+static uint64_t reconcile_descriptor_hash(
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count) {
+    uint64_t hash = 1469598103934665603ull;
+    hash = fnv1a64_update(hash, &binding_count, sizeof(binding_count));
+    for (size_t i = 0; i < binding_count; ++i) {
+        uint32_t u32 = bindings[i].descriptor_set;
+        uint64_t u64 = 0;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = bindings[i].binding;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u64 = (uint64_t)bindings[i].offset;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = (uint64_t)bindings[i].size;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = (uint64_t)bindings[i].api_offset;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = (uint64_t)bindings[i].api_range;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = (uint64_t)bindings[i].api_buffer_size;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u32 = bindings[i].api_descriptor_type;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = (uint32_t)bindings[i].api_dynamic;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u64 = (uint64_t)bindings[i].api_memory_offset;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = (uint64_t)bindings[i].api_memory_size;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = bindings[i].api_memory_id;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = bindings[i].api_buffer_id;
+        hash = fnv1a64_update(hash, &u64, sizeof(u64));
+    }
+    return hash;
+}
+
+static uint64_t reconcile_dispatch_hash(uint32_t gx, uint32_t gy, uint32_t gz) {
+    uint64_t hash = 1469598103934665603ull;
+    hash = fnv1a64_update(hash, &gx, sizeof(gx));
+    hash = fnv1a64_update(hash, &gy, sizeof(gy));
+    hash = fnv1a64_update(hash, &gz, sizeof(gz));
+    return hash;
+}
+
+static const char *json_match_or_null(int present, int matched) {
+    if (!present) return "null";
+    return matched ? "true" : "false";
+}
+
+static void write_vulkan_reconciliation_report(
+        FILE *out,
+        const VulkanDispatchOptions *options,
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        size_t shader_size,
+        uint64_t spirv_hash,
+        const VulkanDispatchSpecialization *specializations,
+        size_t specialization_count,
+        const uint8_t *specialization_data,
+        size_t specialization_data_size,
+        const uint8_t *push,
+        size_t push_size,
+        uint32_t gx,
+        uint32_t gy,
+        uint32_t gz) {
+    const PdockerReceiveEvidence *rx =
+        options && options->has_receive_evidence ? &options->receive_evidence : NULL;
+    const PdockerSenderReconcileEvidence *sender =
+        options ? &options->sender_reconcile : NULL;
+    const uint64_t descriptor_hash = reconcile_descriptor_hash(bindings, binding_count);
+    const uint64_t push_hash = reconcile_bytes_hash(push, push_size);
+    const uint64_t spec_hash = pipeline_specialization_hash(
+        specializations,
+        specialization_count,
+        specialization_data,
+        specialization_data_size);
+    const uint64_t dispatch_hash = reconcile_dispatch_hash(gx, gy, gz);
+    fprintf(out,
+            "\"reconciliation\":{"
+            "\"receive\":{"
+            "\"present\":%s,"
+            "\"raw_command_bytes\":%zu,"
+            "\"raw_command_hash\":\"0x%016llx\","
+            "\"command_bytes\":%zu,"
+            "\"command_hash\":\"0x%016llx\","
+            "\"scm_rights_fd_count_copied\":%zu,"
+            "\"scm_rights_fd_count\":%zu,"
+            "\"msg_flags\":%d,"
+            "\"msg_trunc\":%s,"
+            "\"msg_ctrunc\":%s},"
+            "\"sender\":{"
+            "\"dispatch_id_present\":%s,"
+            "\"dispatch_id\":%llu,"
+            "\"core_command_hash_present\":%s,"
+            "\"core_command_hash\":\"0x%016llx\","
+            "\"spirv_hash_present\":%s,"
+            "\"spirv_hash\":\"0x%016llx\","
+            "\"descriptor_hash_present\":%s,"
+            "\"descriptor_hash\":\"0x%016llx\","
+            "\"push_hash_present\":%s,"
+            "\"push_hash\":\"0x%016llx\","
+            "\"spec_hash_present\":%s,"
+            "\"spec_hash\":\"0x%016llx\","
+            "\"dispatch_hash_present\":%s,"
+            "\"dispatch_hash\":\"0x%016llx\"},"
+            "\"received\":{"
+            "\"shader_bytes\":%zu,"
+            "\"spirv_hash\":\"0x%016llx\","
+            "\"descriptor_count\":%zu,"
+            "\"descriptor_hash\":\"0x%016llx\","
+            "\"push_bytes\":%zu,"
+            "\"push_hash\":\"0x%016llx\","
+            "\"specialization_entries\":%zu,"
+            "\"specialization_data_bytes\":%zu,"
+            "\"specialization_hash\":\"0x%016llx\","
+            "\"dispatch\":[%u,%u,%u],"
+            "\"dispatch_hash\":\"0x%016llx\"},"
+            "\"matches\":{"
+            "\"core_command_hash_comparable\":false,"
+            "\"spirv_hash\":%s,"
+            "\"descriptor_hash\":%s,"
+            "\"push_hash\":%s,"
+            "\"spec_hash\":%s,"
+            "\"dispatch_hash\":%s}}",
+            rx ? "true" : "false",
+            rx ? rx->raw_command_bytes : 0,
+            (unsigned long long)(rx ? rx->raw_command_hash : 0),
+            rx ? rx->command_bytes : 0,
+            (unsigned long long)(rx ? rx->command_hash : 0),
+            rx ? rx->scm_rights_fd_count_copied : 0,
+            rx ? rx->scm_rights_fd_count_copied : 0,
+            rx ? rx->msg_flags : 0,
+            (rx && rx->msg_trunc) ? "true" : "false",
+            (rx && rx->msg_ctrunc) ? "true" : "false",
+            (sender && sender->has_dispatch_id) ? "true" : "false",
+            (unsigned long long)(sender ? sender->dispatch_id : 0),
+            (sender && sender->has_core_command_hash) ? "true" : "false",
+            (unsigned long long)(sender ? sender->core_command_hash : 0),
+            (sender && sender->has_spirv_hash) ? "true" : "false",
+            (unsigned long long)(sender ? sender->spirv_hash : 0),
+            (sender && sender->has_descriptor_hash) ? "true" : "false",
+            (unsigned long long)(sender ? sender->descriptor_hash : 0),
+            (sender && sender->has_push_hash) ? "true" : "false",
+            (unsigned long long)(sender ? sender->push_hash : 0),
+            (sender && sender->has_spec_hash) ? "true" : "false",
+            (unsigned long long)(sender ? sender->spec_hash : 0),
+            (sender && sender->has_dispatch_hash) ? "true" : "false",
+            (unsigned long long)(sender ? sender->dispatch_hash : 0),
+            shader_size,
+            (unsigned long long)spirv_hash,
+            binding_count,
+            (unsigned long long)descriptor_hash,
+            push_size,
+            (unsigned long long)push_hash,
+            specialization_count,
+            specialization_data_size,
+            (unsigned long long)spec_hash,
+            gx, gy, gz,
+            (unsigned long long)dispatch_hash,
+            json_match_or_null(sender && sender->has_spirv_hash,
+                               sender && sender->spirv_hash == spirv_hash),
+            json_match_or_null(sender && sender->has_descriptor_hash,
+                               sender && sender->descriptor_hash == descriptor_hash),
+            json_match_or_null(sender && sender->has_push_hash,
+                               sender && sender->push_hash == push_hash),
+            json_match_or_null(sender && sender->has_spec_hash,
+                               sender && sender->spec_hash == spec_hash),
+            json_match_or_null(sender && sender->has_dispatch_hash,
+                               sender && sender->dispatch_hash == dispatch_hash));
 }
 
 static VulkanDirtyMaskCacheEntry *find_dirty_mask_cache_entry(
@@ -9706,6 +9983,17 @@ static int run_vulkan_dispatch_fd(
                 mutable_bytes,
                 pre_barrier_count,
                 post_barrier_count);
+        write_vulkan_reconciliation_report(json_out(), options,
+                                            bindings, binding_count,
+                                            shader_size,
+                                            original_spirv_hash,
+                                            specializations,
+                                            specialization_count,
+                                            specialization_data,
+                                            specialization_data_size,
+                                            push, push_size,
+                                            gx, gy, gz);
+        fprintf(json_out(), ",");
         write_vulkan_binding_compact_report(json_out(), bindings, binding_count,
                                             buffer_fds,
                                             vk_buffers,
@@ -9879,6 +10167,17 @@ static int run_vulkan_dispatch_fd(
             active_binding_count, read_binding_count, write_binding_count,
             skipped_binding_count, skipped_binding_bytes,
             skipped_upload_bytes, skipped_download_bytes);
+    fprintf(json_out(), ",");
+    write_vulkan_reconciliation_report(json_out(), options,
+                                        bindings, binding_count,
+                                        shader_size,
+                                        original_spirv_hash,
+                                        specializations,
+                                        specialization_count,
+                                        specialization_data,
+                                        specialization_data_size,
+                                        push, push_size,
+                                        gx, gy, gz);
     if (cpu_oracle_requested) {
         /*
          * Keep oracle evidence available in the normal compact event stream.
@@ -10098,6 +10397,17 @@ cleanup:
             fprintf(json_out(), "%s%u", i ? "," : "", spirv_summary.capabilities[i]);
         }
         fprintf(json_out(), "],");
+        write_vulkan_reconciliation_report(json_out(), options,
+                                            bindings, binding_count,
+                                            shader_size,
+                                            spirv_summary.hash,
+                                            specializations,
+                                            specialization_count,
+                                            specialization_data,
+                                            specialization_data_size,
+                                            push, push_size,
+                                            gx, gy, gz);
+        fprintf(json_out(), ",");
         write_vulkan_binding_report(json_out(), bindings, binding_count,
                                     active_bindings,
                                     binding_read_needed, binding_write_needed,
@@ -10889,9 +11199,17 @@ static int parse_count(const char *s, int fallback) {
     return (int)n;
 }
 
-static int recv_command_with_fds(int cfd, char *cmd, size_t cmd_size, int *passed_fds, size_t max_fds, size_t *fd_count) {
+static int recv_command_with_fds(
+        int cfd,
+        char *cmd,
+        size_t cmd_size,
+        int *passed_fds,
+        size_t max_fds,
+        size_t *fd_count,
+        PdockerReceiveEvidence *evidence) {
     if (!cmd || cmd_size == 0 || !passed_fds || !fd_count) return -EINVAL;
     *fd_count = 0;
+    if (evidence) memset(evidence, 0, sizeof(*evidence));
     for (size_t i = 0; i < max_fds; ++i) passed_fds[i] = -1;
     char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_MAX_PASSED_FDS)];
     struct iovec iov;
@@ -10907,8 +11225,31 @@ static int recv_command_with_fds(int cfd, char *cmd, size_t cmd_size, int *passe
     msg.msg_controllen = sizeof(control);
     ssize_t n = recvmsg(cfd, &msg, 0);
     if (n <= 0) return (int)n;
+    if ((size_t)n >= cmd_size) {
+        if (evidence) {
+            evidence->valid = 1;
+            evidence->raw_command_bytes = (size_t)n;
+            evidence->raw_command_hash = reconcile_bytes_hash(cmd, cmd_size ? cmd_size - 1 : 0);
+            evidence->msg_flags = msg.msg_flags | MSG_TRUNC;
+            evidence->msg_trunc = 1;
+            evidence->msg_ctrunc = (msg.msg_flags & MSG_CTRUNC) ? 1 : 0;
+        }
+        return -EMSGSIZE;
+    }
+    if (evidence) {
+        evidence->valid = 1;
+        evidence->raw_command_bytes = (size_t)n;
+        evidence->raw_command_hash = reconcile_bytes_hash(cmd, (size_t)n);
+        evidence->msg_flags = msg.msg_flags;
+        evidence->msg_trunc = (msg.msg_flags & MSG_TRUNC) ? 1 : 0;
+        evidence->msg_ctrunc = (msg.msg_flags & MSG_CTRUNC) ? 1 : 0;
+    }
     cmd[n] = '\0';
     cmd[strcspn(cmd, "\r\n")] = '\0';
+    if (evidence) {
+        evidence->command_bytes = strlen(cmd);
+        evidence->command_hash = reconcile_bytes_hash(cmd, evidence->command_bytes);
+    }
     for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
          cmsg != NULL;
          cmsg = CMSG_NXTHDR(&msg, cmsg)) {
@@ -10916,11 +11257,36 @@ static int recv_command_with_fds(int cfd, char *cmd, size_t cmd_size, int *passe
             cmsg->cmsg_len >= CMSG_LEN(sizeof(int))) {
             size_t bytes = cmsg->cmsg_len - CMSG_LEN(0);
             size_t count = bytes / sizeof(int);
-            if (count > max_fds) count = max_fds;
-            memcpy(passed_fds, CMSG_DATA(cmsg), count * sizeof(int));
-            *fd_count = count;
+            int *received = (int *)CMSG_DATA(cmsg);
+            size_t copy = count;
+            if (copy > max_fds) copy = max_fds;
+            for (size_t i = 0; i < copy; ++i) {
+                passed_fds[i] = received[i];
+            }
+            for (size_t i = copy; i < count; ++i) {
+                if (received[i] >= 0) {
+                    close(received[i]);
+                }
+            }
+            *fd_count = copy;
             break;
         }
+    }
+    if (evidence) evidence->scm_rights_fd_count_copied = *fd_count;
+    if (msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) {
+        fprintf(stderr,
+                "pdocker-gpu-executor: recvmsg control/data truncated flags=0x%x raw_bytes=%zu fds=%zu\n",
+                msg.msg_flags,
+                (size_t)n,
+                *fd_count);
+        for (size_t i = 0; i < *fd_count; ++i) {
+            if (passed_fds[i] >= 0) {
+                close(passed_fds[i]);
+                passed_fds[i] = -1;
+            }
+        }
+        *fd_count = 0;
+        return -EMSGSIZE;
     }
     return (int)n;
 }
@@ -10983,8 +11349,25 @@ static int serve_socket(const char *path) {
         for (;;) {
             int passed_fds[PDOCKER_GPU_MAX_PASSED_FDS];
             size_t passed_fd_count = 0;
-            int nread = recv_command_with_fds(cfd, cmd, sizeof(cmd), passed_fds, PDOCKER_GPU_MAX_PASSED_FDS, &passed_fd_count);
-            if (nread <= 0) break;
+            PdockerReceiveEvidence receive_evidence;
+            int nread = recv_command_with_fds(cfd, cmd, sizeof(cmd),
+                                              passed_fds,
+                                              PDOCKER_GPU_MAX_PASSED_FDS,
+                                              &passed_fd_count,
+                                              &receive_evidence);
+            if (nread == -EMSGSIZE) {
+                g_json_out = out;
+                json_fail("recvmsg", "message truncated (MSG_TRUNC/MSG_CTRUNC)");
+                g_json_out = NULL;
+                break;
+            }
+            if (nread < 0) {
+                g_json_out = out;
+                json_fail("recvmsg", strerror(-nread));
+                g_json_out = NULL;
+                break;
+            }
+            if (nread == 0) break;
             g_json_out = out;
             if (strcmp(cmd, "CAPABILITIES") == 0) {
                 print_capabilities("unix-socket-command-queue");
@@ -11067,6 +11450,8 @@ static int serve_socket(const char *path) {
                 memset(specializations, 0, sizeof(specializations));
                 memset(bindings, 0, sizeof(bindings));
                 memset(&options, 0, sizeof(options));
+                options.has_receive_evidence = receive_evidence.valid;
+                options.receive_evidence = receive_evidence;
                 int parse_ok = 1;
                 if (binding_count == 0 || binding_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
                     push_size > PDOCKER_GPU_MAX_PUSH_BYTES ||

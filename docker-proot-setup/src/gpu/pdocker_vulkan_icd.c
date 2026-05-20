@@ -714,10 +714,182 @@ static uint64_t fnv1a64_bytes(const void *data, size_t size) {
     return hash;
 }
 
+static uint64_t fnv1a64_update_bytes(uint64_t hash, const void *data, size_t size) {
+    const unsigned char *bytes = (const unsigned char *)data;
+    if (!bytes) return hash;
+    for (size_t i = 0; i < size; ++i) {
+        hash ^= (uint64_t)bytes[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+static uint64_t fnv1a64_update_u32(uint64_t hash, uint32_t value) {
+    return fnv1a64_update_bytes(hash, &value, sizeof(value));
+}
+
+static uint64_t fnv1a64_update_u64(uint64_t hash, uint64_t value) {
+    return fnv1a64_update_bytes(hash, &value, sizeof(value));
+}
+
+static uint64_t fnv1a64_specialization_hash(
+        const VkSpecializationMapEntry *entries,
+        size_t entry_count,
+        const void *data,
+        size_t data_size) {
+    uint64_t hash = 1469598103934665603ull;
+    hash = fnv1a64_update_bytes(hash, &entry_count, sizeof(entry_count));
+    for (size_t i = 0; i < entry_count; ++i) {
+        const uint32_t constant_id = entries[i].constantID;
+        const size_t size = entries[i].size;
+        hash = fnv1a64_update_bytes(hash, &constant_id, sizeof(constant_id));
+        hash = fnv1a64_update_bytes(hash, &size, sizeof(size));
+        if (data &&
+            entries[i].offset <= data_size &&
+            size <= data_size - entries[i].offset) {
+            hash = fnv1a64_update_bytes(
+                hash,
+                (const unsigned char *)data + entries[i].offset,
+                size);
+        } else {
+            const uint32_t invalid_offset = entries[i].offset;
+            hash = fnv1a64_update_bytes(hash, &invalid_offset, sizeof(invalid_offset));
+        }
+    }
+    return hash;
+}
+
 static bool dispatch_lifecycle_log_enabled(void) {
     return trace_allocations() ||
            getenv("PDOCKER_VULKAN_ICD_DEBUG") ||
            env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false);
+}
+
+static bool reconcile_api_trace_requested(void) {
+    return env_enabled("PDOCKER_VULKAN_RECONCILE_API_TRACE");
+}
+
+static bool reconcile_api_evidence_log_enabled(void) {
+    return reconcile_api_trace_requested() ||
+           env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false) ||
+           env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", false);
+}
+
+static void trace_vulkan_command_length_warning(uint64_t dispatch_id,
+                                                size_t command_len,
+                                                size_t command_max,
+                                                const char *stage,
+                                                bool fail_closed) {
+    if (command_max == 0) return;
+    const bool near_max = command_len >= (command_max * 9) / 10;
+    if (!fail_closed && !near_max) return;
+    fprintf(stderr,
+            "pdocker-vulkan-icd: reconcile api trace: "
+            "{\"component\":\"icd\",\"event\":\"command_length_warning\","
+            "\"dispatch_id\":%llu,\"stage\":\"%s\",\"command_len\":%zu,"
+            "\"command_max\":%zu,\"near_max\":%s,\"fail_closed\":%s}\n",
+            (unsigned long long)dispatch_id,
+            stage ? stage : "unknown",
+            command_len,
+            command_max,
+            near_max ? "true" : "false",
+            fail_closed ? "true" : "false");
+    fflush(stderr);
+}
+
+static void trace_vulkan_reconcile_evidence(
+        uint64_t dispatch_id,
+        size_t raw_command_len,
+        uint64_t raw_command_hash,
+        size_t core_command_len,
+        uint64_t core_command_hash,
+        size_t shader_size,
+        uint64_t shader_hash,
+        uint32_t push_size,
+        uint64_t push_hash,
+        uint32_t specialization_count,
+        size_t specialization_data_size,
+        uint64_t specialization_data_hash,
+        uint64_t specialization_hash,
+        uint32_t dispatch_x,
+        uint32_t dispatch_y,
+        uint32_t dispatch_z,
+        size_t binding_count,
+        uint64_t descriptor_hash,
+        uint64_t dispatch_hash,
+        const uint32_t *api_descriptor_sets,
+        const uint32_t *bindings,
+        const VkDeviceSize *offsets,
+        const size_t *sizes,
+        const VkDeviceSize *api_offsets,
+        const VkDeviceSize *api_ranges,
+        const size_t *api_buffer_sizes,
+        const uint32_t *api_descriptor_types,
+        const uint32_t *api_dynamic_flags,
+        const VkDeviceSize *api_memory_offsets,
+        const size_t *api_memory_sizes,
+        const uintptr_t *api_memory_ids,
+        const uintptr_t *api_buffer_ids) {
+    if (!reconcile_api_evidence_log_enabled()) return;
+    fprintf(stderr,
+            "pdocker-vulkan-icd: reconcile api trace: "
+            "{\"component\":\"icd\",\"event\":\"send_evidence\","
+            "\"dispatch_id\":%llu,"
+            "\"raw_command_len\":%zu,\"raw_command_hash\":\"0x%016llx\","
+            "\"core_command_len\":%zu,\"core_command_hash\":\"0x%016llx\","
+            "\"shader_size\":%zu,\"shader_hash\":\"0x%016llx\","
+            "\"push_size\":%u,\"push_hash\":\"0x%016llx\","
+            "\"specialization_count\":%u,\"specialization_data_size\":%zu,"
+            "\"specialization_data_hash\":\"0x%016llx\","
+            "\"specialization_hash\":\"0x%016llx\","
+            "\"dispatch_x\":%u,\"dispatch_y\":%u,\"dispatch_z\":%u,"
+            "\"dispatch_hash\":\"0x%016llx\","
+            "\"binding_count\":%zu,\"descriptor_hash\":\"0x%016llx\","
+            "\"bindings\":[",
+            (unsigned long long)dispatch_id,
+            raw_command_len,
+            (unsigned long long)raw_command_hash,
+            core_command_len,
+            (unsigned long long)core_command_hash,
+            shader_size,
+            (unsigned long long)shader_hash,
+            push_size,
+            (unsigned long long)push_hash,
+            specialization_count,
+            specialization_data_size,
+            (unsigned long long)specialization_data_hash,
+            (unsigned long long)specialization_hash,
+            dispatch_x,
+            dispatch_y,
+            dispatch_z,
+            (unsigned long long)dispatch_hash,
+            binding_count,
+            (unsigned long long)descriptor_hash);
+    for (size_t i = 0; i < binding_count; ++i) {
+        fprintf(stderr,
+                "%s{\"set\":%u,\"binding\":%u,\"offset\":%llu,\"size\":%zu,"
+                "\"api_offset\":%llu,\"api_range\":%llu,"
+                "\"api_buffer_size\":%zu,\"api_descriptor_type\":%u,"
+                "\"api_dynamic\":%u,\"api_memory_offset\":%llu,"
+                "\"api_memory_size\":%zu,\"api_memory_id\":%llu,"
+                "\"api_buffer_id\":%llu}",
+                i ? "," : "",
+                api_descriptor_sets[i],
+                bindings[i],
+                (unsigned long long)offsets[i],
+                sizes[i],
+                (unsigned long long)api_offsets[i],
+                (unsigned long long)api_ranges[i],
+                api_buffer_sizes[i],
+                api_descriptor_types[i],
+                api_dynamic_flags[i],
+                (unsigned long long)api_memory_offsets[i],
+                api_memory_sizes[i],
+                (unsigned long long)api_memory_ids[i],
+                (unsigned long long)api_buffer_ids[i]);
+    }
+    fprintf(stderr, "]}\n");
+    fflush(stderr);
 }
 
 static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding);
@@ -733,6 +905,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     if (!op || !op->pipeline || !op->pipeline->shader) return -EINVAL;
     PdockerVkShaderModule *shader = op->pipeline->shader;
     if (shader->code_fd < 0 || shader->code_size == 0) return -EINVAL;
+    const uint64_t dispatch_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
 
     int fds[1 + PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS];
@@ -817,6 +990,17 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     if (op->pipeline->specialization_too_large) return -E2BIG;
 
     char command[4096];
+#define PDOCKER_VK_COMMAND_TOO_LONG(stage_, used_) \
+    do { \
+        trace_vulkan_command_length_warning(dispatch_id, \
+                                            (used_), \
+                                            sizeof(command), \
+                                            (stage_), \
+                                            true); \
+        return -ENAMETOOLONG; \
+    } while (0)
+#define PDOCKER_VK_APPEND_TOO_LONG(stage_) \
+    PDOCKER_VK_COMMAND_TOO_LONG((stage_), off + ((n > 0) ? (size_t)n : 0))
     int n = snprintf(command, sizeof(command),
                      "VULKAN_DISPATCH_V4 %zu %zu %u %u %u %u %s %s %u %zu %s",
                      shader->code_size,
@@ -830,7 +1014,9 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                      op->pipeline->specialization_entry_count,
                      op->pipeline->specialization_data_size,
                      spec_token);
-    if (n < 0 || (size_t)n >= sizeof(command)) return -ENAMETOOLONG;
+    if (n < 0 || (size_t)n >= sizeof(command)) {
+        PDOCKER_VK_COMMAND_TOO_LONG("core-header", (n > 0) ? (size_t)n : 0);
+    }
     size_t off = (size_t)n;
     for (uint32_t i = 0; i < op->pipeline->specialization_entry_count; ++i) {
         const VkSpecializationMapEntry *entry = &op->pipeline->specialization_entries[i];
@@ -839,7 +1025,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                      entry->constantID,
                      entry->offset,
                      entry->size);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     for (size_t i = 0; i < binding_count; ++i) {
@@ -858,35 +1044,89 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                      api_memory_sizes[i],
                      (unsigned long long)api_memory_ids[i],
                      (unsigned long long)api_buffer_ids[i]);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
+        off += (size_t)n;
+    }
+    const size_t core_command_len = off;
+    const uint64_t core_command_hash = fnv1a64_bytes(command, core_command_len);
+    const uint64_t shader_hash =
+        (shader->code_map && shader->code_map != MAP_FAILED)
+            ? fnv1a64_bytes(shader->code_map, shader->code_size)
+            : 0;
+    const uint64_t push_hash = fnv1a64_bytes(op->push_constants, push_size);
+    const uint64_t specialization_data_hash =
+        fnv1a64_bytes(op->pipeline->specialization_data,
+                      op->pipeline->specialization_data_size);
+    const uint64_t specialization_hash =
+        fnv1a64_specialization_hash(op->pipeline->specialization_entries,
+                                    op->pipeline->specialization_entry_count,
+                                    op->pipeline->specialization_data,
+                                    op->pipeline->specialization_data_size);
+    const uint32_t dispatch_y = op->dispatch_y ? op->dispatch_y : 1;
+    const uint32_t dispatch_z = op->dispatch_z ? op->dispatch_z : 1;
+    uint64_t dispatch_hash = 1469598103934665603ull;
+    dispatch_hash = fnv1a64_update_u32(dispatch_hash, op->dispatch_x);
+    dispatch_hash = fnv1a64_update_u32(dispatch_hash, dispatch_y);
+    dispatch_hash = fnv1a64_update_u32(dispatch_hash, dispatch_z);
+    uint64_t descriptor_hash = 1469598103934665603ull;
+    descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)binding_count);
+    for (size_t i = 0; i < binding_count; ++i) {
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_descriptor_sets[i]);
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, bindings[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)offsets[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)sizes[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_offsets[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_ranges[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_sizes[i]);
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_descriptor_types[i]);
+        descriptor_hash = fnv1a64_update_u32(descriptor_hash, api_dynamic_flags[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_offsets[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_sizes[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_memory_ids[i]);
+        descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)api_buffer_ids[i]);
+    }
+    if (reconcile_api_evidence_log_enabled()) {
+        n = snprintf(command + off, sizeof(command) - off,
+                     " dispatch_id=%llu sender_core_command_hash=0x%016llx"
+                     " sender_spirv_hash=0x%016llx sender_push_hash=0x%016llx"
+                     " sender_specialization_hash=0x%016llx sender_descriptor_hash=0x%016llx"
+                     " sender_dispatch_hash=0x%016llx",
+                     (unsigned long long)dispatch_id,
+                     (unsigned long long)core_command_hash,
+                     (unsigned long long)shader_hash,
+                     (unsigned long long)push_hash,
+                     (unsigned long long)specialization_hash,
+                     (unsigned long long)descriptor_hash,
+                     (unsigned long long)dispatch_hash);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_WRITEONLY_DIRTY_PROBE")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " dirty_probe=%u",
                      env_truthy_default("PDOCKER_GPU_WRITEONLY_DIRTY_PROBE", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " dirty_writeback=%u",
                      env_truthy_default("PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_WRITEONLY_BUFFER_CACHE")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " writeonly_cache=%u",
                      env_truthy_default("PDOCKER_GPU_WRITEONLY_BUFFER_CACHE", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_MUTABLE_BUFFER_CACHE")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " mutable_cache=%u",
                      env_truthy_default("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     const char *mutable_cache_max = getenv("PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES");
@@ -897,7 +1137,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             n = snprintf(command + off, sizeof(command) - off,
                          " mutable_cache_max=%llu",
                          parsed);
-            if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+            if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
             off += (size_t)n;
         }
     }
@@ -905,7 +1145,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         n = snprintf(command + off, sizeof(command) - off,
                      " resident_cache=%u",
                      env_truthy_default("PDOCKER_GPU_RESIDENT_CACHE", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     const char *resident_cache_min = getenv("PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES");
@@ -916,7 +1156,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             n = snprintf(command + off, sizeof(command) - off,
                          " resident_cache_min=%llu",
                          parsed);
-            if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+            if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
             off += (size_t)n;
         }
     }
@@ -928,152 +1168,191 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             n = snprintf(command + off, sizeof(command) - off,
                          " dirty_probe_min=%llu",
                          parsed);
-            if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+            if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
             off += (size_t)n;
         }
     }
     if (trace_allocations() || env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", false)) {
         n = snprintf(command + off, sizeof(command) - off, " profile=1");
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_STRICT_PASSTHROUGH")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " strict_passthrough=%u",
                      env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " strict_device_local_staging=%u",
                      env_truthy_default("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " rewrite_duplicate_descriptors=%u",
                      env_truthy_default("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " materialize_descriptor_aliases=%u",
                      env_truthy_default("PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " materialize_specialization=%u",
                      env_truthy_default("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " disable_pipeline_optimization=%u",
                      env_truthy_default("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " skip_unused_descriptor_transfers=%u",
                      env_truthy_default("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " use_spirv_descriptor_access=%u",
                      env_truthy_default("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", true) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " disable_overlap_aliasing=%u",
                      env_truthy_default("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_CPU_ORACLE")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " cpu_oracle=%u",
                      env_truthy_default("PDOCKER_GPU_CPU_ORACLE", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " q6k_oracle_writeback=%u",
                      env_truthy_default("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_Q6K_SAFE_KERNEL")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " q6k_safe_kernel=%u",
                      env_truthy_default("PDOCKER_GPU_Q6K_SAFE_KERNEL", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_Q4K_SAFE_KERNEL")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " q4k_safe_kernel=%u",
                      env_truthy_default("PDOCKER_GPU_Q4K_SAFE_KERNEL", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " q4k_targeted_specialization=%u",
                      env_truthy_default("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " add_float16_capability_for_storage16=%u",
                      env_truthy_default("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " disable_storage8=%u",
                      env_truthy_default("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " disable_storage16=%u",
                      env_truthy_default("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     if (getenv("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC")) {
         n = snprintf(command + off, sizeof(command) - off,
                      " disable_subgroup_arithmetic=%u",
                      env_truthy_default("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC", false) ? 1u : 0u);
-        if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
     n = snprintf(command + off, sizeof(command) - off,
                  " requested_feature_mask=%llu",
                  (unsigned long long)op->pipeline->requested_feature_mask);
-    if (n < 0 || (size_t)n >= sizeof(command) - off) return -ENAMETOOLONG;
+    if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
     off += (size_t)n;
-    if (off + 2 >= sizeof(command)) return -ENAMETOOLONG;
+    if (off + 2 >= sizeof(command)) PDOCKER_VK_COMMAND_TOO_LONG("newline", off + 2);
     command[off++] = '\n';
     command[off] = '\0';
 
-    const uint64_t dispatch_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
-    const uint64_t shader_hash = fnv1a64_bytes(shader->code_map, shader->code_size);
+    const size_t raw_command_len = off;
+    const uint64_t raw_command_hash = fnv1a64_bytes(command, raw_command_len);
+    trace_vulkan_command_length_warning(dispatch_id,
+                                        raw_command_len,
+                                        sizeof(command),
+                                        "pre-send",
+                                        false);
+    trace_vulkan_reconcile_evidence(dispatch_id,
+                                    raw_command_len,
+                                    raw_command_hash,
+                                    core_command_len,
+                                    core_command_hash,
+                                    shader->code_size,
+                                    shader_hash,
+                                    push_size,
+                                    push_hash,
+                                    op->pipeline->specialization_entry_count,
+                                    op->pipeline->specialization_data_size,
+                                    specialization_data_hash,
+                                    specialization_hash,
+                                    op->dispatch_x,
+                                    dispatch_y,
+                                    dispatch_z,
+                                    binding_count,
+                                    descriptor_hash,
+                                    dispatch_hash,
+                                    api_descriptor_sets,
+                                    bindings,
+                                    offsets,
+                                    sizes,
+                                    api_offsets,
+                                    api_ranges,
+                                    api_buffer_sizes,
+                                    api_descriptor_types,
+                                    api_dynamic_flags,
+                                    api_memory_offsets,
+                                    api_memory_sizes,
+                                    api_memory_ids,
+                                    api_buffer_ids);
+#undef PDOCKER_VK_APPEND_TOO_LONG
+#undef PDOCKER_VK_COMMAND_TOO_LONG
     const bool lifecycle_log = dispatch_lifecycle_log_enabled();
     const double lifecycle_start_ms = monotonic_ms();
     if (lifecycle_log) {

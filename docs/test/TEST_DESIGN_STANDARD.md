@@ -184,6 +184,38 @@ artifact, or using a committed fixture that reproduces the failure. A green run
 on the fixed code alone is not enough, because it can prove only that the test
 passes, not that it covers the regression.
 
+## Injection-Point Prevention Rule
+
+Regression tests must not become a substitute for rejecting bad states at the
+point where they enter the system.  For every bug fix or high-risk refactor,
+the test review must classify affected tests as:
+
+- **A: front-door prevention**: the test exercises the validator, state machine,
+  parser, schema, syscall boundary, or API method that prevents the invalid
+  state from being represented;
+- **B: downstream symptom regression**: the test catches a later observable
+  failure after the bad state has already entered the system; or
+- **C: redundant or overfit**: the test mostly checks wording, dated markers,
+  implementation strings, or one captured symptom already protected by an A
+  test.
+
+Class B and C tests may be kept while the prevention point is immature, but
+they are not a substitute for A coverage.  A downstream test may be removed or
+collapsed only after the corresponding prevention mechanism exists and has its
+own executable evidence.
+
+Current priority prevention points are:
+
+| Area | Keep as prevention anchor | Collapse only after |
+|---|---|---|
+| llama GPU environment propagation | `scripts/llama-gpu-env-manifest.json` is the single source for compare, pdockerd, compose, and verifier surfaces. | Duplicate string checks in broader ABI tests are replaced by manifest-driven validation. |
+| llama Vulkan reconciliation | API/executor reconciliation has a typed schema, unique dispatch identity, fresh ICD/executor markers, and SHA-256/full-proof or auditable canonical raw fields. | Synthetic wrong-output/FNV-only/empty-pass cases are consolidated into one table-driven verifier boundary suite. |
+| native GPU/Vulkan ABI | Compiled harnesses validate pNext feature chains, descriptor/range limits, and capability JSON. | Brittle source-string assertions are replaced by executable schema/capability checks. |
+| terminal and TTY | `EngineExecSession`, `Bridge.input`, and xterm input normalization enforce exec ownership, raw-byte input, one-shot modifiers, resize ownership, and IME enter semantics. | Artifact-only cases for duplicate Enter, literal Ctrl-C characters, arrow escape echo, and `top` refresh symptoms are reduced. |
+| path rewrite and archive | `pdocker_direct_exec.c`, archive extraction, Dockerfile `COPY`, bind setup, and changed-path logic reject traversal, escaping symlinks, malformed relative paths, and unsafe fallbacks at ingress. | Device/doc planned-gap checks are trimmed to one promotion artifact per public route. |
+| runtime/container truth | Container state save/load, pid identity, port truth, health truth, and runtime preflight reject fake success before UI cards or artifact summaries consume it. | Teardown/runtime artifact verifier matrices are reduced to one valid, one stale, and one fake-success case per surface. |
+| SAF and storage accounting | SAF path normalization, provider conflict detection, direct-write failure, inode de-duplication, and physical/logical storage accounting are validated at the mediator/accounting boundary. | UI wording and synthetic storage artifact variants are reduced. |
+
 ## Blackbox Requirement Rule
 
 Requirement tests must start from user-visible behavior, not implementation

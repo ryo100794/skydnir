@@ -133,6 +133,61 @@ def q6_verified_writeback(hash_value="0x1111111111111111"):
     }
 
 
+def api_executor_reconciliation(
+    summary="pass",
+    api_hash="0xaaaaaaaaaaaaaaaa",
+    executor_hash="0xaaaaaaaaaaaaaaaa",
+    match_status="match",
+    **extra,
+):
+    result = {
+        "summary": summary,
+        "proof_strength": "full",
+        "hash_algorithm": "sha256",
+        "dispatches": [
+            {
+                "api_canonical_hash": api_hash,
+                "executor_canonical_hash": executor_hash,
+                "match_status": match_status,
+            }
+        ],
+    }
+    result.update(extra)
+    return result
+
+
+def wrong_completion_payload(reconciliation=None):
+    diagnostics = {
+        "runtime_freshness": runtime_marker()
+    }
+    if reconciliation is not None:
+        diagnostics["api_executor_reconciliation"] = reconciliation
+    return {
+        "schema": "pdocker.llama.gpu.compare.v1",
+        "gpu": {
+            "served": True,
+            "service_readiness": {
+                "schema": "pdocker.llama.service-readiness.v1",
+                "summary": {"health": "pass", "models": "pass", "completion": "pass"},
+                "health": {"ok": True, "status": "pass"},
+                "models": {"ok": True, "status": "pass"},
+                "completion": {
+                    "ok": True,
+                    "status": "pass",
+                    "status_code": 200,
+                    "duration_ms": 47771.432,
+                    "prompt": "2+3=",
+                    "expected": ["5"],
+                    "content": " Marvel",
+                    "content_excerpt": " Marvel",
+                    "passed": False,
+                },
+            },
+            "diagnostics": diagnostics,
+        },
+    }
+
+
 class LlamaGpuArtifactVerifierTest(unittest.TestCase):
     def run_verifier(self, payload, *args):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -225,45 +280,114 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["responsibility_boundary"], "service-readiness")
         self.assertFalse(report["service_readiness"]["post_completion_health_ok"])
 
-    def test_completion_wrong_output_precedes_missing_executor_marker(self):
-        payload = {
-            "schema": "pdocker.llama.gpu.compare.v1",
-            "gpu": {
-                "served": True,
-                "service_readiness": {
-                    "schema": "pdocker.llama.service-readiness.v1",
-                    "summary": {"health": "pass", "models": "pass", "completion": "pass"},
-                    "health": {"ok": True, "status": "pass"},
-                    "models": {"ok": True, "status": "pass"},
-                    "completion": {
-                        "ok": True,
-                        "status": "pass",
-                        "status_code": 200,
-                        "duration_ms": 47771.432,
-                        "prompt": "2+3=",
-                        "expected": ["5"],
-                        "content": " Marvel",
-                        "content_excerpt": " Marvel",
-                        "passed": False,
-                    },
-                },
-                "diagnostics": {
-                    "runtime_freshness": {
-                        "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
-                        "observed_executor_markers": [],
-                        "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
-                        "observed_icd_markers": [],
-                    }
-                },
-            },
-        }
+    def test_completion_wrong_output_requires_api_executor_reconciliation(self):
+        payload = wrong_completion_payload()
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 44, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "api-executor-reconciliation-missing")
+        self.assertEqual(report["responsibility_boundary"], "api-executor-reconciliation")
+        self.assertIn(
+            "gpu.diagnostics.api_executor_reconciliation",
+            report["api_executor_reconciliation"]["missing"],
+        )
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_completion_wrong_output_with_passed_reconciliation_and_fresh_markers(self):
+        payload = wrong_completion_payload(api_executor_reconciliation())
         result = self.run_verifier(payload)
         self.assertEqual(result.returncode, 22, result.stdout)
         report = json.loads(result.stdout)
         self.assertEqual(report["classification"], "llama-completion-wrong-output")
-        self.assertEqual(report["responsibility_boundary"], "gpu-correctness")
+        self.assertEqual(report["responsibility_boundary"], "reconciled-gpu-correctness")
         self.assertEqual(report["service_readiness"]["completion_content_excerpt"], " Marvel")
+        self.assertEqual(report["api_executor_reconciliation"]["summary"], "pass")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_completion_wrong_output_rejects_empty_reconciliation_pass(self):
+        payload = wrong_completion_payload({"summary": "pass"})
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 45, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "api-executor-reconciliation-ambiguous")
+        self.assertIn("lacks substantive", json.dumps(report["api_executor_reconciliation"]["ambiguous"]))
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_completion_wrong_output_rejects_fnv_only_reconciliation_pass(self):
+        payload = wrong_completion_payload(
+            {
+                "summary": "pass",
+                "hash_algorithm": "fnv1a64",
+                "dispatches": [
+                    {
+                        "api_canonical_hash": "0xaaaaaaaaaaaaaaaa",
+                        "executor_canonical_hash": "0xaaaaaaaaaaaaaaaa",
+                        "match_status": "match",
+                    }
+                ],
+            }
+        )
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 45, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "api-executor-reconciliation-ambiguous")
+        self.assertIn("diagnostic-only", json.dumps(report["api_executor_reconciliation"]["ambiguous"]))
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_completion_wrong_output_with_reconciliation_still_requires_fresh_executor_marker(self):
+        payload = wrong_completion_payload(api_executor_reconciliation())
+        payload["gpu"]["diagnostics"]["runtime_freshness"] = {
+            "summary": "fail",
+            "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+            "observed_executor_markers": [],
+            "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
+            "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 34, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "executor-marker-not-observed")
+        self.assertEqual(report["observed_service_failure"], "llama-completion-wrong-output")
+        self.assertEqual(report["api_executor_reconciliation"]["summary"], "pass")
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_completion_wrong_output_mismatch_reconciliation_hash_blocks_classification(self):
+        payload = wrong_completion_payload(
+            api_executor_reconciliation(executor_hash="0xbbbbbbbbbbbbbbbb")
+        )
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 46, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "api-executor-reconciliation-mismatch")
+        self.assertEqual(report["api_executor_reconciliation"]["summary"], "mismatch")
+        self.assertIn("canonical hash mismatch", json.dumps(report["api_executor_reconciliation"]["mismatches"]))
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_completion_wrong_output_ambiguous_duplicate_or_unmatched_reconciliation(self):
+        duplicate_payload = wrong_completion_payload(
+            api_executor_reconciliation(duplicate_dispatches=[{"dispatch_id": "q6-0"}])
+        )
+        duplicate = self.run_verifier(duplicate_payload)
+        self.assertEqual(duplicate.returncode, 45, duplicate.stdout)
+        duplicate_report = json.loads(duplicate.stdout)
+        self.assertEqual(duplicate_report["classification"], "api-executor-reconciliation-ambiguous")
+        self.assertIn("duplicate", json.dumps(duplicate_report["api_executor_reconciliation"]["ambiguous"]))
+        self.assertFalse(duplicate_report["benchmark_claim_allowed"])
+
+        unmatched_payload = wrong_completion_payload(
+            api_executor_reconciliation(unmatched_api_outputs=[{"prompt": "2+3="}])
+        )
+        unmatched = self.run_verifier(unmatched_payload)
+        self.assertEqual(unmatched.returncode, 45, unmatched.stdout)
+        unmatched_report = json.loads(unmatched.stdout)
+        self.assertEqual(unmatched_report["classification"], "api-executor-reconciliation-ambiguous")
+        self.assertIn("unmatched", json.dumps(unmatched_report["api_executor_reconciliation"]["ambiguous"]))
+        self.assertFalse(unmatched_report["benchmark_claim_allowed"])
 
     def test_memory_blocker_preserves_artifact_diagnostics(self):
         payload = {

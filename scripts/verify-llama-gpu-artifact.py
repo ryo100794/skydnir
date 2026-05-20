@@ -961,6 +961,173 @@ def _service_completion_timeout(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _api_executor_reconciliation(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate API/output-to-executor dispatch reconciliation evidence.
+
+    Wrong deterministic /completion output is only actionable as GPU
+    correctness after the artifact proves the HTTP/API prompt response was
+    reconciled to the executor dispatch evidence.  Missing evidence fails
+    closed; duplicate or unmatched evidence is ambiguous; explicit failures,
+    dispatch hash disagreements, or mismatch statuses are mismatches.
+    """
+
+    reconciliation = nested(data, "gpu", "diagnostics", "api_executor_reconciliation")
+    if not isinstance(reconciliation, dict) or not reconciliation:
+        return {
+            "summary": "missing",
+            "missing": ["gpu.diagnostics.api_executor_reconciliation"],
+            "ambiguous": [],
+            "mismatches": [],
+        }
+
+    raw_summary = reconciliation.get("summary")
+    if raw_summary in (None, ""):
+        return {
+            "summary": "missing",
+            "missing": ["gpu.diagnostics.api_executor_reconciliation.summary"],
+            "ambiguous": [],
+            "mismatches": [],
+            "evidence": reconciliation,
+        }
+    summary = str(raw_summary).lower()
+
+    ambiguous: list[dict[str, Any]] = []
+    mismatches: list[dict[str, Any]] = []
+
+    def add_ambiguous(path: str, reason: str, value: Any) -> None:
+        if len(ambiguous) < 16:
+            ambiguous.append({"path": path, "reason": reason, "value": value})
+
+    def add_mismatch(path: str, reason: str, value: Any) -> None:
+        if len(mismatches) < 16:
+            mismatches.append({"path": path, "reason": reason, "value": value})
+
+    def truthy_evidence(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value > 0
+        if isinstance(value, float):
+            return value > 0
+        if isinstance(value, (list, tuple, set, dict)):
+            return len(value) > 0
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            return bool(lowered and lowered not in {"0", "false", "none", "no", "not-recorded"})
+        return value is not None
+
+    explicit_hash_pairs = (
+        ("api_canonical_hash", "executor_canonical_hash"),
+        ("api_dispatch_canonical_hash", "executor_dispatch_canonical_hash"),
+        ("api_canonical_request_hash", "executor_canonical_request_hash"),
+        ("api_output_canonical_hash", "executor_output_canonical_hash"),
+        ("api_completion_canonical_hash", "executor_completion_canonical_hash"),
+        ("api_canonical_dispatch_hash", "executor_canonical_dispatch_hash"),
+        ("api_canonical_hash", "dispatch_canonical_hash"),
+        ("api_canonical_hash", "canonical_dispatch_hash"),
+        ("api_canonical_hash", "executor_dispatch_canonical_hash"),
+        ("completion_canonical_hash", "dispatch_canonical_hash"),
+        ("api_completion_canonical_hash", "dispatch_canonical_hash"),
+    )
+
+    def reconciliation_has_hash_pair(value: Any) -> bool:
+        if isinstance(value, dict):
+            for left_key, right_key in explicit_hash_pairs:
+                left = value.get(left_key)
+                right = value.get(right_key)
+                if isinstance(left, str) and left and isinstance(right, str) and right:
+                    return True
+            return any(reconciliation_has_hash_pair(child) for child in value.values())
+        if isinstance(value, list):
+            return any(reconciliation_has_hash_pair(child) for child in value)
+        return False
+
+    def reconciliation_has_promoting_proof(value: Any) -> bool:
+        if isinstance(value, dict):
+            proof_strength = str(value.get("proof_strength") or "").strip().lower()
+            hash_algorithm = str(value.get("hash_algorithm") or "").strip().lower()
+            raw_fields = value.get("canonical_raw_fields_present")
+            if proof_strength in {"full", "sha256", "sha-256", "collision-resistant"}:
+                return True
+            if hash_algorithm in {"sha256", "sha-256"}:
+                return True
+            if raw_fields is True:
+                return True
+            return any(reconciliation_has_promoting_proof(child) for child in value.values())
+        if isinstance(value, list):
+            return any(reconciliation_has_promoting_proof(child) for child in value)
+        return False
+
+    def compare_hash_pair(path: str, item: dict[str, Any], left_key: str, right_key: str) -> None:
+        left = item.get(left_key)
+        right = item.get(right_key)
+        if isinstance(left, str) and left and isinstance(right, str) and right:
+            if left.lower() != right.lower():
+                add_mismatch(
+                    path,
+                    "canonical hash mismatch",
+                    {left_key: left, right_key: right},
+                )
+
+    def inspect(value: Any, path: str) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                lowered_key = str(key).lower()
+                child_path = f"{path}.{key}"
+                if ("duplicate" in lowered_key or "unmatched" in lowered_key) and truthy_evidence(child):
+                    add_ambiguous(child_path, "duplicate or unmatched reconciliation evidence", child)
+                if lowered_key == "match_status" or lowered_key.endswith("_match_status"):
+                    lowered_value = str(child).lower()
+                    if lowered_value in {"mismatch", "hash-mismatch", "canonical-mismatch"}:
+                        add_mismatch(child_path, "match_status mismatch", child)
+                inspect(child, child_path)
+
+            for left_key, right_key in explicit_hash_pairs:
+                compare_hash_pair(path, value, left_key, right_key)
+
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                inspect(child, f"{path}[{index}]")
+
+    inspect(reconciliation, "gpu.diagnostics.api_executor_reconciliation")
+
+    if summary == "pass" and not reconciliation_has_hash_pair(reconciliation):
+        add_ambiguous(
+            "gpu.diagnostics.api_executor_reconciliation",
+            "summary pass lacks substantive one-to-one reconciliation evidence",
+            reconciliation,
+        )
+    if summary == "pass" and reconciliation_has_hash_pair(reconciliation) and not reconciliation_has_promoting_proof(reconciliation):
+        add_ambiguous(
+            "gpu.diagnostics.api_executor_reconciliation",
+            "summary pass is diagnostic-only; promoting reconciliation requires SHA-256/full proof or canonical raw fields",
+            reconciliation,
+        )
+
+    if summary in {"ambiguous", "inconclusive", "duplicate", "unmatched"}:
+        add_ambiguous("gpu.diagnostics.api_executor_reconciliation.summary", "ambiguous summary", raw_summary)
+    if summary in {"fail", "failed", "mismatch", "hash-mismatch", "canonical-mismatch"}:
+        add_mismatch("gpu.diagnostics.api_executor_reconciliation.summary", "failing summary", raw_summary)
+
+    if ambiguous:
+        result_summary = "ambiguous"
+    elif mismatches:
+        result_summary = "mismatch"
+    elif summary == "pass":
+        result_summary = "pass"
+    else:
+        result_summary = "ambiguous"
+        add_ambiguous("gpu.diagnostics.api_executor_reconciliation.summary", "unrecognized summary", raw_summary)
+
+    return {
+        "summary": result_summary,
+        "missing": [],
+        "ambiguous": ambiguous[:16],
+        "mismatches": mismatches[:16],
+        "evidence": reconciliation,
+    }
+
+
 PRE_HTTP_GPU_BLOCKER_CLASSIFICATIONS = {
     "vulkan_pipeline_feature": "vulkan-pipeline-feature",
     "vulkan_queue_submit_feature": "vulkan-queue-submit-feature",
@@ -1387,14 +1554,79 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         and completion_readiness.get("completion_ok") is True
         and completion_readiness.get("completion_passed") is False
     ):
+        api_executor_reconciliation = _api_executor_reconciliation(data)
+        reconciliation_summary = api_executor_reconciliation.get("summary")
+        if reconciliation_summary == "missing":
+            return _claim_base(
+                "api-executor-reconciliation-missing",
+                next_action="rerun compare with API-to-executor reconciliation evidence before assigning wrong deterministic /completion output to GPU correctness",
+                runtime_freshness=runtime_freshness,
+                runtime_env_manifest=runtime_env_manifest,
+                responsibility_boundary="api-executor-reconciliation",
+            ) | {
+                "service_readiness": completion_readiness,
+                "api_executor_reconciliation": api_executor_reconciliation,
+                "runtime_env": nested(data, "gpu", "runtime_env") or {},
+            }
+        if reconciliation_summary == "ambiguous":
+            return _claim_base(
+                "api-executor-reconciliation-ambiguous",
+                next_action="rerun compare until API prompt/output evidence maps to exactly one executor dispatch with no duplicate or unmatched reconciliation evidence",
+                runtime_freshness=runtime_freshness,
+                runtime_env_manifest=runtime_env_manifest,
+                responsibility_boundary="api-executor-reconciliation",
+            ) | {
+                "service_readiness": completion_readiness,
+                "api_executor_reconciliation": api_executor_reconciliation,
+                "runtime_env": nested(data, "gpu", "runtime_env") or {},
+            }
+        if reconciliation_summary == "mismatch":
+            return _claim_base(
+                "api-executor-reconciliation-mismatch",
+                next_action="fix API-to-executor dispatch reconciliation before interpreting the wrong deterministic /completion output as GPU correctness",
+                runtime_freshness=runtime_freshness,
+                runtime_env_manifest=runtime_env_manifest,
+                responsibility_boundary="api-executor-reconciliation",
+            ) | {
+                "service_readiness": completion_readiness,
+                "api_executor_reconciliation": api_executor_reconciliation,
+                "runtime_env": nested(data, "gpu", "runtime_env") or {},
+            }
+        if not _observed_executor_marker_ok(runtime_freshness):
+            return _claim_base(
+                "executor-marker-not-observed",
+                next_action="rerun compare with fresh GPU executor evidence; reconciled wrong-output claims require the expected executor marker",
+                runtime_freshness=runtime_freshness,
+                runtime_env_manifest=runtime_env_manifest,
+                responsibility_boundary="runtime-freshness",
+            ) | {
+                "observed_service_failure": "llama-completion-wrong-output",
+                "service_readiness": completion_readiness,
+                "api_executor_reconciliation": api_executor_reconciliation,
+                "runtime_env": nested(data, "gpu", "runtime_env") or {},
+            }
+        if not _observed_icd_marker_ok(runtime_freshness):
+            return _claim_base(
+                "icd-marker-not-observed",
+                next_action="rerun compare after installing an APK with the expected Vulkan ICD marker; reconciled wrong-output claims require fresh ICD evidence",
+                runtime_freshness=runtime_freshness,
+                runtime_env_manifest=runtime_env_manifest,
+                responsibility_boundary="runtime-freshness",
+            ) | {
+                "observed_service_failure": "llama-completion-wrong-output",
+                "service_readiness": completion_readiness,
+                "api_executor_reconciliation": api_executor_reconciliation,
+                "runtime_env": nested(data, "gpu", "runtime_env") or {},
+            }
         return _claim_base(
             "llama-completion-wrong-output",
-            next_action="keep the current image/model/prompt fixed and inspect GPU numeric/layout/readback evidence; deterministic /completion returned an HTTP response but failed the required prompt check",
+            next_action="keep the current image/model/prompt fixed and inspect GPU numeric/layout/readback evidence; deterministic /completion returned an HTTP response but failed the required prompt check and API-to-executor reconciliation passed",
             runtime_freshness=runtime_freshness,
             runtime_env_manifest=runtime_env_manifest,
-            responsibility_boundary="gpu-correctness",
+            responsibility_boundary="reconciled-gpu-correctness",
         ) | {
             "service_readiness": completion_readiness,
+            "api_executor_reconciliation": api_executor_reconciliation,
             "runtime_env": nested(data, "gpu", "runtime_env") or {},
         }
 
@@ -1729,6 +1961,12 @@ def main(argv: list[str]) -> int:
         "llama-completion-wrong-output",
     }:
         return 22
+    if classification == "api-executor-reconciliation-missing":
+        return 44
+    if classification == "api-executor-reconciliation-ambiguous":
+        return 45
+    if classification == "api-executor-reconciliation-mismatch":
+        return 46
     if classification == "executor-marker-not-observed":
         return 34
     if classification == "icd-marker-not-observed":
