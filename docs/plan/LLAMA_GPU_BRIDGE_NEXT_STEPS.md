@@ -643,6 +643,76 @@ is explicit rather than implicit:
   reused during tuning, but without CPU baseline evidence the verifier keeps
   `benchmark_claim_allowed=false`.
 
+### 2026-05-21 Q6_K evidence-capture and WorkgroupSize update
+
+Latest device evidence before this patch:
+
+- `docs/test/llama-gpu-ngl1-q6-valid-json-adb33619-20260521T220914Z.json`
+- `/health`, `/v1/models`, and `/completion` were reachable, but the required
+  deterministic prompt returned `Marvel` for `2+3=` instead of `5`.
+- Runtime freshness passed and executor markers were fresh.
+- Q6_K/final projection hash `0x1bf751845c5dce75` was reached with
+  `q6_dispatch_seen=true`.
+- The old log merger duplicated durable engine/workspace log records, causing
+  API/executor reconciliation to report `ambiguous` even when the duplicated
+  records were byte-identical.
+- The executor previously emitted non-finite diagnostic doubles as JSON
+  `inf`, which caused the compare driver to drop the Q6 oracle response.
+- After fixing JSON emission, the artifact exposed a real Q6 blocker:
+  `blocker_class=workgroup-shape`,
+  `spirv_local_size=[1,1,1]`,
+  `spirv_local_size_resolved=[1,1,1]`, while the Q6 specialization entries
+  carried the effective workgroup tuple `[32,2,1]`.
+
+Structural fixes now in the bridge:
+
+- The compare driver deduplicates identical executor JSON events after merging
+  multiple durable log sources.  This keeps crash-safe log collection without
+  weakening the verifier's ambiguity checks for genuinely different duplicate
+  dispatches.
+- The executor emits valid JSON for non-finite Q6 diagnostic doubles by writing
+  `null` instead of `inf`/`NaN`.
+- SPIR-V summary now resolves `BuiltIn WorkgroupSize` specialization-constant
+  composites, not only `OpExecutionModeId LocalSizeId`.  This is required for
+  shaders that declare literal `LocalSize 1,1,1` but use Vulkan specialization
+  constants to carry the actual workgroup shape.
+- `PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC=1` can now patch that literal
+  local size from the `BuiltIn WorkgroupSize` specialization tuple.  This is a
+  bridge-side Vulkan compatibility legalization; it does not change llama.cpp,
+  Dockerfiles, model files, prompts, descriptor bytes, or tensor data.
+- `source_spirv_hash` remains the original container-provided shader hash even
+  when the bridge applies the compatibility legalization, so known-hash Q6/Q4
+  diagnostics are not lost after an effective shader hash changes.
+
+Next device run once ADB is available:
+
+```bash
+ANDROID_SERIAL=<device> \
+PDOCKER_GPU_CPU_ORACLE=1 \
+PDOCKER_GPU_DISPATCH_PROFILE_LOG=1 \
+PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1 \
+bash scripts/android-llama-gpu-compare.sh \
+  --gpu-only \
+  --cpu-tps 0.04702448956650603 \
+  --cpu-ctx 512 \
+  --gpu-ctx 512 \
+  --gpu-layers 1 \
+  --predict 4 \
+  --repeat 1 \
+  --out docs/test/llama-gpu-ngl1-q6-workgroup-legalized-<device>-$(date -u +%Y%m%dT%H%M%SZ).json
+```
+
+Expected acceptance for the next run:
+
+- `gpu.diagnostics.q6_workgroup_diagnostics.local_size_resolved == [32,2,1]`.
+- `local_size_patched == true` appears in Q6 executor evidence when the source
+  module uses the `BuiltIn WorkgroupSize` specialization path.
+- The verifier should no longer classify the run as
+  `q6-oracle-capture-missing` or reconciliation-ambiguous solely due to
+  duplicate merged log lines.
+- If the prompt still fails, the next blocker must be a concrete Q6 oracle,
+  writeback, synchronization, or output-layout class with valid JSON evidence.
+
 ### Stage 5: Correctness gate for `ngl=1`
 
 Purpose: make one real offloaded layer safe before increasing GPU layer count.

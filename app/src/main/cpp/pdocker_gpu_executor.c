@@ -1094,6 +1094,8 @@ typedef struct {
     uint32_t local_size_id[3];
     uint32_t local_size_spec_id[3];
     uint8_t local_size_spec_id_valid[3];
+    uint32_t workgroup_size_spec_id[3];
+    uint8_t workgroup_size_spec_id_valid[3];
     uint32_t capability_count;
     uint32_t capabilities[24];
     int requires_float16;
@@ -1148,6 +1150,8 @@ static SpirvTraceSummary summarize_spirv(const uint32_t *code, size_t bytes) {
     s.local_size_id[0] = s.local_size_id[1] = s.local_size_id[2] = 0;
     s.local_size_spec_id[0] = s.local_size_spec_id[1] = s.local_size_spec_id[2] = 0;
     s.local_size_spec_id_valid[0] = s.local_size_spec_id_valid[1] = s.local_size_spec_id_valid[2] = 0;
+    s.workgroup_size_spec_id[0] = s.workgroup_size_spec_id[1] = s.workgroup_size_spec_id[2] = 0;
+    s.workgroup_size_spec_id_valid[0] = s.workgroup_size_spec_id_valid[1] = s.workgroup_size_spec_id_valid[2] = 0;
     s.hash = 1469598103934665603ull;
     if (!code) return s;
     const uint8_t *raw = (const uint8_t *)code;
@@ -1204,7 +1208,37 @@ static SpirvTraceSummary summarize_spirv(const uint32_t *code, size_t bytes) {
         }
         i += word_count;
     }
-    if (s.local_size_id[0] || s.local_size_id[1] || s.local_size_id[2]) {
+    uint32_t workgroup_size_object_id = 0;
+    uint32_t workgroup_size_component_id[3] = {0, 0, 0};
+    for (size_t i = 5; i < words;) {
+        uint32_t inst = code[i];
+        uint16_t word_count = (uint16_t)(inst >> 16);
+        uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) break;
+        if (op == 71 && word_count >= 4 && code[i + 2] == 11 && code[i + 3] == 25) {
+            /* OpDecorate <id> BuiltIn WorkgroupSize */
+            workgroup_size_object_id = code[i + 1];
+            break;
+        }
+        i += word_count;
+    }
+    if (workgroup_size_object_id) {
+        for (size_t i = 5; i < words;) {
+            uint32_t inst = code[i];
+            uint16_t word_count = (uint16_t)(inst >> 16);
+            uint16_t op = (uint16_t)(inst & 0xffffu);
+            if (word_count == 0 || i + word_count > words) break;
+            if (op == 51 && word_count >= 6 && code[i + 2] == workgroup_size_object_id) {
+                workgroup_size_component_id[0] = code[i + 3];
+                workgroup_size_component_id[1] = code[i + 4];
+                workgroup_size_component_id[2] = code[i + 5];
+                break;
+            }
+            i += word_count;
+        }
+    }
+    if ((s.local_size_id[0] || s.local_size_id[1] || s.local_size_id[2]) ||
+        workgroup_size_component_id[0] || workgroup_size_component_id[1] || workgroup_size_component_id[2]) {
         for (size_t i = 5; i < words;) {
             uint32_t inst = code[i];
             uint16_t word_count = (uint16_t)(inst >> 16);
@@ -1215,6 +1249,11 @@ static SpirvTraceSummary summarize_spirv(const uint32_t *code, size_t bytes) {
                     if (s.local_size_id[dim] && code[i + 1] == s.local_size_id[dim]) {
                         s.local_size_spec_id[dim] = code[i + 3];
                         s.local_size_spec_id_valid[dim] = 1;
+                    }
+                    if (workgroup_size_component_id[dim] &&
+                        code[i + 1] == workgroup_size_component_id[dim]) {
+                        s.workgroup_size_spec_id[dim] = code[i + 3];
+                        s.workgroup_size_spec_id_valid[dim] = 1;
                     }
                 }
             }
@@ -1566,6 +1605,16 @@ static void resolve_spirv_local_size(
                                             &spec_value)) {
                 value = spec_value;
             }
+        } else if (summary->workgroup_size_spec_id_valid[i]) {
+            uint64_t spec_value = 0;
+            if (specialization_value_for_id(specializations,
+                                            specialization_count,
+                                            specialization_data,
+                                            specialization_data_size,
+                                            summary->workgroup_size_spec_id[i],
+                                            &spec_value)) {
+                value = spec_value;
+            }
         }
         out[i] = value;
     }
@@ -1593,7 +1642,10 @@ static int spirv_local_size_consistent(
         size_t specialization_data_size) {
     if (!summary || !summary->valid) return 1;
     if (!summary->local_size_id[0] && !summary->local_size_id[1] &&
-        !summary->local_size_id[2]) {
+        !summary->local_size_id[2] &&
+        !summary->workgroup_size_spec_id_valid[0] &&
+        !summary->workgroup_size_spec_id_valid[1] &&
+        !summary->workgroup_size_spec_id_valid[2]) {
         return 1;
     }
     uint64_t resolved[3];
@@ -1655,6 +1707,7 @@ static void write_spirv_execution_report(
             "\"spirv_local_size\":[%u,%u,%u],"
             "\"spirv_local_size_id\":[%u,%u,%u],"
             "\"spirv_local_size_spec_id\":[%u,%u,%u],"
+            "\"spirv_workgroup_size_spec_id\":[%u,%u,%u],"
             "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
             "\"spirv_local_size_consistent\":%s,",
             (unsigned long long)summary->hash,
@@ -1669,6 +1722,9 @@ static void write_spirv_execution_report(
             summary->local_size_spec_id_valid[0] ? summary->local_size_spec_id[0] : UINT32_MAX,
             summary->local_size_spec_id_valid[1] ? summary->local_size_spec_id[1] : UINT32_MAX,
             summary->local_size_spec_id_valid[2] ? summary->local_size_spec_id[2] : UINT32_MAX,
+            summary->workgroup_size_spec_id_valid[0] ? summary->workgroup_size_spec_id[0] : UINT32_MAX,
+            summary->workgroup_size_spec_id_valid[1] ? summary->workgroup_size_spec_id[1] : UINT32_MAX,
+            summary->workgroup_size_spec_id_valid[2] ? summary->workgroup_size_spec_id[2] : UINT32_MAX,
             (unsigned long long)resolved_local_size[0],
             (unsigned long long)resolved_local_size[1],
             (unsigned long long)resolved_local_size[2],
@@ -3178,13 +3234,16 @@ static int patch_spirv_literal_local_size_from_spec(
     int found_local_size_spec = 0;
     for (uint32_t dim = 0; dim < 3; ++dim) {
         local_size[dim] = summary.local_size[dim] ? summary.local_size[dim] : 1;
-        if (summary.local_size_spec_id_valid[dim]) {
+        if (summary.local_size_spec_id_valid[dim] ||
+            summary.workgroup_size_spec_id_valid[dim]) {
             uint64_t value = local_size[dim];
             if (specialization_value_for_id(specializations,
                                             specialization_count,
                                             specialization_data,
                                             specialization_data_size,
-                                            summary.local_size_spec_id[dim],
+                                            summary.local_size_spec_id_valid[dim]
+                                                ? summary.local_size_spec_id[dim]
+                                                : summary.workgroup_size_spec_id[dim],
                                             &value)) {
                 if (value == 0 || value > 1024) return 0;
                 local_size[dim] = value;
@@ -4575,6 +4634,14 @@ static void write_q6_row_provenance_probe(FILE *out, const CpuOracleReport *repo
     fprintf(out, "]}");
 }
 
+static void write_json_double_or_null(FILE *out, double value) {
+    if (isfinite(value)) {
+        fprintf(out, "%.9g", value);
+    } else {
+        fprintf(out, "null");
+    }
+}
+
 static void write_q6_partial_signature_probe(FILE *out, const CpuOracleReport *report) {
     if (!cpu_oracle_report_is_q6(report) || !report ||
         !report->q6_partial_signature_probe_ran) {
@@ -4597,43 +4664,42 @@ static void write_q6_partial_signature_probe(FILE *out, const CpuOracleReport *r
         const Q6PartialSignatureProbeSample *sample =
             &report->q6_partial_signature_probe_samples[i];
         fprintf(out,
-                "%s{\"dst_index\":%llu,\"expected\":%.9g,"
-                "\"gpu_at_dst\":%.9g,"
-                "\"local_y0_sum\":%.9g,\"local_y1_sum\":%.9g,"
-                "\"local_y0_abs_error\":%.9g,"
-                "\"local_y1_abs_error\":%.9g,"
-                "\"local_y_best\":%d,"
-                "\"local_y_best_abs_error\":%.9g,"
-                "\"first16_sum\":%.9g,\"second16_sum\":%.9g,"
-                "\"native_reduction_tree_available\":%s,"
-                "\"native_reduction_tree_sum\":%.9g,"
-                "\"native_reduction_tree_with_accumulator\":%.9g,"
-                "\"native_reduction_tree_gpu_abs_error\":%.9g,"
-                "\"expected_gpu_abs_error\":%.9g,"
-                "\"best_lane\":%d,\"best_lane_value\":%.9g,"
-                "\"best_lane_abs_error\":%.9g,"
-                "\"class\":\"%s\"}",
+                "%s{\"dst_index\":%llu,\"expected\":",
                 i ? "," : "",
-                (unsigned long long)sample->dst_index,
-                sample->expected,
-                sample->gpu_at_dst,
-                sample->local_y0_sum,
-                sample->local_y1_sum,
-                sample->local_y0_abs_error,
-                sample->local_y1_abs_error,
-                sample->local_y_best,
-                sample->local_y_best_abs_error,
-                sample->first16_sum,
-                sample->second16_sum,
-                sample->native_reduction_tree_available ? "true" : "false",
-                sample->native_reduction_tree_sum,
-                sample->native_reduction_tree_with_accumulator,
-                sample->native_reduction_tree_gpu_abs_error,
-                sample->expected_gpu_abs_error,
-                sample->best_lane,
-                sample->best_lane_value,
-                sample->best_lane_abs_error,
-                sample->klass);
+                (unsigned long long)sample->dst_index);
+        write_json_double_or_null(out, sample->expected);
+        fprintf(out, ",\"gpu_at_dst\":");
+        write_json_double_or_null(out, sample->gpu_at_dst);
+        fprintf(out, ",\"local_y0_sum\":");
+        write_json_double_or_null(out, sample->local_y0_sum);
+        fprintf(out, ",\"local_y1_sum\":");
+        write_json_double_or_null(out, sample->local_y1_sum);
+        fprintf(out, ",\"local_y0_abs_error\":");
+        write_json_double_or_null(out, sample->local_y0_abs_error);
+        fprintf(out, ",\"local_y1_abs_error\":");
+        write_json_double_or_null(out, sample->local_y1_abs_error);
+        fprintf(out, ",\"local_y_best\":%d,\"local_y_best_abs_error\":",
+                sample->local_y_best);
+        write_json_double_or_null(out, sample->local_y_best_abs_error);
+        fprintf(out, ",\"first16_sum\":");
+        write_json_double_or_null(out, sample->first16_sum);
+        fprintf(out, ",\"second16_sum\":");
+        write_json_double_or_null(out, sample->second16_sum);
+        fprintf(out, ",\"native_reduction_tree_available\":%s,"
+                     "\"native_reduction_tree_sum\":",
+                sample->native_reduction_tree_available ? "true" : "false");
+        write_json_double_or_null(out, sample->native_reduction_tree_sum);
+        fprintf(out, ",\"native_reduction_tree_with_accumulator\":");
+        write_json_double_or_null(out, sample->native_reduction_tree_with_accumulator);
+        fprintf(out, ",\"native_reduction_tree_gpu_abs_error\":");
+        write_json_double_or_null(out, sample->native_reduction_tree_gpu_abs_error);
+        fprintf(out, ",\"expected_gpu_abs_error\":");
+        write_json_double_or_null(out, sample->expected_gpu_abs_error);
+        fprintf(out, ",\"best_lane\":%d,\"best_lane_value\":", sample->best_lane);
+        write_json_double_or_null(out, sample->best_lane_value);
+        fprintf(out, ",\"best_lane_abs_error\":");
+        write_json_double_or_null(out, sample->best_lane_abs_error);
+        fprintf(out, ",\"class\":\"%s\"}", sample->klass);
     }
     fprintf(out, "]}");
 }
@@ -8298,6 +8364,8 @@ static int run_vulkan_dispatch_fd(
     memset(binding_fd_ino, 0, sizeof(binding_fd_ino));
     if (!shader_code) return -21;
     if (read_fd_exact(shader_fd, shader_code, shader_size, 0) != 0) goto cleanup;
+    const SpirvTraceSummary requested_spirv_summary = summarize_spirv(shader_code, shader_size);
+    const uint64_t original_spirv_hash = requested_spirv_summary.hash;
     const int materialize_specialization_constants =
         strict_passthrough ? 0 :
         options && options->has_materialize_specialization_constants
@@ -8391,8 +8459,6 @@ static int run_vulkan_dispatch_fd(
             goto cleanup;
         }
     }
-    SpirvTraceSummary source_spirv_summary = summarize_spirv(shader_code, shader_size);
-    const uint64_t original_spirv_hash = source_spirv_summary.hash;
     q4k_callsite_detected = is_q4k_matvec_hash(original_spirv_hash);
     q4k_pipeline_retry_enabled = q4k_callsite_detected &&
         (options && options->has_q4k_pipeline_retry_ladder
@@ -8447,12 +8513,11 @@ static int run_vulkan_dispatch_fd(
         options && options->has_q4k_safe_kernel
             ? options->q4k_safe_kernel
             : env_truthy("PDOCKER_GPU_Q4K_SAFE_KERNEL", 0);
-    if (q4k_safe_kernel_requested && is_q4k_matvec_hash(source_spirv_summary.hash)) {
+    if (q4k_safe_kernel_requested && is_q4k_matvec_hash(original_spirv_hash)) {
         memcpy(shader_code, kQ4kSafeSpv, sizeof(kQ4kSafeSpv));
         shader_size = sizeof(kQ4kSafeSpv);
         binding_alias_count = 0;
         q4k_safe_kernel_used = 1;
-        source_spirv_summary = summarize_spirv(shader_code, shader_size);
     }
     uint64_t q4k_spec2 = 0;
     if (!materialize_specialization_constants &&
@@ -8461,7 +8526,7 @@ static int run_vulkan_dispatch_fd(
         (options && options->has_q4k_targeted_specialization
              ? options->q4k_targeted_specialization
              : env_truthy("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", 0)) &&
-        is_q4k_matvec_hash(source_spirv_summary.hash) &&
+        is_q4k_matvec_hash(original_spirv_hash) &&
         specialization_value_for_id(specializations,
                                     specialization_count,
                                     specialization_data,
@@ -8479,7 +8544,6 @@ static int run_vulkan_dispatch_fd(
                 specialization_data_size);
         if (q4k_targeted_specialization_materialized) {
             specialization_materialized = 1;
-            source_spirv_summary = summarize_spirv(shader_code, shader_size);
             q4k_callsite_detected = 1;
         }
     }
@@ -8494,7 +8558,7 @@ static int run_vulkan_dispatch_fd(
         options && options->has_q6k_safe_kernel
             ? options->q6k_safe_kernel
             : env_truthy("PDOCKER_GPU_Q6K_SAFE_KERNEL", 0);
-    if (q6k_safe_kernel_requested && is_q6k_matvec_hash(source_spirv_summary.hash)) {
+    if (q6k_safe_kernel_requested && is_q6k_matvec_hash(original_spirv_hash)) {
         memcpy(shader_code, kQ6kSafeSpv, sizeof(kQ6kSafeSpv));
         shader_size = sizeof(kQ6kSafeSpv);
         binding_alias_count = 0;
@@ -9003,7 +9067,6 @@ static int run_vulkan_dispatch_fd(
                     specialization_data_size)) {
                 specialization_materialized = 1;
                 spirv_summary = summarize_spirv(shader_code, shader_size);
-                source_spirv_summary = spirv_summary;
                 VkShaderModuleCreateInfo retry_smci = {
                     .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
                     .codeSize = shader_size,

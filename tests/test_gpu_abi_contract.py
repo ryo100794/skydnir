@@ -198,9 +198,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q6k_finalize_partial_signature_probe", source)
         self.assertIn("write_q6_partial_signature_probe", source)
         self.assertIn('\\"q6_partial_signature_probe\\":', source)
-        self.assertIn('\\"native_reduction_tree_with_accumulator\\":%.9g', source)
-        self.assertIn('\\"native_reduction_tree_gpu_abs_error\\":%.9g', source)
-        self.assertIn('\\"expected_gpu_abs_error\\":%.9g', source)
+        self.assertIn("write_json_double_or_null", source)
+        self.assertIn('\\"native_reduction_tree_with_accumulator\\":', source)
+        self.assertIn("write_json_double_or_null(out, sample->native_reduction_tree_with_accumulator)", source)
+        self.assertIn("write_json_double_or_null(out, sample->native_reduction_tree_gpu_abs_error)", source)
+        self.assertIn("write_json_double_or_null(out, sample->expected_gpu_abs_error)", source)
         self.assertIn("local-y-partial", source)
         self.assertIn("lane-partial", source)
         self.assertIn("q6k_decode_batch_index(base_work_group_y, ne02, ne12, broadcast2, broadcast3", source)
@@ -622,6 +624,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vk_spec_ptr = specialization_materialized ? NULL : &vk_spec_info;", source)
         self.assertIn('\\"specialization_materialized\\":%s', source)
         self.assertIn("BuiltIn WorkgroupSize", source)
+        self.assertIn("workgroup_size_spec_id", source)
+        self.assertIn("workgroup_size_component_id", source)
         self.assertIn("skip_spec_materialization", source)
         self.assertIn("code[i + 2] == 11 && code[i + 3] == 25", source)
 
@@ -802,6 +806,29 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, compare)
 
+    def test_llama_compare_log_fallback_does_not_depend_on_android_python(self):
+        compare = LLAMA_COMPARE.read_text()
+        start = compare.index("container_logs()")
+        end = compare.index("container_archive_file()", start)
+        body = compare[start:end]
+        self.assertIn("llama workspace scan fallback", body)
+        self.assertIn("workspaces/*/logs/llama-server.log", body)
+        self.assertIn("container rootfs llama log fallback", body)
+        self.assertIn("--- pdocker engine log:", body)
+        self.assertNotIn("python3 -", body)
+        self.assertNotIn("from pathlib import Path", body)
+
+    def test_llama_compare_deduplicates_merged_executor_log_events(self):
+        compare = LLAMA_COMPARE.read_text()
+        start = compare.index("def extract_executor_json_events(text):")
+        end = compare.index("def observed_event_values(events, field):", start)
+        body = compare[start:end]
+        self.assertIn("seen_events = set()", body)
+        self.assertIn("json.dumps(event, sort_keys=True", body)
+        self.assertIn("if event_key in seen_events:", body)
+        self.assertIn("continue", body)
+        self.assertIn("splitlines(keepends=True)", body)
+
     def test_llama_compare_records_server_token_probabilities(self):
         compare = LLAMA_COMPARE.read_text()
         for marker in [
@@ -891,10 +918,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("patch_spirv_literal_local_size_from_spec", source)
         self.assertIn("legalizes the execution", source)
         self.assertIn("found_local_size_spec", source)
+        self.assertIn("summary.workgroup_size_spec_id_valid[dim]", source)
         self.assertIn("local_size[dim] = value;", source)
+        self.assertIn("const SpirvTraceSummary requested_spirv_summary", source)
+        self.assertIn("const uint64_t original_spirv_hash = requested_spirv_summary.hash;", source)
+        self.assertIn("if (q6k_safe_kernel_requested && is_q6k_matvec_hash(original_spirv_hash))", source)
         self.assertIn("const uint64_t invocation_count", source)
         self.assertIn('\\"local_size_patched\\":%s', source)
         self.assertIn('\\"spirv_local_size\\":[%u,%u,%u]', source)
+        self.assertIn('\\"spirv_workgroup_size_spec_id\\":[%u,%u,%u]', source)
         self.assertIn('\\"spirv_local_size_resolved\\":[%llu,%llu,%llu]', source)
         self.assertIn('\\"spirv_local_size_consistent\\":%s', source)
         self.assertIn("spirv_local_size_consistent(", source)

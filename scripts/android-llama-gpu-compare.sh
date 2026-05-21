@@ -1261,83 +1261,58 @@ container_ref() {
 }
 
 container_logs() {
-  local ref raw
+  local ref raw emitted
   ref="$(container_ref)"
+  emitted=0
   raw="$(engine_request GET "/containers/$(urlencode "$ref")/logs?stdout=1&stderr=1&tail=$LOG_TAIL_LINES" | decode_engine_logs || true)"
   if [[ -n "$raw" ]]; then
+    printf "%s\n" "--- pdocker engine log: ${ref:0:12} ---"
     printf "%s\n" "$raw"
-    return 0
+    emitted=1
   fi
   # Fallback for failure paths where the Engine socket is busy or the server
   # has already disconnected the HTTP client.  Container logs and the llama
   # workspace log are app-owned files; reading them directly through run-as
   # keeps the compare artifact useful even when /containers/{id}/logs cannot
   # answer at the exact crash boundary.
-  run_as "python3 - $(remote_quote "$ref") $(remote_quote "${DEVICE_WORKSPACE_HOST:-}") $(remote_quote "$LOG_TAIL_LINES") <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
-
-ref = (sys.argv[1] or '').lstrip('/')
-workspace = sys.argv[2] if len(sys.argv) > 2 else ''
-try:
-    tail_lines = max(1, int(sys.argv[3]))
-except Exception:
-    tail_lines = 2000
-root = Path('files/pdocker')
-
-def read_tail(path: Path) -> str:
-    try:
-        text = path.read_text(encoding='utf-8', errors='replace')
-    except Exception:
-        return ''
-    lines = text.splitlines()
-    if len(lines) > tail_lines:
-        lines = lines[-tail_lines:]
-    return '\n'.join(lines)
-
-def state_matches(state: dict) -> bool:
-    cid = str(state.get('Id') or state.get('ID') or '')
-    name = str(state.get('Name') or '').lstrip('/')
-    return bool(ref and (cid.startswith(ref) or name == ref))
-
-candidate_ids = []
-if ref:
-    candidate_ids.append(ref)
-containers = root / 'containers'
-if containers.is_dir():
-    for state_path in containers.glob('*/state.json'):
-        try:
-            state = json.loads(state_path.read_text(encoding='utf-8'))
-        except Exception:
-            continue
-        if state_matches(state):
-            cid = str(state.get('Id') or state_path.parent.name)
-            if cid not in candidate_ids:
-                candidate_ids.append(cid)
-
-emitted = False
-for cid in candidate_ids:
-    log_path = root / 'logs' / f'{cid}.log'
-    text = read_tail(log_path)
-    if text:
-        print(f'--- pdocker direct log fallback: {log_path} ---')
-        print(text)
-        emitted = True
-        break
-
-if workspace:
-    llama_log = Path(workspace) / 'logs' / 'llama-server.log'
-    text = read_tail(llama_log)
-    if text:
-        print(f'--- llama workspace log fallback: {llama_log} ---')
-        print(text)
-        emitted = True
-
-if not emitted:
-    print('--- pdocker log fallback: no app-owned container/workspace log found ---')
-PY" || true
+  if run_as "cd files/pdocker 2>/dev/null || exit 0
+ref=$(remote_quote "$ref")
+tail_lines=$(remote_quote "$LOG_TAIL_LINES")
+workspace=$(remote_quote "${DEVICE_WORKSPACE_HOST:-}")
+emitted=0
+emit_tail() {
+  p=\"\$1\"
+  label=\"\$2\"
+  if test -f \"\$p\"; then
+    echo \"--- \$label: \$p ---\"
+    tail -n \"\$tail_lines\" \"\$p\" 2>/dev/null || cat \"\$p\" 2>/dev/null || true
+    emitted=1
+  fi
+}
+if test -n \"\$ref\"; then
+  emit_tail \"logs/\$ref.log\" \"pdocker direct log fallback\"
+  for d in containers/\$ref*; do
+    test -d \"\$d\" || continue
+    emit_tail \"\$d/logs/stdout.log\" \"container stdout fallback\"
+    emit_tail \"\$d/logs/stderr.log\" \"container stderr fallback\"
+    emit_tail \"\$d/rootfs/workspace/logs/llama-server.log\" \"container rootfs llama log fallback\"
+  done
+fi
+if test -n \"\$workspace\"; then
+  emit_tail \"\$workspace/logs/llama-server.log\" \"llama workspace log fallback\"
+fi
+for p in workspaces/*/logs/llama-server.log; do
+  test -f \"\$p\" || continue
+  emit_tail \"\$p\" \"llama workspace scan fallback\"
+done
+if test \"\$emitted\" = 0; then
+  echo \"--- pdocker log fallback: no app-owned container/workspace log found ---\"
+fi" || true; then
+    emitted=1
+  fi
+  if [[ "$emitted" -eq 0 ]]; then
+    printf "%s\n" "--- pdocker log fallback: no app-owned container/workspace log found ---"
+  fi
 }
 
 container_archive_file() {
@@ -2228,11 +2203,14 @@ def extract_executor_json_events(text):
                 break
             starts.append(brace_pos)
             search_from = brace_pos + 1
-    for line_start, line in enumerate(text.splitlines()):
+    offset = 0
+    for line in text.splitlines(keepends=True):
         raw = line.strip()
         if raw.startswith("{"):
-            starts.append(text.find(line, 0 if line_start == 0 else 0))
+            starts.append(offset + line.find("{"))
+        offset += len(line)
     seen_starts = set()
+    seen_events = set()
     for start in starts:
         if start < 0 or start in seen_starts:
             continue
@@ -2267,6 +2245,16 @@ def extract_executor_json_events(text):
         except Exception:
             continue
         if event.get("executor") == "pdocker-gpu-executor":
+            # The Android collector intentionally merges multiple durable log
+            # locations (engine container logs plus workspace/server logs) so a
+            # UI or daemon crash cannot erase evidence.  Those sources can
+            # contain the exact same executor JSON line.  Deduplicate here, at
+            # the evidence ingestion boundary, rather than weakening verifier
+            # ambiguity checks for genuinely different duplicate dispatches.
+            event_key = json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            if event_key in seen_events:
+                continue
+            seen_events.add(event_key)
             events.append(event)
     return events
 
