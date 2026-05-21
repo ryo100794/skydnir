@@ -58,6 +58,22 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             self.assertIsInstance(item.get("env"), str)
             self.assertIsInstance(item.get("default"), str)
             self.assertIn("vulkan", item.get("modes", []))
+        profiles = manifest["compare_mode_env_profiles"]
+        self.assertIsInstance(profiles, dict)
+        vulkan_raw = profiles["vulkan-raw"]
+        profile_keys = [item["env"] for item in vulkan_raw["env"]]
+        self.assertEqual(len(profile_keys), len(set(profile_keys)))
+        for key in [
+            "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
+            "GGML_VK_FORCE_MAX_BUFFER_SIZE",
+            "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
+            "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
+            "LLAMA_ARG_N_GPU_LAYERS",
+        ]:
+            self.assertIn(key, profile_keys)
+        trace_keys = [item["env"] for item in vulkan_raw["trace_alloc_env"]]
+        self.assertIn("PDOCKER_VULKAN_ICD_TRACE_ALLOC", trace_keys)
+        self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", trace_keys)
 
     def test_verifier_constants_are_loaded_from_the_same_manifest(self):
         manifest = load_manifest()
@@ -79,6 +95,10 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn("llama-gpu-env-manifest.json", compare)
         self.assertIn("compare_forward_env_keys", compare)
         self.assertIn('set_env(env, f"{key}={value}")', compare)
+        self.assertIn("compare_mode_env_profiles", compare)
+        self.assertIn("apply_manifest_mode_env(env, mode, trace_alloc)", compare)
+        self.assertNotIn('"PDOCKER_VULKAN_MAX_BUFFER_BYTES=536870912"', compare)
+        self.assertNotIn('"GGML_VK_FORCE_MAX_BUFFER_SIZE=536870912"', compare)
         self.assertIn("record_manifest_runtime_env", compare)
         self.assertIn("pdocker.llama.gpu.runtime-env-record.v1", compare)
         self.assertIn("def build_api_executor_reconciliation", compare)

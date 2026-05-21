@@ -1176,13 +1176,22 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(manifest_entry, abi)
         compare = LLAMA_COMPARE.read_text()
-        self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1", compare)
-        self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_LOG=1", compare)
+        manifest_text = LLAMA_GPU_ENV_MANIFEST.read_text()
+        self.assertIn('"env": "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE"', manifest_text)
+        self.assertIn('"env": "PDOCKER_GPU_DISPATCH_PROFILE_LOG"', manifest_text)
 
     def test_llama_gpu_compare_forwards_native_tuning_envs_by_default(self):
         compare = LLAMA_COMPARE.read_text()
         verifier = load_llama_gpu_artifact_verifier()
         forward_envs = set(verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
+        manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
+        profile_envs = {
+            item["env"]
+            for profile in manifest.get("compare_mode_env_profiles", {}).values()
+            for group in ("env", "trace_alloc_env")
+            for item in profile.get(group, [])
+            if isinstance(item, dict) and isinstance(item.get("env"), str)
+        }
         native_sources = GPU_EXECUTOR.read_text() + "\n" + VULKAN_ICD.read_text()
         native_envs = set(re.findall(
             r'getenv\("((?:PDOCKER_GPU|PDOCKER_VULKAN|PDOCKER_ANDROID)_[A-Z0-9_]+)"\)',
@@ -1198,7 +1207,7 @@ class GpuAbiContractTest(unittest.TestCase):
         }
         missing = sorted(
             key for key in native_envs - internal_only
-            if key not in forward_envs and f"{key}=" not in compare
+            if key not in forward_envs and key not in profile_envs and f"{key}=" not in compare
         )
         self.assertEqual([], missing)
 

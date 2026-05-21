@@ -1100,6 +1100,9 @@ if manifest.get("schema") != "pdocker.llama.gpu.env-manifest.v1":
 forward_env_keys = manifest.get("compare_forward_env_keys")
 if not isinstance(forward_env_keys, list) or not all(isinstance(key, str) and key for key in forward_env_keys):
     raise SystemExit(f"invalid compare_forward_env_keys in llama GPU env manifest: {manifest_path}")
+mode_profiles = manifest.get("compare_mode_env_profiles")
+if not isinstance(mode_profiles, dict):
+    raise SystemExit(f"invalid compare_mode_env_profiles in llama GPU env manifest: {manifest_path}")
 
 def env_key(item):
     return item.split("=", 1)[0]
@@ -1111,6 +1114,44 @@ def set_env(env, item):
             env[idx] = item
             return
     env.append(item)
+
+def render_template(value):
+    return str(value).format(
+        workspace_host=workspace_host,
+        gpu_layers=gpu_layers,
+    )
+
+def manifest_env_item(item):
+    if not isinstance(item, dict) or not isinstance(item.get("env"), str) or not item["env"]:
+        raise SystemExit(f"invalid compare_mode_env_profiles entry in llama GPU env manifest: {manifest_path}")
+    key = item["env"]
+    if item.get("host_override") is True and key in os.environ:
+        value = os.environ[key]
+    elif isinstance(item.get("default_template"), str):
+        value = render_template(item["default_template"])
+    elif isinstance(item.get("default"), str):
+        value = item["default"]
+    else:
+        raise SystemExit(f"missing default for {key} in llama GPU env manifest: {manifest_path}")
+    return f"{key}={value}"
+
+def apply_manifest_mode_env(env, mode, trace_alloc):
+    profile = mode_profiles.get(mode)
+    if profile is None:
+        return
+    if not isinstance(profile, dict):
+        raise SystemExit(f"invalid compare mode profile for {mode}: {manifest_path}")
+    entries = profile.get("env") or []
+    if not isinstance(entries, list):
+        raise SystemExit(f"invalid env list for compare mode {mode}: {manifest_path}")
+    for item in entries:
+        set_env(env, manifest_env_item(item))
+    trace_entries = profile.get("trace_alloc_env") or []
+    if trace_alloc == "1":
+        if not isinstance(trace_entries, list):
+            raise SystemExit(f"invalid trace_alloc_env for compare mode {mode}: {manifest_path}")
+        for item in trace_entries:
+            set_env(env, manifest_env_item(item))
 
 env = [
     "PDOCKER_GPU=auto",
@@ -1125,22 +1166,7 @@ env = [
 ]
 if model_url:
     set_env(env, f"LLAMA_MODEL_URL={model_url}")
-if mode == "vulkan-raw":
-    for item in [
-        "PDOCKER_VULKAN_MAX_BUFFER_BYTES=536870912",
-        "PDOCKER_VULKAN_DUMP_SPIRV_DIR=/workspace/logs",
-        f"PDOCKER_GPU_FAILED_SPIRV_DIR={workspace_host}/logs",
-        "PDOCKER_GPU_DISPATCH_PROFILE_LOG=1",
-        f"PDOCKER_GPU_STRICT_PASSTHROUGH={os.environ.get('PDOCKER_GPU_STRICT_PASSTHROUGH', '1')}",
-        "GGML_VK_FORCE_MAX_BUFFER_SIZE=536870912",
-        "GGML_VK_FORCE_MAX_ALLOCATION_SIZE=536870912",
-        "GGML_VK_SUBALLOCATION_BLOCK_SIZE=536870912",
-        f"LLAMA_ARG_N_GPU_LAYERS={gpu_layers}",
-    ]:
-        set_env(env, item)
-    if trace_alloc == "1":
-        set_env(env, "PDOCKER_VULKAN_ICD_TRACE_ALLOC=1")
-        set_env(env, "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1")
+apply_manifest_mode_env(env, mode, trace_alloc)
 for key in forward_env_keys:
     value = os.environ.get(key)
     if value is not None:

@@ -273,5 +273,58 @@
     "kernel-not-implemented-yet",
     "not-implemented",
     "unimplemented"
-  ]
+  ],
+  "compare_mode_env_profiles": {
+    "vulkan-raw": {
+      "env": [
+        {
+          "env": "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
+          "default": "536870912"
+        },
+        {
+          "env": "PDOCKER_VULKAN_DUMP_SPIRV_DIR",
+          "default": "/workspace/logs"
+        },
+        {
+          "env": "PDOCKER_GPU_FAILED_SPIRV_DIR",
+          "default_template": "{workspace_host}/logs"
+        },
+        {
+          "env": "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
+          "default": "1"
+        },
+        {
+          "env": "PDOCKER_GPU_STRICT_PASSTHROUGH",
+          "default": "1",
+          "host_override": true
+        },
+        {
+          "env": "GGML_VK_FORCE_MAX_BUFFER_SIZE",
+          "default": "536870912"
+        },
+        {
+          "env": "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
+          "default": "536870912"
+        },
+        {
+          "env": "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
+          "default": "536870912"
+        },
+        {
+          "env": "LLAMA_ARG_N_GPU_LAYERS",
+          "default_template": "{gpu_layers}"
+        }
+      ],
+      "trace_alloc_env": [
+        {
+          "env": "PDOCKER_VULKAN_ICD_TRACE_ALLOC",
+          "default": "1"
+        },
+        {
+          "env": "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
+          "default": "1"
+        }
+      ]
+    }
+  }
 }
