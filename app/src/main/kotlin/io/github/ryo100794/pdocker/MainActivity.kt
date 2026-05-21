@@ -7884,6 +7884,41 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private data class LlamaComposeEnvDefault(val env: String, val defaultValue: String)
+
+    private fun fallbackLlamaComposeEnvDefaults(): List<LlamaComposeEnvDefault> = listOf(
+        LlamaComposeEnvDefault("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0"),
+        LlamaComposeEnvDefault("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "536870912"),
+        LlamaComposeEnvDefault("GGML_VK_FORCE_MAX_BUFFER_SIZE", "536870912"),
+        LlamaComposeEnvDefault("GGML_VK_FORCE_MAX_ALLOCATION_SIZE", "536870912"),
+        LlamaComposeEnvDefault("GGML_VK_SUBALLOCATION_BLOCK_SIZE", "536870912"),
+    )
+
+    private fun llamaComposeEnvDefaults(): List<LlamaComposeEnvDefault> {
+        val fallback = fallbackLlamaComposeEnvDefaults()
+        return runCatching {
+            val manifestText = assets.open("pdockerd/llama-gpu-env-manifest.json").bufferedReader().use { it.readText() }
+            val manifest = JSONObject(manifestText)
+            val array = manifest.optJSONArray("ui_compose_runtime_env_defaults") ?: return@runCatching fallback
+            val parsed = mutableListOf<LlamaComposeEnvDefault>()
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val env = item.optString("env").trim()
+                val defaultValue = item.optString("default").trim()
+                if (env.isNotEmpty() && defaultValue.isNotEmpty()) {
+                    parsed += LlamaComposeEnvDefault(env, defaultValue)
+                }
+            }
+            if (parsed.isEmpty()) fallback else parsed
+        }.getOrDefault(fallback)
+    }
+
+    private fun llamaComposeEnvLine(default: LlamaComposeEnvDefault): String =
+        default.env + ": \"${'$'}{" + default.env + ":-" + default.defaultValue + "}\""
+
+    private fun llamaComposeEnvDefaultsMissing(composeText: String): Boolean =
+        llamaComposeEnvDefaults().any { llamaComposeEnvLine(it) !in composeText }
+
     private fun migrateLlamaCppGpuWorkspace(project: File) {
         if (project.name != "llama-cpp-gpu") return
         val dockerfile = File(project, "Dockerfile")
@@ -7916,9 +7951,10 @@ class MainActivity : AppCompatActivity() {
         val staleGpuLayerDefault =
             templateVersion < 7 ||
                 "LLAMA_ARG_N_GPU_LAYERS: \"\${LLAMA_ARG_N_GPU_LAYERS:-2}\"" in composeText
-        val stalePipelineOptimizationDefault =
-            templateVersion < 8 ||
-                "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION" !in composeText
+        val staleManifestComposeDefaults =
+            templateVersion < 12 ||
+                "pdocker.llama-gpu-env-manifest: begin ui_compose_runtime_env_defaults" !in composeText ||
+                llamaComposeEnvDefaultsMissing(composeText)
         val staleLlamaWebUi =
             templateVersion < 9 ||
                 "-DLLAMA_BUILD_WEBUI=OFF" in dockerfileText ||
@@ -7926,18 +7962,12 @@ class MainActivity : AppCompatActivity() {
         val staleLlamaStaticPath =
             templateVersion < 10 ||
                 "LLAMA_EXTRA_ARGS: \"\${LLAMA_EXTRA_ARGS:---path /opt/llama.cpp/tools/server/public --jinja}\"" !in composeText
-        val staleLlamaBridgeClamps =
-            templateVersion < 11 ||
-                "PDOCKER_VULKAN_MAX_BUFFER_BYTES" !in composeText ||
-                "GGML_VK_FORCE_MAX_BUFFER_SIZE" !in composeText ||
-                "GGML_VK_FORCE_MAX_ALLOCATION_SIZE" !in composeText ||
-                "GGML_VK_SUBALLOCATION_BLOCK_SIZE" !in composeText
         val staleLlamaCorrectnessProbe =
             templateVersion < 11 ||
                 !File(project, "scripts/pdocker-llama-correctness.sh").isFile
         if (!stalePdockerShaderTuning && !staleCheckout && !staleKvOffloadGuard &&
-            !staleGpuLayerDefault && !stalePipelineOptimizationDefault && !staleLlamaWebUi &&
-            !staleLlamaStaticPath && !staleLlamaBridgeClamps && !staleLlamaCorrectnessProbe) return
+            !staleGpuLayerDefault && !staleManifestComposeDefaults && !staleLlamaWebUi &&
+            !staleLlamaStaticPath && !staleLlamaCorrectnessProbe) return
         val backupDir = File(project, ".pdocker-template-backups/llama-cpp-gpu-${System.currentTimeMillis()}")
         backupDir.mkdirs()
         listOf(
@@ -7962,7 +7992,7 @@ class MainActivity : AppCompatActivity() {
             if (relative.startsWith("scripts/")) dest.setExecutable(true, false)
         }
         File(project, ".pdocker-template-id").writeText("llama-cpp-gpu\n")
-        File(project, ".pdocker-template-version").writeText("11\n")
+        File(project, ".pdocker-template-version").writeText("12\n")
         ensureProjectDocumentsEnv(project)
     }
 

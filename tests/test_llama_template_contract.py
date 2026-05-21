@@ -65,7 +65,7 @@ class LlamaTemplateContractTest(unittest.TestCase):
         self.assertIn("staleLlamaWebUi", self.main_activity)
         self.assertIn("staleLlamaStaticPath", self.main_activity)
         self.assertIn("staleLlamaCorrectnessProbe", self.main_activity)
-        self.assertIn('.pdocker-template-version").writeText("11', self.main_activity)
+        self.assertIn('.pdocker-template-version").writeText("12', self.main_activity)
 
     def test_gpu_correctness_is_separate_from_http_health(self):
         self.assertIn("COPY scripts/pdocker-llama-correctness.sh", self.dockerfile)
@@ -109,9 +109,11 @@ class LlamaTemplateContractTest(unittest.TestCase):
             key = item["env"]
             with self.subTest(key=key):
                 self.assertIn(f'{key}: "${{{key}:-{item["default"]}}}"', self.compose)
-        self.assertIn("stalePipelineOptimizationDefault", self.main_activity)
-        self.assertIn("staleLlamaBridgeClamps", self.main_activity)
-        self.assertIn('.pdocker-template-version").writeText("11', self.main_activity)
+        self.assertIn("llamaComposeEnvDefaults()", self.main_activity)
+        self.assertIn("staleManifestComposeDefaults", self.main_activity)
+        self.assertNotIn("stalePipelineOptimizationDefault", self.main_activity)
+        self.assertNotIn("staleLlamaBridgeClamps", self.main_activity)
+        self.assertIn('.pdocker-template-version").writeText("12', self.main_activity)
 
     def test_kv_guard_does_not_patch_llama_sources_or_build_flow(self):
         forbidden = [

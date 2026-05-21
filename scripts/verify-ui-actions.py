@@ -142,7 +142,7 @@ def main() -> int:
     require("existing compose files migrate documents mounts", "migrateComposeDocuments" in main_src and "PDOCKER_SHARED_DOCUMENTS_HOST" in main_src and "PDOCKER_MODEL_HOST:-./models" in main_src)
     require("installed project compose files migrate on startup", "migrateInstalledProjects()" in main_src and "override fun onResume()" in main_src and "projectDirs().forEach" in main_src and "migrateProjectPorts(project)" in main_src)
     require("llama template migration removes stale shader wrapper tuning", "migrateLlamaCppGpuWorkspace(project)" in main_src and "LLAMA_CPP_VULKAN_SHADER_PROFILE" in main_src and "pdocker-bridge-safe-glslc" in main_src and "git checkout --detach FETCH_HEAD" in main_src and ".pdocker-template-backups/llama-cpp-gpu-" in main_src)
-    require("llama template migration installs KV offload guard", "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in main_src and "--no-kv-offload" in main_src and ".pdocker-template-version\").writeText(\"11" in main_src)
+    require("llama template migration installs KV offload guard", "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in main_src and "--no-kv-offload" in main_src and ".pdocker-template-version\").writeText(\"12" in main_src)
     require("llama template defaults to validated one-layer Vulkan offload", "LLAMA_ARG_N_GPU_LAYERS: \"${LLAMA_ARG_N_GPU_LAYERS:-1}\"" in llama_compose_src and "LLAMA_ARG_N_GPU_LAYERS:-2" not in llama_compose_src and "staleGpuLayerDefault" in main_src)
     ui_compose_env_block_ok = (
         "pdocker.llama-gpu-env-manifest: begin ui_compose_runtime_env_defaults" in llama_compose_src
@@ -151,7 +151,7 @@ def main() -> int:
             for item in llama_gpu_env_manifest["ui_compose_runtime_env_defaults"]
         )
     )
-    require("llama template defaults to measured pipeline optimization path", ui_compose_env_block_ok and "stalePipelineOptimizationDefault" in main_src)
+    require("llama template defaults are manifest-driven", ui_compose_env_block_ok and "llamaComposeEnvDefaults()" in main_src and "staleManifestComposeDefaults" in main_src and "stalePipelineOptimizationDefault" not in main_src and "staleLlamaBridgeClamps" not in main_src)
     require("device llama template verifier catches app-data update drift", "LLAMA_CPP_VULKAN_SHADER_PROFILE" in device_llama_template_src and "git checkout --detach FETCH_HEAD" in device_llama_template_src and "LLAMA_CPP_BUILD_JOBS:-1" in device_llama_template_src and "LLAMA_CPP_BUILD_TYPE:-Release" in device_llama_template_src and "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in device_llama_template_src and "--no-kv-offload" in device_llama_template_src)
     require("documents volume requests legacy storage permission when useful", "READ_EXTERNAL_STORAGE" in manifest_src and "WRITE_EXTERNAL_STORAGE" in manifest_src and "REQUEST_EXTERNAL_STORAGE" in main_src)
     require("compose parser expands project env for documents volume", "composeEnvironment(dir)" in main_src and "File(projectDir, \".env\")" in main_src and "File(projectRoot, \".pdocker-common.env\")" in main_src and "composeValue(value, composeEnv)" in main_src)
