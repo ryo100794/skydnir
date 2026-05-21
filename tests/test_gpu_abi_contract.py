@@ -411,7 +411,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC", compare)
         self.assertIn("PDOCKER_LLAMA_FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC", compare)
         self.assertIn('wait_server "$FORCED_VULKAN_WAIT_SERVER_TIMEOUT_SEC" "Forced Vulkan"', compare)
-        self.assertIn('"PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": os.environ.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0")', PDOCKERD.read_text())
+        pdockerd = PDOCKERD.read_text()
+        self.assertIn('gpu_runtime_env_defaults("vulkan")', pdockerd)
+        self.assertIn('"env": "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION"', LLAMA_GPU_ENV_MANIFEST.read_text())
+        self.assertNotIn('"PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": os.environ.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0")', pdockerd)
 
     def test_llama_gpu_lane_marker_and_scope_are_pinned(self):
         source = GPU_EXECUTOR.read_text()

@@ -127,13 +127,14 @@ def load_gpu_env_manifest():
     return _GPU_ENV_MANIFEST_CACHE
 
 
-def gpu_runtime_env_defaults(mode, fallback):
+def gpu_runtime_env_defaults(mode, fallback=None):
     """Return manifest-driven GPU runtime defaults for one backend mode.
 
     The manifest is the intended source of truth for user-tunable GPU envs.
-    `fallback` preserves old behavior when running an unpackaged development
-    daemon without the manifest next to it.
+    `fallback` is intentionally minimal and reserved for non-packaged
+    development callers; packaged APK/runtime paths must carry the manifest.
     """
+    fallback = fallback or {}
     manifest = load_gpu_env_manifest()
     entries = manifest.get("pdockerd_runtime_env_defaults")
     if not isinstance(entries, list):
@@ -3168,21 +3169,7 @@ def _gpu_env(state):
             "PDOCKER_VULKAN_ICD_KIND": "pdocker-bridge-minimal",
             "PDOCKER_VULKAN_ICD_READY": "0",
         }
-        vulkan_env.update(gpu_runtime_env_defaults("vulkan", {
-            "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE": os.environ.get("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", "0"),
-            "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS": os.environ.get("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "1"),
-            "PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES": os.environ.get("PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES", "0"),
-            "PDOCKER_GPU_RESIDENT_CACHE": os.environ.get("PDOCKER_GPU_RESIDENT_CACHE", "1"),
-            "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES": os.environ.get("PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES", "1048576"),
-            "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK": os.environ.get("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", "0"),
-            "PDOCKER_GPU_Q6K_SAFE_KERNEL": os.environ.get("PDOCKER_GPU_Q6K_SAFE_KERNEL", "0"),
-            "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": os.environ.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0"),
-            "PDOCKER_VULKAN_HEAP_BYTES": os.environ.get("PDOCKER_VULKAN_HEAP_BYTES", "2147483648"),
-            "PDOCKER_VULKAN_MAX_BUFFER_BYTES": os.environ.get("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648"),
-            "GGML_VK_FORCE_MAX_BUFFER_SIZE": os.environ.get("GGML_VK_FORCE_MAX_BUFFER_SIZE", os.environ.get("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648")),
-            "GGML_VK_FORCE_MAX_ALLOCATION_SIZE": os.environ.get("GGML_VK_FORCE_MAX_ALLOCATION_SIZE", os.environ.get("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648")),
-            "GGML_VK_SUBALLOCATION_BLOCK_SIZE": os.environ.get("GGML_VK_SUBALLOCATION_BLOCK_SIZE", "268435456"),
-        }))
+        vulkan_env.update(gpu_runtime_env_defaults("vulkan"))
         env.update(vulkan_env)
     if "cuda-compat" in modes:
         env.update({

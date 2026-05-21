@@ -128,6 +128,9 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn("gpu_runtime_env_defaults", pdockerd)
         self.assertIn("pdockerd_runtime_env_defaults", pdockerd)
         self.assertIn("llama-gpu-env-manifest.json", pdockerd)
+        self.assertIn('gpu_runtime_env_defaults("vulkan")', pdockerd)
+        self.assertNotIn('gpu_runtime_env_defaults("vulkan", {', pdockerd)
+        self.assertNotIn('"PDOCKER_VULKAN_MAX_BUFFER_BYTES": os.environ.get("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648")', pdockerd)
         for key in manifest["pdockerd_runtime_env_keys"]:
             self.assertIn(key, json.dumps(manifest["pdockerd_runtime_env_defaults"]), key)
 
