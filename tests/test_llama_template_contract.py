@@ -110,9 +110,12 @@ class LlamaTemplateContractTest(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertIn(f'{key}: "${{{key}:-{item["default"]}}}"', self.compose)
         self.assertIn("llamaComposeEnvDefaults()", self.main_activity)
+        self.assertIn("fallbackLlamaComposeEnvDefaultsFromBundledCompose", self.main_activity)
         self.assertIn("staleManifestComposeDefaults", self.main_activity)
         self.assertNotIn("stalePipelineOptimizationDefault", self.main_activity)
         self.assertNotIn("staleLlamaBridgeClamps", self.main_activity)
+        for item in self.env_manifest["ui_compose_runtime_env_defaults"]:
+            self.assertNotIn(f'LlamaComposeEnvDefault("{item["env"]}",', self.main_activity)
         self.assertIn('.pdocker-template-version").writeText("12', self.main_activity)
 
     def test_kv_guard_does_not_patch_llama_sources_or_build_flow(self):

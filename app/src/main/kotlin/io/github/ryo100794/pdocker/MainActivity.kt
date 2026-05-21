@@ -7886,31 +7886,52 @@ class MainActivity : AppCompatActivity() {
 
     private data class LlamaComposeEnvDefault(val env: String, val defaultValue: String)
 
-    private fun fallbackLlamaComposeEnvDefaults(): List<LlamaComposeEnvDefault> = listOf(
-        LlamaComposeEnvDefault("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0"),
-        LlamaComposeEnvDefault("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "536870912"),
-        LlamaComposeEnvDefault("GGML_VK_FORCE_MAX_BUFFER_SIZE", "536870912"),
-        LlamaComposeEnvDefault("GGML_VK_FORCE_MAX_ALLOCATION_SIZE", "536870912"),
-        LlamaComposeEnvDefault("GGML_VK_SUBALLOCATION_BLOCK_SIZE", "536870912"),
-    )
+    private fun parseLlamaComposeEnvDefaultsFromManifest(manifestText: String): List<LlamaComposeEnvDefault> {
+        val manifest = JSONObject(manifestText)
+        val array = manifest.optJSONArray("ui_compose_runtime_env_defaults") ?: return emptyList()
+        val parsed = mutableListOf<LlamaComposeEnvDefault>()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val env = item.optString("env").trim()
+            val defaultValue = item.optString("default").trim()
+            if (env.isNotEmpty() && defaultValue.isNotEmpty()) {
+                parsed += LlamaComposeEnvDefault(env, defaultValue)
+            }
+        }
+        return parsed
+    }
 
-    private fun llamaComposeEnvDefaults(): List<LlamaComposeEnvDefault> {
-        val fallback = fallbackLlamaComposeEnvDefaults()
-        return runCatching {
-            val manifestText = assets.open("pdockerd/llama-gpu-env-manifest.json").bufferedReader().use { it.readText() }
-            val manifest = JSONObject(manifestText)
-            val array = manifest.optJSONArray("ui_compose_runtime_env_defaults") ?: return@runCatching fallback
-            val parsed = mutableListOf<LlamaComposeEnvDefault>()
-            for (i in 0 until array.length()) {
-                val item = array.optJSONObject(i) ?: continue
-                val env = item.optString("env").trim()
-                val defaultValue = item.optString("default").trim()
-                if (env.isNotEmpty() && defaultValue.isNotEmpty()) {
-                    parsed += LlamaComposeEnvDefault(env, defaultValue)
+    private fun parseLlamaComposeEnvDefaultsFromCompose(composeText: String): List<LlamaComposeEnvDefault> {
+        val begin = "pdocker.llama-gpu-env-manifest: begin ui_compose_runtime_env_defaults"
+        val end = "pdocker.llama-gpu-env-manifest: end"
+        val envLine = Regex("^\\s*([A-Z0-9_]+):\\s*\"\\$\\{\\1:-([^}]*)}\"")
+        var inBlock = false
+        val parsed = mutableListOf<LlamaComposeEnvDefault>()
+        composeText.lineSequence().forEach { line ->
+            when {
+                begin in line -> inBlock = true
+                end in line -> inBlock = false
+                inBlock -> envLine.find(line)?.let { match ->
+                    parsed += LlamaComposeEnvDefault(match.groupValues[1], match.groupValues[2])
                 }
             }
-            if (parsed.isEmpty()) fallback else parsed
-        }.getOrDefault(fallback)
+        }
+        return parsed
+    }
+
+    private fun fallbackLlamaComposeEnvDefaultsFromBundledCompose(): List<LlamaComposeEnvDefault> =
+        runCatching {
+            assets.open("project-library/llama-cpp-gpu/compose.yaml").bufferedReader().use { reader ->
+                parseLlamaComposeEnvDefaultsFromCompose(reader.readText())
+            }
+        }.getOrDefault(emptyList())
+
+    private fun llamaComposeEnvDefaults(): List<LlamaComposeEnvDefault> {
+        val manifestDefaults = runCatching {
+            val manifestText = assets.open("pdockerd/llama-gpu-env-manifest.json").bufferedReader().use { it.readText() }
+            parseLlamaComposeEnvDefaultsFromManifest(manifestText)
+        }.getOrDefault(emptyList())
+        return manifestDefaults.ifEmpty { fallbackLlamaComposeEnvDefaultsFromBundledCompose() }
     }
 
     private fun llamaComposeEnvLine(default: LlamaComposeEnvDefault): String =

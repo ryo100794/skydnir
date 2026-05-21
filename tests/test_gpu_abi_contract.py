@@ -1328,15 +1328,11 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(key, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
             self.assertIn(key, next_steps)
 
-        ui_compose_template_staleness_keys = [
-            "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
-            "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
-            "GGML_VK_FORCE_MAX_BUFFER_SIZE",
-            "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
-            "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
-        ]
-        for key in ui_compose_template_staleness_keys:
-            self.assertIn(key, main_activity)
+        self.assertIn("parseLlamaComposeEnvDefaultsFromManifest", main_activity)
+        self.assertIn("fallbackLlamaComposeEnvDefaultsFromBundledCompose", main_activity)
+        self.assertIn("project-library/llama-cpp-gpu/compose.yaml", main_activity)
+        for key in ui_compose_runtime_keys:
+            self.assertNotIn(f'LlamaComposeEnvDefault("{key}",', main_activity)
 
         diagnostic_keys = verifier.LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS
         for key in diagnostic_keys:

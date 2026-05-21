@@ -11,6 +11,7 @@ VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 COMPARE = ROOT / "scripts" / "android-llama-gpu-compare.sh"
 PDOCKERD = ROOT / "docker-proot-setup" / "bin" / "pdockerd"
 PDOCERD_RUNTIME = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "PdockerdRuntime.kt"
+MAIN_ACTIVITY = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "MainActivity.kt"
 BUILD_GRADLE = ROOT / "app" / "build.gradle.kts"
 COPY_NATIVE = ROOT / "scripts" / "copy-native.sh"
 LLAMA_COMPOSE = ROOT / "app" / "src" / "main" / "assets" / "project-library" / "llama-cpp-gpu" / "compose.yaml"
@@ -137,8 +138,10 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         for key in manifest["ui_compose_runtime_env_keys"]:
             self.assertIn(f"{key}:", compose, key)
             self.assertIn(f"${{{key}:-", compose, key)
+            self.assertNotIn(f'LlamaComposeEnvDefault("{key}",', MAIN_ACTIVITY.read_text(encoding="utf-8"))
         self.assertIn("pdocker.llama-gpu-env-manifest: begin ui_compose_runtime_env_defaults", compose)
         self.assertIn("pdocker.llama-gpu-env-manifest: end", compose)
+        self.assertIn("fallbackLlamaComposeEnvDefaultsFromBundledCompose", MAIN_ACTIVITY.read_text(encoding="utf-8"))
         for item in manifest["ui_compose_runtime_env_defaults"]:
             expected = f'{item["env"]}: "${{{item["env"]}:-{item["default"]}}}"'
             self.assertIn(expected, compose, item["env"])
