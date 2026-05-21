@@ -236,23 +236,28 @@
     },
     {
       "env": "PDOCKER_GPU_Q6K_SAFE_KERNEL",
-      "executor_field": "q6k_safe_kernel"
+      "executor_field": "q6k_safe_kernel",
+      "evidence_policy": "callsite_gated"
     },
     {
       "env": "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
-      "executor_field": "cpu_oracle.oracle_writeback"
+      "executor_field": "cpu_oracle.oracle_writeback",
+      "evidence_policy": "callsite_gated"
     },
     {
       "env": "PDOCKER_GPU_Q4K_SAFE_KERNEL",
-      "executor_field": "q4k_safe_kernel"
+      "executor_field": "q4k_safe_kernel",
+      "evidence_policy": "callsite_gated"
     },
     {
       "env": "PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION",
-      "executor_field": "q4k_targeted_specialization_materialized"
+      "executor_field": "q4k_targeted_specialization_materialized",
+      "evidence_policy": "callsite_gated"
     },
     {
       "env": "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER",
-      "executor_field": "q4k_pipeline_retry_ladder"
+      "executor_field": "q4k_pipeline_retry_ladder",
+      "evidence_policy": "q4k_callsite_gated"
     },
     {
       "env": "PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16",

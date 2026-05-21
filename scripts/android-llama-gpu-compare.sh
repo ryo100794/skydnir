@@ -2367,26 +2367,22 @@ config_expectations = []
 for item in config_expectations_raw:
     if not isinstance(item, dict) or not item.get("env") or not item.get("executor_field"):
         raise SystemExit(f"invalid config_propagation_env_fields entry in llama GPU env manifest: {manifest_path}")
-    config_expectations.append((str(item["env"]), str(item["executor_field"])))
+    evidence_policy = str(item.get("evidence_policy") or "always")
+    if evidence_policy not in {"always", "callsite_gated", "q4k_callsite_gated"}:
+        raise SystemExit(f"invalid evidence_policy for {item['env']} in llama GPU env manifest: {manifest_path}")
+    config_expectations.append((str(item["env"]), str(item["executor_field"]), evidence_policy))
 config_checks = []
-callsite_gated_config_envs = {
-    "PDOCKER_GPU_Q6K_SAFE_KERNEL",
-    "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
-    "PDOCKER_GPU_Q4K_SAFE_KERNEL",
-    "PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION",
-    "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER",
-}
-for env_name, event_field in config_expectations:
+for env_name, event_field, evidence_policy in config_expectations:
     expected = env_bool(env_name)
     observed = observed_event_values(executor_events, event_field)
     if expected is None:
         status = "not-requested"
     elif not observed:
         status = "missing-evidence"
-    elif env_name in callsite_gated_config_envs and expected in observed:
+    elif evidence_policy == "callsite_gated" and expected in observed:
         status = "pass"
     elif (
-        env_name == "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER"
+        evidence_policy == "q4k_callsite_gated"
         and expected is True
         and observed
         and not any(bool(value) for value in observed_event_values(executor_events, "q4k_callsite_detected"))
@@ -2404,6 +2400,7 @@ for env_name, event_field in config_expectations:
     config_checks.append({
         "env": env_name,
         "executor_field": event_field,
+        "evidence_policy": evidence_policy,
         "expected": expected,
         "observed_values": observed[-8:],
         "status": status,

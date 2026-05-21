@@ -53,7 +53,12 @@ issues, and deciding which planned gaps become hard gates.
    Q6_K blocker without touching llama.cpp, Dockerfiles, models, or prompts.
    The compare script, pdockerd defaults, UI/compose path, and artifact
    verifier must use an audited GPU diagnostic environment so device results do
-   not diverge by launch path. Granular executable units: (a) env manifest
+   not diverge by launch path. As of `d5ce2e8`, pdockerd runtime defaults are
+   read from `scripts/llama-gpu-env-manifest.json` (packaged beside the daemon)
+   and host parity tests cover the manifest, UI/compose keys, compare
+   forwarding, verifier constants, and asset copy path; remaining proof is the
+   real-device config-propagation artifact plus the Q6_K correctness boundary.
+   Granular executable units: (a) env manifest
    parity across compare, pdockerd, UI/compose, and verifier; (b) device
    readiness/headroom artifact before model load; (c) NGL=1 Q6_K
    workgroup/writeback oracle run; (d) artifact classification that keeps

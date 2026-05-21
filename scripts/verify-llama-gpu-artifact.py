@@ -498,6 +498,65 @@ def _oracle_fail_closed_evidence(data: Any, path: str = "$") -> list[dict[str, s
     return evidence
 
 
+def _generic_spirv_cpu_oracle_mismatch_evidence(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return evidence for generic SPIR-V CPU oracle mismatches.
+
+    This gate is intentionally not Q6_K-specific.  Any known generic SPIR-V
+    dispatch CPU oracle that was both a candidate and actually executed, then
+    reported ``status == "mismatch"``, must fail closed before correctness or
+    benchmark claims can be accepted.
+    """
+
+    generic = nested(data, "gpu", "diagnostics", "generic_spirv_dispatch")
+    evidence: list[dict[str, Any]] = []
+
+    def add(path: str, oracle: dict[str, Any], parent: dict[str, Any]) -> None:
+        if len(evidence) >= 16:
+            return
+        item: dict[str, Any] = {
+            "path": path,
+            "candidate": oracle.get("candidate"),
+            "executed": oracle.get("executed"),
+            "status": oracle.get("status"),
+        }
+        for key in ("kernel_hint", "scope", "reason"):
+            if key in oracle:
+                item[key] = oracle.get(key)
+        pipeline_key = parent.get("pipeline_key")
+        if isinstance(pipeline_key, dict) and pipeline_key.get("spirv_hash"):
+            item["spirv_hash"] = pipeline_key.get("spirv_hash")
+        elif parent.get("spirv_hash"):
+            item["spirv_hash"] = parent.get("spirv_hash")
+        evidence.append(item)
+
+    def visit(value: Any, path: str, parent: dict[str, Any] | None = None) -> None:
+        if len(evidence) >= 16:
+            return
+        if isinstance(value, dict):
+            oracle = value.get("cpu_oracle")
+            if (
+                isinstance(oracle, dict)
+                and oracle.get("candidate") is True
+                and oracle.get("executed") is True
+                and str(oracle.get("status") or "").lower() == "mismatch"
+            ):
+                add(f"{path}.cpu_oracle", oracle, value)
+                if len(evidence) >= 16:
+                    return
+            for key, child in value.items():
+                visit(child, f"{path}.{key}", value)
+                if len(evidence) >= 16:
+                    return
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{path}[{index}]", parent)
+                if len(evidence) >= 16:
+                    return
+
+    visit(generic, "gpu.diagnostics.generic_spirv_dispatch")
+    return evidence
+
+
 def _is_finite_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
 
@@ -1737,6 +1796,22 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             "config_propagation": config_propagation,
         }
 
+    generic_cpu_oracle_mismatches = _generic_spirv_cpu_oracle_mismatch_evidence(data)
+    if generic_cpu_oracle_mismatches:
+        return _claim_base(
+            "generic-spirv-cpu-oracle-mismatch",
+            next_action=(
+                data.get("next_action")
+                or "fix the generic SPIR-V CPU oracle mismatch before accepting correctness or benchmark claims"
+            ),
+            runtime_freshness=runtime_freshness,
+            runtime_env_manifest=runtime_env_manifest,
+            responsibility_boundary="generic-spirv-cpu-oracle",
+        ) | {
+            "generic_spirv_cpu_oracle_mismatches": generic_cpu_oracle_mismatches,
+            "config_propagation": config_propagation,
+        }
+
     q6_evidence_reached = False
     if isinstance(q6, dict):
         try:
@@ -1979,6 +2054,8 @@ def main(argv: list[str]) -> int:
         return 36
     if classification == "oracle-fail-closed":
         return 37
+    if classification == "generic-spirv-cpu-oracle-mismatch":
+        return 47
     if classification == "api-prompt-sanity-missing":
         return 38
     if classification == "speedup-fields-missing":

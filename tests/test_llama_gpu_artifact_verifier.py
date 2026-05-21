@@ -156,6 +156,21 @@ def api_executor_reconciliation(
     return result
 
 
+def generic_spirv_cpu_oracle_event(status="match", spirv_hash="0xac41e8033a67af4a"):
+    return {
+        "kernel": "generic_spirv",
+        "pipeline_key": {"spirv_hash": spirv_hash},
+        "cpu_oracle": {
+            "requested": True,
+            "candidate": True,
+            "executed": True,
+            "status": status,
+            "kernel_hint": "rope-yarn",
+            "scope": "debug-only-spv-hash-gated",
+        },
+    }
+
+
 def wrong_completion_payload(reconciliation=None):
     diagnostics = {
         "runtime_freshness": runtime_marker()
@@ -592,6 +607,70 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         with_cpu = self.run_verifier(payload)
         self.assertEqual(with_cpu.returncode, 0, with_cpu.stdout)
         self.assertTrue(json.loads(with_cpu.stdout)["benchmark_claim_allowed"])
+
+    def test_generic_spirv_rope_yarn_cpu_oracle_mismatch_blocks_claims(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "generic_spirv_dispatch": {
+                        "valid_android_vulkan_events": [
+                            generic_spirv_cpu_oracle_event(status="mismatch")
+                        ],
+                    },
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report(),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 47, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "generic-spirv-cpu-oracle-mismatch")
+        self.assertEqual(report["responsibility_boundary"], "generic-spirv-cpu-oracle")
+        self.assert_claims_blocked(report)
+        self.assertIn(
+            "0xac41e8033a67af4a",
+            json.dumps(report["generic_spirv_cpu_oracle_mismatches"]),
+        )
+
+    def test_generic_spirv_cpu_oracle_match_does_not_trip_mismatch_gate(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "generic_spirv_dispatch": {
+                        "valid_android_vulkan_events": [
+                            generic_spirv_cpu_oracle_event(status="match")
+                        ],
+                    },
+                    "q6_workgroup_diagnostics": {
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report(),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-workgroup-cleared-and-oracle-match")
+        self.assertTrue(report["correctness_claim_allowed"])
+        self.assertTrue(report["benchmark_claim_allowed"])
 
     def test_q6_workgroup_clear_can_pass_even_when_numeric_oracle_still_mismatches(self):
         payload = {

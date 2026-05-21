@@ -545,11 +545,14 @@ is explicit rather than implicit:
   forwarding it.  Do not leave correctness-critical behavior only in the
   ad-hoc compare script.
 - Regression guard: `scripts/llama-gpu-env-manifest.json` is the single
-  manifest for UI/compose runtime defaults, compare-only diagnostic forwarding,
-  full compare env forwarding, and executor reflection fields.  The compare
-  driver and artifact verifier both load this file; `tests.test_gpu_abi_contract`
-  checks the verifier constants derived from it, so future edits cannot silently
-  drop one side of the bridge.
+  manifest for UI/compose runtime defaults, pdockerd runtime defaults,
+  compare-only diagnostic forwarding, full compare env forwarding, and executor
+  reflection fields.  Since `d5ce2e8`, pdockerd loads the packaged manifest at
+  startup (falling back to the old literals only when the manifest is absent),
+  and the Android asset/copy path packages the same manifest beside the daemon.
+  The compare driver and artifact verifier both load this file;
+  `tests.test_gpu_abi_contract` checks the verifier constants derived from it,
+  so future edits cannot silently drop one side of the bridge.
 - Lightweight env parity guard: `tests.test_llama_gpu_env_parity` checks that
   the manifest's pdockerd runtime env list, UI-compose runtime env list,
   compare diagnostic/forward env lists, and verifier constants stay in sync
