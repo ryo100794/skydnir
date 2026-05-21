@@ -1181,6 +1181,12 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                  (unsigned long long)op->pipeline->requested_feature_mask);
     if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
     off += (size_t)n;
+    n = snprintf(command + off, sizeof(command) - off,
+                 " v4_binding_schema=0x%016llx v4_binding_fields=%u",
+                 (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH,
+                 PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT);
+    if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
+    off += (size_t)n;
     if (off + 2 >= sizeof(command)) PDOCKER_VK_COMMAND_TOO_LONG("newline", off + 2);
     command[off++] = '\n';
     command[off] = '\0';

@@ -842,6 +842,10 @@ typedef struct {
 typedef struct {
     int has_dispatch_id;
     uint64_t dispatch_id;
+    int has_v4_binding_schema;
+    uint64_t v4_binding_schema;
+    int has_v4_binding_field_count;
+    uint64_t v4_binding_field_count;
     int has_core_command_hash;
     uint64_t core_command_hash;
     int has_spirv_hash;
@@ -2333,6 +2337,20 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
         options->sender_reconcile.has_dispatch_id = 1;
         return 0;
     }
+    if (strncmp(token, "v4_binding_schema=", 18) == 0 ||
+        strncmp(token, "v4_binding_schema_hash=", 23) == 0) {
+        const char *value = strchr(token, '=');
+        if (!value || parse_u64_token_value(value + 1, &options->sender_reconcile.v4_binding_schema) != 0) return -1;
+        options->sender_reconcile.has_v4_binding_schema = 1;
+        return 0;
+    }
+    if (strncmp(token, "v4_binding_fields=", 18) == 0 ||
+        strncmp(token, "v4_binding_field_count=", 23) == 0) {
+        const char *value = strchr(token, '=');
+        if (!value || parse_u64_token_value(value + 1, &options->sender_reconcile.v4_binding_field_count) != 0) return -1;
+        options->sender_reconcile.has_v4_binding_field_count = 1;
+        return 0;
+    }
     if (strncmp(token, "sender_core_command_hash=", 25) == 0 ||
         strncmp(token, "sender_command_hash=", 20) == 0 ||
         strncmp(token, "command_hash=", 13) == 0 ||
@@ -2622,6 +2640,16 @@ static int strict_reconciliation_has_mismatch(
         const char **field_name) {
     if (!options || !strict_vulkan_reconciliation_requested(options)) return 0;
     const PdockerSenderReconcileEvidence *sender = &options->sender_reconcile;
+    if (sender->has_v4_binding_schema &&
+        sender->v4_binding_schema != PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH) {
+        if (field_name) *field_name = "v4_binding_schema";
+        return 1;
+    }
+    if (sender->has_v4_binding_field_count &&
+        sender->v4_binding_field_count != PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT) {
+        if (field_name) *field_name = "v4_binding_fields";
+        return 1;
+    }
     if (sender->has_spirv_hash && sender->spirv_hash != spirv_hash) {
         if (field_name) *field_name = "spirv_hash";
         return 1;
@@ -11303,6 +11331,18 @@ static int serve_socket(const char *path) {
                     if (parse_vulkan_dispatch_option(&options, tok) != 0) {
                         parse_ok = 0;
                     }
+                }
+                if (parse_ok && dispatch_v4 &&
+                    options.sender_reconcile.has_v4_binding_schema &&
+                    options.sender_reconcile.v4_binding_schema !=
+                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH) {
+                    parse_ok = 0;
+                }
+                if (parse_ok && dispatch_v4 &&
+                    options.sender_reconcile.has_v4_binding_field_count &&
+                    options.sender_reconcile.v4_binding_field_count !=
+                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT) {
+                    parse_ok = 0;
                 }
                 if (!parse_ok) {
                     json_fail("vulkan-dispatch", "invalid command");

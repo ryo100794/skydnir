@@ -40,6 +40,25 @@ def defines(path):
     return result
 
 
+def v4_binding_schema(path):
+    source = path.read_text()
+    macro = re.search(
+        r"#define\s+PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELDS\(X\)\s+\\\n(?P<body>.*?)\n\n"
+        r"#define\s+PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT\s+(?P<count>\d+)u\n"
+        r"#define\s+PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH\s+(?P<hash>0x[0-9a-fA-F]+)ull",
+        source,
+        re.S,
+    )
+    assert macro is not None
+    fields = re.findall(r"X\(([^,\s]+),\s*([^)\\\s]+)\)", macro.group("body"))
+    fnv = 1469598103934665603
+    for name, field_type in fields:
+        for byte in f"{name}:{field_type}\0".encode():
+            fnv ^= byte
+            fnv = (fnv * 1099511628211) & ((1 << 64) - 1)
+    return fields, int(macro.group("count")), int(macro.group("hash"), 16), fnv
+
+
 class GpuAbiContractTest(unittest.TestCase):
     def test_container_and_apk_gpu_abi_headers_stay_in_sync(self):
         self.assertEqual(defines(CONTAINER_HEADER), defines(APP_HEADER))
@@ -50,6 +69,55 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertNotIn(forbidden, values)
         self.assertIn("pdocker-gpu-command-v1", values)
         self.assertIn("glibc-shim-command-queue", values)
+
+    def test_vulkan_dispatch_v4_binding_schema_is_single_source_and_checked(self):
+        app_fields, app_count, app_hash, computed_hash = v4_binding_schema(APP_HEADER)
+        container_fields, container_count, container_hash, container_computed_hash = v4_binding_schema(CONTAINER_HEADER)
+        self.assertEqual(app_fields, container_fields)
+        self.assertEqual(app_count, container_count)
+        self.assertEqual(app_hash, container_hash)
+        self.assertEqual(app_hash, computed_hash)
+        self.assertEqual(container_hash, container_computed_hash)
+        self.assertEqual(
+            [
+                ("descriptor_set", "u32"),
+                ("binding", "u32"),
+                ("offset", "u64"),
+                ("size", "size"),
+                ("api_offset", "u64"),
+                ("api_range", "size"),
+                ("api_buffer_size", "size"),
+                ("api_descriptor_type", "u32"),
+                ("api_dynamic", "u32"),
+                ("api_memory_offset", "u64"),
+                ("api_memory_size", "size"),
+                ("api_memory_id", "u64"),
+                ("api_buffer_id", "u64"),
+            ],
+            app_fields,
+        )
+        self.assertEqual(app_count, len(app_fields))
+
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("v4_binding_schema=0x%016llx v4_binding_fields=%u", icd)
+        self.assertIn("PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH", icd)
+        self.assertIn("PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT", icd)
+
+        executor = GPU_EXECUTOR.read_text()
+        self.assertIn('strncmp(token, "v4_binding_schema=", 18) == 0', executor)
+        self.assertIn('strncmp(token, "v4_binding_fields=", 18) == 0', executor)
+        self.assertIn("has_v4_binding_schema", executor)
+        self.assertIn("has_v4_binding_field_count", executor)
+        self.assertIn(
+            "options.sender_reconcile.v4_binding_schema !=\n"
+            "                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH",
+            executor,
+        )
+        self.assertIn(
+            "options.sender_reconcile.v4_binding_field_count !=\n"
+            "                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT",
+            executor,
+        )
 
     def test_vulkan_dispatch_reports_binding_diagnostics(self):
         source = GPU_EXECUTOR.read_text()

@@ -57,4 +57,32 @@
     X(PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES, resident_cache_min, has_resident_cache_min_bytes, resident_cache_min_bytes) \
     X(PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES, dirty_probe_min, has_dirty_probe_min_bytes, dirty_probe_min_bytes)
 
+/*
+ * Positional VULKAN_DISPATCH_V4 binding payload schema.
+ *
+ * The wire format intentionally stays compact and positional for compatibility
+ * with existing commands; producers append v4_binding_schema/v4_binding_fields
+ * options so receivers can reject accidental schema drift instead of silently
+ * reinterpreting later fields.
+ *
+ * schema_hash is FNV-1a64 over each "field:type\0" entry below in order.
+ */
+#define PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELDS(X) \
+    X(descriptor_set, u32) \
+    X(binding, u32) \
+    X(offset, u64) \
+    X(size, size) \
+    X(api_offset, u64) \
+    X(api_range, size) \
+    X(api_buffer_size, size) \
+    X(api_descriptor_type, u32) \
+    X(api_dynamic, u32) \
+    X(api_memory_offset, u64) \
+    X(api_memory_size, size) \
+    X(api_memory_id, u64) \
+    X(api_buffer_id, u64)
+
+#define PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT 13u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH 0x4a322a1f9f143a20ull
+
 #endif
