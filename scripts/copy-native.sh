@@ -22,6 +22,7 @@ fi
 # filesDir/pdocker-runtime/bin/ on first launch.
 mkdir -p "$APP/assets/pdockerd"
 cp "$SUB/bin/pdockerd" "$APP/assets/pdockerd/pdockerd"
+cp "$ROOT/scripts/llama-gpu-env-manifest.json" "$APP/assets/pdockerd/llama-gpu-env-manifest.json"
 
 # --- native: crane + scratch direct runtime assets ---
 # Package as jniLibs with lib*.so naming so Android extracts them to

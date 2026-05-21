@@ -68,6 +68,7 @@ nameserver 1.1.1.1
         // pdockerd so Engine API fixes are not hidden behind a stale extracted
         // daemon after `adb install -r`.
         extractAsset(ctx, "pdockerd/pdockerd", File(bin, "pdockerd"), force = true)
+        extractAsset(ctx, "pdockerd/llama-gpu-env-manifest.json", File(bin, "llama-gpu-env-manifest.json"), force = true)
 
         optionalLinkTo(File(nativeDir, "libcrane.so"), File(dockerBin, "crane"))
         optionalLinkTo(File(nativeDir, "libpdockerdirect.so"), File(dockerBin, "pdocker-direct"))

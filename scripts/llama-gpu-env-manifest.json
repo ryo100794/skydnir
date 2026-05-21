@@ -28,6 +28,101 @@
     "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
     "GGML_VK_SUBALLOCATION_BLOCK_SIZE"
   ],
+  "pdockerd_runtime_env_defaults": [
+    {
+      "env": "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE",
+      "default": "0",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
+      "default": "1",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES",
+      "default": "0",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "PDOCKER_GPU_RESIDENT_CACHE",
+      "default": "1",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
+      "default": "1048576",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
+      "default": "0",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "PDOCKER_GPU_Q6K_SAFE_KERNEL",
+      "default": "0",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
+      "default": "0",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "PDOCKER_VULKAN_HEAP_BYTES",
+      "default": "2147483648",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
+      "default": "2147483648",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "GGML_VK_FORCE_MAX_BUFFER_SIZE",
+      "default_from": "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
+      "default": "2147483648",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
+      "default_from": "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
+      "default": "2147483648",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
+      "default": "268435456",
+      "modes": [
+        "vulkan"
+      ]
+    }
+  ],
   "ui_compose_runtime_env_keys": [
     "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
     "PDOCKER_VULKAN_MAX_BUFFER_BYTES",

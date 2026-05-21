@@ -10,9 +10,11 @@ plugins {
 }
 
 val syncPdockerdAsset by tasks.registering(Copy::class) {
-    from(rootProject.file("docker-proot-setup/bin/pdockerd"))
     into(layout.projectDirectory.dir("src/main/assets/pdockerd"))
-    rename { "pdockerd" }
+    from(rootProject.file("docker-proot-setup/bin/pdockerd")) {
+        rename { "pdockerd" }
+    }
+    from(rootProject.file("scripts/llama-gpu-env-manifest.json"))
 }
 
 val verifyPackagedPayloadFresh by tasks.registering {
@@ -108,6 +110,10 @@ val verifyPackagedPayloadFresh by tasks.registering {
         requireSameBytes(
             project.file("src/main/assets/pdockerd/pdockerd"),
             rootProject.file("docker-proot-setup/bin/pdockerd")
+        )
+        requireSameBytes(
+            project.file("src/main/assets/pdockerd/llama-gpu-env-manifest.json"),
+            rootProject.file("scripts/llama-gpu-env-manifest.json")
         )
     }
 }

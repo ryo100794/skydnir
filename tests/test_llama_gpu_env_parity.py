@@ -9,7 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "scripts" / "llama-gpu-env-manifest.json"
 VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 COMPARE = ROOT / "scripts" / "android-llama-gpu-compare.sh"
-PDOCKERD = ROOT / "app" / "src" / "main" / "assets" / "pdockerd" / "pdockerd"
+PDOCKERD = ROOT / "docker-proot-setup" / "bin" / "pdockerd"
+PDOCERD_RUNTIME = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "PdockerdRuntime.kt"
+BUILD_GRADLE = ROOT / "app" / "build.gradle.kts"
+COPY_NATIVE = ROOT / "scripts" / "copy-native.sh"
 LLAMA_COMPOSE = ROOT / "app" / "src" / "main" / "assets" / "project-library" / "llama-cpp-gpu" / "compose.yaml"
 
 
@@ -46,6 +49,15 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertLessEqual(set(manifest["ui_compose_runtime_env_keys"]), ui_runtime)
         self.assertLessEqual(set(manifest["compare_diagnostic_env_keys"]), set(manifest["compare_forward_env_keys"]))
         self.assertLessEqual(ui_runtime, set(manifest["compare_forward_env_keys"]))
+        defaults = manifest["pdockerd_runtime_env_defaults"]
+        self.assertTrue(defaults)
+        default_keys = [item["env"] for item in defaults]
+        self.assertEqual(len(default_keys), len(set(default_keys)))
+        self.assertLessEqual(set(manifest["pdockerd_runtime_env_keys"]), set(default_keys))
+        for item in defaults:
+            self.assertIsInstance(item.get("env"), str)
+            self.assertIsInstance(item.get("default"), str)
+            self.assertIn("vulkan", item.get("modes", []))
 
     def test_verifier_constants_are_loaded_from_the_same_manifest(self):
         manifest = load_manifest()
@@ -82,12 +94,12 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn('"runtime_env_manifest": runtime_env_manifest', compare)
         self.assertIn("requested_env_missing_from_runtime", compare)
 
+        self.assertIn("load_gpu_env_manifest", pdockerd)
+        self.assertIn("gpu_runtime_env_defaults", pdockerd)
+        self.assertIn("pdockerd_runtime_env_defaults", pdockerd)
+        self.assertIn("llama-gpu-env-manifest.json", pdockerd)
         for key in manifest["pdockerd_runtime_env_keys"]:
-            self.assertRegex(
-                pdockerd,
-                rf'"{re.escape(key)}"\s*:\s*os\.environ\.get\("{re.escape(key)}"',
-                key,
-            )
+            self.assertIn(key, json.dumps(manifest["pdockerd_runtime_env_defaults"]), key)
 
         for key in manifest["ui_compose_runtime_env_keys"]:
             self.assertIn(f"{key}:", compose, key)
@@ -97,6 +109,16 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         # template until promoted to ordinary runtime behavior.
         for key in sorted(set(manifest["compare_diagnostic_env_keys"]) - set(manifest["ui_compose_runtime_env_keys"])):
             self.assertNotIn(f"{key}:", compose, key)
+
+    def test_packaged_pdockerd_runtime_carries_gpu_env_manifest(self):
+        runtime = PDOCERD_RUNTIME.read_text(encoding="utf-8")
+        build_gradle = BUILD_GRADLE.read_text(encoding="utf-8")
+        copy_native = COPY_NATIVE.read_text(encoding="utf-8")
+        for source in [runtime, build_gradle, copy_native]:
+            self.assertIn("llama-gpu-env-manifest.json", source)
+        self.assertIn('extractAsset(ctx, "pdockerd/llama-gpu-env-manifest.json"', runtime)
+        self.assertIn('rootProject.file("scripts/llama-gpu-env-manifest.json")', build_gradle)
+        self.assertIn('$ROOT/scripts/llama-gpu-env-manifest.json', copy_native)
 
     def test_compare_echoes_and_records_manifest_based_runtime_env(self):
         compare = COMPARE.read_text(encoding="utf-8")
