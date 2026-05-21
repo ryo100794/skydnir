@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "app" / "src" / "main" / "assets"
 LIBRARY = ASSETS / "project-library" / "library.json"
-LLAMA_GPU_COMPARE_BRIDGE_MAX_BYTES = "536870912"
+LLAMA_GPU_ENV_MANIFEST = ROOT / "scripts" / "llama-gpu-env-manifest.json"
 LLAMA_GPU_COMPARE_BRIDGE_LIMITS = (
     "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
     "GGML_VK_FORCE_MAX_BUFFER_SIZE",
@@ -38,6 +38,16 @@ def read(path: Path) -> str:
     return path.read_text()
 
 
+def llama_gpu_compare_bridge_limits() -> dict[str, str]:
+    manifest = json.loads(read(LLAMA_GPU_ENV_MANIFEST))
+    profile = manifest.get("compare_mode_env_profiles", {}).get("vulkan-raw", {})
+    limits = {}
+    for item in profile.get("env", []):
+        if isinstance(item, dict) and item.get("env") in LLAMA_GPU_COMPARE_BRIDGE_LIMITS:
+            limits[str(item["env"])] = str(item.get("default", ""))
+    return limits
+
+
 def check_llama_gpu_compare_contract(compare_script: str) -> None:
     policy_checks = {
         "reports unmodified llama.cpp policy": '"llama_cpp_modified": False' in compare_script,
@@ -52,23 +62,14 @@ def check_llama_gpu_compare_contract(compare_script: str) -> None:
         if not passed:
             fail(f"compare script {name}")
 
-    bridge_limits = {}
-    for name in LLAMA_GPU_COMPARE_BRIDGE_LIMITS:
-        matches = re.findall(
-            rf"(?:-e\s+{re.escape(name)}=|\"{re.escape(name)}=)([0-9]+)\b",
-            compare_script,
-        )
-        bridge_limits[name] = matches
-    for name, values in bridge_limits.items():
-        if not values:
-            fail(f"compare script missing {name} Vulkan bridge clamp")
-        if values != [LLAMA_GPU_COMPARE_BRIDGE_MAX_BYTES]:
-            fail(
-                f"compare script {name} must equal "
-                f"{LLAMA_GPU_COMPARE_BRIDGE_MAX_BYTES}, got {values}"
-            )
-    if {values[0] for values in bridge_limits.values()} != {LLAMA_GPU_COMPARE_BRIDGE_MAX_BYTES}:
-        fail("compare script Vulkan bridge clamps must use one byte value")
+    bridge_limits = llama_gpu_compare_bridge_limits()
+    missing_limits = [name for name in LLAMA_GPU_COMPARE_BRIDGE_LIMITS if name not in bridge_limits]
+    if missing_limits:
+        fail(f"llama GPU env manifest missing compare bridge clamps: {missing_limits}")
+    if len(set(bridge_limits.values())) != 1:
+        fail(f"llama GPU compare bridge clamps must use one byte value, got {bridge_limits}")
+    if "compare_mode_env_profiles" not in compare_script or "apply_manifest_mode_env" not in compare_script:
+        fail("compare script must load bridge clamps from llama GPU env manifest")
 
     forbidden_main_path = (
         "stage_test_cli",
@@ -104,6 +105,7 @@ def check_llama_gpu_compare_contract(compare_script: str) -> None:
 def main() -> int:
     compare_script = read(ROOT / "scripts" / "android-llama-gpu-compare.sh")
     host_bench_script = read(ROOT / "scripts" / "android-gpu-host-bench.sh")
+    env_manifest = json.loads(read(LLAMA_GPU_ENV_MANIFEST))
     compare_doc = read(ROOT / "docs" / "test" / "LLAMA_BENCHMARKS.md")
     compare_todo = read(ROOT / "docs" / "plan" / "TODO.md")
     compare_result = json.loads(read(ROOT / "docs" / "test" / "llama-gpu-compare-latest.json"))
@@ -111,7 +113,7 @@ def main() -> int:
         "compare script schema": "pdocker.llama.gpu.compare.v1" in compare_script,
         "compare script leaves llama.cpp unmodified": '"llama_cpp_modified": False' in compare_script,
         "compare script records 10x target": '"target_speedup": 10.0' in compare_script and "target_tps = cpu_tps * 10.0" in compare_script,
-        "compare script gates Vulkan allocation trace": "--trace-alloc" in compare_script and "PDOCKER_VULKAN_ICD_TRACE_ALLOC=1" in compare_script and "allocation_trace_bytes" in compare_script,
+        "compare script gates Vulkan allocation trace": "--trace-alloc" in compare_script and "PDOCKER_VULKAN_ICD_TRACE_ALLOC" in json.dumps(env_manifest.get("compare_mode_env_profiles", {})) and "allocation_trace_bytes" in compare_script,
         "compare script rejects one-token invalid timing": "--predict must be an integer >= 2" in compare_script,
         "compare script uses standard Vulkan entry": "standard Vulkan loader through pdocker-vulkan-icd.so" in compare_script,
         "compare script classifies dispatch blocker": "queue_submit_blocker" in compare_script and "vk::Queue::submit: ErrorFeatureNotPresent" in compare_script,

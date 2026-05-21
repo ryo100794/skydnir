@@ -1,4 +1,5 @@
 import unittest
+import json
 from pathlib import Path
 
 
@@ -9,6 +10,7 @@ LLAMA_COMPOSE = LLAMA_ROOT / "compose.yaml"
 LLAMA_START = LLAMA_ROOT / "scripts" / "start-llama-server.sh"
 LLAMA_CORRECTNESS = LLAMA_ROOT / "scripts" / "pdocker-llama-correctness.sh"
 MAIN_ACTIVITY = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "MainActivity.kt"
+LLAMA_GPU_ENV_MANIFEST = ROOT / "scripts" / "llama-gpu-env-manifest.json"
 
 
 class LlamaTemplateContractTest(unittest.TestCase):
@@ -19,6 +21,7 @@ class LlamaTemplateContractTest(unittest.TestCase):
         cls.start = LLAMA_START.read_text()
         cls.correctness = LLAMA_CORRECTNESS.read_text()
         cls.main_activity = MAIN_ACTIVITY.read_text()
+        cls.env_manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
 
     def test_openblas_uses_standard_cmake_detection(self):
         self.assertIn("-DGGML_BLAS=ON", self.dockerfile)
@@ -101,14 +104,11 @@ class LlamaTemplateContractTest(unittest.TestCase):
             'PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION: "${PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION:-0}"',
             self.compose,
         )
-        for key in [
-            "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
-            "GGML_VK_FORCE_MAX_BUFFER_SIZE",
-            "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
-            "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
-        ]:
+        self.assertIn("pdocker.llama-gpu-env-manifest: begin ui_compose_runtime_env_defaults", self.compose)
+        for item in self.env_manifest["ui_compose_runtime_env_defaults"]:
+            key = item["env"]
             with self.subTest(key=key):
-                self.assertIn(f'{key}: "${{{key}:-536870912}}"', self.compose)
+                self.assertIn(f'{key}: "${{{key}:-{item["default"]}}}"', self.compose)
         self.assertIn("stalePipelineOptimizationDefault", self.main_activity)
         self.assertIn("staleLlamaBridgeClamps", self.main_activity)
         self.assertIn('.pdocker-template-version").writeText("11', self.main_activity)

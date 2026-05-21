@@ -49,6 +49,12 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertLessEqual(set(manifest["ui_compose_runtime_env_keys"]), ui_runtime)
         self.assertLessEqual(set(manifest["compare_diagnostic_env_keys"]), set(manifest["compare_forward_env_keys"]))
         self.assertLessEqual(ui_runtime, set(manifest["compare_forward_env_keys"]))
+        ui_compose_defaults = manifest["ui_compose_runtime_env_defaults"]
+        self.assertTrue(ui_compose_defaults)
+        ui_compose_default_keys = [item["env"] for item in ui_compose_defaults]
+        self.assertEqual(ui_compose_default_keys, manifest["ui_compose_runtime_env_keys"])
+        for item in ui_compose_defaults:
+            self.assertIsInstance(item.get("default"), str)
         defaults = manifest["pdockerd_runtime_env_defaults"]
         self.assertTrue(defaults)
         default_keys = [item["env"] for item in defaults]
@@ -124,6 +130,11 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         for key in manifest["ui_compose_runtime_env_keys"]:
             self.assertIn(f"{key}:", compose, key)
             self.assertIn(f"${{{key}:-", compose, key)
+        self.assertIn("pdocker.llama-gpu-env-manifest: begin ui_compose_runtime_env_defaults", compose)
+        self.assertIn("pdocker.llama-gpu-env-manifest: end", compose)
+        for item in manifest["ui_compose_runtime_env_defaults"]:
+            expected = f'{item["env"]}: "${{{item["env"]}:-{item["default"]}}}"'
+            self.assertIn(expected, compose, item["env"])
 
         # Compare-only diagnostics must remain absent from the UI compose
         # template until promoted to ordinary runtime behavior.

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 import re
+import json
 from pathlib import Path
 
 
@@ -80,6 +81,7 @@ def main() -> int:
     vulkan_icd_src = (ROOT / "docker-proot-setup/src/gpu/pdocker_vulkan_icd.c").read_text()
     opencl_icd_src = (ROOT / "docker-proot-setup/src/gpu/pdocker_opencl_icd.c").read_text()
     llama_compose_src = (ROOT / "app/src/main/assets/project-library/llama-cpp-gpu/compose.yaml").read_text()
+    llama_gpu_env_manifest = json.loads((ROOT / "scripts/llama-gpu-env-manifest.json").read_text())
     llama_profile_src = (ROOT / "app/src/main/assets/project-library/llama-cpp-gpu/scripts/pdocker-gpu-profile.sh").read_text()
     manifest_src = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
     debug_receiver_src = (ROOT / "app/src/main/kotlin/io/github/ryo100794/pdocker/PdockerdDebugReceiver.kt").read_text()
@@ -142,7 +144,14 @@ def main() -> int:
     require("llama template migration removes stale shader wrapper tuning", "migrateLlamaCppGpuWorkspace(project)" in main_src and "LLAMA_CPP_VULKAN_SHADER_PROFILE" in main_src and "pdocker-bridge-safe-glslc" in main_src and "git checkout --detach FETCH_HEAD" in main_src and ".pdocker-template-backups/llama-cpp-gpu-" in main_src)
     require("llama template migration installs KV offload guard", "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in main_src and "--no-kv-offload" in main_src and ".pdocker-template-version\").writeText(\"11" in main_src)
     require("llama template defaults to validated one-layer Vulkan offload", "LLAMA_ARG_N_GPU_LAYERS: \"${LLAMA_ARG_N_GPU_LAYERS:-1}\"" in llama_compose_src and "LLAMA_ARG_N_GPU_LAYERS:-2" not in llama_compose_src and "staleGpuLayerDefault" in main_src)
-    require("llama template defaults to measured pipeline optimization path", "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION: \"${PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION:-0}\"" in llama_compose_src and "stalePipelineOptimizationDefault" in main_src)
+    ui_compose_env_block_ok = (
+        "pdocker.llama-gpu-env-manifest: begin ui_compose_runtime_env_defaults" in llama_compose_src
+        and all(
+            f'{item["env"]}: "${{{item["env"]}:-{item["default"]}}}"' in llama_compose_src
+            for item in llama_gpu_env_manifest["ui_compose_runtime_env_defaults"]
+        )
+    )
+    require("llama template defaults to measured pipeline optimization path", ui_compose_env_block_ok and "stalePipelineOptimizationDefault" in main_src)
     require("device llama template verifier catches app-data update drift", "LLAMA_CPP_VULKAN_SHADER_PROFILE" in device_llama_template_src and "git checkout --detach FETCH_HEAD" in device_llama_template_src and "LLAMA_CPP_BUILD_JOBS:-1" in device_llama_template_src and "LLAMA_CPP_BUILD_TYPE:-Release" in device_llama_template_src and "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in device_llama_template_src and "--no-kv-offload" in device_llama_template_src)
     require("documents volume requests legacy storage permission when useful", "READ_EXTERNAL_STORAGE" in manifest_src and "WRITE_EXTERNAL_STORAGE" in manifest_src and "REQUEST_EXTERNAL_STORAGE" in main_src)
     require("compose parser expands project env for documents volume", "composeEnvironment(dir)" in main_src and "File(projectDir, \".env\")" in main_src and "File(projectRoot, \".pdocker-common.env\")" in main_src and "composeValue(value, composeEnv)" in main_src)
@@ -165,7 +174,7 @@ def main() -> int:
     require("vulkan icd advertises fragile features conservatively", "PDOCKER_VULKAN_ENABLE_INT64" in vulkan_icd_src and "PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC" in vulkan_icd_src and "PDOCKER_VULKAN_ENABLE_16BIT_STORAGE" in vulkan_icd_src and "shaderInt64 must be opt-in" in vulkan_llama_init_src and "BASIC only" in vulkan_llama_init_src)
     require("vulkan icd lets transfer-only submits complete and forwards compute", "has_dispatch" in vulkan_icd_src and "queue-submit transfer-only command buffer" in vulkan_icd_src and "send_generic_vulkan_dispatch" in vulkan_icd_src and "VULKAN_DISPATCH_V4" in vulkan_icd_src and "VULKAN_DISPATCH_V4" in gpu_executor_src and "VULKAN_DISPATCH_V1" in gpu_executor_src)
     require("vulkan icd replays all recorded command-buffer dispatches", "PDOCKER_VK_MAX_DISPATCH_OPS" in vulkan_icd_src and "PDOCKER_VK_MAX_COMMAND_OPS" in vulkan_icd_src and "PdockerVkDispatchOp dispatch_ops[PDOCKER_VK_MAX_DISPATCH_OPS]" in vulkan_icd_src and "PdockerVkCommandOp command_ops[PDOCKER_VK_MAX_COMMAND_OPS]" in vulkan_icd_src and "send_generic_vulkan_dispatch_op" in vulkan_icd_src and "for (uint32_t op_index = 0; op_index < cmd->dispatch_op_count; ++op_index)" in vulkan_icd_src and "for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index)" in vulkan_icd_src and "execute_recorded_fill_op(op)" in vulkan_icd_src and "execute_recorded_update_op(op)" in vulkan_icd_src and "queue-submit replayed ordered ops=%u dispatches=%u" in vulkan_icd_src)
-    llama_gpu_env_manifest_src = (ROOT / "scripts/llama-gpu-env-manifest.json").read_text()
+    llama_gpu_env_manifest_src = json.dumps(llama_gpu_env_manifest)
     require("vulkan icd has opt-in copy alias fast path", "PDOCKER_VULKAN_ALIAS_COPIES" in vulkan_icd_src and "if (copy_alias_enabled())" in vulkan_icd_src and "descriptor alias set=" in vulkan_icd_src and "copy-alias" in vulkan_icd_src and "PDOCKER_VULKAN_ALIAS_COPIES" in llama_gpu_env_manifest_src)
     compare_src = (ROOT / "scripts/android-llama-gpu-compare.sh").read_text()
     require("gpu executor supports default duplicate descriptor aliasing", "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS" in gpu_executor_src and "env_truthy(\"PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS\", 1)" in gpu_executor_src and "rewrite_duplicate_descriptor_bindings" in gpu_executor_src and "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS" in pdockerd_src)

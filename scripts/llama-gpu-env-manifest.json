@@ -130,6 +130,28 @@
     "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
     "GGML_VK_SUBALLOCATION_BLOCK_SIZE"
   ],
+  "ui_compose_runtime_env_defaults": [
+    {
+      "env": "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
+      "default": "0"
+    },
+    {
+      "env": "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
+      "default": "536870912"
+    },
+    {
+      "env": "GGML_VK_FORCE_MAX_BUFFER_SIZE",
+      "default": "536870912"
+    },
+    {
+      "env": "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
+      "default": "536870912"
+    },
+    {
+      "env": "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
+      "default": "536870912"
+    }
+  ],
   "compare_diagnostic_env_keys": [
     "PDOCKER_GPU_CPU_ORACLE",
     "PDOCKER_GPU_STRICT_PASSTHROUGH",
