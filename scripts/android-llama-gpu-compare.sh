@@ -2382,7 +2382,8 @@ def parse_spirv_traces(text):
     return traces
 
 executor_events = extract_executor_json_events(log)
-dispatch_lifecycle = summarize_dispatch_lifecycle(extract_dispatch_lifecycle_events(log))
+dispatch_lifecycle_events = extract_dispatch_lifecycle_events(log)
+dispatch_lifecycle = summarize_dispatch_lifecycle(dispatch_lifecycle_events)
 executor_backends = sorted(set(executor_backends) | {e.get("backend_impl") for e in executor_events if e.get("backend_impl")})
 executor_errors = sorted(set(executor_errors) | {e.get("error") for e in executor_events if e.get("error")})
 spirv_hashes = sorted(set(spirv_hashes) | {e.get("spirv_hash") for e in executor_events if e.get("spirv_hash")})
@@ -2548,7 +2549,7 @@ def build_api_executor_reconciliation(events):
         comparable = {
             key: value
             for key, value in matches.items()
-            if isinstance(value, bool)
+            if isinstance(value, bool) and not str(key).endswith("_comparable")
         }
         if comparable and all(comparable.values()):
             match_status = "diagnostic-match"
@@ -2898,26 +2899,84 @@ advertised_limits = {
     "spirv_trace_count": len(spirv_traces),
     "last_spirv_trace": spirv_traces[-1] if spirv_traces else {},
 }
+Q6_K_MATVEC_SPIRV_HASHES = {
+    "0x274f68a67dfef210",
+    "0x1bf751845c5dce75",
+    "0xe38f6a6a906d765c",
+    "0xbefdfb97e9734eb3",
+    "0x09c4622d92c6acb9",
+    "0x498c69a047eb3b2f",
+    "0xe5cd19682257a368",
+    "0x7ec0292e948c9b41",
+}
+
+valid_spirv_events = [
+    e for e in executor_events
+    if e.get("kernel") == "generic_spirv"
+    and e.get("backend_impl") == "android_vulkan"
+    and e.get("valid") is True
+]
+q6_valid_spirv_events = [
+    e for e in valid_spirv_events
+    if str(e.get("spirv_hash") or "").lower() in Q6_K_MATVEC_SPIRV_HASHES
+]
+q6_dispatch_lifecycle_events = [
+    e for e in dispatch_lifecycle_events
+    if isinstance(e, dict)
+    and e.get("event") == "begin"
+    and str(e.get("spirv_hash") or "").lower() in Q6_K_MATVEC_SPIRV_HASHES
+]
+
+
+def retain_diagnostic_events(priority_events, tail_events, limit=8):
+    """Keep bounded executor evidence while never dropping known Q6 candidates.
+
+    The old `[-4:]` tail sample made an ngl=1 run look as if Q6_K was never
+    reached when the final-projection dispatch was present in lifecycle logs but
+    outside the compact response sample.  This helper keeps the payload small
+    and deterministic, but promotes diagnostically important Q6 events first.
+    """
+
+    retained = []
+    seen = set()
+
+    def key(event):
+        if not isinstance(event, dict):
+            return None
+        return (
+            event.get("dispatch_id"),
+            event.get("spirv_hash"),
+            tuple(event.get("dispatch") or []),
+            event.get("descriptor_hash"),
+            event.get("push_hash"),
+        )
+
+    for event in list(priority_events or []) + list(tail_events or []):
+        marker = key(event)
+        if marker is None or marker in seen:
+            continue
+        retained.append(event)
+        seen.add(marker)
+        if len(retained) >= limit:
+            break
+    return retained
+
+
 generic_spirv_dispatch = {
     "attempted": generic_spirv_attempted,
-    "valid_android_vulkan_events": [e for e in executor_events if e.get("kernel") == "generic_spirv" and e.get("backend_impl") == "android_vulkan" and e.get("valid") is True][-4:],
+    "valid_android_vulkan_events": retain_diagnostic_events(
+        q6_valid_spirv_events,
+        valid_spirv_events[-4:],
+    ),
+    "q6_candidate_events": q6_valid_spirv_events[-8:],
+    "q6_dispatch_lifecycle_events": q6_dispatch_lifecycle_events[-8:],
     "largest_shader_events": sorted(
-        [
-            e for e in executor_events
-            if e.get("kernel") == "generic_spirv"
-            and e.get("backend_impl") == "android_vulkan"
-            and e.get("valid") is True
-        ],
+        valid_spirv_events,
         key=lambda event: int(event.get("shader_bytes") or 0),
         reverse=True,
     )[:8],
     "largest_binding_events": sorted(
-        [
-            e for e in executor_events
-            if e.get("kernel") == "generic_spirv"
-            and e.get("backend_impl") == "android_vulkan"
-            and e.get("valid") is True
-        ],
+        valid_spirv_events,
         key=lambda event: sum(int(detail.get("size") or 0) for detail in event.get("binding_details") or []),
         reverse=True,
     )[:8],
@@ -2991,18 +3050,14 @@ def compact_pre_q6_failure(generic_dispatch, q6_diagnostics):
         "llama_throw": generic_dispatch.get("llama_throw") or "",
         "q6_reachability": {
             "event_count": q6_diagnostics.get("event_count", 0),
+            "dispatch_seen": q6_diagnostics.get("q6_dispatch_seen") is True,
+            "dispatch_event_count": q6_diagnostics.get("q6_dispatch_event_count", 0),
             "blocker_class": q6_diagnostics.get("blocker_class") or "not-reached",
             "diagnostic_interpretation": q6_diagnostics.get("diagnostic_interpretation") or "",
         },
     }
 
 
-valid_spirv_events = [
-    e for e in executor_events
-    if e.get("kernel") == "generic_spirv"
-    and e.get("backend_impl") == "android_vulkan"
-    and e.get("valid") is True
-]
 final_projection_candidate = max(
     valid_spirv_events,
     key=lambda event: sum(int(detail.get("size") or 0) for detail in event.get("binding_details") or []),
@@ -3057,6 +3112,14 @@ q6_oracle_events = [
     and e.get("cpu_oracle", {}).get("kernel_hint") == "mul-mat-vec-q6-k-large"
 ]
 q6_latest = q6_oracle_events[-1] if q6_oracle_events else {}
+q6_latest_dispatch_event = (
+    q6_valid_spirv_events[-1]
+    if q6_valid_spirv_events
+    else q6_dispatch_lifecycle_events[-1]
+    if q6_dispatch_lifecycle_events
+    else {}
+)
+q6_dispatch_seen = bool(q6_valid_spirv_events or q6_dispatch_lifecycle_events)
 q6_latest_oracle = q6_latest.get("cpu_oracle") if isinstance(q6_latest.get("cpu_oracle"), dict) else {}
 q6_latest_partial = (
     q6_latest_oracle.get("partial_diagnostic")
@@ -3464,7 +3527,9 @@ if not q6_shader_like_64_required:
 elif numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_64_abs_delta")):
     q6_shader_like_clear_basis.append("q6_shader_like_64_abs_delta")
 q6_blocker_class = (
-    "not-reached"
+    "q6-oracle-capture-missing"
+    if not q6_oracle_events and q6_dispatch_seen
+    else "not-reached"
     if not q6_oracle_events
     else "workgroup-shape"
     if q6_workgroup_shape_blocker
@@ -3508,6 +3573,22 @@ q6_blocker_class = (
 )
 q6_workgroup_diagnostics = {
     "event_count": len(q6_oracle_events),
+    "q6_dispatch_seen": q6_dispatch_seen,
+    "q6_dispatch_event_count": len(q6_valid_spirv_events) + len(q6_dispatch_lifecycle_events),
+    "q6_dispatch_latest": {
+        "spirv_hash": q6_latest_dispatch_event.get("spirv_hash"),
+        "dispatch": q6_latest_dispatch_event.get("dispatch"),
+        "dispatch_id": q6_latest_dispatch_event.get("dispatch_id"),
+        "source": (
+            "executor-response"
+            if q6_valid_spirv_events
+            else "dispatch-lifecycle"
+            if q6_dispatch_lifecycle_events
+            else None
+        ),
+        "has_cpu_oracle": isinstance(q6_latest_dispatch_event.get("cpu_oracle"), dict),
+    },
+    "q6_oracle_capture_missing": bool(q6_dispatch_seen and not q6_oracle_events),
     "latest_spirv_hash": q6_latest.get("spirv_hash"),
     "latest_status": q6_latest_oracle.get("status"),
     "latest_mismatch_count": q6_latest_oracle.get("mismatch_count"),
@@ -3554,7 +3635,9 @@ q6_workgroup_diagnostics = {
     "workgroup_shape_blocker": q6_workgroup_shape_blocker,
     "blocker_class": q6_blocker_class,
     "diagnostic_interpretation": (
-        "no-q6-oracle-event"
+        "q6-dispatch-seen-without-oracle-response"
+        if not q6_oracle_events and q6_dispatch_seen
+        else "no-q6-oracle-event"
         if not q6_oracle_events
         else "workgroup-shape-inconsistent"
         if q6_workgroup_shape_blocker

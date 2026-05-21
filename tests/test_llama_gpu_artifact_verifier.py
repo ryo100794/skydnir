@@ -323,6 +323,34 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["api_executor_reconciliation"]["summary"], "pass")
         self.assert_claims_blocked(report)
 
+    def test_completion_wrong_output_with_q6_dispatch_but_missing_oracle_blocks_at_q6_evidence(self):
+        payload = wrong_completion_payload(api_executor_reconciliation())
+        payload["gpu"]["diagnostics"]["q6_workgroup_diagnostics"] = {
+            "event_count": 0,
+            "q6_dispatch_seen": True,
+            "q6_dispatch_event_count": 1,
+            "q6_dispatch_latest": {
+                "spirv_hash": "0x1bf751845c5dce75",
+                "dispatch": [1187, 1, 64],
+                "source": "dispatch-lifecycle",
+                "has_cpu_oracle": False,
+            },
+            "q6_oracle_capture_missing": True,
+            "blocker_class": "q6-oracle-capture-missing",
+            "diagnostic_interpretation": "q6-dispatch-seen-without-oracle-response",
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 48, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-oracle-capture-missing")
+        self.assertEqual(report["responsibility_boundary"], "q6-diagnostic-evidence")
+        self.assertEqual(report["observed_service_failure"], "llama-completion-wrong-output")
+        self.assertEqual(
+            report["q6_workgroup_diagnostics"]["q6_dispatch_latest"]["spirv_hash"],
+            "0x1bf751845c5dce75",
+        )
+        self.assert_claims_blocked(report)
+
     def test_completion_wrong_output_rejects_empty_reconciliation_pass(self):
         payload = wrong_completion_payload({"summary": "pass"})
         result = self.run_verifier(payload)

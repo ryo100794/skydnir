@@ -1342,6 +1342,27 @@ def _q6_workgroup_shape_blocked(q6: Any) -> bool:
     return not _q6_required_local_size_clear(q6)
 
 
+def _q6_dispatch_seen_without_oracle(q6: Any) -> bool:
+    if not isinstance(q6, dict):
+        return False
+    try:
+        event_count = int(q6.get("event_count", 0))
+    except (TypeError, ValueError):
+        event_count = 0
+    if event_count > 0:
+        return False
+    try:
+        dispatch_count = int(q6.get("q6_dispatch_event_count", 0))
+    except (TypeError, ValueError):
+        dispatch_count = 0
+    return (
+        q6.get("q6_dispatch_seen") is True
+        or q6.get("q6_oracle_capture_missing") is True
+        or dispatch_count > 0
+        or str(q6.get("blocker_class") or "") == "q6-oracle-capture-missing"
+    )
+
+
 def _q6_shader_like_interpretation(q6: Any) -> dict[str, Any]:
     """Explain whether the Q6 shader-like CPU oracle cleared.
 
@@ -1613,6 +1634,23 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         and completion_readiness.get("completion_ok") is True
         and completion_readiness.get("completion_passed") is False
     ):
+        if _q6_dispatch_seen_without_oracle(q6):
+            return _claim_base(
+                "q6-oracle-capture-missing",
+                next_action=(
+                    "fix compare/executor evidence retention so every observed Q6_K/final-projection "
+                    "dispatch carries CPU-oracle, local-size, binding, and writeback diagnostics before "
+                    "interpreting the wrong deterministic /completion output"
+                ),
+                runtime_freshness=runtime_freshness,
+                runtime_env_manifest=runtime_env_manifest,
+                responsibility_boundary="q6-diagnostic-evidence",
+            ) | {
+                "observed_service_failure": "llama-completion-wrong-output",
+                "service_readiness": completion_readiness,
+                "q6_workgroup_diagnostics": q6,
+                "runtime_env": nested(data, "gpu", "runtime_env") or {},
+            }
         api_executor_reconciliation = _api_executor_reconciliation(data)
         reconciliation_summary = api_executor_reconciliation.get("summary")
         if reconciliation_summary == "missing":
@@ -1868,6 +1906,13 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         classification = "q6-not-reached"
         responsibility_boundary = "q6-not-reached"
         next_action = data.get("next_action") or "collect an ngl=1 artifact with Q6_K oracle enabled"
+    elif _q6_dispatch_seen_without_oracle(q6):
+        classification = "q6-oracle-capture-missing"
+        responsibility_boundary = "q6-diagnostic-evidence"
+        next_action = (
+            data.get("next_action")
+            or "fix compare/executor evidence retention so every observed Q6_K/final-projection dispatch carries CPU-oracle diagnostics"
+        )
     elif _q6_workgroup_shape_blocked(q6):
         classification = "q6-workgroup-shape-blocker"
         responsibility_boundary = "q6-local-size"
@@ -2056,6 +2101,8 @@ def main(argv: list[str]) -> int:
         return 37
     if classification == "generic-spirv-cpu-oracle-mismatch":
         return 47
+    if classification == "q6-oracle-capture-missing":
+        return 48
     if classification == "api-prompt-sanity-missing":
         return 38
     if classification == "speedup-fields-missing":

@@ -776,6 +776,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('detail.get("upload_ms")', compare)
         self.assertIn('detail.get("download_ms")', compare)
 
+    def test_llama_compare_retains_q6_dispatch_evidence_ahead_of_tail_sampling(self):
+        compare = LLAMA_COMPARE.read_text()
+        for marker in [
+            "Q6_K_MATVEC_SPIRV_HASHES",
+            "0x1bf751845c5dce75",
+            "q6_valid_spirv_events",
+            "q6_dispatch_lifecycle_events",
+            "retain_diagnostic_events",
+            '"q6_candidate_events"',
+            '"q6_dispatch_lifecycle_events"',
+            '"q6_dispatch_seen"',
+            '"q6_oracle_capture_missing"',
+            '"q6-oracle-capture-missing"',
+            "q6-dispatch-seen-without-oracle-response",
+        ]:
+            self.assertIn(marker, compare)
+
     def test_llama_compare_records_server_token_probabilities(self):
         compare = LLAMA_COMPARE.read_text()
         for marker in [

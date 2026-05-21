@@ -1,6 +1,6 @@
 # llama.cpp GPU Bridge Next Steps
 
-Snapshot date: 2026-05-20.
+Snapshot date: 2026-05-21.
 
 This document is the handoff plan for continuing the llama.cpp GPU bridge work
 with a smaller or faster coding model.  It assumes the repository is on or
@@ -196,6 +196,23 @@ passthrough for isolating driver compilation rejection from descriptor/call-site
 ABI correctness; it is not a benchmarkable product optimization.
 Fresh APK/device evidence for this lane must show executor marker
 `gpu-executor-llama-q4k-callsite-20260520`.
+
+2026-05-21 Q6 evidence-retention gate: a fresh `ngl=1` compare on
+`192.168.179.26:37303` served `/health`, `/v1/models`, and `/completion`, but
+the deterministic prompt returned the wrong text (`2+3=` produced `Marvel`).
+The compact artifact also showed an important evidence gap: the dispatch
+lifecycle reached the known Q6_K/final-projection hash `0x1bf751845c5dce75`,
+while `q6_workgroup_diagnostics` still reported `event_count=0` and
+`not-reached`.  The compare summarizer now keeps known Q6_K/final-projection
+dispatches ahead of bounded tail sampling, records lifecycle Q6 dispatches as
+`q6_dispatch_seen`, and fails closed as `q6-oracle-capture-missing` when a Q6
+dispatch is observed without CPU-oracle/local-size/binding/writeback evidence.
+The verifier also treats that as a diagnostic-evidence blocker before any
+served HTTP wrong-output claim can be promoted.  Next device run should use the
+same Dockerfile, model, prompt, and image and verify that the new artifact
+classifies the run as either a concrete Q6_K oracle result or
+`q6-oracle-capture-missing`; it must no longer look like Q6 was simply not
+reached.
 
 Milestone compare with CPU baseline should be run only after a correctness
 blocker changes, not after every small diagnostic edit.
