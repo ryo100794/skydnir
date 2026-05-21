@@ -1147,6 +1147,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         {"PDOCKER_GPU_Q6K_SAFE_KERNEL", "q6k_safe_kernel", false},
         {"PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel", false},
         {"PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization", false},
+        {"PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", "q4k_pipeline_retry_ladder", true},
         {"PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", "add_float16_capability_for_storage16", false},
         {"PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", "disable_storage8", false},
         {"PDOCKER_VULKAN_DISABLE_16BIT_STORAGE", "disable_storage16", false},

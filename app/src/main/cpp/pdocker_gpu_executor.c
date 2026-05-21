@@ -905,6 +905,8 @@ typedef struct {
     int q4k_safe_kernel;
     int has_q4k_targeted_specialization;
     int q4k_targeted_specialization;
+    int has_q4k_pipeline_retry_ladder;
+    int q4k_pipeline_retry_ladder;
     int has_add_float16_capability_for_storage16;
     int add_float16_capability_for_storage16;
     int disable_storage8;
@@ -2296,6 +2298,20 @@ static size_t count_dirty_probe_pages(
     return pages;
 }
 
+
+static int parse_bool_token_value(const char *value) {
+    if (!value || !value[0]) return -1;
+    if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+        strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
+        return 1;
+    }
+    if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+        strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
+        return 0;
+    }
+    return -1;
+}
+
 static int parse_u64_token_value(const char *value, uint64_t *out) {
     if (!value || !value[0] || !out) return -1;
     char *end = NULL;
@@ -2365,406 +2381,72 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
         options->sender_reconcile.has_dispatch_hash = 1;
         return 0;
     }
-    if (strncmp(token, "dirty_probe=", 12) == 0) {
-        const char *value = token + 12;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_dirty_probe = 1;
-            options->dirty_probe = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_dirty_probe = 1;
-            options->dirty_probe = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "dirty_writeback=", 16) == 0) {
-        const char *value = token + 16;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_dirty_writeback = 1;
-            options->dirty_writeback = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_dirty_writeback = 1;
-            options->dirty_writeback = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "dirty_probe_min=", 16) == 0) {
-        const char *value = token + 16;
-        char *end = NULL;
-        unsigned long long parsed = strtoull(value, &end, 10);
-        if (!end || *end != '\0') return -1;
-        options->has_dirty_probe_min_bytes = 1;
-        options->dirty_probe_min_bytes = (size_t)parsed;
+    typedef struct {
+        const char *name;
+        int *has_field;
+        int *value_field;
+    } VulkanBoolDispatchOption;
+    VulkanBoolDispatchOption bool_options[] = {
+        {"dirty_probe", &options->has_dirty_probe, &options->dirty_probe},
+        {"dirty_writeback", &options->has_dirty_writeback, &options->dirty_writeback},
+        {"writeonly_cache", &options->has_writeonly_buffer_cache, &options->writeonly_buffer_cache},
+        {"mutable_cache", &options->has_mutable_buffer_cache, &options->mutable_buffer_cache},
+        {"resident_cache", &options->has_resident_cache, &options->resident_cache},
+        {"profile", &options->has_profile_response, &options->profile_response},
+        {"rewrite_duplicate_descriptors", &options->has_rewrite_duplicate_descriptors, &options->rewrite_duplicate_descriptors},
+        {"materialize_descriptor_aliases", &options->has_materialize_descriptor_aliases, &options->materialize_descriptor_aliases},
+        {"materialize_specialization", &options->has_materialize_specialization_constants, &options->materialize_specialization_constants},
+        {"disable_pipeline_optimization", &options->has_disable_pipeline_optimization, &options->disable_pipeline_optimization},
+        {"skip_unused_descriptor_transfers", &options->has_skip_unused_descriptor_transfers, &options->skip_unused_descriptor_transfers},
+        {"use_spirv_descriptor_access", &options->has_use_spirv_descriptor_access, &options->use_spirv_descriptor_access},
+        {"strict_passthrough", &options->has_strict_passthrough, &options->strict_passthrough},
+        {"strict_reconciliation", &options->has_strict_reconciliation, &options->strict_reconciliation},
+        {"strict_device_local_staging", &options->has_strict_device_local_staging, &options->strict_device_local_staging},
+        {"disable_overlap_aliasing", &options->has_disable_overlap_aliasing, &options->disable_overlap_aliasing},
+        {"cpu_oracle", &options->has_cpu_oracle, &options->cpu_oracle},
+        {"q6k_oracle_writeback", &options->has_q6k_oracle_writeback, &options->q6k_oracle_writeback},
+        {"q6k_safe_kernel", &options->has_q6k_safe_kernel, &options->q6k_safe_kernel},
+        {"q4k_safe_kernel", &options->has_q4k_safe_kernel, &options->q4k_safe_kernel},
+        {"q4k_targeted_specialization", &options->has_q4k_targeted_specialization, &options->q4k_targeted_specialization},
+        {"q4k_pipeline_retry_ladder", &options->has_q4k_pipeline_retry_ladder, &options->q4k_pipeline_retry_ladder},
+        {"add_float16_capability_for_storage16", &options->has_add_float16_capability_for_storage16, &options->add_float16_capability_for_storage16},
+        {"disable_storage8", NULL, &options->disable_storage8},
+        {"disable_storage16", NULL, &options->disable_storage16},
+        {"disable_subgroup_arithmetic", NULL, &options->disable_subgroup_arithmetic},
+    };
+    for (size_t i = 0; i < sizeof(bool_options) / sizeof(bool_options[0]); ++i) {
+        const VulkanBoolDispatchOption *option = &bool_options[i];
+        size_t name_len = strlen(option->name);
+        if (strncmp(token, option->name, name_len) != 0 || token[name_len] != '=') continue;
+        const char *value = token + name_len + 1;
+        int parsed = parse_bool_token_value(value);
+        if (parsed < 0) return -1;
+        if (option->has_field) *option->has_field = 1;
+        *option->value_field = parsed;
         return 0;
     }
-    if (strncmp(token, "writeonly_cache=", 16) == 0) {
-        const char *value = token + 16;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_writeonly_buffer_cache = 1;
-            options->writeonly_buffer_cache = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_writeonly_buffer_cache = 1;
-            options->writeonly_buffer_cache = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "mutable_cache=", 14) == 0) {
-        const char *value = token + 14;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_mutable_buffer_cache = 1;
-            options->mutable_buffer_cache = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_mutable_buffer_cache = 1;
-            options->mutable_buffer_cache = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "mutable_cache_max=", 18) == 0) {
-        const char *value = token + 18;
-        char *end = NULL;
-        unsigned long long parsed = strtoull(value, &end, 10);
-        if (!end || *end != '\0') return -1;
-        options->has_mutable_buffer_cache_max_bytes = 1;
-        options->mutable_buffer_cache_max_bytes = (size_t)parsed;
+
+    typedef struct {
+        const char *name;
+        int *has_field;
+        size_t *value_field;
+    } VulkanSizeDispatchOption;
+    VulkanSizeDispatchOption size_options[] = {
+        {"dirty_probe_min", &options->has_dirty_probe_min_bytes, &options->dirty_probe_min_bytes},
+        {"mutable_cache_max", &options->has_mutable_buffer_cache_max_bytes, &options->mutable_buffer_cache_max_bytes},
+        {"resident_cache_min", &options->has_resident_cache_min_bytes, &options->resident_cache_min_bytes},
+    };
+    for (size_t i = 0; i < sizeof(size_options) / sizeof(size_options[0]); ++i) {
+        const VulkanSizeDispatchOption *option = &size_options[i];
+        size_t name_len = strlen(option->name);
+        if (strncmp(token, option->name, name_len) != 0 || token[name_len] != '=') continue;
+        uint64_t parsed = 0;
+        if (parse_u64_token_value(token + name_len + 1, &parsed) != 0 || parsed > (uint64_t)SIZE_MAX) return -1;
+        if (option->has_field) *option->has_field = 1;
+        *option->value_field = (size_t)parsed;
         return 0;
     }
-    if (strncmp(token, "resident_cache=", 15) == 0) {
-        const char *value = token + 15;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_resident_cache = 1;
-            options->resident_cache = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_resident_cache = 1;
-            options->resident_cache = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "resident_cache_min=", 19) == 0) {
-        const char *value = token + 19;
-        char *end = NULL;
-        unsigned long long parsed = strtoull(value, &end, 10);
-        if (!end || *end != '\0') return -1;
-        options->has_resident_cache_min_bytes = 1;
-        options->resident_cache_min_bytes = (size_t)parsed;
-        return 0;
-    }
-    if (strncmp(token, "profile=", 8) == 0) {
-        const char *value = token + 8;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_profile_response = 1;
-            options->profile_response = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_profile_response = 1;
-            options->profile_response = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "rewrite_duplicate_descriptors=", 30) == 0) {
-        const char *value = token + 30;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_rewrite_duplicate_descriptors = 1;
-            options->rewrite_duplicate_descriptors = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_rewrite_duplicate_descriptors = 1;
-            options->rewrite_duplicate_descriptors = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "materialize_descriptor_aliases=", 31) == 0) {
-        const char *value = token + 31;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_materialize_descriptor_aliases = 1;
-            options->materialize_descriptor_aliases = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_materialize_descriptor_aliases = 1;
-            options->materialize_descriptor_aliases = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "materialize_specialization=", 27) == 0) {
-        const char *value = token + 27;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_materialize_specialization_constants = 1;
-            options->materialize_specialization_constants = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_materialize_specialization_constants = 1;
-            options->materialize_specialization_constants = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "disable_pipeline_optimization=", 30) == 0) {
-        const char *value = token + 30;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_disable_pipeline_optimization = 1;
-            options->disable_pipeline_optimization = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_disable_pipeline_optimization = 1;
-            options->disable_pipeline_optimization = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "skip_unused_descriptor_transfers=", 33) == 0) {
-        const char *value = token + 33;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_skip_unused_descriptor_transfers = 1;
-            options->skip_unused_descriptor_transfers = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_skip_unused_descriptor_transfers = 1;
-            options->skip_unused_descriptor_transfers = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "use_spirv_descriptor_access=", 28) == 0) {
-        const char *value = token + 28;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_use_spirv_descriptor_access = 1;
-            options->use_spirv_descriptor_access = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_use_spirv_descriptor_access = 1;
-            options->use_spirv_descriptor_access = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "strict_passthrough=", 19) == 0) {
-        const char *value = token + 19;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_strict_passthrough = 1;
-            options->strict_passthrough = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_strict_passthrough = 1;
-            options->strict_passthrough = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "strict_reconciliation=", 22) == 0) {
-        const char *value = token + 22;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_strict_reconciliation = 1;
-            options->strict_reconciliation = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_strict_reconciliation = 1;
-            options->strict_reconciliation = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "strict_device_local_staging=", 28) == 0) {
-        const char *value = token + 28;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_strict_device_local_staging = 1;
-            options->strict_device_local_staging = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_strict_device_local_staging = 1;
-            options->strict_device_local_staging = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "disable_overlap_aliasing=", 25) == 0) {
-        const char *value = token + 25;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_disable_overlap_aliasing = 1;
-            options->disable_overlap_aliasing = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_disable_overlap_aliasing = 1;
-            options->disable_overlap_aliasing = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "cpu_oracle=", 11) == 0) {
-        const char *value = token + 11;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_cpu_oracle = 1;
-            options->cpu_oracle = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_cpu_oracle = 1;
-            options->cpu_oracle = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "q6k_oracle_writeback=", 21) == 0) {
-        const char *value = token + 21;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_q6k_oracle_writeback = 1;
-            options->q6k_oracle_writeback = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_q6k_oracle_writeback = 1;
-            options->q6k_oracle_writeback = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "q6k_safe_kernel=", 16) == 0) {
-        const char *value = token + 16;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_q6k_safe_kernel = 1;
-            options->q6k_safe_kernel = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_q6k_safe_kernel = 1;
-            options->q6k_safe_kernel = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "q4k_safe_kernel=", 16) == 0) {
-        const char *value = token + 16;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_q4k_safe_kernel = 1;
-            options->q4k_safe_kernel = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_q4k_safe_kernel = 1;
-            options->q4k_safe_kernel = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "q4k_targeted_specialization=", 28) == 0) {
-        const char *value = token + 28;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_q4k_targeted_specialization = 1;
-            options->q4k_targeted_specialization = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_q4k_targeted_specialization = 1;
-            options->q4k_targeted_specialization = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "add_float16_capability_for_storage16=", 37) == 0) {
-        const char *value = token + 37;
-        if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-            strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0) {
-            options->has_add_float16_capability_for_storage16 = 1;
-            options->add_float16_capability_for_storage16 = 1;
-            return 0;
-        }
-        if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
-            strcasecmp(value, "no") == 0 || strcasecmp(value, "off") == 0) {
-            options->has_add_float16_capability_for_storage16 = 1;
-            options->add_float16_capability_for_storage16 = 0;
-            return 0;
-        }
-        return -1;
-    }
-    if (strncmp(token, "disable_storage8=", 17) == 0) {
-        const char *value = token + 17;
-        options->disable_storage8 =
-            (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-             strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0);
-        return 0;
-    }
-    if (strncmp(token, "disable_storage16=", 18) == 0) {
-        const char *value = token + 18;
-        options->disable_storage16 =
-            (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-             strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0);
-        return 0;
-    }
-    if (strncmp(token, "disable_subgroup_arithmetic=", 28) == 0) {
-        const char *value = token + 28;
-        options->disable_subgroup_arithmetic =
-            (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
-             strcasecmp(value, "yes") == 0 || strcasecmp(value, "on") == 0);
-        return 0;
-    }
+
     if (strncmp(token, "requested_feature_mask=", 23) == 0) {
         const char *value = token + 23;
         char *end = NULL;
@@ -8701,7 +8383,9 @@ static int run_vulkan_dispatch_fd(
     const uint64_t original_spirv_hash = source_spirv_summary.hash;
     q4k_callsite_detected = is_q4k_matvec_hash(original_spirv_hash);
     q4k_pipeline_retry_enabled = q4k_callsite_detected &&
-        env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 1);
+        (options && options->has_q4k_pipeline_retry_ladder
+            ? options->q4k_pipeline_retry_ladder
+            : env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 1));
     dispatch_lifecycle_spirv_hash = original_spirv_hash;
     const char *strict_reconciliation_field = NULL;
     if (strict_reconciliation && strict_reconciliation_has_mismatch(

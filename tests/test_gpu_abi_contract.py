@@ -174,7 +174,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("infos[write_count].offset = (VkDeviceSize)binding_descriptor_offset[i];", source)
         self.assertIn("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", source)
         self.assertIn("has_strict_device_local_staging", source)
-        self.assertIn("strict_device_local_staging=", source)
+        self.assertIn('"strict_device_local_staging", &options->has_strict_device_local_staging', source)
         self.assertIn("device_local_staged", source)
         self.assertIn("vkCmdCopyBuffer(command_buffer,", source)
         self.assertIn("device_local_staging_requested", source)
