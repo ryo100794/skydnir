@@ -2835,7 +2835,47 @@ vulkan_model_mib = [
     float(m.group(1))
     for m in re.finditer(r"Vulkan0 model buffer size =\s+([0-9.]+) MiB", log)
 ]
-bridge_max_buffer_bytes = 536870912
+def compare_profile_value(name, mode="vulkan-raw"):
+    profiles = env_manifest.get("compare_mode_env_profiles")
+    if not isinstance(profiles, dict):
+        return None
+    profile = profiles.get(mode)
+    if not isinstance(profile, dict):
+        return None
+    for section in ("env", "trace_alloc_env"):
+        entries = profile.get(section) or []
+        if not isinstance(entries, list):
+            continue
+        for item in entries:
+            if not isinstance(item, dict) or item.get("env") != name:
+                continue
+            if item.get("host_override") is True and name in os.environ:
+                return os.environ[name]
+            if isinstance(item.get("default"), str):
+                return item["default"]
+            if isinstance(item.get("default_template"), str):
+                return item["default_template"].format(
+                    workspace_host="",
+                    gpu_layers=gpu_layers,
+                )
+    return None
+
+def int_runtime_or_profile_env(name):
+    value = effective_runtime_env.get(name)
+    if value is None:
+        value = compare_profile_value(name)
+    try:
+        return int(str(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+configured_clamps = {
+    "PDOCKER_VULKAN_MAX_BUFFER_BYTES": int_runtime_or_profile_env("PDOCKER_VULKAN_MAX_BUFFER_BYTES"),
+    "GGML_VK_FORCE_MAX_BUFFER_SIZE": int_runtime_or_profile_env("GGML_VK_FORCE_MAX_BUFFER_SIZE"),
+    "GGML_VK_FORCE_MAX_ALLOCATION_SIZE": int_runtime_or_profile_env("GGML_VK_FORCE_MAX_ALLOCATION_SIZE"),
+    "GGML_VK_SUBALLOCATION_BLOCK_SIZE": int_runtime_or_profile_env("GGML_VK_SUBALLOCATION_BLOCK_SIZE"),
+}
+bridge_max_buffer_bytes = configured_clamps["PDOCKER_VULKAN_MAX_BUFFER_BYTES"]
 largest_allocation = max(allocations) if allocations else 0
 largest_created_buffer = max(created_buffers) if created_buffers else 0
 model_cpu_mapped_bytes = int(cpu_mapped_model_mib[-1] * 1024 * 1024) if cpu_mapped_model_mib else 0
@@ -2843,21 +2883,16 @@ chunking_pressure = {
     "configured_bridge_max_buffer_bytes": bridge_max_buffer_bytes,
     "largest_allocation_bytes": largest_allocation,
     "largest_created_buffer_bytes": largest_created_buffer,
-    "allocation_near_clamp": bool(largest_allocation and largest_allocation >= int(bridge_max_buffer_bytes * 0.90)),
+    "allocation_near_clamp": bool(bridge_max_buffer_bytes and largest_allocation and largest_allocation >= int(bridge_max_buffer_bytes * 0.90)),
     "model_cpu_mapped_bytes": model_cpu_mapped_bytes,
-    "model_cpu_mapped_exceeds_bridge_clamp": bool(model_cpu_mapped_bytes and model_cpu_mapped_bytes > bridge_max_buffer_bytes),
+    "model_cpu_mapped_exceeds_bridge_clamp": bool(bridge_max_buffer_bytes and model_cpu_mapped_bytes and model_cpu_mapped_bytes > bridge_max_buffer_bytes),
     "vulkan_model_buffer_mib": vulkan_model_mib[-1] if vulkan_model_mib else 0.0,
     "descriptor_range_max_bytes": max(descriptor_ranges) if descriptor_ranges else 0,
     "descriptor_array_layout_seen": bool(descriptor_array_layouts),
     "descriptor_array_layouts": descriptor_array_layouts[-16:],
 }
 advertised_limits = {
-    "configured_clamps": {
-        "PDOCKER_VULKAN_MAX_BUFFER_BYTES": bridge_max_buffer_bytes,
-        "GGML_VK_FORCE_MAX_BUFFER_SIZE": bridge_max_buffer_bytes,
-        "GGML_VK_FORCE_MAX_ALLOCATION_SIZE": bridge_max_buffer_bytes,
-        "GGML_VK_SUBALLOCATION_BLOCK_SIZE": bridge_max_buffer_bytes,
-    },
+    "configured_clamps": configured_clamps,
     "icd_advertises_subgroup_arithmetic_by_default": "PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC" not in log,
     "executor_android_features": android_feature_trace,
     "spirv_trace_count": len(spirv_traces),
