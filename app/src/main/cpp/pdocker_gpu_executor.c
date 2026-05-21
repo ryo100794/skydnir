@@ -2387,32 +2387,15 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
         int *value_field;
     } VulkanBoolDispatchOption;
     VulkanBoolDispatchOption bool_options[] = {
-        {"dirty_probe", &options->has_dirty_probe, &options->dirty_probe},
-        {"dirty_writeback", &options->has_dirty_writeback, &options->dirty_writeback},
-        {"writeonly_cache", &options->has_writeonly_buffer_cache, &options->writeonly_buffer_cache},
-        {"mutable_cache", &options->has_mutable_buffer_cache, &options->mutable_buffer_cache},
-        {"resident_cache", &options->has_resident_cache, &options->resident_cache},
         {"profile", &options->has_profile_response, &options->profile_response},
-        {"rewrite_duplicate_descriptors", &options->has_rewrite_duplicate_descriptors, &options->rewrite_duplicate_descriptors},
-        {"materialize_descriptor_aliases", &options->has_materialize_descriptor_aliases, &options->materialize_descriptor_aliases},
-        {"materialize_specialization", &options->has_materialize_specialization_constants, &options->materialize_specialization_constants},
-        {"disable_pipeline_optimization", &options->has_disable_pipeline_optimization, &options->disable_pipeline_optimization},
-        {"skip_unused_descriptor_transfers", &options->has_skip_unused_descriptor_transfers, &options->skip_unused_descriptor_transfers},
-        {"use_spirv_descriptor_access", &options->has_use_spirv_descriptor_access, &options->use_spirv_descriptor_access},
-        {"strict_passthrough", &options->has_strict_passthrough, &options->strict_passthrough},
-        {"strict_reconciliation", &options->has_strict_reconciliation, &options->strict_reconciliation},
-        {"strict_device_local_staging", &options->has_strict_device_local_staging, &options->strict_device_local_staging},
-        {"disable_overlap_aliasing", &options->has_disable_overlap_aliasing, &options->disable_overlap_aliasing},
-        {"cpu_oracle", &options->has_cpu_oracle, &options->cpu_oracle},
-        {"q6k_oracle_writeback", &options->has_q6k_oracle_writeback, &options->q6k_oracle_writeback},
-        {"q6k_safe_kernel", &options->has_q6k_safe_kernel, &options->q6k_safe_kernel},
-        {"q4k_safe_kernel", &options->has_q4k_safe_kernel, &options->q4k_safe_kernel},
-        {"q4k_targeted_specialization", &options->has_q4k_targeted_specialization, &options->q4k_targeted_specialization},
-        {"q4k_pipeline_retry_ladder", &options->has_q4k_pipeline_retry_ladder, &options->q4k_pipeline_retry_ladder},
-        {"add_float16_capability_for_storage16", &options->has_add_float16_capability_for_storage16, &options->add_float16_capability_for_storage16},
-        {"disable_storage8", NULL, &options->disable_storage8},
-        {"disable_storage16", NULL, &options->disable_storage16},
-        {"disable_subgroup_arithmetic", NULL, &options->disable_subgroup_arithmetic},
+#define PDOCKER_EXEC_BOOL_DISPATCH_OPTION(env_name, option_name, has_field, value_field, default_value) \
+        {#option_name, &options->has_field, &options->value_field},
+        PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_EXEC_BOOL_DISPATCH_OPTION)
+#undef PDOCKER_EXEC_BOOL_DISPATCH_OPTION
+#define PDOCKER_EXEC_BOOL_DISPATCH_OPTION_NO_HAS(env_name, option_name, value_field, default_value) \
+        {#option_name, NULL, &options->value_field},
+        PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS_NO_HAS(PDOCKER_EXEC_BOOL_DISPATCH_OPTION_NO_HAS)
+#undef PDOCKER_EXEC_BOOL_DISPATCH_OPTION_NO_HAS
     };
     for (size_t i = 0; i < sizeof(bool_options) / sizeof(bool_options[0]); ++i) {
         const VulkanBoolDispatchOption *option = &bool_options[i];
@@ -2432,9 +2415,10 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
         size_t *value_field;
     } VulkanSizeDispatchOption;
     VulkanSizeDispatchOption size_options[] = {
-        {"dirty_probe_min", &options->has_dirty_probe_min_bytes, &options->dirty_probe_min_bytes},
-        {"mutable_cache_max", &options->has_mutable_buffer_cache_max_bytes, &options->mutable_buffer_cache_max_bytes},
-        {"resident_cache_min", &options->has_resident_cache_min_bytes, &options->resident_cache_min_bytes},
+#define PDOCKER_EXEC_SIZE_DISPATCH_OPTION(env_name, option_name, has_field, value_field) \
+        {#option_name, &options->has_field, &options->value_field},
+        PDOCKER_GPU_VULKAN_SIZE_DISPATCH_OPTIONS(PDOCKER_EXEC_SIZE_DISPATCH_OPTION)
+#undef PDOCKER_EXEC_SIZE_DISPATCH_OPTION
     };
     for (size_t i = 0; i < sizeof(size_options) / sizeof(size_options[0]); ++i) {
         const VulkanSizeDispatchOption *option = &size_options[i];

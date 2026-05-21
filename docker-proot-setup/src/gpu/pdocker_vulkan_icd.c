@@ -1127,31 +1127,14 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         bool default_value;
     } PdockerVkBoolBridgeOption;
     static const PdockerVkBoolBridgeOption bool_bridge_options[] = {
-        {"PDOCKER_GPU_WRITEONLY_DIRTY_PROBE", "dirty_probe", false},
-        {"PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK", "dirty_writeback", false},
-        {"PDOCKER_GPU_WRITEONLY_BUFFER_CACHE", "writeonly_cache", false},
-        {"PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_cache", true},
-        {"PDOCKER_GPU_RESIDENT_CACHE", "resident_cache", true},
-        {"PDOCKER_GPU_STRICT_PASSTHROUGH", "strict_passthrough", false},
-        {"PDOCKER_GPU_STRICT_RECONCILIATION", "strict_reconciliation", false},
-        {"PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", "strict_device_local_staging", false},
-        {"PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "rewrite_duplicate_descriptors", true},
-        {"PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES", "materialize_descriptor_aliases", false},
-        {"PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization", true},
-        {"PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "disable_pipeline_optimization", true},
-        {"PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", "skip_unused_descriptor_transfers", true},
-        {"PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "use_spirv_descriptor_access", true},
-        {"PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", "disable_overlap_aliasing", false},
-        {"PDOCKER_GPU_CPU_ORACLE", "cpu_oracle", false},
-        {"PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", "q6k_oracle_writeback", false},
-        {"PDOCKER_GPU_Q6K_SAFE_KERNEL", "q6k_safe_kernel", false},
-        {"PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel", false},
-        {"PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization", false},
-        {"PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", "q4k_pipeline_retry_ladder", true},
-        {"PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", "add_float16_capability_for_storage16", false},
-        {"PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", "disable_storage8", false},
-        {"PDOCKER_VULKAN_DISABLE_16BIT_STORAGE", "disable_storage16", false},
-        {"PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC", "disable_subgroup_arithmetic", false},
+#define PDOCKER_VK_BOOL_BRIDGE_OPTION(env_name, option_name, has_field, value_field, default_value) \
+        {#env_name, #option_name, (default_value) != 0},
+        PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_VK_BOOL_BRIDGE_OPTION)
+#undef PDOCKER_VK_BOOL_BRIDGE_OPTION
+#define PDOCKER_VK_BOOL_BRIDGE_OPTION_NO_HAS(env_name, option_name, value_field, default_value) \
+        {#env_name, #option_name, (default_value) != 0},
+        PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS_NO_HAS(PDOCKER_VK_BOOL_BRIDGE_OPTION_NO_HAS)
+#undef PDOCKER_VK_BOOL_BRIDGE_OPTION_NO_HAS
     };
     for (size_t i = 0; i < sizeof(bool_bridge_options) / sizeof(bool_bridge_options[0]); ++i) {
         const PdockerVkBoolBridgeOption *option = &bool_bridge_options[i];
@@ -1169,9 +1152,10 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         const char *option;
     } PdockerVkU64BridgeOption;
     static const PdockerVkU64BridgeOption u64_bridge_options[] = {
-        {"PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES", "mutable_cache_max"},
-        {"PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES", "resident_cache_min"},
-        {"PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES", "dirty_probe_min"},
+#define PDOCKER_VK_U64_BRIDGE_OPTION(env_name, option_name, has_field, value_field) \
+        {#env_name, #option_name},
+        PDOCKER_GPU_VULKAN_SIZE_DISPATCH_OPTIONS(PDOCKER_VK_U64_BRIDGE_OPTION)
+#undef PDOCKER_VK_U64_BRIDGE_OPTION
     };
     for (size_t i = 0; i < sizeof(u64_bridge_options) / sizeof(u64_bridge_options[0]); ++i) {
         const PdockerVkU64BridgeOption *option = &u64_bridge_options[i];

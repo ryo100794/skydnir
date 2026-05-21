@@ -174,7 +174,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("infos[write_count].offset = (VkDeviceSize)binding_descriptor_offset[i];", source)
         self.assertIn("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", source)
         self.assertIn("has_strict_device_local_staging", source)
-        self.assertIn('"strict_device_local_staging", &options->has_strict_device_local_staging', source)
+        abi = APP_HEADER.read_text()
+        self.assertIn(
+            "X(PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING, strict_device_local_staging, "
+            "has_strict_device_local_staging, strict_device_local_staging, 0)",
+            abi,
+        )
+        self.assertIn("PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_EXEC_BOOL_DISPATCH_OPTION)", source)
         self.assertIn("device_local_staged", source)
         self.assertIn("vkCmdCopyBuffer(command_buffer,", source)
         self.assertIn("device_local_staging_requested", source)
@@ -266,9 +272,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"q4k_targeted_specialization_materialized\\":%s', source)
         self.assertIn('\\"float16_capability_added\\":%s', source)
         self.assertIn("add_spirv_capability(&shader_code, &shader_size, 9)", source)
+        abi = APP_HEADER.read_text()
         icd_source = (ROOT / "docker-proot-setup/src/gpu/pdocker_vulkan_icd.c").read_text()
-        self.assertIn("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", icd_source)
-        self.assertIn('"PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", "add_float16_capability_for_storage16"', icd_source)
+        self.assertIn(
+            "X(PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16, "
+            "add_float16_capability_for_storage16, "
+            "has_add_float16_capability_for_storage16, "
+            "add_float16_capability_for_storage16, 0)",
+            abi,
+        )
+        self.assertIn("PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_VK_BOOL_BRIDGE_OPTION)", icd_source)
         self.assertIn("pipeline->requested_feature_mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT16", icd_source)
         self.assertIn('\\"q4k_safe_kernel\\":%s', source)
         self.assertIn("kQ4kSafeSpv", source)
@@ -1052,25 +1065,28 @@ class GpuAbiContractTest(unittest.TestCase):
             "ADD_DEVICE_EXTENSION(VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME",
         ]:
             self.assertIn(extension, icd)
-        for env_name, option_name in [
-            ("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", "rewrite_duplicate_descriptors"),
-            ("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_cache"),
-            ("PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel"),
-            ("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization"),
-            ("PDOCKER_GPU_STRICT_PASSTHROUGH", "strict_passthrough"),
-            ("PDOCKER_GPU_STRICT_RECONCILIATION", "strict_reconciliation"),
-            ("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", "strict_device_local_staging"),
-            ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
-            ("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "disable_pipeline_optimization"),
-            ("PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS", "skip_unused_descriptor_transfers"),
-            ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "use_spirv_descriptor_access"),
-            ("PDOCKER_GPU_DISABLE_OVERLAP_ALIASING", "disable_overlap_aliasing"),
-            ("PDOCKER_GPU_CPU_ORACLE", "cpu_oracle"),
-            ("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE", "disable_storage8"),
-            ("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE", "disable_storage16"),
-            ("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC", "disable_subgroup_arithmetic"),
+        abi = APP_HEADER.read_text()
+        for manifest_entry in [
+            "X(PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS, rewrite_duplicate_descriptors, has_rewrite_duplicate_descriptors, rewrite_duplicate_descriptors, 1)",
+            "X(PDOCKER_GPU_MUTABLE_BUFFER_CACHE, mutable_cache, has_mutable_buffer_cache, mutable_buffer_cache, 1)",
+            "X(PDOCKER_GPU_Q4K_SAFE_KERNEL, q4k_safe_kernel, has_q4k_safe_kernel, q4k_safe_kernel, 0)",
+            "X(PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION, q4k_targeted_specialization, has_q4k_targeted_specialization, q4k_targeted_specialization, 0)",
+            "X(PDOCKER_GPU_STRICT_PASSTHROUGH, strict_passthrough, has_strict_passthrough, strict_passthrough, 0)",
+            "X(PDOCKER_GPU_STRICT_RECONCILIATION, strict_reconciliation, has_strict_reconciliation, strict_reconciliation, 0)",
+            "X(PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING, strict_device_local_staging, has_strict_device_local_staging, strict_device_local_staging, 0)",
+            "X(PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS, materialize_specialization, has_materialize_specialization_constants, materialize_specialization_constants, 1)",
+            "X(PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION, disable_pipeline_optimization, has_disable_pipeline_optimization, disable_pipeline_optimization, 1)",
+            "X(PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS, skip_unused_descriptor_transfers, has_skip_unused_descriptor_transfers, skip_unused_descriptor_transfers, 1)",
+            "X(PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS, use_spirv_descriptor_access, has_use_spirv_descriptor_access, use_spirv_descriptor_access, 1)",
+            "X(PDOCKER_GPU_DISABLE_OVERLAP_ALIASING, disable_overlap_aliasing, has_disable_overlap_aliasing, disable_overlap_aliasing, 0)",
+            "X(PDOCKER_GPU_CPU_ORACLE, cpu_oracle, has_cpu_oracle, cpu_oracle, 0)",
+            "X(PDOCKER_VULKAN_DISABLE_8BIT_STORAGE, disable_storage8, disable_storage8, 0)",
+            "X(PDOCKER_VULKAN_DISABLE_16BIT_STORAGE, disable_storage16, disable_storage16, 0)",
+            "X(PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC, disable_subgroup_arithmetic, disable_subgroup_arithmetic, 0)",
         ]:
-            self.assertIn(f'"{env_name}", "{option_name}"', icd)
+            self.assertIn(manifest_entry, abi)
+        self.assertIn("PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_VK_BOOL_BRIDGE_OPTION)", icd)
+        self.assertIn("PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS_NO_HAS(PDOCKER_VK_BOOL_BRIDGE_OPTION_NO_HAS)", icd)
         self.assertIn("api_offsets[binding_count]", icd)
         self.assertIn("api_descriptor_types[binding_count]", icd)
         self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_LOG", icd)
@@ -1138,19 +1154,25 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, source)
         icd = VULKAN_ICD.read_text()
+        abi = APP_HEADER.read_text()
         for marker in [
             "PdockerVkBoolBridgeOption",
             "bool_bridge_options[]",
-            '"PDOCKER_GPU_WRITEONLY_DIRTY_PROBE", "dirty_probe"',
-            '"PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK", "dirty_writeback"',
-            '"PDOCKER_GPU_WRITEONLY_BUFFER_CACHE", "writeonly_cache"',
-            '"PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES", "mutable_cache_max"',
+            "PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_VK_BOOL_BRIDGE_OPTION)",
+            "PDOCKER_GPU_VULKAN_SIZE_DISPATCH_OPTIONS(PDOCKER_VK_U64_BRIDGE_OPTION)",
             "profile=1",
-            '"PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES", "dirty_probe_min"',
             "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
             "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
         ]:
             self.assertIn(marker, icd)
+        for manifest_entry in [
+            "X(PDOCKER_GPU_WRITEONLY_DIRTY_PROBE, dirty_probe, has_dirty_probe, dirty_probe, 0)",
+            "X(PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK, dirty_writeback, has_dirty_writeback, dirty_writeback, 0)",
+            "X(PDOCKER_GPU_WRITEONLY_BUFFER_CACHE, writeonly_cache, has_writeonly_buffer_cache, writeonly_buffer_cache, 0)",
+            "X(PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES, mutable_cache_max, has_mutable_buffer_cache_max_bytes, mutable_buffer_cache_max_bytes)",
+            "X(PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES, dirty_probe_min, has_dirty_probe_min_bytes, dirty_probe_min_bytes)",
+        ]:
+            self.assertIn(manifest_entry, abi)
         compare = LLAMA_COMPARE.read_text()
         self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1", compare)
         self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_LOG=1", compare)
