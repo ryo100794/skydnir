@@ -2215,18 +2215,19 @@ def env_bool(name):
 
 def extract_executor_json_events(text):
     events = []
-    marker = "generic dispatch response:"
+    markers = ("generic dispatch response:", "q6 compact response:")
     starts = []
-    search_from = 0
-    while True:
-        marker_pos = text.find(marker, search_from)
-        if marker_pos < 0:
-            break
-        brace_pos = text.find("{", marker_pos + len(marker))
-        if brace_pos < 0:
-            break
-        starts.append(brace_pos)
-        search_from = brace_pos + 1
+    for marker in markers:
+        search_from = 0
+        while True:
+            marker_pos = text.find(marker, search_from)
+            if marker_pos < 0:
+                break
+            brace_pos = text.find("{", marker_pos + len(marker))
+            if brace_pos < 0:
+                break
+            starts.append(brace_pos)
+            search_from = brace_pos + 1
     for line_start, line in enumerate(text.splitlines()):
         raw = line.strip()
         if raw.startswith("{"):

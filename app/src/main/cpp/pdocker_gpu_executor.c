@@ -9525,6 +9525,92 @@ static int run_vulkan_dispatch_fd(
         ret = 76;
         goto cleanup;
     }
+    if (profile_response && is_q6k_matvec_hash(spirv_summary.hash)) {
+        /*
+         * Q6_K is the current llama GPU bridge split point.  The normal
+         * profile response intentionally carries a rich full-dispatch record,
+         * but Android/engine log retention can drop that very large final
+         * projection line while keeping the smaller ICD lifecycle line.  Emit
+         * a bounded, standalone Q6 event before the large response so the
+         * compare artifact cannot regress to "dispatch seen without oracle"
+         * merely because the verbose line was lost.  This is diagnostic
+         * evidence only; it never writes oracle values back.
+         */
+        uint64_t q6_compact_resolved_local_size[3];
+        resolve_spirv_local_size(&spirv_summary,
+                                 specializations,
+                                 specialization_count,
+                                 specialization_data,
+                                 specialization_data_size,
+                                 q6_compact_resolved_local_size);
+        const int q6_compact_local_size_consistent =
+            spirv_local_size_consistent(&spirv_summary,
+                                        specializations,
+                                        specialization_count,
+                                        specialization_data,
+                                        specialization_data_size);
+        fprintf(stderr,
+                "pdocker-gpu-executor: q6 compact response: "
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\","
+                "\"abi_version\":\"%s\",\"executor_build_marker\":\"%s\","
+                "\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\","
+                "\"compact_summary\":true,\"q6_compact_response\":true,"
+                "\"strict_passthrough\":%s,"
+                "\"shader_bytes\":%zu,"
+                "\"source_spirv_hash\":\"0x%016llx\","
+                "\"effective_spirv_hash\":\"0x%016llx\","
+                "\"entry\":\"%s\",\"specializations\":%zu,"
+                "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
+                "\"pipeline_key\":{\"spirv_hash\":\"0x%016llx\","
+                "\"spec_hash\":\"0x%016llx\",\"layout_bindings\":%u,"
+                "\"descriptor_sets\":%u,\"push_bytes\":%zu},"
+                "\"cpu_oracle_requested\":%s,"
+                "\"q6k_safe_kernel\":%s,"
+                "\"spirv_local_size\":[%u,%u,%u],"
+                "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
+                "\"spirv_local_size_consistent\":%s,"
+                "\"valid\":true,",
+                PDOCKER_GPU_COMMAND_API,
+                PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
+                strict_passthrough ? "true" : "false",
+                shader_size,
+                (unsigned long long)original_spirv_hash,
+                (unsigned long long)spirv_summary.hash,
+                entry_name, specialization_count, binding_count, gx, gy, gz,
+                (unsigned long long)spirv_summary.hash,
+                (unsigned long long)spec_hash,
+                layout_count,
+                descriptor_set_count,
+                push_size,
+                cpu_oracle_requested ? "true" : "false",
+                q6k_safe_kernel_used ? "true" : "false",
+                spirv_summary.local_size[0],
+                spirv_summary.local_size[1],
+                spirv_summary.local_size[2],
+                (unsigned long long)q6_compact_resolved_local_size[0],
+                (unsigned long long)q6_compact_resolved_local_size[1],
+                (unsigned long long)q6_compact_resolved_local_size[2],
+                q6_compact_local_size_consistent ? "true" : "false");
+        write_vulkan_binding_compact_report(stderr, bindings, binding_count,
+                                            buffer_fds,
+                                            vk_buffers,
+                                            binding_gpu_offset,
+                                            binding_dirty_writeback_bytes,
+                                            active_bindings,
+                                            binding_read_needed, binding_write_needed,
+                                            cache_resident, cache_hits,
+                                            binding_fd_before_hash,
+                                            binding_gpu_after_upload_hash,
+                                            binding_gpu_after_dispatch_hash,
+                                            binding_fd_after_hash,
+                                            binding_alias_rep,
+                                            &cpu_oracle_report);
+        fprintf(stderr, ",");
+        write_cpu_oracle_report(stderr, &cpu_oracle_report);
+        fprintf(stderr, "}\n");
+        fflush(stderr);
+    }
     double download_start = now_ms();
     for (size_t i = 0; i < binding_count; ++i) {
         if (!active_bindings[i]) continue;

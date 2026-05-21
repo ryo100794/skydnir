@@ -552,6 +552,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"oracle_fail_closed\\":%s', source)
         self.assertIn("write_cpu_oracle_report(json_out(), &cpu_oracle_report);", source)
 
+    def test_q6_oracle_has_bounded_compact_retention_event(self):
+        source = GPU_EXECUTOR.read_text()
+        compare = LLAMA_COMPARE.read_text()
+        self.assertIn("q6 compact response", source)
+        self.assertIn("q6_compact_response", source)
+        self.assertIn("write_vulkan_binding_compact_report(stderr", source)
+        self.assertIn("write_cpu_oracle_report(stderr, &cpu_oracle_report);", source)
+        self.assertIn('"q6 compact response:"', compare)
+
     def test_rope_yarn_oracle_is_hash_gated_and_evidence_backed(self):
         source = GPU_EXECUTOR.read_text()
         self.assertIn("0xac41e8033a67af4aull", source)
