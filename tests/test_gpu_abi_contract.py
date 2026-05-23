@@ -1023,6 +1023,8 @@ class GpuAbiContractTest(unittest.TestCase):
         payload = json.loads(result.stdout)
         module = payload["modules"][0]
         self.assertEqual(module["hash"], "0x1bf751845c5dce75")
+        self.assertEqual(module["version"], "0x00010500")
+        self.assertEqual(probe_manifest["validation_gates"]["target_env"], "vulkan1.2")
         self.assertEqual(module["local_size"], [1, 1, 1])
         workgroup = module["workgroup_size_builtin"]
         self.assertEqual(workgroup["kind"], "spec_constant_composite")

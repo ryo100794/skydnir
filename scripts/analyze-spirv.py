@@ -629,6 +629,21 @@ def build_q6_probe_targets(module: dict) -> dict:
     }
 
 
+def validation_target_env_for_spirv_version(version_hex: str) -> str:
+    """Return the minimum Vulkan target-env that can validate this SPIR-V module."""
+    try:
+        version = int(version_hex, 16)
+    except (TypeError, ValueError):
+        return "vulkan1.2"
+    if version >= 0x00010600:
+        return "vulkan1.3"
+    if version >= 0x00010500:
+        return "vulkan1.2"
+    if version >= 0x00010300:
+        return "vulkan1.1"
+    return "vulkan1.0"
+
+
 def build_probe_manifest(module: dict, source_path: Path, probe_range: tuple[int, int] | None = None) -> dict:
     control_flow = module.get("control_flow", {})
     probe_plan = control_flow.get("probe_plan", {})
@@ -755,7 +770,7 @@ def build_probe_manifest(module: dict, source_path: Path, probe_range: tuple[int
         },
         "validation_gates": {
             "spirv_val_required": True,
-            "target_env": "vulkan1.1",
+            "target_env": validation_target_env_for_spirv_version(module.get("version", "")),
             "pre_instrumentation": {
                 "status": "required-before-instrumentation",
                 "hash": module.get("hash"),
