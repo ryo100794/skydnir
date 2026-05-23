@@ -3554,24 +3554,101 @@
         {
           "binding": 0,
           "id": 31,
+          "name": "",
           "non_readable": false,
           "non_writable": true,
+          "pointee_layout": {
+            "block": false,
+            "buffer_block": true,
+            "id": 29,
+            "kind": "struct",
+            "member_count": 1,
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "NonWritable": true,
+                  "Offset": 0
+                },
+                "name": "data_a_u32",
+                "offset": 0,
+                "type": {
+                  "id": 28,
+                  "kind": "unknown"
+                },
+                "type_id": 28
+              }
+            ]
+          },
+          "pointee_type": 29,
+          "pointer_type": 30,
           "set": 0,
           "storage_class": "Uniform"
         },
         {
           "binding": 1,
           "id": 333,
+          "name": "",
           "non_readable": false,
           "non_writable": true,
+          "pointee_layout": {
+            "block": false,
+            "buffer_block": true,
+            "id": 331,
+            "kind": "struct",
+            "member_count": 1,
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "NonWritable": true,
+                  "Offset": 0
+                },
+                "name": "data_b",
+                "offset": 0,
+                "type": {
+                  "id": 330,
+                  "kind": "unknown"
+                },
+                "type_id": 330
+              }
+            ]
+          },
+          "pointee_type": 331,
+          "pointer_type": 332,
           "set": 0,
           "storage_class": "Uniform"
         },
         {
           "binding": 2,
           "id": 354,
+          "name": "",
           "non_readable": false,
           "non_writable": false,
+          "pointee_layout": {
+            "block": false,
+            "buffer_block": true,
+            "id": 352,
+            "kind": "struct",
+            "member_count": 1,
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "Offset": 0
+                },
+                "name": "data_d",
+                "offset": 0,
+                "type": {
+                  "id": 351,
+                  "kind": "unknown"
+                },
+                "type_id": 351
+              }
+            ]
+          },
+          "pointee_type": 352,
+          "pointer_type": 353,
           "set": 0,
           "storage_class": "Uniform"
         }

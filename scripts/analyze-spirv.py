@@ -136,6 +136,11 @@ CAPABILITY_NAMES = {
 DECORATION_NAMES = {
     1: "SpecId",
     2: "Block",
+    3: "BufferBlock",
+    4: "RowMajor",
+    5: "ColMajor",
+    6: "ArrayStride",
+    7: "MatrixStride",
     11: "BuiltIn",
     24: "NonWritable",
     25: "NonReadable",
@@ -611,6 +616,10 @@ def analyze_spirv(path: Path) -> dict:
     entry_points: list[dict] = []
     type_pointer: dict[int, dict] = {}
     type_struct: dict[int, dict] = {}
+    type_vector: dict[int, dict] = {}
+    type_matrix: dict[int, dict] = {}
+    type_array: dict[int, dict] = {}
+    type_runtime_array: dict[int, dict] = {}
     variable: dict[int, dict] = {}
     type_scalar: dict[int, dict] = {}
     constants: dict[int, dict] = {}
@@ -682,6 +691,25 @@ def analyze_spirv(path: Path) -> dict:
             type_scalar[inst[1]] = {"kind": "int", "bits": inst[2], "signed": inst[3]}
         elif opcode == 22 and len(inst) >= 3:
             type_scalar[inst[1]] = {"kind": "float", "bits": inst[2]}
+        elif opcode == 23 and len(inst) >= 4:
+            type_vector[inst[1]] = {
+                "component_type": inst[2],
+                "component_count": inst[3],
+            }
+        elif opcode == 25 and len(inst) >= 4:
+            type_matrix[inst[1]] = {
+                "column_type": inst[2],
+                "column_count": inst[3],
+            }
+        elif opcode == 27 and len(inst) >= 4:
+            type_array[inst[1]] = {
+                "element_type": inst[2],
+                "length_id": inst[3],
+            }
+        elif opcode == 28 and len(inst) >= 3:
+            type_runtime_array[inst[1]] = {
+                "element_type": inst[2],
+            }
         elif opcode == 30 and len(inst) >= 2:
             type_struct[inst[1]] = {"member_types": inst[2:]}
         elif opcode == 32 and len(inst) >= 4:
@@ -745,32 +773,30 @@ def analyze_spirv(path: Path) -> dict:
                 }
             )
 
-    descriptor_variables = []
-    bindings_seen: dict[tuple[int, int], list[int]] = defaultdict(list)
-    for var_id, var in variable.items():
-        dec = decorations.get(var_id, {})
-        if "Binding" not in dec:
-            continue
-        descriptor_set = int(dec.get("DescriptorSet", 0))
-        binding = int(dec["Binding"])
-        bindings_seen[(descriptor_set, binding)].append(var_id)
-        descriptor_variables.append(
-            {
-                "id": var_id,
-                "set": descriptor_set,
-                "binding": binding,
-                "storage_class": var["storage_class_name"],
-                "non_readable": bool(dec.get("NonReadable", False)),
-                "non_writable": bool(dec.get("NonWritable", False)),
-            }
-        )
-
     member_offsets: dict[int, dict[int, int]] = defaultdict(dict)
+    member_layout: dict[int, dict[int, dict]] = defaultdict(dict)
     for item in member_decorations:
-        if item.get("decoration") == "Offset" and item.get("operands"):
-            member_offsets[int(item["target"])][int(item["member"])] = int(item["operands"][0])
+        decoration = item.get("decoration")
+        operands = item.get("operands") or []
+        target = int(item["target"])
+        member = int(item["member"])
+        layout = member_layout[target].setdefault(member, {})
+        if decoration == "Offset" and operands:
+            member_offsets[target][member] = int(operands[0])
+        if operands:
+            layout[str(decoration)] = int(operands[0])
+        else:
+            layout[str(decoration)] = True
 
-    def describe_type(type_id: int) -> dict:
+    def constant_u32(value_id: int) -> int | None:
+        value = constants.get(value_id)
+        if not value or len(value.get("words", [])) != 1:
+            return None
+        return int(value["words"][0])
+
+    def describe_type(type_id: int, depth: int = 0) -> dict:
+        if depth > 8:
+            return {"id": type_id, "kind": "max-depth"}
         if type_id in type_scalar:
             return {"id": type_id, **type_scalar[type_id]}
         if type_id in type_pointer:
@@ -780,14 +806,94 @@ def analyze_spirv(path: Path) -> dict:
                 "kind": "pointer",
                 "storage_class": type_pointer[type_id]["storage_class_name"],
                 "pointee_type": pointee,
+                "pointee": describe_type(pointee, depth + 1),
+            }
+        if type_id in type_vector:
+            component = type_vector[type_id]["component_type"]
+            return {
+                "id": type_id,
+                "kind": "vector",
+                "component_type": component,
+                "component_count": type_vector[type_id]["component_count"],
+                "component": describe_type(component, depth + 1),
+            }
+        if type_id in type_matrix:
+            column = type_matrix[type_id]["column_type"]
+            return {
+                "id": type_id,
+                "kind": "matrix",
+                "column_type": column,
+                "column_count": type_matrix[type_id]["column_count"],
+                "column": describe_type(column, depth + 1),
+                "matrix_stride": decorations.get(type_id, {}).get("MatrixStride"),
+            }
+        if type_id in type_array:
+            element = type_array[type_id]["element_type"]
+            return {
+                "id": type_id,
+                "kind": "array",
+                "element_type": element,
+                "length_id": type_array[type_id]["length_id"],
+                "length_u32": constant_u32(type_array[type_id]["length_id"]),
+                "array_stride": decorations.get(type_id, {}).get("ArrayStride"),
+                "element": describe_type(element, depth + 1),
+            }
+        if type_id in type_runtime_array:
+            element = type_runtime_array[type_id]["element_type"]
+            return {
+                "id": type_id,
+                "kind": "runtime_array",
+                "element_type": element,
+                "array_stride": decorations.get(type_id, {}).get("ArrayStride"),
+                "element": describe_type(element, depth + 1),
             }
         if type_id in type_struct:
             return {
                 "id": type_id,
                 "kind": "struct",
                 "member_count": len(type_struct[type_id]["member_types"]),
+                "block": bool(decorations.get(type_id, {}).get("Block", False)),
+                "buffer_block": bool(decorations.get(type_id, {}).get("BufferBlock", False)),
+                "members": [
+                    {
+                        "index": index,
+                        "name": member_names.get(type_id, {}).get(index, ""),
+                        "type_id": member_type,
+                        "offset": member_offsets.get(type_id, {}).get(index),
+                        "layout": member_layout.get(type_id, {}).get(index, {}),
+                        "type": describe_type(member_type, depth + 1),
+                    }
+                    for index, member_type in enumerate(type_struct[type_id]["member_types"])
+                ],
             }
         return {"id": type_id, "kind": "unknown"}
+
+    descriptor_variables = []
+    bindings_seen: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for var_id, var in variable.items():
+        dec = decorations.get(var_id, {})
+        if "Binding" not in dec:
+            continue
+        descriptor_set = int(dec.get("DescriptorSet", 0))
+        binding = int(dec["Binding"])
+        pointer_type = var["result_type"]
+        pointer = type_pointer.get(pointer_type, {})
+        pointee_type = pointer.get("pointee_type")
+        bindings_seen[(descriptor_set, binding)].append(var_id)
+        descriptor_variables.append(
+            {
+                "id": var_id,
+                "name": names.get(var_id, ""),
+                "set": descriptor_set,
+                "binding": binding,
+                "storage_class": var["storage_class_name"],
+                "pointer_type": pointer_type,
+                "pointee_type": pointee_type,
+                "pointee_layout": describe_type(pointee_type) if pointee_type is not None else None,
+                "non_readable": bool(dec.get("NonReadable", False)),
+                "non_writable": bool(dec.get("NonWritable", False)),
+            }
+        )
 
     push_constant_blocks = []
     for var_id, var in sorted(variable.items()):
@@ -834,12 +940,6 @@ def analyze_spirv(path: Path) -> dict:
 
     descriptor_by_id = {int(item["id"]): item for item in descriptor_variables}
     push_constant_by_id = {int(item["variable_id"]): item for item in push_constant_blocks}
-
-    def constant_u32(value_id: int) -> int | None:
-        value = constants.get(value_id)
-        if not value or len(value.get("words", [])) != 1:
-            return None
-        return int(value["words"][0])
 
     def describe_base(base_id: int) -> dict:
         if base_id in descriptor_by_id:

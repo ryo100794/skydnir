@@ -32,6 +32,65 @@ def load_module(path: Path, module_index: int = 0) -> dict[str, Any]:
     raise SystemExit(f"{path}: unsupported analysis schema {payload.get('schema')!r}")
 
 
+def type_layout_signature(type_info: Any) -> Any:
+    if not isinstance(type_info, dict):
+        return None
+    kind = type_info.get("kind")
+    if kind in {"int", "float"}:
+        result: dict[str, Any] = {"kind": kind, "bits": type_info.get("bits")}
+        if kind == "int":
+            result["signed"] = type_info.get("signed")
+        return result
+    if kind == "pointer":
+        return {
+            "kind": "pointer",
+            "storage_class": type_info.get("storage_class"),
+            "pointee": type_layout_signature(type_info.get("pointee")),
+        }
+    if kind == "vector":
+        return {
+            "kind": "vector",
+            "component_count": type_info.get("component_count"),
+            "component": type_layout_signature(type_info.get("component")),
+        }
+    if kind == "matrix":
+        return {
+            "kind": "matrix",
+            "column_count": type_info.get("column_count"),
+            "matrix_stride": type_info.get("matrix_stride"),
+            "column": type_layout_signature(type_info.get("column")),
+        }
+    if kind in {"array", "runtime_array"}:
+        result = {
+            "kind": kind,
+            "array_stride": type_info.get("array_stride"),
+            "element": type_layout_signature(type_info.get("element")),
+        }
+        if kind == "array":
+            result["length_u32"] = type_info.get("length_u32")
+        return result
+    if kind == "struct":
+        return {
+            "kind": "struct",
+            "block": bool(type_info.get("block")),
+            "buffer_block": bool(type_info.get("buffer_block")),
+            "members": [
+                {
+                    "index": member.get("index"),
+                    "offset": member.get("offset"),
+                    "layout": {
+                        key: value
+                        for key, value in sorted((member.get("layout") or {}).items())
+                        if key in {"Offset", "ArrayStride", "MatrixStride", "RowMajor", "ColMajor", "NonReadable", "NonWritable"}
+                    },
+                    "type": type_layout_signature(member.get("type")),
+                }
+                for member in type_info.get("members", [])
+            ],
+        }
+    return {"kind": kind or "unknown"}
+
+
 def descriptor_signature(module: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(
         [
@@ -39,6 +98,7 @@ def descriptor_signature(module: dict[str, Any]) -> list[dict[str, Any]]:
                 "set": item.get("set"),
                 "binding": item.get("binding"),
                 "storage_class": item.get("storage_class"),
+                "layout": type_layout_signature(item.get("pointee_layout")),
                 "non_readable": bool(item.get("non_readable")),
                 "non_writable": bool(item.get("non_writable")),
             }

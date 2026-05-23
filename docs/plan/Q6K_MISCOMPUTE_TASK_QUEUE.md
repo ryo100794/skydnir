@@ -251,6 +251,35 @@ Next task if failed:
 - Add the invariant at ICD send time and executor parse time, then add a
   contract test that rejects inconsistent V4 binding metadata.
 
+### Q6K-009: Descriptor layout static comparison
+
+Status: started.
+
+Purpose: make native-vs-safe comparison sensitive to descriptor element/layout
+shape, not only set/binding/read-write flags.
+
+Current implementation:
+
+- `scripts/analyze-spirv.py` now emits descriptor `pointee_layout` with struct
+  member offsets/layout decorations and recursive type summaries for pointer,
+  struct, array/runtime-array, vector, matrix, scalar, and related decorations.
+- `tests.test_gpu_abi_contract` verifies the embedded safe Q6 descriptor
+  layout so analyzer updates cannot silently drop this evidence.
+
+Acceptance:
+
+- Native Q6 analysis includes descriptor layout for every declared storage
+  buffer variable.
+- `scripts/compare-spirv-dataflow.py` compares descriptor layout signatures
+  between safe and native analyses.
+- A layout mismatch reports the exact set/binding/member/type field that
+  differs.
+
+Next task if failed:
+
+- Add layout-signature comparison and name-stripped normalization before
+  interpreting native Q6 arithmetic.
+
 ### Q6K-005: Regression prevention at the mixing point
 
 Status: open.

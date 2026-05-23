@@ -951,6 +951,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(module["instruction_count"], 570)
         self.assertEqual(module["entry_points"][0]["execution_model_name"], "GLCompute")
         self.assertEqual(module["entry_points"][0]["name"], "main")
+        descriptor_by_binding = {item["binding"]: item for item in module["descriptor_variables"]}
+        self.assertEqual(descriptor_by_binding[0]["pointee_layout"]["kind"], "struct")
+        self.assertTrue(descriptor_by_binding[0]["pointee_layout"]["members"][0]["layout"]["NonWritable"])
+        self.assertEqual(descriptor_by_binding[2]["pointee_layout"]["members"][0]["offset"], 0)
+        self.assertFalse(descriptor_by_binding[2]["non_writable"])
         push_members = module["push_constant_blocks"][0]["members"]
         self.assertEqual(push_members[0]["name"], "ncols")
         self.assertEqual(push_members[0]["offset"], 0)
@@ -1096,6 +1101,8 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             payload = json.loads(out.read_text())
         self.assertTrue(payload["all_match"])
+        self.assertEqual(payload["left"]["descriptors"][0]["layout"]["kind"], "struct")
+        self.assertIn("layout", payload["comparisons"][3]["left"][0])
         self.assertIn("push[0:ncols@0]", payload["left"]["loads"]["push_origins"])
         self.assertIn("descriptor[0,2](0,id:357:)", payload["left"]["stores"]["descriptor_origins"])
         self.assertTrue(all(item["match"] for item in payload["comparisons"]))
