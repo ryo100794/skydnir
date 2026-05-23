@@ -24,6 +24,7 @@ LLAMA_GPU_ARTIFACT_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 LLAMA_GPU_ENV_MANIFEST = ROOT / "scripts" / "llama-gpu-env-manifest.json"
 SPIRV_ANALYZER = ROOT / "scripts" / "analyze-spirv.py"
 SPIRV_PROBE_MANIFEST_VERIFIER = ROOT / "scripts" / "verify-spirv-probe-manifest.py"
+SPIRV_DATAFLOW_COMPARE = ROOT / "scripts" / "compare-spirv-dataflow.py"
 
 
 def load_llama_gpu_artifact_verifier():
@@ -1079,6 +1080,25 @@ class GpuAbiContractTest(unittest.TestCase):
                     any(expected_error in error for error in json.loads(result.stdout)["errors"]),
                     result.stdout,
                 )
+
+    def test_spirv_dataflow_compare_self_match_reports_pointer_origins(self):
+        analysis = ROOT / "docs" / "test" / "spirv-q6k-safe-current" / "q6k-safe.analysis.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "compare.json"
+            result = subprocess.run(
+                ["python3", str(SPIRV_DATAFLOW_COMPARE), str(analysis), str(analysis), "--json-out", str(out)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            self.assertEqual(result.returncode, 0)
+            payload = json.loads(out.read_text())
+        self.assertTrue(payload["all_match"])
+        self.assertIn("push[0:ncols@0]", payload["left"]["loads"]["push_origins"])
+        self.assertIn("descriptor[0,2](0,id:357:)", payload["left"]["stores"]["descriptor_origins"])
+        self.assertTrue(all(item["match"] for item in payload["comparisons"]))
 
     def test_vulkan_guarded_memory_profile_is_recorded(self):
         source = VULKAN_ICD.read_text()
