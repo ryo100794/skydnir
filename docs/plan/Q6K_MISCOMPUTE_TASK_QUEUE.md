@@ -1,0 +1,282 @@
+# Q6_K Miscompute Investigation Task Queue
+
+Snapshot date: 2026-05-23.
+
+This queue exists so the Q6_K investigation never stalls after one diagnostic
+run.  When a task closes, add the next smallest task that can further locate
+the miscompute.  The goal is not to accumulate tests; the goal is to prevent
+bad bridge states from being introduced and to identify the exact failing
+layer.
+
+Non-negotiable constraints:
+
+- Do not modify llama.cpp.
+- Do not modify Dockerfiles, models, or prompts.
+- Do not change `VULKAN_DISPATCH_V4` positional ABI.
+- Do not claim performance from a run that does not pass correctness.
+- Do not replace static reasoning with random trial-and-error.
+- Do not hide native Q6 failure behind the safe-kernel path.
+
+## Current working model
+
+The safe Q6 bridge-owned kernel has proven that the bridge can move the relevant
+descriptor data through Android Vulkan and pass the `ngl=1` prompt gate under
+explicit compatibility substitution.  That does **not** prove that the native
+llama.cpp Q6 SPIR-V is correct on the bridge.
+
+The native Q6 source hash remains:
+
+- `0x1bf751845c5dce75`
+
+The bridge-owned safe Q6 hash remains:
+
+- `0x7ec0292e948c9b41`
+
+The current blocker is therefore:
+
+> Find where native Q6 diverges: descriptor/range transport, push/spec
+> interpretation, local size/workgroup mapping, reduction/arithmetic,
+> synchronization/device visibility, or final store/writeback.
+
+## Always-on inventory command
+
+Run this after each related artifact lands:
+
+```bash
+python3 scripts/maintenance/summarize-q6k-evidence.py \
+  --out docs/test/q6k-evidence-inventory-latest.json
+```
+
+The generated inventory records the next task queue from observable artifact
+gaps.  If it says `q6k-native-spv-dump` is open, do not pretend native static
+comparison is complete.
+
+## Open queue
+
+### Current artifact-derived facts
+
+The inventory currently finds native Q6 mismatch evidence in older artifacts
+and safe-kernel match evidence in newer artifacts.  The strongest native
+mismatch artifacts show:
+
+- command transport, descriptor hashes, push hashes, specialization hashes, and
+  writeback evidence are often sufficient to move suspicion away from the
+  host/container fd writeback layer;
+- the native output value is already wrong at the GPU-after-dispatch /
+  final-store-visible boundary in the detailed mismatch records;
+- historical artifacts disagree on the intended local-size interpretation
+  (`[32,2,1]` appears in old diagnostics, while the current safe-kernel plan
+  treats `[32,1,1]` as the validated compatibility target), so the next native
+  run must record native SPIR-V `OpExecutionMode`/`OpExecutionModeId`,
+  `BuiltIn WorkgroupSize`, specialization entries, and the resolved local size
+  in the same Q6 event before assigning blame to reduction math;
+- safe-kernel success proves the bridge data path can work, but it also means
+  native Q6 must remain separately visible as unresolved.
+
+Therefore, the next tasks are ordered to avoid jumping directly to performance
+or shader replacement.
+
+### Q6K-001: Native SPIR-V dump
+
+Status: open.
+
+Purpose: collect the exact native Q6 `.spv` for source hash
+`0x1bf751845c5dce75`.
+
+Acceptance:
+
+- A device compare run sets `PDOCKER_GPU_SPIRV_DUMP_DIR`.
+- The dump includes a `.spv` whose FNV hash is `0x1bf751845c5dce75`.
+- The dump is analyzed with `scripts/analyze-spirv.py`.
+- The analysis records entry point, descriptors, push constants,
+  specialization constants, access-chain origins, load origins, and store
+  origins.
+
+Next task if blocked:
+
+- Add artifact/UI/log evidence that explains why the dump was not created
+  before running another performance or correctness claim.
+
+### Q6K-002: Safe-vs-native static dataflow compare
+
+Status: blocked by Q6K-001.
+
+Purpose: determine whether the bridge understands native Q6 ABI/dataflow before
+executing more GPU variants.
+
+Acceptance:
+
+```bash
+python3 scripts/compare-spirv-dataflow.py \
+  docs/test/spirv-q6k-safe-current/q6k-safe.analysis.json \
+  <native-q6.analysis.json> \
+  --json-out <safe-vs-native-q6.dataflow.json>
+```
+
+The report must either:
+
+- show matching descriptor/push/store origins for the comparable Q6 operation,
+  or
+- name the first structural mismatch that explains why the safe-kernel and
+  native module are not equivalent.
+
+Next task if it fails:
+
+- Create a bridge invariant test at the point where the structural mismatch was
+  introduced.  Do not add an end-of-pipeline test only.
+
+### Q6K-003: Native mismatch classifier
+
+Status: open.
+
+Purpose: convert "native Q6 mismatch" into exactly one active blocker class.
+
+Acceptance:
+
+The latest artifact must prove which of these classes remains:
+
+1. descriptor/range transport,
+2. push/spec interpretation,
+3. local-size/workgroup mapping,
+4. Q6 arithmetic/reduction,
+5. synchronization/device visibility,
+6. final output store/writeback.
+
+Evidence required:
+
+- `source_spirv_hash` and `effective_spirv_hash`;
+- descriptor writes and binding reflection;
+- V4 offset/range/API offset/API range/API memory offset fields;
+- push u32 prefix and specialization entries;
+- local size and resolved local size;
+- upload/dispatch/writeback hashes for writable binding 2;
+- CPU-oracle first mismatch or match status;
+- prompt sanity result.
+
+Next task if ambiguous:
+
+- Add the missing evidence field at the layer where ambiguity entered.  Do not
+  rerun the same compare expecting a different conclusion.
+
+### Q6K-004: Valid-module probe bisection
+
+Status: blocked by Q6K-001 and Q6K-002.
+
+Purpose: bisect native Q6 dynamic execution without submitting arbitrary SPIR-V
+fragments and without changing the V4 ABI.
+
+Acceptance:
+
+- Probe manifest verifies fail-closed.
+- Instrumented module passes post-instrumentation `spirv-val`.
+- Debug SSBO is appended as an ordinary V4 storage-buffer binding.
+- Runtime descriptor collision is checked before dispatch.
+- The probe output identifies whether divergence appears before reduction,
+  during reduction, before final store, or after final store/writeback.
+
+Next task if a range still diverges:
+
+- Split the failing valid-module probe range in half and repeat until the
+  smallest responsible block/store site is identified.
+
+### Q6K-006: No-op instrumentation perturbation check
+
+Status: blocked by Q6K-001.
+
+Purpose: prove that adding a debug SSBO binding and an otherwise no-op
+instrumented valid module does not change native Q6 behavior.
+
+Acceptance:
+
+- pre-instrumentation and post-instrumentation modules both pass `spirv-val`;
+- the no-op instrumented module preserves source/effective/probe hash links;
+- descriptor set/binding collision checks pass;
+- native Q6 mismatch is reproduced with the same first mismatch class;
+- if the no-op path changes the output, Q6 block bisection is not allowed to
+  start and the new blocker becomes "probe transport perturbs execution".
+
+Next task if failed:
+
+- Fix debug binding transport, descriptor layout, or barrier semantics before
+  adding any semantic probe.
+
+### Q6K-007: Workgroup/local-size contract lock
+
+Status: open.
+
+Purpose: stop the investigation from oscillating between stale `[32,2,1]`,
+current `[32,1,1]`, literal `[1,1,1]`, and specialization-derived workgroup
+interpretations.
+
+Acceptance:
+
+- the artifact records literal local size, LocalSizeId ids, BuiltIn
+  WorkgroupSize ids, specialization constant ids, specialization values, and
+  resolved local size for the same native Q6 dispatch;
+- the verifier classifies missing or contradictory workgroup evidence before
+  arithmetic/reduction classifications;
+- docs and task queue name exactly which tuple is used for the current lane and
+  why.
+
+Next task if failed:
+
+- Add analyzer/compare support for specialization-resolved local size before
+  another device run is interpreted.
+
+### Q6K-008: Runtime descriptor offset invariant gate
+
+Status: open.
+
+Purpose: prevent descriptor/range/offset coordinate mistakes from entering the
+executor unnoticed.
+
+Acceptance:
+
+For every native Q6 V4 binding:
+
+```text
+offset == api_memory_offset + api_offset
+api_offset + size <= api_buffer_size
+api_memory_offset + api_buffer_size <= api_memory_size
+VkDescriptorBufferInfo.offset == api_offset
+VkDescriptorBufferInfo.range == size
+host fd read/write offset == offset
+```
+
+The artifact must state whether each invariant passed.  If any invariant fails,
+shader arithmetic is not investigated until this layer is fixed.
+
+Next task if failed:
+
+- Add the invariant at ICD send time and executor parse time, then add a
+  contract test that rejects inconsistent V4 binding metadata.
+
+### Q6K-005: Regression prevention at the mixing point
+
+Status: open.
+
+Purpose: stop recurring update/reflection/env propagation mistakes at their
+source instead of adding more late tests.
+
+Acceptance:
+
+- Any new runtime option has one manifest entry and one generated/checked path
+  to pdockerd, ICD, executor reflection, compare artifacts, and verifier
+  constants.
+- Missing executor reflection for correctness-critical env vars is a hard
+  failure before Q6 classification.
+- Static analyzer/comparison gaps are represented as `blocked` task states,
+  not silently ignored.
+
+Next task if a gap appears:
+
+- Add a source-of-truth contract test for that propagation path and remove any
+  duplicated literal that allowed drift.
+
+## Closed or parked items
+
+- Safe-kernel correctness path: closed for proving bridge-owned compatibility
+  substitution, not closed for native Q6 correctness.
+- HTTP liveness and `/v1/models`: parked as readiness only; never correctness.
+- Speedup tuning: parked until native or compatibility correctness evidence is
+  current and benchmark claims are allowed.
