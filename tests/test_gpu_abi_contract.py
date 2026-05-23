@@ -955,6 +955,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(push_members[0]["offset"], 0)
         self.assertEqual(push_members[12]["name"], "broadcast3")
         self.assertEqual(push_members[12]["offset"], 48)
+        self.assertGreater(len(module["access_chains"]), 0)
+        self.assertTrue(any(
+            event["pointer_origin"].get("push_member", {}).get("name") == "ncols"
+            for event in module["load_events"]
+        ))
+        self.assertTrue(any(
+            event["pointer_origin"].get("base", {}).get("binding") == 2
+            for event in module["store_events"]
+        ))
         self.assertIn("op_histogram", module)
         self.assertGreater(module["control_flow"]["function_count"], 0)
         self.assertGreater(module["control_flow"]["block_count"], 0)

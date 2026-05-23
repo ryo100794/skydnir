@@ -1,6 +1,580 @@
 {
   "modules": [
     {
+      "access_chains": [
+        {
+          "base": {
+            "id": 192,
+            "kind": "id",
+            "name": "gl_WorkGroupID"
+          },
+          "base_id": 192,
+          "index_ids": [
+            86
+          ],
+          "indices": [
+            {
+              "constant_u32": 0,
+              "id": 86,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "result_id": 194,
+          "result_type": 193,
+          "word_index": 921
+        },
+        {
+          "base": {
+            "id": 196,
+            "kind": "id",
+            "name": "gl_NumWorkGroups"
+          },
+          "base_id": 196,
+          "index_ids": [
+            86
+          ],
+          "indices": [
+            {
+              "constant_u32": 0,
+              "id": 86,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "result_id": 197,
+          "result_type": 193,
+          "word_index": 930
+        },
+        {
+          "base": {
+            "id": 192,
+            "kind": "id",
+            "name": "gl_WorkGroupID"
+          },
+          "base_id": 192,
+          "index_ids": [
+            152
+          ],
+          "indices": [
+            {
+              "constant_u32": 2,
+              "id": 152,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "result_id": 199,
+          "result_type": 193,
+          "word_index": 939
+        },
+        {
+          "base": {
+            "id": 209,
+            "kind": "push_constant",
+            "name": "p",
+            "struct_name": "parameter",
+            "struct_type": 207
+          },
+          "base_id": 209,
+          "index_ids": [
+            32
+          ],
+          "indices": [
+            {
+              "constant_u32": 0,
+              "id": 32,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "push_member": {
+            "index": 0,
+            "name": "ncols",
+            "offset": 0,
+            "type": {
+              "bits": 32,
+              "id": 6,
+              "kind": "int",
+              "signed": 0
+            }
+          },
+          "result_id": 211,
+          "result_type": 210,
+          "word_index": 973
+        },
+        {
+          "base": {
+            "id": 209,
+            "kind": "push_constant",
+            "name": "p",
+            "struct_name": "parameter",
+            "struct_type": 207
+          },
+          "base_id": 209,
+          "index_ids": [
+            215
+          ],
+          "indices": [
+            {
+              "constant_u32": 3,
+              "id": 215,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "push_member": {
+            "index": 3,
+            "name": "stride_d",
+            "offset": 12,
+            "type": {
+              "bits": 32,
+              "id": 6,
+              "kind": "int",
+              "signed": 0
+            }
+          },
+          "result_id": 216,
+          "result_type": 210,
+          "word_index": 990
+        },
+        {
+          "base": {
+            "id": 192,
+            "kind": "id",
+            "name": "gl_WorkGroupID"
+          },
+          "base_id": 192,
+          "index_ids": [
+            76
+          ],
+          "indices": [
+            {
+              "constant_u32": 1,
+              "id": 76,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "result_id": 219,
+          "result_type": 193,
+          "word_index": 1002
+        },
+        {
+          "base": {
+            "id": 209,
+            "kind": "push_constant",
+            "name": "p",
+            "struct_name": "parameter",
+            "struct_type": 207
+          },
+          "base_id": 209,
+          "index_ids": [
+            221
+          ],
+          "indices": [
+            {
+              "constant_u32": 8,
+              "id": 221,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "push_member": {
+            "index": 8,
+            "name": "base_work_group_y",
+            "offset": 32,
+            "type": {
+              "bits": 32,
+              "id": 6,
+              "kind": "int",
+              "signed": 0
+            }
+          },
+          "result_id": 222,
+          "result_type": 210,
+          "word_index": 1011
+        },
+        {
+          "base": {
+            "id": 209,
+            "kind": "push_constant",
+            "name": "p",
+            "struct_name": "parameter",
+            "struct_type": 207
+          },
+          "base_id": 209,
+          "index_ids": [
+            232
+          ],
+          "indices": [
+            {
+              "constant_u32": 10,
+              "id": 232,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "push_member": {
+            "index": 10,
+            "name": "ne12",
+            "offset": 40,
+            "type": {
+              "bits": 32,
+              "id": 6,
+              "kind": "int",
+              "signed": 0
+            }
+          },
+          "result_id": 233,
+          "result_type": 210,
+          "word_index": 1053
+        },
+        {
+          "base": {
+            "id": 209,
+            "kind": "push_constant",
+            "name": "p",
+            "struct_name": "parameter",
+            "struct_type": 207
+          },
+          "base_id": 209,
+          "index_ids": [
+            232
+          ],
+          "indices": [
+            {
+              "constant_u32": 10,
+              "id": 232,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "push_member": {
+            "index": 10,
+            "name": "ne12",
+            "offset": 40,
+            "type": {
+              "bits": 32,
+              "id": 6,
+              "kind": "int",
+              "signed": 0
+            }
+          },
+          "result_id": 238,
+          "result_type": 210,
+          "word_index": 1074
+        },
+        {
+          "base": {
+            "id": 209,
+            "kind": "push_constant",
+            "name": "p",
+            "struct_name": "parameter",
+            "struct_type": 207
+          },
+          "base_id": 209,
+          "index_ids": [
+            243
+          ],
+          "indices": [
+            {
+              "constant_u32": 12,
+              "id": 243,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "push_member": {
+            "index": 12,
+            "name": "broadcast3",
+            "offset": 48,
+            "type": {
+              "bits": 32,
+              "id": 6,
+              "kind": "int",
+              "signed": 0
+            }
+          },
+          "result_id": 244,
+          "result_type": 210,
+          "word_index": 1095
+        },
+        {
+          "base": {
+            "id": 209,
+            "kind": "push_constant",
+            "name": "p",
+            "struct_name": "parameter",
+            "struct_type": 207
+          },
+          "base_id": 209,
+          "index_ids": [
+            249
+          ],
+          "indices": [
+            {
+              "constant_u32": 11,
+              "id": 249,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "push_member": {
+            "index": 11,
+            "name": "broadcast2",
+            "offset": 44,
+            "type": {
+              "bits": 32,
+              "id": 6,
+              "kind": "int",
+              "signed": 0
+            }
+          },
+          "result_id": 250,
+          "result_type": 210,
+          "word_index": 1116
+        },
+        {
+          "base": {
+            "id": 209,
+            "kind": "push_constant",
+            "name": "p",
+            "struct_name": "parameter",
+            "struct_type": 207
+          },
+          "base_id": 209,
+          "index_ids": [
+            254
+          ],
+          "indices": [
+            {
+              "constant_u32": 9,
+              "id": 254,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "push_member": {
+            "index": 9,
+            "name": "ne02",
+            "offset": 36,
+            "type": {
+              "bits": 32,
+              "id": 6,
+              "kind": "int",
+              "signed": 0
+            }
+          },
+          "result_id": 255,
+          "result_type": 210,
+          "word_index": 1137
+        },
+        {
+          "base": {
+            "id": 209,
+            "kind": "push_constant",
+            "name": "p",
+            "struct_name": "parameter",
+            "struct_type": 207
+          },
+          "base_id": 209,
+          "index_ids": [
+            124
+          ],
+          "indices": [
+            {
+              "constant_u32": 4,
+              "id": 124,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "push_member": {
+            "index": 4,
+            "name": "batch_stride_a",
+            "offset": 16,
+            "type": {
+              "bits": 32,
+              "id": 6,
+              "kind": "int",
+              "signed": 0
+            }
+          },
+          "result_id": 262,
+          "result_type": 210,
+          "word_index": 1171
+        },
+        {
+          "base": {
+            "id": 209,
+            "kind": "push_constant",
+            "name": "p",
+            "struct_name": "parameter",
+            "struct_type": 207
+          },
+          "base_id": 209,
+          "index_ids": [
+            268
+          ],
+          "indices": [
+            {
+              "constant_u32": 5,
+              "id": 268,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "push_member": {
+            "index": 5,
+            "name": "batch_stride_b",
+            "offset": 20,
+            "type": {
+              "bits": 32,
+              "id": 6,
+              "kind": "int",
+              "signed": 0
+            }
+          },
+          "result_id": 269,
+          "result_type": 210,
+          "word_index": 1197
+        },
+        {
+          "base": {
+            "id": 209,
+            "kind": "push_constant",
+            "name": "p",
+            "struct_name": "parameter",
+            "struct_type": 207
+          },
+          "base_id": 209,
+          "index_ids": [
+            274
+          ],
+          "indices": [
+            {
+              "constant_u32": 6,
+              "id": 274,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "push_member": {
+            "index": 6,
+            "name": "batch_stride_d",
+            "offset": 24,
+            "type": {
+              "bits": 32,
+              "id": 6,
+              "kind": "int",
+              "signed": 0
+            }
+          },
+          "result_id": 275,
+          "result_type": 210,
+          "word_index": 1218
+        },
+        {
+          "base": {
+            "binding": 1,
+            "id": 333,
+            "kind": "descriptor",
+            "name": "",
+            "non_readable": false,
+            "non_writable": true,
+            "set": 0,
+            "storage_class": "Uniform"
+          },
+          "base_id": 333,
+          "index_ids": [
+            32,
+            339
+          ],
+          "indices": [
+            {
+              "constant_u32": 0,
+              "id": 32,
+              "name": ""
+            },
+            {
+              "constant_u32": null,
+              "id": 339,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "result_id": 341,
+          "result_type": 340,
+          "word_index": 1460
+        },
+        {
+          "base": {
+            "binding": 2,
+            "id": 354,
+            "kind": "descriptor",
+            "name": "",
+            "non_readable": false,
+            "non_writable": false,
+            "set": 0,
+            "storage_class": "Uniform"
+          },
+          "base_id": 354,
+          "index_ids": [
+            32,
+            357
+          ],
+          "indices": [
+            {
+              "constant_u32": 0,
+              "id": 32,
+              "name": ""
+            },
+            {
+              "constant_u32": null,
+              "id": 357,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "result_id": 359,
+          "result_type": 340,
+          "word_index": 1544
+        },
+        {
+          "base": {
+            "binding": 0,
+            "id": 31,
+            "kind": "descriptor",
+            "name": "",
+            "non_readable": false,
+            "non_writable": true,
+            "set": 0,
+            "storage_class": "Uniform"
+          },
+          "base_id": 31,
+          "index_ids": [
+            32,
+            35
+          ],
+          "indices": [
+            {
+              "constant_u32": 0,
+              "id": 32,
+              "name": ""
+            },
+            {
+              "constant_u32": null,
+              "id": 35,
+              "name": ""
+            }
+          ],
+          "op": "OpAccessChain",
+          "result_id": 37,
+          "result_type": 36,
+          "word_index": 1598
+        }
+      ],
       "bound": 363,
       "bytes": 9040,
       "capabilities": [
@@ -3015,6 +3589,1337 @@
       "generator": 524299,
       "hash": "0x7ec0292e948c9b41",
       "instruction_count": 570,
+      "load_events": [
+        {
+          "pointer_id": 194,
+          "pointer_origin": {
+            "access_chain_result_id": 194,
+            "base": {
+              "id": 192,
+              "kind": "id",
+              "name": "gl_WorkGroupID"
+            },
+            "indices": [
+              {
+                "constant_u32": 0,
+                "id": 86,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain"
+          },
+          "result_id": 195,
+          "result_type": 6,
+          "word_index": 926
+        },
+        {
+          "pointer_id": 197,
+          "pointer_origin": {
+            "access_chain_result_id": 197,
+            "base": {
+              "id": 196,
+              "kind": "id",
+              "name": "gl_NumWorkGroups"
+            },
+            "indices": [
+              {
+                "constant_u32": 0,
+                "id": 86,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain"
+          },
+          "result_id": 198,
+          "result_type": 6,
+          "word_index": 935
+        },
+        {
+          "pointer_id": 199,
+          "pointer_origin": {
+            "access_chain_result_id": 199,
+            "base": {
+              "id": 192,
+              "kind": "id",
+              "name": "gl_WorkGroupID"
+            },
+            "indices": [
+              {
+                "constant_u32": 2,
+                "id": 152,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain"
+          },
+          "result_id": 200,
+          "result_type": 6,
+          "word_index": 944
+        },
+        {
+          "pointer_id": 189,
+          "pointer_origin": {
+            "id": 189,
+            "kind": "id",
+            "name": "wg_linear"
+          },
+          "result_id": 204,
+          "result_type": 6,
+          "word_index": 961
+        },
+        {
+          "pointer_id": 211,
+          "pointer_origin": {
+            "access_chain_result_id": 211,
+            "base": {
+              "id": 209,
+              "kind": "push_constant",
+              "name": "p",
+              "struct_name": "parameter",
+              "struct_type": 207
+            },
+            "indices": [
+              {
+                "constant_u32": 0,
+                "id": 32,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain",
+            "push_member": {
+              "index": 0,
+              "name": "ncols",
+              "offset": 0,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          },
+          "result_id": 212,
+          "result_type": 6,
+          "word_index": 978
+        },
+        {
+          "pointer_id": 216,
+          "pointer_origin": {
+            "access_chain_result_id": 216,
+            "base": {
+              "id": 209,
+              "kind": "push_constant",
+              "name": "p",
+              "struct_name": "parameter",
+              "struct_type": 207
+            },
+            "indices": [
+              {
+                "constant_u32": 3,
+                "id": 215,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain",
+            "push_member": {
+              "index": 3,
+              "name": "stride_d",
+              "offset": 12,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          },
+          "result_id": 217,
+          "result_type": 6,
+          "word_index": 995
+        },
+        {
+          "pointer_id": 219,
+          "pointer_origin": {
+            "access_chain_result_id": 219,
+            "base": {
+              "id": 192,
+              "kind": "id",
+              "name": "gl_WorkGroupID"
+            },
+            "indices": [
+              {
+                "constant_u32": 1,
+                "id": 76,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain"
+          },
+          "result_id": 220,
+          "result_type": 6,
+          "word_index": 1007
+        },
+        {
+          "pointer_id": 222,
+          "pointer_origin": {
+            "access_chain_result_id": 222,
+            "base": {
+              "id": 209,
+              "kind": "push_constant",
+              "name": "p",
+              "struct_name": "parameter",
+              "struct_type": 207
+            },
+            "indices": [
+              {
+                "constant_u32": 8,
+                "id": 221,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain",
+            "push_member": {
+              "index": 8,
+              "name": "base_work_group_y",
+              "offset": 32,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          },
+          "result_id": 223,
+          "result_type": 6,
+          "word_index": 1016
+        },
+        {
+          "pointer_id": 218,
+          "pointer_origin": {
+            "id": 218,
+            "kind": "id",
+            "name": "batch_idx"
+          },
+          "result_id": 226,
+          "result_type": 6,
+          "word_index": 1031
+        },
+        {
+          "pointer_id": 218,
+          "pointer_origin": {
+            "id": 218,
+            "kind": "id",
+            "name": "batch_idx"
+          },
+          "result_id": 231,
+          "result_type": 6,
+          "word_index": 1049
+        },
+        {
+          "pointer_id": 233,
+          "pointer_origin": {
+            "access_chain_result_id": 233,
+            "base": {
+              "id": 209,
+              "kind": "push_constant",
+              "name": "p",
+              "struct_name": "parameter",
+              "struct_type": 207
+            },
+            "indices": [
+              {
+                "constant_u32": 10,
+                "id": 232,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain",
+            "push_member": {
+              "index": 10,
+              "name": "ne12",
+              "offset": 40,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          },
+          "result_id": 234,
+          "result_type": 6,
+          "word_index": 1058
+        },
+        {
+          "pointer_id": 218,
+          "pointer_origin": {
+            "id": 218,
+            "kind": "id",
+            "name": "batch_idx"
+          },
+          "result_id": 237,
+          "result_type": 6,
+          "word_index": 1070
+        },
+        {
+          "pointer_id": 238,
+          "pointer_origin": {
+            "access_chain_result_id": 238,
+            "base": {
+              "id": 209,
+              "kind": "push_constant",
+              "name": "p",
+              "struct_name": "parameter",
+              "struct_type": 207
+            },
+            "indices": [
+              {
+                "constant_u32": 10,
+                "id": 232,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain",
+            "push_member": {
+              "index": 10,
+              "name": "ne12",
+              "offset": 40,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          },
+          "result_id": 239,
+          "result_type": 6,
+          "word_index": 1079
+        },
+        {
+          "pointer_id": 230,
+          "pointer_origin": {
+            "id": 230,
+            "kind": "id",
+            "name": "i13"
+          },
+          "result_id": 242,
+          "result_type": 6,
+          "word_index": 1091
+        },
+        {
+          "pointer_id": 244,
+          "pointer_origin": {
+            "access_chain_result_id": 244,
+            "base": {
+              "id": 209,
+              "kind": "push_constant",
+              "name": "p",
+              "struct_name": "parameter",
+              "struct_type": 207
+            },
+            "indices": [
+              {
+                "constant_u32": 12,
+                "id": 243,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain",
+            "push_member": {
+              "index": 12,
+              "name": "broadcast3",
+              "offset": 48,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          },
+          "result_id": 245,
+          "result_type": 6,
+          "word_index": 1100
+        },
+        {
+          "pointer_id": 236,
+          "pointer_origin": {
+            "id": 236,
+            "kind": "id",
+            "name": "i12"
+          },
+          "result_id": 248,
+          "result_type": 6,
+          "word_index": 1112
+        },
+        {
+          "pointer_id": 250,
+          "pointer_origin": {
+            "access_chain_result_id": 250,
+            "base": {
+              "id": 209,
+              "kind": "push_constant",
+              "name": "p",
+              "struct_name": "parameter",
+              "struct_type": 207
+            },
+            "indices": [
+              {
+                "constant_u32": 11,
+                "id": 249,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain",
+            "push_member": {
+              "index": 11,
+              "name": "broadcast2",
+              "offset": 44,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          },
+          "result_id": 251,
+          "result_type": 6,
+          "word_index": 1121
+        },
+        {
+          "pointer_id": 241,
+          "pointer_origin": {
+            "id": 241,
+            "kind": "id",
+            "name": "i03"
+          },
+          "result_id": 253,
+          "result_type": 6,
+          "word_index": 1133
+        },
+        {
+          "pointer_id": 255,
+          "pointer_origin": {
+            "access_chain_result_id": 255,
+            "base": {
+              "id": 209,
+              "kind": "push_constant",
+              "name": "p",
+              "struct_name": "parameter",
+              "struct_type": 207
+            },
+            "indices": [
+              {
+                "constant_u32": 9,
+                "id": 254,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain",
+            "push_member": {
+              "index": 9,
+              "name": "ne02",
+              "offset": 36,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          },
+          "result_id": 256,
+          "result_type": 6,
+          "word_index": 1142
+        },
+        {
+          "pointer_id": 247,
+          "pointer_origin": {
+            "id": 247,
+            "kind": "id",
+            "name": "i02"
+          },
+          "result_id": 258,
+          "result_type": 6,
+          "word_index": 1151
+        },
+        {
+          "pointer_id": 225,
+          "pointer_origin": {
+            "id": 225,
+            "kind": "id",
+            "name": "batch_idx_a"
+          },
+          "result_id": 261,
+          "result_type": 6,
+          "word_index": 1167
+        },
+        {
+          "pointer_id": 262,
+          "pointer_origin": {
+            "access_chain_result_id": 262,
+            "base": {
+              "id": 209,
+              "kind": "push_constant",
+              "name": "p",
+              "struct_name": "parameter",
+              "struct_type": 207
+            },
+            "indices": [
+              {
+                "constant_u32": 4,
+                "id": 124,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain",
+            "push_member": {
+              "index": 4,
+              "name": "batch_stride_a",
+              "offset": 16,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          },
+          "result_id": 263,
+          "result_type": 6,
+          "word_index": 1176
+        },
+        {
+          "pointer_id": 218,
+          "pointer_origin": {
+            "id": 218,
+            "kind": "id",
+            "name": "batch_idx"
+          },
+          "result_id": 267,
+          "result_type": 6,
+          "word_index": 1193
+        },
+        {
+          "pointer_id": 269,
+          "pointer_origin": {
+            "access_chain_result_id": 269,
+            "base": {
+              "id": 209,
+              "kind": "push_constant",
+              "name": "p",
+              "struct_name": "parameter",
+              "struct_type": 207
+            },
+            "indices": [
+              {
+                "constant_u32": 5,
+                "id": 268,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain",
+            "push_member": {
+              "index": 5,
+              "name": "batch_stride_b",
+              "offset": 20,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          },
+          "result_id": 270,
+          "result_type": 6,
+          "word_index": 1202
+        },
+        {
+          "pointer_id": 218,
+          "pointer_origin": {
+            "id": 218,
+            "kind": "id",
+            "name": "batch_idx"
+          },
+          "result_id": 273,
+          "result_type": 6,
+          "word_index": 1214
+        },
+        {
+          "pointer_id": 275,
+          "pointer_origin": {
+            "access_chain_result_id": 275,
+            "base": {
+              "id": 209,
+              "kind": "push_constant",
+              "name": "p",
+              "struct_name": "parameter",
+              "struct_type": 207
+            },
+            "indices": [
+              {
+                "constant_u32": 6,
+                "id": 274,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain",
+            "push_member": {
+              "index": 6,
+              "name": "batch_stride_d",
+              "offset": 24,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          },
+          "result_id": 276,
+          "result_type": 6,
+          "word_index": 1223
+        },
+        {
+          "pointer_id": 278,
+          "pointer_origin": {
+            "id": 278,
+            "kind": "id",
+            "name": "n"
+          },
+          "result_id": 284,
+          "result_type": 6,
+          "word_index": 1250
+        },
+        {
+          "pointer_id": 203,
+          "pointer_origin": {
+            "id": 203,
+            "kind": "id",
+            "name": "first_row"
+          },
+          "result_id": 287,
+          "result_type": 6,
+          "word_index": 1265
+        },
+        {
+          "pointer_id": 278,
+          "pointer_origin": {
+            "id": 278,
+            "kind": "id",
+            "name": "n"
+          },
+          "result_id": 288,
+          "result_type": 6,
+          "word_index": 1269
+        },
+        {
+          "pointer_id": 286,
+          "pointer_origin": {
+            "id": 286,
+            "kind": "id",
+            "name": "row"
+          },
+          "result_id": 290,
+          "result_type": 6,
+          "word_index": 1281
+        },
+        {
+          "pointer_id": 214,
+          "pointer_origin": {
+            "id": 214,
+            "kind": "id",
+            "name": "total_rows"
+          },
+          "result_id": 291,
+          "result_type": 6,
+          "word_index": 1285
+        },
+        {
+          "pointer_id": 298,
+          "pointer_origin": {
+            "id": 298,
+            "kind": "id",
+            "name": "bi"
+          },
+          "result_id": 304,
+          "result_type": 6,
+          "word_index": 1325
+        },
+        {
+          "pointer_id": 206,
+          "pointer_origin": {
+            "id": 206,
+            "kind": "id",
+            "name": "num_blocks_per_row"
+          },
+          "result_id": 305,
+          "result_type": 6,
+          "word_index": 1329
+        },
+        {
+          "pointer_id": 260,
+          "pointer_origin": {
+            "id": 260,
+            "kind": "id",
+            "name": "a_offset_blocks"
+          },
+          "result_id": 308,
+          "result_type": 6,
+          "word_index": 1344
+        },
+        {
+          "pointer_id": 286,
+          "pointer_origin": {
+            "id": 286,
+            "kind": "id",
+            "name": "row"
+          },
+          "result_id": 309,
+          "result_type": 6,
+          "word_index": 1348
+        },
+        {
+          "pointer_id": 206,
+          "pointer_origin": {
+            "id": 206,
+            "kind": "id",
+            "name": "num_blocks_per_row"
+          },
+          "result_id": 310,
+          "result_type": 6,
+          "word_index": 1352
+        },
+        {
+          "pointer_id": 298,
+          "pointer_origin": {
+            "id": 298,
+            "kind": "id",
+            "name": "bi"
+          },
+          "result_id": 313,
+          "result_type": 6,
+          "word_index": 1366
+        },
+        {
+          "pointer_id": 317,
+          "pointer_origin": {
+            "id": 317,
+            "kind": "id",
+            "name": "e"
+          },
+          "result_id": 323,
+          "result_type": 6,
+          "word_index": 1398
+        },
+        {
+          "pointer_id": 307,
+          "pointer_origin": {
+            "id": 307,
+            "kind": "id",
+            "name": "block_base"
+          },
+          "result_id": 326,
+          "result_type": 6,
+          "word_index": 1413
+        },
+        {
+          "pointer_id": 317,
+          "pointer_origin": {
+            "id": 317,
+            "kind": "id",
+            "name": "e"
+          },
+          "result_id": 328,
+          "result_type": 6,
+          "word_index": 1420
+        },
+        {
+          "pointer_id": 266,
+          "pointer_origin": {
+            "id": 266,
+            "kind": "id",
+            "name": "b_offset"
+          },
+          "result_id": 334,
+          "result_type": 6,
+          "word_index": 1433
+        },
+        {
+          "pointer_id": 298,
+          "pointer_origin": {
+            "id": 298,
+            "kind": "id",
+            "name": "bi"
+          },
+          "result_id": 335,
+          "result_type": 6,
+          "word_index": 1437
+        },
+        {
+          "pointer_id": 317,
+          "pointer_origin": {
+            "id": 317,
+            "kind": "id",
+            "name": "e"
+          },
+          "result_id": 338,
+          "result_type": 6,
+          "word_index": 1451
+        },
+        {
+          "pointer_id": 341,
+          "pointer_origin": {
+            "access_chain_result_id": 341,
+            "base": {
+              "binding": 1,
+              "id": 333,
+              "kind": "descriptor",
+              "name": "",
+              "non_readable": false,
+              "non_writable": true,
+              "set": 0,
+              "storage_class": "Uniform"
+            },
+            "indices": [
+              {
+                "constant_u32": 0,
+                "id": 32,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "id": 339,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain"
+          },
+          "result_id": 342,
+          "result_type": 17,
+          "word_index": 1466
+        },
+        {
+          "pointer_id": 296,
+          "pointer_origin": {
+            "id": 296,
+            "kind": "id",
+            "name": "sum"
+          },
+          "result_id": 344,
+          "result_type": 17,
+          "word_index": 1475
+        },
+        {
+          "pointer_id": 317,
+          "pointer_origin": {
+            "id": 317,
+            "kind": "id",
+            "name": "e"
+          },
+          "result_id": 346,
+          "result_type": 6,
+          "word_index": 1491
+        },
+        {
+          "pointer_id": 298,
+          "pointer_origin": {
+            "id": 298,
+            "kind": "id",
+            "name": "bi"
+          },
+          "result_id": 349,
+          "result_type": 6,
+          "word_index": 1511
+        },
+        {
+          "pointer_id": 272,
+          "pointer_origin": {
+            "id": 272,
+            "kind": "id",
+            "name": "d_offset"
+          },
+          "result_id": 355,
+          "result_type": 6,
+          "word_index": 1527
+        },
+        {
+          "pointer_id": 286,
+          "pointer_origin": {
+            "id": 286,
+            "kind": "id",
+            "name": "row"
+          },
+          "result_id": 356,
+          "result_type": 6,
+          "word_index": 1531
+        },
+        {
+          "pointer_id": 296,
+          "pointer_origin": {
+            "id": 296,
+            "kind": "id",
+            "name": "sum"
+          },
+          "result_id": 358,
+          "result_type": 17,
+          "word_index": 1540
+        },
+        {
+          "pointer_id": 278,
+          "pointer_origin": {
+            "id": 278,
+            "kind": "id",
+            "name": "n"
+          },
+          "result_id": 360,
+          "result_type": 6,
+          "word_index": 1557
+        },
+        {
+          "pointer_id": 9,
+          "pointer_origin": {
+            "id": 9,
+            "kind": "id",
+            "name": "off"
+          },
+          "result_id": 33,
+          "result_type": 6,
+          "word_index": 1589
+        },
+        {
+          "pointer_id": 37,
+          "pointer_origin": {
+            "access_chain_result_id": 37,
+            "base": {
+              "binding": 0,
+              "id": 31,
+              "kind": "descriptor",
+              "name": "",
+              "non_readable": false,
+              "non_writable": true,
+              "set": 0,
+              "storage_class": "Uniform"
+            },
+            "indices": [
+              {
+                "constant_u32": 0,
+                "id": 32,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "id": 35,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain"
+          },
+          "result_id": 38,
+          "result_type": 6,
+          "word_index": 1604
+        },
+        {
+          "pointer_id": 27,
+          "pointer_origin": {
+            "id": 27,
+            "kind": "id",
+            "name": "w"
+          },
+          "result_id": 39,
+          "result_type": 6,
+          "word_index": 1611
+        },
+        {
+          "pointer_id": 9,
+          "pointer_origin": {
+            "id": 9,
+            "kind": "id",
+            "name": "off"
+          },
+          "result_id": 40,
+          "result_type": 6,
+          "word_index": 1615
+        },
+        {
+          "pointer_id": 14,
+          "pointer_origin": {
+            "id": 14,
+            "kind": "id",
+            "name": "off"
+          },
+          "result_id": 52,
+          "result_type": 6,
+          "word_index": 1664
+        },
+        {
+          "pointer_id": 50,
+          "pointer_origin": {
+            "id": 50,
+            "kind": "id",
+            "name": "b"
+          },
+          "result_id": 54,
+          "result_type": 6,
+          "word_index": 1679
+        },
+        {
+          "pointer_id": 50,
+          "pointer_origin": {
+            "id": 50,
+            "kind": "id",
+            "name": "b"
+          },
+          "result_id": 61,
+          "result_type": 6,
+          "word_index": 1697
+        },
+        {
+          "pointer_id": 50,
+          "pointer_origin": {
+            "id": 50,
+            "kind": "id",
+            "name": "b"
+          },
+          "result_id": 65,
+          "result_type": 6,
+          "word_index": 1713
+        },
+        {
+          "pointer_id": 58,
+          "pointer_origin": {
+            "id": 58,
+            "kind": "id",
+            "name": ""
+          },
+          "result_id": 66,
+          "result_type": 6,
+          "word_index": 1724
+        },
+        {
+          "pointer_id": 19,
+          "pointer_origin": {
+            "id": 19,
+            "kind": "id",
+            "name": "off"
+          },
+          "result_id": 72,
+          "result_type": 6,
+          "word_index": 1761
+        },
+        {
+          "pointer_id": 19,
+          "pointer_origin": {
+            "id": 19,
+            "kind": "id",
+            "name": "off"
+          },
+          "result_id": 75,
+          "result_type": 6,
+          "word_index": 1776
+        },
+        {
+          "pointer_id": 70,
+          "pointer_origin": {
+            "id": 70,
+            "kind": "id",
+            "name": "lo"
+          },
+          "result_id": 80,
+          "result_type": 6,
+          "word_index": 1796
+        },
+        {
+          "pointer_id": 74,
+          "pointer_origin": {
+            "id": 74,
+            "kind": "id",
+            "name": "hi"
+          },
+          "result_id": 81,
+          "result_type": 6,
+          "word_index": 1800
+        },
+        {
+          "pointer_id": 24,
+          "pointer_origin": {
+            "id": 24,
+            "kind": "id",
+            "name": "k"
+          },
+          "result_id": 91,
+          "result_type": 6,
+          "word_index": 1909
+        },
+        {
+          "pointer_id": 24,
+          "pointer_origin": {
+            "id": 24,
+            "kind": "id",
+            "name": "k"
+          },
+          "result_id": 95,
+          "result_type": 6,
+          "word_index": 1921
+        },
+        {
+          "pointer_id": 23,
+          "pointer_origin": {
+            "id": 23,
+            "kind": "id",
+            "name": "block_base"
+          },
+          "result_id": 99,
+          "result_type": 6,
+          "word_index": 1933
+        },
+        {
+          "pointer_id": 94,
+          "pointer_origin": {
+            "id": 94,
+            "kind": "id",
+            "name": "half_idx"
+          },
+          "result_id": 100,
+          "result_type": 6,
+          "word_index": 1937
+        },
+        {
+          "pointer_id": 90,
+          "pointer_origin": {
+            "id": 90,
+            "kind": "id",
+            "name": "pos"
+          },
+          "result_id": 104,
+          "result_type": 6,
+          "word_index": 1951
+        },
+        {
+          "pointer_id": 23,
+          "pointer_origin": {
+            "id": 23,
+            "kind": "id",
+            "name": "block_base"
+          },
+          "result_id": 109,
+          "result_type": 6,
+          "word_index": 1968
+        },
+        {
+          "pointer_id": 94,
+          "pointer_origin": {
+            "id": 94,
+            "kind": "id",
+            "name": "half_idx"
+          },
+          "result_id": 111,
+          "result_type": 6,
+          "word_index": 1977
+        },
+        {
+          "pointer_id": 90,
+          "pointer_origin": {
+            "id": 90,
+            "kind": "id",
+            "name": "pos"
+          },
+          "result_id": 115,
+          "result_type": 6,
+          "word_index": 1991
+        },
+        {
+          "pointer_id": 23,
+          "pointer_origin": {
+            "id": 23,
+            "kind": "id",
+            "name": "block_base"
+          },
+          "result_id": 120,
+          "result_type": 6,
+          "word_index": 2008
+        },
+        {
+          "pointer_id": 24,
+          "pointer_origin": {
+            "id": 24,
+            "kind": "id",
+            "name": "k"
+          },
+          "result_id": 123,
+          "result_type": 6,
+          "word_index": 2017
+        },
+        {
+          "pointer_id": 98,
+          "pointer_origin": {
+            "id": 98,
+            "kind": "id",
+            "name": "ql_index"
+          },
+          "result_id": 129,
+          "result_type": 6,
+          "word_index": 2034
+        },
+        {
+          "pointer_id": 108,
+          "pointer_origin": {
+            "id": 108,
+            "kind": "id",
+            "name": "qh_index"
+          },
+          "result_id": 133,
+          "result_type": 6,
+          "word_index": 2049
+        },
+        {
+          "pointer_id": 90,
+          "pointer_origin": {
+            "id": 90,
+            "kind": "id",
+            "name": "pos"
+          },
+          "result_id": 136,
+          "result_type": 6,
+          "word_index": 2064
+        },
+        {
+          "pointer_id": 127,
+          "pointer_origin": {
+            "id": 127,
+            "kind": "id",
+            "name": "ql"
+          },
+          "result_id": 141,
+          "result_type": 6,
+          "word_index": 2082
+        },
+        {
+          "pointer_id": 127,
+          "pointer_origin": {
+            "id": 127,
+            "kind": "id",
+            "name": "ql"
+          },
+          "result_id": 145,
+          "result_type": 6,
+          "word_index": 2098
+        },
+        {
+          "pointer_id": 138,
+          "pointer_origin": {
+            "id": 138,
+            "kind": "id",
+            "name": ""
+          },
+          "result_id": 149,
+          "result_type": 6,
+          "word_index": 2119
+        },
+        {
+          "pointer_id": 131,
+          "pointer_origin": {
+            "id": 131,
+            "kind": "id",
+            "name": "qh"
+          },
+          "result_id": 151,
+          "result_type": 6,
+          "word_index": 2126
+        },
+        {
+          "pointer_id": 90,
+          "pointer_origin": {
+            "id": 90,
+            "kind": "id",
+            "name": "pos"
+          },
+          "result_id": 153,
+          "result_type": 6,
+          "word_index": 2130
+        },
+        {
+          "pointer_id": 135,
+          "pointer_origin": {
+            "id": 135,
+            "kind": "id",
+            "name": "low4"
+          },
+          "result_id": 162,
+          "result_type": 6,
+          "word_index": 2162
+        },
+        {
+          "pointer_id": 150,
+          "pointer_origin": {
+            "id": 150,
+            "kind": "id",
+            "name": "high2"
+          },
+          "result_id": 163,
+          "result_type": 6,
+          "word_index": 2166
+        },
+        {
+          "pointer_id": 119,
+          "pointer_origin": {
+            "id": 119,
+            "kind": "id",
+            "name": "scale_index"
+          },
+          "result_id": 171,
+          "result_type": 6,
+          "word_index": 2192
+        },
+        {
+          "pointer_id": 23,
+          "pointer_origin": {
+            "id": 23,
+            "kind": "id",
+            "name": "block_base"
+          },
+          "result_id": 175,
+          "result_type": 6,
+          "word_index": 2207
+        },
+        {
+          "pointer_id": 174,
+          "pointer_origin": {
+            "id": 174,
+            "kind": "id",
+            "name": "d"
+          },
+          "result_id": 180,
+          "result_type": 17,
+          "word_index": 2227
+        },
+        {
+          "pointer_id": 169,
+          "pointer_origin": {
+            "id": 169,
+            "kind": "id",
+            "name": "scale"
+          },
+          "result_id": 181,
+          "result_type": 12,
+          "word_index": 2231
+        },
+        {
+          "pointer_id": 161,
+          "pointer_origin": {
+            "id": 161,
+            "kind": "id",
+            "name": "q"
+          },
+          "result_id": 184,
+          "result_type": 12,
+          "word_index": 2244
+        }
+      ],
       "local_size": [
         1,
         1,
@@ -3247,6 +5152,569 @@
       "risk_notes": [],
       "schema": "pdocker.spirv.analysis.v1",
       "spec_constants": [],
+      "store_events": [
+        {
+          "object_id": 202,
+          "pointer_id": 189,
+          "pointer_origin": {
+            "id": 189,
+            "kind": "id",
+            "name": "wg_linear"
+          },
+          "word_index": 958
+        },
+        {
+          "object_id": 205,
+          "pointer_id": 203,
+          "pointer_origin": {
+            "id": 203,
+            "kind": "id",
+            "name": "first_row"
+          },
+          "word_index": 970
+        },
+        {
+          "object_id": 213,
+          "pointer_id": 206,
+          "pointer_origin": {
+            "id": 206,
+            "kind": "id",
+            "name": "num_blocks_per_row"
+          },
+          "word_index": 987
+        },
+        {
+          "object_id": 217,
+          "pointer_id": 214,
+          "pointer_origin": {
+            "id": 214,
+            "kind": "id",
+            "name": "total_rows"
+          },
+          "word_index": 999
+        },
+        {
+          "object_id": 224,
+          "pointer_id": 218,
+          "pointer_origin": {
+            "id": 218,
+            "kind": "id",
+            "name": "batch_idx"
+          },
+          "word_index": 1025
+        },
+        {
+          "object_id": 86,
+          "pointer_id": 225,
+          "pointer_origin": {
+            "id": 225,
+            "kind": "id",
+            "name": "batch_idx_a"
+          },
+          "word_index": 1028
+        },
+        {
+          "object_id": 235,
+          "pointer_id": 230,
+          "pointer_origin": {
+            "id": 230,
+            "kind": "id",
+            "name": "i13"
+          },
+          "word_index": 1067
+        },
+        {
+          "object_id": 240,
+          "pointer_id": 236,
+          "pointer_origin": {
+            "id": 236,
+            "kind": "id",
+            "name": "i12"
+          },
+          "word_index": 1088
+        },
+        {
+          "object_id": 246,
+          "pointer_id": 241,
+          "pointer_origin": {
+            "id": 241,
+            "kind": "id",
+            "name": "i03"
+          },
+          "word_index": 1109
+        },
+        {
+          "object_id": 252,
+          "pointer_id": 247,
+          "pointer_origin": {
+            "id": 247,
+            "kind": "id",
+            "name": "i02"
+          },
+          "word_index": 1130
+        },
+        {
+          "object_id": 259,
+          "pointer_id": 225,
+          "pointer_origin": {
+            "id": 225,
+            "kind": "id",
+            "name": "batch_idx_a"
+          },
+          "word_index": 1160
+        },
+        {
+          "object_id": 265,
+          "pointer_id": 260,
+          "pointer_origin": {
+            "id": 260,
+            "kind": "id",
+            "name": "a_offset_blocks"
+          },
+          "word_index": 1190
+        },
+        {
+          "object_id": 271,
+          "pointer_id": 266,
+          "pointer_origin": {
+            "id": 266,
+            "kind": "id",
+            "name": "b_offset"
+          },
+          "word_index": 1211
+        },
+        {
+          "object_id": 277,
+          "pointer_id": 272,
+          "pointer_origin": {
+            "id": 272,
+            "kind": "id",
+            "name": "d_offset"
+          },
+          "word_index": 1232
+        },
+        {
+          "object_id": 86,
+          "pointer_id": 278,
+          "pointer_origin": {
+            "id": 278,
+            "kind": "id",
+            "name": "n"
+          },
+          "word_index": 1235
+        },
+        {
+          "object_id": 289,
+          "pointer_id": 286,
+          "pointer_origin": {
+            "id": 286,
+            "kind": "id",
+            "name": "row"
+          },
+          "word_index": 1278
+        },
+        {
+          "object_id": 297,
+          "pointer_id": 296,
+          "pointer_origin": {
+            "id": 296,
+            "kind": "id",
+            "name": "sum"
+          },
+          "word_index": 1307
+        },
+        {
+          "object_id": 86,
+          "pointer_id": 298,
+          "pointer_origin": {
+            "id": 298,
+            "kind": "id",
+            "name": "bi"
+          },
+          "word_index": 1310
+        },
+        {
+          "object_id": 316,
+          "pointer_id": 307,
+          "pointer_origin": {
+            "id": 307,
+            "kind": "id",
+            "name": "block_base"
+          },
+          "word_index": 1380
+        },
+        {
+          "object_id": 86,
+          "pointer_id": 317,
+          "pointer_origin": {
+            "id": 317,
+            "kind": "id",
+            "name": "e"
+          },
+          "word_index": 1383
+        },
+        {
+          "object_id": 326,
+          "pointer_id": 325,
+          "pointer_origin": {
+            "id": 325,
+            "kind": "id",
+            "name": "param"
+          },
+          "word_index": 1417
+        },
+        {
+          "object_id": 328,
+          "pointer_id": 327,
+          "pointer_origin": {
+            "id": 327,
+            "kind": "id",
+            "name": "param"
+          },
+          "word_index": 1424
+        },
+        {
+          "object_id": 345,
+          "pointer_id": 296,
+          "pointer_origin": {
+            "id": 296,
+            "kind": "id",
+            "name": "sum"
+          },
+          "word_index": 1484
+        },
+        {
+          "object_id": 348,
+          "pointer_id": 317,
+          "pointer_origin": {
+            "id": 317,
+            "kind": "id",
+            "name": "e"
+          },
+          "word_index": 1500
+        },
+        {
+          "object_id": 350,
+          "pointer_id": 298,
+          "pointer_origin": {
+            "id": 298,
+            "kind": "id",
+            "name": "bi"
+          },
+          "word_index": 1520
+        },
+        {
+          "object_id": 358,
+          "pointer_id": 359,
+          "pointer_origin": {
+            "access_chain_result_id": 359,
+            "base": {
+              "binding": 2,
+              "id": 354,
+              "kind": "descriptor",
+              "name": "",
+              "non_readable": false,
+              "non_writable": false,
+              "set": 0,
+              "storage_class": "Uniform"
+            },
+            "indices": [
+              {
+                "constant_u32": 0,
+                "id": 32,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "id": 357,
+                "name": ""
+              }
+            ],
+            "kind": "access_chain"
+          },
+          "word_index": 1550
+        },
+        {
+          "object_id": 361,
+          "pointer_id": 278,
+          "pointer_origin": {
+            "id": 278,
+            "kind": "id",
+            "name": "n"
+          },
+          "word_index": 1566
+        },
+        {
+          "object_id": 38,
+          "pointer_id": 27,
+          "pointer_origin": {
+            "id": 27,
+            "kind": "id",
+            "name": "w"
+          },
+          "word_index": 1608
+        },
+        {
+          "object_id": 52,
+          "pointer_id": 51,
+          "pointer_origin": {
+            "id": 51,
+            "kind": "id",
+            "name": "param"
+          },
+          "word_index": 1668
+        },
+        {
+          "object_id": 53,
+          "pointer_id": 50,
+          "pointer_origin": {
+            "id": 50,
+            "kind": "id",
+            "name": "b"
+          },
+          "word_index": 1676
+        },
+        {
+          "object_id": 63,
+          "pointer_id": 58,
+          "pointer_origin": {
+            "id": 58,
+            "kind": "id",
+            "name": ""
+          },
+          "word_index": 1706
+        },
+        {
+          "object_id": 65,
+          "pointer_id": 58,
+          "pointer_origin": {
+            "id": 58,
+            "kind": "id",
+            "name": ""
+          },
+          "word_index": 1717
+        },
+        {
+          "object_id": 72,
+          "pointer_id": 71,
+          "pointer_origin": {
+            "id": 71,
+            "kind": "id",
+            "name": "param"
+          },
+          "word_index": 1765
+        },
+        {
+          "object_id": 73,
+          "pointer_id": 70,
+          "pointer_origin": {
+            "id": 70,
+            "kind": "id",
+            "name": "lo"
+          },
+          "word_index": 1773
+        },
+        {
+          "object_id": 77,
+          "pointer_id": 78,
+          "pointer_origin": {
+            "id": 78,
+            "kind": "id",
+            "name": "param"
+          },
+          "word_index": 1785
+        },
+        {
+          "object_id": 79,
+          "pointer_id": 74,
+          "pointer_origin": {
+            "id": 74,
+            "kind": "id",
+            "name": "hi"
+          },
+          "word_index": 1793
+        },
+        {
+          "object_id": 93,
+          "pointer_id": 90,
+          "pointer_origin": {
+            "id": 90,
+            "kind": "id",
+            "name": "pos"
+          },
+          "word_index": 1918
+        },
+        {
+          "object_id": 97,
+          "pointer_id": 94,
+          "pointer_origin": {
+            "id": 94,
+            "kind": "id",
+            "name": "half_idx"
+          },
+          "word_index": 1930
+        },
+        {
+          "object_id": 107,
+          "pointer_id": 98,
+          "pointer_origin": {
+            "id": 98,
+            "kind": "id",
+            "name": "ql_index"
+          },
+          "word_index": 1965
+        },
+        {
+          "object_id": 118,
+          "pointer_id": 108,
+          "pointer_origin": {
+            "id": 108,
+            "kind": "id",
+            "name": "qh_index"
+          },
+          "word_index": 2005
+        },
+        {
+          "object_id": 126,
+          "pointer_id": 119,
+          "pointer_origin": {
+            "id": 119,
+            "kind": "id",
+            "name": "scale_index"
+          },
+          "word_index": 2031
+        },
+        {
+          "object_id": 129,
+          "pointer_id": 128,
+          "pointer_origin": {
+            "id": 128,
+            "kind": "id",
+            "name": "param"
+          },
+          "word_index": 2038
+        },
+        {
+          "object_id": 130,
+          "pointer_id": 127,
+          "pointer_origin": {
+            "id": 127,
+            "kind": "id",
+            "name": "ql"
+          },
+          "word_index": 2046
+        },
+        {
+          "object_id": 133,
+          "pointer_id": 132,
+          "pointer_origin": {
+            "id": 132,
+            "kind": "id",
+            "name": "param"
+          },
+          "word_index": 2053
+        },
+        {
+          "object_id": 134,
+          "pointer_id": 131,
+          "pointer_origin": {
+            "id": 131,
+            "kind": "id",
+            "name": "qh"
+          },
+          "word_index": 2061
+        },
+        {
+          "object_id": 143,
+          "pointer_id": 138,
+          "pointer_origin": {
+            "id": 138,
+            "kind": "id",
+            "name": ""
+          },
+          "word_index": 2091
+        },
+        {
+          "object_id": 148,
+          "pointer_id": 138,
+          "pointer_origin": {
+            "id": 138,
+            "kind": "id",
+            "name": ""
+          },
+          "word_index": 2112
+        },
+        {
+          "object_id": 149,
+          "pointer_id": 135,
+          "pointer_origin": {
+            "id": 135,
+            "kind": "id",
+            "name": "low4"
+          },
+          "word_index": 2123
+        },
+        {
+          "object_id": 159,
+          "pointer_id": 150,
+          "pointer_origin": {
+            "id": 150,
+            "kind": "id",
+            "name": "high2"
+          },
+          "word_index": 2159
+        },
+        {
+          "object_id": 168,
+          "pointer_id": 161,
+          "pointer_origin": {
+            "id": 161,
+            "kind": "id",
+            "name": "q"
+          },
+          "word_index": 2189
+        },
+        {
+          "object_id": 171,
+          "pointer_id": 170,
+          "pointer_origin": {
+            "id": 170,
+            "kind": "id",
+            "name": "param"
+          },
+          "word_index": 2196
+        },
+        {
+          "object_id": 172,
+          "pointer_id": 169,
+          "pointer_origin": {
+            "id": 169,
+            "kind": "id",
+            "name": "scale"
+          },
+          "word_index": 2204
+        },
+        {
+          "object_id": 177,
+          "pointer_id": 178,
+          "pointer_origin": {
+            "id": 178,
+            "kind": "id",
+            "name": "param"
+          },
+          "word_index": 2216
+        },
+        {
+          "object_id": 179,
+          "pointer_id": 174,
+          "pointer_origin": {
+            "id": 174,
+            "kind": "id",
+            "name": "d"
+          },
+          "word_index": 2224
+        }
+      ],
       "version": "0x00010000",
       "words": 2260,
       "workgroup_variable_count": 0

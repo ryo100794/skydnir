@@ -615,6 +615,9 @@ def analyze_spirv(path: Path) -> dict:
     type_scalar: dict[int, dict] = {}
     constants: dict[int, dict] = {}
     spec_constants: dict[int, dict] = {}
+    access_chains_raw: list[dict] = []
+    load_events_raw: list[dict] = []
+    store_events_raw: list[dict] = []
     access_chain_count = 0
     workgroup_variable_count = 0
     storage_variables = []
@@ -626,8 +629,25 @@ def analyze_spirv(path: Path) -> dict:
         op_hist[opcode] += 1
         if opcode in (61,):
             loads += 1
+            if len(inst) >= 4:
+                load_events_raw.append(
+                    {
+                        "word_index": _index,
+                        "result_type": inst[1],
+                        "result_id": inst[2],
+                        "pointer_id": inst[3],
+                    }
+                )
         elif opcode in (62,):
             stores += 1
+            if len(inst) >= 3:
+                store_events_raw.append(
+                    {
+                        "word_index": _index,
+                        "pointer_id": inst[1],
+                        "object_id": inst[2],
+                    }
+                )
         elif opcode in (63, 64):
             stores += 1
         elif opcode in (65, 66):
@@ -697,6 +717,17 @@ def analyze_spirv(path: Path) -> dict:
                 "opcode": inst[3],
                 "operands": inst[4:],
             }
+        elif opcode in (65, 66) and len(inst) >= 4:
+            access_chains_raw.append(
+                {
+                    "word_index": _index,
+                    "op": OP_NAMES.get(opcode, f"Op{opcode}"),
+                    "result_type": inst[1],
+                    "result_id": inst[2],
+                    "base_id": inst[3],
+                    "index_ids": inst[4:],
+                }
+            )
         elif opcode == 71 and len(inst) >= 3:
             target, decoration = inst[1], inst[2]
             name = DECORATION_NAMES.get(decoration, str(decoration))
@@ -801,6 +832,98 @@ def analyze_spirv(path: Path) -> dict:
             item["words"] = spec.get("words", [])
         spec_constant_list.append(item)
 
+    descriptor_by_id = {int(item["id"]): item for item in descriptor_variables}
+    push_constant_by_id = {int(item["variable_id"]): item for item in push_constant_blocks}
+
+    def constant_u32(value_id: int) -> int | None:
+        value = constants.get(value_id)
+        if not value or len(value.get("words", [])) != 1:
+            return None
+        return int(value["words"][0])
+
+    def describe_base(base_id: int) -> dict:
+        if base_id in descriptor_by_id:
+            item = descriptor_by_id[base_id]
+            return {
+                "kind": "descriptor",
+                "id": base_id,
+                "name": names.get(base_id, ""),
+                "set": item.get("set"),
+                "binding": item.get("binding"),
+                "storage_class": item.get("storage_class"),
+                "non_readable": item.get("non_readable"),
+                "non_writable": item.get("non_writable"),
+            }
+        if base_id in push_constant_by_id:
+            item = push_constant_by_id[base_id]
+            return {
+                "kind": "push_constant",
+                "id": base_id,
+                "name": item.get("name", ""),
+                "struct_type": item.get("struct_type"),
+                "struct_name": item.get("struct_name", ""),
+            }
+        return {
+            "kind": "id",
+            "id": base_id,
+            "name": names.get(base_id, ""),
+        }
+
+    access_chain_by_result: dict[int, dict] = {}
+    access_chains = []
+    for raw in access_chains_raw:
+        base = describe_base(raw["base_id"])
+        indices = []
+        for index_id in raw["index_ids"]:
+            indices.append(
+                {
+                    "id": index_id,
+                    "name": names.get(index_id, ""),
+                    "constant_u32": constant_u32(index_id),
+                }
+            )
+        resolved = {
+            **raw,
+            "base": base,
+            "indices": indices,
+        }
+        if base.get("kind") == "push_constant" and indices and indices[0].get("constant_u32") is not None:
+            member_index = indices[0]["constant_u32"]
+            members = push_constant_by_id.get(raw["base_id"], {}).get("members", [])
+            if isinstance(member_index, int) and 0 <= member_index < len(members):
+                resolved["push_member"] = members[member_index]
+        access_chains.append(resolved)
+        access_chain_by_result[int(raw["result_id"])] = resolved
+
+    def pointer_origin(pointer_id: int) -> dict:
+        if pointer_id in access_chain_by_result:
+            chain = access_chain_by_result[pointer_id]
+            origin = {
+                "kind": "access_chain",
+                "access_chain_result_id": pointer_id,
+                "base": chain.get("base"),
+                "indices": chain.get("indices", []),
+            }
+            if "push_member" in chain:
+                origin["push_member"] = chain["push_member"]
+            return origin
+        return describe_base(pointer_id)
+
+    load_events = [
+        {
+            **event,
+            "pointer_origin": pointer_origin(event["pointer_id"]),
+        }
+        for event in load_events_raw
+    ]
+    store_events = [
+        {
+            **event,
+            "pointer_origin": pointer_origin(event["pointer_id"]),
+        }
+        for event in store_events_raw
+    ]
+
     duplicate_bindings = [
         {"set": set_id, "binding": binding, "variable_ids": ids}
         for (set_id, binding), ids in sorted(bindings_seen.items())
@@ -852,6 +975,9 @@ def analyze_spirv(path: Path) -> dict:
         "descriptor_variables": descriptor_variables,
         "push_constant_blocks": push_constant_blocks,
         "spec_constants": spec_constant_list,
+        "access_chains": access_chains,
+        "load_events": load_events,
+        "store_events": store_events,
         "duplicate_bindings": duplicate_bindings,
         "workgroup_variable_count": workgroup_variable_count,
         "control_flow": summarize_cfg(words),
