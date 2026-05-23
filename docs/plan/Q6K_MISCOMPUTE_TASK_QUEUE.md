@@ -38,6 +38,25 @@ The current blocker is therefore:
 > interpretation, local size/workgroup mapping, reduction/arithmetic,
 > synchronization/device visibility, or final store/writeback.
 
+Latest device evidence from `192.168.179.26:45055` narrows the native Q6
+identity one step further:
+
+- source/native SPIR-V hash: `0x1bf751845c5dce75`;
+- effective SPIR-V hash during dispatch: `0xe38f6a6a906d765c`;
+- the effective hash is reproduced by changing only
+  `OpExecutionMode %main LocalSize 1 1 1` to `LocalSize 32 1 1`;
+- the source module separately declares `BuiltIn WorkgroupSize` as an
+  `OpSpecConstantComposite` whose first component is `SpecId 0`
+  (`default=1`, runtime specialization value `32`);
+- writable binding writeback is verified, and the wrong value is already
+  visible at the GPU final-store/readback boundary.
+
+So the next investigation must treat `[32,1,1]` legalization as a known,
+reproducible bridge transform, not as an unknown shader replacement.  The open
+question is now whether the remaining native Q6 mismatch is caused by
+descriptor/alias semantics, local invocation/workgroup interpretation,
+native arithmetic/reduction, or final store indexing.
+
 ## Always-on inventory command
 
 Run this after each related artifact lands:
@@ -78,19 +97,21 @@ or shader replacement.
 
 ### Q6K-001: Native SPIR-V dump
 
-Status: open.
+Status: closed for source module, open for runtime dump plumbing.
 
 Purpose: collect the exact native Q6 `.spv` for source hash
 `0x1bf751845c5dce75`.
 
 Acceptance:
 
-- A device compare run sets `PDOCKER_GPU_SPIRV_DUMP_DIR`.
-- The dump includes a `.spv` whose FNV hash is `0x1bf751845c5dce75`.
-- The dump is analyzed with `scripts/analyze-spirv.py`.
-- The analysis records entry point, descriptors, push constants,
-  specialization constants, access-chain origins, load origins, and store
-  origins.
+- [x] A `.spv` whose FNV hash is `0x1bf751845c5dce75` is preserved as
+  `docs/test/spirv-q6k-native-adb45055/native-q6-source.spv`.
+- [x] The dump is analyzed with `scripts/analyze-spirv.py`.
+- [x] The analysis records entry point, descriptors, push constants,
+  specialization constants, `BuiltIn WorkgroupSize`, access-chain origins,
+  load origins, and store origins.
+- [ ] The executor-side `PDOCKER_GPU_SPIRV_DUMP_DIR` path must still be fixed
+  or bridged so future effective runtime modules are dumped automatically.
 
 Next task if blocked:
 
@@ -99,7 +120,7 @@ Next task if blocked:
 
 ### Q6K-002: Safe-vs-native static dataflow compare
 
-Status: blocked by Q6K-001.
+Status: started.
 
 Purpose: determine whether the bridge understands native Q6 ABI/dataflow before
 executing more GPU variants.
@@ -113,7 +134,16 @@ python3 scripts/compare-spirv-dataflow.py \
   --json-out <safe-vs-native-q6.dataflow.json>
 ```
 
-The report must either:
+Current report:
+
+- `docs/test/spirv-q6k-native-adb45055/safe-vs-native-q6-source.dataflow.json`
+  exists.
+- The safe kernel and native Q6 module are structurally not equivalent:
+  descriptor layout/storage-class shape and store/load origin counts differ.
+- This is expected because the safe kernel is a bridge-owned compatibility
+  substitute, not a proof that the native module is decoded identically.
+
+The report must continue to either:
 
 - show matching descriptor/push/store origins for the comparable Q6 operation,
   or
@@ -127,7 +157,7 @@ Next task if it fails:
 
 ### Q6K-003: Native mismatch classifier
 
-Status: open.
+Status: in progress.
 
 Purpose: convert "native Q6 mismatch" into exactly one active blocker class.
 
@@ -157,6 +187,21 @@ Next task if ambiguous:
 
 - Add the missing evidence field at the layer where ambiguity entered.  Do not
   rerun the same compare expecting a different conclusion.
+
+Current classification from
+`docs/test/llama-gpu-ngl1-q6-native-dump-adb45055-20260523T205152Z.json`:
+
+- `blocker_class`: `native-q6-final-store-or-readback`;
+- `q6_writeback_verified_all`: true;
+- `q6_row_indexed_writeback_verified`: true;
+- first mismatch: dst index 0, expected `11.7231684`, GPU `5.85118008`;
+- native reduction-tree CPU delta is tiny, while GPU-at-dst absolute error is
+  large.
+
+This is strong evidence against host fd writeback as the first failing layer,
+but not yet enough to choose between native shader arithmetic/reduction and
+store-index/value semantics.  Valid-module instrumentation remains the next
+decisive step.
 
 ### Q6K-004: Valid-module probe bisection
 
@@ -202,7 +247,7 @@ Next task if failed:
 
 ### Q6K-007: Workgroup/local-size contract lock
 
-Status: open.
+Status: closed for analyzer support, open for verifier/runtime hard gate.
 
 Purpose: stop the investigation from oscillating between stale `[32,2,1]`,
 current `[32,1,1]`, literal `[1,1,1]`, and specialization-derived workgroup
@@ -210,6 +255,13 @@ interpretations.
 
 Acceptance:
 
+- [x] analyzer records literal local size and `BuiltIn WorkgroupSize`
+  specialization constants;
+- [x] native-vs-effective comparison records that effective
+  `0xe38f6a6a906d765c` is the local-size legalized form of source
+  `0x1bf751845c5dce75`;
+- [ ] the artifact verifier must classify missing or contradictory workgroup
+  evidence before arithmetic/reduction classifications;
 - the artifact records literal local size, LocalSizeId ids, BuiltIn
   WorkgroupSize ids, specialization constant ids, specialization values, and
   resolved local size for the same native Q6 dispatch;
@@ -253,7 +305,8 @@ Next task if failed:
 
 ### Q6K-009: Descriptor layout static comparison
 
-Status: started.
+Status: closed for static analyzer/compare baseline, open for exact mismatch
+path reporting.
 
 Purpose: make native-vs-safe comparison sensitive to descriptor element/layout
 shape, not only set/binding/read-write flags.
@@ -263,8 +316,12 @@ Current implementation:
 - `scripts/analyze-spirv.py` now emits descriptor `pointee_layout` with struct
   member offsets/layout decorations and recursive type summaries for pointer,
   struct, array/runtime-array, vector, matrix, scalar, and related decorations.
+- The analyzer now emits `workgroup_size_builtin` so native Q6's
+  `BuiltIn WorkgroupSize` specialization contract is visible even when
+  `OpExecutionModeId` is absent.
 - `tests.test_gpu_abi_contract` verifies the embedded safe Q6 descriptor
-  layout so analyzer updates cannot silently drop this evidence.
+  layout and the preserved native Q6 WorkgroupSize contract so analyzer updates
+  cannot silently drop this evidence.
 
 Acceptance:
 

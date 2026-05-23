@@ -24,6 +24,14 @@ MAX_LIST_ITEMS = 8
 DEFAULT_MAX_ARTIFACTS = 32
 
 
+def fnv1a64(data: bytes) -> int:
+    value = 1469598103934665603
+    for byte in data:
+        value ^= byte
+        value = (value * 1099511628211) & ((1 << 64) - 1)
+    return value
+
+
 def find_repo_root(start: Path) -> Path:
     for candidate in (start, *start.parents):
         if (candidate / "scripts").is_dir() and (candidate / "docs").is_dir():
@@ -251,7 +259,15 @@ def artifact_summary(path: Path, target_hashes: set[str]) -> dict[str, Any]:
 def derive_next_tasks(artifact_summaries: list[dict[str, Any]], native_spv_files: list[str]) -> list[dict[str, Any]]:
     has_native_hash = any(Q6_NATIVE_HASH in item.get("q6_source_hashes", []) for item in artifact_summaries)
     has_safe_hash = any(Q6_SAFE_HASH in item.get("q6_source_hashes", []) for item in artifact_summaries)
-    has_native_spv = any(Q6_NATIVE_HASH in path for path in native_spv_files)
+    spv_hashes: set[str] = set()
+    for item in native_spv_files:
+        path = ROOT / item
+        try:
+            spv_hashes.add(f"0x{fnv1a64(path.read_bytes()):016x}")
+        except OSError:
+            continue
+    has_native_spv = Q6_NATIVE_HASH in spv_hashes
+    has_static_compare = (ROOT / "docs/test/spirv-q6k-native-adb45055/safe-vs-native-q6-source.dataflow.json").exists()
     has_native_mismatch = any(
         (event.get("cpu_oracle") or {}).get("status") == "mismatch"
         for item in artifact_summaries
@@ -280,6 +296,15 @@ def derive_next_tasks(artifact_summaries: list[dict[str, Any]], native_spv_files
                 "id": "q6k-safe-vs-native-static-compare-blocked",
                 "status": "blocked",
                 "blocked_by": "q6k-native-spv-dump",
+                "goal": "Compare safe Q6 dataflow against native Q6 dataflow.",
+                "acceptance": "scripts/compare-spirv-dataflow.py emits a report naming descriptor/push/store differences or declaring static ABI match.",
+            }
+        )
+    elif has_safe_hash and has_native_spv and not has_static_compare:
+        tasks.append(
+            {
+                "id": "q6k-safe-vs-native-static-compare",
+                "status": "open",
                 "goal": "Compare safe Q6 dataflow against native Q6 dataflow.",
                 "acceptance": "scripts/compare-spirv-dataflow.py emits a report naming descriptor/push/store differences or declaring static ABI match.",
             }

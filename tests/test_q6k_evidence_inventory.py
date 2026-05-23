@@ -75,7 +75,6 @@ class Q6kEvidenceInventoryTest(unittest.TestCase):
         self.assertEqual(event["cpu_oracle"]["status"], "mismatch")
         self.assertEqual(event["push_u32_prefix"][-1]["truncated_count"], 16)
         task_ids = {task["id"] for task in summary["next_task_queue"]}
-        self.assertIn("q6k-native-spv-dump", task_ids)
         self.assertIn("q6k-native-mismatch-classify", task_ids)
 
     def test_safe_only_inventory_blocks_native_compare(self):
@@ -95,9 +94,10 @@ class Q6kEvidenceInventoryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "safe.json"
             path.write_text(json.dumps(payload), encoding="utf-8")
-            summary = module.summarize([path])
+            artifact_summary = module.artifact_summary(path, {module.Q6_NATIVE_HASH, module.Q6_SAFE_HASH})
+            tasks = module.derive_next_tasks([artifact_summary], [])
 
-        task_by_id = {task["id"]: task for task in summary["next_task_queue"]}
+        task_by_id = {task["id"]: task for task in tasks}
         self.assertEqual(task_by_id["q6k-safe-vs-native-static-compare-blocked"]["status"], "blocked")
         self.assertEqual(
             task_by_id["q6k-safe-vs-native-static-compare-blocked"]["blocked_by"],

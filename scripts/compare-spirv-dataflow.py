@@ -124,6 +124,53 @@ def push_signature(module: dict[str, Any]) -> list[dict[str, Any]]:
         for member in members
     ]
 
+def scalar_id_signature(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return None
+    kind = value.get("kind")
+    if kind == "constant":
+        return {"kind": kind, "value_u32": value.get("value_u32")}
+    if kind == "spec_constant":
+        return {
+            "kind": kind,
+            "default_u32": value.get("default_u32"),
+            "spec_id": value.get("spec_id"),
+        }
+    if kind == "spec_constant_op":
+        return {
+            "kind": kind,
+            "opcode": value.get("opcode"),
+            "operands": value.get("operands", []),
+            "spec_id": value.get("spec_id"),
+        }
+    if kind == "spec_constant_composite":
+        return {
+            "kind": kind,
+            "constituents": value.get("constituents", []),
+        }
+    return {"kind": kind or "id"}
+
+
+def workgroup_size_signature(module: dict[str, Any]) -> dict[str, Any] | None:
+    workgroup = module.get("workgroup_size_builtin")
+    if not isinstance(workgroup, dict):
+        return None
+    kind = workgroup.get("kind")
+    if kind == "spec_constant_composite":
+        return {
+            "kind": kind,
+            "components": [
+                scalar_id_signature(component)
+                for component in workgroup.get("components", [])
+            ],
+        }
+    if kind == "variable":
+        return {
+            "kind": kind,
+            "storage_class": workgroup.get("storage_class"),
+        }
+    return {"kind": kind or "unknown"}
+
 
 def origin_key(origin: dict[str, Any]) -> str:
     if not isinstance(origin, dict):
@@ -201,6 +248,7 @@ def summarize(module: dict[str, Any]) -> dict[str, Any]:
         "entry_points": module.get("entry_points", []),
         "local_size": module.get("local_size"),
         "local_size_id": module.get("local_size_id"),
+        "workgroup_size_builtin": workgroup_size_signature(module),
         "descriptors": descriptor_signature(module),
         "push_constants": push_signature(module),
         "loads": event_summary(module, "load_events"),
@@ -225,6 +273,12 @@ def main() -> int:
         compare_lists("entry_points", left["entry_points"], right["entry_points"]),
         compare_lists("local_size", left["local_size"], right["local_size"]),
         compare_lists("local_size_id", left["local_size_id"], right["local_size_id"]),
+        {
+            "name": "workgroup_size_builtin",
+            "match": left["workgroup_size_builtin"] == right["workgroup_size_builtin"],
+            "left": left["workgroup_size_builtin"],
+            "right": right["workgroup_size_builtin"],
+        },
         compare_lists("descriptors", left["descriptors"], right["descriptors"]),
         compare_lists("push_constants", left["push_constants"], right["push_constants"]),
         compare_counts("load_origins", left["loads"], right["loads"]),

@@ -951,6 +951,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(module["instruction_count"], 570)
         self.assertEqual(module["entry_points"][0]["execution_model_name"], "GLCompute")
         self.assertEqual(module["entry_points"][0]["name"], "main")
+        self.assertIn("workgroup_size_builtin", module)
         descriptor_by_binding = {item["binding"]: item for item in module["descriptor_variables"]}
         self.assertEqual(descriptor_by_binding[0]["pointee_layout"]["kind"], "struct")
         self.assertTrue(descriptor_by_binding[0]["pointee_layout"]["members"][0]["layout"]["NonWritable"])
@@ -985,6 +986,37 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("instrumented module must pass spirv-val after instrumentation", probe_manifest["validation_gates"]["messages"])
         self.assertTrue(probe_manifest["validation_gates"]["spirv_val_required"])
         self.assertTrue(json.loads(verified.stdout)["valid"])
+
+    def test_spirv_analyzer_reports_q6_native_workgroup_builtin_spec_contract(self):
+        spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
+        self.assertTrue(spv.exists(), "native Q6 source SPIR-V evidence must be preserved")
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["python3", str(SPIRV_ANALYZER), str(spv)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+        payload = json.loads(result.stdout)
+        module = payload["modules"][0]
+        self.assertEqual(module["hash"], "0x1bf751845c5dce75")
+        self.assertEqual(module["local_size"], [1, 1, 1])
+        workgroup = module["workgroup_size_builtin"]
+        self.assertEqual(workgroup["kind"], "spec_constant_composite")
+        self.assertEqual(
+            [
+                {"kind": "spec_constant", "default_u32": 1, "spec_id": 0},
+                {"kind": "constant", "value_u32": 1},
+                {"kind": "constant", "value_u32": 1},
+            ],
+            [
+                {key: component[key] for key in ("kind",) + (("default_u32", "spec_id") if component["kind"] == "spec_constant" else ("value_u32",))}
+                for component in workgroup["components"]
+            ],
+        )
+        self.assertTrue(any("BuiltIn WorkgroupSize" in note for note in module["risk_notes"]))
 
     def test_spirv_probe_manifest_verifier_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1102,7 +1134,8 @@ class GpuAbiContractTest(unittest.TestCase):
             payload = json.loads(out.read_text())
         self.assertTrue(payload["all_match"])
         self.assertEqual(payload["left"]["descriptors"][0]["layout"]["kind"], "struct")
-        self.assertIn("layout", payload["comparisons"][3]["left"][0])
+        descriptor_comparison = next(item for item in payload["comparisons"] if item["name"] == "descriptors")
+        self.assertIn("layout", descriptor_comparison["left"][0])
         self.assertIn("push[0:ncols@0]", payload["left"]["loads"]["push_origins"])
         self.assertIn("descriptor[0,2](0,id:357:)", payload["left"]["stores"]["descriptor_origins"])
         self.assertTrue(all(item["match"] for item in payload["comparisons"]))

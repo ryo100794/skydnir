@@ -3653,7 +3653,6 @@
           "storage_class": "Uniform"
         }
       ],
-      "disassembly_path": "docs/test/spirv-q6k-safe-current/q6k-safe.spv.spvasm",
       "duplicate_bindings": [],
       "entry_points": [
         {
@@ -5794,6 +5793,7 @@
       ],
       "version": "0x00010000",
       "words": 2260,
+      "workgroup_size_builtin": null,
       "workgroup_variable_count": 0
     }
   ],

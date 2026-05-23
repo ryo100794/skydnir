@@ -149,6 +149,15 @@ DECORATION_NAMES = {
     35: "Offset",
 }
 
+BUILTIN_NAMES = {
+    24: "NumWorkgroups",
+    25: "WorkgroupSize",
+    26: "WorkgroupId",
+    27: "LocalInvocationId",
+    28: "GlobalInvocationId",
+    29: "LocalInvocationIndex",
+}
+
 STORAGE_CLASS_NAMES = {
     0: "UniformConstant",
     1: "Input",
@@ -624,6 +633,7 @@ def analyze_spirv(path: Path) -> dict:
     type_scalar: dict[int, dict] = {}
     constants: dict[int, dict] = {}
     spec_constants: dict[int, dict] = {}
+    spec_constant_composites: dict[int, dict] = {}
     access_chains_raw: list[dict] = []
     load_events_raw: list[dict] = []
     store_events_raw: list[dict] = []
@@ -734,10 +744,15 @@ def analyze_spirv(path: Path) -> dict:
                 "result_type": inst[1],
                 "words": inst[3:],
             }
-        elif opcode == 47 and len(inst) >= 4:
+        elif opcode == 50 and len(inst) >= 4:
             spec_constants[inst[2]] = {
                 "result_type": inst[1],
                 "words": inst[3:],
+            }
+        elif opcode == 51 and len(inst) >= 4:
+            spec_constant_composites[inst[2]] = {
+                "result_type": inst[1],
+                "constituents": inst[3:],
             }
         elif opcode == 52 and len(inst) >= 4:
             spec_constants[inst[2]] = {
@@ -759,8 +774,10 @@ def analyze_spirv(path: Path) -> dict:
         elif opcode == 71 and len(inst) >= 3:
             target, decoration = inst[1], inst[2]
             name = DECORATION_NAMES.get(decoration, str(decoration))
-            if decoration in (1, 33, 34) and len(inst) >= 4:
+            if decoration in (1, 11, 33, 34) and len(inst) >= 4:
                 decorations[target][name] = inst[3]
+                if decoration == 11:
+                    decorations[target]["BuiltInName"] = BUILTIN_NAMES.get(inst[3], str(inst[3]))
             else:
                 decorations[target][name] = True
         elif opcode == 72 and len(inst) >= 4:
@@ -793,6 +810,46 @@ def analyze_spirv(path: Path) -> dict:
         if not value or len(value.get("words", [])) != 1:
             return None
         return int(value["words"][0])
+
+    def spec_constant_default_u32(value_id: int) -> int | None:
+        value = spec_constants.get(value_id)
+        if not value or "opcode" in value or len(value.get("words", [])) != 1:
+            return None
+        return int(value["words"][0])
+
+    def describe_scalar_id(value_id: int) -> dict:
+        item: dict = {
+            "id": value_id,
+            "name": names.get(value_id, ""),
+        }
+        const_value = constant_u32(value_id)
+        if const_value is not None:
+            item.update({"kind": "constant", "value_u32": const_value})
+            return item
+        spec_value = spec_constant_default_u32(value_id)
+        if spec_value is not None:
+            item.update({
+                "kind": "spec_constant",
+                "default_u32": spec_value,
+                "spec_id": decorations.get(value_id, {}).get("SpecId"),
+            })
+            return item
+        if value_id in spec_constants and "opcode" in spec_constants[value_id]:
+            item.update({
+                "kind": "spec_constant_op",
+                "opcode": spec_constants[value_id].get("opcode"),
+                "operands": spec_constants[value_id].get("operands", []),
+                "spec_id": decorations.get(value_id, {}).get("SpecId"),
+            })
+            return item
+        if value_id in spec_constant_composites:
+            item.update({
+                "kind": "spec_constant_composite",
+                "constituents": spec_constant_composites[value_id].get("constituents", []),
+            })
+            return item
+        item["kind"] = "id"
+        return item
 
     def describe_type(type_id: int, depth: int = 0) -> dict:
         if depth > 8:
@@ -937,6 +994,43 @@ def analyze_spirv(path: Path) -> dict:
         else:
             item["words"] = spec.get("words", [])
         spec_constant_list.append(item)
+    for const_id, composite in sorted(spec_constant_composites.items()):
+        spec_constant_list.append(
+            {
+                "id": const_id,
+                "name": names.get(const_id, ""),
+                "kind": "spec_constant_composite",
+                "result_type": composite.get("result_type"),
+                "constituents": [
+                    describe_scalar_id(int(member_id))
+                    for member_id in composite.get("constituents", [])
+                ],
+            }
+        )
+
+    workgroup_size_builtin = None
+    for value_id, dec in sorted(decorations.items()):
+        if dec.get("BuiltInName") != "WorkgroupSize":
+            continue
+        if value_id in variable:
+            var = variable[value_id]
+            workgroup_size_builtin = {
+                "kind": "variable",
+                "id": value_id,
+                "name": names.get(value_id, ""),
+                "storage_class": var.get("storage_class_name"),
+                "result_type": var.get("result_type"),
+            }
+            break
+        if value_id in spec_constant_composites:
+            constituents = spec_constant_composites[value_id].get("constituents", [])
+            workgroup_size_builtin = {
+                "kind": "spec_constant_composite",
+                "id": value_id,
+                "name": names.get(value_id, ""),
+                "components": [describe_scalar_id(int(member_id)) for member_id in constituents],
+            }
+            break
 
     descriptor_by_id = {int(item["id"]): item for item in descriptor_variables}
     push_constant_by_id = {int(item["variable_id"]): item for item in push_constant_blocks}
@@ -1049,6 +1143,8 @@ def analyze_spirv(path: Path) -> dict:
         risk_notes.append("multiple variables share descriptor set/binding; bridge must preserve API descriptor view exactly")
     if local_size_id != [0, 0, 0]:
         risk_notes.append("uses specialization-controlled workgroup size; cache keys and validation must include specialization data")
+    if workgroup_size_builtin and workgroup_size_builtin.get("kind") == "spec_constant_composite":
+        risk_notes.append("declares BuiltIn WorkgroupSize through specialization constants; executor must reconcile literal LocalSize with specialized WorkgroupSize")
 
     return {
         "schema": "pdocker.spirv.analysis.v1",
@@ -1070,6 +1166,7 @@ def analyze_spirv(path: Path) -> dict:
         },
         "local_size": local_size,
         "local_size_id": local_size_id,
+        "workgroup_size_builtin": workgroup_size_builtin,
         "entry_points": entry_points,
         "capabilities": capability_names,
         "descriptor_variables": descriptor_variables,

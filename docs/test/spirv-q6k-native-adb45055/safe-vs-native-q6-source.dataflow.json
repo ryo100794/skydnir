@@ -1,0 +1,2196 @@
+{
+  "all_match": false,
+  "comparisons": [
+    {
+      "left": [
+        {
+          "execution_model": 5,
+          "execution_model_name": "GLCompute",
+          "id": 4,
+          "name": "main"
+        }
+      ],
+      "match": true,
+      "name": "entry_points",
+      "right": [
+        {
+          "execution_model": 5,
+          "execution_model_name": "GLCompute",
+          "id": 4,
+          "name": "main"
+        }
+      ]
+    },
+    {
+      "left": [
+        1,
+        1,
+        1
+      ],
+      "match": true,
+      "name": "local_size",
+      "right": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "left": [
+        0,
+        0,
+        0
+      ],
+      "match": true,
+      "name": "local_size_id",
+      "right": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "left": null,
+      "match": false,
+      "name": "workgroup_size_builtin",
+      "right": {
+        "components": [
+          {
+            "default_u32": 1,
+            "kind": "spec_constant",
+            "spec_id": 0
+          },
+          {
+            "kind": "constant",
+            "value_u32": 1
+          },
+          {
+            "kind": "constant",
+            "value_u32": 1
+          }
+        ],
+        "kind": "spec_constant_composite"
+      }
+    },
+    {
+      "left": [
+        {
+          "binding": 0,
+          "layout": {
+            "block": false,
+            "buffer_block": true,
+            "kind": "struct",
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "NonWritable": true,
+                  "Offset": 0
+                },
+                "offset": 0,
+                "type": {
+                  "kind": "unknown"
+                }
+              }
+            ]
+          },
+          "non_readable": false,
+          "non_writable": true,
+          "set": 0,
+          "storage_class": "Uniform"
+        },
+        {
+          "binding": 1,
+          "layout": {
+            "block": false,
+            "buffer_block": true,
+            "kind": "struct",
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "NonWritable": true,
+                  "Offset": 0
+                },
+                "offset": 0,
+                "type": {
+                  "kind": "unknown"
+                }
+              }
+            ]
+          },
+          "non_readable": false,
+          "non_writable": true,
+          "set": 0,
+          "storage_class": "Uniform"
+        },
+        {
+          "binding": 2,
+          "layout": {
+            "block": false,
+            "buffer_block": true,
+            "kind": "struct",
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "Offset": 0
+                },
+                "offset": 0,
+                "type": {
+                  "kind": "unknown"
+                }
+              }
+            ]
+          },
+          "non_readable": false,
+          "non_writable": false,
+          "set": 0,
+          "storage_class": "Uniform"
+        }
+      ],
+      "match": false,
+      "name": "descriptors",
+      "right": [
+        {
+          "binding": 0,
+          "layout": {
+            "block": true,
+            "buffer_block": false,
+            "kind": "struct",
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "NonWritable": true,
+                  "Offset": 0
+                },
+                "offset": 0,
+                "type": {
+                  "kind": "unknown"
+                }
+              }
+            ]
+          },
+          "non_readable": false,
+          "non_writable": false,
+          "set": 0,
+          "storage_class": "StorageBuffer"
+        },
+        {
+          "binding": 0,
+          "layout": {
+            "block": true,
+            "buffer_block": false,
+            "kind": "struct",
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "NonWritable": true,
+                  "Offset": 0
+                },
+                "offset": 0,
+                "type": {
+                  "kind": "unknown"
+                }
+              }
+            ]
+          },
+          "non_readable": false,
+          "non_writable": false,
+          "set": 0,
+          "storage_class": "StorageBuffer"
+        },
+        {
+          "binding": 1,
+          "layout": {
+            "block": true,
+            "buffer_block": false,
+            "kind": "struct",
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "NonWritable": true,
+                  "Offset": 0
+                },
+                "offset": 0,
+                "type": {
+                  "kind": "unknown"
+                }
+              }
+            ]
+          },
+          "non_readable": false,
+          "non_writable": false,
+          "set": 0,
+          "storage_class": "StorageBuffer"
+        },
+        {
+          "binding": 2,
+          "layout": {
+            "block": true,
+            "buffer_block": false,
+            "kind": "struct",
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "NonReadable": true,
+                  "Offset": 0
+                },
+                "offset": 0,
+                "type": {
+                  "kind": "unknown"
+                }
+              }
+            ]
+          },
+          "non_readable": false,
+          "non_writable": false,
+          "set": 0,
+          "storage_class": "StorageBuffer"
+        },
+        {
+          "binding": 3,
+          "layout": {
+            "block": true,
+            "buffer_block": false,
+            "kind": "struct",
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "NonWritable": true,
+                  "Offset": 0
+                },
+                "offset": 0,
+                "type": {
+                  "kind": "unknown"
+                }
+              }
+            ]
+          },
+          "non_readable": false,
+          "non_writable": false,
+          "set": 0,
+          "storage_class": "StorageBuffer"
+        },
+        {
+          "binding": 4,
+          "layout": {
+            "block": true,
+            "buffer_block": false,
+            "kind": "struct",
+            "members": [
+              {
+                "index": 0,
+                "layout": {
+                  "NonWritable": true,
+                  "Offset": 0
+                },
+                "offset": 0,
+                "type": {
+                  "kind": "unknown"
+                }
+              }
+            ]
+          },
+          "non_readable": false,
+          "non_writable": false,
+          "set": 0,
+          "storage_class": "StorageBuffer"
+        }
+      ]
+    },
+    {
+      "left": [
+        {
+          "bits": 32,
+          "index": 0,
+          "name": "ncols",
+          "offset": 0,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 1,
+          "name": "stride_a",
+          "offset": 4,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 2,
+          "name": "stride_b",
+          "offset": 8,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 3,
+          "name": "stride_d",
+          "offset": 12,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 4,
+          "name": "batch_stride_a",
+          "offset": 16,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 5,
+          "name": "batch_stride_b",
+          "offset": 20,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 6,
+          "name": "batch_stride_d",
+          "offset": 24,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 7,
+          "name": "fusion_flags",
+          "offset": 28,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 8,
+          "name": "base_work_group_y",
+          "offset": 32,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 9,
+          "name": "ne02",
+          "offset": 36,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 10,
+          "name": "ne12",
+          "offset": 40,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 11,
+          "name": "broadcast2",
+          "offset": 44,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 12,
+          "name": "broadcast3",
+          "offset": 48,
+          "type": "int"
+        }
+      ],
+      "match": false,
+      "name": "push_constants",
+      "right": [
+        {
+          "bits": 32,
+          "index": 0,
+          "name": "",
+          "offset": 0,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 1,
+          "name": "",
+          "offset": 4,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 2,
+          "name": "",
+          "offset": 8,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 3,
+          "name": "",
+          "offset": 12,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 4,
+          "name": "",
+          "offset": 16,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 5,
+          "name": "",
+          "offset": 20,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 6,
+          "name": "",
+          "offset": 24,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 7,
+          "name": "",
+          "offset": 28,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 8,
+          "name": "",
+          "offset": 32,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 9,
+          "name": "",
+          "offset": 36,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 10,
+          "name": "",
+          "offset": 40,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 11,
+          "name": "",
+          "offset": 44,
+          "type": "int"
+        },
+        {
+          "bits": 32,
+          "index": 12,
+          "name": "",
+          "offset": 48,
+          "type": "int"
+        }
+      ]
+    },
+    {
+      "diffs": [
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1124:,0,id:1125:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1124:,0,id:1132:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1124:,0,id:1141:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1124:,0,id:1148:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1124:,1,id:1166:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1124:,1,id:1173:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1124:,2,id:917:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1124:,3)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1447:,2,id:917:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1458:,0,id:1459:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1458:,0,id:1466:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1458:,0,id:1475:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1458:,0,id:1482:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1458:,1,id:1500:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1458:,1,id:1507:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:1458:,3)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2127:,0,id:2128:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2127:,0,id:2135:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2127:,0,id:2144:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2127:,0,id:2151:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2127:,1,id:2169:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2127:,1,id:2176:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2127:,2,id:1920:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2127:,3)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2450:,2,id:1920:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2461:,0,id:2462:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2461:,0,id:2469:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2461:,0,id:2478:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2461:,0,id:2485:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2461:,1,id:2503:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2461:,1,id:2510:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,0](0,id:2461:,3)",
+          "right": 1
+        },
+        {
+          "left": 1,
+          "origin": "descriptor[0,0](0,id:35:)",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:1248:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:1264:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:1280:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:1296:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:1582:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:1598:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:1614:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:1630:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:2251:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:2267:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:2283:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:2299:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:2585:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:2601:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:2617:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,1](0,id:2633:)",
+          "right": 1
+        },
+        {
+          "left": 1,
+          "origin": "descriptor[0,1](0,id:339:)",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,3](0,id:1833:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,3](0,id:2836:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,4](0,id:1855:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,4](0,id:2858:)",
+          "right": 1
+        },
+        {
+          "left": 1,
+          "origin": "id:108:qh_index",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:119:scale_index",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:127:ql",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:131:qh",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:135:low4",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:138:",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:143:",
+          "right": 10
+        },
+        {
+          "left": 1,
+          "origin": "id:14:off",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:150:high2",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:161:q",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:169:scale",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:174:d",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:189:wg_linear",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:1908:",
+          "right": 1
+        },
+        {
+          "left": 3,
+          "origin": "id:192:gl_WorkGroupID",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:196:gl_NumWorkGroups",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:19:off",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:203:first_row",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:206:num_blocks_per_row",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:214:total_rows",
+          "right": 0
+        },
+        {
+          "left": 5,
+          "origin": "id:218:batch_idx",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:225:batch_idx_a",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:230:i13",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:236:i12",
+          "right": 0
+        },
+        {
+          "left": 4,
+          "origin": "id:23:block_base",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:241:i03",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:247:i02",
+          "right": 0
+        },
+        {
+          "left": 3,
+          "origin": "id:24:k",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:260:a_offset_blocks",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:266:b_offset",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:272:d_offset",
+          "right": 0
+        },
+        {
+          "left": 3,
+          "origin": "id:278:n",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:27:w",
+          "right": 0
+        },
+        {
+          "left": 3,
+          "origin": "id:286:row",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:296:sum",
+          "right": 0
+        },
+        {
+          "left": 4,
+          "origin": "id:298:bi",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:307:block_base",
+          "right": 0
+        },
+        {
+          "left": 4,
+          "origin": "id:317:e",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:332:",
+          "right": 16
+        },
+        {
+          "left": 3,
+          "origin": "id:50:b",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:56:",
+          "right": 4
+        },
+        {
+          "left": 1,
+          "origin": "id:58:",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:656:",
+          "right": 6
+        },
+        {
+          "left": 1,
+          "origin": "id:70:lo",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:714:",
+          "right": 2
+        },
+        {
+          "left": 1,
+          "origin": "id:74:hi",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:838:",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "id:905:",
+          "right": 1
+        },
+        {
+          "left": 4,
+          "origin": "id:90:pos",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:94:half_idx",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:98:ql_index",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:9:off",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "push[0:@0]",
+          "right": 2
+        },
+        {
+          "left": 1,
+          "origin": "push[0:ncols@0]",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "push[10:@40]",
+          "right": 2
+        },
+        {
+          "left": 2,
+          "origin": "push[10:ne12@40]",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "push[11:@44]",
+          "right": 2
+        },
+        {
+          "left": 1,
+          "origin": "push[11:broadcast2@44]",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "push[12:@48]",
+          "right": 2
+        },
+        {
+          "left": 1,
+          "origin": "push[12:broadcast3@48]",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "push[3:@12]",
+          "right": 1
+        },
+        {
+          "left": 1,
+          "origin": "push[3:stride_d@12]",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "push[4:@16]",
+          "right": 2
+        },
+        {
+          "left": 1,
+          "origin": "push[4:batch_stride_a@16]",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "push[5:@20]",
+          "right": 2
+        },
+        {
+          "left": 1,
+          "origin": "push[5:batch_stride_b@20]",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "push[6:@24]",
+          "right": 2
+        },
+        {
+          "left": 1,
+          "origin": "push[6:batch_stride_d@24]",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "push[7:@28]",
+          "right": 2
+        },
+        {
+          "left": 0,
+          "origin": "push[8:@32]",
+          "right": 2
+        },
+        {
+          "left": 1,
+          "origin": "push[8:base_work_group_y@32]",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "push[9:@36]",
+          "right": 2
+        },
+        {
+          "left": 1,
+          "origin": "push[9:ne02@36]",
+          "right": 0
+        }
+      ],
+      "left_count": 89,
+      "match": false,
+      "name": "load_origins",
+      "right_count": 114
+    },
+    {
+      "diffs": [
+        {
+          "left": 0,
+          "origin": "descriptor[0,2](0,id:1870:)",
+          "right": 1
+        },
+        {
+          "left": 0,
+          "origin": "descriptor[0,2](0,id:2873:)",
+          "right": 1
+        },
+        {
+          "left": 1,
+          "origin": "descriptor[0,2](0,id:357:)",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:108:qh_index",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:119:scale_index",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:127:ql",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:128:param",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:131:qh",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:132:param",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:135:low4",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:138:",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:143:",
+          "right": 8
+        },
+        {
+          "left": 1,
+          "origin": "id:150:high2",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:161:q",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:169:scale",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:170:param",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:174:d",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:178:param",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:189:wg_linear",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:1908:",
+          "right": 1
+        },
+        {
+          "left": 1,
+          "origin": "id:203:first_row",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:206:num_blocks_per_row",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:214:total_rows",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:218:batch_idx",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:225:batch_idx_a",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:230:i13",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:236:i12",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:241:i03",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:247:i02",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:260:a_offset_blocks",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:266:b_offset",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:272:d_offset",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:278:n",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:27:w",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:286:row",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:296:sum",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:298:bi",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:307:block_base",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:317:e",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:325:param",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:327:param",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:332:",
+          "right": 4
+        },
+        {
+          "left": 1,
+          "origin": "id:50:b",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:51:param",
+          "right": 0
+        },
+        {
+          "left": 2,
+          "origin": "id:58:",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:656:",
+          "right": 6
+        },
+        {
+          "left": 1,
+          "origin": "id:70:lo",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:71:param",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:74:hi",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:78:param",
+          "right": 0
+        },
+        {
+          "left": 0,
+          "origin": "id:905:",
+          "right": 1
+        },
+        {
+          "left": 1,
+          "origin": "id:90:pos",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:94:half_idx",
+          "right": 0
+        },
+        {
+          "left": 1,
+          "origin": "id:98:ql_index",
+          "right": 0
+        }
+      ],
+      "left_count": 54,
+      "match": false,
+      "name": "store_origins",
+      "right_count": 22
+    }
+  ],
+  "left": {
+    "bytes": 9040,
+    "descriptors": [
+      {
+        "binding": 0,
+        "layout": {
+          "block": false,
+          "buffer_block": true,
+          "kind": "struct",
+          "members": [
+            {
+              "index": 0,
+              "layout": {
+                "NonWritable": true,
+                "Offset": 0
+              },
+              "offset": 0,
+              "type": {
+                "kind": "unknown"
+              }
+            }
+          ]
+        },
+        "non_readable": false,
+        "non_writable": true,
+        "set": 0,
+        "storage_class": "Uniform"
+      },
+      {
+        "binding": 1,
+        "layout": {
+          "block": false,
+          "buffer_block": true,
+          "kind": "struct",
+          "members": [
+            {
+              "index": 0,
+              "layout": {
+                "NonWritable": true,
+                "Offset": 0
+              },
+              "offset": 0,
+              "type": {
+                "kind": "unknown"
+              }
+            }
+          ]
+        },
+        "non_readable": false,
+        "non_writable": true,
+        "set": 0,
+        "storage_class": "Uniform"
+      },
+      {
+        "binding": 2,
+        "layout": {
+          "block": false,
+          "buffer_block": true,
+          "kind": "struct",
+          "members": [
+            {
+              "index": 0,
+              "layout": {
+                "Offset": 0
+              },
+              "offset": 0,
+              "type": {
+                "kind": "unknown"
+              }
+            }
+          ]
+        },
+        "non_readable": false,
+        "non_writable": false,
+        "set": 0,
+        "storage_class": "Uniform"
+      }
+    ],
+    "entry_points": [
+      {
+        "execution_model": 5,
+        "execution_model_name": "GLCompute",
+        "id": 4,
+        "name": "main"
+      }
+    ],
+    "hash": "0x7ec0292e948c9b41",
+    "instruction_count": 570,
+    "loads": {
+      "by_origin": {
+        "descriptor[0,0](0,id:35:)": 1,
+        "descriptor[0,1](0,id:339:)": 1,
+        "id:108:qh_index": 1,
+        "id:119:scale_index": 1,
+        "id:127:ql": 2,
+        "id:131:qh": 1,
+        "id:135:low4": 1,
+        "id:138:": 1,
+        "id:14:off": 1,
+        "id:150:high2": 1,
+        "id:161:q": 1,
+        "id:169:scale": 1,
+        "id:174:d": 1,
+        "id:189:wg_linear": 1,
+        "id:192:gl_WorkGroupID": 3,
+        "id:196:gl_NumWorkGroups": 1,
+        "id:19:off": 2,
+        "id:203:first_row": 1,
+        "id:206:num_blocks_per_row": 2,
+        "id:214:total_rows": 1,
+        "id:218:batch_idx": 5,
+        "id:225:batch_idx_a": 1,
+        "id:230:i13": 1,
+        "id:236:i12": 1,
+        "id:23:block_base": 4,
+        "id:241:i03": 1,
+        "id:247:i02": 1,
+        "id:24:k": 3,
+        "id:260:a_offset_blocks": 1,
+        "id:266:b_offset": 1,
+        "id:272:d_offset": 1,
+        "id:278:n": 3,
+        "id:27:w": 1,
+        "id:286:row": 3,
+        "id:296:sum": 2,
+        "id:298:bi": 4,
+        "id:307:block_base": 1,
+        "id:317:e": 4,
+        "id:50:b": 3,
+        "id:58:": 1,
+        "id:70:lo": 1,
+        "id:74:hi": 1,
+        "id:90:pos": 4,
+        "id:94:half_idx": 2,
+        "id:98:ql_index": 1,
+        "id:9:off": 2,
+        "push[0:ncols@0]": 1,
+        "push[10:ne12@40]": 2,
+        "push[11:broadcast2@44]": 1,
+        "push[12:broadcast3@48]": 1,
+        "push[3:stride_d@12]": 1,
+        "push[4:batch_stride_a@16]": 1,
+        "push[5:batch_stride_b@20]": 1,
+        "push[6:batch_stride_d@24]": 1,
+        "push[8:base_work_group_y@32]": 1,
+        "push[9:ne02@36]": 1
+      },
+      "count": 89,
+      "descriptor_origins": {
+        "descriptor[0,0](0,id:35:)": 1,
+        "descriptor[0,1](0,id:339:)": 1
+      },
+      "push_origins": {
+        "push[0:ncols@0]": 1,
+        "push[10:ne12@40]": 2,
+        "push[11:broadcast2@44]": 1,
+        "push[12:broadcast3@48]": 1,
+        "push[3:stride_d@12]": 1,
+        "push[4:batch_stride_a@16]": 1,
+        "push[5:batch_stride_b@20]": 1,
+        "push[6:batch_stride_d@24]": 1,
+        "push[8:base_work_group_y@32]": 1,
+        "push[9:ne02@36]": 1
+      }
+    },
+    "local_size": [
+      1,
+      1,
+      1
+    ],
+    "local_size_id": [
+      0,
+      0,
+      0
+    ],
+    "path": "docs/test/spirv-q6k-safe-current/q6k-safe.spv",
+    "push_constants": [
+      {
+        "bits": 32,
+        "index": 0,
+        "name": "ncols",
+        "offset": 0,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 1,
+        "name": "stride_a",
+        "offset": 4,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 2,
+        "name": "stride_b",
+        "offset": 8,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 3,
+        "name": "stride_d",
+        "offset": 12,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 4,
+        "name": "batch_stride_a",
+        "offset": 16,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 5,
+        "name": "batch_stride_b",
+        "offset": 20,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 6,
+        "name": "batch_stride_d",
+        "offset": 24,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 7,
+        "name": "fusion_flags",
+        "offset": 28,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 8,
+        "name": "base_work_group_y",
+        "offset": 32,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 9,
+        "name": "ne02",
+        "offset": 36,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 10,
+        "name": "ne12",
+        "offset": 40,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 11,
+        "name": "broadcast2",
+        "offset": 44,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 12,
+        "name": "broadcast3",
+        "offset": 48,
+        "type": "int"
+      }
+    ],
+    "schema": "pdocker.spirv.analysis.v1",
+    "stores": {
+      "by_origin": {
+        "descriptor[0,2](0,id:357:)": 1,
+        "id:108:qh_index": 1,
+        "id:119:scale_index": 1,
+        "id:127:ql": 1,
+        "id:128:param": 1,
+        "id:131:qh": 1,
+        "id:132:param": 1,
+        "id:135:low4": 1,
+        "id:138:": 2,
+        "id:150:high2": 1,
+        "id:161:q": 1,
+        "id:169:scale": 1,
+        "id:170:param": 1,
+        "id:174:d": 1,
+        "id:178:param": 1,
+        "id:189:wg_linear": 1,
+        "id:203:first_row": 1,
+        "id:206:num_blocks_per_row": 1,
+        "id:214:total_rows": 1,
+        "id:218:batch_idx": 1,
+        "id:225:batch_idx_a": 2,
+        "id:230:i13": 1,
+        "id:236:i12": 1,
+        "id:241:i03": 1,
+        "id:247:i02": 1,
+        "id:260:a_offset_blocks": 1,
+        "id:266:b_offset": 1,
+        "id:272:d_offset": 1,
+        "id:278:n": 2,
+        "id:27:w": 1,
+        "id:286:row": 1,
+        "id:296:sum": 2,
+        "id:298:bi": 2,
+        "id:307:block_base": 1,
+        "id:317:e": 2,
+        "id:325:param": 1,
+        "id:327:param": 1,
+        "id:50:b": 1,
+        "id:51:param": 1,
+        "id:58:": 2,
+        "id:70:lo": 1,
+        "id:71:param": 1,
+        "id:74:hi": 1,
+        "id:78:param": 1,
+        "id:90:pos": 1,
+        "id:94:half_idx": 1,
+        "id:98:ql_index": 1
+      },
+      "count": 54,
+      "descriptor_origins": {
+        "descriptor[0,2](0,id:357:)": 1
+      },
+      "push_origins": {}
+    },
+    "workgroup_size_builtin": null
+  },
+  "right": {
+    "bytes": 26784,
+    "descriptors": [
+      {
+        "binding": 0,
+        "layout": {
+          "block": true,
+          "buffer_block": false,
+          "kind": "struct",
+          "members": [
+            {
+              "index": 0,
+              "layout": {
+                "NonWritable": true,
+                "Offset": 0
+              },
+              "offset": 0,
+              "type": {
+                "kind": "unknown"
+              }
+            }
+          ]
+        },
+        "non_readable": false,
+        "non_writable": false,
+        "set": 0,
+        "storage_class": "StorageBuffer"
+      },
+      {
+        "binding": 0,
+        "layout": {
+          "block": true,
+          "buffer_block": false,
+          "kind": "struct",
+          "members": [
+            {
+              "index": 0,
+              "layout": {
+                "NonWritable": true,
+                "Offset": 0
+              },
+              "offset": 0,
+              "type": {
+                "kind": "unknown"
+              }
+            }
+          ]
+        },
+        "non_readable": false,
+        "non_writable": false,
+        "set": 0,
+        "storage_class": "StorageBuffer"
+      },
+      {
+        "binding": 1,
+        "layout": {
+          "block": true,
+          "buffer_block": false,
+          "kind": "struct",
+          "members": [
+            {
+              "index": 0,
+              "layout": {
+                "NonWritable": true,
+                "Offset": 0
+              },
+              "offset": 0,
+              "type": {
+                "kind": "unknown"
+              }
+            }
+          ]
+        },
+        "non_readable": false,
+        "non_writable": false,
+        "set": 0,
+        "storage_class": "StorageBuffer"
+      },
+      {
+        "binding": 2,
+        "layout": {
+          "block": true,
+          "buffer_block": false,
+          "kind": "struct",
+          "members": [
+            {
+              "index": 0,
+              "layout": {
+                "NonReadable": true,
+                "Offset": 0
+              },
+              "offset": 0,
+              "type": {
+                "kind": "unknown"
+              }
+            }
+          ]
+        },
+        "non_readable": false,
+        "non_writable": false,
+        "set": 0,
+        "storage_class": "StorageBuffer"
+      },
+      {
+        "binding": 3,
+        "layout": {
+          "block": true,
+          "buffer_block": false,
+          "kind": "struct",
+          "members": [
+            {
+              "index": 0,
+              "layout": {
+                "NonWritable": true,
+                "Offset": 0
+              },
+              "offset": 0,
+              "type": {
+                "kind": "unknown"
+              }
+            }
+          ]
+        },
+        "non_readable": false,
+        "non_writable": false,
+        "set": 0,
+        "storage_class": "StorageBuffer"
+      },
+      {
+        "binding": 4,
+        "layout": {
+          "block": true,
+          "buffer_block": false,
+          "kind": "struct",
+          "members": [
+            {
+              "index": 0,
+              "layout": {
+                "NonWritable": true,
+                "Offset": 0
+              },
+              "offset": 0,
+              "type": {
+                "kind": "unknown"
+              }
+            }
+          ]
+        },
+        "non_readable": false,
+        "non_writable": false,
+        "set": 0,
+        "storage_class": "StorageBuffer"
+      }
+    ],
+    "entry_points": [
+      {
+        "execution_model": 5,
+        "execution_model_name": "GLCompute",
+        "id": 4,
+        "name": "main"
+      }
+    ],
+    "hash": "0x1bf751845c5dce75",
+    "instruction_count": 1479,
+    "loads": {
+      "by_origin": {
+        "descriptor[0,0](0,id:1124:,0,id:1125:)": 1,
+        "descriptor[0,0](0,id:1124:,0,id:1132:)": 1,
+        "descriptor[0,0](0,id:1124:,0,id:1141:)": 1,
+        "descriptor[0,0](0,id:1124:,0,id:1148:)": 1,
+        "descriptor[0,0](0,id:1124:,1,id:1166:)": 1,
+        "descriptor[0,0](0,id:1124:,1,id:1173:)": 1,
+        "descriptor[0,0](0,id:1124:,2,id:917:)": 1,
+        "descriptor[0,0](0,id:1124:,3)": 1,
+        "descriptor[0,0](0,id:1447:,2,id:917:)": 1,
+        "descriptor[0,0](0,id:1458:,0,id:1459:)": 1,
+        "descriptor[0,0](0,id:1458:,0,id:1466:)": 1,
+        "descriptor[0,0](0,id:1458:,0,id:1475:)": 1,
+        "descriptor[0,0](0,id:1458:,0,id:1482:)": 1,
+        "descriptor[0,0](0,id:1458:,1,id:1500:)": 1,
+        "descriptor[0,0](0,id:1458:,1,id:1507:)": 1,
+        "descriptor[0,0](0,id:1458:,3)": 1,
+        "descriptor[0,0](0,id:2127:,0,id:2128:)": 1,
+        "descriptor[0,0](0,id:2127:,0,id:2135:)": 1,
+        "descriptor[0,0](0,id:2127:,0,id:2144:)": 1,
+        "descriptor[0,0](0,id:2127:,0,id:2151:)": 1,
+        "descriptor[0,0](0,id:2127:,1,id:2169:)": 1,
+        "descriptor[0,0](0,id:2127:,1,id:2176:)": 1,
+        "descriptor[0,0](0,id:2127:,2,id:1920:)": 1,
+        "descriptor[0,0](0,id:2127:,3)": 1,
+        "descriptor[0,0](0,id:2450:,2,id:1920:)": 1,
+        "descriptor[0,0](0,id:2461:,0,id:2462:)": 1,
+        "descriptor[0,0](0,id:2461:,0,id:2469:)": 1,
+        "descriptor[0,0](0,id:2461:,0,id:2478:)": 1,
+        "descriptor[0,0](0,id:2461:,0,id:2485:)": 1,
+        "descriptor[0,0](0,id:2461:,1,id:2503:)": 1,
+        "descriptor[0,0](0,id:2461:,1,id:2510:)": 1,
+        "descriptor[0,0](0,id:2461:,3)": 1,
+        "descriptor[0,1](0,id:1248:)": 1,
+        "descriptor[0,1](0,id:1264:)": 1,
+        "descriptor[0,1](0,id:1280:)": 1,
+        "descriptor[0,1](0,id:1296:)": 1,
+        "descriptor[0,1](0,id:1582:)": 1,
+        "descriptor[0,1](0,id:1598:)": 1,
+        "descriptor[0,1](0,id:1614:)": 1,
+        "descriptor[0,1](0,id:1630:)": 1,
+        "descriptor[0,1](0,id:2251:)": 1,
+        "descriptor[0,1](0,id:2267:)": 1,
+        "descriptor[0,1](0,id:2283:)": 1,
+        "descriptor[0,1](0,id:2299:)": 1,
+        "descriptor[0,1](0,id:2585:)": 1,
+        "descriptor[0,1](0,id:2601:)": 1,
+        "descriptor[0,1](0,id:2617:)": 1,
+        "descriptor[0,1](0,id:2633:)": 1,
+        "descriptor[0,3](0,id:1833:)": 1,
+        "descriptor[0,3](0,id:2836:)": 1,
+        "descriptor[0,4](0,id:1855:)": 1,
+        "descriptor[0,4](0,id:2858:)": 1,
+        "id:143:": 10,
+        "id:1908:": 1,
+        "id:332:": 16,
+        "id:56:": 4,
+        "id:656:": 6,
+        "id:714:": 2,
+        "id:838:": 1,
+        "id:905:": 1,
+        "push[0:@0]": 2,
+        "push[10:@40]": 2,
+        "push[11:@44]": 2,
+        "push[12:@48]": 2,
+        "push[3:@12]": 1,
+        "push[4:@16]": 2,
+        "push[5:@20]": 2,
+        "push[6:@24]": 2,
+        "push[7:@28]": 2,
+        "push[8:@32]": 2,
+        "push[9:@36]": 2
+      },
+      "count": 114,
+      "descriptor_origins": {
+        "descriptor[0,0](0,id:1124:,0,id:1125:)": 1,
+        "descriptor[0,0](0,id:1124:,0,id:1132:)": 1,
+        "descriptor[0,0](0,id:1124:,0,id:1141:)": 1,
+        "descriptor[0,0](0,id:1124:,0,id:1148:)": 1,
+        "descriptor[0,0](0,id:1124:,1,id:1166:)": 1,
+        "descriptor[0,0](0,id:1124:,1,id:1173:)": 1,
+        "descriptor[0,0](0,id:1124:,2,id:917:)": 1,
+        "descriptor[0,0](0,id:1124:,3)": 1,
+        "descriptor[0,0](0,id:1447:,2,id:917:)": 1,
+        "descriptor[0,0](0,id:1458:,0,id:1459:)": 1,
+        "descriptor[0,0](0,id:1458:,0,id:1466:)": 1,
+        "descriptor[0,0](0,id:1458:,0,id:1475:)": 1,
+        "descriptor[0,0](0,id:1458:,0,id:1482:)": 1,
+        "descriptor[0,0](0,id:1458:,1,id:1500:)": 1,
+        "descriptor[0,0](0,id:1458:,1,id:1507:)": 1,
+        "descriptor[0,0](0,id:1458:,3)": 1,
+        "descriptor[0,0](0,id:2127:,0,id:2128:)": 1,
+        "descriptor[0,0](0,id:2127:,0,id:2135:)": 1,
+        "descriptor[0,0](0,id:2127:,0,id:2144:)": 1,
+        "descriptor[0,0](0,id:2127:,0,id:2151:)": 1,
+        "descriptor[0,0](0,id:2127:,1,id:2169:)": 1,
+        "descriptor[0,0](0,id:2127:,1,id:2176:)": 1,
+        "descriptor[0,0](0,id:2127:,2,id:1920:)": 1,
+        "descriptor[0,0](0,id:2127:,3)": 1,
+        "descriptor[0,0](0,id:2450:,2,id:1920:)": 1,
+        "descriptor[0,0](0,id:2461:,0,id:2462:)": 1,
+        "descriptor[0,0](0,id:2461:,0,id:2469:)": 1,
+        "descriptor[0,0](0,id:2461:,0,id:2478:)": 1,
+        "descriptor[0,0](0,id:2461:,0,id:2485:)": 1,
+        "descriptor[0,0](0,id:2461:,1,id:2503:)": 1,
+        "descriptor[0,0](0,id:2461:,1,id:2510:)": 1,
+        "descriptor[0,0](0,id:2461:,3)": 1,
+        "descriptor[0,1](0,id:1248:)": 1,
+        "descriptor[0,1](0,id:1264:)": 1,
+        "descriptor[0,1](0,id:1280:)": 1,
+        "descriptor[0,1](0,id:1296:)": 1,
+        "descriptor[0,1](0,id:1582:)": 1,
+        "descriptor[0,1](0,id:1598:)": 1,
+        "descriptor[0,1](0,id:1614:)": 1,
+        "descriptor[0,1](0,id:1630:)": 1,
+        "descriptor[0,1](0,id:2251:)": 1,
+        "descriptor[0,1](0,id:2267:)": 1,
+        "descriptor[0,1](0,id:2283:)": 1,
+        "descriptor[0,1](0,id:2299:)": 1,
+        "descriptor[0,1](0,id:2585:)": 1,
+        "descriptor[0,1](0,id:2601:)": 1,
+        "descriptor[0,1](0,id:2617:)": 1,
+        "descriptor[0,1](0,id:2633:)": 1,
+        "descriptor[0,3](0,id:1833:)": 1,
+        "descriptor[0,3](0,id:2836:)": 1,
+        "descriptor[0,4](0,id:1855:)": 1,
+        "descriptor[0,4](0,id:2858:)": 1
+      },
+      "push_origins": {
+        "push[0:@0]": 2,
+        "push[10:@40]": 2,
+        "push[11:@44]": 2,
+        "push[12:@48]": 2,
+        "push[3:@12]": 1,
+        "push[4:@16]": 2,
+        "push[5:@20]": 2,
+        "push[6:@24]": 2,
+        "push[7:@28]": 2,
+        "push[8:@32]": 2,
+        "push[9:@36]": 2
+      }
+    },
+    "local_size": [
+      1,
+      1,
+      1
+    ],
+    "local_size_id": [
+      0,
+      0,
+      0
+    ],
+    "path": "docs/test/spirv-q6k-native-adb45055/native-q6-source.spv",
+    "push_constants": [
+      {
+        "bits": 32,
+        "index": 0,
+        "name": "",
+        "offset": 0,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 1,
+        "name": "",
+        "offset": 4,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 2,
+        "name": "",
+        "offset": 8,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 3,
+        "name": "",
+        "offset": 12,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 4,
+        "name": "",
+        "offset": 16,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 5,
+        "name": "",
+        "offset": 20,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 6,
+        "name": "",
+        "offset": 24,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 7,
+        "name": "",
+        "offset": 28,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 8,
+        "name": "",
+        "offset": 32,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 9,
+        "name": "",
+        "offset": 36,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 10,
+        "name": "",
+        "offset": 40,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 11,
+        "name": "",
+        "offset": 44,
+        "type": "int"
+      },
+      {
+        "bits": 32,
+        "index": 12,
+        "name": "",
+        "offset": 48,
+        "type": "int"
+      }
+    ],
+    "schema": "pdocker.spirv.analysis.v1",
+    "stores": {
+      "by_origin": {
+        "descriptor[0,2](0,id:1870:)": 1,
+        "descriptor[0,2](0,id:2873:)": 1,
+        "id:143:": 8,
+        "id:1908:": 1,
+        "id:332:": 4,
+        "id:656:": 6,
+        "id:905:": 1
+      },
+      "count": 22,
+      "descriptor_origins": {
+        "descriptor[0,2](0,id:1870:)": 1,
+        "descriptor[0,2](0,id:2873:)": 1
+      },
+      "push_origins": {}
+    },
+    "workgroup_size_builtin": {
+      "components": [
+        {
+          "default_u32": 1,
+          "kind": "spec_constant",
+          "spec_id": 0
+        },
+        {
+          "kind": "constant",
+          "value_u32": 1
+        },
+        {
+          "kind": "constant",
+          "value_u32": 1
+        }
+      ],
+      "kind": "spec_constant_composite"
+    }
+  },
+  "schema": "pdocker.spirv.dataflow-compare.v1"
+}
