@@ -4,7 +4,7 @@ Snapshot date: 2026-05-23.
 
 This document is the handoff plan for continuing the llama.cpp GPU bridge work
 with a smaller or faster coding model.  It assumes the repository is on or
-after commit `ac40e49` (`Clear Q6 safe-kernel correctness path`) and that
+after commit `14b14fc` (`Add SPIR-V dataflow comparison tool`) and that
 llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
@@ -29,6 +29,7 @@ Confirmed facts:
 | 2026-05-20 Q6_K workflow | Device workflow reaches the known Q6_K blocker again; create-timeout race is no longer the blocker | `docs/test/llama-gpu-q6k-adb41503-20260520T110352Z.json` (ignored runtime evidence), workflow `classification=q6-native-device-execution-or-final-store` |
 | 2026-05-23 Q6 WorkgroupSize lane | Device is reachable and Q6 dispatch evidence is present, but the effective Q6 WorkgroupSize evidence is still not visible in the oracle record | ADB `192.168.179.26:34761`; `docs/test/llama-gpu-readiness-adb34761-latest.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-legalized-adb34761-20260523T084956Z.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-composite-adb34761-20260523T091428Z.json` |
 | commit `ac40e49` safe-kernel lane | `ngl=1` prompt/Q6 oracle/writeback correctness clears only under bridge-owned Q6 safe-kernel substitution | `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`; classification `q6-workgroup-cleared-and-oracle-match`; safe-kernel hash `0x7ec0292e948c9b41` for source hash `0x1bf751845c5dce75` |
+| 2026-05-23 SPIR-V structural lane | Safe Q6 module is now analyzed by static dataflow/origin tooling; native Q6 comparison is blocked until a real native `.spv` dump is collected from device | commits `59b0a4e`, `ab3b24b`, `e42ce9e`, `14b14fc`; `docs/test/spirv-q6k-safe-current/q6k-safe.analysis.json`; `scripts/analyze-spirv.py`; `scripts/compare-spirv-dataflow.py`; `scripts/verify-spirv-probe-manifest.py` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -128,6 +129,63 @@ JSON metadata with word count, instruction count, opcode class counts, local
 size evidence, and the FNV hash.  Analyze those dumps with
 `scripts/analyze-spirv.py`; this is a structural SPIR-V observation path, not a
 hash-targeted correctness bypass.
+
+Static SPIR-V dataflow comparison now has a canonical host-only loop.  Use it
+before any device-side patch when the question is "did the bridge understand
+the shader's ABI/dataflow?" rather than "did the Android GPU compute the right
+numbers?":
+
+```bash
+python3 scripts/analyze-spirv.py <native-q6.spv> \
+  --json-out <native-q6.analysis.json> \
+  --probe-plan-out <native-q6.probe.json> \
+  --probe-range 0:2 \
+  --disassemble-dir <spvasm-dir>
+
+python3 scripts/verify-spirv-probe-manifest.py <native-q6.probe.json>
+
+python3 scripts/compare-spirv-dataflow.py \
+  docs/test/spirv-q6k-safe-current/q6k-safe.analysis.json \
+  <native-q6.analysis.json> \
+  --json-out <safe-vs-native-q6.dataflow.json>
+```
+
+The tracked safe baseline currently has source hash `0x7ec0292e948c9b41`,
+entry point `main`, local size `[1,1,1]`, descriptors set 0 bindings
+`0`/`1` read-only and `2` writable, and 13 push-constant uints
+(`ncols`, strides, batch strides, fusion flags, base workgroup, and broadcast
+fields).  It also records pointer-origin evidence such as
+`push[0:ncols@0]` loads and `descriptor[0,2]` stores.  This baseline is useful
+for detecting ABI/dataflow drift; it is not proof that the original native
+llama.cpp Q6 module is correct.
+
+There is no tracked native Q6 `.spv` file for source hash
+`0x1bf751845c5dce75` yet.  If no native dump file is present, do not synthesize
+or fake one.  The next ADB run should set `PDOCKER_GPU_SPIRV_DUMP_DIR`, locate
+the dumped module matching `q6_workgroup_diagnostics.latest_spirv_hash` or
+source hash `0x1bf751845c5dce75`, and then run the analyze/verify/compare loop
+above.
+
+The optional probe replay path is fail-closed and uses the existing
+`VULKAN_DISPATCH_V4` command, not a new GPU ABI.  A replay run must provide all
+of the following and must leave llama.cpp, Dockerfile, model, and prompt
+unchanged:
+
+```bash
+PDOCKER_GPU_SPIRV_PROBE_MANIFEST=<probe.json>
+PDOCKER_GPU_SPIRV_PROBE_SHADER=<instrumented.spv>
+PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH=<original-source-fnv>
+PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH=<instrumented-fnv>
+PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES=<bounded-byte-count>
+PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET=<unused-set>
+PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING=<unused-binding>
+```
+
+The ICD verifies the manifest, opens and hashes the effective probe shader, and
+adds the debug buffer as an ordinary storage-buffer binding.  If any manifest,
+hash, size, or binding guard fails, the probe must not dispatch.  This keeps
+the narrowing work auditable and prevents "works because diagnostics changed
+the workload" regressions.
 `scripts/analyze-spirv.py` also emits a control-flow graph with function,
 basic-block, successor, store-site, and probe-candidate inventories.  Do not
 try to submit arbitrary SPIR-V fragments to Vulkan: the valid-module boundary
@@ -1119,3 +1177,48 @@ If these hold, the next static performance target is output-range narrowing for
 binding 2, followed by resident/read-only buffer caching.  Do not increase
 `ngl` or change the model/prompt/Dockerfile until this transfer-pruning evidence
 is recorded.
+
+### 2026-05-23 Update: SPIR-V dataflow/origin tooling
+
+Latest implementation commits:
+
+- `59b0a4e` - probe replay guard hardening.
+- `ab3b24b` - entry point, push constant, and descriptor dataflow exposure in
+  `scripts/analyze-spirv.py`.
+- `e42ce9e` - pointer-origin tracking for loads, stores, and access chains.
+- `14b14fc` - `scripts/compare-spirv-dataflow.py`.
+
+Purpose:
+
+- Replace trial-and-error shader debugging with a static ABI/dataflow
+  comparison loop.
+- Keep native Q6 SPIR-V, safe-kernel SPIR-V, and any instrumented probe module
+  explicitly related by hashes, manifests, and structural analysis.
+- Prevent "update漏れ / reflection漏れ / env反映漏れ" style regressions by
+  making the expected dataflow visible before device execution is interpreted.
+
+Current safe baseline:
+
+- `docs/test/spirv-q6k-safe-current/q6k-safe.analysis.json`
+- `docs/test/spirv-q6k-safe-current/q6k-safe.probe.json`
+
+Known limitation:
+
+- This is structural analysis, not a full SPIR-V decompiler or GLSL source
+  reconstruction.
+- Native Q6 comparison is not complete until the device run produces a real
+  `.spv` dump for the original llama.cpp Q6 source module.  Do not infer native
+  Q6 correctness from the safe baseline.
+
+Next concrete action when ADB is available:
+
+1. Run a diagnostic compare with `PDOCKER_GPU_SPIRV_DUMP_DIR` set.
+2. Identify the native Q6 dump for source hash `0x1bf751845c5dce75`.
+3. Run `scripts/analyze-spirv.py` on that native dump.
+4. Run `scripts/compare-spirv-dataflow.py` between the safe baseline and the
+   native analysis.
+5. If entry/descriptors/push constants/output stores diverge, fix the bridge's
+   ABI understanding before executing more GPU trials.
+6. If static dataflow matches, the next blocker is dynamic: Android Vulkan
+   execution, synchronization, memory visibility, writeback, or a valid-module
+   instrumentation probe.
