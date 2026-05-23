@@ -1242,6 +1242,13 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     if (!op || !op->pipeline || !op->pipeline->shader) return -EINVAL;
     PdockerVkShaderModule *shader = op->pipeline->shader;
     if (shader->code_fd < 0 || shader->code_size == 0) return -EINVAL;
+    const bool strict_passthrough =
+        env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false);
+    if (strict_passthrough && copy_alias_enabled()) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: rejecting PDOCKER_VULKAN_ALIAS_COPIES under strict passthrough\n");
+        return -EINVAL;
+    }
     const uint64_t dispatch_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
 
     int fds[1 + PDOCKER_VK_MAX_STORAGE_BUFFERS];

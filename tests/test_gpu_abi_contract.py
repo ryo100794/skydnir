@@ -166,6 +166,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("VULKAN_DISPATCH_V5", icd)
         self.assertNotIn("SPIRV_PROBE_DISPATCH", icd)
 
+    def test_strict_passthrough_rejects_copy_alias_transport(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn('env_truthy_default("PDOCKER_GPU_STRICT_PASSTHROUGH", false)', icd)
+        self.assertIn("strict_passthrough && copy_alias_enabled()", icd)
+        self.assertIn("rejecting PDOCKER_VULKAN_ALIAS_COPIES under strict passthrough", icd)
+
     def test_vulkan_dispatch_reports_binding_diagnostics(self):
         source = GPU_EXECUTOR.read_text()
         self.assertIn("PDOCKER_GPU_EXECUTOR_BUILD_MARKER", source)
