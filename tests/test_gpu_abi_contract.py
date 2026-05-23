@@ -971,6 +971,67 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertFalse(payload["valid"])
         self.assertIn("fragment submission must be explicitly disabled", payload["errors"])
 
+    def test_spirv_probe_manifest_verifier_recomputes_manifest_safety(self):
+        source = GPU_EXECUTOR.read_text()
+        match = re.search(
+            r"static const uint32_t kQ6kSafeSpv\[\] = \{(?P<body>.*?)\n\};",
+            source,
+            re.S,
+        )
+        self.assertIsNotNone(match)
+        words = [
+            int(token.rstrip("uU"), 0)
+            for token in re.findall(r"0x[0-9a-fA-F]+[uU]?|\b\d+[uU]?\b", match.group("body"))
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            spv = tmp_path / "q6k-safe.spv"
+            manifest = tmp_path / "q6k-safe.probe.json"
+            spv.write_bytes(b"".join(word.to_bytes(4, "little") for word in words))
+            subprocess.run(
+                ["python3", str(SPIRV_ANALYZER), str(spv), "--probe-plan-out", str(manifest), "--probe-range", "0:2"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            valid = json.loads(manifest.read_text())
+
+            cases = []
+            broken = json.loads(json.dumps(valid))
+            broken["basis"]["module_hash"] = "0x0000000000000000"
+            cases.append((broken, "basis.module_hash mismatch"))
+
+            broken = json.loads(json.dumps(valid))
+            broken["debug_ssbo"]["descriptor"]["binding"] = broken["descriptors"]["declared"][0]["binding"]
+            broken["collision_checks"]["proposed"]["binding"] = broken["debug_ssbo"]["descriptor"]["binding"]
+            cases.append((broken, "debug descriptor binding number collides with declared descriptor"))
+
+            broken = json.loads(json.dumps(valid))
+            broken["probe_selection"]["selected_candidates"][0]["candidate_id"] = 99
+            cases.append((broken, "candidate_id 99 is outside selected candidate_range"))
+
+            broken = json.loads(json.dumps(valid))
+            broken["probe_selection"]["selected_candidates"][0]["block_entry_insert_after_phi_word_index"] = "bad"
+            cases.append((broken, "block_entry_insert_after_phi_word_index must be an integer"))
+
+            for idx, (payload, expected_error) in enumerate(cases):
+                path = tmp_path / f"broken-{idx}.json"
+                path.write_text(json.dumps(payload))
+                result = subprocess.run(
+                    ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(path)],
+                    cwd=ROOT,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertNotEqual(result.returncode, 0, expected_error)
+                self.assertTrue(
+                    any(expected_error in error for error in json.loads(result.stdout)["errors"]),
+                    result.stdout,
+                )
+
     def test_vulkan_guarded_memory_profile_is_recorded(self):
         source = VULKAN_ICD.read_text()
         for marker in [

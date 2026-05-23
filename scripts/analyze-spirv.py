@@ -525,6 +525,7 @@ def build_probe_manifest(module: dict, source_path: Path, probe_range: tuple[int
             },
         },
         "probe_selection": {
+            "method": "instrument-valid-module-not-arbitrary-fragment",
             "candidate_range": selected_range,
             "selected_candidate_count": len(selected_candidates),
             "selected_candidates": selected_candidates,
