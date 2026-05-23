@@ -33,8 +33,8 @@ OP_NAMES = {
     22: "OpTypeFloat",
     23: "OpTypeVector",
     25: "OpTypeMatrix",
-    27: "OpTypeArray",
-    28: "OpTypeRuntimeArray",
+    28: "OpTypeArray",
+    29: "OpTypeRuntimeArray",
     30: "OpTypeStruct",
     31: "OpTypeOpaque",
     32: "OpTypePointer",
@@ -42,7 +42,7 @@ OP_NAMES = {
     44: "OpConstantComposite",
     45: "OpSpecConstantTrue",
     46: "OpSpecConstantFalse",
-    47: "OpSpecConstant",
+    50: "OpSpecConstant",
     51: "OpSpecConstantComposite",
     52: "OpSpecConstantOp",
     54: "OpFunction",
@@ -56,27 +56,33 @@ OP_NAMES = {
     72: "OpMemberDecorate",
     63: "OpCopyMemory",
     64: "OpCopyMemorySized",
-    124: "OpIAdd",
-    125: "OpFAdd",
-    126: "OpISub",
-    127: "OpFSub",
-    128: "OpIMul",
-    129: "OpFMul",
-    132: "OpUDiv",
-    133: "OpSDiv",
+    80: "OpCompositeConstruct",
+    81: "OpCompositeExtract",
+    82: "OpCompositeInsert",
+    83: "OpVectorShuffle",
+    84: "OpVectorExtractDynamic",
+    86: "OpVectorTimesScalar",
+    128: "OpIAdd",
+    129: "OpFAdd",
+    130: "OpISub",
+    131: "OpFSub",
+    132: "OpIMul",
+    133: "OpFMul",
+    134: "OpUDiv",
+    135: "OpSDiv",
     136: "OpFDiv",
-    139: "OpUMod",
-    140: "OpSRem",
-    141: "OpSMod",
-    142: "OpFRem",
-    143: "OpFMod",
-    145: "OpVectorTimesScalar",
-    146: "OpMatrixTimesScalar",
-    147: "OpVectorTimesMatrix",
-    148: "OpMatrixTimesVector",
-    149: "OpMatrixTimesMatrix",
-    150: "OpOuterProduct",
-    151: "OpDot",
+    137: "OpUMod",
+    138: "OpSRem",
+    139: "OpSMod",
+    140: "OpFRem",
+    141: "OpFMod",
+    142: "OpVectorTimesScalar",
+    143: "OpMatrixTimesScalar",
+    144: "OpVectorTimesMatrix",
+    145: "OpMatrixTimesVector",
+    146: "OpMatrixTimesMatrix",
+    147: "OpOuterProduct",
+    148: "OpDot",
     154: "OpShiftRightLogical",
     155: "OpShiftRightArithmetic",
     156: "OpShiftLeftLogical",
@@ -634,6 +640,7 @@ def analyze_spirv(path: Path) -> dict:
     constants: dict[int, dict] = {}
     spec_constants: dict[int, dict] = {}
     spec_constant_composites: dict[int, dict] = {}
+    id_defs: dict[int, dict] = {}
     access_chains_raw: list[dict] = []
     load_events_raw: list[dict] = []
     store_events_raw: list[dict] = []
@@ -649,6 +656,11 @@ def analyze_spirv(path: Path) -> dict:
         if opcode in (61,):
             loads += 1
             if len(inst) >= 4:
+                id_defs[inst[2]] = {
+                    "op": "OpLoad",
+                    "result_type": inst[1],
+                    "pointer_id": inst[3],
+                }
                 load_events_raw.append(
                     {
                         "word_index": _index,
@@ -761,6 +773,12 @@ def analyze_spirv(path: Path) -> dict:
                 "operands": inst[4:],
             }
         elif opcode in (65, 66) and len(inst) >= 4:
+            id_defs[inst[2]] = {
+                "op": OP_NAMES.get(opcode, f"Op{opcode}"),
+                "result_type": inst[1],
+                "base_id": inst[3],
+                "index_ids": inst[4:],
+            }
             access_chains_raw.append(
                 {
                     "word_index": _index,
@@ -774,7 +792,7 @@ def analyze_spirv(path: Path) -> dict:
         elif opcode == 71 and len(inst) >= 3:
             target, decoration = inst[1], inst[2]
             name = DECORATION_NAMES.get(decoration, str(decoration))
-            if decoration in (1, 11, 33, 34) and len(inst) >= 4:
+            if decoration in (1, 6, 7, 11, 33, 34, 35) and len(inst) >= 4:
                 decorations[target][name] = inst[3]
                 if decoration == 11:
                     decorations[target]["BuiltInName"] = BUILTIN_NAMES.get(inst[3], str(inst[3]))
@@ -789,6 +807,25 @@ def analyze_spirv(path: Path) -> dict:
                     "operands": inst[4:],
                 }
             )
+        elif 124 <= opcode <= 190 and len(inst) >= 4:
+            id_defs[inst[2]] = {
+                "op": OP_NAMES.get(opcode, f"Op{opcode}"),
+                "result_type": inst[1],
+                "operands": inst[3:],
+            }
+        elif opcode in (80, 81, 82, 83, 84, 86) and len(inst) >= 4:
+            id_defs[inst[2]] = {
+                "op": OP_NAMES.get(opcode, f"Op{opcode}"),
+                "result_type": inst[1],
+                "operands": inst[3:],
+            }
+        elif opcode == 245 and len(inst) >= 4:
+            id_defs[inst[2]] = {
+                "op": "OpPhi",
+                "result_type": inst[1],
+                "operands": inst[3::2],
+                "incoming_labels": inst[4::2],
+            }
 
     member_offsets: dict[int, dict[int, int]] = defaultdict(dict)
     member_layout: dict[int, dict[int, dict]] = defaultdict(dict)
@@ -1102,6 +1139,70 @@ def analyze_spirv(path: Path) -> dict:
                 origin["push_member"] = chain["push_member"]
             return origin
         return describe_base(pointer_id)
+
+    def describe_id_expr(value_id: int, depth: int = 0, seen: set[int] | None = None) -> dict:
+        if seen is None:
+            seen = set()
+        if depth > 6:
+            return {"kind": "max-depth", "id": value_id}
+        if value_id in seen:
+            return {"kind": "cycle", "id": value_id}
+        seen.add(value_id)
+        const_value = constant_u32(value_id)
+        if const_value is not None:
+            return {"kind": "constant", "id": value_id, "value_u32": const_value}
+        spec_value = spec_constant_default_u32(value_id)
+        if spec_value is not None:
+            return {
+                "kind": "spec_constant",
+                "id": value_id,
+                "default_u32": spec_value,
+                "spec_id": decorations.get(value_id, {}).get("SpecId"),
+            }
+        if value_id in variable:
+            dec = decorations.get(value_id, {})
+            return {
+                "kind": "variable",
+                "id": value_id,
+                "name": names.get(value_id, ""),
+                "storage_class": variable[value_id].get("storage_class_name"),
+                "built_in": dec.get("BuiltInName"),
+            }
+        definition = id_defs.get(value_id)
+        if not definition:
+            return {"kind": "id", "id": value_id, "name": names.get(value_id, "")}
+        op = definition.get("op")
+        if op == "OpLoad":
+            return {
+                "kind": "load",
+                "id": value_id,
+                "pointer": pointer_origin(int(definition.get("pointer_id"))),
+            }
+        if op in ("OpAccessChain", "OpInBoundsAccessChain"):
+            return {
+                "kind": "access_chain",
+                "id": value_id,
+                "base": describe_base(int(definition.get("base_id"))),
+                "indices": [
+                    describe_id_expr(int(index_id), depth + 1, set(seen))
+                    for index_id in definition.get("index_ids", [])
+                ],
+            }
+        operands = definition.get("operands", [])
+        return {
+            "kind": "op",
+            "id": value_id,
+            "op": op,
+            "operands": [
+                describe_id_expr(int(operand), depth + 1, set(seen))
+                for operand in operands[:6]
+            ],
+            "truncated_operands": max(0, len(operands) - 6),
+        }
+
+    for chain in access_chains:
+        for index in chain.get("indices", []):
+            index["expr"] = describe_id_expr(int(index["id"]))
 
     load_events = [
         {

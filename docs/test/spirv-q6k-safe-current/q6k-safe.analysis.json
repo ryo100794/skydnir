@@ -15,6 +15,11 @@
           "indices": [
             {
               "constant_u32": 0,
+              "expr": {
+                "id": 86,
+                "kind": "constant",
+                "value_u32": 0
+              },
               "id": 86,
               "name": ""
             }
@@ -37,6 +42,11 @@
           "indices": [
             {
               "constant_u32": 0,
+              "expr": {
+                "id": 86,
+                "kind": "constant",
+                "value_u32": 0
+              },
               "id": 86,
               "name": ""
             }
@@ -59,6 +69,11 @@
           "indices": [
             {
               "constant_u32": 2,
+              "expr": {
+                "id": 152,
+                "kind": "constant",
+                "value_u32": 2
+              },
               "id": 152,
               "name": ""
             }
@@ -83,6 +98,11 @@
           "indices": [
             {
               "constant_u32": 0,
+              "expr": {
+                "id": 32,
+                "kind": "constant",
+                "value_u32": 0
+              },
               "id": 32,
               "name": ""
             }
@@ -118,6 +138,11 @@
           "indices": [
             {
               "constant_u32": 3,
+              "expr": {
+                "id": 215,
+                "kind": "constant",
+                "value_u32": 3
+              },
               "id": 215,
               "name": ""
             }
@@ -151,6 +176,11 @@
           "indices": [
             {
               "constant_u32": 1,
+              "expr": {
+                "id": 76,
+                "kind": "constant",
+                "value_u32": 1
+              },
               "id": 76,
               "name": ""
             }
@@ -175,6 +205,11 @@
           "indices": [
             {
               "constant_u32": 8,
+              "expr": {
+                "id": 221,
+                "kind": "constant",
+                "value_u32": 8
+              },
               "id": 221,
               "name": ""
             }
@@ -210,6 +245,11 @@
           "indices": [
             {
               "constant_u32": 10,
+              "expr": {
+                "id": 232,
+                "kind": "constant",
+                "value_u32": 10
+              },
               "id": 232,
               "name": ""
             }
@@ -245,6 +285,11 @@
           "indices": [
             {
               "constant_u32": 10,
+              "expr": {
+                "id": 232,
+                "kind": "constant",
+                "value_u32": 10
+              },
               "id": 232,
               "name": ""
             }
@@ -280,6 +325,11 @@
           "indices": [
             {
               "constant_u32": 12,
+              "expr": {
+                "id": 243,
+                "kind": "constant",
+                "value_u32": 12
+              },
               "id": 243,
               "name": ""
             }
@@ -315,6 +365,11 @@
           "indices": [
             {
               "constant_u32": 11,
+              "expr": {
+                "id": 249,
+                "kind": "constant",
+                "value_u32": 11
+              },
               "id": 249,
               "name": ""
             }
@@ -350,6 +405,11 @@
           "indices": [
             {
               "constant_u32": 9,
+              "expr": {
+                "id": 254,
+                "kind": "constant",
+                "value_u32": 9
+              },
               "id": 254,
               "name": ""
             }
@@ -385,6 +445,11 @@
           "indices": [
             {
               "constant_u32": 4,
+              "expr": {
+                "id": 124,
+                "kind": "constant",
+                "value_u32": 4
+              },
               "id": 124,
               "name": ""
             }
@@ -420,6 +485,11 @@
           "indices": [
             {
               "constant_u32": 5,
+              "expr": {
+                "id": 268,
+                "kind": "constant",
+                "value_u32": 5
+              },
               "id": 268,
               "name": ""
             }
@@ -455,6 +525,11 @@
           "indices": [
             {
               "constant_u32": 6,
+              "expr": {
+                "id": 274,
+                "kind": "constant",
+                "value_u32": 6
+              },
               "id": 274,
               "name": ""
             }
@@ -494,11 +569,72 @@
           "indices": [
             {
               "constant_u32": 0,
+              "expr": {
+                "id": 32,
+                "kind": "constant",
+                "value_u32": 0
+              },
               "id": 32,
               "name": ""
             },
             {
               "constant_u32": null,
+              "expr": {
+                "id": 339,
+                "kind": "op",
+                "op": "OpIAdd",
+                "operands": [
+                  {
+                    "id": 337,
+                    "kind": "op",
+                    "op": "OpIAdd",
+                    "operands": [
+                      {
+                        "id": 334,
+                        "kind": "load",
+                        "pointer": {
+                          "id": 266,
+                          "kind": "id",
+                          "name": "b_offset"
+                        }
+                      },
+                      {
+                        "id": 336,
+                        "kind": "op",
+                        "op": "OpIMul",
+                        "operands": [
+                          {
+                            "id": 335,
+                            "kind": "load",
+                            "pointer": {
+                              "id": 298,
+                              "kind": "id",
+                              "name": "bi"
+                            }
+                          },
+                          {
+                            "id": 62,
+                            "kind": "constant",
+                            "value_u32": 256
+                          }
+                        ],
+                        "truncated_operands": 0
+                      }
+                    ],
+                    "truncated_operands": 0
+                  },
+                  {
+                    "id": 338,
+                    "kind": "load",
+                    "pointer": {
+                      "id": 317,
+                      "kind": "id",
+                      "name": "e"
+                    }
+                  }
+                ],
+                "truncated_operands": 0
+              },
               "id": 339,
               "name": ""
             }
@@ -527,11 +663,42 @@
           "indices": [
             {
               "constant_u32": 0,
+              "expr": {
+                "id": 32,
+                "kind": "constant",
+                "value_u32": 0
+              },
               "id": 32,
               "name": ""
             },
             {
               "constant_u32": null,
+              "expr": {
+                "id": 357,
+                "kind": "op",
+                "op": "OpIAdd",
+                "operands": [
+                  {
+                    "id": 355,
+                    "kind": "load",
+                    "pointer": {
+                      "id": 272,
+                      "kind": "id",
+                      "name": "d_offset"
+                    }
+                  },
+                  {
+                    "id": 356,
+                    "kind": "load",
+                    "pointer": {
+                      "id": 286,
+                      "kind": "id",
+                      "name": "row"
+                    }
+                  }
+                ],
+                "truncated_operands": 0
+              },
               "id": 357,
               "name": ""
             }
@@ -560,11 +727,21 @@
           "indices": [
             {
               "constant_u32": 0,
+              "expr": {
+                "id": 32,
+                "kind": "constant",
+                "value_u32": 0
+              },
               "id": 32,
               "name": ""
             },
             {
               "constant_u32": null,
+              "expr": {
+                "id": 35,
+                "kind": "id",
+                "name": ""
+              },
               "id": 35,
               "name": ""
             }
@@ -652,15 +829,15 @@
                 "load_count": 9,
                 "loop_merge": null,
                 "op_histogram": {
-                  "Op134": 1,
                   "OpAccessChain": 7,
                   "OpBranchConditional": 1,
+                  "OpIAdd": 2,
                   "OpIMul": 2,
                   "OpINotEqual": 1,
                   "OpLoad": 9,
                   "OpSelectionMerge": 1,
                   "OpStore": 6,
-                  "OpUDiv": 2,
+                  "OpUDiv": 1,
                   "OpVariable": 21
                 },
                 "phi_count": 0,
@@ -749,14 +926,14 @@
                 "load_count": 11,
                 "loop_merge": null,
                 "op_histogram": {
-                  "Op134": 3,
-                  "Op137": 1,
                   "OpAccessChain": 5,
                   "OpBranch": 1,
+                  "OpIAdd": 1,
                   "OpIMul": 1,
                   "OpLoad": 11,
                   "OpStore": 5,
-                  "OpUDiv": 1
+                  "OpUDiv": 3,
+                  "OpUMod": 1
                 },
                 "phi_count": 0,
                 "selection_merge": null,
@@ -825,12 +1002,12 @@
                 "load_count": 6,
                 "loop_merge": null,
                 "op_histogram": {
-                  "Op134": 1,
                   "OpAccessChain": 3,
                   "OpBranch": 1,
+                  "OpIMul": 3,
                   "OpLoad": 6,
                   "OpStore": 4,
-                  "OpUDiv": 3
+                  "OpUDiv": 1
                 },
                 "phi_count": 0,
                 "selection_merge": null,
@@ -949,7 +1126,7 @@
                 "loop_merge": null,
                 "op_histogram": {
                   "OpBranchConditional": 1,
-                  "OpIMul": 1,
+                  "OpIAdd": 1,
                   "OpLoad": 4,
                   "OpSelectionMerge": 1,
                   "OpStore": 1,
@@ -1130,10 +1307,10 @@
                 "loop_merge": null,
                 "op_histogram": {
                   "OpBranch": 1,
+                  "OpIAdd": 2,
                   "OpIMul": 2,
                   "OpLoad": 4,
-                  "OpStore": 2,
-                  "OpUDiv": 2
+                  "OpStore": 2
                 },
                 "phi_count": 0,
                 "selection_merge": null,
@@ -1253,12 +1430,12 @@
                   "Op57": 1,
                   "OpAccessChain": 1,
                   "OpBranch": 1,
+                  "OpFAdd": 1,
                   "OpFMul": 1,
-                  "OpIMul": 2,
+                  "OpIAdd": 2,
+                  "OpIMul": 1,
                   "OpLoad": 7,
-                  "OpSDiv": 1,
-                  "OpStore": 3,
-                  "OpUDiv": 1
+                  "OpStore": 3
                 },
                 "phi_count": 0,
                 "selection_merge": null,
@@ -1304,7 +1481,7 @@
                 "loop_merge": null,
                 "op_histogram": {
                   "OpBranch": 1,
-                  "OpIMul": 1,
+                  "OpIAdd": 1,
                   "OpLoad": 1,
                   "OpStore": 1
                 },
@@ -1368,7 +1545,7 @@
                 "loop_merge": null,
                 "op_histogram": {
                   "OpBranch": 1,
-                  "OpIMul": 1,
+                  "OpIAdd": 1,
                   "OpLoad": 1,
                   "OpStore": 1
                 },
@@ -1410,7 +1587,7 @@
                 "op_histogram": {
                   "OpAccessChain": 1,
                   "OpBranch": 1,
-                  "OpIMul": 1,
+                  "OpIAdd": 1,
                   "OpLoad": 3,
                   "OpStore": 1
                 },
@@ -1448,7 +1625,7 @@
                 "loop_merge": null,
                 "op_histogram": {
                   "OpBranch": 1,
-                  "OpIMul": 1,
+                  "OpIAdd": 1,
                   "OpLoad": 1,
                   "OpStore": 1
                 },
@@ -1528,10 +1705,10 @@
                   "Op194": 2,
                   "Op199": 2,
                   "OpAccessChain": 1,
+                  "OpIMul": 1,
                   "OpLoad": 4,
                   "OpReturnValue": 1,
                   "OpStore": 1,
-                  "OpUDiv": 1,
                   "OpVariable": 1
                 },
                 "phi_count": 0,
@@ -1629,8 +1806,8 @@
                 "load_count": 1,
                 "loop_merge": null,
                 "op_histogram": {
-                  "Op130": 1,
                   "OpBranch": 1,
+                  "OpISub": 1,
                   "OpLoad": 1,
                   "OpStore": 1
                 },
@@ -1702,7 +1879,7 @@
                 "load_count": 1,
                 "loop_merge": null,
                 "op_histogram": {
-                  "OpIAdd": 1,
+                  "Op124": 1,
                   "OpLoad": 1,
                   "OpReturnValue": 1
                 },
@@ -1758,8 +1935,8 @@
                   "Op196": 1,
                   "Op197": 1,
                   "Op57": 2,
-                  "Op81": 1,
-                  "OpIMul": 1,
+                  "OpCompositeExtract": 1,
+                  "OpIAdd": 1,
                   "OpLoad": 4,
                   "OpReturnValue": 1,
                   "OpStore": 4,
@@ -1876,11 +2053,11 @@
                   "Op199": 3,
                   "Op57": 2,
                   "OpBranchConditional": 1,
-                  "OpIMul": 7,
+                  "OpIAdd": 7,
+                  "OpIMul": 2,
                   "OpLoad": 13,
                   "OpSelectionMerge": 1,
                   "OpStore": 9,
-                  "OpUDiv": 2,
                   "OpULessThan": 1,
                   "OpVariable": 17
                 },
@@ -2070,19 +2247,19 @@
                 "loop_merge": null,
                 "op_histogram": {
                   "Op111": 2,
-                  "Op130": 1,
+                  "Op124": 1,
                   "Op194": 2,
                   "Op196": 1,
                   "Op197": 1,
                   "Op199": 2,
                   "Op57": 2,
+                  "OpFMul": 2,
                   "OpIAdd": 1,
                   "OpIMul": 1,
+                  "OpISub": 1,
                   "OpLoad": 10,
                   "OpReturnValue": 1,
-                  "OpSDiv": 2,
-                  "OpStore": 7,
-                  "OpUDiv": 1
+                  "OpStore": 7
                 },
                 "phi_count": 0,
                 "selection_merge": null,
@@ -3573,7 +3750,7 @@
                 "name": "data_a_u32",
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 4,
                   "element": {
                     "bits": 32,
                     "id": 6,
@@ -3615,7 +3792,7 @@
                 "name": "data_b",
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 4,
                   "element": {
                     "bits": 32,
                     "id": 17,
@@ -3655,7 +3832,7 @@
                 "name": "data_d",
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 4,
                   "element": {
                     "bits": 32,
                     "id": 17,
@@ -3700,6 +3877,11 @@
             "indices": [
               {
                 "constant_u32": 0,
+                "expr": {
+                  "id": 86,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
                 "id": 86,
                 "name": ""
               }
@@ -3722,6 +3904,11 @@
             "indices": [
               {
                 "constant_u32": 0,
+                "expr": {
+                  "id": 86,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
                 "id": 86,
                 "name": ""
               }
@@ -3744,6 +3931,11 @@
             "indices": [
               {
                 "constant_u32": 2,
+                "expr": {
+                  "id": 152,
+                  "kind": "constant",
+                  "value_u32": 2
+                },
                 "id": 152,
                 "name": ""
               }
@@ -3779,6 +3971,11 @@
             "indices": [
               {
                 "constant_u32": 0,
+                "expr": {
+                  "id": 32,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
                 "id": 32,
                 "name": ""
               }
@@ -3814,6 +4011,11 @@
             "indices": [
               {
                 "constant_u32": 3,
+                "expr": {
+                  "id": 215,
+                  "kind": "constant",
+                  "value_u32": 3
+                },
                 "id": 215,
                 "name": ""
               }
@@ -3847,6 +4049,11 @@
             "indices": [
               {
                 "constant_u32": 1,
+                "expr": {
+                  "id": 76,
+                  "kind": "constant",
+                  "value_u32": 1
+                },
                 "id": 76,
                 "name": ""
               }
@@ -3871,6 +4078,11 @@
             "indices": [
               {
                 "constant_u32": 8,
+                "expr": {
+                  "id": 221,
+                  "kind": "constant",
+                  "value_u32": 8
+                },
                 "id": 221,
                 "name": ""
               }
@@ -3928,6 +4140,11 @@
             "indices": [
               {
                 "constant_u32": 10,
+                "expr": {
+                  "id": 232,
+                  "kind": "constant",
+                  "value_u32": 10
+                },
                 "id": 232,
                 "name": ""
               }
@@ -3974,6 +4191,11 @@
             "indices": [
               {
                 "constant_u32": 10,
+                "expr": {
+                  "id": 232,
+                  "kind": "constant",
+                  "value_u32": 10
+                },
                 "id": 232,
                 "name": ""
               }
@@ -4020,6 +4242,11 @@
             "indices": [
               {
                 "constant_u32": 12,
+                "expr": {
+                  "id": 243,
+                  "kind": "constant",
+                  "value_u32": 12
+                },
                 "id": 243,
                 "name": ""
               }
@@ -4066,6 +4293,11 @@
             "indices": [
               {
                 "constant_u32": 11,
+                "expr": {
+                  "id": 249,
+                  "kind": "constant",
+                  "value_u32": 11
+                },
                 "id": 249,
                 "name": ""
               }
@@ -4112,6 +4344,11 @@
             "indices": [
               {
                 "constant_u32": 9,
+                "expr": {
+                  "id": 254,
+                  "kind": "constant",
+                  "value_u32": 9
+                },
                 "id": 254,
                 "name": ""
               }
@@ -4169,6 +4406,11 @@
             "indices": [
               {
                 "constant_u32": 4,
+                "expr": {
+                  "id": 124,
+                  "kind": "constant",
+                  "value_u32": 4
+                },
                 "id": 124,
                 "name": ""
               }
@@ -4215,6 +4457,11 @@
             "indices": [
               {
                 "constant_u32": 5,
+                "expr": {
+                  "id": 268,
+                  "kind": "constant",
+                  "value_u32": 5
+                },
                 "id": 268,
                 "name": ""
               }
@@ -4261,6 +4508,11 @@
             "indices": [
               {
                 "constant_u32": 6,
+                "expr": {
+                  "id": 274,
+                  "kind": "constant",
+                  "value_u32": 6
+                },
                 "id": 274,
                 "name": ""
               }
@@ -4486,11 +4738,72 @@
             "indices": [
               {
                 "constant_u32": 0,
+                "expr": {
+                  "id": 32,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
                 "id": 32,
                 "name": ""
               },
               {
                 "constant_u32": null,
+                "expr": {
+                  "id": 339,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 337,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 334,
+                          "kind": "load",
+                          "pointer": {
+                            "id": 266,
+                            "kind": "id",
+                            "name": "b_offset"
+                          }
+                        },
+                        {
+                          "id": 336,
+                          "kind": "op",
+                          "op": "OpIMul",
+                          "operands": [
+                            {
+                              "id": 335,
+                              "kind": "load",
+                              "pointer": {
+                                "id": 298,
+                                "kind": "id",
+                                "name": "bi"
+                              }
+                            },
+                            {
+                              "id": 62,
+                              "kind": "constant",
+                              "value_u32": 256
+                            }
+                          ],
+                          "truncated_operands": 0
+                        }
+                      ],
+                      "truncated_operands": 0
+                    },
+                    {
+                      "id": 338,
+                      "kind": "load",
+                      "pointer": {
+                        "id": 317,
+                        "kind": "id",
+                        "name": "e"
+                      }
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
                 "id": 339,
                 "name": ""
               }
@@ -4606,11 +4919,21 @@
             "indices": [
               {
                 "constant_u32": 0,
+                "expr": {
+                  "id": 32,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
                 "id": 32,
                 "name": ""
               },
               {
                 "constant_u32": null,
+                "expr": {
+                  "id": 35,
+                  "kind": "id",
+                  "name": ""
+                },
                 "id": 35,
                 "name": ""
               }
@@ -5040,36 +5363,35 @@
         "Op11": 1,
         "Op111": 2,
         "Op12": 1,
-        "Op130": 2,
-        "Op134": 5,
-        "Op137": 1,
+        "Op124": 2,
         "Op14": 1,
         "Op194": 7,
         "Op196": 2,
         "Op197": 2,
         "Op199": 9,
         "Op20": 1,
-        "Op29": 3,
         "Op3": 1,
         "Op33": 5,
         "Op55": 5,
         "Op57": 8,
-        "Op81": 1,
         "OpAccessChain": 18,
         "OpBranch": 18,
         "OpBranchConditional": 7,
         "OpCapability": 1,
+        "OpCompositeExtract": 1,
         "OpConstant": 34,
         "OpConstantComposite": 1,
         "OpDecorate": 18,
         "OpEntryPoint": 1,
         "OpExecutionMode": 1,
-        "OpFMul": 1,
+        "OpFAdd": 1,
+        "OpFMul": 3,
         "OpFunction": 5,
         "OpFunctionEnd": 5,
-        "OpIAdd": 2,
-        "OpIMul": 21,
+        "OpIAdd": 21,
+        "OpIMul": 13,
         "OpINotEqual": 1,
+        "OpISub": 2,
         "OpLabel": 30,
         "OpLoad": 89,
         "OpLoopMerge": 3,
@@ -5078,18 +5400,19 @@
         "OpName": 64,
         "OpReturn": 1,
         "OpReturnValue": 4,
-        "OpSDiv": 3,
         "OpSelectionMerge": 4,
         "OpStore": 54,
         "OpTypeFloat": 1,
         "OpTypeInt": 2,
         "OpTypePointer": 12,
+        "OpTypeRuntimeArray": 3,
         "OpTypeStruct": 4,
         "OpTypeVector": 2,
         "OpTypeVoid": 1,
-        "OpUDiv": 13,
+        "OpUDiv": 5,
         "OpUGreaterThanEqual": 2,
         "OpULessThan": 4,
+        "OpUMod": 1,
         "OpVariable": 52
       },
       "path": "docs/test/spirv-q6k-safe-current/q6k-safe.spv",
@@ -5519,11 +5842,42 @@
             "indices": [
               {
                 "constant_u32": 0,
+                "expr": {
+                  "id": 32,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
                 "id": 32,
                 "name": ""
               },
               {
                 "constant_u32": null,
+                "expr": {
+                  "id": 357,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 355,
+                      "kind": "load",
+                      "pointer": {
+                        "id": 272,
+                        "kind": "id",
+                        "name": "d_offset"
+                      }
+                    },
+                    {
+                      "id": 356,
+                      "kind": "load",
+                      "pointer": {
+                        "id": 286,
+                        "kind": "id",
+                        "name": "row"
+                      }
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
                 "id": 357,
                 "name": ""
               }

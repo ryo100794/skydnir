@@ -1017,6 +1017,17 @@ class GpuAbiContractTest(unittest.TestCase):
             ],
         )
         self.assertTrue(any("BuiltIn WorkgroupSize" in note for note in module["risk_notes"]))
+        descriptor_by_binding = {item["binding"]: item for item in module["descriptor_variables"]}
+        output_member_type = descriptor_by_binding[2]["pointee_layout"]["members"][0]["type"]
+        self.assertEqual(output_member_type["kind"], "runtime_array")
+        self.assertEqual(output_member_type["array_stride"], 4)
+        self.assertEqual(output_member_type["element"]["kind"], "float")
+        self.assertEqual(output_member_type["element"]["bits"], 32)
+        self.assertTrue(any(
+            event["pointer_origin"].get("base", {}).get("binding") == 2
+            and event["pointer_origin"]["indices"][1]["expr"]["op"] == "OpIAdd"
+            for event in module["store_events"]
+        ))
 
     def test_spirv_probe_manifest_verifier_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:

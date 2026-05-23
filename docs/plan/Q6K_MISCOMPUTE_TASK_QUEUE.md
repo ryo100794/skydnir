@@ -57,6 +57,30 @@ question is now whether the remaining native Q6 mismatch is caused by
 descriptor/alias semantics, local invocation/workgroup interpretation,
 native arithmetic/reduction, or final store indexing.
 
+Static follow-up on the preserved native/effective modules found:
+
+- `docs/test/spirv-q6k-native-adb45055/native-vs-effective-local-size-patched.dataflow.json`
+  reports only `local_size` mismatch; entry points, LocalSizeId,
+  `BuiltIn WorkgroupSize`, descriptors, push constants, load origins, and
+  store origins match.
+- The disassembly diff is the single line
+  `OpExecutionMode %4 LocalSize 1 1 1` versus
+  `OpExecutionMode %4 LocalSize 32 1 1`.
+- The native Q6 output binding is `%284` (`set=0,binding=2`).  There are two
+  final output stores:
+  - tail/partial path: block `%2865`, store word index `3789`,
+    `native-q6-source.spv.spvasm` line 844;
+  - full path: block `%1862`, store word index `6653`,
+    `native-q6-source.spv.spvasm` line 1466.
+- Both stores write a value loaded from workgroup memory `%143[y][x][0]`.
+  Therefore the next probe should prioritize workgroup partial/reduction values
+  before treating host fd writeback as the culprit.
+- V4 descriptor/offset review found the current artifact API-faithful:
+  binding 2/3/4 intentionally share the same API buffer slice, descriptor
+  writes remain distinct, and strict reconciliation matches.  `copy_alias`
+  remains a future hazard, so strict passthrough must reject or ignore alias
+  copy substitution before V4 send.
+
 ## Always-on inventory command
 
 Run this after each related artifact lands:
@@ -205,7 +229,7 @@ decisive step.
 
 ### Q6K-004: Valid-module probe bisection
 
-Status: blocked by Q6K-001 and Q6K-002.
+Status: ready to implement after no-op perturbation guard.
 
 Purpose: bisect native Q6 dynamic execution without submitting arbitrary SPIR-V
 fragments and without changing the V4 ABI.
@@ -218,6 +242,21 @@ Acceptance:
 - Runtime descriptor collision is checked before dispatch.
 - The probe output identifies whether divergence appears before reduction,
   during reduction, before final store, or after final store/writeback.
+
+Initial probe candidates, in priority order:
+
+1. full final store: block `%1862`, store word index `6653`, line 1466;
+   record `%1870` output index, `%1874` value, `%2992`, `%2993`, and local
+   invocation id `%915`;
+2. tail final store: block `%2865`, store word index `3789`, line 844;
+   record `%2873` output index, `%2877` value, `%2926`, `%2927`, and local
+   invocation id `%1918`;
+3. full reduction store: block `%1781`, store word index `6351`, line 1388;
+4. tail reduction store: block `%2784`, store word index `3487`, line 766;
+5. full partial-to-workgroup store: block `%1748`, store word index `6198`,
+   line 1347;
+6. tail partial-to-workgroup store: block `%2751`, store word index `3334`,
+   line 725.
 
 Next task if a range still diverges:
 
@@ -302,6 +341,13 @@ Next task if failed:
 
 - Add the invariant at ICD send time and executor parse time, then add a
   contract test that rejects inconsistent V4 binding metadata.
+
+Additional strict-passthrough invariant:
+
+- `PDOCKER_VULKAN_ALIAS_COPIES` must not silently alter strict V4 transport.
+  In strict mode, an alias-copy hit must be rejected before send or recorded as
+  a hard invariant failure, because it can mix copied transport memory with
+  original `api_memory_id/api_buffer_id/api_offset` metadata.
 
 ### Q6K-009: Descriptor layout static comparison
 

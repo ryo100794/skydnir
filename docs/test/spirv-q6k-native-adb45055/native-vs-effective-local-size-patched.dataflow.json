@@ -106,7 +106,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 210,
                   "element": {
                     "block": false,
                     "buffer_block": false,
@@ -119,7 +119,7 @@
                         },
                         "offset": 0,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 1,
                           "element": {
                             "bits": 8,
                             "kind": "int",
@@ -136,7 +136,7 @@
                         },
                         "offset": 128,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 1,
                           "element": {
                             "bits": 8,
                             "kind": "int",
@@ -153,7 +153,7 @@
                         },
                         "offset": 192,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 1,
                           "element": {
                             "bits": 8,
                             "kind": "int",
@@ -201,7 +201,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 210,
                   "element": {
                     "block": false,
                     "buffer_block": false,
@@ -214,7 +214,7 @@
                         },
                         "offset": 0,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 2,
                           "element": {
                             "bits": 16,
                             "kind": "int",
@@ -231,7 +231,7 @@
                         },
                         "offset": 128,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 2,
                           "element": {
                             "bits": 16,
                             "kind": "int",
@@ -248,7 +248,7 @@
                         },
                         "offset": 192,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 2,
                           "element": {
                             "bits": 16,
                             "kind": "int",
@@ -296,7 +296,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 16,
                   "element": {
                     "component": {
                       "bits": 32,
@@ -330,7 +330,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 4,
                   "element": {
                     "bits": 32,
                     "kind": "float"
@@ -360,7 +360,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 4,
                   "element": {
                     "bits": 32,
                     "kind": "float"
@@ -390,7 +390,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 4,
                   "element": {
                     "bits": 32,
                     "kind": "float"
@@ -424,7 +424,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 210,
                   "element": {
                     "block": false,
                     "buffer_block": false,
@@ -437,7 +437,7 @@
                         },
                         "offset": 0,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 1,
                           "element": {
                             "bits": 8,
                             "kind": "int",
@@ -454,7 +454,7 @@
                         },
                         "offset": 128,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 1,
                           "element": {
                             "bits": 8,
                             "kind": "int",
@@ -471,7 +471,7 @@
                         },
                         "offset": 192,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 1,
                           "element": {
                             "bits": 8,
                             "kind": "int",
@@ -519,7 +519,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 210,
                   "element": {
                     "block": false,
                     "buffer_block": false,
@@ -532,7 +532,7 @@
                         },
                         "offset": 0,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 2,
                           "element": {
                             "bits": 16,
                             "kind": "int",
@@ -549,7 +549,7 @@
                         },
                         "offset": 128,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 2,
                           "element": {
                             "bits": 16,
                             "kind": "int",
@@ -566,7 +566,7 @@
                         },
                         "offset": 192,
                         "type": {
-                          "array_stride": true,
+                          "array_stride": 2,
                           "element": {
                             "bits": 16,
                             "kind": "int",
@@ -614,7 +614,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 16,
                   "element": {
                     "component": {
                       "bits": 32,
@@ -648,7 +648,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 4,
                   "element": {
                     "bits": 32,
                     "kind": "float"
@@ -678,7 +678,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 4,
                   "element": {
                     "bits": 32,
                     "kind": "float"
@@ -708,7 +708,7 @@
                 },
                 "offset": 0,
                 "type": {
-                  "array_stride": true,
+                  "array_stride": 4,
                   "element": {
                     "bits": 32,
                     "kind": "float"
@@ -948,7 +948,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 210,
                 "element": {
                   "block": false,
                   "buffer_block": false,
@@ -961,7 +961,7 @@
                       },
                       "offset": 0,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 1,
                         "element": {
                           "bits": 8,
                           "kind": "int",
@@ -978,7 +978,7 @@
                       },
                       "offset": 128,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 1,
                         "element": {
                           "bits": 8,
                           "kind": "int",
@@ -995,7 +995,7 @@
                       },
                       "offset": 192,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 1,
                         "element": {
                           "bits": 8,
                           "kind": "int",
@@ -1043,7 +1043,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 210,
                 "element": {
                   "block": false,
                   "buffer_block": false,
@@ -1056,7 +1056,7 @@
                       },
                       "offset": 0,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 2,
                         "element": {
                           "bits": 16,
                           "kind": "int",
@@ -1073,7 +1073,7 @@
                       },
                       "offset": 128,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 2,
                         "element": {
                           "bits": 16,
                           "kind": "int",
@@ -1090,7 +1090,7 @@
                       },
                       "offset": 192,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 2,
                         "element": {
                           "bits": 16,
                           "kind": "int",
@@ -1138,7 +1138,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 16,
                 "element": {
                   "component": {
                     "bits": 32,
@@ -1172,7 +1172,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 4,
                 "element": {
                   "bits": 32,
                   "kind": "float"
@@ -1202,7 +1202,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 4,
                 "element": {
                   "bits": 32,
                   "kind": "float"
@@ -1232,7 +1232,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 4,
                 "element": {
                   "bits": 32,
                   "kind": "float"
@@ -1560,7 +1560,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 210,
                 "element": {
                   "block": false,
                   "buffer_block": false,
@@ -1573,7 +1573,7 @@
                       },
                       "offset": 0,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 1,
                         "element": {
                           "bits": 8,
                           "kind": "int",
@@ -1590,7 +1590,7 @@
                       },
                       "offset": 128,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 1,
                         "element": {
                           "bits": 8,
                           "kind": "int",
@@ -1607,7 +1607,7 @@
                       },
                       "offset": 192,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 1,
                         "element": {
                           "bits": 8,
                           "kind": "int",
@@ -1655,7 +1655,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 210,
                 "element": {
                   "block": false,
                   "buffer_block": false,
@@ -1668,7 +1668,7 @@
                       },
                       "offset": 0,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 2,
                         "element": {
                           "bits": 16,
                           "kind": "int",
@@ -1685,7 +1685,7 @@
                       },
                       "offset": 128,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 2,
                         "element": {
                           "bits": 16,
                           "kind": "int",
@@ -1702,7 +1702,7 @@
                       },
                       "offset": 192,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 2,
                         "element": {
                           "bits": 16,
                           "kind": "int",
@@ -1750,7 +1750,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 16,
                 "element": {
                   "component": {
                     "bits": 32,
@@ -1784,7 +1784,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 4,
                 "element": {
                   "bits": 32,
                   "kind": "float"
@@ -1814,7 +1814,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 4,
                 "element": {
                   "bits": 32,
                   "kind": "float"
@@ -1844,7 +1844,7 @@
               },
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 4,
                 "element": {
                   "bits": 32,
                   "kind": "float"

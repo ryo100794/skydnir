@@ -72,7 +72,7 @@
               "name": "",
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 4,
                 "element": {
                   "bits": 32,
                   "id": 14,
@@ -113,7 +113,7 @@
               "name": "",
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 4,
                 "element": {
                   "bits": 32,
                   "id": 14,
@@ -154,7 +154,7 @@
               "name": "",
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 4,
                 "element": {
                   "bits": 32,
                   "id": 14,
@@ -195,7 +195,7 @@
               "name": "",
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 210,
                 "element": {
                   "block": false,
                   "buffer_block": false,
@@ -211,7 +211,7 @@
                       "name": "",
                       "offset": 0,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 1,
                         "element": {
                           "bits": 8,
                           "id": 334,
@@ -234,7 +234,7 @@
                       "name": "",
                       "offset": 128,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 1,
                         "element": {
                           "bits": 8,
                           "id": 334,
@@ -257,7 +257,7 @@
                       "name": "",
                       "offset": 192,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 1,
                         "element": {
                           "bits": 8,
                           "id": 339,
@@ -323,7 +323,7 @@
               "name": "",
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 210,
                 "element": {
                   "block": false,
                   "buffer_block": false,
@@ -339,7 +339,7 @@
                       "name": "",
                       "offset": 0,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 2,
                         "element": {
                           "bits": 16,
                           "id": 360,
@@ -362,7 +362,7 @@
                       "name": "",
                       "offset": 128,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 2,
                         "element": {
                           "bits": 16,
                           "id": 360,
@@ -385,7 +385,7 @@
                       "name": "",
                       "offset": 192,
                       "type": {
-                        "array_stride": true,
+                        "array_stride": 2,
                         "element": {
                           "bits": 16,
                           "id": 364,
@@ -451,7 +451,7 @@
               "name": "",
               "offset": 0,
               "type": {
-                "array_stride": true,
+                "array_stride": 16,
                 "element": {
                   "component": {
                     "bits": 32,
