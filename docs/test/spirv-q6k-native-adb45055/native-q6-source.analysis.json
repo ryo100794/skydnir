@@ -16490,8 +16490,15 @@
                 "name": "",
                 "offset": 0,
                 "type": {
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "id": 14,
+                    "kind": "float"
+                  },
+                  "element_type": 14,
                   "id": 236,
-                  "kind": "unknown"
+                  "kind": "runtime_array"
                 },
                 "type_id": 236
               }
@@ -16524,8 +16531,15 @@
                 "name": "",
                 "offset": 0,
                 "type": {
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "id": 14,
+                    "kind": "float"
+                  },
+                  "element_type": 14,
                   "id": 263,
-                  "kind": "unknown"
+                  "kind": "runtime_array"
                 },
                 "type_id": 263
               }
@@ -16558,8 +16572,15 @@
                 "name": "",
                 "offset": 0,
                 "type": {
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "id": 14,
+                    "kind": "float"
+                  },
+                  "element_type": 14,
                   "id": 281,
-                  "kind": "unknown"
+                  "kind": "runtime_array"
                 },
                 "type_id": 281
               }
@@ -16592,8 +16613,102 @@
                 "name": "",
                 "offset": 0,
                 "type": {
+                  "array_stride": true,
+                  "element": {
+                    "block": false,
+                    "buffer_block": false,
+                    "id": 342,
+                    "kind": "struct",
+                    "member_count": 4,
+                    "members": [
+                      {
+                        "index": 0,
+                        "layout": {
+                          "Offset": 0
+                        },
+                        "name": "",
+                        "offset": 0,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 8,
+                            "id": 334,
+                            "kind": "int",
+                            "signed": 0
+                          },
+                          "element_type": 334,
+                          "id": 336,
+                          "kind": "array",
+                          "length_id": 335,
+                          "length_u32": 128
+                        },
+                        "type_id": 336
+                      },
+                      {
+                        "index": 1,
+                        "layout": {
+                          "Offset": 128
+                        },
+                        "name": "",
+                        "offset": 128,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 8,
+                            "id": 334,
+                            "kind": "int",
+                            "signed": 0
+                          },
+                          "element_type": 334,
+                          "id": 338,
+                          "kind": "array",
+                          "length_id": 337,
+                          "length_u32": 64
+                        },
+                        "type_id": 338
+                      },
+                      {
+                        "index": 2,
+                        "layout": {
+                          "Offset": 192
+                        },
+                        "name": "",
+                        "offset": 192,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 8,
+                            "id": 339,
+                            "kind": "int",
+                            "signed": 1
+                          },
+                          "element_type": 339,
+                          "id": 340,
+                          "kind": "array",
+                          "length_id": 326,
+                          "length_u32": 16
+                        },
+                        "type_id": 340
+                      },
+                      {
+                        "index": 3,
+                        "layout": {
+                          "Offset": 208
+                        },
+                        "name": "",
+                        "offset": 208,
+                        "type": {
+                          "bits": 16,
+                          "id": 341,
+                          "kind": "float"
+                        },
+                        "type_id": 341
+                      }
+                    ]
+                  },
+                  "element_type": 342,
                   "id": 343,
-                  "kind": "unknown"
+                  "kind": "runtime_array"
                 },
                 "type_id": 343
               }
@@ -16626,8 +16741,102 @@
                 "name": "",
                 "offset": 0,
                 "type": {
+                  "array_stride": true,
+                  "element": {
+                    "block": false,
+                    "buffer_block": false,
+                    "id": 367,
+                    "kind": "struct",
+                    "member_count": 4,
+                    "members": [
+                      {
+                        "index": 0,
+                        "layout": {
+                          "Offset": 0
+                        },
+                        "name": "",
+                        "offset": 0,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 16,
+                            "id": 360,
+                            "kind": "int",
+                            "signed": 0
+                          },
+                          "element_type": 360,
+                          "id": 361,
+                          "kind": "array",
+                          "length_id": 337,
+                          "length_u32": 64
+                        },
+                        "type_id": 361
+                      },
+                      {
+                        "index": 1,
+                        "layout": {
+                          "Offset": 128
+                        },
+                        "name": "",
+                        "offset": 128,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 16,
+                            "id": 360,
+                            "kind": "int",
+                            "signed": 0
+                          },
+                          "element_type": 360,
+                          "id": 363,
+                          "kind": "array",
+                          "length_id": 362,
+                          "length_u32": 32
+                        },
+                        "type_id": 363
+                      },
+                      {
+                        "index": 2,
+                        "layout": {
+                          "Offset": 192
+                        },
+                        "name": "",
+                        "offset": 192,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 16,
+                            "id": 364,
+                            "kind": "int",
+                            "signed": 1
+                          },
+                          "element_type": 364,
+                          "id": 366,
+                          "kind": "array",
+                          "length_id": 365,
+                          "length_u32": 8
+                        },
+                        "type_id": 366
+                      },
+                      {
+                        "index": 3,
+                        "layout": {
+                          "Offset": 208
+                        },
+                        "name": "",
+                        "offset": 208,
+                        "type": {
+                          "bits": 16,
+                          "id": 341,
+                          "kind": "float"
+                        },
+                        "type_id": 341
+                      }
+                    ]
+                  },
+                  "element_type": 367,
                   "id": 368,
-                  "kind": "unknown"
+                  "kind": "runtime_array"
                 },
                 "type_id": 368
               }
@@ -16660,8 +16869,21 @@
                 "name": "",
                 "offset": 0,
                 "type": {
+                  "array_stride": true,
+                  "element": {
+                    "component": {
+                      "bits": 32,
+                      "id": 14,
+                      "kind": "float"
+                    },
+                    "component_count": 4,
+                    "component_type": 14,
+                    "id": 473,
+                    "kind": "vector"
+                  },
+                  "element_type": 473,
                   "id": 527,
-                  "kind": "unknown"
+                  "kind": "runtime_array"
                 },
                 "type_id": 527
               }

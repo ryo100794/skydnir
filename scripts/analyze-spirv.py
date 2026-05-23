@@ -711,12 +711,12 @@ def analyze_spirv(path: Path) -> dict:
                 "column_type": inst[2],
                 "column_count": inst[3],
             }
-        elif opcode == 27 and len(inst) >= 4:
+        elif opcode == 28 and len(inst) >= 4:
             type_array[inst[1]] = {
                 "element_type": inst[2],
                 "length_id": inst[3],
             }
-        elif opcode == 28 and len(inst) >= 3:
+        elif opcode == 29 and len(inst) >= 3:
             type_runtime_array[inst[1]] = {
                 "element_type": inst[2],
             }

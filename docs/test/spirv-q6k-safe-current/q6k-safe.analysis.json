@@ -3573,8 +3573,16 @@
                 "name": "data_a_u32",
                 "offset": 0,
                 "type": {
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "id": 6,
+                    "kind": "int",
+                    "signed": 0
+                  },
+                  "element_type": 6,
                   "id": 28,
-                  "kind": "unknown"
+                  "kind": "runtime_array"
                 },
                 "type_id": 28
               }
@@ -3607,8 +3615,15 @@
                 "name": "data_b",
                 "offset": 0,
                 "type": {
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "id": 17,
+                    "kind": "float"
+                  },
+                  "element_type": 17,
                   "id": 330,
-                  "kind": "unknown"
+                  "kind": "runtime_array"
                 },
                 "type_id": 330
               }
@@ -3640,8 +3655,15 @@
                 "name": "data_d",
                 "offset": 0,
                 "type": {
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "id": 17,
+                    "kind": "float"
+                  },
+                  "element_type": 17,
                   "id": 351,
-                  "kind": "unknown"
+                  "kind": "runtime_array"
                 },
                 "type_id": 351
               }

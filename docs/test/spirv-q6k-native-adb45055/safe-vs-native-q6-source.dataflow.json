@@ -89,7 +89,13 @@
                 },
                 "offset": 0,
                 "type": {
-                  "kind": "unknown"
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "kind": "int",
+                    "signed": 0
+                  },
+                  "kind": "runtime_array"
                 }
               }
             ]
@@ -114,7 +120,12 @@
                 },
                 "offset": 0,
                 "type": {
-                  "kind": "unknown"
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "kind": "float"
+                  },
+                  "kind": "runtime_array"
                 }
               }
             ]
@@ -138,7 +149,12 @@
                 },
                 "offset": 0,
                 "type": {
-                  "kind": "unknown"
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "kind": "float"
+                  },
+                  "kind": "runtime_array"
                 }
               }
             ]
@@ -167,7 +183,77 @@
                 },
                 "offset": 0,
                 "type": {
-                  "kind": "unknown"
+                  "array_stride": true,
+                  "element": {
+                    "block": false,
+                    "buffer_block": false,
+                    "kind": "struct",
+                    "members": [
+                      {
+                        "index": 0,
+                        "layout": {
+                          "Offset": 0
+                        },
+                        "offset": 0,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 8,
+                            "kind": "int",
+                            "signed": 0
+                          },
+                          "kind": "array",
+                          "length_u32": 128
+                        }
+                      },
+                      {
+                        "index": 1,
+                        "layout": {
+                          "Offset": 128
+                        },
+                        "offset": 128,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 8,
+                            "kind": "int",
+                            "signed": 0
+                          },
+                          "kind": "array",
+                          "length_u32": 64
+                        }
+                      },
+                      {
+                        "index": 2,
+                        "layout": {
+                          "Offset": 192
+                        },
+                        "offset": 192,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 8,
+                            "kind": "int",
+                            "signed": 1
+                          },
+                          "kind": "array",
+                          "length_u32": 16
+                        }
+                      },
+                      {
+                        "index": 3,
+                        "layout": {
+                          "Offset": 208
+                        },
+                        "offset": 208,
+                        "type": {
+                          "bits": 16,
+                          "kind": "float"
+                        }
+                      }
+                    ]
+                  },
+                  "kind": "runtime_array"
                 }
               }
             ]
@@ -192,7 +278,77 @@
                 },
                 "offset": 0,
                 "type": {
-                  "kind": "unknown"
+                  "array_stride": true,
+                  "element": {
+                    "block": false,
+                    "buffer_block": false,
+                    "kind": "struct",
+                    "members": [
+                      {
+                        "index": 0,
+                        "layout": {
+                          "Offset": 0
+                        },
+                        "offset": 0,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 16,
+                            "kind": "int",
+                            "signed": 0
+                          },
+                          "kind": "array",
+                          "length_u32": 64
+                        }
+                      },
+                      {
+                        "index": 1,
+                        "layout": {
+                          "Offset": 128
+                        },
+                        "offset": 128,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 16,
+                            "kind": "int",
+                            "signed": 0
+                          },
+                          "kind": "array",
+                          "length_u32": 32
+                        }
+                      },
+                      {
+                        "index": 2,
+                        "layout": {
+                          "Offset": 192
+                        },
+                        "offset": 192,
+                        "type": {
+                          "array_stride": true,
+                          "element": {
+                            "bits": 16,
+                            "kind": "int",
+                            "signed": 1
+                          },
+                          "kind": "array",
+                          "length_u32": 8
+                        }
+                      },
+                      {
+                        "index": 3,
+                        "layout": {
+                          "Offset": 208
+                        },
+                        "offset": 208,
+                        "type": {
+                          "bits": 16,
+                          "kind": "float"
+                        }
+                      }
+                    ]
+                  },
+                  "kind": "runtime_array"
                 }
               }
             ]
@@ -217,7 +373,16 @@
                 },
                 "offset": 0,
                 "type": {
-                  "kind": "unknown"
+                  "array_stride": true,
+                  "element": {
+                    "component": {
+                      "bits": 32,
+                      "kind": "float"
+                    },
+                    "component_count": 4,
+                    "kind": "vector"
+                  },
+                  "kind": "runtime_array"
                 }
               }
             ]
@@ -242,7 +407,12 @@
                 },
                 "offset": 0,
                 "type": {
-                  "kind": "unknown"
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "kind": "float"
+                  },
+                  "kind": "runtime_array"
                 }
               }
             ]
@@ -267,7 +437,12 @@
                 },
                 "offset": 0,
                 "type": {
-                  "kind": "unknown"
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "kind": "float"
+                  },
+                  "kind": "runtime_array"
                 }
               }
             ]
@@ -292,7 +467,12 @@
                 },
                 "offset": 0,
                 "type": {
-                  "kind": "unknown"
+                  "array_stride": true,
+                  "element": {
+                    "bits": 32,
+                    "kind": "float"
+                  },
+                  "kind": "runtime_array"
                 }
               }
             ]
@@ -1434,7 +1614,13 @@
               },
               "offset": 0,
               "type": {
-                "kind": "unknown"
+                "array_stride": true,
+                "element": {
+                  "bits": 32,
+                  "kind": "int",
+                  "signed": 0
+                },
+                "kind": "runtime_array"
               }
             }
           ]
@@ -1459,7 +1645,12 @@
               },
               "offset": 0,
               "type": {
-                "kind": "unknown"
+                "array_stride": true,
+                "element": {
+                  "bits": 32,
+                  "kind": "float"
+                },
+                "kind": "runtime_array"
               }
             }
           ]
@@ -1483,7 +1674,12 @@
               },
               "offset": 0,
               "type": {
-                "kind": "unknown"
+                "array_stride": true,
+                "element": {
+                  "bits": 32,
+                  "kind": "float"
+                },
+                "kind": "runtime_array"
               }
             }
           ]
@@ -1762,7 +1958,77 @@
               },
               "offset": 0,
               "type": {
-                "kind": "unknown"
+                "array_stride": true,
+                "element": {
+                  "block": false,
+                  "buffer_block": false,
+                  "kind": "struct",
+                  "members": [
+                    {
+                      "index": 0,
+                      "layout": {
+                        "Offset": 0
+                      },
+                      "offset": 0,
+                      "type": {
+                        "array_stride": true,
+                        "element": {
+                          "bits": 8,
+                          "kind": "int",
+                          "signed": 0
+                        },
+                        "kind": "array",
+                        "length_u32": 128
+                      }
+                    },
+                    {
+                      "index": 1,
+                      "layout": {
+                        "Offset": 128
+                      },
+                      "offset": 128,
+                      "type": {
+                        "array_stride": true,
+                        "element": {
+                          "bits": 8,
+                          "kind": "int",
+                          "signed": 0
+                        },
+                        "kind": "array",
+                        "length_u32": 64
+                      }
+                    },
+                    {
+                      "index": 2,
+                      "layout": {
+                        "Offset": 192
+                      },
+                      "offset": 192,
+                      "type": {
+                        "array_stride": true,
+                        "element": {
+                          "bits": 8,
+                          "kind": "int",
+                          "signed": 1
+                        },
+                        "kind": "array",
+                        "length_u32": 16
+                      }
+                    },
+                    {
+                      "index": 3,
+                      "layout": {
+                        "Offset": 208
+                      },
+                      "offset": 208,
+                      "type": {
+                        "bits": 16,
+                        "kind": "float"
+                      }
+                    }
+                  ]
+                },
+                "kind": "runtime_array"
               }
             }
           ]
@@ -1787,7 +2053,77 @@
               },
               "offset": 0,
               "type": {
-                "kind": "unknown"
+                "array_stride": true,
+                "element": {
+                  "block": false,
+                  "buffer_block": false,
+                  "kind": "struct",
+                  "members": [
+                    {
+                      "index": 0,
+                      "layout": {
+                        "Offset": 0
+                      },
+                      "offset": 0,
+                      "type": {
+                        "array_stride": true,
+                        "element": {
+                          "bits": 16,
+                          "kind": "int",
+                          "signed": 0
+                        },
+                        "kind": "array",
+                        "length_u32": 64
+                      }
+                    },
+                    {
+                      "index": 1,
+                      "layout": {
+                        "Offset": 128
+                      },
+                      "offset": 128,
+                      "type": {
+                        "array_stride": true,
+                        "element": {
+                          "bits": 16,
+                          "kind": "int",
+                          "signed": 0
+                        },
+                        "kind": "array",
+                        "length_u32": 32
+                      }
+                    },
+                    {
+                      "index": 2,
+                      "layout": {
+                        "Offset": 192
+                      },
+                      "offset": 192,
+                      "type": {
+                        "array_stride": true,
+                        "element": {
+                          "bits": 16,
+                          "kind": "int",
+                          "signed": 1
+                        },
+                        "kind": "array",
+                        "length_u32": 8
+                      }
+                    },
+                    {
+                      "index": 3,
+                      "layout": {
+                        "Offset": 208
+                      },
+                      "offset": 208,
+                      "type": {
+                        "bits": 16,
+                        "kind": "float"
+                      }
+                    }
+                  ]
+                },
+                "kind": "runtime_array"
               }
             }
           ]
@@ -1812,7 +2148,16 @@
               },
               "offset": 0,
               "type": {
-                "kind": "unknown"
+                "array_stride": true,
+                "element": {
+                  "component": {
+                    "bits": 32,
+                    "kind": "float"
+                  },
+                  "component_count": 4,
+                  "kind": "vector"
+                },
+                "kind": "runtime_array"
               }
             }
           ]
@@ -1837,7 +2182,12 @@
               },
               "offset": 0,
               "type": {
-                "kind": "unknown"
+                "array_stride": true,
+                "element": {
+                  "bits": 32,
+                  "kind": "float"
+                },
+                "kind": "runtime_array"
               }
             }
           ]
@@ -1862,7 +2212,12 @@
               },
               "offset": 0,
               "type": {
-                "kind": "unknown"
+                "array_stride": true,
+                "element": {
+                  "bits": 32,
+                  "kind": "float"
+                },
+                "kind": "runtime_array"
               }
             }
           ]
@@ -1887,7 +2242,12 @@
               },
               "offset": 0,
               "type": {
-                "kind": "unknown"
+                "array_stride": true,
+                "element": {
+                  "bits": 32,
+                  "kind": "float"
+                },
+                "kind": "runtime_array"
               }
             }
           ]
