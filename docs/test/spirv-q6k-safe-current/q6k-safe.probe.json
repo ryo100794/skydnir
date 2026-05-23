@@ -8,7 +8,7 @@
     "module_instruction_count": 570,
     "module_words": 2260,
     "prior_transforms": [],
-    "source_spirv": "/root/tl/pdocker-android/docs/test/spirv-q6k-safe-current/q6k-safe.spv"
+    "source_spirv": "docs/test/spirv-q6k-safe-current/q6k-safe.spv"
   },
   "collision_checks": {
     "alias_collision": "unknown-until-dispatch-metadata",

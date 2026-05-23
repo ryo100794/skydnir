@@ -3002,8 +3002,16 @@
           "storage_class": "Uniform"
         }
       ],
-      "disassembly_path": "/root/tl/pdocker-android/docs/test/spirv-q6k-safe-current/q6k-safe.spv.spvasm",
+      "disassembly_path": "docs/test/spirv-q6k-safe-current/q6k-safe.spv.spvasm",
       "duplicate_bindings": [],
+      "entry_points": [
+        {
+          "execution_model": 5,
+          "execution_model_name": "GLCompute",
+          "id": 4,
+          "name": "main"
+        }
+      ],
       "generator": 524299,
       "hash": "0x7ec0292e948c9b41",
       "instruction_count": 570,
@@ -3038,12 +3046,11 @@
         "Op197": 2,
         "Op199": 9,
         "Op20": 1,
+        "Op29": 3,
         "Op3": 1,
         "Op33": 5,
-        "Op5": 64,
         "Op55": 5,
         "Op57": 8,
-        "Op6": 16,
         "Op81": 1,
         "OpAccessChain": 18,
         "OpBranch": 18,
@@ -3064,6 +3071,8 @@
         "OpLoad": 89,
         "OpLoopMerge": 3,
         "OpMemberDecorate": 18,
+        "OpMemberName": 16,
+        "OpName": 64,
         "OpReturn": 1,
         "OpReturnValue": 4,
         "OpSDiv": 3,
@@ -3071,9 +3080,8 @@
         "OpStore": 54,
         "OpTypeFloat": 1,
         "OpTypeInt": 2,
-        "OpTypeOpaque": 4,
         "OpTypePointer": 12,
-        "OpTypeStruct": 3,
+        "OpTypeStruct": 4,
         "OpTypeVector": 2,
         "OpTypeVoid": 1,
         "OpUDiv": 13,
@@ -3081,9 +3089,164 @@
         "OpULessThan": 4,
         "OpVariable": 52
       },
-      "path": "/root/tl/pdocker-android/docs/test/spirv-q6k-safe-current/q6k-safe.spv",
+      "path": "docs/test/spirv-q6k-safe-current/q6k-safe.spv",
+      "push_constant_blocks": [
+        {
+          "members": [
+            {
+              "index": 0,
+              "name": "ncols",
+              "offset": 0,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 1,
+              "name": "stride_a",
+              "offset": 4,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 2,
+              "name": "stride_b",
+              "offset": 8,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 3,
+              "name": "stride_d",
+              "offset": 12,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 4,
+              "name": "batch_stride_a",
+              "offset": 16,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 5,
+              "name": "batch_stride_b",
+              "offset": 20,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 6,
+              "name": "batch_stride_d",
+              "offset": 24,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 7,
+              "name": "fusion_flags",
+              "offset": 28,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 8,
+              "name": "base_work_group_y",
+              "offset": 32,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 9,
+              "name": "ne02",
+              "offset": 36,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 10,
+              "name": "ne12",
+              "offset": 40,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 11,
+              "name": "broadcast2",
+              "offset": 44,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            },
+            {
+              "index": 12,
+              "name": "broadcast3",
+              "offset": 48,
+              "type": {
+                "bits": 32,
+                "id": 6,
+                "kind": "int",
+                "signed": 0
+              }
+            }
+          ],
+          "name": "p",
+          "pointer_type": 208,
+          "struct_name": "parameter",
+          "struct_type": 207,
+          "variable_id": 209
+        }
+      ],
       "risk_notes": [],
       "schema": "pdocker.spirv.analysis.v1",
+      "spec_constants": [],
       "version": "0x00010000",
       "words": 2260,
       "workgroup_variable_count": 0

@@ -23,6 +23,8 @@ from typing import Iterable
 SPIRV_MAGIC = 0x07230203
 
 OP_NAMES = {
+    5: "OpName",
+    6: "OpMemberName",
     15: "OpEntryPoint",
     16: "OpExecutionMode",
     17: "OpCapability",
@@ -33,8 +35,8 @@ OP_NAMES = {
     25: "OpTypeMatrix",
     27: "OpTypeArray",
     28: "OpTypeRuntimeArray",
-    29: "OpTypeStruct",
-    30: "OpTypeOpaque",
+    30: "OpTypeStruct",
+    31: "OpTypeOpaque",
     32: "OpTypePointer",
     43: "OpConstant",
     44: "OpConstantComposite",
@@ -134,10 +136,12 @@ CAPABILITY_NAMES = {
 DECORATION_NAMES = {
     1: "SpecId",
     2: "Block",
+    11: "BuiltIn",
     24: "NonWritable",
     25: "NonReadable",
     33: "Binding",
     34: "DescriptorSet",
+    35: "Offset",
 }
 
 STORAGE_CLASS_NAMES = {
@@ -148,8 +152,15 @@ STORAGE_CLASS_NAMES = {
     4: "Workgroup",
     5: "CrossWorkgroup",
     7: "Function",
+    9: "PushConstant",
     12: "StorageBuffer",
     13: "PhysicalStorageBuffer",
+}
+
+EXECUTION_MODEL_NAMES = {
+    0: "Vertex",
+    4: "Fragment",
+    5: "GLCompute",
 }
 
 
@@ -171,6 +182,17 @@ def iter_instructions(words: list[int]) -> Iterable[tuple[int, int, list[int]]]:
             raise ValueError(f"truncated SPIR-V instruction at word {index}")
         yield index, opcode, words[index : index + word_count]
         index += word_count
+
+
+def decode_spirv_string(words: list[int], start: int) -> str:
+    data = bytearray()
+    for word in words[start:]:
+        for shift in (0, 8, 16, 24):
+            byte = (word >> shift) & 0xFF
+            if byte == 0:
+                return data.decode("utf-8", errors="replace")
+            data.append(byte)
+    return data.decode("utf-8", errors="replace")
 
 
 def branch_targets(opcode: int, inst: list[int]) -> list[int]:
@@ -584,9 +606,15 @@ def analyze_spirv(path: Path) -> dict:
     capabilities: list[int] = []
     decorations: dict[int, dict[str, int | bool]] = defaultdict(dict)
     member_decorations: list[dict] = []
+    names: dict[int, str] = {}
+    member_names: dict[int, dict[int, str]] = defaultdict(dict)
+    entry_points: list[dict] = []
     type_pointer: dict[int, dict] = {}
+    type_struct: dict[int, dict] = {}
     variable: dict[int, dict] = {}
     type_scalar: dict[int, dict] = {}
+    constants: dict[int, dict] = {}
+    spec_constants: dict[int, dict] = {}
     access_chain_count = 0
     workgroup_variable_count = 0
     storage_variables = []
@@ -611,7 +639,20 @@ def analyze_spirv(path: Path) -> dict:
         elif 245 <= opcode <= 255:
             control += 1
 
-        if opcode == 17 and len(inst) >= 2:
+        if opcode == 5 and len(inst) >= 3:
+            names[inst[1]] = decode_spirv_string(inst, 2)
+        elif opcode == 6 and len(inst) >= 4:
+            member_names[inst[1]][inst[2]] = decode_spirv_string(inst, 3)
+        elif opcode == 15 and len(inst) >= 4:
+            entry_points.append(
+                {
+                    "execution_model": inst[1],
+                    "execution_model_name": EXECUTION_MODEL_NAMES.get(inst[1], str(inst[1])),
+                    "id": inst[2],
+                    "name": decode_spirv_string(inst, 3),
+                }
+            )
+        elif opcode == 17 and len(inst) >= 2:
             capabilities.append(inst[1])
         elif opcode == 16 and len(inst) >= 6 and inst[2] == 17:
             local_size = [inst[3], inst[4], inst[5]]
@@ -621,6 +662,8 @@ def analyze_spirv(path: Path) -> dict:
             type_scalar[inst[1]] = {"kind": "int", "bits": inst[2], "signed": inst[3]}
         elif opcode == 22 and len(inst) >= 3:
             type_scalar[inst[1]] = {"kind": "float", "bits": inst[2]}
+        elif opcode == 30 and len(inst) >= 2:
+            type_struct[inst[1]] = {"member_types": inst[2:]}
         elif opcode == 32 and len(inst) >= 4:
             type_pointer[inst[1]] = {
                 "storage_class": inst[2],
@@ -638,6 +681,22 @@ def analyze_spirv(path: Path) -> dict:
                 workgroup_variable_count += 1
             if storage_class in (2, 12):
                 storage_variables.append(result_id)
+        elif opcode == 43 and len(inst) >= 4:
+            constants[inst[2]] = {
+                "result_type": inst[1],
+                "words": inst[3:],
+            }
+        elif opcode == 47 and len(inst) >= 4:
+            spec_constants[inst[2]] = {
+                "result_type": inst[1],
+                "words": inst[3:],
+            }
+        elif opcode == 52 and len(inst) >= 4:
+            spec_constants[inst[2]] = {
+                "result_type": inst[1],
+                "opcode": inst[3],
+                "operands": inst[4:],
+            }
         elif opcode == 71 and len(inst) >= 3:
             target, decoration = inst[1], inst[2]
             name = DECORATION_NAMES.get(decoration, str(decoration))
@@ -674,6 +733,73 @@ def analyze_spirv(path: Path) -> dict:
                 "non_writable": bool(dec.get("NonWritable", False)),
             }
         )
+
+    member_offsets: dict[int, dict[int, int]] = defaultdict(dict)
+    for item in member_decorations:
+        if item.get("decoration") == "Offset" and item.get("operands"):
+            member_offsets[int(item["target"])][int(item["member"])] = int(item["operands"][0])
+
+    def describe_type(type_id: int) -> dict:
+        if type_id in type_scalar:
+            return {"id": type_id, **type_scalar[type_id]}
+        if type_id in type_pointer:
+            pointee = type_pointer[type_id]["pointee_type"]
+            return {
+                "id": type_id,
+                "kind": "pointer",
+                "storage_class": type_pointer[type_id]["storage_class_name"],
+                "pointee_type": pointee,
+            }
+        if type_id in type_struct:
+            return {
+                "id": type_id,
+                "kind": "struct",
+                "member_count": len(type_struct[type_id]["member_types"]),
+            }
+        return {"id": type_id, "kind": "unknown"}
+
+    push_constant_blocks = []
+    for var_id, var in sorted(variable.items()):
+        if var.get("storage_class") != 9:
+            continue
+        pointer = type_pointer.get(var["result_type"], {})
+        struct_id = pointer.get("pointee_type")
+        struct_info = type_struct.get(struct_id, {})
+        members = []
+        for index, member_type in enumerate(struct_info.get("member_types", [])):
+            members.append(
+                {
+                    "index": index,
+                    "name": member_names.get(struct_id, {}).get(index, ""),
+                    "offset": member_offsets.get(struct_id, {}).get(index),
+                    "type": describe_type(member_type),
+                }
+            )
+        push_constant_blocks.append(
+            {
+                "variable_id": var_id,
+                "name": names.get(var_id, ""),
+                "pointer_type": var["result_type"],
+                "struct_type": struct_id,
+                "struct_name": names.get(struct_id, ""),
+                "members": members,
+            }
+        )
+
+    spec_constant_list = []
+    for const_id, spec in sorted(spec_constants.items()):
+        item = {
+            "id": const_id,
+            "name": names.get(const_id, ""),
+            "spec_id": decorations.get(const_id, {}).get("SpecId"),
+            "result_type": spec.get("result_type"),
+        }
+        if "opcode" in spec:
+            item["opcode"] = spec.get("opcode")
+            item["operands"] = spec.get("operands", [])
+        else:
+            item["words"] = spec.get("words", [])
+        spec_constant_list.append(item)
 
     duplicate_bindings = [
         {"set": set_id, "binding": binding, "variable_ids": ids}
@@ -721,8 +847,11 @@ def analyze_spirv(path: Path) -> dict:
         },
         "local_size": local_size,
         "local_size_id": local_size_id,
+        "entry_points": entry_points,
         "capabilities": capability_names,
         "descriptor_variables": descriptor_variables,
+        "push_constant_blocks": push_constant_blocks,
+        "spec_constants": spec_constant_list,
         "duplicate_bindings": duplicate_bindings,
         "workgroup_variable_count": workgroup_variable_count,
         "control_flow": summarize_cfg(words),

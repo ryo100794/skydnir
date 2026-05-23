@@ -948,6 +948,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(module["bytes"], len(words) * 4)
         self.assertEqual(module["words"], len(words))
         self.assertEqual(module["instruction_count"], 570)
+        self.assertEqual(module["entry_points"][0]["execution_model_name"], "GLCompute")
+        self.assertEqual(module["entry_points"][0]["name"], "main")
+        push_members = module["push_constant_blocks"][0]["members"]
+        self.assertEqual(push_members[0]["name"], "ncols")
+        self.assertEqual(push_members[0]["offset"], 0)
+        self.assertEqual(push_members[12]["name"], "broadcast3")
+        self.assertEqual(push_members[12]["offset"], 48)
         self.assertIn("op_histogram", module)
         self.assertGreater(module["control_flow"]["function_count"], 0)
         self.assertGreater(module["control_flow"]["block_count"], 0)
