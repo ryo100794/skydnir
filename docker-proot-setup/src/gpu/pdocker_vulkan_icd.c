@@ -1375,6 +1375,12 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         fds[0] = probe.shader_fd;
         shader_size_to_send = probe.shader_size;
         shader_hash_to_send = probe.effective_shader_hash;
+        uintptr_t probe_memory_id =
+            (uintptr_t)0x5044513600000000ull ^ (uintptr_t)dispatch_id;
+        uintptr_t probe_buffer_id =
+            (uintptr_t)0x5044513600000001ull ^ ((uintptr_t)dispatch_id << 1);
+        if (probe_memory_id == 0) probe_memory_id = (uintptr_t)0x50445136u;
+        if (probe_buffer_id == 0) probe_buffer_id = (uintptr_t)0x50445137u;
         api_descriptor_sets[binding_count] = probe.debug_set;
         bindings[binding_count] = probe.debug_binding;
         offsets[binding_count] = 0;
@@ -1386,8 +1392,16 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         api_dynamic_flags[binding_count] = 0;
         api_memory_offsets[binding_count] = 0;
         api_memory_sizes[binding_count] = probe.debug_bytes;
-        api_memory_ids[binding_count] = 0;
-        api_buffer_ids[binding_count] = 0;
+        /*
+         * The debug SSBO is synthetic, but in strict Vulkan passthrough mode
+         * the executor intentionally validates the same object-graph contract
+         * for every binding: memory id, buffer id, object sizes, descriptor
+         * offsets, and absolute transport offset must all be coherent.  Use
+         * deterministic non-zero pseudo object ids for the probe binding
+         * instead of weakening the contract or adding a probe-only bypass.
+         */
+        api_memory_ids[binding_count] = probe_memory_id;
+        api_buffer_ids[binding_count] = probe_buffer_id;
         fds[1 + binding_count] = probe.debug_fd;
         binding_count++;
     }
