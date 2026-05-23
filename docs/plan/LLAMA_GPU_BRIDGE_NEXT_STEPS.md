@@ -30,6 +30,7 @@ Confirmed facts:
 | 2026-05-23 Q6 WorkgroupSize lane | Device is reachable and Q6 dispatch evidence is present, but the effective Q6 WorkgroupSize evidence is still not visible in the oracle record | ADB `192.168.179.26:34761`; `docs/test/llama-gpu-readiness-adb34761-latest.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-legalized-adb34761-20260523T084956Z.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-composite-adb34761-20260523T091428Z.json` |
 | commit `ac40e49` safe-kernel lane | `ngl=1` prompt/Q6 oracle/writeback correctness clears only under bridge-owned Q6 safe-kernel substitution | `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`; classification `q6-workgroup-cleared-and-oracle-match`; safe-kernel hash `0x7ec0292e948c9b41` for source hash `0x1bf751845c5dce75` |
 | 2026-05-23 SPIR-V structural lane | Safe Q6 module is now analyzed by static dataflow/origin tooling; native Q6 comparison is blocked until a real native `.spv` dump is collected from device | commits `59b0a4e`, `ab3b24b`, `e42ce9e`, `14b14fc`; `docs/test/spirv-q6k-safe-current/q6k-safe.analysis.json`; `scripts/analyze-spirv.py`; `scripts/compare-spirv-dataflow.py`; `scripts/verify-spirv-probe-manifest.py` |
+| 2026-05-23 valid-module probe lane | Native Q6 no-op replay reaches the known wrong-output blocker without changing llama.cpp/model/prompt, and executable Q6 debug-SSBO write probes are generated/validated locally for the next device run | commits `139fa83`, `5956a41`, `8515829`; `docs/test/llama-gpu-ngl1-q6-noop-probe-strictid-adb39419-20260523T230924Z.json`; `scripts/prepare-q6k-noop-probe.sh --probe-writes`; effective probe hash `0xfd2949c11ffa33e9` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -150,6 +151,11 @@ python3 scripts/compare-spirv-dataflow.py \
   --json-out <safe-vs-native-q6.dataflow.json>
 ```
 
+Use the `validation_gates.target_env` emitted by the analyzer.  SPIR-V 1.5
+native Q6 modules require `vulkan1.2` validation; treating them as
+`vulkan1.1` artifacts is a false blocker and must not be used to reject a
+valid module.
+
 The tracked safe baseline currently has source hash `0x7ec0292e948c9b41`,
 entry point `main`, local size `[1,1,1]`, descriptors set 0 bindings
 `0`/`1` read-only and `2` writable, and 13 push-constant uints
@@ -186,6 +192,13 @@ adds the debug buffer as an ordinary storage-buffer binding.  If any manifest,
 hash, size, or binding guard fails, the probe must not dispatch.  This keeps
 the narrowing work auditable and prevents "works because diagnostics changed
 the workload" regressions.
+
+For Q6_K executable probe writes, `scripts/prepare-q6k-noop-probe.sh
+--probe-writes` produces a module with six debug-SSBO records and leaves the
+V4 schema unchanged.  The executor now emits `debug_probe_binding`,
+`u32_after_dispatch`, and `u32_after_writeback` samples for the configured
+debug binding.  The next device-side evidence run should inspect those u32
+records before adding more shader substitutions.
 `scripts/analyze-spirv.py` also emits a control-flow graph with function,
 basic-block, successor, store-site, and probe-candidate inventories.  Do not
 try to submit arbitrary SPIR-V fragments to Vulkan: the valid-module boundary

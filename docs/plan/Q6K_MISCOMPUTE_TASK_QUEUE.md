@@ -229,8 +229,8 @@ decisive step.
 
 ### Q6K-004: Valid-module probe bisection
 
-Status: manifest targets are now first-class; valid-module rewrite still
-pending after no-op perturbation guard.
+Status: manifest targets and executable probe-write module generation are now
+first-class; device-side u32 record collection is the next open step.
 
 Purpose: bisect native Q6 dynamic execution without submitting arbitrary SPIR-V
 fragments and without changing the V4 ABI.
@@ -241,6 +241,9 @@ Acceptance:
 - Instrumented module passes post-instrumentation `spirv-val`.
 - Debug SSBO is appended as an ordinary V4 storage-buffer binding.
 - Runtime descriptor collision is checked before dispatch.
+- Executor artifact/report includes `debug_probe_binding`,
+  `u32_after_dispatch`, and `u32_after_writeback` for the configured debug
+  binding.
 - The probe output identifies whether divergence appears before reduction,
   during reduction, before final store, or after final store/writeback.
 
@@ -254,6 +257,14 @@ Implementation note:
 - `scripts/verify-spirv-probe-manifest.py` validates this optional section
   fail-closed when present, including target roles, word ranges, candidate
   linkage, and required capture fields.
+- `scripts/prepare-q6k-noop-probe.sh --probe-writes` currently emits six
+  executable debug-SSBO writes for the priority Q6 targets.  The generated
+  write-probe module validates with the analyzer-selected target environment.
+  For the preserved native SPIR-V 1.5 Q6 module this is `vulkan1.2`, not
+  `vulkan1.1`.
+- The debug binding is set `0`, binding `5`, transported as a normal
+  `VULKAN_DISPATCH_V4` storage-buffer binding.  This is diagnostic transport,
+  not a new command ABI.
 
 Initial probe candidates, in priority order:
 
@@ -277,8 +288,9 @@ Next task if a range still diverges:
 
 ### Q6K-006: No-op instrumentation perturbation check
 
-Status: static no-op module generation closed; device perturbation run still
-open.
+Status: static no-op module generation closed; strict-ID device replay reaches
+the known wrong-output blocker, but same-first-mismatch row-level comparison is
+still open.
 
 Purpose: prove that adding a debug SSBO binding and an otherwise no-op
 instrumented valid module does not change native Q6 behavior.
@@ -293,7 +305,10 @@ Acceptance:
   the debug SSBO must still use a distinct binding number;
 - [x] no-op instrumentation is a full valid-module rewrite, not fragment
   submission, and it adds zero executable probe writes;
-- native Q6 mismatch is reproduced with the same first mismatch class;
+- [x] native Q6 path is reproduced through HTTP serving with wrong deterministic
+  output under strict debug-binding transport;
+- [ ] native Q6 mismatch is reproduced with the same row-level first mismatch
+  class;
 - if the no-op path changes the output, Q6 block bisection is not allowed to
   start and the new blocker becomes "probe transport perturbs execution".
 
