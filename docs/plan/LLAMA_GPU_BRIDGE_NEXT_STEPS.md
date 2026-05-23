@@ -128,6 +128,16 @@ JSON metadata with word count, instruction count, opcode class counts, local
 size evidence, and the FNV hash.  Analyze those dumps with
 `scripts/analyze-spirv.py`; this is a structural SPIR-V observation path, not a
 hash-targeted correctness bypass.
+`scripts/analyze-spirv.py` also emits a control-flow graph with function,
+basic-block, successor, store-site, and probe-candidate inventories.  Do not
+try to submit arbitrary SPIR-V fragments to Vulkan: the valid-module boundary
+must be preserved.  The intended narrowing method is block-boundary/store-site
+instrumentation inside a still-valid module, then CPU-oracle comparison of the
+probe output.  Static block order is not the same as dynamic execution order,
+so treat the generated split plan as candidate-range bisection, not proof of a
+first executed divergent block until dynamic probe records confirm it.  That
+lets us bisect shader evidence ranges without replacing
+llama.cpp, changing prompts, or depending on one hard-coded hash.
 If the run stops before Q6_K, the artifact verifier now preserves bounded
 `pre_http_failure_evidence` for the first failed generic SPIR-V event
 (`fail_stage`/`error`, `vk_result`, SPIR-V hash, pipeline key, feature

@@ -1185,10 +1185,8 @@ static SpirvTraceSummary summarize_spirv(const uint32_t *code, size_t bytes) {
             break;
         }
         s.instruction_count++;
-        if (op == 61 || op == 62 || op == 63 || op == 64 || op == 65 ||
-            op == 66 || op == 67 || op == 68 || op == 69 || op == 70 ||
-            op == 80 || op == 81 || op == 82 || op == 83 || op == 84 ||
-            op == 85 || op == 86 || op == 87 || op == 88) {
+        if (op == 61 || op == 62 || op == 63 || op == 64 ||
+            op == 65 || op == 66) {
             s.memory_instruction_count++;
         } else if ((op >= 124 && op <= 171) || (op >= 182 && op <= 205)) {
             s.arithmetic_instruction_count++;

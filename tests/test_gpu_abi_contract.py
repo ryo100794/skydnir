@@ -861,6 +861,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "pdocker.spirv.analysis.v1",
             "op_histogram",
             "duplicate_bindings",
+            "control_flow",
+            "probe_plan",
+            "bisect_rounds",
+            "instrument-valid-module-not-arbitrary-fragment",
             "risk_notes",
             "uses 8-bit storage",
             "uses specialization-controlled workgroup size",
@@ -897,6 +901,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(module["words"], len(words))
         self.assertEqual(module["instruction_count"], 570)
         self.assertIn("op_histogram", module)
+        self.assertGreater(module["control_flow"]["function_count"], 0)
+        self.assertGreater(module["control_flow"]["block_count"], 0)
+        self.assertTrue(module["control_flow"]["probe_plan"]["binary_search_supported"])
+        self.assertIn("functions", module["control_flow"])
+        self.assertGreater(len(module["control_flow"]["probe_plan"]["bisect_rounds"]), 0)
 
     def test_vulkan_guarded_memory_profile_is_recorded(self):
         source = VULKAN_ICD.read_text()

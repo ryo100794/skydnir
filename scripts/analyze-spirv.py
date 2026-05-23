@@ -52,8 +52,8 @@ OP_NAMES = {
     66: "OpInBoundsAccessChain",
     71: "OpDecorate",
     72: "OpMemberDecorate",
-    80: "OpCopyMemory",
-    81: "OpCopyMemorySized",
+    63: "OpCopyMemory",
+    64: "OpCopyMemorySized",
     124: "OpIAdd",
     125: "OpFAdd",
     126: "OpISub",
@@ -98,17 +98,21 @@ OP_NAMES = {
     190: "OpDPdx",
     224: "OpControlBarrier",
     225: "OpMemoryBarrier",
-    245: "OpLoopMerge",
-    246: "OpSelectionMerge",
-    247: "OpLabel",
-    248: "OpBranch",
-    249: "OpBranchConditional",
-    250: "OpSwitch",
+    245: "OpPhi",
+    246: "OpLoopMerge",
+    247: "OpSelectionMerge",
+    248: "OpLabel",
+    249: "OpBranch",
+    250: "OpBranchConditional",
+    251: "OpSwitch",
+    252: "OpKill",
     253: "OpReturn",
     254: "OpReturnValue",
     255: "OpUnreachable",
     331: "OpExecutionModeId",
 }
+
+TERMINATOR_OPS = {249, 250, 251, 252, 253, 254, 255}
 
 CAPABILITY_NAMES = {
     1: "Shader",
@@ -169,6 +173,214 @@ def iter_instructions(words: list[int]) -> Iterable[tuple[int, int, list[int]]]:
         index += word_count
 
 
+def branch_targets(opcode: int, inst: list[int]) -> list[int]:
+    if opcode == 249 and len(inst) >= 2:
+        return [inst[1]]
+    if opcode == 250 and len(inst) >= 4:
+        return [inst[2], inst[3]]
+    if opcode == 251 and len(inst) >= 3:
+        targets = [inst[2]]
+        for i in range(4, len(inst), 2):
+            targets.append(inst[i])
+        return targets
+    return []
+
+
+def summarize_cfg(words: list[int]) -> dict:
+    functions = []
+    current_function: dict | None = None
+    current_block: dict | None = None
+    block_by_label: dict[int, dict] = {}
+
+    for word_index, opcode, inst in iter_instructions(words):
+        op_name = OP_NAMES.get(opcode, f"Op{opcode}")
+        if opcode == 54 and len(inst) >= 5:
+            current_function = {
+                "id": inst[2],
+                "result_type": inst[1],
+                "function_control": inst[3],
+                "function_type": inst[4],
+                "word_index": word_index,
+                "blocks": [],
+            }
+            current_block = None
+            functions.append(current_function)
+            continue
+        if opcode == 56:
+            current_function = None
+            current_block = None
+            continue
+        if current_function is None:
+            continue
+        if opcode == 247 and len(inst) >= 2:
+            current_block = {
+                "label": inst[1],
+                "word_index": word_index,
+                "instruction_count": 0,
+                "op_histogram": Counter(),
+                "load_count": 0,
+                "store_count": 0,
+                "access_chain_count": 0,
+                "arithmetic_count": 0,
+                "barrier_count": 0,
+                "phi_count": 0,
+                "loop_merge": None,
+                "selection_merge": None,
+                "terminator": None,
+                "successors": [],
+                "store_candidates": [],
+            }
+            current_function["blocks"].append(current_block)
+            block_by_label[inst[1]] = current_block
+            continue
+        if current_block is None:
+            continue
+        current_block["instruction_count"] += 1
+        current_block["op_histogram"][op_name] += 1
+        if opcode == 61:
+            current_block["load_count"] += 1
+        elif opcode == 62:
+            current_block["store_count"] += 1
+            current_block["store_candidates"].append(
+                {
+                    "word_index": word_index,
+                    "pointer_id": inst[1] if len(inst) > 1 else None,
+                    "object_id": inst[2] if len(inst) > 2 else None,
+                }
+            )
+        elif opcode in (63, 64):
+            current_block["store_count"] += 1
+            current_block["store_candidates"].append(
+                {
+                    "word_index": word_index,
+                    "pointer_id": inst[1] if len(inst) > 1 else None,
+                    "object_id": inst[2] if len(inst) > 2 else None,
+                    "kind": op_name,
+                }
+            )
+        elif opcode in (65, 66):
+            current_block["access_chain_count"] += 1
+        elif opcode == 245:
+            current_block["phi_count"] += 1
+        elif 124 <= opcode <= 190:
+            current_block["arithmetic_count"] += 1
+        elif opcode in (224, 225):
+            current_block["barrier_count"] += 1
+        elif opcode == 246:
+            current_block["loop_merge"] = {
+                "merge_block": inst[1] if len(inst) > 1 else None,
+                "continue_target": inst[2] if len(inst) > 2 else None,
+                "control": inst[3] if len(inst) > 3 else None,
+            }
+        elif opcode == 247:
+            current_block["selection_merge"] = {
+                "merge_block": inst[1] if len(inst) > 1 else None,
+                "control": inst[2] if len(inst) > 2 else None,
+            }
+        if opcode in TERMINATOR_OPS:
+            current_block["terminator"] = op_name
+            current_block["successors"] = branch_targets(opcode, inst)
+
+    probe_candidates = []
+    for function in functions:
+        for ordinal, block in enumerate(function["blocks"]):
+            probe_candidates.append(
+                {
+                    "function_id": function["id"],
+                    "block_label": block["label"],
+                    "block_ordinal": ordinal,
+                    "word_index": block["word_index"],
+                    "reason": "store" if block["store_count"] else "arithmetic" if block["arithmetic_count"] else "control",
+                    "store_count": block["store_count"],
+                    "arithmetic_count": block["arithmetic_count"],
+                    "barrier_count": block["barrier_count"],
+                }
+            )
+
+    bisect_rounds = []
+    pending_ranges = [(0, len(probe_candidates))]
+    while pending_ranges:
+        next_ranges = []
+        round_groups = []
+        for start, end in pending_ranges:
+            if end - start <= 1:
+                round_groups.append(
+                    {
+                        "range": [start, end],
+                        "candidate_count": end - start,
+                        "leaf": True,
+                        "candidate_indices": list(range(start, end)),
+                    }
+                )
+                continue
+            mid = start + (end - start) // 2
+            left = {"range": [start, mid], "candidate_count": mid - start, "candidate_indices": list(range(start, mid))}
+            right = {"range": [mid, end], "candidate_count": end - mid, "candidate_indices": list(range(mid, end))}
+            round_groups.extend([left, right])
+            next_ranges.extend([(start, mid), (mid, end)])
+        if round_groups:
+            bisect_rounds.append(round_groups)
+        if all(end - start <= 1 for start, end in next_ranges):
+            if next_ranges:
+                bisect_rounds.append([
+                    {
+                        "range": [start, end],
+                        "candidate_count": end - start,
+                        "leaf": True,
+                        "candidate_indices": list(range(start, end)),
+                    }
+                    for start, end in next_ranges
+                ])
+            break
+        pending_ranges = next_ranges
+
+    def json_block(block: dict) -> dict:
+        return {
+            "label": block["label"],
+            "word_index": block["word_index"],
+            "instruction_count": block["instruction_count"],
+            "op_histogram": dict(block["op_histogram"].most_common()),
+            "load_count": block["load_count"],
+            "store_count": block["store_count"],
+            "access_chain_count": block["access_chain_count"],
+            "arithmetic_count": block["arithmetic_count"],
+            "barrier_count": block["barrier_count"],
+            "phi_count": block["phi_count"],
+            "loop_merge": block["loop_merge"],
+            "selection_merge": block["selection_merge"],
+            "terminator": block["terminator"],
+            "successors": block["successors"],
+            "store_candidates": block["store_candidates"],
+        }
+
+    return {
+        "function_count": len(functions),
+        "block_count": sum(len(function["blocks"]) for function in functions),
+        "edge_count": sum(len(block["successors"]) for function in functions for block in function["blocks"]),
+        "functions": [
+            {
+                "id": function["id"],
+                "word_index": function["word_index"],
+                "block_count": len(function["blocks"]),
+                "blocks": [json_block(block) for block in function["blocks"]],
+            }
+            for function in functions
+        ],
+        "probe_plan": {
+            "method": "instrument-valid-module-not-arbitrary-fragment",
+            "binary_search_supported": bool(probe_candidates),
+            "candidate_count": len(probe_candidates),
+            "candidates": probe_candidates,
+            "bisect_rounds": bisect_rounds,
+            "notes": [
+                "SPIR-V fragments cannot be submitted to Vulkan directly; probes must keep a valid entry point.",
+                "Use block boundary or store-site instrumentation, then compare GPU probe output with the CPU oracle.",
+                "Static block order is not dynamic execution order; bisect candidate ranges, then confirm the final site with dynamic probe output.",
+            ],
+        },
+    }
+
+
 def analyze_spirv(path: Path) -> dict:
     data = path.read_bytes()
     if len(data) < 20 or len(data) % 4:
@@ -213,9 +425,9 @@ def analyze_spirv(path: Path) -> dict:
         elif opcode == 331 and len(inst) >= 6 and inst[2] == 38:
             local_size_id = [inst[3], inst[4], inst[5]]
         elif opcode == 21 and len(inst) >= 4:
-            type_scalar[inst[2]] = {"kind": "int", "bits": inst[3], "signed": inst[4] if len(inst) > 4 else None}
-        elif opcode == 22 and len(inst) >= 4:
-            type_scalar[inst[2]] = {"kind": "float", "bits": inst[3]}
+            type_scalar[inst[1]] = {"kind": "int", "bits": inst[2], "signed": inst[3]}
+        elif opcode == 22 and len(inst) >= 3:
+            type_scalar[inst[1]] = {"kind": "float", "bits": inst[2]}
         elif opcode == 32 and len(inst) >= 4:
             type_pointer[inst[1]] = {
                 "storage_class": inst[2],
@@ -320,6 +532,7 @@ def analyze_spirv(path: Path) -> dict:
         "descriptor_variables": descriptor_variables,
         "duplicate_bindings": duplicate_bindings,
         "workgroup_variable_count": workgroup_variable_count,
+        "control_flow": summarize_cfg(words),
         "op_histogram": op_hist_named,
         "risk_notes": risk_notes,
     }
