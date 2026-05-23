@@ -24,6 +24,7 @@ LLAMA_GPU_ARTIFACT_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 LLAMA_GPU_ENV_MANIFEST = ROOT / "scripts" / "llama-gpu-env-manifest.json"
 SPIRV_ANALYZER = ROOT / "scripts" / "analyze-spirv.py"
 SPIRV_PROBE_MANIFEST_VERIFIER = ROOT / "scripts" / "verify-spirv-probe-manifest.py"
+SPIRV_NOOP_INSTRUMENTER = ROOT / "scripts" / "instrument-spirv-noop-probe.py"
 SPIRV_DATAFLOW_COMPARE = ROOT / "scripts" / "compare-spirv-dataflow.py"
 
 
@@ -1204,6 +1205,83 @@ class GpuAbiContractTest(unittest.TestCase):
                     any(expected_error in error for error in json.loads(result.stdout)["errors"]),
                     result.stdout,
                 )
+
+    def test_native_q6_noop_instrumentation_validates_and_preserves_v4_probe_policy(self):
+        spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
+        self.assertTrue(spv.exists(), "native Q6 SPIR-V evidence must be preserved")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            manifest = tmp_path / "native-q6.probe.json"
+            noop_spv = tmp_path / "native-q6.noop.spv"
+            noop_manifest = tmp_path / "native-q6.noop.probe.json"
+            subprocess.run(
+                ["python3", str(SPIRV_ANALYZER), str(spv), "--probe-plan-out", str(manifest), "--probe-range", "0:2"],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(SPIRV_NOOP_INSTRUMENTER),
+                    str(spv),
+                    str(noop_spv),
+                    "--manifest-in",
+                    str(manifest),
+                    "--manifest-out",
+                    str(noop_manifest),
+                    "--target-env",
+                    "vulkan1.2",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            verified = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(noop_manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            manifest_payload = json.loads(noop_manifest.read_text())
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["valid"])
+        self.assertEqual(payload["source_spirv_hash"], "0x1bf751845c5dce75")
+        self.assertNotEqual(payload["source_spirv_hash"], payload["instrumented_spirv_hash"])
+        instrumentation = payload["instrumentation"]
+        self.assertEqual(instrumentation["kind"], "noop-debug-ssbo-declaration")
+        self.assertEqual(instrumentation["executable_probe_writes"], 0)
+        self.assertEqual(instrumentation["old_bound"], 3441)
+        self.assertEqual(instrumentation["new_bound"], 3445)
+        self.assertEqual(instrumentation["debug_descriptor"], {
+            "binding": 5,
+            "descriptor_type": "storage_buffer",
+            "set": 0,
+        })
+        self.assertEqual(
+            manifest_payload["debug_ssbo"]["dispatch_transport"],
+            "append-as-normal-vulkan-dispatch-v4-binding",
+        )
+        self.assertEqual(manifest_payload["validation_gates"]["post_instrumentation"]["status"], "pass")
+        self.assertEqual(
+            manifest_payload["instrumented_spirv_hash"],
+            payload["instrumented_spirv_hash"],
+        )
+        self.assertTrue(json.loads(verified.stdout)["valid"])
 
     def test_spirv_dataflow_compare_self_match_reports_pointer_origins(self):
         analysis = ROOT / "docs" / "test" / "spirv-q6k-safe-current" / "q6k-safe.analysis.json"

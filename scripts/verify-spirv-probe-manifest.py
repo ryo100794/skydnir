@@ -56,8 +56,9 @@ def verify_manifest(payload: dict) -> list[str]:
         fail(errors, "basis.module_bytes must be a positive 4-byte aligned integer")
     elif isinstance(module_words, int) and module_bytes != module_words * 4:
         fail(errors, "basis.module_bytes must equal basis.module_words * 4")
-    if basis.get("prior_transforms") not in ([], None):
-        fail(errors, "basis.prior_transforms must be empty before debug instrumentation")
+    prior_transforms = basis.get("prior_transforms")
+    if prior_transforms not in ([], None, ["noop-debug-ssbo-declaration"]):
+        fail(errors, "basis.prior_transforms must be empty or contain only noop-debug-ssbo-declaration")
     source_spirv = basis.get("source_spirv")
     if isinstance(source_spirv, str) and source_spirv:
         source_path = Path(source_spirv)
@@ -119,10 +120,9 @@ def verify_manifest(payload: dict) -> list[str]:
 
     declared = (payload.get("descriptors") or {}).get("declared") or []
     duplicate_bindings = (payload.get("descriptors") or {}).get("duplicate_bindings") or []
-    if duplicate_bindings:
-        fail(errors, "declared descriptor bindings must not contain duplicates")
+    if not isinstance(duplicate_bindings, list):
+        fail(errors, "descriptors.duplicate_bindings must be a list")
     seen_declared_pairs: set[tuple[int, int]] = set()
-    seen_binding_numbers: set[int] = set()
     for item in declared:
         if not isinstance(item, dict):
             fail(errors, "declared descriptor entries must be objects")
@@ -134,11 +134,12 @@ def verify_manifest(payload: dict) -> list[str]:
             continue
         pair = (dset, dbinding)
         if pair in seen_declared_pairs:
-            fail(errors, f"duplicate declared descriptor pair set={dset} binding={dbinding}")
+            # Some real shaders expose multiple variables for the same API
+            # descriptor binding.  That is a shader fact to preserve, not a
+            # probe collision, as long as the debug SSBO uses a distinct
+            # binding number.
+            pass
         seen_declared_pairs.add(pair)
-        if dbinding in seen_binding_numbers:
-            fail(errors, f"declared descriptor binding number is not globally unique: {dbinding}")
-        seen_binding_numbers.add(dbinding)
         if pair == (descriptor.get("set"), descriptor.get("binding")):
             fail(errors, "debug descriptor collides with declared descriptor pair")
         if dbinding == descriptor.get("binding"):

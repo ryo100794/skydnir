@@ -277,19 +277,33 @@ Next task if a range still diverges:
 
 ### Q6K-006: No-op instrumentation perturbation check
 
-Status: blocked by Q6K-001.
+Status: static no-op module generation closed; device perturbation run still
+open.
 
 Purpose: prove that adding a debug SSBO binding and an otherwise no-op
 instrumented valid module does not change native Q6 behavior.
 
 Acceptance:
 
-- pre-instrumentation and post-instrumentation modules both pass `spirv-val`;
-- the no-op instrumented module preserves source/effective/probe hash links;
-- descriptor set/binding collision checks pass;
+- [x] pre-instrumentation and post-instrumentation modules both pass
+  `spirv-val --target-env vulkan1.2`;
+- [x] the no-op instrumented module preserves source/effective/probe hash links;
+- [x] descriptor set/binding collision checks pass;
+- [x] duplicate native descriptor binding 0 is preserved as a shader fact, while
+  the debug SSBO must still use a distinct binding number;
+- [x] no-op instrumentation is a full valid-module rewrite, not fragment
+  submission, and it adds zero executable probe writes;
 - native Q6 mismatch is reproduced with the same first mismatch class;
 - if the no-op path changes the output, Q6 block bisection is not allowed to
   start and the new blocker becomes "probe transport perturbs execution".
+
+Implementation note:
+
+- `scripts/instrument-spirv-noop-probe.py` adds a storage-buffer debug SSBO
+  declaration to a complete SPIR-V module, updates the module bound, reassembles
+  with numeric IDs preserved, and runs `spirv-val`.
+- The tool records `instrumented_spirv_hash` and keeps the debug SSBO transport
+  as an ordinary `VULKAN_DISPATCH_V4` binding.
 
 Next task if failed:
 
