@@ -2153,6 +2153,60 @@ static int create_strict_vulkan_object_graph(
     return 0;
 }
 
+static int validate_strict_vulkan_binding_contract(
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        const char **field_name,
+        size_t *binding_index) {
+    if (!bindings) {
+        if (field_name) *field_name = "bindings";
+        if (binding_index) *binding_index = 0;
+        return -EINVAL;
+    }
+    for (size_t i = 0; i < binding_count; ++i) {
+        const VulkanDispatchBinding *b = &bindings[i];
+        const char *field = NULL;
+        if (b->offset < 0) {
+            field = "offset";
+        } else if (b->api_memory_id == 0) {
+            field = "api_memory_id";
+        } else if (b->api_buffer_id == 0) {
+            field = "api_buffer_id";
+        } else if (b->api_buffer_size == 0) {
+            field = "api_buffer_size";
+        } else if (b->api_memory_size == 0) {
+            field = "api_memory_size";
+        } else if (b->api_memory_offset < 0) {
+            field = "api_memory_offset";
+        } else if (b->api_offset < 0) {
+            field = "api_offset";
+        } else {
+            const uint64_t memory_offset = (uint64_t)b->api_memory_offset;
+            const uint64_t descriptor_offset = (uint64_t)b->api_offset;
+            const uint64_t binding_offset = (uint64_t)b->offset;
+            const uint64_t buffer_size = (uint64_t)b->api_buffer_size;
+            const uint64_t memory_size = (uint64_t)b->api_memory_size;
+            const uint64_t binding_size = (uint64_t)b->size;
+            if (descriptor_offset > buffer_size ||
+                binding_size > buffer_size - descriptor_offset) {
+                field = "api_offset";
+            } else if (memory_offset > memory_size ||
+                       buffer_size > memory_size - memory_offset) {
+                field = "api_memory_offset";
+            } else if (memory_offset > UINT64_MAX - descriptor_offset ||
+                       binding_offset != memory_offset + descriptor_offset) {
+                field = "offset";
+            }
+        }
+        if (field) {
+            if (field_name) *field_name = field;
+            if (binding_index) *binding_index = i;
+            return -EINVAL;
+        }
+    }
+    return 0;
+}
+
 static int env_truthy(const char *name, int default_value) {
     const char *value = getenv(name);
     if (!value || !value[0]) return default_value;
@@ -8257,6 +8311,23 @@ static int run_vulkan_dispatch_fd(
         (options && options->has_strict_device_local_staging
             ? options->strict_device_local_staging
             : env_truthy("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", 0));
+    if (strict_passthrough) {
+        const char *strict_binding_field = NULL;
+        size_t strict_binding_index = 0;
+        if (validate_strict_vulkan_binding_contract(
+                bindings,
+                binding_count,
+                &strict_binding_field,
+                &strict_binding_index) != 0) {
+            fprintf(stderr,
+                    "pdocker-gpu-executor: strict binding contract mismatch "
+                    "index=%zu field=%s\n",
+                    strict_binding_index,
+                    strict_binding_field ? strict_binding_field : "unknown");
+            json_fail("vulkan-dispatch", "strict binding contract mismatch");
+            return 64;
+        }
+    }
     const int skip_unused_descriptor_transfers =
         strict_passthrough ? 0 :
         options && options->has_skip_unused_descriptor_transfers
@@ -11597,15 +11668,15 @@ static int serve_socket(const char *path) {
                     }
                 }
                 if (parse_ok && dispatch_v4 &&
-                    options.sender_reconcile.has_v4_binding_schema &&
-                    options.sender_reconcile.v4_binding_schema !=
-                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH) {
+                    (!options.sender_reconcile.has_v4_binding_schema ||
+                     options.sender_reconcile.v4_binding_schema !=
+                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH)) {
                     parse_ok = 0;
                 }
                 if (parse_ok && dispatch_v4 &&
-                    options.sender_reconcile.has_v4_binding_field_count &&
-                    options.sender_reconcile.v4_binding_field_count !=
-                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT) {
+                    (!options.sender_reconcile.has_v4_binding_field_count ||
+                     options.sender_reconcile.v4_binding_field_count !=
+                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT)) {
                     parse_ok = 0;
                 }
                 if (!parse_ok) {

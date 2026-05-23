@@ -117,6 +117,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('strncmp(token, "v4_binding_fields=", 18) == 0', executor)
         self.assertIn("has_v4_binding_schema", executor)
         self.assertIn("has_v4_binding_field_count", executor)
+        self.assertIn("!options.sender_reconcile.has_v4_binding_schema", executor)
+        self.assertIn("!options.sender_reconcile.has_v4_binding_field_count", executor)
         self.assertIn(
             "options.sender_reconcile.v4_binding_schema !=\n"
             "                        PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH",
@@ -778,6 +780,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "VulkanStrictMemoryObject",
             "VulkanStrictBufferObject",
             "create_strict_vulkan_object_graph",
+            "validate_strict_vulkan_binding_contract",
+            "strict binding contract mismatch",
+            "binding_offset != memory_offset + descriptor_offset",
+            "binding_size > buffer_size - descriptor_offset",
+            "buffer_size > memory_size - memory_offset",
             "vkBindBufferMemory(device, buffers[b].buffer, memory->memory, buffers[b].memory_offset)",
             "strict_object_graph",
             "unsupported_descriptor_set_layout",
