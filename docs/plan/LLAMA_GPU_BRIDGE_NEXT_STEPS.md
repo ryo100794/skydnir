@@ -1077,3 +1077,20 @@ Executor JSON now exposes
 `effective_spirv_descriptor_access` so runtime artifacts can prove that the
 optimization came from the audited safe-kernel contract, not from a broad
 native-shader heuristic.
+
+Next device validation, once ADB is available, must compare the new artifact
+against `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`
+and check these fields before interpreting throughput:
+
+- `safe_kernel_reflection_transfer_pruning == true`;
+- `effective_skip_unused_descriptor_transfers == true`;
+- `effective_spirv_descriptor_access == true`;
+- binding 0/1 remain readable and skip writeback;
+- undeclared safe-kernel bindings remain present in descriptor evidence but
+  have zero transfer intent;
+- prompt sanity remains `2+3=` -> `5` and Q6 oracle remains `match`.
+
+If these hold, the next static performance target is output-range narrowing for
+binding 2, followed by resident/read-only buffer caching.  Do not increase
+`ngl` or change the model/prompt/Dockerfile until this transfer-pruning evidence
+is recorded.
