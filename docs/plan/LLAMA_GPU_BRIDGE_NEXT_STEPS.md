@@ -138,6 +138,14 @@ so treat the generated split plan as candidate-range bisection, not proof of a
 first executed divergent block until dynamic probe records confirm it.  That
 lets us bisect shader evidence ranges without replacing
 llama.cpp, changing prompts, or depending on one hard-coded hash.
+The replay path should not introduce a new GPU command ABI at first:
+instrumented modules should be passed through the existing `VULKAN_DISPATCH_V4`
+path as a replacement shader fd plus one extra ordinary storage-buffer binding
+for debug output.  The debug binding must use a statically unused descriptor
+set/binding pair and, until set-aware executor reflection is broader, a globally
+unused binding number.  The V4 schema, required command tokens, model, prompt,
+Dockerfile, and llama.cpp source remain unchanged; original/effective/probe
+hashes are correlated through the probe manifest and artifact logs.
 If the run stops before Q6_K, the artifact verifier now preserves bounded
 `pre_http_failure_evidence` for the first failed generic SPIR-V event
 (`fail_stage`/`error`, `vk_result`, SPIR-V hash, pipeline key, feature

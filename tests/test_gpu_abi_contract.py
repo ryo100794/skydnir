@@ -864,6 +864,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "control_flow",
             "probe_plan",
             "bisect_rounds",
+            "probe-manifest.v1",
+            "fragment_submission_allowed",
+            "debug descriptor must not collide",
+            "append-as-normal-vulkan-dispatch-v4-binding",
+            "globally-unused-binding-number",
             "instrument-valid-module-not-arbitrary-fragment",
             "risk_notes",
             "uses 8-bit storage",
@@ -886,15 +891,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertGreater(len(words), 5)
         with tempfile.TemporaryDirectory() as tmp:
             spv = Path(tmp) / "q6k-safe.spv"
+            manifest = Path(tmp) / "q6k-safe.probe.json"
             spv.write_bytes(b"".join(word.to_bytes(4, "little") for word in words))
             result = subprocess.run(
-                ["python3", str(SPIRV_ANALYZER), str(spv)],
+                ["python3", str(SPIRV_ANALYZER), str(spv), "--probe-plan-out", str(manifest), "--probe-range", "0:2"],
                 cwd=ROOT,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=True,
             )
+            probe_manifest = json.loads(manifest.read_text())
         payload = json.loads(result.stdout)
         module = payload["modules"][0]
         self.assertEqual(module["bytes"], len(words) * 4)
@@ -906,6 +913,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertTrue(module["control_flow"]["probe_plan"]["binary_search_supported"])
         self.assertIn("functions", module["control_flow"])
         self.assertGreater(len(module["control_flow"]["probe_plan"]["bisect_rounds"]), 0)
+        self.assertEqual(probe_manifest["schema"], "pdocker.spirv.probe-manifest.v1")
+        self.assertFalse(probe_manifest["policy"]["fragment_submission_allowed"])
+        self.assertEqual(probe_manifest["probe_selection"]["candidate_range"], [0, 2])
+        self.assertTrue(probe_manifest["debug_ssbo"]["descriptor"]["available"])
+        self.assertEqual(probe_manifest["debug_ssbo"]["dispatch_transport"], "append-as-normal-vulkan-dispatch-v4-binding")
+        self.assertFalse(probe_manifest["collision_checks"]["static_binding_number_collision"])
+        self.assertIn("instrumented module must pass spirv-val after instrumentation", probe_manifest["validation_gates"]["messages"])
+        self.assertTrue(probe_manifest["validation_gates"]["spirv_val_required"])
 
     def test_vulkan_guarded_memory_profile_is_recorded(self):
         source = VULKAN_ICD.read_text()

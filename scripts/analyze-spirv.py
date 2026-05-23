@@ -212,12 +212,13 @@ def summarize_cfg(words: list[int]) -> dict:
             continue
         if current_function is None:
             continue
-        if opcode == 247 and len(inst) >= 2:
+        if opcode == 248 and len(inst) >= 2:
             current_block = {
                 "label": inst[1],
                 "word_index": word_index,
                 "instruction_count": 0,
                 "op_histogram": Counter(),
+                "instruction_word_indices": [],
                 "load_count": 0,
                 "store_count": 0,
                 "access_chain_count": 0,
@@ -226,6 +227,8 @@ def summarize_cfg(words: list[int]) -> dict:
                 "phi_count": 0,
                 "loop_merge": None,
                 "selection_merge": None,
+                "first_non_phi_word_index": None,
+                "pre_merge_word_index": None,
                 "terminator": None,
                 "successors": [],
                 "store_candidates": [],
@@ -236,7 +239,10 @@ def summarize_cfg(words: list[int]) -> dict:
         if current_block is None:
             continue
         current_block["instruction_count"] += 1
+        current_block["instruction_word_indices"].append(word_index)
         current_block["op_histogram"][op_name] += 1
+        if opcode != 245 and current_block["first_non_phi_word_index"] is None:
+            current_block["first_non_phi_word_index"] = word_index
         if opcode == 61:
             current_block["load_count"] += 1
         elif opcode == 62:
@@ -267,17 +273,23 @@ def summarize_cfg(words: list[int]) -> dict:
         elif opcode in (224, 225):
             current_block["barrier_count"] += 1
         elif opcode == 246:
+            if current_block["pre_merge_word_index"] is None:
+                current_block["pre_merge_word_index"] = word_index
             current_block["loop_merge"] = {
                 "merge_block": inst[1] if len(inst) > 1 else None,
                 "continue_target": inst[2] if len(inst) > 2 else None,
                 "control": inst[3] if len(inst) > 3 else None,
             }
         elif opcode == 247:
+            if current_block["pre_merge_word_index"] is None:
+                current_block["pre_merge_word_index"] = word_index
             current_block["selection_merge"] = {
                 "merge_block": inst[1] if len(inst) > 1 else None,
                 "control": inst[2] if len(inst) > 2 else None,
             }
         if opcode in TERMINATOR_OPS:
+            if current_block["pre_merge_word_index"] is None:
+                current_block["pre_merge_word_index"] = word_index
             current_block["terminator"] = op_name
             current_block["successors"] = branch_targets(opcode, inst)
 
@@ -286,10 +298,13 @@ def summarize_cfg(words: list[int]) -> dict:
         for ordinal, block in enumerate(function["blocks"]):
             probe_candidates.append(
                 {
+                    "candidate_id": len(probe_candidates),
                     "function_id": function["id"],
                     "block_label": block["label"],
                     "block_ordinal": ordinal,
                     "word_index": block["word_index"],
+                    "block_entry_insert_after_phi_word_index": block["first_non_phi_word_index"],
+                    "block_exit_insert_before_word_index": block["pre_merge_word_index"],
                     "reason": "store" if block["store_count"] else "arithmetic" if block["arithmetic_count"] else "control",
                     "store_count": block["store_count"],
                     "arithmetic_count": block["arithmetic_count"],
@@ -338,6 +353,7 @@ def summarize_cfg(words: list[int]) -> dict:
         return {
             "label": block["label"],
             "word_index": block["word_index"],
+            "instruction_word_indices": block["instruction_word_indices"],
             "instruction_count": block["instruction_count"],
             "op_histogram": dict(block["op_histogram"].most_common()),
             "load_count": block["load_count"],
@@ -348,6 +364,8 @@ def summarize_cfg(words: list[int]) -> dict:
             "phi_count": block["phi_count"],
             "loop_merge": block["loop_merge"],
             "selection_merge": block["selection_merge"],
+            "block_entry_insert_after_phi_word_index": block["first_non_phi_word_index"],
+            "block_exit_insert_before_word_index": block["pre_merge_word_index"],
             "terminator": block["terminator"],
             "successors": block["successors"],
             "store_candidates": block["store_candidates"],
@@ -381,6 +399,178 @@ def summarize_cfg(words: list[int]) -> dict:
     }
 
 
+def choose_debug_descriptor(descriptor_variables: list[dict], max_sets: int = 8, max_bindings: int = 16) -> dict:
+    used = {
+        (int(item["set"]), int(item["binding"]))
+        for item in descriptor_variables
+        if "set" in item and "binding" in item
+    }
+    used_binding_numbers = {
+        int(item["binding"])
+        for item in descriptor_variables
+        if "binding" in item
+    }
+    preferred_sets = sorted({set_id for set_id, _binding in used}) or [0]
+    for set_id in preferred_sets + [set_id for set_id in range(max_sets) if set_id not in preferred_sets]:
+        for binding in range(max_bindings):
+            if (set_id, binding) not in used and binding not in used_binding_numbers:
+                return {
+                    "available": True,
+                    "set": set_id,
+                    "binding": binding,
+                    "strategy": "first-unused-existing-set-or-fallback-set-and-globally-unused-binding-number",
+                    "max_sets": max_sets,
+                    "max_bindings_per_set": max_bindings,
+                }
+    return {
+        "available": False,
+        "reason": "no free descriptor set/binding for diagnostic SSBO",
+        "max_sets": max_sets,
+        "max_bindings_per_set": max_bindings,
+    }
+
+
+def build_probe_manifest(module: dict, source_path: Path, probe_range: tuple[int, int] | None = None) -> dict:
+    control_flow = module.get("control_flow", {})
+    probe_plan = control_flow.get("probe_plan", {})
+    candidates = list(probe_plan.get("candidates", []))
+    if probe_range is None:
+        selected_range = [0, len(candidates)]
+    else:
+        start, end = probe_range
+        start = max(0, min(start, len(candidates)))
+        end = max(start, min(end, len(candidates)))
+        selected_range = [start, end]
+    selected_candidates = candidates[selected_range[0]:selected_range[1]]
+    descriptor_choice = choose_debug_descriptor(module.get("descriptor_variables", []))
+    candidate_ranges = []
+    for round_index, groups in enumerate(probe_plan.get("bisect_rounds", [])):
+        for group_index, group in enumerate(groups):
+            candidate_ranges.append(
+                {
+                    "round": round_index,
+                    "range_id": f"r{round_index}-{group_index}",
+                    "candidate_index_range": group.get("range", [0, 0]),
+                    "candidate_indices": group.get("candidate_indices", []),
+                    "candidate_count": group.get("candidate_count", 0),
+                    "leaf": bool(group.get("leaf", False)),
+                    "activation": "instrument_all_candidates_in_range",
+                }
+            )
+    first_function_word_index = None
+    functions = control_flow.get("functions", [])
+    if functions:
+        first_function_word_index = min(function.get("word_index", 0) for function in functions)
+    validation_gate_messages = [
+        "input module must pass spirv-val before instrumentation",
+        "instrumented module must pass spirv-val after instrumentation",
+        "probe insertion must preserve OpPhi ordering",
+        "probe insertion must occur before OpLoopMerge/OpSelectionMerge when probing block exit",
+        "debug descriptor must not collide with existing descriptor set/binding",
+        "probe output slots must be deterministic; avoid multiple invocations writing the same slot",
+        "original/effective SPIR-V hash and probe policy must be recorded with the artifact",
+    ]
+    return {
+        "schema": "pdocker.spirv.probe-manifest.v1",
+        "basis": {
+            "analysis_schema": module.get("schema"),
+            "source_spirv": str(source_path),
+            "module_hash": module.get("hash"),
+            "module_bytes": module.get("bytes"),
+            "module_words": module.get("words"),
+            "module_bound": module.get("bound"),
+            "module_instruction_count": module.get("instruction_count"),
+            "instrumentation_basis": "effective-pre-debug",
+            "prior_transforms": [],
+        },
+        "entry": {
+            "name": "main",
+            "local_size": module.get("local_size", [0, 0, 0]),
+            "local_size_id": module.get("local_size_id", [0, 0, 0]),
+            "specialization_entries": [],
+        },
+        "descriptors": {
+            "declared": module.get("descriptor_variables", []),
+            "runtime_writes": [],
+            "aliases": [],
+            "duplicate_bindings": module.get("duplicate_bindings", []),
+        },
+        "policy": {
+            "submission_model": "valid-module-instrumentation",
+            "fragment_submission_allowed": False,
+            "llama_cpp_modified": False,
+            "dockerfile_model_prompt_modified": False,
+            "static_order_is_dynamic_order": False,
+        },
+        "insertion_layout": {
+            "first_function_word_index": first_function_word_index,
+            "annotation_insert_before_word_index": first_function_word_index,
+            "type_global_insert_before_word_index": first_function_word_index,
+            "old_bound": module.get("bound"),
+            "reserved_id_range": [module.get("bound"), module.get("bound")],
+            "new_bound": module.get("bound"),
+        },
+        "debug_ssbo": {
+            "descriptor": descriptor_choice,
+            "descriptor_type": "storage_buffer",
+            "access": "write_only",
+            "dispatch_transport": "append-as-normal-vulkan-dispatch-v4-binding",
+            "record_layout": {
+                "magic": "PDBG",
+                "version": 1,
+                "header_u32": 8,
+                "record_u32": 12,
+                "slot_policy": "probe_id_times_sample_count_plus_sample_index",
+                "atomics_required": False,
+            },
+        },
+        "probe_selection": {
+            "candidate_range": selected_range,
+            "selected_candidate_count": len(selected_candidates),
+            "selected_candidates": selected_candidates,
+            "bisect_rounds": probe_plan.get("bisect_rounds", []),
+            "candidate_ranges": candidate_ranges,
+        },
+        "insertion_rules": {
+            "block_entry": "insert after contiguous OpPhi instructions",
+            "block_exit": "insert before OpLoopMerge/OpSelectionMerge if present, otherwise before terminator",
+            "store_site": "insert around OpStore/OpCopyMemory sites after type and pointer-origin analysis",
+        },
+        "collision_checks": {
+            "basis": "effective-pre-debug",
+            "proposed": {
+                "set": descriptor_choice.get("set"),
+                "binding": descriptor_choice.get("binding"),
+            } if descriptor_choice.get("available") else None,
+            "static_declared_collision": False if descriptor_choice.get("available") else None,
+            "static_binding_number_collision": False if descriptor_choice.get("available") else None,
+            "runtime_write_collision": "unknown-until-dispatch-metadata",
+            "alias_collision": "unknown-until-dispatch-metadata",
+            "duplicate_binding_collision": False if descriptor_choice.get("available") else None,
+            "binding_count_limit": "must-satisfy-original-plus-debug <= PDOCKER_GPU_MAX_VULKAN_BINDINGS",
+            "fd_count_limit": "must-satisfy-shader-plus-original-bindings-plus-debug <= PDOCKER_GPU_MAX_PASSED_FDS",
+            "within_static_tool_limits": bool(descriptor_choice.get("available")),
+            "decision": "pass" if descriptor_choice.get("available") else "fail",
+        },
+        "validation_gates": {
+            "spirv_val_required": True,
+            "target_env": "vulkan1.1",
+            "pre_instrumentation": {
+                "status": "required-before-instrumentation",
+                "hash": module.get("hash"),
+            },
+            "post_instrumentation": {
+                "status": "required-before-dispatch",
+                "hash": None,
+                "stderr_tail": "",
+            },
+            "dispatch_allowed": False,
+            "messages": validation_gate_messages,
+        },
+        "next_implementation_step": "generate instrumented full SPIR-V module and validate with spirv-val",
+    }
+
+
 def analyze_spirv(path: Path) -> dict:
     data = path.read_bytes()
     if len(data) < 20 or len(data) % 4:
@@ -408,6 +598,8 @@ def analyze_spirv(path: Path) -> dict:
         if opcode in (61,):
             loads += 1
         elif opcode in (62,):
+            stores += 1
+        elif opcode in (63, 64):
             stores += 1
         elif opcode in (65, 66):
             access_chain_count += 1
@@ -552,8 +744,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("spirv", nargs="+", type=Path, help="SPIR-V .spv file(s)")
     parser.add_argument("--json-out", type=Path, help="write combined JSON report")
+    parser.add_argument("--probe-plan-out", type=Path, help="write a probe manifest for a single SPIR-V module")
+    parser.add_argument("--probe-range", help="candidate range for the probe manifest, formatted start:end")
     parser.add_argument("--disassemble-dir", type=Path, help="write spirv-dis output into this directory")
     args = parser.parse_args()
+    if args.probe_plan_out and len(args.spirv) != 1:
+        parser.error("--probe-plan-out requires exactly one SPIR-V input")
+    probe_range = None
+    if args.probe_range:
+        try:
+            start_text, end_text = args.probe_range.split(":", 1)
+            probe_range = (int(start_text), int(end_text))
+        except Exception as exc:
+            parser.error(f"--probe-range must be start:end: {exc}")
 
     reports = []
     for path in args.spirv:
@@ -562,6 +765,10 @@ def main() -> int:
         if asm:
             report["disassembly_path"] = asm
         reports.append(report)
+    if args.probe_plan_out:
+        manifest = build_probe_manifest(reports[0], args.spirv[0], probe_range)
+        args.probe_plan_out.parent.mkdir(parents=True, exist_ok=True)
+        args.probe_plan_out.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
     payload = {"schema": "pdocker.spirv.analysis.bundle.v1", "modules": reports}
     text = json.dumps(payload, indent=2, sort_keys=True)
