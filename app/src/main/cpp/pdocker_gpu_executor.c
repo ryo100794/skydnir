@@ -8647,14 +8647,35 @@ static int run_vulkan_dispatch_fd(
         shader_size,
         shader_binding_access,
         sizeof(shader_binding_access) / sizeof(shader_binding_access[0]));
-    if (skip_unused_descriptor_transfers) {
+    /*
+     * Strict passthrough normally keeps every application-provided descriptor
+     * transfer-conservative: if a descriptor exists, upload it and write it
+     * back unless an explicit non-strict pruning knob is active.  The Q6_K safe
+     * kernel is different: it is a bridge-owned compatibility shader with a
+     * fixed, statically reviewed descriptor contract.  The Vulkan object graph
+     * (descriptor sets, VkBuffer identities, offsets, ranges) still remains
+     * strict, but host<->device byte transfers may follow SPIR-V reflection:
+     *   - undeclared bindings are not transferred,
+     *   - read-only bindings are not written back.
+     *
+     * This is deliberately limited to the safe-kernel path.  It is not a
+     * heuristic for native llama.cpp shaders and it does not transform any
+     * model, prompt, Dockerfile, or descriptor data.
+     */
+    const int safe_kernel_reflection_transfer_pruning =
+        strict_passthrough && q6k_safe_kernel_used;
+    const int transfer_skip_unused_descriptor_transfers =
+        skip_unused_descriptor_transfers || safe_kernel_reflection_transfer_pruning;
+    const int transfer_use_spirv_descriptor_access =
+        use_spirv_descriptor_access || safe_kernel_reflection_transfer_pruning;
+    if (transfer_skip_unused_descriptor_transfers) {
         for (size_t i = 0; i < binding_alias_count; ++i) {
             if (binding_aliases[i].rewritten_binding < sizeof(shader_used_bindings) &&
                 shader_used_bindings[binding_aliases[i].rewritten_binding] &&
                 binding_aliases[i].original_binding < sizeof(shader_used_bindings)) {
                 shader_used_bindings[binding_aliases[i].original_binding] = 1;
             }
-            if (use_spirv_descriptor_access &&
+            if (transfer_use_spirv_descriptor_access &&
                 binding_aliases[i].rewritten_binding <
                     sizeof(shader_binding_access) / sizeof(shader_binding_access[0]) &&
                 binding_aliases[i].original_binding <
@@ -8677,12 +8698,25 @@ static int run_vulkan_dispatch_fd(
     size_t skipped_upload_bytes = 0;
     size_t skipped_download_bytes = 0;
     for (size_t i = 0; i < binding_count; ++i) {
-        if (!skip_unused_descriptor_transfers ||
-            (bindings[i].binding < sizeof(shader_used_bindings) &&
-             shader_used_bindings[bindings[i].binding])) {
+        const int shader_declared =
+            bindings[i].binding < sizeof(shader_used_bindings) &&
+            shader_used_bindings[bindings[i].binding];
+        if (!transfer_skip_unused_descriptor_transfers ||
+            shader_declared ||
+            safe_kernel_reflection_transfer_pruning) {
             active_bindings[i] = 1;
             active_binding_count++;
-            if (!use_spirv_descriptor_access ||
+            if (safe_kernel_reflection_transfer_pruning && !shader_declared) {
+                /*
+                 * Strict Q6 safe-kernel: keep the descriptor bound for ABI
+                 * fidelity, but do not copy bytes for a binding absent from
+                 * the bridge-owned SPIR-V module.
+                 */
+                binding_read_needed[i] = 0;
+                binding_write_needed[i] = 0;
+                skipped_binding_count++;
+                skipped_binding_bytes += bindings[i].size;
+            } else if (!transfer_use_spirv_descriptor_access ||
                 bindings[i].binding >= sizeof(shader_binding_access) / sizeof(shader_binding_access[0])) {
                 binding_read_needed[i] = 1;
                 binding_write_needed[i] = 1;
@@ -8690,6 +8724,21 @@ static int run_vulkan_dispatch_fd(
                 const SpirvDescriptorAccess *access = &shader_binding_access[bindings[i].binding];
                 binding_read_needed[i] = access->readable;
                 binding_write_needed[i] = access->writable;
+            }
+            if (safe_kernel_reflection_transfer_pruning) {
+                if ((bindings[i].binding == 0 || bindings[i].binding == 1) &&
+                    !binding_read_needed[i]) {
+                    json_fail("vulkan-dispatch",
+                              "Q6 safe-kernel input binding reflection lost readability");
+                    ret = 64;
+                    goto cleanup;
+                }
+                if (bindings[i].binding == 2 && !binding_write_needed[i]) {
+                    json_fail("vulkan-dispatch",
+                              "Q6 safe-kernel output binding reflection lost writability");
+                    ret = 64;
+                    goto cleanup;
+                }
             }
             if (binding_read_needed[i]) {
                 read_binding_count++;
@@ -9878,6 +9927,9 @@ static int run_vulkan_dispatch_fd(
                 "\"descriptor_sets\":%u,\"push_bytes\":%zu},"
                 "\"skip_unused_descriptor_transfers\":%s,"
                 "\"spirv_descriptor_access\":%s,"
+                "\"safe_kernel_reflection_transfer_pruning\":%s,"
+                "\"effective_skip_unused_descriptor_transfers\":%s,"
+                "\"effective_spirv_descriptor_access\":%s,"
                 "\"disable_overlap_aliasing\":%s,"
                 "\"cpu_oracle_requested\":%s,"
                 "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
@@ -9928,6 +9980,9 @@ static int run_vulkan_dispatch_fd(
                 push_size,
                 skip_unused_descriptor_transfers ? "true" : "false",
                 use_spirv_descriptor_access ? "true" : "false",
+                safe_kernel_reflection_transfer_pruning ? "true" : "false",
+                transfer_skip_unused_descriptor_transfers ? "true" : "false",
+                transfer_use_spirv_descriptor_access ? "true" : "false",
                 disable_overlap_aliasing ? "true" : "false",
                 cpu_oracle_requested ? "true" : "false",
                 binding_alias_count,
@@ -10048,6 +10103,9 @@ static int run_vulkan_dispatch_fd(
             "\"descriptor_sets\":%u,\"push_bytes\":%zu},"
             "\"skip_unused_descriptor_transfers\":%s,"
             "\"spirv_descriptor_access\":%s,"
+            "\"safe_kernel_reflection_transfer_pruning\":%s,"
+            "\"effective_skip_unused_descriptor_transfers\":%s,"
+            "\"effective_spirv_descriptor_access\":%s,"
             "\"disable_overlap_aliasing\":%s,"
             "\"cpu_oracle_requested\":%s,"
             "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
@@ -10109,6 +10167,9 @@ static int run_vulkan_dispatch_fd(
             push_size,
             skip_unused_descriptor_transfers ? "true" : "false",
             use_spirv_descriptor_access ? "true" : "false",
+            safe_kernel_reflection_transfer_pruning ? "true" : "false",
+            transfer_skip_unused_descriptor_transfers ? "true" : "false",
+            transfer_use_spirv_descriptor_access ? "true" : "false",
             disable_overlap_aliasing ? "true" : "false",
             cpu_oracle_requested ? "true" : "false",
             binding_alias_count,

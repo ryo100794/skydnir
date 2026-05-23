@@ -251,12 +251,12 @@ Two ICD correctness fixes were added on 2026-05-08:
 - The executor now patches the specific SPIR-V shape where llama.cpp's shader
   exposes a specialization-backed `BuiltIn WorkgroupSize` but also contains a
   literal `OpExecutionMode LocalSize 1 1 1`. The first version only copied
-  `SpecId 0` into `LocalSize.x`, producing `[32,1,1]` for Q6_K even though the
-  application supplied `[32,2,1]`. That can silently run only half of the
-  intended local invocations. The current implementation copies all available
-  `SpecId 0..2` dimensions and rejects invalid or over-large workgroup sizes.
+  `SpecId 0` into `LocalSize.x`; later diagnostics then incorrectly treated
+  Q6_K specialization constant `1` (`NUM_ROWS`) as `WorkGroupSizeY`.  The
+  current implementation uses only the actual `LocalSizeId` operands, rejects
+  invalid or over-large workgroup sizes, and keeps b9030 Q6_K at `[32,1,1]`.
   The next device run must confirm that Q6_K reports `local_size_patched=true`
-  with `spirv_local_size=[32,2,1]` and then re-check the sampled oracle.
+  with `spirv_local_size=[32,1,1]` and then re-check the sampled oracle.
 - The compare driver now refuses to start a llama container when Android memory
   headroom is already unsafe. The default hard gate is
   `PDOCKER_LLAMA_MIN_FREE_MB=512`; `SwapFree` is recorded as Android zram
@@ -841,7 +841,7 @@ benchmark evidence should use the defaults unless the report explicitly says it
 is a strict-swap run.
 
 Next pass condition: on the next `ngl=1` strict run, the JSON event for
-`mul-mat-vec-q6-k-large` must show `spirv_local_size_resolved:[32,2,1]`,
+`mul-mat-vec-q6-k-large` must show `spirv_local_size_resolved:[32,1,1]`,
 `spirv_local_size_consistent:true`, and either `cpu_oracle_status:"match"` or a
 new mismatch whose `q6_shader_like_64_abs_delta` rules out the collapsed
 workgroup-shape hypothesis.
@@ -996,7 +996,7 @@ the artifact in this exact order:
    writeback is no longer the leading explanation.  Choose one sub-branch:
    - `workgroup_shape_blocker == true`, non-true
      `spirv_local_size_consistent`, or `spirv_local_size_resolved` other than
-     `[32,2,1]` means the next blocker is `workgroup-shape`.
+     `[32,1,1]` means the next blocker is `workgroup-shape`.
    - Workgroup shape clear, row-indexed writeback verified, read-only hashes
      clean, and shader-like Q6 diagnostics cleared means the next blocker is
      `vulkan-device-execution`: barriers, queue submit, device-local staging, or
@@ -1047,7 +1047,7 @@ the investigation can move past WorkgroupSize:
 
 1. fresh runtime and executor markers;
 2. a valid Q6 oracle event for source hash `0x1bf751845c5dce75`;
-3. effective Q6 workgroup size `[32,2,1]` visible in the compact/folded
+3. effective Q6 workgroup size `[32,1,1]` visible in the compact/folded
    diagnostics;
 4. if legalization is applied, explicit evidence that the original source hash
    is retained while the effective module is legalized from the
@@ -1089,6 +1089,13 @@ writeback-hash evidence.
 
 ### Q6 safe-kernel correctness result (2026-05-23, ADB 192.168.179.26:44443)
 
+Commit context:
+
+- Commit `ac40e49` (`Clear Q6 safe-kernel correctness path`) is the current
+  documentation/test-gate anchor for this result.
+- The evidence artifact is
+  `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`.
+
 Artifact:
 
 - `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`
@@ -1117,6 +1124,49 @@ Decision state:
 - Native b9030 Q6 SPIR-V still mismatched before safe-kernel substitution, so the
   safe kernel is evidence that the descriptor/writeback path can be correct and
   that the remaining native-Q6 issue is shader/driver/typed-storage behavior.
-- Next work should either advance to `ngl=2` with the same correctness gates or
-  reduce bridge overhead for the safe-kernel path.  Do not weaken prompt probes
-  or alter llama.cpp/Dockerfile/model/prompt to claim success.
+- The safe kernel is a pdocker bridge-owned compatibility substitution.  It is
+  not a llama.cpp source change, not a Dockerfile/model/prompt change, and not a
+  claim that native llama.cpp Q6 SPIR-V now executes correctly on the Android
+  driver.
+- The next phase is not "execute and adjust until green".  It must be planned
+  from static data-flow invariants across the three boundaries below, then
+  implemented against those invariants:
+  1. llama.cpp Vulkan data flow: source shader hash, descriptor set/binding
+     roles, offsets/ranges, push constants, specialization constants, row/output
+     index mapping, and tensor ownership;
+  2. ICD command ABI: serialized object identity, memory/buffer sizes and
+     offsets, descriptor update order, safe-kernel selection token, runtime
+     marker/config propagation, and bounded diagnostics;
+  3. executor object graph: Android memory/buffer identity, upload ranges,
+     descriptor-set layout, module choice, barriers/fence wait, staging or
+     direct writeback, and fd-visible output hashes.
+
+Acceptance criteria before advancing to `ngl=2` or performance tuning:
+
+- The static invariant note proves how source hash `0x1bf751845c5dce75` maps to
+  bridge-owned safe-kernel hash `0x7ec0292e948c9b41` without changing llama.cpp
+  or hiding the original source hash.
+- Artifacts continue to show unchanged prompt sanity (`2+3=` expected prefix
+  `5`), runtime freshness, config propagation, Q6 oracle `match`,
+  `mismatch_count=0`, row-indexed writeback verification, and
+  `benchmark_claim_allowed=true` for the `ngl=1` safe-kernel lane.
+- Native Q6 SPIR-V remains a visible separate blocker.  A safe-kernel pass must
+  not be reworded as native-Q6 correctness.
+- Benchmark/performance work is blocked until the correctness artifact is
+  complete; speedup alone, `/health`, `/v1/models`, `/completion` serving, or
+  `served=true` is not enough.
+- The gate must not be weakened: no prompt changes, Dockerfile changes,
+  llama.cpp changes, missing-diagnostic acceptance, or verifier/classifier
+  relaxation.
+
+Follow-up implementation:
+
+- Q6 safe-kernel performance work now starts with static reflection transfer
+  pruning rather than trial-and-error shader variants.  Strict descriptor object
+  identity is preserved, but undeclared safe-kernel bindings skip byte
+  transfers and read-only safe-kernel bindings skip writeback.
+- Runtime evidence must include
+  `safe_kernel_reflection_transfer_pruning`,
+  `effective_skip_unused_descriptor_transfers`, and
+  `effective_spirv_descriptor_access` before claiming this optimization is
+  active.

@@ -4,9 +4,8 @@ Snapshot date: 2026-05-23.
 
 This document is the handoff plan for continuing the llama.cpp GPU bridge work
 with a smaller or faster coding model.  It assumes the repository is on or
-after commit `9cccc81` for the GPU workgroup diagnostics lane, plus any later
-non-GPU service-truth or terminal commits, and that llama.cpp itself remains
-unmodified.
+after commit `ac40e49` (`Clear Q6 safe-kernel correctness path`) and that
+llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
@@ -29,18 +28,22 @@ Confirmed facts:
 | current device readiness | Heavy compare is memory-gated | readiness requires sufficient `MemAvailable`; low Android zram `SwapFree` is advisory unless a strict swap gate is explicitly configured |
 | 2026-05-20 Q6_K workflow | Device workflow reaches the known Q6_K blocker again; create-timeout race is no longer the blocker | `docs/test/llama-gpu-q6k-adb41503-20260520T110352Z.json` (ignored runtime evidence), workflow `classification=q6-native-device-execution-or-final-store` |
 | 2026-05-23 Q6 WorkgroupSize lane | Device is reachable and Q6 dispatch evidence is present, but the effective Q6 WorkgroupSize evidence is still not visible in the oracle record | ADB `192.168.179.26:34761`; `docs/test/llama-gpu-readiness-adb34761-latest.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-legalized-adb34761-20260523T084956Z.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-composite-adb34761-20260523T091428Z.json` |
+| commit `ac40e49` safe-kernel lane | `ngl=1` prompt/Q6 oracle/writeback correctness clears only under bridge-owned Q6 safe-kernel substitution | `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`; classification `q6-workgroup-cleared-and-oracle-match`; safe-kernel hash `0x7ec0292e948c9b41` for source hash `0x1bf751845c5dce75` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
-HTTP alone.  The latest strict row-provenance artifact still fails required
-correctness and has `benchmark_claim_allowed=false`; Q6_K is narrowed to
-`native-q6-device-execution-or-final-store` after row-indexed writeback,
-workgroup shape, and a native reduction/shader-like sum were cleared.  The
-memory readiness gate is still required before heavy compare or benchmark evidence can
-promote anything.
+HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
+safe-kernel artifact, not native llama.cpp Q6 SPIR-V correctness.  The
+safe-kernel is a pdocker bridge compatibility substitution selected under
+`PDOCKER_GPU_Q6K_SAFE_KERNEL=1`; it is not a llama.cpp change, not a model
+change, and not proof that the original native Q6 shader/driver path is fixed.
+The memory readiness gate is still required before heavy compare or benchmark
+evidence can promote anything.
 
 ## Non-Negotiable Rules
 
 - Do not modify llama.cpp.
+- Do not modify prompts, Dockerfiles, model files, or diagnostic gates to make
+  a run pass.
 - Do not rebuild the llama image unless the user explicitly allows it.
 - Do not add external libraries or copied upstream code without explicit user
   approval.
@@ -48,6 +51,9 @@ promote anything.
   bind Bionic vendor libraries directly into the glibc image as a product path.
 - Benchmark claims require a passing correctness report.  Speed without
   correctness is diagnostic only.
+- `served=true`, `/health`, or `/v1/models` alone is never success.
+- Do not weaken artifact verifier, prompt sanity, runtime freshness,
+  config-propagation, Q6 oracle, or writeback gates.
 - Commit only focused changes and their directly relevant evidence artifacts.
 
 ## Canonical Commands
@@ -252,7 +258,7 @@ Next validation criteria:
 - The Q6 event for source hash `0x1bf751845c5dce75` must include a valid JSON
   oracle response, not only lifecycle dispatch evidence.
 - The Q6 record must expose the effective specialization-backed workgroup tuple
-  as `[32,2,1]` through `spirv_local_size_resolved` or the equivalent folded
+  as `[32,1,1]` through `spirv_local_size_resolved` or the equivalent folded
   summary field.
 - If legalization is active, the event must explicitly show that the source
   shader hash remains `0x1bf751845c5dce75` while the effective execution module
@@ -554,7 +560,7 @@ or reruns, not as a request to collect another generic row-indexed artifact.
    Then use the existing sub-classifier instead of treating "another mismatch"
    as progress:
    - If `workgroup_shape_blocker == true`, `spirv_local_size_consistent` is not
-     true, or `spirv_local_size_resolved` is not `[32,2,1]` for the Q6_K event,
+     true, or `spirv_local_size_resolved` is not `[32,1,1]` for the Q6_K event,
      the next C-side blocker is **workgroup-shape**: fix local-size
      propagation/materialization and strict refusal semantics.
    - If workgroup shape is clear, read-only upload/dispatch hashes are clean,
@@ -753,7 +759,7 @@ Latest device evidence before this patch:
   `blocker_class=workgroup-shape`,
   `spirv_local_size=[1,1,1]`,
   `spirv_local_size_resolved=[1,1,1]`, while the Q6 specialization entries
-  carried the effective workgroup tuple `[32,2,1]`.
+  carried the effective workgroup tuple `[32,1,1]`.
 
 Structural fixes now in the bridge:
 
@@ -795,7 +801,7 @@ bash scripts/android-llama-gpu-compare.sh \
 
 Expected acceptance for the next run:
 
-- `gpu.diagnostics.q6_workgroup_diagnostics.local_size_resolved == [32,2,1]`.
+- `gpu.diagnostics.q6_workgroup_diagnostics.local_size_resolved == [32,1,1]`.
 - `local_size_patched == true` appears in Q6 executor evidence when the source
   module uses the `BuiltIn WorkgroupSize` specialization path.
 - The verifier should no longer classify the run as
@@ -1005,15 +1011,69 @@ Planning implications:
 1. For llama.cpp b9030 Q6_K, expected local size is `[32,1,1]`; specialization
    constant `1` is `NUM_ROWS`, not `WorkGroupSizeY`.  Treat older `[32,2,1]`
    requirements as stale diagnostic assumptions.
-2. Correctness is now good enough to move the next blocker from Q6 workgroup
-   shape to performance/overhead on the safe-kernel path.
-3. The native Q6 SPIR-V mismatch remains a separate compatibility issue.  Do not
-   hide it; keep the safe-kernel path explicitly marked as a bridge-owned
-   compatibility substitution.
-4. Next bounded tasks:
-   - run `ngl=2` with `PDOCKER_GPU_Q6K_SAFE_KERNEL=1` and the same prompt gates;
-   - profile upload/download/copy time in the safe-kernel artifact;
-   - reduce repeated full-buffer transfer where the strict descriptor invariant
-     permits narrower dirty/writeback handling;
-   - add a release-facing note that Q6 safe-kernel is an explicit compatibility
-     path, not a llama.cpp modification.
+2. Commit `ac40e49` and the safe-kernel artifact establish that the bridge can
+   carry descriptor data, execute a bridge-owned compatibility kernel, write
+   back the sampled Q6 outputs, and satisfy the unchanged prompt gate for
+   `ngl=1`.  They do **not** establish native llama.cpp Q6 shader correctness,
+   a product performance win, or permission to tune by trial and error.
+3. The safe-kernel path must remain labelled as a bridge-owned compatibility
+   substitution: the original llama.cpp shader source, Dockerfile, model,
+   prompt, and tensor bytes are unchanged, while the pdocker bridge substitutes
+   the driver-facing compute kernel for a known Q6 dispatch shape.
+4. The next phase is a static-invariant implementation phase, not
+   "run variants until one passes".  Before code changes, derive and document
+   the expected data flow from:
+   - llama.cpp Vulkan dispatch metadata: source hash, descriptor set/binding
+     roles, descriptor offsets/ranges, push constants, specialization constants,
+     and output indices;
+   - the ICD command ABI: how container Vulkan object identity, memory/buffer
+     offsets, descriptor updates, specialization data, and safe-kernel selection
+     are serialized to the executor;
+   - the executor object graph: Android `VkDeviceMemory`/`VkBuffer` identity,
+     upload ranges, descriptor set layout, dispatch module choice, barriers,
+     staging/download, and fd writeback.
+5. Only after those static invariants are written down and matched against the
+   `ac40e49` artifact may implementation proceed.  The implementation target is
+   to preserve the proven bridge data-flow contract while making the
+   compatibility substitution explicit and auditable, not to mutate prompts,
+   Dockerfiles, llama.cpp, or verifier gates.
+
+Acceptance criteria before `ngl=2` or performance tuning:
+
+- A static invariant note identifies every Q6 input/output buffer boundary from
+  llama.cpp dispatch through ICD command tokens to executor objects and
+  writeback, including which fields prove source hash `0x1bf751845c5dce75` and
+  safe-kernel hash `0x7ec0292e948c9b41` are intentionally related.
+- The safe-kernel decision is reflected in executor JSON as a compatibility
+  substitution with original source hash retained; artifacts must not look like
+  llama.cpp emitted a different shader.
+- Prompt sanity remains unchanged (`2+3=` expected prefix `5`), runtime
+  freshness/config propagation pass, Q6 oracle status is `match`, row-indexed
+  writeback is verified, and `benchmark_claim_allowed` is true for `ngl=1`.
+- Native Q6 SPIR-V mismatch remains separately visible as a compatibility
+  blocker; it must not be hidden behind the safe-kernel success.
+- No acceptance path depends on `served=true`, `/health`, `/v1/models`, speedup,
+  missing diagnostics, or weakened verifier classification.
+
+### 2026-05-23 Update: Q6 safe-kernel transfer pruning
+
+The first performance change after `ac40e49` is now constrained to the proven
+Q6 safe-kernel lane.  In strict passthrough mode the executor still preserves
+the application descriptor object graph: descriptor sets, `VkBuffer` identity,
+offsets, ranges, and descriptor writes are not removed or rewritten for native
+llama.cpp shaders.  When `PDOCKER_GPU_Q6K_SAFE_KERNEL=1` selects the bridge-owned
+safe kernel, the executor may use SPIR-V reflection only to prune byte
+transfers:
+
+- undeclared safe-kernel bindings stay bound for ABI fidelity but do not upload
+  or write back bytes;
+- read-only safe-kernel bindings remain uploaded but skip writeback;
+- the output binding must remain writable, and input bindings must remain
+  readable, otherwise dispatch fails closed.
+
+Executor JSON now exposes
+`safe_kernel_reflection_transfer_pruning`,
+`effective_skip_unused_descriptor_transfers`, and
+`effective_spirv_descriptor_access` so runtime artifacts can prove that the
+optimization came from the audited safe-kernel contract, not from a broad
+native-shader heuristic.
