@@ -268,6 +268,7 @@ PY
 cleanup() {
   local status="$?"
   if [[ "$status" -ne 0 ]]; then
+    write_failure_artifact "$status" >/dev/null 2>&1 || true
     operation_notify "failed" "$CURRENT_STAGE failed with exit code $status" 1 >/dev/null 2>&1 || true
     if [[ -s "$RUNTIME_ABORT_JSON" && ! -s "$OUT" ]]; then
       mkdir -p "$(dirname "$OUT")"
@@ -281,6 +282,72 @@ cleanup() {
   "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
+
+write_failure_artifact() {
+  local status="$1"
+  if [[ -s "$OUT" ]]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$OUT")"
+  local mem_json diagnostics_json adb_state_json runtime_env_json
+  if declare -F memory_snapshot_json >/dev/null 2>&1; then
+    mem_json="$(memory_snapshot_json 2>/dev/null || printf '{}')"
+  else
+    mem_json='{}'
+  fi
+  if declare -F pdocker_memory_diagnostics_json >/dev/null 2>&1; then
+    diagnostics_json="$(pdocker_memory_diagnostics_json 2>/dev/null || printf '{}')"
+  else
+    diagnostics_json='{}'
+  fi
+  adb_state_json="$("$ADB" shell 'printf "{";
+    printf "\"adb_wifi_enabled\":\"%s\"," "$(settings get global adb_wifi_enabled 2>/dev/null)";
+    printf "\"adb_enabled\":\"%s\"," "$(settings get global adb_enabled 2>/dev/null)";
+    printf "\"service_adb_tcp\":\"%s\"," "$(getprop service.adb.tcp.port)";
+    printf "\"persist_adb_tcp\":\"%s\"" "$(getprop persist.adb.tcp.port)";
+    printf "}"' 2>/dev/null || printf '{}')"
+  if [[ -s "${RUNTIME_ENV_RECORD_JSON:-}" ]]; then
+    runtime_env_json="$(cat "$RUNTIME_ENV_RECORD_JSON" 2>/dev/null || printf '{}')"
+  else
+    runtime_env_json='{}'
+  fi
+  python3 - "$OUT" "$status" "$CURRENT_STAGE" "$PKG" "$CONTAINER" "$mem_json" "$diagnostics_json" "$adb_state_json" "$runtime_env_json" <<'PY'
+import json
+import sys
+import time
+from pathlib import Path
+
+out, status, stage, pkg, container = sys.argv[1:6]
+
+def parse(raw):
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, (dict, list)) else {}
+    except Exception as exc:
+        return {"parse_error": str(exc), "raw_excerpt": raw[:2000]}
+
+artifact = {
+    "schema": "pdocker.llama.gpu.compare.failure.v1",
+    "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "exit_code": int(status) if str(status).isdigit() else status,
+    "stage": stage,
+    "package": pkg,
+    "container": container,
+    "failure_class": "early_compare_failure",
+    "message": f"{stage} failed before the full llama GPU compare artifact was produced",
+    "adb_state": parse(sys.argv[8]),
+    "memory": parse(sys.argv[6]),
+    "pdocker_diagnostics": parse(sys.argv[7]),
+    "runtime_env_record": parse(sys.argv[9]),
+    "next_action": "inspect adb_state, pdockerd socket/process diagnostics, and host log; rerun without changing Dockerfile/model/prompt after restoring transport stability",
+}
+Path(out).write_text(json.dumps(artifact, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+PY
+  local device_name
+  device_name="$(basename "$OUT")"
+  "$ADB" push "$OUT" "/data/local/tmp/$device_name" >/dev/null 2>&1 || true
+  run_as "mkdir -p files/pdocker/bench && cp /data/local/tmp/$(remote_quote "$device_name") files/pdocker/bench/$(remote_quote "$device_name")" >/dev/null 2>&1 || true
+}
 
 remote_quote() {
   printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
@@ -385,6 +452,40 @@ wait_for_engine() {
   done
   echo "pdockerd socket did not appear" >&2
   return 1
+}
+
+stage_probe_artifact_for_container() {
+  local env_name="$1"
+  local source_path="${!env_name:-}"
+  if [[ -z "$source_path" ]]; then
+    return 0
+  fi
+  case "$source_path" in
+    /workspace/*)
+      return 0
+      ;;
+  esac
+  if [[ -z "${DEVICE_WORKSPACE_HOST:-}" ]]; then
+    echo "[pdocker llama compare] cannot stage $env_name before DEVICE_WORKSPACE_HOST is resolved" >&2
+    return 1
+  fi
+  local base staged_host staged_container
+  base="$(basename "$source_path")"
+  staged_host="$DEVICE_WORKSPACE_HOST/.pdocker-probes/$base"
+  staged_container="/workspace/.pdocker-probes/$base"
+  run_as "mkdir -p $(remote_quote "$DEVICE_WORKSPACE_HOST/.pdocker-probes") && cp -f $(remote_quote "$source_path") $(remote_quote "$staged_host") && chmod 0644 $(remote_quote "$staged_host")" >/dev/null
+  export "$env_name=$staged_container"
+  echo "[pdocker llama compare] staged $env_name for container: $source_path -> $staged_container" >&2
+}
+
+stage_spirv_probe_artifacts_for_container() {
+  # The Vulkan ICD runs inside the container view.  Android app-private
+  # absolute paths such as /data/user/0/... are valid to run-as but are
+  # intentionally not a stable container ABI path after direct-executor path
+  # rewriting.  Stage probe inputs through the already-mounted /workspace
+  # volume so the shader replay path stays container-native and reproducible.
+  stage_probe_artifact_for_container "PDOCKER_GPU_SPIRV_PROBE_MANIFEST"
+  stage_probe_artifact_for_container "PDOCKER_GPU_SPIRV_PROBE_SHADER"
 }
 
 memory_snapshot_json() {
@@ -1887,6 +1988,7 @@ wait_for_engine
 DEVICE_PROJECT="$(run_as "cd $(remote_quote "$PROJECT") && pwd" | tr -d '\r')"
 DEVICE_MODEL_HOST="$(run_as "cd $(remote_quote "$PROJECT") && . ./.env >/dev/null 2>&1 && printf '%s' \"\${PDOCKER_MODEL_HOST:-$DEVICE_PROJECT/models}\"" | tr -d '\r')"
 DEVICE_WORKSPACE_HOST="$(run_as "cd $(remote_quote "$PROJECT") && . ./.env >/dev/null 2>&1 && printf '%s' \"\${PDOCKER_FAST_WORKSPACE_HOST:-$DEVICE_PROJECT/workspace}\"" | tr -d '\r')"
+stage_spirv_probe_artifacts_for_container
 CPU_JSON="$TMP/cpu.json"
 CPU_CORRECTNESS_JSON="$TMP/cpu-correctness.json"
 if [[ "$RUN_CPU" -eq 1 ]]; then
