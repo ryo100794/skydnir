@@ -3866,6 +3866,72 @@ static float sample_f32_at(const void *data, size_t size, size_t index) {
     return value;
 }
 
+static uint32_t sample_u32_at(const void *data, size_t size, size_t index, int *ok) {
+    uint32_t value = 0;
+    size_t offset = index * sizeof(value);
+    if (ok) *ok = 0;
+    if (!data || offset + sizeof(value) > size) return 0;
+    memcpy(&value, (const unsigned char *)data + offset, sizeof(value));
+    if (ok) *ok = 1;
+    return value;
+}
+
+static int probe_debug_binding_from_env(void) {
+    const char *value = getenv("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING");
+    if (!value || !value[0]) return -1;
+    char *end = NULL;
+    errno = 0;
+    unsigned long parsed = strtoul(value, &end, 0);
+    if (errno != 0 || end == value || (end && *end) || parsed > UINT32_MAX) return -1;
+    return (int)parsed;
+}
+
+static void write_u32_sample_array_prefix(FILE *out, const void *data, size_t size, size_t max_count) {
+    fprintf(out, "[");
+    const size_t count = size / sizeof(uint32_t);
+    const size_t emit = count < max_count ? count : max_count;
+    for (size_t i = 0; i < emit; ++i) {
+        int ok = 0;
+        uint32_t value = sample_u32_at(data, size, i, &ok);
+        fprintf(out,
+                "%s{\"index\":%zu,\"value\":",
+                i ? "," : "",
+                i);
+        if (ok) {
+            fprintf(out, "%u", value);
+        } else {
+            fprintf(out, "null");
+        }
+        fprintf(out, "}");
+    }
+    fprintf(out, "]");
+}
+
+static void write_u32_fd_sample_array_prefix(FILE *out, int fd, off_t offset, size_t size, size_t max_count) {
+    fprintf(out, "[");
+    const size_t count = size / sizeof(uint32_t);
+    const size_t emit = count < max_count ? count : max_count;
+    for (size_t i = 0; i < emit; ++i) {
+        uint32_t value = 0;
+        int ok = 0;
+        const off_t u_off = offset + (off_t)(i * sizeof(value));
+        if (pread(fd, &value, sizeof(value), u_off) == (ssize_t)sizeof(value)) {
+            ok = 1;
+        }
+        fprintf(out,
+                "%s{\"index\":%zu,\"value\":",
+                i ? "," : "",
+                i);
+        if (ok) {
+            fprintf(out, "%u", value);
+        } else {
+            fprintf(out, "null");
+        }
+        fprintf(out, "}");
+    }
+    fprintf(out, "]");
+}
+
 static int sample_f32_at_u64(const void *data, size_t size, uint64_t index, float *out) {
     if (!data || !out || index > (uint64_t)(SIZE_MAX / sizeof(float))) return 0;
     const size_t offset = (size_t)index * sizeof(float);
@@ -4047,6 +4113,7 @@ static void write_vulkan_binding_report(
     const size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
         cpu_oracle_report, q6_sample_indices,
         sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]));
+    const int debug_probe_binding = probe_debug_binding_from_env();
     for (size_t i = 0; i < binding_count; ++i) {
         fprintf(out,
                 "%s{\"index\":%zu,\"set\":%u,\"binding\":%u,\"offset\":%lld,"
@@ -4139,6 +4206,23 @@ static void write_vulkan_binding_report(
                     NULL, 0,
                     buffer_fds[i], bindings[i].offset, 1,
                     q6_sample_indices, q6_sample_count);
+            }
+        } else if (debug_probe_binding >= 0 &&
+                   bindings[i].binding == (uint32_t)debug_probe_binding &&
+                   active && active[i] && writable && writable[i] &&
+                   vk_buffers && vk_buffers[i] && vk_buffers[i]->map &&
+                   binding_gpu_offset && binding_gpu_offset[i] < vk_buffers[i]->size) {
+            size_t local_size = vk_buffers[i]->size - binding_gpu_offset[i];
+            if (local_size > bindings[i].size) local_size = bindings[i].size;
+            fprintf(out, ",\"debug_probe_binding\":true,\"u32_after_dispatch\":");
+            write_u32_sample_array_prefix(
+                out,
+                (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
+                local_size,
+                96);
+            if (buffer_fds && buffer_fds[i] >= 0 && fd_after_hash && fd_after_hash[i] != 0) {
+                fprintf(out, ",\"u32_after_writeback\":");
+                write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 96);
             }
         }
         fprintf(out, "}");
@@ -7058,6 +7142,7 @@ static void write_vulkan_binding_compact_report(
     const size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
         cpu_oracle_report, q6_sample_indices,
         sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]));
+    const int debug_probe_binding = probe_debug_binding_from_env();
     for (size_t i = 0; i < binding_count; ++i) {
         fprintf(out,
                 "%s{\"index\":%zu,\"set\":%u,\"binding\":%u,\"offset\":%lld,"
@@ -7136,6 +7221,18 @@ static void write_vulkan_binding_compact_report(
                         NULL, 0,
                         buffer_fds[i], bindings[i].offset, 1,
                         q6_sample_indices, q6_sample_count);
+                }
+            } else if (debug_probe_binding >= 0 &&
+                       bindings[i].binding == (uint32_t)debug_probe_binding) {
+                fprintf(out, ",\"debug_probe_binding\":true,\"u32_after_dispatch\":");
+                write_u32_sample_array_prefix(
+                    out,
+                    (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
+                    local_size,
+                    96);
+                if (buffer_fds && buffer_fds[i] >= 0 && fd_after_hash && fd_after_hash[i] != 0) {
+                    fprintf(out, ",\"u32_after_writeback\":");
+                    write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 96);
                 }
             } else {
                 fprintf(out, ",\"f32_after_dispatch\":");
