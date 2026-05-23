@@ -86,6 +86,8 @@ typedef struct PdockerVkFence PdockerVkFence;
 #define PDOCKER_VK_MAX_COPY_ALIASES 128
 #define PDOCKER_VK_ALIAS_MIN_SOURCE_BYTES (64ull * 1024ull * 1024ull)
 #define PDOCKER_VK_MAX_GUARDED_MEMORIES 256
+#define PDOCKER_VK_MAX_PROBE_SHADER_BYTES (8ull * 1024ull * 1024ull)
+#define PDOCKER_VK_MAX_PROBE_MANIFEST_BYTES (1024ull * 1024ull)
 #define PDOCKER_VULKAN_ICD_BUILD_MARKER "vulkan-icd-feature-chain-marker-20260518"
 #define PDOCKER_VK_GUARDED_DEFAULT_MIN_BYTES (64ull * 1024ull * 1024ull)
 
@@ -783,6 +785,144 @@ static void close_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe) {
     }
 }
 
+static bool text_contains_u32_json_field(const char *text, const char *field, uint32_t value) {
+    if (!text || !field) return false;
+    char compact[64];
+    char spaced[64];
+    snprintf(compact, sizeof(compact), "\"%s\":%u", field, value);
+    snprintf(spaced, sizeof(spaced), "\"%s\": %u", field, value);
+    return strstr(text, compact) || strstr(text, spaced);
+}
+
+static bool text_contains_size_json_field(const char *text, const char *field, size_t value) {
+    if (!text || !field) return false;
+    char compact[80];
+    char spaced[80];
+    snprintf(compact, sizeof(compact), "\"%s\":%zu", field, value);
+    snprintf(spaced, sizeof(spaced), "\"%s\": %zu", field, value);
+    return strstr(text, compact) || strstr(text, spaced);
+}
+
+static bool text_contains_json_false_field(const char *text, const char *field) {
+    if (!text || !field) return false;
+    char compact[80];
+    char spaced[80];
+    snprintf(compact, sizeof(compact), "\"%s\":false", field);
+    snprintf(spaced, sizeof(spaced), "\"%s\": false", field);
+    return strstr(text, compact) || strstr(text, spaced);
+}
+
+static int read_probe_manifest_limited(const char *path, char **out_text, size_t *out_size) {
+    if (!path || !path[0] || !out_text || !out_size) return -EINVAL;
+    *out_text = NULL;
+    *out_size = 0;
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -errno;
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        int rc = -errno;
+        close(fd);
+        return rc;
+    }
+    if (st.st_size <= 0 || (uint64_t)st.st_size > PDOCKER_VK_MAX_PROBE_MANIFEST_BYTES) {
+        close(fd);
+        return -EFBIG;
+    }
+    size_t size = (size_t)st.st_size;
+    char *text = (char *)malloc(size + 1);
+    if (!text) {
+        close(fd);
+        return -ENOMEM;
+    }
+    size_t off = 0;
+    while (off < size) {
+        ssize_t r = read(fd, text + off, size - off);
+        if (r < 0) {
+            int rc = -errno;
+            free(text);
+            close(fd);
+            return rc;
+        }
+        if (r == 0) break;
+        off += (size_t)r;
+    }
+    close(fd);
+    if (off != size) {
+        free(text);
+        return -EIO;
+    }
+    text[size] = '\0';
+    *out_text = text;
+    *out_size = size;
+    return 0;
+}
+
+static int verify_spirv_probe_manifest_runtime_guard(
+        const PdockerVkSpirvProbeReplay *probe,
+        uint64_t source_shader_hash) {
+    if (!probe || !probe->manifest_path || !probe->manifest_path[0]) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: missing PDOCKER_GPU_SPIRV_PROBE_MANIFEST\n");
+        return -EINVAL;
+    }
+    char *manifest = NULL;
+    size_t manifest_size = 0;
+    int rc = read_probe_manifest_limited(probe->manifest_path, &manifest, &manifest_size);
+    if (rc < 0) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: cannot read manifest %s rc=%d\n",
+                probe->manifest_path,
+                rc);
+        return rc;
+    }
+    char source_hash[32];
+    char effective_hash[32];
+    snprintf(source_hash, sizeof(source_hash), "0x%016llx",
+             (unsigned long long)source_shader_hash);
+    snprintf(effective_hash, sizeof(effective_hash), "0x%016llx",
+             (unsigned long long)probe->effective_shader_hash);
+    bool ok =
+        strstr(manifest, "\"schema\"") &&
+        strstr(manifest, "pdocker.spirv.probe-manifest.v1") &&
+        strstr(manifest, "\"submission_model\"") &&
+        strstr(manifest, "valid-module-instrumentation") &&
+        text_contains_json_false_field(manifest, "fragment_submission_allowed") &&
+        strstr(manifest, "\"dispatch_transport\"") &&
+        strstr(manifest, "append-as-normal-vulkan-dispatch-v4-binding") &&
+        text_contains_json_false_field(manifest, "dispatch_allowed") &&
+        strstr(manifest, source_hash) &&
+        text_contains_u32_json_field(manifest, "set", probe->debug_set) &&
+        text_contains_u32_json_field(manifest, "binding", probe->debug_binding);
+    /*
+     * The pre-instrumentation manifest may not know the final instrumented
+     * shader hash yet.  When the instrumenter records it, require the manifest
+     * and runtime env to agree; otherwise the env hash still guards the fd.
+     */
+    if (strstr(manifest, "instrumented_spirv_hash") ||
+        strstr(manifest, "effective_probe_shader_hash")) {
+        ok = ok && strstr(manifest, effective_hash);
+    }
+    if (strstr(manifest, "\"debug_bytes\"") ||
+        strstr(manifest, "\"min_bytes\"")) {
+        ok = ok && (text_contains_size_json_field(manifest, "debug_bytes", probe->debug_bytes) ||
+                    text_contains_size_json_field(manifest, "min_bytes", probe->debug_bytes));
+    }
+    free(manifest);
+    if (!ok) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: manifest guard mismatch manifest=%s source_hash=%s effective_hash=%s debug_set=%u debug_binding=%u debug_bytes=%zu\n",
+                probe->manifest_path,
+                source_hash,
+                effective_hash,
+                probe->debug_set,
+                probe->debug_binding,
+                probe->debug_bytes);
+        return -EPERM;
+    }
+    (void)manifest_size;
+    return 0;
+}
+
 static int prepare_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe,
                                       uint64_t source_shader_hash,
                                       size_t binding_count,
@@ -809,6 +949,13 @@ static int prepare_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe,
                 (unsigned long long)source_shader_hash,
                 (probe->manifest_path && probe->manifest_path[0]) ? probe->manifest_path : "-");
         return -ENOEXEC;
+    }
+    uint64_t expected_effective_hash = 0;
+    if (!parse_u64_env_base0("PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH",
+                             &expected_effective_hash)) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: missing PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH\n");
+        return -EINVAL;
     }
     if (!parse_size_env_base0("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
                               &probe->debug_bytes) ||
@@ -851,21 +998,32 @@ static int prepare_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe,
         }
     }
 
-    struct stat st;
-    if (stat(probe->shader_path, &st) != 0 || st.st_size <= 0) {
-        fprintf(stderr,
-                "pdocker-vulkan-icd: SPIR-V probe replay rejected: cannot stat probe shader %s\n",
-                probe->shader_path);
-        return -errno;
-    }
-    probe->shader_size = (size_t)st.st_size;
     probe->shader_fd = open(probe->shader_path, O_RDONLY | O_CLOEXEC);
     if (probe->shader_fd < 0) {
+        int rc = -errno;
         fprintf(stderr,
                 "pdocker-vulkan-icd: SPIR-V probe replay rejected: cannot open probe shader %s\n",
                 probe->shader_path);
-        return -errno;
+        return rc;
     }
+    struct stat st;
+    if (fstat(probe->shader_fd, &st) != 0) {
+        int rc = -errno;
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: cannot fstat probe shader %s\n",
+                probe->shader_path);
+        close_spirv_probe_replay(probe);
+        return rc;
+    }
+    if (st.st_size <= 0 || (uint64_t)st.st_size > PDOCKER_VK_MAX_PROBE_SHADER_BYTES) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: invalid probe shader size=%lld max=%llu\n",
+                (long long)st.st_size,
+                (unsigned long long)PDOCKER_VK_MAX_PROBE_SHADER_BYTES);
+        close_spirv_probe_replay(probe);
+        return -EFBIG;
+    }
+    probe->shader_size = (size_t)st.st_size;
     void *shader_map = mmap(NULL, probe->shader_size, PROT_READ, MAP_PRIVATE, probe->shader_fd, 0);
     if (shader_map == MAP_FAILED) {
         int rc = -errno;
@@ -874,12 +1032,25 @@ static int prepare_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe,
     }
     probe->effective_shader_hash = fnv1a64_bytes(shader_map, probe->shader_size);
     munmap(shader_map, probe->shader_size);
+    if (probe->effective_shader_hash != expected_effective_hash) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: effective hash mismatch expected=0x%016llx actual=0x%016llx\n",
+                (unsigned long long)expected_effective_hash,
+                (unsigned long long)probe->effective_shader_hash);
+        close_spirv_probe_replay(probe);
+        return -ENOEXEC;
+    }
 
     probe->debug_fd = create_shared_fd(probe->debug_bytes);
     if (probe->debug_fd < 0) {
         int rc = -errno;
         close_spirv_probe_replay(probe);
         return rc ? rc : -ENOMEM;
+    }
+    int manifest_rc = verify_spirv_probe_manifest_runtime_guard(probe, source_shader_hash);
+    if (manifest_rc < 0) {
+        close_spirv_probe_replay(probe);
+        return manifest_rc;
     }
     probe->enabled = true;
     fprintf(stderr,

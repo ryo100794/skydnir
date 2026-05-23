@@ -139,10 +139,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_SPIRV_PROBE_MANIFEST",
             "PDOCKER_GPU_SPIRV_PROBE_SHADER",
             "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH",
+            "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH",
             "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
             "PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
             "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
             "SPIR-V probe replay rejected",
+            "verify_spirv_probe_manifest_runtime_guard",
+            "fstat(probe->shader_fd, &st)",
+            "PDOCKER_VK_MAX_PROBE_SHADER_BYTES",
             "transport=VULKAN_DISPATCH_V4",
         ]:
             self.assertIn(marker, icd)
