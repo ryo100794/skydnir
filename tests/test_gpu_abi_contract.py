@@ -997,14 +997,16 @@ class GpuAbiContractTest(unittest.TestCase):
         spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
         self.assertTrue(spv.exists(), "native Q6 source SPIR-V evidence must be preserved")
         with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "native-q6.probe.json"
             result = subprocess.run(
-                ["python3", str(SPIRV_ANALYZER), str(spv)],
+                ["python3", str(SPIRV_ANALYZER), str(spv), "--probe-plan-out", str(manifest), "--probe-range", "0:2"],
                 cwd=ROOT,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=True,
             )
+            probe_manifest = json.loads(manifest.read_text())
         payload = json.loads(result.stdout)
         module = payload["modules"][0]
         self.assertEqual(module["hash"], "0x1bf751845c5dce75")
@@ -1034,6 +1036,52 @@ class GpuAbiContractTest(unittest.TestCase):
             and event["pointer_origin"]["indices"][1]["expr"]["op"] == "OpIAdd"
             for event in module["store_events"]
         ))
+        self.assertTrue(any(
+            event["pointer_origin"].get("base", {}).get("storage_class") == "Workgroup"
+            and event["object_expr"]["kind"] in ("load", "op", "id")
+            for event in module["store_events"]
+        ))
+        q6_targets = probe_manifest["q6_probe_targets"]
+        self.assertTrue(q6_targets["available"])
+        self.assertEqual(q6_targets["final_output_store_count"], 2)
+        self.assertEqual(q6_targets["workgroup_store_count"], 12)
+        by_phase = {phase["name"]: phase for phase in q6_targets["phases"]}
+        self.assertEqual(by_phase["tail"]["source_workgroup_base_ids"], [143])
+        self.assertEqual(by_phase["full"]["source_workgroup_base_ids"], [143])
+        self.assertEqual(by_phase["tail"]["output_store"]["word_index"], 3789)
+        self.assertEqual(by_phase["full"]["output_store"]["word_index"], 6653)
+        self.assertEqual(by_phase["tail"]["output_store"]["base"]["kind"], "descriptor")
+        self.assertEqual(by_phase["tail"]["output_store"]["base"]["binding"], 2)
+        self.assertEqual(
+            [
+                ("partial_to_workgroup_candidate", 3334, 39),
+                ("reduction_candidate", 3487, 49),
+            ],
+            [
+                (target["role"], target["word_index"], target["candidate"]["candidate_id"])
+                for target in by_phase["tail"]["preceding_workgroup_stores"][:2]
+            ],
+        )
+        self.assertEqual(
+            [
+                ("variable", "Workgroup"),
+                ("variable", "Workgroup"),
+            ],
+            [
+                (target["base"]["kind"], target["base"]["storage_class"])
+                for target in by_phase["full"]["preceding_workgroup_stores"][:2]
+            ],
+        )
+        self.assertEqual(
+            [
+                ("partial_to_workgroup_candidate", 6198, 105),
+                ("reduction_candidate", 6351, 115),
+            ],
+            [
+                (target["role"], target["word_index"], target["candidate"]["candidate_id"])
+                for target in by_phase["full"]["preceding_workgroup_stores"][:2]
+            ],
+        )
 
     def test_spirv_probe_manifest_verifier_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1118,6 +1166,28 @@ class GpuAbiContractTest(unittest.TestCase):
             broken = json.loads(json.dumps(valid))
             broken["probe_selection"]["selected_candidates"][0]["block_entry_insert_after_phi_word_index"] = "bad"
             cases.append((broken, "block_entry_insert_after_phi_word_index must be an integer"))
+
+            broken = json.loads(json.dumps(valid))
+            broken["q6_probe_targets"]["priority_targets"][0]["role"] = "hash-targeted-shortcut"
+            cases.append((broken, "q6_probe_targets.priority_targets[0].role must be one of"))
+
+            broken = json.loads(json.dumps(valid))
+            del broken["q6_probe_targets"]
+            cases.append((broken, "q6_probe_targets must be present as an object"))
+
+            broken = json.loads(json.dumps(valid))
+            broken["q6_probe_targets"]["available"] = True
+            broken["q6_probe_targets"]["priority_targets"] = [
+                target for target in broken["q6_probe_targets"]["priority_targets"]
+                if target.get("role") != "reduction_candidate"
+            ]
+            cases.append((broken, "q6_probe_targets.priority_targets must include a reduction_candidate when available"))
+
+            broken = json.loads(json.dumps(valid))
+            target = broken["q6_probe_targets"]["priority_targets"][0]
+            if target.get("role") == "final_output_store":
+                target["base"] = {"kind": "variable", "storage_class": "Workgroup"}
+                cases.append((broken, "base must be descriptor binding 2 for final_output_store"))
 
             for idx, (payload, expected_error) in enumerate(cases):
                 path = tmp_path / f"broken-{idx}.json"

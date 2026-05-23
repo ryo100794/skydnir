@@ -472,6 +472,163 @@ def choose_debug_descriptor(descriptor_variables: list[dict], max_sets: int = 8,
     }
 
 
+def build_q6_probe_targets(module: dict) -> dict:
+    """Describe Q6-like final-output and workgroup stores for valid-module probes.
+
+    This is intentionally structural rather than hash-targeted: it looks for
+    writes to the runtime output descriptor and the preceding Workgroup stores
+    that feed those writes.  The result is a probe *plan*, not an executable
+    instrumentation fragment; the runtime still has to submit a full, validated
+    SPIR-V module.
+    """
+
+    def block_for_word(word_index: int) -> dict | None:
+        for function in module.get("control_flow", {}).get("functions", []):
+            for ordinal, block in enumerate(function.get("blocks", [])):
+                indices = list(block.get("instruction_word_indices") or [])
+                if not indices:
+                    continue
+                start = int(block.get("word_index", min(indices)))
+                end = max(indices + [start])
+                if start <= word_index <= end:
+                    return {
+                        "function_id": function.get("id"),
+                        "block_label": block.get("label"),
+                        "block_ordinal": ordinal,
+                        "block_word_index": block.get("word_index"),
+                        "block_entry_insert_after_phi_word_index": block.get("block_entry_insert_after_phi_word_index"),
+                        "block_exit_insert_before_word_index": block.get("block_exit_insert_before_word_index"),
+                    }
+        return None
+
+    candidate_by_block: dict[tuple[int | None, int | None], dict] = {}
+    for candidate in module.get("control_flow", {}).get("probe_plan", {}).get("candidates", []):
+        candidate_by_block[(candidate.get("function_id"), candidate.get("block_label"))] = candidate
+
+    def annotate_store(store: dict, phase: str, role: str, output_store_word_index: int | None = None) -> dict:
+        word_index = int(store.get("word_index", -1))
+        block = block_for_word(word_index) or {}
+        candidate = candidate_by_block.get((block.get("function_id"), block.get("block_label")), {})
+        pointer_origin = store.get("pointer_origin") or {}
+        base = pointer_origin.get("base") or pointer_origin
+        item = {
+            "phase": phase,
+            "role": role,
+            "word_index": word_index,
+            "object_id": store.get("object_id"),
+            "pointer_id": store.get("pointer_id"),
+            "base": {
+                "kind": base.get("kind"),
+                "id": base.get("id"),
+                "set": base.get("set"),
+                "binding": base.get("binding"),
+                "storage_class": base.get("storage_class"),
+                "built_in": base.get("built_in"),
+            },
+            "index_expr": pointer_origin.get("indices", []),
+            "block": block,
+            "candidate": {
+                "candidate_id": candidate.get("candidate_id"),
+                "word_index": candidate.get("word_index"),
+                "block_entry_insert_after_phi_word_index": candidate.get("block_entry_insert_after_phi_word_index"),
+                "block_exit_insert_before_word_index": candidate.get("block_exit_insert_before_word_index"),
+            },
+            "capture": [
+                "local_invocation_id",
+                "workgroup_id",
+                "computed_output_index",
+                "stored_value_bits",
+                "candidate_id",
+            ],
+        }
+        if output_store_word_index is not None:
+            item["related_output_store_word_index"] = output_store_word_index
+        return item
+
+    def collect_workgroup_bases(expr: object, out: set[int]) -> None:
+        if isinstance(expr, dict):
+            pointer = expr.get("pointer")
+            if isinstance(pointer, dict):
+                base = pointer.get("base") or pointer
+                if base.get("kind") == "variable" and base.get("storage_class") == "Workgroup":
+                    base_id = base.get("id")
+                    if isinstance(base_id, int):
+                        out.add(base_id)
+                collect_workgroup_bases(pointer, out)
+            for value in expr.values():
+                collect_workgroup_bases(value, out)
+        elif isinstance(expr, list):
+            for value in expr:
+                collect_workgroup_bases(value, out)
+
+    stores = sorted(module.get("store_events", []), key=lambda item: int(item.get("word_index", -1)))
+    final_output_stores = []
+    workgroup_stores = []
+    for store in stores:
+        pointer_origin = store.get("pointer_origin") or {}
+        base = pointer_origin.get("base") or pointer_origin
+        if base.get("kind") == "descriptor" and base.get("binding") == 2:
+            final_output_stores.append(store)
+        if base.get("kind") == "variable" and base.get("storage_class") == "Workgroup":
+            workgroup_stores.append(store)
+
+    phases = []
+    previous_output_word = -1
+    for phase_index, output_store in enumerate(final_output_stores):
+        output_word = int(output_store.get("word_index", -1))
+        phase_name = "tail" if phase_index == 0 and len(final_output_stores) > 1 else "full" if len(final_output_stores) > 1 else "single"
+        source_workgroup_base_ids: set[int] = set()
+        collect_workgroup_bases(output_store.get("object_expr"), source_workgroup_base_ids)
+        preceding = [
+            store
+            for store in workgroup_stores
+            if previous_output_word < int(store.get("word_index", -1)) < output_word
+            and (
+                not source_workgroup_base_ids
+                or ((store.get("pointer_origin") or {}).get("base") or {}).get("id") in source_workgroup_base_ids
+            )
+        ]
+        priority_roles = []
+        if len(preceding) >= 1:
+            priority_roles.append("partial_to_workgroup_candidate")
+        if len(preceding) >= 2:
+            priority_roles.append("reduction_candidate")
+        while len(priority_roles) < len(preceding):
+            priority_roles.append("post_reduction_workgroup_candidate")
+        phases.append(
+            {
+                "name": phase_name,
+                "source_workgroup_base_ids": sorted(source_workgroup_base_ids),
+                "output_store": annotate_store(output_store, phase_name, "final_output_store"),
+                "preceding_workgroup_stores": [
+                    annotate_store(store, phase_name, priority_roles[index], output_word)
+                    for index, store in enumerate(preceding)
+                ],
+            }
+        )
+        previous_output_word = output_word
+
+    priority_targets = []
+    for phase in phases:
+        priority_targets.extend(phase["preceding_workgroup_stores"][:2])
+        priority_targets.append(phase["output_store"])
+
+    return {
+        "available": bool(final_output_stores and workgroup_stores),
+        "method": "structural-output-descriptor-and-workgroup-store-chain",
+        "output_descriptor_binding": 2,
+        "final_output_store_count": len(final_output_stores),
+        "workgroup_store_count": len(workgroup_stores),
+        "phases": phases,
+        "priority_targets": priority_targets,
+        "notes": [
+            "Targets are derived from descriptor/workgroup dataflow, not from a shader hash.",
+            "Use priority targets to distinguish partial accumulation, reduction, and final output store.",
+            "Probe execution still requires full-module instrumentation plus spirv-val success.",
+        ],
+    }
+
+
 def build_probe_manifest(module: dict, source_path: Path, probe_range: tuple[int, int] | None = None) -> dict:
     control_flow = module.get("control_flow", {})
     probe_plan = control_flow.get("probe_plan", {})
@@ -574,6 +731,7 @@ def build_probe_manifest(module: dict, source_path: Path, probe_range: tuple[int
             "bisect_rounds": probe_plan.get("bisect_rounds", []),
             "candidate_ranges": candidate_ranges,
         },
+        "q6_probe_targets": build_q6_probe_targets(module),
         "insertion_rules": {
             "block_entry": "insert after contiguous OpPhi instructions",
             "block_exit": "insert before OpLoopMerge/OpSelectionMerge if present, otherwise before terminator",
@@ -1094,6 +1252,17 @@ def analyze_spirv(path: Path) -> dict:
                 "struct_type": item.get("struct_type"),
                 "struct_name": item.get("struct_name", ""),
             }
+        if base_id in variable:
+            item = variable[base_id]
+            dec = decorations.get(base_id, {})
+            return {
+                "kind": "variable",
+                "id": base_id,
+                "name": names.get(base_id, ""),
+                "storage_class": item.get("storage_class_name"),
+                "built_in": dec.get("BuiltInName"),
+                "result_type": item.get("result_type"),
+            }
         return {
             "kind": "id",
             "id": base_id,
@@ -1215,6 +1384,7 @@ def analyze_spirv(path: Path) -> dict:
         {
             **event,
             "pointer_origin": pointer_origin(event["pointer_id"]),
+            "object_expr": describe_id_expr(int(event["object_id"])),
         }
         for event in store_events_raw
     ]

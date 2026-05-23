@@ -233,6 +233,106 @@ def verify_manifest(payload: dict) -> list[str]:
         if item.get("candidate_count") != rng[1] - rng[0]:
             fail(errors, f"candidate range {rng} has wrong candidate_count")
 
+    q6_targets = payload.get("q6_probe_targets")
+    if not isinstance(q6_targets, dict):
+        fail(errors, "q6_probe_targets must be present as an object")
+    else:
+        if q6_targets.get("method") != "structural-output-descriptor-and-workgroup-store-chain":
+            fail(errors, "q6_probe_targets.method must be structural and non-hash-targeted")
+        if q6_targets.get("output_descriptor_binding") != 2:
+            fail(errors, "q6_probe_targets.output_descriptor_binding must be 2 for Q6 output probes")
+        available = q6_targets.get("available")
+        if not isinstance(available, bool):
+            fail(errors, "q6_probe_targets.available must be boolean")
+        for count_key in ("final_output_store_count", "workgroup_store_count"):
+            if not isinstance(q6_targets.get(count_key), int) or q6_targets.get(count_key) < 0:
+                fail(errors, f"q6_probe_targets.{count_key} must be a non-negative integer")
+        phases = q6_targets.get("phases")
+        priority_targets = q6_targets.get("priority_targets")
+        if not isinstance(phases, list):
+            fail(errors, "q6_probe_targets.phases must be a list")
+            phases = []
+        if not isinstance(priority_targets, list):
+            fail(errors, "q6_probe_targets.priority_targets must be a list")
+            priority_targets = []
+
+        allowed_roles = {
+            "final_output_store",
+            "partial_to_workgroup_candidate",
+            "reduction_candidate",
+            "post_reduction_workgroup_candidate",
+        }
+
+        def validate_target(target: object, context: str) -> None:
+            if not isinstance(target, dict):
+                fail(errors, f"{context} must be an object")
+                return
+            role = target.get("role")
+            if role not in allowed_roles:
+                fail(errors, f"{context}.role must be one of {sorted(allowed_roles)}")
+            word_index = target.get("word_index")
+            if not isinstance(word_index, int):
+                fail(errors, f"{context}.word_index must be an integer")
+            elif isinstance(module_words, int) and not (0 <= word_index < module_words):
+                fail(errors, f"{context}.word_index is outside module word range")
+            block = target.get("block")
+            if not isinstance(block, dict):
+                fail(errors, f"{context}.block must be present")
+            else:
+                for key in ("function_id", "block_label", "block_ordinal"):
+                    if not isinstance(block.get(key), int):
+                        fail(errors, f"{context}.block.{key} must be an integer")
+            candidate = target.get("candidate")
+            if not isinstance(candidate, dict):
+                fail(errors, f"{context}.candidate must be present")
+            elif not isinstance(candidate.get("candidate_id"), int):
+                fail(errors, f"{context}.candidate.candidate_id must be an integer")
+            capture = target.get("capture")
+            if not isinstance(capture, list) or "stored_value_bits" not in capture or "computed_output_index" not in capture:
+                fail(errors, f"{context}.capture must include stored_value_bits and computed_output_index")
+            base = target.get("base") if isinstance(target.get("base"), dict) else {}
+            if role == "final_output_store":
+                if base.get("kind") != "descriptor" or base.get("binding") != 2:
+                    fail(errors, f"{context}.base must be descriptor binding 2 for final_output_store")
+            elif role in {
+                "partial_to_workgroup_candidate",
+                "reduction_candidate",
+                "post_reduction_workgroup_candidate",
+            }:
+                if base.get("kind") != "variable" or base.get("storage_class") != "Workgroup":
+                    fail(errors, f"{context}.base must be a Workgroup variable for {role}")
+                if not isinstance(target.get("related_output_store_word_index"), int):
+                    fail(errors, f"{context}.related_output_store_word_index must be present for Workgroup probes")
+
+        for phase_index, phase in enumerate(phases):
+            if not isinstance(phase, dict):
+                fail(errors, f"q6_probe_targets.phases[{phase_index}] must be an object")
+                continue
+            if phase.get("name") not in ("tail", "full", "single"):
+                fail(errors, f"q6_probe_targets.phases[{phase_index}].name is invalid")
+            source_ids = phase.get("source_workgroup_base_ids")
+            if not isinstance(source_ids, list) or not all(isinstance(value, int) for value in source_ids):
+                fail(errors, f"q6_probe_targets.phases[{phase_index}].source_workgroup_base_ids must be integer ids")
+            validate_target(phase.get("output_store"), f"q6_probe_targets.phases[{phase_index}].output_store")
+            for store_index, target in enumerate(phase.get("preceding_workgroup_stores") or []):
+                validate_target(target, f"q6_probe_targets.phases[{phase_index}].preceding_workgroup_stores[{store_index}]")
+
+        for target_index, target in enumerate(priority_targets):
+            validate_target(target, f"q6_probe_targets.priority_targets[{target_index}]")
+
+        if available is True:
+            roles = [
+                target.get("role")
+                for target in priority_targets
+                if isinstance(target, dict)
+            ]
+            if "final_output_store" not in roles:
+                fail(errors, "q6_probe_targets.priority_targets must include a final_output_store when available")
+            if "reduction_candidate" not in roles:
+                fail(errors, "q6_probe_targets.priority_targets must include a reduction_candidate when available")
+            if not phases:
+                fail(errors, "q6_probe_targets.phases must be non-empty when available")
+
     return errors
 
 

@@ -229,7 +229,8 @@ decisive step.
 
 ### Q6K-004: Valid-module probe bisection
 
-Status: ready to implement after no-op perturbation guard.
+Status: manifest targets are now first-class; valid-module rewrite still
+pending after no-op perturbation guard.
 
 Purpose: bisect native Q6 dynamic execution without submitting arbitrary SPIR-V
 fragments and without changing the V4 ABI.
@@ -242,6 +243,17 @@ Acceptance:
 - Runtime descriptor collision is checked before dispatch.
 - The probe output identifies whether divergence appears before reduction,
   during reduction, before final store, or after final store/writeback.
+
+Implementation note:
+
+- `scripts/analyze-spirv.py` now emits `q6_probe_targets` in the probe
+  manifest.  The target selection is structural: it traces final writes to
+  output descriptor binding 2 back to the Workgroup source base, then selects
+  the preceding Workgroup store chain.  It is not keyed to a SPIR-V hash and it
+  does not alter `VULKAN_DISPATCH_V4`.
+- `scripts/verify-spirv-probe-manifest.py` validates this optional section
+  fail-closed when present, including target roles, word ranges, candidate
+  linkage, and required capture fields.
 
 Initial probe candidates, in priority order:
 
