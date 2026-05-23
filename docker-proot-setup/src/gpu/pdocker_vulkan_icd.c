@@ -732,6 +732,167 @@ static uint64_t fnv1a64_update_u64(uint64_t hash, uint64_t value) {
     return fnv1a64_update_bytes(hash, &value, sizeof(value));
 }
 
+typedef struct {
+    bool enabled;
+    int shader_fd;
+    int debug_fd;
+    size_t shader_size;
+    size_t debug_bytes;
+    uint32_t debug_set;
+    uint32_t debug_binding;
+    uint64_t expected_source_hash;
+    uint64_t effective_shader_hash;
+    const char *manifest_path;
+    const char *shader_path;
+} PdockerVkSpirvProbeReplay;
+
+static bool parse_u64_env_base0(const char *name, uint64_t *out) {
+    const char *value = getenv(name);
+    if (!value || !value[0] || !out) return false;
+    char *end = NULL;
+    errno = 0;
+    unsigned long long parsed = strtoull(value, &end, 0);
+    if (errno != 0 || !end || *end != '\0') return false;
+    *out = (uint64_t)parsed;
+    return true;
+}
+
+static bool parse_size_env_base0(const char *name, size_t *out) {
+    uint64_t value = 0;
+    if (!parse_u64_env_base0(name, &value) || value > (uint64_t)SIZE_MAX) return false;
+    *out = (size_t)value;
+    return true;
+}
+
+static bool parse_u32_env_base0(const char *name, uint32_t *out) {
+    uint64_t value = 0;
+    if (!parse_u64_env_base0(name, &value) || value > UINT32_MAX) return false;
+    *out = (uint32_t)value;
+    return true;
+}
+
+static void close_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe) {
+    if (!probe) return;
+    if (probe->shader_fd >= 0) {
+        close(probe->shader_fd);
+        probe->shader_fd = -1;
+    }
+    if (probe->debug_fd >= 0) {
+        close(probe->debug_fd);
+        probe->debug_fd = -1;
+    }
+}
+
+static int prepare_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe,
+                                      uint64_t source_shader_hash,
+                                      size_t binding_count,
+                                      const uint32_t *descriptor_sets,
+                                      const uint32_t *bindings) {
+    if (!probe) return -EINVAL;
+    memset(probe, 0, sizeof(*probe));
+    probe->shader_fd = -1;
+    probe->debug_fd = -1;
+    probe->manifest_path = getenv("PDOCKER_GPU_SPIRV_PROBE_MANIFEST");
+    probe->shader_path = getenv("PDOCKER_GPU_SPIRV_PROBE_SHADER");
+    if (!probe->shader_path || !probe->shader_path[0]) return 0;
+
+    if (!parse_u64_env_base0("PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH",
+                             &probe->expected_source_hash)) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: missing PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH\n");
+        return -EINVAL;
+    }
+    if (probe->expected_source_hash != source_shader_hash) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: source hash mismatch expected=0x%016llx actual=0x%016llx manifest=%s\n",
+                (unsigned long long)probe->expected_source_hash,
+                (unsigned long long)source_shader_hash,
+                (probe->manifest_path && probe->manifest_path[0]) ? probe->manifest_path : "-");
+        return -ENOEXEC;
+    }
+    if (!parse_size_env_base0("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
+                              &probe->debug_bytes) ||
+        probe->debug_bytes == 0 ||
+        probe->debug_bytes > 16ull * 1024ull * 1024ull) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: invalid PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES\n");
+        return -EINVAL;
+    }
+    if (!parse_u32_env_base0("PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
+                             &probe->debug_set) ||
+        !parse_u32_env_base0("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
+                             &probe->debug_binding) ||
+        probe->debug_set >= PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
+        probe->debug_binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: invalid debug descriptor set/binding\n");
+        return -EINVAL;
+    }
+    if (binding_count >= PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: no V4 binding slot for debug SSBO\n");
+        return -E2BIG;
+    }
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (descriptor_sets && bindings &&
+            descriptor_sets[i] == probe->debug_set &&
+            bindings[i] == probe->debug_binding) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: SPIR-V probe replay rejected: debug descriptor collides set=%u binding=%u\n",
+                    probe->debug_set,
+                    probe->debug_binding);
+            return -EEXIST;
+        }
+        if (bindings && bindings[i] == probe->debug_binding) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: SPIR-V probe replay rejected: debug binding number collides binding=%u\n",
+                    probe->debug_binding);
+            return -EEXIST;
+        }
+    }
+
+    struct stat st;
+    if (stat(probe->shader_path, &st) != 0 || st.st_size <= 0) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: cannot stat probe shader %s\n",
+                probe->shader_path);
+        return -errno;
+    }
+    probe->shader_size = (size_t)st.st_size;
+    probe->shader_fd = open(probe->shader_path, O_RDONLY | O_CLOEXEC);
+    if (probe->shader_fd < 0) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: SPIR-V probe replay rejected: cannot open probe shader %s\n",
+                probe->shader_path);
+        return -errno;
+    }
+    void *shader_map = mmap(NULL, probe->shader_size, PROT_READ, MAP_PRIVATE, probe->shader_fd, 0);
+    if (shader_map == MAP_FAILED) {
+        int rc = -errno;
+        close_spirv_probe_replay(probe);
+        return rc;
+    }
+    probe->effective_shader_hash = fnv1a64_bytes(shader_map, probe->shader_size);
+    munmap(shader_map, probe->shader_size);
+
+    probe->debug_fd = create_shared_fd(probe->debug_bytes);
+    if (probe->debug_fd < 0) {
+        int rc = -errno;
+        close_spirv_probe_replay(probe);
+        return rc ? rc : -ENOMEM;
+    }
+    probe->enabled = true;
+    fprintf(stderr,
+            "pdocker-vulkan-icd: SPIR-V probe replay armed: manifest=%s source_hash=0x%016llx effective_hash=0x%016llx debug_set=%u debug_binding=%u debug_bytes=%zu transport=VULKAN_DISPATCH_V4\n",
+            (probe->manifest_path && probe->manifest_path[0]) ? probe->manifest_path : "-",
+            (unsigned long long)source_shader_hash,
+            (unsigned long long)probe->effective_shader_hash,
+            probe->debug_set,
+            probe->debug_binding,
+            probe->debug_bytes);
+    return 0;
+}
+
 static uint64_t fnv1a64_specialization_hash(
         const VkSpecializationMapEntry *entries,
         size_t entry_count,
@@ -989,6 +1150,10 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     }
     if (binding_count == 0) return -EINVAL;
 
+    const uint64_t source_shader_hash =
+        (shader->code_map && shader->code_map != MAP_FAILED)
+            ? fnv1a64_bytes(shader->code_map, shader->code_size)
+            : 0;
     uint32_t push_size = op->push_constant_size;
     if (op->pipeline && op->pipeline->layout &&
         op->pipeline->layout->push_constant_size > push_size) {
@@ -1009,6 +1174,36 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     const char *spec_token = op->pipeline->specialization_data_size ? spec_hex : "-";
     if (op->pipeline->specialization_too_large) return -E2BIG;
 
+    PdockerVkSpirvProbeReplay probe;
+    int probe_rc = prepare_spirv_probe_replay(&probe,
+                                              source_shader_hash,
+                                              binding_count,
+                                              api_descriptor_sets,
+                                              bindings);
+    if (probe_rc < 0) return probe_rc;
+    size_t shader_size_to_send = shader->code_size;
+    uint64_t shader_hash_to_send = source_shader_hash;
+    if (probe.enabled) {
+        fds[0] = probe.shader_fd;
+        shader_size_to_send = probe.shader_size;
+        shader_hash_to_send = probe.effective_shader_hash;
+        api_descriptor_sets[binding_count] = probe.debug_set;
+        bindings[binding_count] = probe.debug_binding;
+        offsets[binding_count] = 0;
+        sizes[binding_count] = probe.debug_bytes;
+        api_offsets[binding_count] = 0;
+        api_ranges[binding_count] = probe.debug_bytes;
+        api_buffer_sizes[binding_count] = probe.debug_bytes;
+        api_descriptor_types[binding_count] = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        api_dynamic_flags[binding_count] = 0;
+        api_memory_offsets[binding_count] = 0;
+        api_memory_sizes[binding_count] = probe.debug_bytes;
+        api_memory_ids[binding_count] = 0;
+        api_buffer_ids[binding_count] = 0;
+        fds[1 + binding_count] = probe.debug_fd;
+        binding_count++;
+    }
+
     char command[4096];
 #define PDOCKER_VK_COMMAND_TOO_LONG(stage_, used_) \
     do { \
@@ -1017,13 +1212,14 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                                             sizeof(command), \
                                             (stage_), \
                                             true); \
+        close_spirv_probe_replay(&probe); \
         return -ENAMETOOLONG; \
     } while (0)
 #define PDOCKER_VK_APPEND_TOO_LONG(stage_) \
     PDOCKER_VK_COMMAND_TOO_LONG((stage_), off + ((n > 0) ? (size_t)n : 0))
     int n = snprintf(command, sizeof(command),
                      "VULKAN_DISPATCH_V4 %zu %zu %u %u %u %u %s %s %u %zu %s",
-                     shader->code_size,
+                     shader_size_to_send,
                      binding_count,
                      push_size,
                      op->dispatch_x,
@@ -1069,10 +1265,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     }
     const size_t core_command_len = off;
     const uint64_t core_command_hash = fnv1a64_bytes(command, core_command_len);
-    const uint64_t shader_hash =
-        (shader->code_map && shader->code_map != MAP_FAILED)
-            ? fnv1a64_bytes(shader->code_map, shader->code_size)
-            : 0;
+    const uint64_t shader_hash = shader_hash_to_send;
     const uint64_t push_hash = fnv1a64_bytes(op->push_constants, push_size);
     const uint64_t specialization_data_hash =
         fnv1a64_bytes(op->pipeline->specialization_data,
@@ -1203,7 +1396,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                                     raw_command_hash,
                                     core_command_len,
                                     core_command_hash,
-                                    shader->code_size,
+                                    shader_size_to_send,
                                     shader_hash,
                                     push_size,
                                     push_hash,
@@ -1242,7 +1435,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                 "\"bindings\":%zu,\"dispatch\":[%u,%u,%u]}\n",
                 (unsigned long long)dispatch_id,
                 (unsigned long long)shader_hash,
-                shader->code_size,
+                shader_size_to_send,
                 binding_count,
                 op->dispatch_x,
                 op->dispatch_y ? op->dispatch_y : 1,
@@ -1262,6 +1455,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                     monotonic_ms() - lifecycle_start_ms);
             fflush(stderr);
         }
+        close_spirv_probe_replay(&probe);
         return socket_fd;
     }
     char control[CMSG_SPACE(sizeof(fds))];
@@ -1352,6 +1546,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         fflush(stderr);
     }
     close(socket_fd);
+    close_spirv_probe_replay(&probe);
     return rc;
 }
 

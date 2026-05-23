@@ -133,6 +133,34 @@ class GpuAbiContractTest(unittest.TestCase):
             executor,
         )
 
+    def test_spirv_probe_replay_uses_existing_v4_binding_transport(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "PDOCKER_GPU_SPIRV_PROBE_MANIFEST",
+            "PDOCKER_GPU_SPIRV_PROBE_SHADER",
+            "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH",
+            "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
+            "PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
+            "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
+            "SPIR-V probe replay rejected",
+            "transport=VULKAN_DISPATCH_V4",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn("fds[0] = probe.shader_fd;", icd)
+        self.assertIn("fds[1 + binding_count] = probe.debug_fd;", icd)
+        self.assertIn("api_descriptor_sets[binding_count] = probe.debug_set;", icd)
+        self.assertIn("bindings[binding_count] = probe.debug_binding;", icd)
+        self.assertIn("binding_count++;", icd)
+        app_fields, app_count, app_hash, _ = v4_binding_schema(APP_HEADER)
+        container_fields, container_count, container_hash, _ = v4_binding_schema(CONTAINER_HEADER)
+        self.assertEqual(app_fields, container_fields)
+        self.assertEqual(app_count, 13)
+        self.assertEqual(container_count, 13)
+        self.assertEqual(app_hash, int("0x4a322a1f9f143a20", 16))
+        self.assertEqual(container_hash, int("0x4a322a1f9f143a20", 16))
+        self.assertNotIn("VULKAN_DISPATCH_V5", icd)
+        self.assertNotIn("SPIRV_PROBE_DISPATCH", icd)
+
     def test_vulkan_dispatch_reports_binding_diagnostics(self):
         source = GPU_EXECUTOR.read_text()
         self.assertIn("PDOCKER_GPU_EXECUTOR_BUILD_MARKER", source)
