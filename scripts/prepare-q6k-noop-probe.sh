@@ -6,15 +6,17 @@ SPV="$ROOT/docs/test/spirv-q6k-native-adb45055/native-q6-source.spv"
 OUT_DIR="$ROOT/docs/test/q6k-noop-probe-latest"
 DEBUG_BYTES="${PDOCKER_Q6K_PROBE_DEBUG_BYTES:-65536}"
 TARGET_ENV="${PDOCKER_Q6K_PROBE_TARGET_ENV:-vulkan1.2}"
+PROBE_WRITES=0
 
 usage() {
   cat <<'EOF'
-usage: scripts/prepare-q6k-noop-probe.sh [--spv PATH] [--out-dir DIR]
+usage: scripts/prepare-q6k-noop-probe.sh [--spv PATH] [--out-dir DIR] [--probe-writes]
 
 Prepare a deterministic Q6K no-op SPIR-V probe bundle.  This does not rebuild
 the llama image, does not modify llama.cpp/Dockerfile/model/prompt, and does not
 dispatch anything.  It only creates validated artifacts and an env file for the
-next device run.
+next device run.  --probe-writes keeps the same whole-module validation path but
+adds executable Q6K debug SSBO stores for the manifest priority targets.
 EOF
 }
 
@@ -27,6 +29,10 @@ while [[ $# -gt 0 ]]; do
     --out-dir)
       OUT_DIR="$2"
       shift 2
+      ;;
+    --probe-writes)
+      PROBE_WRITES=1
+      shift
       ;;
     -h|--help)
       usage
@@ -43,10 +49,15 @@ done
 mkdir -p "$OUT_DIR"
 
 MANIFEST="$OUT_DIR/native-q6.probe.json"
-NOOP_SPV="$OUT_DIR/native-q6.noop.spv"
-NOOP_MANIFEST="$OUT_DIR/native-q6.noop.probe.json"
-NOOP_ASM="$OUT_DIR/native-q6.noop.spvasm"
-INSTRUMENTATION_JSON="$OUT_DIR/native-q6.noop.instrumentation.json"
+if [[ "$PROBE_WRITES" == "1" ]]; then
+  PROBE_KIND="write"
+else
+  PROBE_KIND="noop"
+fi
+NOOP_SPV="$OUT_DIR/native-q6.$PROBE_KIND.spv"
+NOOP_MANIFEST="$OUT_DIR/native-q6.$PROBE_KIND.probe.json"
+NOOP_ASM="$OUT_DIR/native-q6.$PROBE_KIND.spvasm"
+INSTRUMENTATION_JSON="$OUT_DIR/native-q6.$PROBE_KIND.instrumentation.json"
 VERIFY_SOURCE_JSON="$OUT_DIR/native-q6.probe.verify.json"
 VERIFY_NOOP_JSON="$OUT_DIR/native-q6.noop.probe.verify.json"
 ENV_FILE="$OUT_DIR/noop-probe.env"
@@ -61,11 +72,17 @@ python3 "$ROOT/scripts/analyze-spirv.py" "$SPV" \
 python3 "$ROOT/scripts/verify-spirv-probe-manifest.py" "$MANIFEST" \
   --json-out "$VERIFY_SOURCE_JSON" >/dev/null
 
-python3 "$ROOT/scripts/instrument-spirv-noop-probe.py" "$SPV" "$NOOP_SPV" \
-  --manifest-in "$MANIFEST" \
-  --manifest-out "$NOOP_MANIFEST" \
-  --asm-out "$NOOP_ASM" \
-  --target-env "$TARGET_ENV" >"$INSTRUMENTATION_JSON"
+INSTRUMENT_ARGS=(
+  "$ROOT/scripts/instrument-spirv-noop-probe.py" "$SPV" "$NOOP_SPV"
+  --manifest-in "$MANIFEST"
+  --manifest-out "$NOOP_MANIFEST"
+  --asm-out "$NOOP_ASM"
+  --target-env "$TARGET_ENV"
+)
+if [[ "$PROBE_WRITES" == "1" ]]; then
+  INSTRUMENT_ARGS+=(--probe-writes)
+fi
+python3 "${INSTRUMENT_ARGS[@]}" >"$INSTRUMENTATION_JSON"
 
 python3 "$ROOT/scripts/verify-spirv-probe-manifest.py" "$NOOP_MANIFEST" \
   --json-out "$VERIFY_NOOP_JSON" >/dev/null
@@ -105,7 +122,7 @@ env_path.write_text(
     "\n".join(f"export {key}={shlex.quote(value)}" for key, value in env.items()) + "\n"
 )
 summary = {
-    "schema": "pdocker.q6k.noop-probe-bundle.v1",
+    "schema": f"pdocker.q6k.{instrumentation['instrumentation']['kind']}.bundle.v1",
     "valid": True,
     "source_manifest": str(manifest_path),
     "noop_manifest": str(noop_manifest_path),

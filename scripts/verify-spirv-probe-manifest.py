@@ -57,8 +57,14 @@ def verify_manifest(payload: dict) -> list[str]:
     elif isinstance(module_words, int) and module_bytes != module_words * 4:
         fail(errors, "basis.module_bytes must equal basis.module_words * 4")
     prior_transforms = basis.get("prior_transforms")
-    if prior_transforms not in ([], None, ["noop-debug-ssbo-declaration"]):
-        fail(errors, "basis.prior_transforms must be empty or contain only noop-debug-ssbo-declaration")
+    allowed_prior_transforms = (
+        [],
+        None,
+        ["noop-debug-ssbo-declaration"],
+        ["q6-debug-ssbo-probe-writes"],
+    )
+    if prior_transforms not in allowed_prior_transforms:
+        fail(errors, "basis.prior_transforms must be empty or contain an approved whole-module debug SSBO transform")
     source_spirv = basis.get("source_spirv")
     if isinstance(source_spirv, str) and source_spirv:
         source_path = Path(source_spirv)

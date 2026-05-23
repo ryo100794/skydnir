@@ -1271,7 +1271,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(instrumentation["kind"], "noop-debug-ssbo-declaration")
         self.assertEqual(instrumentation["executable_probe_writes"], 0)
         self.assertEqual(instrumentation["old_bound"], 3441)
-        self.assertEqual(instrumentation["new_bound"], 3445)
+        self.assertEqual(instrumentation["new_bound"], 3446)
+        self.assertIn("u32_pointer", instrumentation["reserved_ids"])
         self.assertEqual(instrumentation["debug_descriptor"], {
             "binding": 5,
             "descriptor_type": "storage_buffer",
@@ -1285,6 +1286,74 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(
             manifest_payload["instrumented_spirv_hash"],
             payload["instrumented_spirv_hash"],
+        )
+        self.assertTrue(json.loads(verified.stdout)["valid"])
+
+    def test_native_q6_probe_write_instrumentation_validates(self):
+        spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            manifest = tmp_path / "native-q6.probe.json"
+            write_spv = tmp_path / "native-q6.write.spv"
+            write_manifest = tmp_path / "native-q6.write.probe.json"
+            subprocess.run(
+                [
+                    "python3",
+                    str(SPIRV_ANALYZER),
+                    str(spv),
+                    "--probe-plan-out",
+                    str(manifest),
+                    "--probe-range",
+                    "0:2",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(SPIRV_NOOP_INSTRUMENTER),
+                    str(spv),
+                    str(write_spv),
+                    "--manifest-in",
+                    str(manifest),
+                    "--manifest-out",
+                    str(write_manifest),
+                    "--target-env",
+                    "vulkan1.2",
+                    "--probe-writes",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            verified = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(write_manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+        payload = json.loads(result.stdout)
+        instrumentation = payload["instrumentation"]
+        self.assertEqual(instrumentation["kind"], "q6-debug-ssbo-probe-writes")
+        self.assertEqual(instrumentation["executable_probe_writes"], 6)
+        self.assertEqual(
+            [item["role"] for item in instrumentation["probe_writes"]],
+            [
+                "partial_to_workgroup_candidate",
+                "reduction_candidate",
+                "final_output_store",
+                "partial_to_workgroup_candidate",
+                "reduction_candidate",
+                "final_output_store",
+            ],
         )
         self.assertTrue(json.loads(verified.stdout)["valid"])
 
