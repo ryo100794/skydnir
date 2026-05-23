@@ -23,6 +23,7 @@ ROPE_YARN_ARTIFACT = ROOT / "docs" / "test" / "llama-gpu-ngl1-rope-yarn-oracle-2
 LLAMA_GPU_ARTIFACT_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 LLAMA_GPU_ENV_MANIFEST = ROOT / "scripts" / "llama-gpu-env-manifest.json"
 SPIRV_ANALYZER = ROOT / "scripts" / "analyze-spirv.py"
+SPIRV_PROBE_MANIFEST_VERIFIER = ROOT / "scripts" / "verify-spirv-probe-manifest.py"
 
 
 def load_llama_gpu_artifact_verifier():
@@ -902,6 +903,14 @@ class GpuAbiContractTest(unittest.TestCase):
                 check=True,
             )
             probe_manifest = json.loads(manifest.read_text())
+            verified = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
         payload = json.loads(result.stdout)
         module = payload["modules"][0]
         self.assertEqual(module["bytes"], len(words) * 4)
@@ -921,6 +930,46 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertFalse(probe_manifest["collision_checks"]["static_binding_number_collision"])
         self.assertIn("instrumented module must pass spirv-val after instrumentation", probe_manifest["validation_gates"]["messages"])
         self.assertTrue(probe_manifest["validation_gates"]["spirv_val_required"])
+        self.assertTrue(json.loads(verified.stdout)["valid"])
+
+    def test_spirv_probe_manifest_verifier_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "unsafe.json"
+            manifest.write_text(json.dumps({
+                "schema": "pdocker.spirv.probe-manifest.v1",
+                "policy": {
+                    "submission_model": "fragment",
+                    "fragment_submission_allowed": True,
+                    "llama_cpp_modified": False,
+                    "dockerfile_model_prompt_modified": False,
+                },
+                "debug_ssbo": {
+                    "dispatch_transport": "custom-v5",
+                    "descriptor": {"available": False}
+                },
+                "collision_checks": {"decision": "fail"},
+                "validation_gates": {
+                    "spirv_val_required": False,
+                    "dispatch_allowed": True,
+                    "messages": []
+                },
+                "probe_selection": {
+                    "candidate_range": [0, 1],
+                    "selected_candidate_count": 0,
+                    "selected_candidates": []
+                },
+            }))
+            result = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["valid"])
+        self.assertIn("fragment submission must be explicitly disabled", payload["errors"])
 
     def test_vulkan_guarded_memory_profile_is_recorded(self):
         source = VULKAN_ICD.read_text()
