@@ -95,7 +95,7 @@ def speedup_sections(speedup=2.0, target_met=True, cpu_tps=0.1, gpu_tps=0.2):
 
 def q6_verified_writeback(hash_value="0x1111111111111111"):
     return {
-        "local_size_resolved": [32, 2, 1],
+        "local_size_resolved": [32, 1, 1],
         "q6_writeback_verified_all": True,
         "q6_row_indexed_sample_indices": [257],
         "q6_row_indexed_writeback_verified": True,
@@ -725,7 +725,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         exact = self.run_verifier(payload, "--require-q6-match")
         self.assertEqual(exact.returncode, 30, exact.stdout)
 
-    def test_q6_32x2x1_treats_64_lane_delta_as_diagnostic_only(self):
+    def test_q6_32x1x1_num_rows_treats_64_lane_delta_as_diagnostic_only(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",
             "gpu": {
@@ -738,7 +738,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 2,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "blocker_class": "q6-arithmetic-reduction-or-output-layout",
                         "q6_shader_like_abs_delta": 1.0e-7,
                         "q6_shader_like_64_abs_delta": 6.2,
@@ -813,7 +813,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_shader_like_abs_delta": 1.0e-7,
                         "q6_output_layout_probe": {
                             "summary": "canonical-mismatch-found-elsewhere",
@@ -871,7 +871,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_shader_like_abs_delta": 1.0e-7,
                         "q6_output_layout_probe": {
                             "summary": "canonical-mismatch-inconclusive",
@@ -938,7 +938,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_shader_like_abs_delta": 1.0e-7,
                         "q6_output_layout_probe": {
                             "summary": "canonical-mismatch-inconclusive",
@@ -971,7 +971,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_shader_like_abs_delta": 1.0e-7,
                         "q6_output_layout_probe": {
                             "summary": "canonical-mismatch-inconclusive",
@@ -1022,7 +1022,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_shader_like_abs_delta": 1.0e-7,
                         "q6_output_layout_probe": {
                             "summary": "canonical-mismatch-inconclusive",
@@ -1083,7 +1083,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_shader_like_abs_delta": 1.0e-7,
                         "q6_output_layout_probe": {
                             "summary": "canonical-mismatch-inconclusive",
@@ -1133,7 +1133,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_shader_like_abs_delta": 1.0e-7,
                         "q6_output_layout_probe": {
                             "summary": "canonical-mismatch-not-found",
@@ -1175,7 +1175,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_output_layout_probe": {"summary": "canonical-mismatch-found-elsewhere"},
                         **q6_verified_writeback(),
                     },
@@ -1201,7 +1201,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_shader_like_abs_delta": 0.0,
                         "q6_shader_like_oracle_cleared": True,
                         "q6_output_layout_probe": {
@@ -1249,7 +1249,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_output_layout_probe": {
                             "summary": "canonical-mismatch-inconclusive",
                         },
@@ -1341,7 +1341,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
 
-    def test_q6_32x2x1_nonzero_shader_like_delta_remains_arithmetic_boundary(self):
+    def test_q6_32x1x1_num_rows_nonzero_shader_like_delta_remains_arithmetic_boundary(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",
             "gpu": {
@@ -1352,7 +1352,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "event_count": 1,
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "blocker_class": "q6-arithmetic-reduction-or-output-layout",
                         "q6_shader_like_abs_delta": 0.5,
                         "q6_shader_like_64_abs_delta": 0.0,
@@ -1408,7 +1408,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "mismatch",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_shader_like_oracle_cleared": True,
                     },
                 },
@@ -1466,7 +1466,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_writeback_verified_all": False,
                         "q6_writable_writeback_unknown": [
                             {"index": 2, "binding": 2, "writeback_verified": None}
@@ -1496,7 +1496,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_writeback_verified_all": False,
                         "q6_writable_writeback_mismatches": [
                             {
@@ -1532,7 +1532,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_writeback_verified_all": True,
                     },
                 },
@@ -1559,7 +1559,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                     "q6_workgroup_diagnostics": {
                         "workgroup_shape_blocker": False,
                         "latest_status": "match",
-                        "local_size_resolved": [32, 2, 1],
+                        "local_size_resolved": [32, 1, 1],
                         "q6_writeback_verified_all": True,
                         "q6_row_indexed_sample_indices": [257],
                         "q6_writable_bindings": [

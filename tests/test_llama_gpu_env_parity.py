@@ -91,6 +91,102 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertEqual(tuple(manifest["compare_diagnostic_env_keys"]), verifier.LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS)
         self.assertEqual(tuple(manifest["compare_forward_env_keys"]), verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
 
+    def test_manifest_env_bridge_classification_is_exhaustive(self):
+        manifest = load_manifest()
+
+        env_keys = set()
+        for key in [
+            "ui_runtime_env_keys",
+            "pdockerd_runtime_env_keys",
+            "ui_compose_runtime_env_keys",
+            "compare_diagnostic_env_keys",
+            "compare_forward_env_keys",
+        ]:
+            env_keys.update(manifest[key])
+        for key in ["pdockerd_runtime_env_defaults", "ui_compose_runtime_env_defaults", "config_propagation_env_fields"]:
+            env_keys.update(item["env"] for item in manifest[key])
+        for profile in manifest["compare_mode_env_profiles"].values():
+            for key in ["env", "trace_alloc_env"]:
+                env_keys.update(item["env"] for item in profile.get(key, []))
+
+        classifications = {
+            "container_env_only": {
+                "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
+                "GGML_VK_FORCE_MAX_BUFFER_SIZE",
+                "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
+                "LLAMA_ARG_N_GPU_LAYERS",
+                "PDOCKER_GPU_VIRTUAL_MEMORY",
+                "PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES",
+                "PDOCKER_VULKAN_ALIAS_COPIES",
+                "PDOCKER_VULKAN_DUMP_SPIRV_DIR",
+                "PDOCKER_VULKAN_ENABLE_16BIT_STORAGE",
+                "PDOCKER_VULKAN_ENABLE_8BIT_STORAGE",
+                "PDOCKER_VULKAN_ENABLE_INT64",
+                "PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC",
+                "PDOCKER_VULKAN_HEAP_BYTES",
+                "PDOCKER_VULKAN_ICD_DEBUG",
+                "PDOCKER_VULKAN_ICD_TRACE_ALLOC",
+                "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
+                "PDOCKER_VULKAN_SUBGROUP_SIZE",
+            },
+            "icd_to_executor_bool_option": {
+                "PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16",
+                "PDOCKER_GPU_CPU_ORACLE",
+                "PDOCKER_GPU_DISABLE_OVERLAP_ALIASING",
+                "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
+                "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
+                "PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES",
+                "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
+                "PDOCKER_GPU_MUTABLE_BUFFER_CACHE",
+                "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER",
+                "PDOCKER_GPU_Q4K_SAFE_KERNEL",
+                "PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION",
+                "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
+                "PDOCKER_GPU_Q6K_SAFE_KERNEL",
+                "PDOCKER_GPU_RESIDENT_CACHE",
+                "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
+                "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
+                "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",
+                "PDOCKER_GPU_STRICT_PASSTHROUGH",
+                "PDOCKER_GPU_STRICT_RECONCILIATION",
+                "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
+                "PDOCKER_GPU_WRITEONLY_BUFFER_CACHE",
+                "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE",
+                "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
+                "PDOCKER_VULKAN_DISABLE_16BIT_STORAGE",
+                "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE",
+                "PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC",
+            },
+            "icd_to_executor_size_option": {
+                "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
+                "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
+                "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
+            },
+            "icd_to_executor_string_option": set(),
+            "app_process_only": {
+                "PDOCKER_ANDROID_OPENCL_LIBRARY",
+                "PDOCKER_GPU_DISABLE_ANDROID_OPENCL",
+                "PDOCKER_GPU_DISABLE_ANDROID_VULKAN",
+            },
+            "deprecated_or_invalid": set(),
+            "needs_bridge": {
+                "PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS",
+                "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
+                "PDOCKER_GPU_FAILED_SPIRV_DIR",
+                "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
+                "PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION",
+                "PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE",
+                "PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES",
+            },
+        }
+        classified = set()
+        for name, values in classifications.items():
+            overlap = classified & values
+            self.assertFalse(overlap, f"{name} overlaps: {sorted(overlap)}")
+            classified.update(values)
+
+        self.assertEqual(env_keys, classified)
+
     def test_compare_pdockerd_and_ui_compose_env_surfaces_match_manifest(self):
         manifest = load_manifest()
         compare = COMPARE.read_text(encoding="utf-8")

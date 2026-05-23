@@ -1,6 +1,6 @@
 # llama.cpp GPU Bridge Next Steps
 
-Snapshot date: 2026-05-21.
+Snapshot date: 2026-05-23.
 
 This document is the handoff plan for continuing the llama.cpp GPU bridge work
 with a smaller or faster coding model.  It assumes the repository is on or
@@ -28,6 +28,7 @@ Confirmed facts:
 | `ngl=1` Q6_K/final-projection shader | Row-indexed writeback verified; workgroup shape and native reduction sum clear; final output still mismatches | `docs/test/llama-gpu-ngl1-q6-row-provenance-20260519.json`, `blocker_class=native-q6-device-execution-or-final-store` |
 | current device readiness | Heavy compare is memory-gated | readiness requires sufficient `MemAvailable`; low Android zram `SwapFree` is advisory unless a strict swap gate is explicitly configured |
 | 2026-05-20 Q6_K workflow | Device workflow reaches the known Q6_K blocker again; create-timeout race is no longer the blocker | `docs/test/llama-gpu-q6k-adb41503-20260520T110352Z.json` (ignored runtime evidence), workflow `classification=q6-native-device-execution-or-final-store` |
+| 2026-05-23 Q6 WorkgroupSize lane | Device is reachable and Q6 dispatch evidence is present, but the effective Q6 WorkgroupSize evidence is still not visible in the oracle record | ADB `192.168.179.26:34761`; `docs/test/llama-gpu-readiness-adb34761-latest.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-legalized-adb34761-20260523T084956Z.json`; `docs/test/llama-gpu-ngl1-q6-workgroup-composite-adb34761-20260523T091428Z.json` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest strict row-provenance artifact still fails required
@@ -213,6 +214,53 @@ same Dockerfile, model, prompt, and image and verify that the new artifact
 classifies the run as either a concrete Q6_K oracle result or
 `q6-oracle-capture-missing`; it must no longer look like Q6 was simply not
 reached.
+
+2026-05-23 Q6 WorkgroupSize validation lane: the fresh device endpoint was
+`192.168.179.26:34761`.  Readiness reported `ready=true` with
+`memory.mem_available_mb=2656`, but Android zram was under pressure
+(`memory.swap_free_mb=156`; advisory threshold `1024`; hard swap gate disabled).
+That makes the run acceptable for diagnostic evidence, but not for performance
+claims or long benchmark interpretation.
+
+Relevant artifacts:
+
+- `docs/test/llama-gpu-readiness-adb34761-latest.json`
+- `docs/test/llama-gpu-ngl1-q6-workgroup-legalized-adb34761-20260523T084956Z.json`
+- `docs/test/llama-gpu-ngl1-q6-workgroup-composite-adb34761-20260523T091428Z.json`
+
+The `q6-workgroup-legalized` artifact reached generic SPIR-V dispatch and kept
+Q6 lifecycle evidence, but still did not surface a Q6 oracle response:
+`q6_dispatch_seen=true`, `q6_dispatch_event_count=4`,
+`q6_workgroup_diagnostics.event_count=0`, and
+`diagnostic_interpretation=q6-dispatch-seen-without-oracle-response`.  Treat
+that as an evidence-capture blocker, not as a Q6 mathematical result.
+
+The `q6-workgroup-composite` artifact did not provide fresh executor evidence
+for the Q6 oracle path and the verifier classified it under runtime freshness
+(`executor-marker-not-observed`).  Its run-level blocker was a wait-server
+memory-pressure stop, not a completed GPU correctness result.
+
+Current blocker name for this lane:
+
+- `spirv-local-size-inconsistent` / Q6 `BuiltIn WorkgroupSize` evidence not yet
+  visible in the compact Q6 oracle record.
+
+Next validation criteria:
+
+- The run must observe the expected fresh executor marker before interpreting
+  Q6 correctness.
+- The Q6 event for source hash `0x1bf751845c5dce75` must include a valid JSON
+  oracle response, not only lifecycle dispatch evidence.
+- The Q6 record must expose the effective specialization-backed workgroup tuple
+  as `[32,2,1]` through `spirv_local_size_resolved` or the equivalent folded
+  summary field.
+- If legalization is active, the event must explicitly show that the source
+  shader hash remains `0x1bf751845c5dce75` while the effective execution module
+  was legalized from the `BuiltIn WorkgroupSize` specialization composite.
+- Only after those fields are visible may the next blocker move to Q6 writeback,
+  synchronization, output layout, or arithmetic/reduction.  Do not promote
+  prompt output, throughput, or benchmark evidence while Q6 WorkgroupSize
+  evidence is missing.
 
 Milestone compare with CPU baseline should be run only after a correctness
 blocker changes, not after every small diagnostic edit.
@@ -570,6 +618,49 @@ is explicit rather than implicit:
   The compare driver and artifact verifier both load this file;
   `tests.test_gpu_abi_contract` checks the verifier constants derived from it,
   so future edits cannot silently drop one side of the bridge.
+
+
+### Env bridge contract inventory (2026-05-23)
+
+Adding a name to `scripts/llama-gpu-env-manifest.json` only proves that the
+compare/pdockerd container payload can carry the variable.  It does **not** prove
+that the persistent Android executor process can observe it.  Current manifest
+env keys are classified as follows:
+
+| Class | Env keys | Contract |
+|---|---|---|
+| `container_env_only` | `PDOCKER_VULKAN_HEAP_BYTES`, `PDOCKER_VULKAN_MAX_BUFFER_BYTES`, `GGML_VK_FORCE_MAX_BUFFER_SIZE`, `GGML_VK_FORCE_MAX_ALLOCATION_SIZE`, `GGML_VK_SUBALLOCATION_BLOCK_SIZE`, `PDOCKER_VULKAN_ICD_DEBUG`, `PDOCKER_VULKAN_ICD_TRACE_ALLOC`, `PDOCKER_VULKAN_ALIAS_COPIES`, `PDOCKER_VULKAN_DUMP_SPIRV_DIR`, `PDOCKER_VULKAN_ENABLE_8BIT_STORAGE`, `PDOCKER_VULKAN_ENABLE_16BIT_STORAGE`, `PDOCKER_VULKAN_ENABLE_INT64`, `PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC`, `PDOCKER_VULKAN_SUBGROUP_SIZE`, `PDOCKER_GPU_VIRTUAL_MEMORY`, `PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES`, `LLAMA_ARG_N_GPU_LAYERS` | Consumed by llama.cpp/container scripts or the glibc ICD before command emission; no executor reflection is expected. |
+| `icd_to_executor_bool_option` | `PDOCKER_VULKAN_DISABLE_8BIT_STORAGE`, `PDOCKER_VULKAN_DISABLE_16BIT_STORAGE`, `PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC`, `PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS`, `PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES`, `PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS`, `PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION`, `PDOCKER_GPU_STRICT_PASSTHROUGH`, `PDOCKER_GPU_STRICT_RECONCILIATION`, `PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING`, `PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS`, `PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS`, `PDOCKER_GPU_DISABLE_OVERLAP_ALIASING`, `PDOCKER_GPU_CPU_ORACLE`, `PDOCKER_GPU_Q6K_ORACLE_WRITEBACK`, `PDOCKER_GPU_Q6K_SAFE_KERNEL`, `PDOCKER_GPU_Q4K_SAFE_KERNEL`, `PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION`, `PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER`, `PDOCKER_GPU_RESIDENT_CACHE`, `PDOCKER_GPU_MUTABLE_BUFFER_CACHE`, `PDOCKER_GPU_WRITEONLY_BUFFER_CACHE`, `PDOCKER_GPU_WRITEONLY_DIRTY_PROBE`, `PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK`, `PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16`, `PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE` | ICD appends a command-token boolean (or the existing `profile=1` token) and executor JSON must expose the effective value. |
+| `icd_to_executor_size_option` | `PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES`, `PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES`, `PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES` | ICD appends a parsed unsigned-size command token; malformed values are ignored rather than guessed. |
+| `icd_to_executor_string_option` | _none today_ | Future string/path options need a bounded, escaped command field plus executor reflection; container env alone is not enough. |
+| `app_process_only` | `PDOCKER_GPU_DISABLE_ANDROID_VULKAN`, `PDOCKER_GPU_DISABLE_ANDROID_OPENCL`, `PDOCKER_ANDROID_OPENCL_LIBRARY` | Read by the APK/executor process before or outside per-dispatch Vulkan command emission. Forwarding these only into the container is not a reliable override. |
+| `deprecated_or_invalid` | _none in the manifest env set_ | Keep unsupported work tokens out of env classification. |
+| `needs_bridge` | `PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC`, `PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION`, `PDOCKER_GPU_DISPATCH_PROFILE_LOG`, `PDOCKER_GPU_FAILED_SPIRV_DIR`, `PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS`, `PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE`, `PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES` | Manifest forwarding can make these look requested, but the current executor-side behavior still depends on APK-process `getenv()` or an unreflected default. Do not interpret a run as having honored these until a dispatch option and JSON reflection exist. |
+
+`needs_bridge` priority, highest risk first:
+
+1. `PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC` - directly controls the
+   active Q6 WorkgroupSize lane.  Until Aquinas lands a reflected bool option,
+   a container-only setting must not be used as proof that executor legalization
+   changed.
+2. `PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION` and
+   `PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS` - can change shader/module
+   creation paths and feature-chain interpretation, so stale executor defaults
+   can invalidate SPIR-V blocker conclusions.
+3. `PDOCKER_GPU_DISPATCH_PROFILE_LOG`, `PDOCKER_GPU_FAILED_SPIRV_DIR`, and
+   `PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES` - affect evidence capture.  A
+   missing bridge may look like missing Q6 evidence rather than a failed knob.
+4. `PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE` - safety gate for dirty-writeback
+   caching; keep it fail-closed until it has an explicit reflected option.
+
+String option design: add an ICD-to-executor string option only for bounded
+ASCII/UTF-8 payloads, escape separators or length-prefix the value, cap it well
+below `PDOCKER_GPU_MAX_COMMAND_BYTES`, and echo the accepted value in compact
+executor JSON.  For path-like diagnostics such as `PDOCKER_GPU_FAILED_SPIRV_DIR`,
+prefer a host/container path chosen by compare, bridged as `failed_spirv_dir=...`,
+and rejected if empty, absolute/relative policy is violated, or it would
+truncate the command.
+
 - Lightweight env parity guard: `tests.test_llama_gpu_env_parity` checks that
   the manifest's pdockerd runtime env list, UI-compose runtime env list,
   compare diagnostic/forward env lists, and verifier constants stay in sync
@@ -891,3 +982,38 @@ that could make a failing test pass by weakening the test instead of fixing the
 bridge.  Examples include changing prompts, disabling correctness probes,
 lowering required checks, hiding a shader hash from diagnostics, or treating
 `served=true` as success.
+
+## 2026-05-23 Update: Q6 safe-kernel path clears correctness
+
+Latest validated artifact:
+
+- `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`
+
+Outcome:
+
+- `q6-workgroup-cleared-and-oracle-match`.
+- API prompt sanity passed: deterministic `2+3=` returned `5`.
+- Q6 source hash `0x1bf751845c5dce75` was replaced by bridge-owned safe kernel
+  hash `0x7ec0292e948c9b41` under `PDOCKER_GPU_Q6K_SAFE_KERNEL=1`.
+- Q6 oracle matched with `mismatch_count=0` and row-indexed writeback evidence
+  passed.
+- Speedup was `1.1976089878024805x` versus the CPU baseline, below the current
+  10x target.
+
+Planning implications:
+
+1. For llama.cpp b9030 Q6_K, expected local size is `[32,1,1]`; specialization
+   constant `1` is `NUM_ROWS`, not `WorkGroupSizeY`.  Treat older `[32,2,1]`
+   requirements as stale diagnostic assumptions.
+2. Correctness is now good enough to move the next blocker from Q6 workgroup
+   shape to performance/overhead on the safe-kernel path.
+3. The native Q6 SPIR-V mismatch remains a separate compatibility issue.  Do not
+   hide it; keep the safe-kernel path explicitly marked as a bridge-owned
+   compatibility substitution.
+4. Next bounded tasks:
+   - run `ngl=2` with `PDOCKER_GPU_Q6K_SAFE_KERNEL=1` and the same prompt gates;
+   - profile upload/download/copy time in the safe-kernel artifact;
+   - reduce repeated full-buffer transfer where the strict descriptor invariant
+     permits narrower dirty/writeback handling;
+   - add a release-facing note that Q6 safe-kernel is an explicit compatibility
+     path, not a llama.cpp modification.

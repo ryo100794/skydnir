@@ -397,6 +397,8 @@ import sys
 
 raw = sys.argv[1] if len(sys.argv) > 1 else ""
 snap = {
+    "valid": False,
+    "raw_bytes": len(raw.encode("utf-8", errors="ignore")),
     "mem_total_mb": 0,
     "mem_used_mb": 0,
     "mem_free_mb": 0,
@@ -443,7 +445,33 @@ for line in raw.splitlines():
 if not snap["mem_used_mb"] and snap["mem_total_mb"]:
     snap["mem_used_mb"] = max(0, snap["mem_total_mb"] - snap["mem_free_mb"])
 snap["mem_preflight_free_mb"] = snap["mem_available_mb"] or snap["mem_free_mb"]
+snap["valid"] = snap["mem_total_mb"] > 0 and snap["mem_preflight_free_mb"] > 0
 print(json.dumps(snap, separators=(",", ":")))
+PY
+}
+
+memory_snapshot_is_valid() {
+  local snap="$1"
+  python3 - "$snap" <<'PY'
+import json
+import sys
+
+try:
+    data = json.loads(sys.argv[1])
+except Exception:
+    data = {}
+valid = bool(data.get("valid"))
+mem_total = int(data.get("mem_total_mb") or 0)
+preflight_free = int(
+    data.get("mem_preflight_free_mb")
+    or data.get("mem_available_mb")
+    or data.get("mem_free_mb")
+    or 0
+)
+# Treat only a complete memory sample as authoritative.  A disconnected adb
+# read, an empty /proc/meminfo, or the separator-only output from the shell
+# command must not be interpreted as Android OOM pressure.
+sys.exit(0 if (valid or (mem_total > 0 and preflight_free > 0)) else 1)
 PY
 }
 
@@ -746,6 +774,10 @@ ensure_memory_headroom() {
   local phase="$1"
   local snap free_mb swap_free_mb swap_hard_block diagnostics thresholds cleanup_commands
   snap="$(memory_snapshot_json || printf '{}')"
+  if ! memory_snapshot_is_valid "$snap"; then
+    echo "[pdocker llama compare] runtime memory sample unavailable during $phase; continuing without treating missing /proc/meminfo as OOM: $snap" >&2
+    return 0
+  fi
   free_mb="$(python3 - "$snap" <<'PY'
 import json, sys
 try:
@@ -882,6 +914,10 @@ runtime_memory_headroom_ok() {
   local phase="$1"
   local snap free_mb swap_free_mb swap_hard_block diagnostics thresholds
   snap="$(memory_snapshot_json || printf '{}')"
+  if ! memory_snapshot_is_valid "$snap"; then
+    echo "[pdocker llama compare] runtime memory sample unavailable during $phase; continuing without treating missing /proc/meminfo as OOM: $snap" >&2
+    return 0
+  fi
   free_mb="$(python3 - "$snap" <<'PY'
 import json, sys
 try:
@@ -2736,10 +2772,10 @@ service_prompt_sanity = {
     "content_excerpt": service_completion.get("content_excerpt") or service_completion.get("content"),
     "duration_ms": service_completion.get("duration_ms"),
 }
-if evidence["buffer_range_assert_blocker"]:
+if evidence.get("buffer_range_assert_blocker"):
     blocker_class = "vulkan_buffer_range_accounting"
     blocker_detail = "scheduler warmup hit ggml_backend_buffer_get_alloc_size"
-elif evidence["buffer_allocation_blocker"] or evidence["assert_blocker"]:
+elif evidence.get("buffer_allocation_blocker") or evidence.get("assert_blocker"):
     blocker_class = "vulkan_buffer_allocation"
     blocker_detail = "Vulkan buffer allocation/assertion failed before dispatch"
 elif pipeline_feature_blocker:
@@ -2769,7 +2805,7 @@ elif executor_feature_mismatches:
 elif config_propagation["summary"] == "fail":
     blocker_class = "config_propagation_mismatch"
     blocker_detail = "one or more requested bridge tuning options did not appear with the expected value in executor evidence"
-elif int(gpu_layers) == 0 and evidence["generic_spirv_dispatch_seen"] and bool(int(gpu_served_s)) and (
+elif int(gpu_layers) == 0 and evidence.get("generic_spirv_dispatch_seen") and bool(int(gpu_served_s)) and (
     gpu_correctness_summary == "fail" or
     differential_correctness_summary == "fail"
 ):
@@ -2781,13 +2817,13 @@ elif bool(int(gpu_served_s)) and (
 ):
     blocker_class = "gpu_correctness_mismatch"
     blocker_detail = "GPU offload served, but correctness probes do not match the CPU/no-offload control"
-elif evidence["generic_spirv_dispatch_seen"] and bool(int(gpu_served_s)):
+elif evidence.get("generic_spirv_dispatch_seen") and bool(int(gpu_served_s)):
     blocker_class = "bridge_dispatch_performance"
     blocker_detail = "generic SPIR-V dispatch served; benchmark throughput is the remaining gap"
-elif evidence["offload_seen"] and gpu_offloaded_layers > 1 and bool(int(gpu_served_s)):
+elif evidence.get("offload_seen") and gpu_offloaded_layers > 1 and bool(int(gpu_served_s)):
     blocker_class = "bridge_dispatch_performance"
     blocker_detail = "Vulkan offload served with repeating transformer layers, but throughput is still below the 10x target"
-elif evidence["gpu_output_only_offload"] and bool(int(gpu_served_s)):
+elif evidence.get("gpu_output_only_offload") and bool(int(gpu_served_s)):
     blocker_class = "insufficient_gpu_offload_depth"
     blocker_detail = "llama.cpp served, but only the output layer was offloaded; repeating transformer layers stayed on CPU"
 else:
@@ -2899,6 +2935,17 @@ Q6_K_MATVEC_SPIRV_HASHES = {
     "0x7ec0292e948c9b41",
 }
 
+def event_spirv_identity_hashes(event):
+    hashes = []
+    for field in ("source_spirv_hash", "spirv_hash", "effective_spirv_hash"):
+        value = event.get(field) if isinstance(event, dict) else None
+        if value:
+            hashes.append(str(value).lower())
+    return hashes
+
+def event_has_q6_matvec_identity(event):
+    return any(value in Q6_K_MATVEC_SPIRV_HASHES for value in event_spirv_identity_hashes(event))
+
 valid_spirv_events = [
     e for e in executor_events
     if e.get("kernel") == "generic_spirv"
@@ -2907,7 +2954,7 @@ valid_spirv_events = [
 ]
 q6_valid_spirv_events = [
     e for e in valid_spirv_events
-    if str(e.get("spirv_hash") or "").lower() in Q6_K_MATVEC_SPIRV_HASHES
+    if event_has_q6_matvec_identity(e)
 ]
 q6_dispatch_lifecycle_events = [
     e for e in dispatch_lifecycle_events
@@ -3468,7 +3515,7 @@ def build_q6_native_vs_writeback_split():
 
 q6_native_vs_writeback_split = build_q6_native_vs_writeback_split()
 q6_safe_kernel_used = q6_latest.get("q6k_safe_kernel") is True
-q6_expected_local_size = [1, 1, 1] if q6_safe_kernel_used else [32, 2, 1]
+q6_expected_local_size = [1, 1, 1] if q6_safe_kernel_used else [32, 1, 1]
 q6_workgroup_shape_blocker = bool(
     q6_latest
     and (
@@ -3481,14 +3528,14 @@ q6_workgroup_shape_blocker = bool(
     )
 )
 q6_local_size_resolved = q6_latest.get("spirv_local_size_resolved")
-q6_shader_like_64_required = (not q6_safe_kernel_used) and q6_local_size_resolved != [32, 2, 1]
+q6_shader_like_64_required = (not q6_safe_kernel_used) and q6_local_size_resolved != [32, 1, 1]
 q6_shader_like_64_interpretation = (
     "diagnostic-only-for-q6k-safe-kernel; single-invocation replacement is an explicit bridge diagnostic"
     if q6_safe_kernel_used
     else
-    "diagnostic-only-for-32x2x1; flattened 64 tids are not required same-row oracle lanes"
+    "diagnostic-only-for-32x1x1-num-rows; constant_id=1 is NUM_ROWS, not WorkGroupSizeY"
     if not q6_shader_like_64_required
-    else "required-for-non-32x2x1-local-size"
+    else "required-for-non-32x1x1-local-size"
 )
 q6_shader_like_oracle_cleared = (
     q6_latest_oracle.get("status") == "mismatch"
@@ -3510,7 +3557,7 @@ if not q6_shader_like_64_required:
         ])
     else:
         q6_shader_like_clear_basis.extend([
-            "local_size_resolved=[32,2,1]",
+            "local_size_resolved=[32,1,1]",
             "q6_shader_like_64_abs_delta=diagnostic-only",
         ])
 elif numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_64_abs_delta")):
@@ -3910,17 +3957,17 @@ next_action = (
     "free Android memory or lower the llama runtime memory footprint, then rerun; the watchdog stopped before LMK/OOM"
     if runtime_abort
     else
-    "fix Q6_K three-dimensional workgroup shape propagation before interpreting numeric mismatch"
+    "fix Q6_K local-size/NUM_ROWS separation before interpreting numeric mismatch"
     if q6_workgroup_diagnostics["workgroup_shape_blocker"]
     else
     "continue Q6_K strict-passthrough split at the %s boundary" % q6_workgroup_diagnostics["blocker_class"]
     if q6_workgroup_diagnostics["latest_status"] == "mismatch"
     else
     "fix Vulkan buffer base/range accounting for scheduler warmup"
-    if evidence["buffer_range_assert_blocker"]
+    if evidence.get("buffer_range_assert_blocker")
     else
     "split 4GiB+ Vulkan buffers / pinned host-buffer path"
-    if evidence["buffer_allocation_blocker"] or evidence["assert_blocker"]
+    if evidence.get("buffer_allocation_blocker") or evidence.get("assert_blocker")
     else "map failed SPIR-V capabilities to Android Vulkan feature bits, then clamp or translate the advertised feature set"
     if blocker_class == "vulkan_pipeline_feature"
     else "inspect ICD/executor dispatch begin/end evidence; liveness passed but /completion timed out before a benchmarkable token"
@@ -3930,11 +3977,11 @@ next_action = (
     else "lower generic SPIR-V dispatch into the Android Vulkan executor or clamp advertised capabilities"
     if blocker_class in {"vulkan_generic_spirv_dispatch", "vulkan_queue_submit_feature"}
     else "inspect traced Android Vulkan feature/SPIR-V mismatch"
-    if evidence["android_vulkan_dispatch_blocker"] and evidence["executor_spirv_trace_seen"]
+    if evidence.get("android_vulkan_dispatch_blocker") and evidence.get("executor_spirv_trace_seen")
     else "clamp or translate llama.cpp storage8/int8 final-projection shaders before accepting performance results"
     if blocker_class == "vulkan_feature_mismatch"
     else "lower llama.cpp SPIR-V dispatch into the Android GPU executor"
-    if evidence["spirv_dispatch_blocker"] or evidence["queue_submit_blocker"]
+    if evidence.get("spirv_dispatch_blocker") or evidence.get("queue_submit_blocker")
     else "trace final-projection descriptor aliases and feature requirements until GPU output matches CPU/no-offload"
     if blocker_class == "gpu_correctness_mismatch"
     else "treat n-gpu-layers as an insufficient isolation knob; bisect by first generic SPIR-V shader hash under Vulkan mode"

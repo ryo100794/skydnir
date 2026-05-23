@@ -1323,7 +1323,7 @@ def _q6_safe_kernel_enabled(q6: Any) -> bool:
 
 
 def _q6_expected_local_size(q6: Any) -> list[int]:
-    return [1, 1, 1] if _q6_safe_kernel_enabled(q6) else [32, 2, 1]
+    return [1, 1, 1] if _q6_safe_kernel_enabled(q6) else [32, 1, 1]
 
 
 def _q6_required_local_size_clear(q6: Any) -> bool:
@@ -1366,10 +1366,10 @@ def _q6_dispatch_seen_without_oracle(q6: Any) -> bool:
 def _q6_shader_like_interpretation(q6: Any) -> dict[str, Any]:
     """Explain whether the Q6 shader-like CPU oracle cleared.
 
-    For the observed Q6_K kernel with local_size=[32,2,1], the 32-lane
-    shader-like CPU oracle is the proven same-row arithmetic check.  The
-    flattened 64-lane diagnostic spans the Y dimension and is useful context,
-    but it is not a fail-closed requirement for clearing CPU-side arithmetic.
+    For the observed llama.cpp b9030 Q6_K kernel, local_size=[32,1,1].
+    specialization constant_id=1 is NUM_ROWS, not WorkGroupSizeY, so the
+    flattened 64-lane diagnostic is useful context but is not a fail-closed
+    requirement for clearing CPU-side arithmetic.
     """
 
     if not isinstance(q6, dict):
@@ -1381,7 +1381,7 @@ def _q6_shader_like_interpretation(q6: Any) -> dict[str, Any]:
         }
     local_size = _q6_local_size_resolved(q6)
     safe_kernel = _q6_safe_kernel_enabled(q6)
-    sixty_four_required = (not safe_kernel) and local_size != [32, 2, 1]
+    sixty_four_required = (not safe_kernel) and local_size != [32, 1, 1]
     thirty_two_clear = _numeric_close_to_zero(q6.get("q6_shader_like_abs_delta"))
     sixty_four_clear = _numeric_close_to_zero(q6.get("q6_shader_like_64_abs_delta"))
     cleared = q6.get("latest_status") == "mismatch" and thirty_two_clear and (
@@ -1397,7 +1397,7 @@ def _q6_shader_like_interpretation(q6: Any) -> dict[str, Any]:
             ])
         else:
             basis.extend([
-                "local_size_resolved=[32,2,1]",
+                "local_size_resolved=[32,1,1]",
                 "q6_shader_like_64_abs_delta=diagnostic-only",
             ])
     elif sixty_four_clear:
@@ -1410,9 +1410,9 @@ def _q6_shader_like_interpretation(q6: Any) -> dict[str, Any]:
             "diagnostic-only-for-q6k-safe-kernel; single-invocation replacement is an explicit bridge diagnostic"
             if safe_kernel
             else
-            "diagnostic-only-for-32x2x1; flattened 64 tids are not required same-row oracle lanes"
+            "diagnostic-only-for-32x1x1-num-rows; constant_id=1 is NUM_ROWS, not WorkGroupSizeY"
             if not sixty_four_required
-            else "required-for-non-32x2x1-local-size"
+            else "required-for-non-32x1x1-local-size"
         ),
     }
 

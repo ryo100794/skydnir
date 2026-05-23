@@ -86,6 +86,8 @@ match the same model's CPU/no-offload output for the same prompt.
 | `llama-gpu-ngl1-q6k-shader-like-oracle-20260509.json` | 1 | Shader-like Q6_K oracle using llama's packed 32-bit load and scale-cache flow | n/a | 2.01x | fail | shader-like sum `13.8780238`; canonical delta `4.16e-7`; GPU still `6.831` |
 | `llama-gpu-ngl1-q6k-materialized-alias-icd-20260509.json` | 1 | Duplicate Binding 0 alias materialized as a separate descriptor buffer | n/a | 2.17x | fail | option propagated as `true`; output unchanged, so same-VkBuffer aliasing is not sufficient |
 | `llama-gpu-ngl1-q6k-materialized-specialization-20260509.json` | 1 | SPIR-V specialization materialization probe | n/a | 2.65x | fail | Q6_K still mismatches; materializer did not rewrite this shader's Q6 specialization path |
+| `llama-gpu-ngl1-q6-workgroup-legalized-adb34761-20260523T084956Z.json` | 1 | Q6 WorkgroupSize legalization evidence on ADB `192.168.179.26:34761` | n/a | n/a | fail | Q6 lifecycle dispatch was seen, but no valid Q6 oracle event was folded; current blocker remains evidence capture / `spirv-local-size-inconsistent` |
+| `llama-gpu-ngl1-q6-workgroup-composite-adb34761-20260523T091428Z.json` | 1 | Q6 WorkgroupSize composite follow-up on ADB `192.168.179.26:34761` | n/a | n/a | fail | wait-server stopped under memory pressure and fresh executor evidence was not observed; not a correctness or performance result |
 
 `llama-gpu-compare-20260507-ngl1-no-dup-rewrite.json` is not included in the
 evidence table because adb went offline during that run, so the result is
@@ -1011,3 +1013,110 @@ This tree intentionally keeps "row-indexed writeback verified + Q6 mismatch"
 separate from both "writeback failed" and "memory blocked" so the next C-side
 change targets a single boundary instead of weakening the correctness gate.
 A sampled mismatch without row-indexed writeback evidence is not progress.
+
+### Q6 WorkgroupSize Evidence Capture Status (2026-05-23)
+
+The 2026-05-23 device lane used ADB `192.168.179.26:34761`.  Device readiness
+was positive (`ready=true`) and diagnostic collection was allowed, but swap was
+low: `memory.mem_available_mb=2656`, `memory.swap_free_mb=156`,
+`swap_free_advisory_ok=false`, and the swap gate was advisory rather than hard.
+This permits short correctness diagnostics while explicitly blocking any
+benchmark or performance interpretation.
+
+Two Q6 WorkgroupSize artifacts were recorded:
+
+- `docs/test/llama-gpu-ngl1-q6-workgroup-legalized-adb34761-20260523T084956Z.json`
+- `docs/test/llama-gpu-ngl1-q6-workgroup-composite-adb34761-20260523T091428Z.json`
+
+The first artifact reached generic dispatch and preserved the Q6 lifecycle
+signal, but the Q6 oracle response was still absent from
+`gpu.diagnostics.q6_workgroup_diagnostics`
+(`event_count=0`, `q6_dispatch_seen=true`,
+`diagnostic_interpretation=q6-dispatch-seen-without-oracle-response`).  The
+second artifact stopped before a fresh executor-marker-backed Q6 record was
+available.  Therefore the latest correctness state is still fail-closed at the
+diagnostic boundary:
+
+- blocker: `spirv-local-size-inconsistent` / Q6 `BuiltIn WorkgroupSize`
+  evidence not yet visible in the folded oracle record;
+- not proven: Q6 arithmetic, Q6 writeback, output layout, prompt correctness,
+  or performance.
+
+The next valid Q6 correctness artifact must show all of the following before
+the investigation can move past WorkgroupSize:
+
+1. fresh runtime and executor markers;
+2. a valid Q6 oracle event for source hash `0x1bf751845c5dce75`;
+3. effective Q6 workgroup size `[32,2,1]` visible in the compact/folded
+   diagnostics;
+4. if legalization is applied, explicit evidence that the original source hash
+   is retained while the effective module is legalized from the
+   specialization-backed `BuiltIn WorkgroupSize` composite;
+5. no benchmark claim unless prompt correctness, Q6 oracle status, and
+   writeback evidence all pass together.
+
+### Env Contract Audit (2026-05-23)
+
+The env manifest is now treated as a routing inventory, not as evidence that an
+env var reached the persistent executor.  Current audit result:
+
+- `icd_to_executor_bool_option`: bridge behavior is explicit for feature clamps,
+  strict/diagnostic toggles, descriptor/specialization toggles, Q4/Q6 safe-kernel
+  toggles, cache toggles, dirty-probe/writeback toggles, and
+  `PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE` via the existing `profile=1` command
+  token.
+- `icd_to_executor_size_option`: only
+  `PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES`,
+  `PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES`, and
+  `PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES` have size-token bridging today.
+- `icd_to_executor_string_option`: none yet.  `PDOCKER_GPU_FAILED_SPIRV_DIR`
+  must be promoted to a bounded reflected string command option before a compare
+  artifact can claim that a container-provided dump directory reached the
+  executor.
+- `needs_bridge`: highest-risk gaps are
+  `PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC`,
+  `PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION`,
+  `PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS`,
+  `PDOCKER_GPU_DISPATCH_PROFILE_LOG`, `PDOCKER_GPU_FAILED_SPIRV_DIR`,
+  `PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES`, and
+  `PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE`.
+
+Correctness interpretation rule: if a Q6 or feature-chain conclusion depends on
+a `needs_bridge` env var, require executor-side JSON reflection first.  A value
+present in `planned_container_env` or `runtime_env_manifest` alone is not enough
+to interpret SPIR-V WorkgroupSize, specialization retry, failed-SPIR-V dump, or
+writeback-hash evidence.
+
+### Q6 safe-kernel correctness result (2026-05-23, ADB 192.168.179.26:44443)
+
+Artifact:
+
+- `docs/test/llama-gpu-ngl1-q6-safe-kernel-adb44443-20260523T112715Z.json`
+
+Result summary:
+
+- Runtime freshness: pass (`executor_event_count=1110`, expected executor and ICD markers observed).
+- Verifier classification: `q6-workgroup-cleared-and-oracle-match`.
+- API prompt sanity: pass; `/completion` for `2+3=` returned `5`.
+- Q6 source hash: `0x1bf751845c5dce75`.
+- Effective safe-kernel hash: `0x7ec0292e948c9b41`.
+- Q6 oracle: match, `mismatch_count=0`.
+- Q6 native/writeback split: pass for 32 joined samples.
+- Speedup vs CPU baseline: `1.1976089878024805x`.
+- Benchmark target: not met; the remaining blocker is performance, especially bridge upload/copy overhead.
+
+Important correction: for llama.cpp b9030 Q6_K, specialization constant `1` is
+`NUM_ROWS`, not `WorkGroupSizeY`.  The non-safe-kernel expected local size is
+`[32,1,1]`, while `NUM_ROWS=2` is row grouping.  Previous notes that required
+`[32,2,1]` for this hash were diagnostic drift and must not be used as a
+correctness gate for b9030 Q6_K.
+
+Decision state:
+
+- Q6 WorkgroupSize is no longer the active blocker for this artifact.
+- Native b9030 Q6 SPIR-V still mismatched before safe-kernel substitution, so the
+  safe kernel is evidence that the descriptor/writeback path can be correct and
+  that the remaining native-Q6 issue is shader/driver/typed-storage behavior.
+- Next work should either advance to `ngl=2` with the same correctness gates or
+  reduce bridge overhead for the safe-kernel path.  Do not weaken prompt probes
+  or alter llama.cpp/Dockerfile/model/prompt to claim success.

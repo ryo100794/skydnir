@@ -31,6 +31,15 @@ def load_llama_gpu_artifact_verifier():
     return verifier
 
 
+def load_llama_gpu_compare_q6_helpers():
+    source = LLAMA_COMPARE.read_text()
+    start = source.index("Q6_K_MATVEC_SPIRV_HASHES = {")
+    end = source.index("\nvalid_spirv_events = [", start)
+    namespace = {}
+    exec(compile(source[start:end], str(LLAMA_COMPARE), "exec"), namespace)
+    return namespace
+
+
 def defines(path):
     result = {}
     for line in path.read_text().splitlines():
@@ -229,6 +238,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"specialization_entries\\":[', source)
         self.assertIn('\\"duplicate_descriptor_rewrite\\":%s', source)
         self.assertIn('\\"materialize_specialization\\":%s', source)
+        self.assertIn('\\"legalize_workgroup_size_from_spec\\":%s', source)
+        self.assertIn('\\"legalize_workgroup_size_from_spec_source\\":\\"%s\\"', source)
+        self.assertIn("has_legalize_workgroup_size_from_spec", source)
+        self.assertIn('env_truthy("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", 1)', source)
+        self.assertIn("legalize_workgroup_size_from_spec", APP_HEADER.read_text())
+        self.assertIn("PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_EXEC_BOOL_DISPATCH_OPTION)", source)
+        self.assertIn('options->legalize_workgroup_size_from_spec', source)
+        self.assertIn('"option"', source)
+        self.assertIn('"env-default"', source)
         self.assertIn('\\"descriptor_writes\\":[', source)
         self.assertIn('\\"descriptor_alias_map\\":[', source)
         self.assertIn('\\"target_id\\":%u', source)
@@ -351,6 +369,13 @@ class GpuAbiContractTest(unittest.TestCase):
             "add_float16_capability_for_storage16, 0)",
             abi,
         )
+        self.assertIn(
+            "X(PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC, "
+            "legalize_workgroup_size_from_spec, "
+            "has_legalize_workgroup_size_from_spec, "
+            "legalize_workgroup_size_from_spec, 1)",
+            abi,
+        )
         self.assertIn("PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_VK_BOOL_BRIDGE_OPTION)", icd_source)
         self.assertIn("pipeline->requested_feature_mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT16", icd_source)
         self.assertIn('\\"q4k_safe_kernel\\":%s', source)
@@ -417,6 +442,48 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('gpu_runtime_env_defaults("vulkan")', pdockerd)
         self.assertIn('"env": "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION"', LLAMA_GPU_ENV_MANIFEST.read_text())
         self.assertNotIn('"PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": os.environ.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0")', pdockerd)
+
+    def test_llama_gpu_compare_q6_identity_survives_spirv_legalization_hash_changes(self):
+        helpers = load_llama_gpu_compare_q6_helpers()
+        q6_hash = sorted(helpers["Q6_K_MATVEC_SPIRV_HASHES"])[0]
+        non_q6_hash = "0x0000000000000001"
+
+        source_original_event = {
+            "source_spirv_hash": q6_hash,
+            "effective_spirv_hash": non_q6_hash,
+        }
+        self.assertEqual(
+            [q6_hash, non_q6_hash],
+            helpers["event_spirv_identity_hashes"](source_original_event),
+        )
+        self.assertTrue(helpers["event_has_q6_matvec_identity"](source_original_event))
+
+        legacy_event = {
+            "spirv_hash": q6_hash.upper(),
+        }
+        self.assertEqual(
+            [q6_hash],
+            helpers["event_spirv_identity_hashes"](legacy_event),
+        )
+        self.assertTrue(helpers["event_has_q6_matvec_identity"](legacy_event))
+
+        empty_and_non_string_event = {
+            "source_spirv_hash": "",
+            "spirv_hash": 0,
+            "effective_spirv_hash": ["not", "a", "hash"],
+        }
+        self.assertFalse(helpers["event_has_q6_matvec_identity"](empty_and_non_string_event))
+
+        duplicate_event = {
+            "source_spirv_hash": q6_hash,
+            "spirv_hash": q6_hash.upper(),
+            "effective_spirv_hash": q6_hash,
+        }
+        duplicate_hashes = helpers["event_spirv_identity_hashes"](duplicate_event)
+        self.assertEqual([q6_hash, q6_hash, q6_hash], duplicate_hashes)
+        self.assertTrue(helpers["event_has_q6_matvec_identity"](duplicate_event))
+        self.assertFalse(helpers["event_has_q6_matvec_identity"]({}))
+        self.assertFalse(helpers["event_has_q6_matvec_identity"](None))
 
     def test_llama_gpu_lane_marker_and_scope_are_pinned(self):
         source = GPU_EXECUTOR.read_text()
@@ -626,6 +693,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("BuiltIn WorkgroupSize", source)
         self.assertIn("workgroup_size_spec_id", source)
         self.assertIn("workgroup_size_component_id", source)
+        self.assertIn("OpConstantComposite / OpSpecConstantComposite", source)
+        self.assertIn("OpSpecConstantOp CompositeConstruct", source)
+        self.assertIn("code[i + 3] == 80", source)
         self.assertIn("skip_spec_materialization", source)
         self.assertIn("code[i + 2] == 11 && code[i + 3] == 25", source)
 
@@ -928,10 +998,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"spirv_local_size\\":[%u,%u,%u]', source)
         self.assertIn('\\"spirv_workgroup_size_spec_id\\":[%u,%u,%u]', source)
         self.assertIn('\\"spirv_local_size_resolved\\":[%llu,%llu,%llu]', source)
+        self.assertIn("cleanup_resolved_local_size", source)
         self.assertIn('\\"spirv_local_size_consistent\\":%s', source)
         self.assertIn("spirv_local_size_consistent(", source)
         self.assertIn("spirv-local-size-inconsistent", source)
-        self.assertIn("strict passthrough refused", source)
+        self.assertIn('fail_stage = "spirv-local-size-inconsistent";', source)
+        self.assertNotIn('json_fail("spirv-local-size-inconsistent"', source)
         self.assertIn("spirv_local_invocation_count", source)
         self.assertIn("product > UINT64_MAX / local_size[i]", source)
         self.assertIn("invalid-q6-local-size", source)
@@ -1012,7 +1084,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "workgroup_shape_blocker == true",
             "spirv_local_size_consistent",
             "spirv_local_size_resolved",
-            "[32,2,1]",
             "workgroup-shape",
             "q6_shader_like_64_abs_delta",
             "Vulkan device-execution",
@@ -1031,9 +1102,32 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_llama_gpu_compare_memory_preflight_uses_available_memory(self):
         compare = LLAMA_COMPARE.read_text()
         self.assertIn("MemAvailable", compare)
+        self.assertIn('"valid": False', compare)
+        self.assertIn('"raw_bytes": len(raw.encode', compare)
+        self.assertIn("memory_snapshot_is_valid()", compare)
+        self.assertIn("preflight_free = int(", compare)
+        self.assertIn("separator-only output", compare)
+        self.assertIn('runtime memory sample unavailable', compare)
+        self.assertIn('without treating missing /proc/meminfo as OOM', compare)
+        self.assertNotIn("raw_bytes > 0", compare)
         self.assertIn('"mem_available_mb"', compare)
         self.assertIn('"mem_preflight_free_mb"', compare)
         self.assertIn('data.get("mem_preflight_free_mb")', compare)
+        ensure_body = compare[
+            compare.index("ensure_memory_headroom() {") : compare.index(
+                "wait_for_memory_headroom() {"
+            )
+        ]
+        runtime_body = compare[
+            compare.index("runtime_memory_headroom_ok() {") : compare.index(
+                "urlencode() {"
+            )
+        ]
+        for body in [ensure_body, runtime_body]:
+            guard = body.index('memory_snapshot_is_valid "$snap"')
+            free_parse = body.index('free_mb="$(python3 - "$snap"')
+            self.assertLess(guard, free_parse)
+            self.assertIn("return 0", body[guard:free_parse])
         self.assertIn('wait_for_memory_headroom "preflight before daemon start"', compare)
         preflight_call = compare.index('wait_for_memory_headroom "preflight before daemon start"')
         self.assertLess(
@@ -1103,7 +1197,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("remove_container >/dev/null 2>&1 || true", compare)
         self.assertIn("q6_workgroup_diagnostics", compare)
         self.assertIn("workgroup_shape_blocker", compare)
-        self.assertIn("fix Q6_K three-dimensional workgroup shape propagation", compare)
+        self.assertIn("q6_expected_local_size = [1, 1, 1] if q6_safe_kernel_used else [32, 1, 1]", compare)
+        self.assertIn("constant_id=1 is NUM_ROWS, not WorkGroupSizeY", compare)
+        self.assertIn("local_size_resolved=[32,1,1]", compare)
+        self.assertIn("fix Q6_K local-size/NUM_ROWS separation", compare)
         self.assertIn("q6_accum_mask", compare)
         self.assertIn("q6_base_work_group_y", compare)
         self.assertIn("q6_output_base_index", compare)
@@ -1206,6 +1303,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "X(PDOCKER_GPU_STRICT_RECONCILIATION, strict_reconciliation, has_strict_reconciliation, strict_reconciliation, 0)",
             "X(PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING, strict_device_local_staging, has_strict_device_local_staging, strict_device_local_staging, 0)",
             "X(PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS, materialize_specialization, has_materialize_specialization_constants, materialize_specialization_constants, 1)",
+            "X(PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC, legalize_workgroup_size_from_spec, has_legalize_workgroup_size_from_spec, legalize_workgroup_size_from_spec, 1)",
             "X(PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION, disable_pipeline_optimization, has_disable_pipeline_optimization, disable_pipeline_optimization, 1)",
             "X(PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS, skip_unused_descriptor_transfers, has_skip_unused_descriptor_transfers, skip_unused_descriptor_transfers, 1)",
             "X(PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS, use_spirv_descriptor_access, has_use_spirv_descriptor_access, use_spirv_descriptor_access, 1)",

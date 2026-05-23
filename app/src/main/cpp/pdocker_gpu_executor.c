@@ -891,6 +891,8 @@ typedef struct {
     int materialize_descriptor_aliases;
     int has_materialize_specialization_constants;
     int materialize_specialization_constants;
+    int has_legalize_workgroup_size_from_spec;
+    int legalize_workgroup_size_from_spec;
     int has_disable_pipeline_optimization;
     int disable_pipeline_optimization;
     int has_skip_unused_descriptor_transfers;
@@ -1228,10 +1230,29 @@ static SpirvTraceSummary summarize_spirv(const uint32_t *code, size_t bytes) {
             uint16_t word_count = (uint16_t)(inst >> 16);
             uint16_t op = (uint16_t)(inst & 0xffffu);
             if (word_count == 0 || i + word_count > words) break;
-            if (op == 51 && word_count >= 6 && code[i + 2] == workgroup_size_object_id) {
+            if ((op == 44 || op == 51) &&
+                word_count >= 6 &&
+                code[i + 2] == workgroup_size_object_id) {
+                /*
+                 * OpConstantComposite / OpSpecConstantComposite:
+                 *   <result-type> <result-id> <x-id> <y-id> <z-id>
+                 */
                 workgroup_size_component_id[0] = code[i + 3];
                 workgroup_size_component_id[1] = code[i + 4];
                 workgroup_size_component_id[2] = code[i + 5];
+                break;
+            }
+            if (op == 52 &&
+                word_count >= 7 &&
+                code[i + 2] == workgroup_size_object_id &&
+                code[i + 3] == 80) {
+                /*
+                 * OpSpecConstantOp CompositeConstruct:
+                 *   <result-type> <result-id> CompositeConstruct <x-id> <y-id> <z-id>
+                 */
+                workgroup_size_component_id[0] = code[i + 4];
+                workgroup_size_component_id[1] = code[i + 5];
+                workgroup_size_component_id[2] = code[i + 6];
                 break;
             }
             i += word_count;
@@ -3227,7 +3248,10 @@ static int patch_spirv_literal_local_size_from_spec(
     const SpirvTraceSummary summary = summarize_spirv(code, bytes);
     if (!summary.valid || summary.truncated) return 0;
     if (!summary.local_size_id[0] && !summary.local_size_id[1] &&
-        !summary.local_size_id[2]) {
+        !summary.local_size_id[2] &&
+        !summary.workgroup_size_spec_id_valid[0] &&
+        !summary.workgroup_size_spec_id_valid[1] &&
+        !summary.workgroup_size_spec_id_valid[2]) {
         return 0;
     }
     uint64_t local_size[3] = {1, 1, 1};
@@ -3629,6 +3653,7 @@ static uint64_t vulkan_pipeline_policy_hash(
         int materialize_specialization_constants,
         int specialization_materialized,
         int float16_capability_added,
+        int legalize_workgroup_size_from_spec,
         int disable_pipeline_optimization,
         int skip_unused_descriptor_transfers,
         int use_spirv_descriptor_access,
@@ -3648,6 +3673,7 @@ static uint64_t vulkan_pipeline_policy_hash(
         (unsigned char)(materialize_specialization_constants ? 1 : 0),
         (unsigned char)(specialization_materialized ? 1 : 0),
         (unsigned char)(float16_capability_added ? 1 : 0),
+        (unsigned char)(legalize_workgroup_size_from_spec ? 1 : 0),
         (unsigned char)(disable_pipeline_optimization ? 1 : 0),
         (unsigned char)(skip_unused_descriptor_transfers ? 1 : 0),
         (unsigned char)(use_spirv_descriptor_access ? 1 : 0),
@@ -8391,7 +8417,13 @@ static int run_vulkan_dispatch_fd(
             specialization_data_size);
     }
     const int legalize_workgroup_size_from_spec =
-        env_truthy("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", 1);
+        options && options->has_legalize_workgroup_size_from_spec
+            ? options->legalize_workgroup_size_from_spec
+            : env_truthy("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", 1);
+    const char *legalize_workgroup_size_from_spec_source =
+        options && options->has_legalize_workgroup_size_from_spec
+            ? "option"
+            : "env-default";
     if (legalize_workgroup_size_from_spec) {
         /*
          * Some SPIR-V modules expose LocalSize through OpExecutionModeId while
@@ -8569,6 +8601,7 @@ static int run_vulkan_dispatch_fd(
         materialize_specialization_constants,
         specialization_materialized,
         float16_capability_added,
+        legalize_workgroup_size_from_spec,
         disable_pipeline_optimization,
         skip_unused_descriptor_transfers,
         use_spirv_descriptor_access,
@@ -8593,8 +8626,7 @@ static int run_vulkan_dispatch_fd(
                                      specialization_count,
                                      specialization_data,
                                      specialization_data_size)) {
-        json_fail("spirv-local-size-inconsistent",
-                  "strict passthrough refused a shader whose LocalSize disagrees with specialization-resolved WorkGroupSize");
+        fail_stage = "spirv-local-size-inconsistent";
         ret = 64;
         goto cleanup;
     }
@@ -9851,6 +9883,8 @@ static int run_vulkan_dispatch_fd(
                 "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
                 "\"materialize_descriptor_aliases\":%s,"
                 "\"materialize_specialization\":%s,"
+                "\"legalize_workgroup_size_from_spec\":%s,"
+                "\"legalize_workgroup_size_from_spec_source\":\"%s\","
                 "\"disable_pipeline_optimization\":%s,"
                 "\"specialization_materialized\":%s,"
                 "\"q4k_targeted_specialization_materialized\":%s,"
@@ -9900,6 +9934,8 @@ static int run_vulkan_dispatch_fd(
                 rewrite_duplicate_descriptors ? "true" : "false",
                 materialize_descriptor_aliases ? "true" : "false",
                 materialize_specialization_constants ? "true" : "false",
+                legalize_workgroup_size_from_spec ? "true" : "false",
+                legalize_workgroup_size_from_spec_source,
                 disable_pipeline_optimization ? "true" : "false",
                 specialization_materialized ? "true" : "false",
                 q4k_targeted_specialization_materialized ? "true" : "false",
@@ -10017,6 +10053,8 @@ static int run_vulkan_dispatch_fd(
             "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
             "\"materialize_descriptor_aliases\":%s,"
             "\"materialize_specialization\":%s,"
+            "\"legalize_workgroup_size_from_spec\":%s,"
+            "\"legalize_workgroup_size_from_spec_source\":\"%s\","
             "\"disable_pipeline_optimization\":%s,"
             "\"specialization_materialized\":%s,"
             "\"q4k_targeted_specialization_materialized\":%s,"
@@ -10077,6 +10115,8 @@ static int run_vulkan_dispatch_fd(
             rewrite_duplicate_descriptors ? "true" : "false",
             materialize_descriptor_aliases ? "true" : "false",
             materialize_specialization_constants ? "true" : "false",
+            legalize_workgroup_size_from_spec ? "true" : "false",
+            legalize_workgroup_size_from_spec_source,
             disable_pipeline_optimization ? "true" : "false",
             specialization_materialized ? "true" : "false",
             q4k_targeted_specialization_materialized ? "true" : "false",
@@ -10236,7 +10276,7 @@ cleanup:
                 "\"executor_build_marker\":\"%s\","
                 "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
                 "\"backend_impl\":\"android_vulkan\",\"kernel\":\"generic_spirv\","
-                "\"valid\":false,\"stage\":\"vulkan-dispatch\",\"error\":\"%s\","
+                "\"valid\":false,\"stage\":\"%s\",\"error\":\"vulkan-dispatch failed\","
                 "\"vk_result\":%d,\"shader_bytes\":%zu,\"entry\":\"%s\","
                 "\"specializations\":%zu,\"bindings\":%zu,"
                 "\"layout_bindings\":%u,"
@@ -10248,11 +10288,14 @@ cleanup:
                 "\"estimated_workgroup_bytes\":%llu,"
                 "\"duplicate_descriptor_rewrite\":%s,"
                 "\"materialize_specialization\":%s,"
+                "\"legalize_workgroup_size_from_spec\":%s,"
+                "\"legalize_workgroup_size_from_spec_source\":\"%s\","
                 "\"specialization_materialized\":%s,"
                 "\"q4k_targeted_specialization_materialized\":%s,"
                 "\"q4k_callsite_detected\":%s,"
                 "\"q4k_pipeline_retry_ladder\":%s,"
                 "\"q4k_pipeline_retry_attempted\":%s,"
+                "\"local_size_patched\":%s,"
                 "\"float16_capability_added\":%s,"
                 "\"q4k_safe_kernel\":%s,"
                 "\"oracle_fail_closed\":%s,"
@@ -10263,11 +10306,14 @@ cleanup:
                 "\"spirv_valid\":%s,\"spirv_truncated\":%u,"
                 "\"spirv_local_size\":[%u,%u,%u],"
                 "\"spirv_local_size_id\":[%u,%u,%u],"
+                "\"spirv_local_size_spec_id\":[%u,%u,%u],"
+                "\"spirv_workgroup_size_spec_id\":[%u,%u,%u],"
                 "\"spirv_local_size_resolved\":[",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
                 PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
-                fail_stage, rc, shader_size, entry_name, specialization_count,
+                fail_stage ? fail_stage : "vulkan-dispatch",
+                rc, shader_size, entry_name, specialization_count,
                 binding_count, layout_count,
                 fail_binding, io_rc,
                 gx, gy, gz, push_size,
@@ -10279,11 +10325,14 @@ cleanup:
                 (unsigned long long)estimated_workgroup_bytes,
                 rewrite_duplicate_descriptors ? "true" : "false",
                 materialize_specialization_constants ? "true" : "false",
+                legalize_workgroup_size_from_spec ? "true" : "false",
+                legalize_workgroup_size_from_spec_source,
                 specialization_materialized ? "true" : "false",
                 q4k_targeted_specialization_materialized ? "true" : "false",
                 q4k_callsite_detected ? "true" : "false",
                 q4k_pipeline_retry_enabled ? "true" : "false",
                 q4k_pipeline_retry_attempted ? "true" : "false",
+                local_size_patched ? "true" : "false",
                 float16_capability_added ? "true" : "false",
                 q4k_safe_kernel_used ? "true" : "false",
                 oracle_fail_closed ? "true" : "false",
@@ -10298,18 +10347,23 @@ cleanup:
                 spirv_summary.local_size[2],
                 spirv_summary.local_size_id[0],
                 spirv_summary.local_size_id[1],
-                spirv_summary.local_size_id[2]);
+                spirv_summary.local_size_id[2],
+                spirv_summary.local_size_spec_id_valid[0] ? spirv_summary.local_size_spec_id[0] : UINT32_MAX,
+                spirv_summary.local_size_spec_id_valid[1] ? spirv_summary.local_size_spec_id[1] : UINT32_MAX,
+                spirv_summary.local_size_spec_id_valid[2] ? spirv_summary.local_size_spec_id[2] : UINT32_MAX,
+                spirv_summary.workgroup_size_spec_id_valid[0] ? spirv_summary.workgroup_size_spec_id[0] : UINT32_MAX,
+                spirv_summary.workgroup_size_spec_id_valid[1] ? spirv_summary.workgroup_size_spec_id[1] : UINT32_MAX,
+                spirv_summary.workgroup_size_spec_id_valid[2] ? spirv_summary.workgroup_size_spec_id[2] : UINT32_MAX);
+        uint64_t cleanup_resolved_local_size[3];
+        resolve_spirv_local_size(&spirv_summary,
+                                 specializations,
+                                 specialization_count,
+                                 specialization_data,
+                                 specialization_data_size,
+                                 cleanup_resolved_local_size);
         for (uint32_t i = 0; i < 3; ++i) {
-            uint64_t value = spirv_summary.local_size[i];
-            if (spirv_summary.local_size_id[i]) {
-                uint64_t spec_value = 0;
-                if (specialization_value_for_id(specializations, specialization_count,
-                                                specialization_data, specialization_data_size,
-                                                spirv_summary.local_size_id[i], &spec_value)) {
-                    value = spec_value;
-                }
-            }
-            fprintf(json_out(), "%s%llu", i ? "," : "", (unsigned long long)value);
+            fprintf(json_out(), "%s%llu", i ? "," : "",
+                    (unsigned long long)cleanup_resolved_local_size[i]);
         }
         fprintf(json_out(), "],\"specialization_entries\":[");
         for (size_t i = 0; i < specialization_count; ++i) {
