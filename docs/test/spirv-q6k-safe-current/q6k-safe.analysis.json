@@ -1,0 +1,3093 @@
+{
+  "modules": [
+    {
+      "bound": 363,
+      "bytes": 9040,
+      "capabilities": [
+        "Shader"
+      ],
+      "control_flow": {
+        "block_count": 30,
+        "edge_count": 32,
+        "function_count": 5,
+        "functions": [
+          {
+            "block_count": 20,
+            "blocks": [
+              {
+                "access_chain_count": 7,
+                "arithmetic_count": 6,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 837,
+                "block_exit_insert_before_word_index": 1040,
+                "instruction_count": 51,
+                "instruction_word_indices": [
+                  837,
+                  841,
+                  845,
+                  849,
+                  853,
+                  857,
+                  861,
+                  865,
+                  869,
+                  873,
+                  877,
+                  881,
+                  885,
+                  889,
+                  893,
+                  897,
+                  901,
+                  905,
+                  909,
+                  913,
+                  917,
+                  921,
+                  926,
+                  930,
+                  935,
+                  939,
+                  944,
+                  948,
+                  953,
+                  958,
+                  961,
+                  965,
+                  970,
+                  973,
+                  978,
+                  982,
+                  987,
+                  990,
+                  995,
+                  999,
+                  1002,
+                  1007,
+                  1011,
+                  1016,
+                  1020,
+                  1025,
+                  1028,
+                  1031,
+                  1035,
+                  1040,
+                  1043
+                ],
+                "label": 5,
+                "load_count": 9,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op134": 1,
+                  "OpAccessChain": 7,
+                  "OpBranchConditional": 1,
+                  "OpIMul": 2,
+                  "OpINotEqual": 1,
+                  "OpLoad": 9,
+                  "OpSelectionMerge": 1,
+                  "OpStore": 6,
+                  "OpUDiv": 2,
+                  "OpVariable": 21
+                },
+                "phi_count": 0,
+                "selection_merge": {
+                  "control": 0,
+                  "merge_block": 229
+                },
+                "store_candidates": [
+                  {
+                    "object_id": 202,
+                    "pointer_id": 189,
+                    "word_index": 958
+                  },
+                  {
+                    "object_id": 205,
+                    "pointer_id": 203,
+                    "word_index": 970
+                  },
+                  {
+                    "object_id": 213,
+                    "pointer_id": 206,
+                    "word_index": 987
+                  },
+                  {
+                    "object_id": 217,
+                    "pointer_id": 214,
+                    "word_index": 999
+                  },
+                  {
+                    "object_id": 224,
+                    "pointer_id": 218,
+                    "word_index": 1025
+                  },
+                  {
+                    "object_id": 86,
+                    "pointer_id": 225,
+                    "word_index": 1028
+                  }
+                ],
+                "store_count": 6,
+                "successors": [
+                  228,
+                  229
+                ],
+                "terminator": "OpBranchConditional",
+                "word_index": 835
+              },
+              {
+                "access_chain_count": 5,
+                "arithmetic_count": 6,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1049,
+                "block_exit_insert_before_word_index": 1163,
+                "instruction_count": 28,
+                "instruction_word_indices": [
+                  1049,
+                  1053,
+                  1058,
+                  1062,
+                  1067,
+                  1070,
+                  1074,
+                  1079,
+                  1083,
+                  1088,
+                  1091,
+                  1095,
+                  1100,
+                  1104,
+                  1109,
+                  1112,
+                  1116,
+                  1121,
+                  1125,
+                  1130,
+                  1133,
+                  1137,
+                  1142,
+                  1146,
+                  1151,
+                  1155,
+                  1160,
+                  1163
+                ],
+                "label": 228,
+                "load_count": 11,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op134": 3,
+                  "Op137": 1,
+                  "OpAccessChain": 5,
+                  "OpBranch": 1,
+                  "OpIMul": 1,
+                  "OpLoad": 11,
+                  "OpStore": 5,
+                  "OpUDiv": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 235,
+                    "pointer_id": 230,
+                    "word_index": 1067
+                  },
+                  {
+                    "object_id": 240,
+                    "pointer_id": 236,
+                    "word_index": 1088
+                  },
+                  {
+                    "object_id": 246,
+                    "pointer_id": 241,
+                    "word_index": 1109
+                  },
+                  {
+                    "object_id": 252,
+                    "pointer_id": 247,
+                    "word_index": 1130
+                  },
+                  {
+                    "object_id": 259,
+                    "pointer_id": 225,
+                    "word_index": 1160
+                  }
+                ],
+                "store_count": 5,
+                "successors": [
+                  229
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1047
+              },
+              {
+                "access_chain_count": 3,
+                "arithmetic_count": 4,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1167,
+                "block_exit_insert_before_word_index": 1238,
+                "instruction_count": 18,
+                "instruction_word_indices": [
+                  1167,
+                  1171,
+                  1176,
+                  1180,
+                  1185,
+                  1190,
+                  1193,
+                  1197,
+                  1202,
+                  1206,
+                  1211,
+                  1214,
+                  1218,
+                  1223,
+                  1227,
+                  1232,
+                  1235,
+                  1238
+                ],
+                "label": 229,
+                "load_count": 6,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op134": 1,
+                  "OpAccessChain": 3,
+                  "OpBranch": 1,
+                  "OpLoad": 6,
+                  "OpStore": 4,
+                  "OpUDiv": 3
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 265,
+                    "pointer_id": 260,
+                    "word_index": 1190
+                  },
+                  {
+                    "object_id": 271,
+                    "pointer_id": 266,
+                    "word_index": 1211
+                  },
+                  {
+                    "object_id": 277,
+                    "pointer_id": 272,
+                    "word_index": 1232
+                  },
+                  {
+                    "object_id": 86,
+                    "pointer_id": 278,
+                    "word_index": 1235
+                  }
+                ],
+                "store_count": 4,
+                "successors": [
+                  279
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1165
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 0,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1242,
+                "block_exit_insert_before_word_index": 1242,
+                "instruction_count": 2,
+                "instruction_word_indices": [
+                  1242,
+                  1246
+                ],
+                "label": 279,
+                "load_count": 0,
+                "loop_merge": {
+                  "continue_target": 282,
+                  "control": 0,
+                  "merge_block": 281
+                },
+                "op_histogram": {
+                  "OpBranch": 1,
+                  "OpLoopMerge": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [],
+                "store_count": 0,
+                "successors": [
+                  283
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1240
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1250,
+                "block_exit_insert_before_word_index": 1259,
+                "instruction_count": 3,
+                "instruction_word_indices": [
+                  1250,
+                  1254,
+                  1259
+                ],
+                "label": 283,
+                "load_count": 1,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranchConditional": 1,
+                  "OpLoad": 1,
+                  "OpULessThan": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [],
+                "store_count": 0,
+                "successors": [
+                  280,
+                  281
+                ],
+                "terminator": "OpBranchConditional",
+                "word_index": 1248
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 2,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1265,
+                "block_exit_insert_before_word_index": 1294,
+                "instruction_count": 9,
+                "instruction_word_indices": [
+                  1265,
+                  1269,
+                  1273,
+                  1278,
+                  1281,
+                  1285,
+                  1289,
+                  1294,
+                  1297
+                ],
+                "label": 280,
+                "load_count": 4,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranchConditional": 1,
+                  "OpIMul": 1,
+                  "OpLoad": 4,
+                  "OpSelectionMerge": 1,
+                  "OpStore": 1,
+                  "OpUGreaterThanEqual": 1
+                },
+                "phi_count": 0,
+                "selection_merge": {
+                  "control": 0,
+                  "merge_block": 294
+                },
+                "store_candidates": [
+                  {
+                    "object_id": 289,
+                    "pointer_id": 286,
+                    "word_index": 1278
+                  }
+                ],
+                "store_count": 1,
+                "successors": [
+                  293,
+                  294
+                ],
+                "terminator": "OpBranchConditional",
+                "word_index": 1263
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 0,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1303,
+                "block_exit_insert_before_word_index": 1303,
+                "instruction_count": 1,
+                "instruction_word_indices": [
+                  1303
+                ],
+                "label": 293,
+                "load_count": 0,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranch": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [],
+                "store_count": 0,
+                "successors": [
+                  282
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1301
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 0,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1307,
+                "block_exit_insert_before_word_index": 1313,
+                "instruction_count": 3,
+                "instruction_word_indices": [
+                  1307,
+                  1310,
+                  1313
+                ],
+                "label": 294,
+                "load_count": 0,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranch": 1,
+                  "OpStore": 2
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 297,
+                    "pointer_id": 296,
+                    "word_index": 1307
+                  },
+                  {
+                    "object_id": 86,
+                    "pointer_id": 298,
+                    "word_index": 1310
+                  }
+                ],
+                "store_count": 2,
+                "successors": [
+                  299
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1305
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 0,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1317,
+                "block_exit_insert_before_word_index": 1317,
+                "instruction_count": 2,
+                "instruction_word_indices": [
+                  1317,
+                  1321
+                ],
+                "label": 299,
+                "load_count": 0,
+                "loop_merge": {
+                  "continue_target": 302,
+                  "control": 0,
+                  "merge_block": 301
+                },
+                "op_histogram": {
+                  "OpBranch": 1,
+                  "OpLoopMerge": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [],
+                "store_count": 0,
+                "successors": [
+                  303
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1315
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1325,
+                "block_exit_insert_before_word_index": 1338,
+                "instruction_count": 4,
+                "instruction_word_indices": [
+                  1325,
+                  1329,
+                  1333,
+                  1338
+                ],
+                "label": 303,
+                "load_count": 2,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranchConditional": 1,
+                  "OpLoad": 2,
+                  "OpULessThan": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [],
+                "store_count": 0,
+                "successors": [
+                  300,
+                  301
+                ],
+                "terminator": "OpBranchConditional",
+                "word_index": 1323
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 4,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1344,
+                "block_exit_insert_before_word_index": 1386,
+                "instruction_count": 11,
+                "instruction_word_indices": [
+                  1344,
+                  1348,
+                  1352,
+                  1356,
+                  1361,
+                  1366,
+                  1370,
+                  1375,
+                  1380,
+                  1383,
+                  1386
+                ],
+                "label": 300,
+                "load_count": 4,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranch": 1,
+                  "OpIMul": 2,
+                  "OpLoad": 4,
+                  "OpStore": 2,
+                  "OpUDiv": 2
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 316,
+                    "pointer_id": 307,
+                    "word_index": 1380
+                  },
+                  {
+                    "object_id": 86,
+                    "pointer_id": 317,
+                    "word_index": 1383
+                  }
+                ],
+                "store_count": 2,
+                "successors": [
+                  318
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1342
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 0,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1390,
+                "block_exit_insert_before_word_index": 1390,
+                "instruction_count": 2,
+                "instruction_word_indices": [
+                  1390,
+                  1394
+                ],
+                "label": 318,
+                "load_count": 0,
+                "loop_merge": {
+                  "continue_target": 321,
+                  "control": 0,
+                  "merge_block": 320
+                },
+                "op_histogram": {
+                  "OpBranch": 1,
+                  "OpLoopMerge": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [],
+                "store_count": 0,
+                "successors": [
+                  322
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1388
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1398,
+                "block_exit_insert_before_word_index": 1407,
+                "instruction_count": 3,
+                "instruction_word_indices": [
+                  1398,
+                  1402,
+                  1407
+                ],
+                "label": 322,
+                "load_count": 1,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranchConditional": 1,
+                  "OpLoad": 1,
+                  "OpULessThan": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [],
+                "store_count": 0,
+                "successors": [
+                  319,
+                  320
+                ],
+                "terminator": "OpBranchConditional",
+                "word_index": 1396
+              },
+              {
+                "access_chain_count": 1,
+                "arithmetic_count": 5,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1413,
+                "block_exit_insert_before_word_index": 1487,
+                "instruction_count": 18,
+                "instruction_word_indices": [
+                  1413,
+                  1417,
+                  1420,
+                  1424,
+                  1427,
+                  1433,
+                  1437,
+                  1441,
+                  1446,
+                  1451,
+                  1455,
+                  1460,
+                  1466,
+                  1470,
+                  1475,
+                  1479,
+                  1484,
+                  1487
+                ],
+                "label": 319,
+                "load_count": 7,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op57": 1,
+                  "OpAccessChain": 1,
+                  "OpBranch": 1,
+                  "OpFMul": 1,
+                  "OpIMul": 2,
+                  "OpLoad": 7,
+                  "OpSDiv": 1,
+                  "OpStore": 3,
+                  "OpUDiv": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 326,
+                    "pointer_id": 325,
+                    "word_index": 1417
+                  },
+                  {
+                    "object_id": 328,
+                    "pointer_id": 327,
+                    "word_index": 1424
+                  },
+                  {
+                    "object_id": 345,
+                    "pointer_id": 296,
+                    "word_index": 1484
+                  }
+                ],
+                "store_count": 3,
+                "successors": [
+                  321
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1411
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1491,
+                "block_exit_insert_before_word_index": 1503,
+                "instruction_count": 4,
+                "instruction_word_indices": [
+                  1491,
+                  1495,
+                  1500,
+                  1503
+                ],
+                "label": 321,
+                "load_count": 1,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranch": 1,
+                  "OpIMul": 1,
+                  "OpLoad": 1,
+                  "OpStore": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 348,
+                    "pointer_id": 317,
+                    "word_index": 1500
+                  }
+                ],
+                "store_count": 1,
+                "successors": [
+                  318
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1489
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 0,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1507,
+                "block_exit_insert_before_word_index": 1507,
+                "instruction_count": 1,
+                "instruction_word_indices": [
+                  1507
+                ],
+                "label": 320,
+                "load_count": 0,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranch": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [],
+                "store_count": 0,
+                "successors": [
+                  302
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1505
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1511,
+                "block_exit_insert_before_word_index": 1523,
+                "instruction_count": 4,
+                "instruction_word_indices": [
+                  1511,
+                  1515,
+                  1520,
+                  1523
+                ],
+                "label": 302,
+                "load_count": 1,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranch": 1,
+                  "OpIMul": 1,
+                  "OpLoad": 1,
+                  "OpStore": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 350,
+                    "pointer_id": 298,
+                    "word_index": 1520
+                  }
+                ],
+                "store_count": 1,
+                "successors": [
+                  299
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1509
+              },
+              {
+                "access_chain_count": 1,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1527,
+                "block_exit_insert_before_word_index": 1553,
+                "instruction_count": 7,
+                "instruction_word_indices": [
+                  1527,
+                  1531,
+                  1535,
+                  1540,
+                  1544,
+                  1550,
+                  1553
+                ],
+                "label": 301,
+                "load_count": 3,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpAccessChain": 1,
+                  "OpBranch": 1,
+                  "OpIMul": 1,
+                  "OpLoad": 3,
+                  "OpStore": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 358,
+                    "pointer_id": 359,
+                    "word_index": 1550
+                  }
+                ],
+                "store_count": 1,
+                "successors": [
+                  282
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1525
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1557,
+                "block_exit_insert_before_word_index": 1569,
+                "instruction_count": 4,
+                "instruction_word_indices": [
+                  1557,
+                  1561,
+                  1566,
+                  1569
+                ],
+                "label": 282,
+                "load_count": 1,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranch": 1,
+                  "OpIMul": 1,
+                  "OpLoad": 1,
+                  "OpStore": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 361,
+                    "pointer_id": 278,
+                    "word_index": 1566
+                  }
+                ],
+                "store_count": 1,
+                "successors": [
+                  279
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1555
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 0,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1573,
+                "block_exit_insert_before_word_index": 1573,
+                "instruction_count": 1,
+                "instruction_word_indices": [
+                  1573
+                ],
+                "label": 281,
+                "load_count": 0,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpReturn": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [],
+                "store_count": 0,
+                "successors": [],
+                "terminator": "OpReturn",
+                "word_index": 1571
+              }
+            ],
+            "id": 4,
+            "word_index": 830
+          },
+          {
+            "block_count": 1,
+            "blocks": [
+              {
+                "access_chain_count": 1,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1585,
+                "block_exit_insert_before_word_index": 1639,
+                "instruction_count": 13,
+                "instruction_word_indices": [
+                  1585,
+                  1589,
+                  1593,
+                  1598,
+                  1604,
+                  1608,
+                  1611,
+                  1615,
+                  1619,
+                  1624,
+                  1629,
+                  1634,
+                  1639
+                ],
+                "label": 11,
+                "load_count": 4,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op194": 2,
+                  "Op199": 2,
+                  "OpAccessChain": 1,
+                  "OpLoad": 4,
+                  "OpReturnValue": 1,
+                  "OpStore": 1,
+                  "OpUDiv": 1,
+                  "OpVariable": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 38,
+                    "pointer_id": 27,
+                    "word_index": 1608
+                  }
+                ],
+                "store_count": 1,
+                "successors": [],
+                "terminator": "OpReturnValue",
+                "word_index": 1583
+              }
+            ],
+            "id": 10,
+            "word_index": 1575
+          },
+          {
+            "block_count": 4,
+            "blocks": [
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1652,
+                "block_exit_insert_before_word_index": 1688,
+                "instruction_count": 11,
+                "instruction_word_indices": [
+                  1652,
+                  1656,
+                  1660,
+                  1664,
+                  1668,
+                  1671,
+                  1676,
+                  1679,
+                  1683,
+                  1688,
+                  1691
+                ],
+                "label": 16,
+                "load_count": 2,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op57": 1,
+                  "OpBranchConditional": 1,
+                  "OpLoad": 2,
+                  "OpSelectionMerge": 1,
+                  "OpStore": 2,
+                  "OpUGreaterThanEqual": 1,
+                  "OpVariable": 3
+                },
+                "phi_count": 0,
+                "selection_merge": {
+                  "control": 0,
+                  "merge_block": 60
+                },
+                "store_candidates": [
+                  {
+                    "object_id": 52,
+                    "pointer_id": 51,
+                    "word_index": 1668
+                  },
+                  {
+                    "object_id": 53,
+                    "pointer_id": 50,
+                    "word_index": 1676
+                  }
+                ],
+                "store_count": 2,
+                "successors": [
+                  59,
+                  64
+                ],
+                "terminator": "OpBranchConditional",
+                "word_index": 1650
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1697,
+                "block_exit_insert_before_word_index": 1709,
+                "instruction_count": 4,
+                "instruction_word_indices": [
+                  1697,
+                  1701,
+                  1706,
+                  1709
+                ],
+                "label": 59,
+                "load_count": 1,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op130": 1,
+                  "OpBranch": 1,
+                  "OpLoad": 1,
+                  "OpStore": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 63,
+                    "pointer_id": 58,
+                    "word_index": 1706
+                  }
+                ],
+                "store_count": 1,
+                "successors": [
+                  60
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1695
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 0,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1713,
+                "block_exit_insert_before_word_index": 1720,
+                "instruction_count": 3,
+                "instruction_word_indices": [
+                  1713,
+                  1717,
+                  1720
+                ],
+                "label": 64,
+                "load_count": 1,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpBranch": 1,
+                  "OpLoad": 1,
+                  "OpStore": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 65,
+                    "pointer_id": 58,
+                    "word_index": 1717
+                  }
+                ],
+                "store_count": 1,
+                "successors": [
+                  60
+                ],
+                "terminator": "OpBranch",
+                "word_index": 1711
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1724,
+                "block_exit_insert_before_word_index": 1732,
+                "instruction_count": 3,
+                "instruction_word_indices": [
+                  1724,
+                  1728,
+                  1732
+                ],
+                "label": 60,
+                "load_count": 1,
+                "loop_merge": null,
+                "op_histogram": {
+                  "OpIAdd": 1,
+                  "OpLoad": 1,
+                  "OpReturnValue": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [],
+                "store_count": 0,
+                "successors": [],
+                "terminator": "OpReturnValue",
+                "word_index": 1722
+              }
+            ],
+            "id": 15,
+            "word_index": 1642
+          },
+          {
+            "block_count": 1,
+            "blocks": [
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 1,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1745,
+                "block_exit_insert_before_word_index": 1825,
+                "instruction_count": 20,
+                "instruction_word_indices": [
+                  1745,
+                  1749,
+                  1753,
+                  1757,
+                  1761,
+                  1765,
+                  1768,
+                  1773,
+                  1776,
+                  1780,
+                  1785,
+                  1788,
+                  1793,
+                  1796,
+                  1800,
+                  1804,
+                  1809,
+                  1814,
+                  1820,
+                  1825
+                ],
+                "label": 21,
+                "load_count": 4,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op12": 1,
+                  "Op196": 1,
+                  "Op197": 1,
+                  "Op57": 2,
+                  "Op81": 1,
+                  "OpIMul": 1,
+                  "OpLoad": 4,
+                  "OpReturnValue": 1,
+                  "OpStore": 4,
+                  "OpVariable": 4
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 72,
+                    "pointer_id": 71,
+                    "word_index": 1765
+                  },
+                  {
+                    "object_id": 73,
+                    "pointer_id": 70,
+                    "word_index": 1773
+                  },
+                  {
+                    "object_id": 77,
+                    "pointer_id": 78,
+                    "word_index": 1785
+                  },
+                  {
+                    "object_id": 79,
+                    "pointer_id": 74,
+                    "word_index": 1793
+                  }
+                ],
+                "store_count": 4,
+                "successors": [],
+                "terminator": "OpReturnValue",
+                "word_index": 1743
+              }
+            ],
+            "id": 20,
+            "word_index": 1735
+          },
+          {
+            "block_count": 4,
+            "blocks": [
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 10,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 1841,
+                "block_exit_insert_before_word_index": 2073,
+                "instruction_count": 58,
+                "instruction_word_indices": [
+                  1841,
+                  1845,
+                  1849,
+                  1853,
+                  1857,
+                  1861,
+                  1865,
+                  1869,
+                  1873,
+                  1877,
+                  1881,
+                  1885,
+                  1889,
+                  1893,
+                  1897,
+                  1901,
+                  1905,
+                  1909,
+                  1913,
+                  1918,
+                  1921,
+                  1925,
+                  1930,
+                  1933,
+                  1937,
+                  1941,
+                  1946,
+                  1951,
+                  1955,
+                  1960,
+                  1965,
+                  1968,
+                  1972,
+                  1977,
+                  1981,
+                  1986,
+                  1991,
+                  1995,
+                  2000,
+                  2005,
+                  2008,
+                  2012,
+                  2017,
+                  2021,
+                  2026,
+                  2031,
+                  2034,
+                  2038,
+                  2041,
+                  2046,
+                  2049,
+                  2053,
+                  2056,
+                  2061,
+                  2064,
+                  2068,
+                  2073,
+                  2076
+                ],
+                "label": 26,
+                "load_count": 13,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op194": 2,
+                  "Op199": 3,
+                  "Op57": 2,
+                  "OpBranchConditional": 1,
+                  "OpIMul": 7,
+                  "OpLoad": 13,
+                  "OpSelectionMerge": 1,
+                  "OpStore": 9,
+                  "OpUDiv": 2,
+                  "OpULessThan": 1,
+                  "OpVariable": 17
+                },
+                "phi_count": 0,
+                "selection_merge": {
+                  "control": 0,
+                  "merge_block": 140
+                },
+                "store_candidates": [
+                  {
+                    "object_id": 93,
+                    "pointer_id": 90,
+                    "word_index": 1918
+                  },
+                  {
+                    "object_id": 97,
+                    "pointer_id": 94,
+                    "word_index": 1930
+                  },
+                  {
+                    "object_id": 107,
+                    "pointer_id": 98,
+                    "word_index": 1965
+                  },
+                  {
+                    "object_id": 118,
+                    "pointer_id": 108,
+                    "word_index": 2005
+                  },
+                  {
+                    "object_id": 126,
+                    "pointer_id": 119,
+                    "word_index": 2031
+                  },
+                  {
+                    "object_id": 129,
+                    "pointer_id": 128,
+                    "word_index": 2038
+                  },
+                  {
+                    "object_id": 130,
+                    "pointer_id": 127,
+                    "word_index": 2046
+                  },
+                  {
+                    "object_id": 133,
+                    "pointer_id": 132,
+                    "word_index": 2053
+                  },
+                  {
+                    "object_id": 134,
+                    "pointer_id": 131,
+                    "word_index": 2061
+                  }
+                ],
+                "store_count": 9,
+                "successors": [
+                  139,
+                  144
+                ],
+                "terminator": "OpBranchConditional",
+                "word_index": 1839
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 0,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 2082,
+                "block_exit_insert_before_word_index": 2094,
+                "instruction_count": 4,
+                "instruction_word_indices": [
+                  2082,
+                  2086,
+                  2091,
+                  2094
+                ],
+                "label": 139,
+                "load_count": 1,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op199": 1,
+                  "OpBranch": 1,
+                  "OpLoad": 1,
+                  "OpStore": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 143,
+                    "pointer_id": 138,
+                    "word_index": 2091
+                  }
+                ],
+                "store_count": 1,
+                "successors": [
+                  140
+                ],
+                "terminator": "OpBranch",
+                "word_index": 2080
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 0,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 2098,
+                "block_exit_insert_before_word_index": 2115,
+                "instruction_count": 5,
+                "instruction_word_indices": [
+                  2098,
+                  2102,
+                  2107,
+                  2112,
+                  2115
+                ],
+                "label": 144,
+                "load_count": 1,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op194": 1,
+                  "Op199": 1,
+                  "OpBranch": 1,
+                  "OpLoad": 1,
+                  "OpStore": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 148,
+                    "pointer_id": 138,
+                    "word_index": 2112
+                  }
+                ],
+                "store_count": 1,
+                "successors": [
+                  140
+                ],
+                "terminator": "OpBranch",
+                "word_index": 2096
+              },
+              {
+                "access_chain_count": 0,
+                "arithmetic_count": 6,
+                "barrier_count": 0,
+                "block_entry_insert_after_phi_word_index": 2119,
+                "block_exit_insert_before_word_index": 2257,
+                "instruction_count": 34,
+                "instruction_word_indices": [
+                  2119,
+                  2123,
+                  2126,
+                  2130,
+                  2134,
+                  2139,
+                  2144,
+                  2149,
+                  2154,
+                  2159,
+                  2162,
+                  2166,
+                  2170,
+                  2175,
+                  2180,
+                  2184,
+                  2189,
+                  2192,
+                  2196,
+                  2199,
+                  2204,
+                  2207,
+                  2211,
+                  2216,
+                  2219,
+                  2224,
+                  2227,
+                  2231,
+                  2235,
+                  2239,
+                  2244,
+                  2248,
+                  2252,
+                  2257
+                ],
+                "label": 140,
+                "load_count": 10,
+                "loop_merge": null,
+                "op_histogram": {
+                  "Op111": 2,
+                  "Op130": 1,
+                  "Op194": 2,
+                  "Op196": 1,
+                  "Op197": 1,
+                  "Op199": 2,
+                  "Op57": 2,
+                  "OpIAdd": 1,
+                  "OpIMul": 1,
+                  "OpLoad": 10,
+                  "OpReturnValue": 1,
+                  "OpSDiv": 2,
+                  "OpStore": 7,
+                  "OpUDiv": 1
+                },
+                "phi_count": 0,
+                "selection_merge": null,
+                "store_candidates": [
+                  {
+                    "object_id": 149,
+                    "pointer_id": 135,
+                    "word_index": 2123
+                  },
+                  {
+                    "object_id": 159,
+                    "pointer_id": 150,
+                    "word_index": 2159
+                  },
+                  {
+                    "object_id": 168,
+                    "pointer_id": 161,
+                    "word_index": 2189
+                  },
+                  {
+                    "object_id": 171,
+                    "pointer_id": 170,
+                    "word_index": 2196
+                  },
+                  {
+                    "object_id": 172,
+                    "pointer_id": 169,
+                    "word_index": 2204
+                  },
+                  {
+                    "object_id": 177,
+                    "pointer_id": 178,
+                    "word_index": 2216
+                  },
+                  {
+                    "object_id": 179,
+                    "pointer_id": 174,
+                    "word_index": 2224
+                  }
+                ],
+                "store_count": 7,
+                "successors": [],
+                "terminator": "OpReturnValue",
+                "word_index": 2117
+              }
+            ],
+            "id": 25,
+            "word_index": 1828
+          }
+        ],
+        "probe_plan": {
+          "binary_search_supported": true,
+          "bisect_rounds": [
+            [
+              {
+                "candidate_count": 15,
+                "candidate_indices": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7,
+                  8,
+                  9,
+                  10,
+                  11,
+                  12,
+                  13,
+                  14
+                ],
+                "range": [
+                  0,
+                  15
+                ]
+              },
+              {
+                "candidate_count": 15,
+                "candidate_indices": [
+                  15,
+                  16,
+                  17,
+                  18,
+                  19,
+                  20,
+                  21,
+                  22,
+                  23,
+                  24,
+                  25,
+                  26,
+                  27,
+                  28,
+                  29
+                ],
+                "range": [
+                  15,
+                  30
+                ]
+              }
+            ],
+            [
+              {
+                "candidate_count": 7,
+                "candidate_indices": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6
+                ],
+                "range": [
+                  0,
+                  7
+                ]
+              },
+              {
+                "candidate_count": 8,
+                "candidate_indices": [
+                  7,
+                  8,
+                  9,
+                  10,
+                  11,
+                  12,
+                  13,
+                  14
+                ],
+                "range": [
+                  7,
+                  15
+                ]
+              },
+              {
+                "candidate_count": 7,
+                "candidate_indices": [
+                  15,
+                  16,
+                  17,
+                  18,
+                  19,
+                  20,
+                  21
+                ],
+                "range": [
+                  15,
+                  22
+                ]
+              },
+              {
+                "candidate_count": 8,
+                "candidate_indices": [
+                  22,
+                  23,
+                  24,
+                  25,
+                  26,
+                  27,
+                  28,
+                  29
+                ],
+                "range": [
+                  22,
+                  30
+                ]
+              }
+            ],
+            [
+              {
+                "candidate_count": 3,
+                "candidate_indices": [
+                  0,
+                  1,
+                  2
+                ],
+                "range": [
+                  0,
+                  3
+                ]
+              },
+              {
+                "candidate_count": 4,
+                "candidate_indices": [
+                  3,
+                  4,
+                  5,
+                  6
+                ],
+                "range": [
+                  3,
+                  7
+                ]
+              },
+              {
+                "candidate_count": 4,
+                "candidate_indices": [
+                  7,
+                  8,
+                  9,
+                  10
+                ],
+                "range": [
+                  7,
+                  11
+                ]
+              },
+              {
+                "candidate_count": 4,
+                "candidate_indices": [
+                  11,
+                  12,
+                  13,
+                  14
+                ],
+                "range": [
+                  11,
+                  15
+                ]
+              },
+              {
+                "candidate_count": 3,
+                "candidate_indices": [
+                  15,
+                  16,
+                  17
+                ],
+                "range": [
+                  15,
+                  18
+                ]
+              },
+              {
+                "candidate_count": 4,
+                "candidate_indices": [
+                  18,
+                  19,
+                  20,
+                  21
+                ],
+                "range": [
+                  18,
+                  22
+                ]
+              },
+              {
+                "candidate_count": 4,
+                "candidate_indices": [
+                  22,
+                  23,
+                  24,
+                  25
+                ],
+                "range": [
+                  22,
+                  26
+                ]
+              },
+              {
+                "candidate_count": 4,
+                "candidate_indices": [
+                  26,
+                  27,
+                  28,
+                  29
+                ],
+                "range": [
+                  26,
+                  30
+                ]
+              }
+            ],
+            [
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  0
+                ],
+                "range": [
+                  0,
+                  1
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  1,
+                  2
+                ],
+                "range": [
+                  1,
+                  3
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  3,
+                  4
+                ],
+                "range": [
+                  3,
+                  5
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  5,
+                  6
+                ],
+                "range": [
+                  5,
+                  7
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  7,
+                  8
+                ],
+                "range": [
+                  7,
+                  9
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  9,
+                  10
+                ],
+                "range": [
+                  9,
+                  11
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  11,
+                  12
+                ],
+                "range": [
+                  11,
+                  13
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  13,
+                  14
+                ],
+                "range": [
+                  13,
+                  15
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  15
+                ],
+                "range": [
+                  15,
+                  16
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  16,
+                  17
+                ],
+                "range": [
+                  16,
+                  18
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  18,
+                  19
+                ],
+                "range": [
+                  18,
+                  20
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  20,
+                  21
+                ],
+                "range": [
+                  20,
+                  22
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  22,
+                  23
+                ],
+                "range": [
+                  22,
+                  24
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  24,
+                  25
+                ],
+                "range": [
+                  24,
+                  26
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  26,
+                  27
+                ],
+                "range": [
+                  26,
+                  28
+                ]
+              },
+              {
+                "candidate_count": 2,
+                "candidate_indices": [
+                  28,
+                  29
+                ],
+                "range": [
+                  28,
+                  30
+                ]
+              }
+            ],
+            [
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  0
+                ],
+                "leaf": true,
+                "range": [
+                  0,
+                  1
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  1
+                ],
+                "range": [
+                  1,
+                  2
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  2
+                ],
+                "range": [
+                  2,
+                  3
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  3
+                ],
+                "range": [
+                  3,
+                  4
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  4
+                ],
+                "range": [
+                  4,
+                  5
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  5
+                ],
+                "range": [
+                  5,
+                  6
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  6
+                ],
+                "range": [
+                  6,
+                  7
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  7
+                ],
+                "range": [
+                  7,
+                  8
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  8
+                ],
+                "range": [
+                  8,
+                  9
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  9
+                ],
+                "range": [
+                  9,
+                  10
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  10
+                ],
+                "range": [
+                  10,
+                  11
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  11
+                ],
+                "range": [
+                  11,
+                  12
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  12
+                ],
+                "range": [
+                  12,
+                  13
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  13
+                ],
+                "range": [
+                  13,
+                  14
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  14
+                ],
+                "range": [
+                  14,
+                  15
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  15
+                ],
+                "leaf": true,
+                "range": [
+                  15,
+                  16
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  16
+                ],
+                "range": [
+                  16,
+                  17
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  17
+                ],
+                "range": [
+                  17,
+                  18
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  18
+                ],
+                "range": [
+                  18,
+                  19
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  19
+                ],
+                "range": [
+                  19,
+                  20
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  20
+                ],
+                "range": [
+                  20,
+                  21
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  21
+                ],
+                "range": [
+                  21,
+                  22
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  22
+                ],
+                "range": [
+                  22,
+                  23
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  23
+                ],
+                "range": [
+                  23,
+                  24
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  24
+                ],
+                "range": [
+                  24,
+                  25
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  25
+                ],
+                "range": [
+                  25,
+                  26
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  26
+                ],
+                "range": [
+                  26,
+                  27
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  27
+                ],
+                "range": [
+                  27,
+                  28
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  28
+                ],
+                "range": [
+                  28,
+                  29
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  29
+                ],
+                "range": [
+                  29,
+                  30
+                ]
+              }
+            ],
+            [
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  1
+                ],
+                "leaf": true,
+                "range": [
+                  1,
+                  2
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  2
+                ],
+                "leaf": true,
+                "range": [
+                  2,
+                  3
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  3
+                ],
+                "leaf": true,
+                "range": [
+                  3,
+                  4
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  4
+                ],
+                "leaf": true,
+                "range": [
+                  4,
+                  5
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  5
+                ],
+                "leaf": true,
+                "range": [
+                  5,
+                  6
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  6
+                ],
+                "leaf": true,
+                "range": [
+                  6,
+                  7
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  7
+                ],
+                "leaf": true,
+                "range": [
+                  7,
+                  8
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  8
+                ],
+                "leaf": true,
+                "range": [
+                  8,
+                  9
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  9
+                ],
+                "leaf": true,
+                "range": [
+                  9,
+                  10
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  10
+                ],
+                "leaf": true,
+                "range": [
+                  10,
+                  11
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  11
+                ],
+                "leaf": true,
+                "range": [
+                  11,
+                  12
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  12
+                ],
+                "leaf": true,
+                "range": [
+                  12,
+                  13
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  13
+                ],
+                "leaf": true,
+                "range": [
+                  13,
+                  14
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  14
+                ],
+                "leaf": true,
+                "range": [
+                  14,
+                  15
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  16
+                ],
+                "leaf": true,
+                "range": [
+                  16,
+                  17
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  17
+                ],
+                "leaf": true,
+                "range": [
+                  17,
+                  18
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  18
+                ],
+                "leaf": true,
+                "range": [
+                  18,
+                  19
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  19
+                ],
+                "leaf": true,
+                "range": [
+                  19,
+                  20
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  20
+                ],
+                "leaf": true,
+                "range": [
+                  20,
+                  21
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  21
+                ],
+                "leaf": true,
+                "range": [
+                  21,
+                  22
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  22
+                ],
+                "leaf": true,
+                "range": [
+                  22,
+                  23
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  23
+                ],
+                "leaf": true,
+                "range": [
+                  23,
+                  24
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  24
+                ],
+                "leaf": true,
+                "range": [
+                  24,
+                  25
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  25
+                ],
+                "leaf": true,
+                "range": [
+                  25,
+                  26
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  26
+                ],
+                "leaf": true,
+                "range": [
+                  26,
+                  27
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  27
+                ],
+                "leaf": true,
+                "range": [
+                  27,
+                  28
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  28
+                ],
+                "leaf": true,
+                "range": [
+                  28,
+                  29
+                ]
+              },
+              {
+                "candidate_count": 1,
+                "candidate_indices": [
+                  29
+                ],
+                "leaf": true,
+                "range": [
+                  29,
+                  30
+                ]
+              }
+            ]
+          ],
+          "candidate_count": 30,
+          "candidates": [
+            {
+              "arithmetic_count": 6,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 837,
+              "block_exit_insert_before_word_index": 1040,
+              "block_label": 5,
+              "block_ordinal": 0,
+              "candidate_id": 0,
+              "function_id": 4,
+              "reason": "store",
+              "store_count": 6,
+              "word_index": 835
+            },
+            {
+              "arithmetic_count": 6,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1049,
+              "block_exit_insert_before_word_index": 1163,
+              "block_label": 228,
+              "block_ordinal": 1,
+              "candidate_id": 1,
+              "function_id": 4,
+              "reason": "store",
+              "store_count": 5,
+              "word_index": 1047
+            },
+            {
+              "arithmetic_count": 4,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1167,
+              "block_exit_insert_before_word_index": 1238,
+              "block_label": 229,
+              "block_ordinal": 2,
+              "candidate_id": 2,
+              "function_id": 4,
+              "reason": "store",
+              "store_count": 4,
+              "word_index": 1165
+            },
+            {
+              "arithmetic_count": 0,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1242,
+              "block_exit_insert_before_word_index": 1242,
+              "block_label": 279,
+              "block_ordinal": 3,
+              "candidate_id": 3,
+              "function_id": 4,
+              "reason": "control",
+              "store_count": 0,
+              "word_index": 1240
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1250,
+              "block_exit_insert_before_word_index": 1259,
+              "block_label": 283,
+              "block_ordinal": 4,
+              "candidate_id": 4,
+              "function_id": 4,
+              "reason": "arithmetic",
+              "store_count": 0,
+              "word_index": 1248
+            },
+            {
+              "arithmetic_count": 2,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1265,
+              "block_exit_insert_before_word_index": 1294,
+              "block_label": 280,
+              "block_ordinal": 5,
+              "candidate_id": 5,
+              "function_id": 4,
+              "reason": "store",
+              "store_count": 1,
+              "word_index": 1263
+            },
+            {
+              "arithmetic_count": 0,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1303,
+              "block_exit_insert_before_word_index": 1303,
+              "block_label": 293,
+              "block_ordinal": 6,
+              "candidate_id": 6,
+              "function_id": 4,
+              "reason": "control",
+              "store_count": 0,
+              "word_index": 1301
+            },
+            {
+              "arithmetic_count": 0,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1307,
+              "block_exit_insert_before_word_index": 1313,
+              "block_label": 294,
+              "block_ordinal": 7,
+              "candidate_id": 7,
+              "function_id": 4,
+              "reason": "store",
+              "store_count": 2,
+              "word_index": 1305
+            },
+            {
+              "arithmetic_count": 0,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1317,
+              "block_exit_insert_before_word_index": 1317,
+              "block_label": 299,
+              "block_ordinal": 8,
+              "candidate_id": 8,
+              "function_id": 4,
+              "reason": "control",
+              "store_count": 0,
+              "word_index": 1315
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1325,
+              "block_exit_insert_before_word_index": 1338,
+              "block_label": 303,
+              "block_ordinal": 9,
+              "candidate_id": 9,
+              "function_id": 4,
+              "reason": "arithmetic",
+              "store_count": 0,
+              "word_index": 1323
+            },
+            {
+              "arithmetic_count": 4,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1344,
+              "block_exit_insert_before_word_index": 1386,
+              "block_label": 300,
+              "block_ordinal": 10,
+              "candidate_id": 10,
+              "function_id": 4,
+              "reason": "store",
+              "store_count": 2,
+              "word_index": 1342
+            },
+            {
+              "arithmetic_count": 0,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1390,
+              "block_exit_insert_before_word_index": 1390,
+              "block_label": 318,
+              "block_ordinal": 11,
+              "candidate_id": 11,
+              "function_id": 4,
+              "reason": "control",
+              "store_count": 0,
+              "word_index": 1388
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1398,
+              "block_exit_insert_before_word_index": 1407,
+              "block_label": 322,
+              "block_ordinal": 12,
+              "candidate_id": 12,
+              "function_id": 4,
+              "reason": "arithmetic",
+              "store_count": 0,
+              "word_index": 1396
+            },
+            {
+              "arithmetic_count": 5,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1413,
+              "block_exit_insert_before_word_index": 1487,
+              "block_label": 319,
+              "block_ordinal": 13,
+              "candidate_id": 13,
+              "function_id": 4,
+              "reason": "store",
+              "store_count": 3,
+              "word_index": 1411
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1491,
+              "block_exit_insert_before_word_index": 1503,
+              "block_label": 321,
+              "block_ordinal": 14,
+              "candidate_id": 14,
+              "function_id": 4,
+              "reason": "store",
+              "store_count": 1,
+              "word_index": 1489
+            },
+            {
+              "arithmetic_count": 0,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1507,
+              "block_exit_insert_before_word_index": 1507,
+              "block_label": 320,
+              "block_ordinal": 15,
+              "candidate_id": 15,
+              "function_id": 4,
+              "reason": "control",
+              "store_count": 0,
+              "word_index": 1505
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1511,
+              "block_exit_insert_before_word_index": 1523,
+              "block_label": 302,
+              "block_ordinal": 16,
+              "candidate_id": 16,
+              "function_id": 4,
+              "reason": "store",
+              "store_count": 1,
+              "word_index": 1509
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1527,
+              "block_exit_insert_before_word_index": 1553,
+              "block_label": 301,
+              "block_ordinal": 17,
+              "candidate_id": 17,
+              "function_id": 4,
+              "reason": "store",
+              "store_count": 1,
+              "word_index": 1525
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1557,
+              "block_exit_insert_before_word_index": 1569,
+              "block_label": 282,
+              "block_ordinal": 18,
+              "candidate_id": 18,
+              "function_id": 4,
+              "reason": "store",
+              "store_count": 1,
+              "word_index": 1555
+            },
+            {
+              "arithmetic_count": 0,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1573,
+              "block_exit_insert_before_word_index": 1573,
+              "block_label": 281,
+              "block_ordinal": 19,
+              "candidate_id": 19,
+              "function_id": 4,
+              "reason": "control",
+              "store_count": 0,
+              "word_index": 1571
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1585,
+              "block_exit_insert_before_word_index": 1639,
+              "block_label": 11,
+              "block_ordinal": 0,
+              "candidate_id": 20,
+              "function_id": 10,
+              "reason": "store",
+              "store_count": 1,
+              "word_index": 1583
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1652,
+              "block_exit_insert_before_word_index": 1688,
+              "block_label": 16,
+              "block_ordinal": 0,
+              "candidate_id": 21,
+              "function_id": 15,
+              "reason": "store",
+              "store_count": 2,
+              "word_index": 1650
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1697,
+              "block_exit_insert_before_word_index": 1709,
+              "block_label": 59,
+              "block_ordinal": 1,
+              "candidate_id": 22,
+              "function_id": 15,
+              "reason": "store",
+              "store_count": 1,
+              "word_index": 1695
+            },
+            {
+              "arithmetic_count": 0,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1713,
+              "block_exit_insert_before_word_index": 1720,
+              "block_label": 64,
+              "block_ordinal": 2,
+              "candidate_id": 23,
+              "function_id": 15,
+              "reason": "store",
+              "store_count": 1,
+              "word_index": 1711
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1724,
+              "block_exit_insert_before_word_index": 1732,
+              "block_label": 60,
+              "block_ordinal": 3,
+              "candidate_id": 24,
+              "function_id": 15,
+              "reason": "arithmetic",
+              "store_count": 0,
+              "word_index": 1722
+            },
+            {
+              "arithmetic_count": 1,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1745,
+              "block_exit_insert_before_word_index": 1825,
+              "block_label": 21,
+              "block_ordinal": 0,
+              "candidate_id": 25,
+              "function_id": 20,
+              "reason": "store",
+              "store_count": 4,
+              "word_index": 1743
+            },
+            {
+              "arithmetic_count": 10,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 1841,
+              "block_exit_insert_before_word_index": 2073,
+              "block_label": 26,
+              "block_ordinal": 0,
+              "candidate_id": 26,
+              "function_id": 25,
+              "reason": "store",
+              "store_count": 9,
+              "word_index": 1839
+            },
+            {
+              "arithmetic_count": 0,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 2082,
+              "block_exit_insert_before_word_index": 2094,
+              "block_label": 139,
+              "block_ordinal": 1,
+              "candidate_id": 27,
+              "function_id": 25,
+              "reason": "store",
+              "store_count": 1,
+              "word_index": 2080
+            },
+            {
+              "arithmetic_count": 0,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 2098,
+              "block_exit_insert_before_word_index": 2115,
+              "block_label": 144,
+              "block_ordinal": 2,
+              "candidate_id": 28,
+              "function_id": 25,
+              "reason": "store",
+              "store_count": 1,
+              "word_index": 2096
+            },
+            {
+              "arithmetic_count": 6,
+              "barrier_count": 0,
+              "block_entry_insert_after_phi_word_index": 2119,
+              "block_exit_insert_before_word_index": 2257,
+              "block_label": 140,
+              "block_ordinal": 3,
+              "candidate_id": 29,
+              "function_id": 25,
+              "reason": "store",
+              "store_count": 7,
+              "word_index": 2117
+            }
+          ],
+          "method": "instrument-valid-module-not-arbitrary-fragment",
+          "notes": [
+            "SPIR-V fragments cannot be submitted to Vulkan directly; probes must keep a valid entry point.",
+            "Use block boundary or store-site instrumentation, then compare GPU probe output with the CPU oracle.",
+            "Static block order is not dynamic execution order; bisect candidate ranges, then confirm the final site with dynamic probe output."
+          ]
+        }
+      },
+      "descriptor_variables": [
+        {
+          "binding": 0,
+          "id": 31,
+          "non_readable": false,
+          "non_writable": true,
+          "set": 0,
+          "storage_class": "Uniform"
+        },
+        {
+          "binding": 1,
+          "id": 333,
+          "non_readable": false,
+          "non_writable": true,
+          "set": 0,
+          "storage_class": "Uniform"
+        },
+        {
+          "binding": 2,
+          "id": 354,
+          "non_readable": false,
+          "non_writable": false,
+          "set": 0,
+          "storage_class": "Uniform"
+        }
+      ],
+      "disassembly_path": "/root/tl/pdocker-android/docs/test/spirv-q6k-safe-current/q6k-safe.spv.spvasm",
+      "duplicate_bindings": [],
+      "generator": 524299,
+      "hash": "0x7ec0292e948c9b41",
+      "instruction_count": 570,
+      "local_size": [
+        1,
+        1,
+        1
+      ],
+      "local_size_id": [
+        0,
+        0,
+        0
+      ],
+      "op_class_counts": {
+        "access_chain": 18,
+        "arithmetic": 55,
+        "barrier": 0,
+        "control": 67,
+        "load": 89,
+        "store": 54
+      },
+      "op_histogram": {
+        "Op11": 1,
+        "Op111": 2,
+        "Op12": 1,
+        "Op130": 2,
+        "Op134": 5,
+        "Op137": 1,
+        "Op14": 1,
+        "Op194": 7,
+        "Op196": 2,
+        "Op197": 2,
+        "Op199": 9,
+        "Op20": 1,
+        "Op3": 1,
+        "Op33": 5,
+        "Op5": 64,
+        "Op55": 5,
+        "Op57": 8,
+        "Op6": 16,
+        "Op81": 1,
+        "OpAccessChain": 18,
+        "OpBranch": 18,
+        "OpBranchConditional": 7,
+        "OpCapability": 1,
+        "OpConstant": 34,
+        "OpConstantComposite": 1,
+        "OpDecorate": 18,
+        "OpEntryPoint": 1,
+        "OpExecutionMode": 1,
+        "OpFMul": 1,
+        "OpFunction": 5,
+        "OpFunctionEnd": 5,
+        "OpIAdd": 2,
+        "OpIMul": 21,
+        "OpINotEqual": 1,
+        "OpLabel": 30,
+        "OpLoad": 89,
+        "OpLoopMerge": 3,
+        "OpMemberDecorate": 18,
+        "OpReturn": 1,
+        "OpReturnValue": 4,
+        "OpSDiv": 3,
+        "OpSelectionMerge": 4,
+        "OpStore": 54,
+        "OpTypeFloat": 1,
+        "OpTypeInt": 2,
+        "OpTypeOpaque": 4,
+        "OpTypePointer": 12,
+        "OpTypeStruct": 3,
+        "OpTypeVector": 2,
+        "OpTypeVoid": 1,
+        "OpUDiv": 13,
+        "OpUGreaterThanEqual": 2,
+        "OpULessThan": 4,
+        "OpVariable": 52
+      },
+      "path": "/root/tl/pdocker-android/docs/test/spirv-q6k-safe-current/q6k-safe.spv",
+      "risk_notes": [],
+      "schema": "pdocker.spirv.analysis.v1",
+      "version": "0x00010000",
+      "words": 2260,
+      "workgroup_variable_count": 0
+    }
+  ],
+  "schema": "pdocker.spirv.analysis.bundle.v1"
+}
