@@ -1092,6 +1092,12 @@ typedef struct {
     uint32_t magic;
     uint32_t version;
     uint32_t bound;
+    uint32_t word_count;
+    uint32_t instruction_count;
+    uint32_t memory_instruction_count;
+    uint32_t arithmetic_instruction_count;
+    uint32_t control_instruction_count;
+    uint32_t barrier_instruction_count;
     uint32_t local_size[3];
     uint32_t local_size_id[3];
     uint32_t local_size_spec_id[3];
@@ -1163,6 +1169,8 @@ static SpirvTraceSummary summarize_spirv(const uint32_t *code, size_t bytes) {
     }
     if (bytes < 20 || (bytes % sizeof(uint32_t)) != 0) return s;
     const size_t words = bytes / sizeof(uint32_t);
+    if (words > UINT32_MAX) return s;
+    s.word_count = (uint32_t)words;
     s.magic = code[0];
     s.version = code[1];
     s.bound = code[3];
@@ -1175,6 +1183,19 @@ static SpirvTraceSummary summarize_spirv(const uint32_t *code, size_t bytes) {
         if (word_count == 0 || i + word_count > words) {
             s.truncated = 1;
             break;
+        }
+        s.instruction_count++;
+        if (op == 61 || op == 62 || op == 63 || op == 64 || op == 65 ||
+            op == 66 || op == 67 || op == 68 || op == 69 || op == 70 ||
+            op == 80 || op == 81 || op == 82 || op == 83 || op == 84 ||
+            op == 85 || op == 86 || op == 87 || op == 88) {
+            s.memory_instruction_count++;
+        } else if ((op >= 124 && op <= 171) || (op >= 182 && op <= 205)) {
+            s.arithmetic_instruction_count++;
+        } else if ((op >= 245 && op <= 255) || op == 248 || op == 249) {
+            s.control_instruction_count++;
+        } else if (op == 224 || op == 225) {
+            s.barrier_instruction_count++;
         }
         if (op == 17 && word_count >= 2) {
             uint32_t cap = code[i + 1];
@@ -1432,7 +1453,9 @@ static void log_spirv_trace(
     if (!summary) return;
     fprintf(stderr,
             "pdocker-gpu-executor: SPIR-V trace valid=%u truncated=%u hash=0x%016llx "
-            "magic=0x%08x version=0x%08x bound=%u local_size=%u,%u,%u local_size_id=%u,%u,%u "
+            "magic=0x%08x version=0x%08x words=%u instructions=%u "
+            "op_classes={mem:%u,arith:%u,ctrl:%u,barrier:%u} "
+            "bound=%u local_size=%u,%u,%u local_size_id=%u,%u,%u "
             "local_size_spec_id=%u,%u,%u "
             "dispatch=%u,%u,%u push=%zu bindings=%zu caps=",
             summary->valid,
@@ -1440,6 +1463,12 @@ static void log_spirv_trace(
             (unsigned long long)summary->hash,
             summary->magic,
             summary->version,
+            summary->word_count,
+            summary->instruction_count,
+            summary->memory_instruction_count,
+            summary->arithmetic_instruction_count,
+            summary->control_instruction_count,
+            summary->barrier_instruction_count,
             summary->bound,
             summary->local_size[0],
             summary->local_size[1],
@@ -1725,6 +1754,9 @@ static void write_spirv_execution_report(
             "],"
             "\"spirv_hash\":\"0x%016llx\","
             "\"spirv_valid\":%s,\"spirv_truncated\":%u,"
+            "\"spirv_words\":%u,"
+            "\"spirv_instruction_count\":%u,"
+            "\"spirv_op_class_counts\":{\"memory\":%u,\"arithmetic\":%u,\"control\":%u,\"barrier\":%u},"
             "\"spirv_local_size\":[%u,%u,%u],"
             "\"spirv_local_size_id\":[%u,%u,%u],"
             "\"spirv_local_size_spec_id\":[%u,%u,%u],"
@@ -1734,6 +1766,12 @@ static void write_spirv_execution_report(
             (unsigned long long)summary->hash,
             summary->valid ? "true" : "false",
             summary->truncated,
+            summary->word_count,
+            summary->instruction_count,
+            summary->memory_instruction_count,
+            summary->arithmetic_instruction_count,
+            summary->control_instruction_count,
+            summary->barrier_instruction_count,
             summary->local_size[0],
             summary->local_size[1],
             summary->local_size[2],
@@ -8158,6 +8196,87 @@ static void dump_failed_spirv_if_requested(
     fclose(fp);
 }
 
+static void dump_spirv_if_requested(
+        const char *phase,
+        uint64_t dispatch_id,
+        const uint32_t *shader_code,
+        size_t shader_size,
+        const SpirvTraceSummary *summary) {
+    const char *dir = getenv("PDOCKER_GPU_SPIRV_DUMP_DIR");
+    if (!dir || !dir[0] || !shader_code || shader_size == 0) return;
+    const uint64_t hash = summary ? summary->hash : summarize_spirv(shader_code, shader_size).hash;
+    char safe_phase[48];
+    size_t out = 0;
+    const char *src = phase && phase[0] ? phase : "unknown";
+    for (size_t i = 0; src[i] && out + 1 < sizeof(safe_phase); ++i) {
+        const char c = src[i];
+        safe_phase[out++] =
+            ((c >= 'a' && c <= 'z') ||
+             (c >= 'A' && c <= 'Z') ||
+             (c >= '0' && c <= '9') ||
+             c == '-' || c == '_') ? c : '_';
+    }
+    safe_phase[out] = '\0';
+
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path),
+             "%s/pdocker-spirv-%s-%llu-0x%016llx.spv",
+             dir,
+             safe_phase,
+             (unsigned long long)dispatch_id,
+             (unsigned long long)hash);
+    FILE *fp = fopen(path, "wb");
+    if (fp) {
+        fwrite(shader_code, 1, shader_size, fp);
+        fclose(fp);
+    }
+
+    if (!summary) return;
+    char meta_path[PATH_MAX];
+    snprintf(meta_path, sizeof(meta_path),
+             "%s/pdocker-spirv-%s-%llu-0x%016llx.json",
+             dir,
+             safe_phase,
+             (unsigned long long)dispatch_id,
+             (unsigned long long)hash);
+    FILE *meta = fopen(meta_path, "w");
+    if (!meta) return;
+    fprintf(meta,
+            "{"
+            "\"schema\":\"pdocker.spirv.dump.v1\","
+            "\"phase\":\"%s\","
+            "\"dispatch_id\":%llu,"
+            "\"spirv_hash\":\"0x%016llx\","
+            "\"shader_bytes\":%zu,"
+            "\"spirv_words\":%u,"
+            "\"spirv_instruction_count\":%u,"
+            "\"spirv_op_class_counts\":{\"memory\":%u,\"arithmetic\":%u,\"control\":%u,\"barrier\":%u},"
+            "\"local_size\":[%u,%u,%u],"
+            "\"local_size_id\":[%u,%u,%u],"
+            "\"truncated\":%s,"
+            "\"valid\":%s"
+            "}\n",
+            safe_phase,
+            (unsigned long long)dispatch_id,
+            (unsigned long long)summary->hash,
+            shader_size,
+            summary->word_count,
+            summary->instruction_count,
+            summary->memory_instruction_count,
+            summary->arithmetic_instruction_count,
+            summary->control_instruction_count,
+            summary->barrier_instruction_count,
+            summary->local_size[0],
+            summary->local_size[1],
+            summary->local_size[2],
+            summary->local_size_id[0],
+            summary->local_size_id[1],
+            summary->local_size_id[2],
+            summary->truncated ? "true" : "false",
+            summary->valid ? "true" : "false");
+    fclose(meta);
+}
+
 
 static int write_dirty_pages_exact(
         int fd,
@@ -8463,6 +8582,7 @@ static int run_vulkan_dispatch_fd(
     if (read_fd_exact(shader_fd, shader_code, shader_size, 0) != 0) goto cleanup;
     const SpirvTraceSummary requested_spirv_summary = summarize_spirv(shader_code, shader_size);
     const uint64_t original_spirv_hash = requested_spirv_summary.hash;
+    dump_spirv_if_requested("original", dispatch_lifecycle_id, shader_code, shader_size, &requested_spirv_summary);
     const int materialize_specialization_constants =
         strict_passthrough ? 0 :
         options && options->has_materialize_specialization_constants
@@ -8680,6 +8800,7 @@ static int run_vulkan_dispatch_fd(
         strict_passthrough);
     spirv_summary = summarize_spirv(shader_code, shader_size);
     have_spirv_summary = 1;
+    dump_spirv_if_requested("effective", dispatch_lifecycle_id, shader_code, shader_size, &spirv_summary);
     if (strict_passthrough && options && options->has_requested_feature_mask) {
         const uint64_t required_feature_mask = spirv_required_feature_mask(&spirv_summary);
         const uint64_t missing_requested_features =

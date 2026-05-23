@@ -2,6 +2,7 @@ import json
 import importlib.util
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -21,6 +22,7 @@ LLAMA_GPU_CORRECTNESS = ROOT / "docs" / "test" / "LLAMA_GPU_CORRECTNESS_20260507
 ROPE_YARN_ARTIFACT = ROOT / "docs" / "test" / "llama-gpu-ngl1-rope-yarn-oracle-20260509.json"
 LLAMA_GPU_ARTIFACT_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 LLAMA_GPU_ENV_MANIFEST = ROOT / "scripts" / "llama-gpu-env-manifest.json"
+SPIRV_ANALYZER = ROOT / "scripts" / "analyze-spirv.py"
 
 
 def load_llama_gpu_artifact_verifier():
@@ -840,6 +842,61 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("send_generic_vulkan_dispatch_op(dispatch)", submit_body)
         self.assertIn("cmd->dispatch_op_count > 0", submit_body)
         self.assertIn("send_generic_vulkan_dispatch_op(op)", submit_body)
+
+    def test_spirv_observability_is_generic_not_hash_only(self):
+        source = GPU_EXECUTOR.read_text()
+        for marker in [
+            "instruction_count",
+            "memory_instruction_count",
+            "arithmetic_instruction_count",
+            "PDOCKER_GPU_SPIRV_DUMP_DIR",
+            "dump_spirv_if_requested(\"original\"",
+            "dump_spirv_if_requested(\"effective\"",
+            "spirv_instruction_count",
+            "spirv_op_class_counts",
+        ]:
+            self.assertIn(marker, source)
+        analyzer = SPIRV_ANALYZER.read_text()
+        for marker in [
+            "pdocker.spirv.analysis.v1",
+            "op_histogram",
+            "duplicate_bindings",
+            "risk_notes",
+            "uses 8-bit storage",
+            "uses specialization-controlled workgroup size",
+        ]:
+            self.assertIn(marker, analyzer)
+
+    def test_spirv_analyzer_counts_embedded_q6k_module(self):
+        source = GPU_EXECUTOR.read_text()
+        match = re.search(
+            r"static const uint32_t kQ6kSafeSpv\[\] = \{(?P<body>.*?)\n\};",
+            source,
+            re.S,
+        )
+        self.assertIsNotNone(match)
+        words = [
+            int(token.rstrip("uU"), 0)
+            for token in re.findall(r"0x[0-9a-fA-F]+[uU]?|\b\d+[uU]?\b", match.group("body"))
+        ]
+        self.assertGreater(len(words), 5)
+        with tempfile.TemporaryDirectory() as tmp:
+            spv = Path(tmp) / "q6k-safe.spv"
+            spv.write_bytes(b"".join(word.to_bytes(4, "little") for word in words))
+            result = subprocess.run(
+                ["python3", str(SPIRV_ANALYZER), str(spv)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+        payload = json.loads(result.stdout)
+        module = payload["modules"][0]
+        self.assertEqual(module["bytes"], len(words) * 4)
+        self.assertEqual(module["words"], len(words))
+        self.assertEqual(module["instruction_count"], 570)
+        self.assertIn("op_histogram", module)
 
     def test_vulkan_guarded_memory_profile_is_recorded(self):
         source = VULKAN_ICD.read_text()

@@ -121,6 +121,13 @@ The compare script also writes `gpu.runtime_env_manifest` into the artifact and
 echoes manifest-selected runtime environment variables before collection; keep
 that record with the Q6_K evidence so env propagation can be audited without
 changing llama.cpp, the image, models, or prompts.
+For shader-structure triage, `PDOCKER_GPU_SPIRV_DUMP_DIR` may be set to a
+workspace/log directory.  The Android executor then records both the original
+container-provided SPIR-V module and the effective executor module, plus compact
+JSON metadata with word count, instruction count, opcode class counts, local
+size evidence, and the FNV hash.  Analyze those dumps with
+`scripts/analyze-spirv.py`; this is a structural SPIR-V observation path, not a
+hash-targeted correctness bypass.
 If the run stops before Q6_K, the artifact verifier now preserves bounded
 `pre_http_failure_evidence` for the first failed generic SPIR-V event
 (`fail_stage`/`error`, `vk_result`, SPIR-V hash, pipeline key, feature

@@ -162,7 +162,8 @@
     "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
     "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
     "PDOCKER_VULKAN_DISABLE_16BIT_STORAGE",
-    "PDOCKER_VULKAN_SUBGROUP_SIZE"
+    "PDOCKER_VULKAN_SUBGROUP_SIZE",
+    "PDOCKER_GPU_SPIRV_DUMP_DIR"
   ],
   "compare_forward_env_keys": [
     "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
@@ -217,7 +218,8 @@
     "PDOCKER_VULKAN_ENABLE_16BIT_STORAGE",
     "PDOCKER_VULKAN_ENABLE_INT64",
     "PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC",
-    "PDOCKER_VULKAN_SUBGROUP_SIZE"
+    "PDOCKER_VULKAN_SUBGROUP_SIZE",
+    "PDOCKER_GPU_SPIRV_DUMP_DIR"
   ],
   "config_propagation_env_fields": [
     {
@@ -335,6 +337,10 @@
         {
           "env": "LLAMA_ARG_N_GPU_LAYERS",
           "default_template": "{gpu_layers}"
+        },
+        {
+          "env": "PDOCKER_GPU_SPIRV_DUMP_DIR",
+          "default_template": "{workspace_host}/logs"
         }
       ],
       "trace_alloc_env": [
