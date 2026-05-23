@@ -304,6 +304,10 @@ Implementation note:
   with numeric IDs preserved, and runs `spirv-val`.
 - The tool records `instrumented_spirv_hash` and keeps the debug SSBO transport
   as an ordinary `VULKAN_DISPATCH_V4` binding.
+- `scripts/prepare-q6k-noop-probe.sh` prepares a reproducible bundle and env
+  file.  It sets `PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY=1` so non-Q6 shaders in
+  the same llama run pass through unchanged; the target source hash is still
+  required before the no-op probe shader can replace a dispatch.
 
 Next task if failed:
 

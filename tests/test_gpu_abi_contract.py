@@ -145,7 +145,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
             "PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
             "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
+            "PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY",
             "SPIR-V probe replay rejected",
+            "SPIR-V probe replay skipped non-target shader",
             "verify_spirv_probe_manifest_runtime_guard",
             "fstat(probe->shader_fd, &st)",
             "PDOCKER_VK_MAX_PROBE_SHADER_BYTES",
@@ -157,6 +159,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("api_descriptor_sets[binding_count] = probe.debug_set;", icd)
         self.assertIn("bindings[binding_count] = probe.debug_binding;", icd)
         self.assertIn("binding_count++;", icd)
+        self.assertIn('env_truthy_default("PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY", false)', icd)
+        env_manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
+        self.assertIn("PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY", env_manifest["compare_forward_env_keys"])
         app_fields, app_count, app_hash, _ = v4_binding_schema(APP_HEADER)
         container_fields, container_count, container_hash, _ = v4_binding_schema(CONTAINER_HEADER)
         self.assertEqual(app_fields, container_fields)

@@ -943,6 +943,16 @@ static int prepare_spirv_probe_replay(PdockerVkSpirvProbeReplay *probe,
         return -EINVAL;
     }
     if (probe->expected_source_hash != source_shader_hash) {
+        if (env_truthy_default("PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY", false)) {
+            if (trace_allocations() || env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: SPIR-V probe replay skipped non-target shader expected=0x%016llx actual=0x%016llx manifest=%s\n",
+                        (unsigned long long)probe->expected_source_hash,
+                        (unsigned long long)source_shader_hash,
+                        (probe->manifest_path && probe->manifest_path[0]) ? probe->manifest_path : "-");
+            }
+            return 0;
+        }
         fprintf(stderr,
                 "pdocker-vulkan-icd: SPIR-V probe replay rejected: source hash mismatch expected=0x%016llx actual=0x%016llx manifest=%s\n",
                 (unsigned long long)probe->expected_source_hash,
