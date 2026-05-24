@@ -32,6 +32,7 @@ Confirmed facts:
 | 2026-05-23 SPIR-V structural lane | Safe Q6 module is now analyzed by static dataflow/origin tooling; native Q6 comparison is blocked until a real native `.spv` dump is collected from device | commits `59b0a4e`, `ab3b24b`, `e42ce9e`, `14b14fc`; `docs/test/spirv-q6k-safe-current/q6k-safe.analysis.json`; `scripts/analyze-spirv.py`; `scripts/compare-spirv-dataflow.py`; `scripts/verify-spirv-probe-manifest.py` |
 | 2026-05-23 valid-module probe lane | Native Q6 no-op replay reaches the known wrong-output blocker without changing llama.cpp/model/prompt, and executable Q6 debug-SSBO write probes are generated/validated locally for the next device run | commits `139fa83`, `5956a41`, `8515829`; `docs/test/llama-gpu-ngl1-q6-noop-probe-strictid-adb39419-20260523T230924Z.json`; `scripts/prepare-q6k-noop-probe.sh --probe-writes`; effective probe hash `0xfd2949c11ffa33e9` |
 | 2026-05-24 Q6 write-probe lane | Native Q6 valid-module replay now emits a 10-record debug SSBO split across tail/full partial, reduction, post-reduction, and final stores.  Device evidence shows the full branch executes partial/reduction/final records and writeback matches dispatch samples; post-reduction candidate stores are not dynamically executed for this prompt.  Compare now maps the instrumented probe hash back to the original Q6 source hash through the probe manifest env, so the diagnostics classify this as `q6-probe-writeback-cleared-oracle-missing` instead of silently losing the Q6 event.  Prompt sanity still fails (`" Marvel"` for `2+3=`), so Q6 writeback is no longer the first suspected boundary for this run. | local artifacts `docs/test/llama-gpu-ngl1-q6-write10-probe-adb42493-20260524T005341Z.json`, `docs/test/llama-gpu-ngl1-q6-write10-classified2-adb40309-20260524T021223Z.json` (ignored runtime evidence); parsed summary `pass`; effective probe hash `0x3f14f34b0679040e`; original/source hash `0x1bf751845c5dce75` |
+| 2026-05-24 strict passthrough/object-graph lane | Strict passthrough now preserves descriptor/push/specialization bytes by default and no longer hard-stops on local-size disagreement.  Android Vulkan object handles still cannot be copied across the glibc/Bionic process boundary: the executor reconstructs an equivalent Android `VkDeviceMemory`/`VkBuffer`/descriptor object graph from IDs, offsets, ranges, and shared backing fds.  The Q6 native shader reaches Android GPU execution and writeback, but literal `OpExecutionMode LocalSize 1,1,1` remains inconsistent with the specialized `BuiltIn WorkgroupSize.x == 32`; prompt sanity still fails until the explicit WorkgroupSize compatibility lowering is verified on device. | host tests `tests/test_gpu_abi_contract.py tests/test_llama_gpu_env_parity.py`; artifact `docs/test/llama-gpu-ngl1-q6-strict-probe-adb40309-20260524T0331.json`; latest ADB `192.168.179.26:39111` disconnected before reinstall |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -41,6 +42,32 @@ safe-kernel is a pdocker bridge compatibility substitution selected under
 change, and not proof that the original native Q6 shader/driver path is fixed.
 The memory readiness gate is still required before heavy compare or benchmark
 evidence can promote anything.
+
+### Passthrough boundary terminology
+
+In this bridge, "strict passthrough" means preserving the application-visible
+Vulkan semantics, not copying opaque handle values.  SPIR-V bytes, push
+constant bytes, specialization data bytes, and buffer payload bytes are the
+byte-preservation boundary.  `VkBuffer`, `VkDeviceMemory`, descriptor set, and
+pipeline handles are process-local driver objects; the container-side ICD
+therefore sends object IDs, descriptor offsets/ranges, memory offsets/sizes,
+and shared backing fds, and the Android executor reconstructs an equivalent
+object graph with real Android Vulkan handles.
+
+This is different from upstream Docker on Linux.  Docker usually exposes the
+host device nodes, driver libraries, ICD files, and permissions into the
+container, so the container process calls the real host driver directly.  It
+does not translate `VkBuffer` handles.  pdocker cannot rely on that path on
+Android because the product boundary is glibc-container code to APK-owned
+Bionic/vendor Vulkan code.
+
+The explicit Q6 WorkgroupSize compatibility lowering is allowed only as a
+narrow driver-compatibility lane: a valid module with exactly one literal
+`OpExecutionMode LocalSize 1,1,1`, no `LocalSizeId`, a specialized
+`BuiltIn WorkgroupSize.x`, and a runtime specialization resolving to
+`[32,1,1]`.  It may change only the three literal `LocalSize` operands and
+must not rewrite descriptors, push constants, specialization data, bindings, or
+buffer contents.
 
 ## Non-Negotiable Rules
 
@@ -156,6 +183,39 @@ Use the `validation_gates.target_env` emitted by the analyzer.  SPIR-V 1.5
 native Q6 modules require `vulkan1.2` validation; treating them as
 `vulkan1.1` artifacts is a false blocker and must not be used to reject a
 valid module.
+
+Before the next Q6 WorkgroupSize device run, also run the narrow lowering
+preflight against the exact native Q6 SPIR-V sample that will be replayed:
+
+```bash
+python3 scripts/maintenance/verify-q6-workgroup-lowering-preflight.py \
+  /tmp/q6write10-bundle/native-q6.write.spv \
+  --expect-spec-id 0 \
+  --expect-value 32 \
+  --json-out docs/test/q6-workgroup-lowering-preflight-latest.json
+```
+
+The preflight must report `ok:true`.  It proves only that this specific module
+is structurally eligible for the explicit compatibility lowering; it is not a
+correctness claim.  The following run must set
+`PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC=1` explicitly, and the artifact
+must later show `local_size_patched:true`, `spirv_local_size_resolved:[32,1,1]`,
+Q6 writeback verified, and prompt sanity passing before any benchmark claim is
+allowed.
+
+To avoid env-propagation mistakes, prefer the fixed runner instead of typing
+the compare command by hand:
+
+```bash
+ANDROID_SERIAL=<host:port> \
+scripts/android-llama-gpu-q6-workgroup-run.sh \
+  --out docs/test/llama-gpu-ngl1-q6-workgroup-legalized-<serial>-<timestamp>.json
+```
+
+The runner performs the SPIR-V preflight, records readiness, sets
+`PDOCKER_GPU_STRICT_PASSTHROUGH=1` and
+`PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC=1`, reuses the CPU baseline, and
+runs the artifact verifier with `--require-q6-workgroup-clear`.
 
 The tracked safe baseline currently has source hash `0x7ec0292e948c9b41`,
 entry point `main`, local size `[1,1,1]`, descriptors set 0 bindings

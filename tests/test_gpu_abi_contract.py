@@ -377,7 +377,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"legalize_workgroup_size_from_spec\\":%s', source)
         self.assertIn('\\"legalize_workgroup_size_from_spec_source\\":\\"%s\\"', source)
         self.assertIn("has_legalize_workgroup_size_from_spec", source)
-        self.assertIn("strict_passthrough ? 0 :\n        options && options->has_legalize_workgroup_size_from_spec", source)
+        self.assertIn("const char *legalize_workgroup_env", source)
+        self.assertIn("strict_passthrough\n            ? (legalize_workgroup_env ?", source)
+        self.assertIn('env_truthy("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", 0)', source)
         self.assertIn('env_truthy("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", 1)', source)
         self.assertIn("legalize_workgroup_size_from_spec", APP_HEADER.read_text())
         self.assertIn("PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS(PDOCKER_EXEC_BOOL_DISPATCH_OPTION)", source)
@@ -385,6 +387,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('"option"', source)
         self.assertIn('"env-default"', source)
         self.assertIn('"strict-passthrough"', source)
+        self.assertIn('"strict-env"', source)
+        self.assertIn('"strict-option"', source)
         self.assertIn('\\"descriptor_writes\\":[', source)
         self.assertIn('\\"descriptor_alias_map\\":[', source)
         self.assertIn('\\"target_id\\":%u', source)
@@ -743,7 +747,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(evidence, doc)
 
-    def test_spirv_local_size_patch_uses_execution_mode_id_not_workgroup_builtin(self):
+    def test_spirv_local_size_patch_uses_requested_spec_workgroup_evidence(self):
         source = GPU_EXECUTOR.read_text()
         self.assertIn("local_size_spec_id[3]", source)
         self.assertIn("local_size_spec_id_valid[3]", source)
@@ -751,9 +755,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op == 71 && word_count >= 4 && code[i + 2] == 1", source)
         self.assertIn("summary->local_size_spec_id_valid[i]", source)
         self.assertIn("summary->local_size_spec_id[i]", source)
+        self.assertIn("summary->workgroup_size_spec_id_valid[0]", source)
+        self.assertIn("summary->workgroup_size_spec_id[0]", source)
         self.assertIn('\\"spirv_local_size_spec_id\\":[%u,%u,%u]', source)
         function = re.search(
-            r"static int patch_spirv_literal_local_size_from_spec\(.*?\n}\n\nstatic int rewrite_duplicate_descriptor_bindings",
+            r"static int patch_spirv_literal_local_size_from_spec\(.*?\n}\n\nstatic int spirv_has_capability",
             source,
             re.S,
         )
@@ -762,9 +768,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("summarize_spirv(code, bytes)", body)
         self.assertIn("summary.local_size_spec_id_valid[dim]", body)
         self.assertIn("summary.local_size_spec_id[dim]", body)
+        self.assertIn("summary.workgroup_size_spec_id_valid[dim]", body)
+        self.assertIn("summary.workgroup_size_spec_id[dim]", body)
         self.assertNotIn("code[i + 2] == 11 && code[i + 3] == 25", body)
         self.assertNotIn("dim,", body)
-        self.assertIn("constant_id=1 for NUM_ROWS, not LocalSizeY", source)
+        self.assertIn("specialized BuiltIn WorkgroupSize value", source)
+        self.assertIn("does not replace kernels", source)
         summarize = re.search(
             r"static SpirvTraceSummary summarize_spirv\(.*?\n}\n\nstatic void log_vulkan_feature_trace",
             source,
@@ -1710,7 +1719,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("0xbefdfb97e9734eb3ull", source)
         self.assertIn('\\"partial_diagnostic\\":', source)
         self.assertIn("patch_spirv_literal_local_size_from_spec", source)
-        self.assertIn("legalizes the execution", source)
+        self.assertIn("pipeline compatibility lowering", source)
         self.assertIn("found_local_size_spec", source)
         self.assertIn("summary.workgroup_size_spec_id_valid[dim]", source)
         self.assertIn("local_size[dim] = value;", source)
@@ -1725,8 +1734,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cleanup_resolved_local_size", source)
         self.assertIn('\\"spirv_local_size_consistent\\":%s', source)
         self.assertIn("spirv_local_size_consistent(", source)
-        self.assertIn("spirv-local-size-inconsistent", source)
-        self.assertIn('fail_stage = "spirv-local-size-inconsistent";', source)
+        self.assertIn("Strict passthrough is the ABI-preservation lane", source)
+        self.assertIn("do not reject a driver-visible module solely because", source)
+        self.assertIn("let the real Vulkan path decide", source)
+        self.assertNotIn('fail_stage = "spirv-local-size-inconsistent";', source)
         self.assertNotIn('json_fail("spirv-local-size-inconsistent"', source)
         self.assertIn("spirv_local_invocation_count", source)
         self.assertIn("product > UINT64_MAX / local_size[i]", source)
@@ -2198,6 +2209,18 @@ class GpuAbiContractTest(unittest.TestCase):
             "top_dirty_probe_bindings",
         ]:
             self.assertIn(field, compare)
+
+    def test_q6_workgroup_runner_fixes_required_env_and_preflight(self):
+        runner = (ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh").read_text()
+        self.assertIn("verify-q6-workgroup-lowering-preflight.py", runner)
+        self.assertIn("android-llama-gpu-readiness.sh", runner)
+        self.assertIn("PDOCKER_GPU_STRICT_PASSTHROUGH=1", runner)
+        self.assertIn("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC=1", runner)
+        self.assertIn("PDOCKER_GPU_CPU_ORACLE=1", runner)
+        self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1", runner)
+        self.assertIn("android-llama-gpu-compare.sh", runner)
+        self.assertIn("--require-q6-workgroup-clear", runner)
+        self.assertIn("does not rebuild the llama image", runner)
 
     def test_gpu_env_propagation_parity_is_documented_and_guarded(self):
         compare = LLAMA_COMPARE.read_text()

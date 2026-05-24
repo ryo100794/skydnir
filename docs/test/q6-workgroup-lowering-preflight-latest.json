@@ -1,0 +1,41 @@
+{
+  "duplicate_spec0_defaults": [
+    32,
+    1
+  ],
+  "errors": [],
+  "expected_runtime_specialization": {
+    "constant_id": 0,
+    "value": 32
+  },
+  "literal_local_sizes": [
+    [
+      1,
+      1,
+      1
+    ]
+  ],
+  "local_size_id_modes": [],
+  "ok": true,
+  "patch_policy": {
+    "allowed_change": "OpExecutionMode LocalSize operands only",
+    "descriptor_push_specialization_data_rewrite": false,
+    "post_lowering_local_size": [
+      32,
+      1,
+      1
+    ]
+  },
+  "path": "/tmp/q6write10-bundle/native-q6.write.spv",
+  "schema": "pdocker.q6-workgroup-lowering-preflight.v1",
+  "workgroup_size_components": [
+    782,
+    57,
+    57
+  ],
+  "workgroup_size_object": 783,
+  "workgroup_size_x_default": 1,
+  "workgroup_size_x_spec_id": 0,
+  "workgroup_size_y_default": 1,
+  "workgroup_size_z_default": 1
+}
