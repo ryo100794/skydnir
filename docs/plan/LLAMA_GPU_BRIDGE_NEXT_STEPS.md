@@ -254,6 +254,37 @@ hashes are correlated through the probe manifest and artifact logs.
   semantics.  Do not add more device tries before the static SPIR-V control-flow
   and descriptor/push-constant interpretation above has been reviewed.
 
+Static misunderstanding fixed in the follow-up commits:
+
+- "Passthrough" did not mean the bridge had no opportunity to change the
+  shader.  The executor could still apply diagnostic transformations after
+  receiving the container SPIR-V.  In strict passthrough mode, descriptor
+  duplicate rewriting was already disabled, and WorkgroupSize legalization is
+  now disabled as well (`legalize_workgroup_size_from_spec_source` reports
+  `strict-passthrough`).  This makes the strict lane a real ABI-preservation
+  lane instead of a partially transformed compatibility lane.
+- Q6 binding 0 is intentionally duplicated in the SPIR-V as two typed views of
+  the same descriptor: an 8-bit byte view (`%346`) and a 16-bit ushort view
+  (`%371`).  Rewriting either view to another binding changes the shader ABI
+  and is not valid evidence for native llama.cpp passthrough correctness.
+- Source, effective, and oracle shader identities are separate.  Probe replay
+  passes an instrumented/effective module, but the CPU oracle must classify the
+  original Q6 source module.  The ICD now carries
+  `sender_source_spirv_hash`/`sender_effective_spirv_hash`; the executor trusts
+  the source oracle only when that source/effective relation is verified and a
+  probe debug binding is present.
+- The apparent post-reduction probe miss was not a writeback failure.  Those
+  candidate blocks are optional fused-add branches controlled by push constant
+  member 7 (`&1` for binding 3 and `&2` for binding 4).  With push[7] equal to
+  zero, skipping those blocks is expected and the final-output store can still
+  execute.
+- The next static split point is upstream of the verified final/reduction
+  writeback path: cand83/cand93 stage Q6 `scales[]` into Workgroup `%332`, and
+  cand98 accumulates input-vector dot products into Function `%656`.  If the
+  next strict probe still produces wrong prompt output after source-oracle
+  attachment, inspect this dequant/FMA accumulator boundary before changing
+  Dockerfiles, prompts, or llama.cpp.
+
 If the run stops before Q6_K, the artifact verifier now preserves bounded
 `pre_http_failure_evidence` for the first failed generic SPIR-V event
 (`fail_stage`/`error`, `vk_result`, SPIR-V hash, pipeline key, feature
