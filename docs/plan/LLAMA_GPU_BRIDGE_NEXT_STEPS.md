@@ -1426,6 +1426,11 @@ Next concrete actions:
    it to decide whether Q6 is still passing live specialization data to the
    Android driver because of an unsupported SPIR-V expression, a guarded
    WorkgroupSize subtree, or a no-op rewrite.
+   The skip guard is now intentionally conditional: WorkgroupSize composite
+   operands are skipped only while the pre-materialized module still has an
+   inconsistent literal/specialized workgroup shape.  After LocalSize
+   legalization makes the literal shape match the requested specialization, the
+   WorkgroupSize subtree is allowed to fold with the rest of the Q6 module.
 2. Compare Q6 descriptor/access evidence before and after reflection transfer
    intent to ensure no application-visible descriptor write was removed.
 3. Run one targeted device-local staging diagnostic only after static evidence

@@ -912,6 +912,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("skip_spec_materialization", source)
         self.assertIn("code[i + 2] == 11 && code[i + 3] == 25", source)
         self.assertIn("preserve_workgroup_size_spec_subtree", source)
+        self.assertIn("preserve_workgroup_size_spec_subtree &&\n            op == 51", source)
         self.assertIn("pre_materialize_local_size", source)
         self.assertIn("the stale default gl_WorkGroupSize value", source)
         self.assertIn("materialize_specialization_env", source)

@@ -244,22 +244,22 @@ sequence is:
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Llama as llama.cpp Q6_K dispatch
-    participant ICD as pdocker Vulkan ICD
-    participant Exec as Android executor
-    participant Oracle as CPU oracle / verifier
-    participant Vk as Android Vulkan
-    participant Report as compare JSON
+    participant App as Llama Q6 dispatch
+    participant Icd as Pdocker Vulkan ICD
+    participant Exe as Android executor
+    participant Ora as CPU oracle
+    participant Drv as Android Vulkan
+    participant Rep as Compare JSON
 
-    Llama->>ICD: create Q6_K SPIR-V pipeline and descriptors
-    ICD->>Exec: VULKAN_DISPATCH_V4 with source SPIR-V hash and strict object fields
-    Exec->>Exec: classify source hash as Q6 scope
-    Exec->>Exec: legalize Q6 LocalSize if requested
-    Exec->>Exec: attempt scoped specialization materialization
-    Exec->>Exec: preserve descriptor bindings; use SPIR-V access for transfer intent
-    Exec->>Oracle: run known-callsite CPU oracle when enabled
-    Exec->>Vk: run native Android Vulkan dispatch
-    Exec->>Report: write hashes, descriptor evidence, oracle deltas, materialization report
+    App->>Icd: Create Q6 SPIRV pipeline and descriptors
+    Icd->>Exe: Send dispatch V4 with shader hash and object fields
+    Exe->>Exe: Classify source hash as Q6 scope
+    Exe->>Exe: Legalize Q6 LocalSize if requested
+    Exe->>Exe: Attempt scoped specialization materialization
+    Exe->>Exe: Preserve descriptors and apply SPIRV access intent
+    Exe->>Ora: Run known callsite CPU oracle when enabled
+    Exe->>Drv: Run native Android Vulkan dispatch
+    Exe->>Rep: Write hashes, descriptor evidence, oracle deltas, and materialization report
 ```
 
 Known current state:
@@ -312,4 +312,3 @@ Evidence must be specific enough to answer:
   performance claims.
 - A benchmark claim is allowed only when the verifier has a passing
   reconciliation artifact and prompt/oracle correctness for the same run.
-

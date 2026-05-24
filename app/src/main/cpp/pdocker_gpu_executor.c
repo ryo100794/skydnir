@@ -3310,7 +3310,8 @@ static int materialize_spirv_specialization_constants(
         uint16_t word_count = (uint16_t)(inst >> 16);
         uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) break;
-        if (op == 51 && word_count >= 3 && code[i + 2] < bound &&
+        if (preserve_workgroup_size_spec_subtree &&
+            op == 51 && word_count >= 3 && code[i + 2] < bound &&
             workgroup_size_id[code[i + 2]]) {
             for (uint16_t j = 3; j < word_count; ++j) {
                 if (code[i + j] < bound) {
