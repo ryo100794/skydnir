@@ -8790,11 +8790,14 @@ static int run_vulkan_dispatch_fd(
             specialization_data_size);
     }
     const int legalize_workgroup_size_from_spec =
+        strict_passthrough ? 0 :
         options && options->has_legalize_workgroup_size_from_spec
             ? options->legalize_workgroup_size_from_spec
             : env_truthy("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", 1);
     const char *legalize_workgroup_size_from_spec_source =
-        options && options->has_legalize_workgroup_size_from_spec
+        strict_passthrough
+            ? "strict-passthrough"
+            : options && options->has_legalize_workgroup_size_from_spec
             ? "option"
             : "env-default";
     if (legalize_workgroup_size_from_spec) {
