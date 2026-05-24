@@ -56,7 +56,8 @@
 #define PDOCKER_GPU_VULKAN_SIZE_DISPATCH_OPTIONS(X) \
     X(PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES, mutable_cache_max, has_mutable_buffer_cache_max_bytes, mutable_buffer_cache_max_bytes) \
     X(PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES, resident_cache_min, has_resident_cache_min_bytes, resident_cache_min_bytes) \
-    X(PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES, dirty_probe_min, has_dirty_probe_min_bytes, dirty_probe_min_bytes)
+    X(PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES, dirty_probe_min, has_dirty_probe_min_bytes, dirty_probe_min_bytes) \
+    X(PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING, spirv_probe_debug_binding, has_spirv_probe_debug_binding, spirv_probe_debug_binding)
 
 /*
  * Positional VULKAN_DISPATCH_V4 binding payload schema.

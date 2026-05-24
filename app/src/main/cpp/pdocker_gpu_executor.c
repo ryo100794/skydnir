@@ -865,6 +865,8 @@ typedef struct {
     int dirty_probe;
     int has_dirty_probe_min_bytes;
     size_t dirty_probe_min_bytes;
+    int has_spirv_probe_debug_binding;
+    size_t spirv_probe_debug_binding;
     int has_dirty_writeback;
     int dirty_writeback;
     int has_writeonly_buffer_cache;
@@ -3876,7 +3878,11 @@ static uint32_t sample_u32_at(const void *data, size_t size, size_t index, int *
     return value;
 }
 
-static int probe_debug_binding_from_env(void) {
+static int probe_debug_binding_from_options(const VulkanDispatchOptions *options) {
+    if (options && options->has_spirv_probe_debug_binding) {
+        if (options->spirv_probe_debug_binding > UINT32_MAX) return -1;
+        return (int)options->spirv_probe_debug_binding;
+    }
     const char *value = getenv("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING");
     if (!value || !value[0]) return -1;
     char *end = NULL;
@@ -4107,13 +4113,13 @@ static void write_vulkan_binding_report(
         VulkanVectorBuffer * const *vk_buffers,
         const size_t *binding_gpu_offset,
         const int *buffer_fds,
+        int debug_probe_binding,
         const CpuOracleReport *cpu_oracle_report) {
     fprintf(out, "\"binding_details\":[");
     uint64_t q6_sample_indices[48];
     const size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
         cpu_oracle_report, q6_sample_indices,
         sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]));
-    const int debug_probe_binding = probe_debug_binding_from_env();
     for (size_t i = 0; i < binding_count; ++i) {
         fprintf(out,
                 "%s{\"index\":%zu,\"set\":%u,\"binding\":%u,\"offset\":%lld,"
@@ -7136,13 +7142,13 @@ static void write_vulkan_binding_compact_report(
         const uint64_t *gpu_after_dispatch_hash,
         const uint64_t *fd_after_hash,
         const size_t *alias_rep,
+        int debug_probe_binding,
         const CpuOracleReport *cpu_oracle_report) {
     fprintf(out, "\"binding_details\":[");
     uint64_t q6_sample_indices[48];
     const size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
         cpu_oracle_report, q6_sample_indices,
         sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]));
-    const int debug_probe_binding = probe_debug_binding_from_env();
     for (size_t i = 0; i < binding_count; ++i) {
         fprintf(out,
                 "%s{\"index\":%zu,\"set\":%u,\"binding\":%u,\"offset\":%lld,"
@@ -10036,6 +10042,7 @@ static int run_vulkan_dispatch_fd(
                                             binding_gpu_after_dispatch_hash,
                                             binding_fd_after_hash,
                                             binding_alias_rep,
+                                            probe_debug_binding_from_options(options),
                                             &cpu_oracle_report);
         fprintf(stderr, ",");
         write_cpu_oracle_report(stderr, &cpu_oracle_report);
@@ -10326,6 +10333,7 @@ static int run_vulkan_dispatch_fd(
                                             binding_gpu_after_dispatch_hash,
                                             binding_fd_after_hash,
                                             binding_alias_rep,
+                                            probe_debug_binding_from_options(options),
                                             &cpu_oracle_report);
         fprintf(json_out(), ",");
         write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt, options);
@@ -10548,6 +10556,7 @@ static int run_vulkan_dispatch_fd(
                                     vk_buffers,
                                     binding_gpu_offset,
                                     buffer_fds,
+                                    probe_debug_binding_from_options(options),
                                     &cpu_oracle_report);
         fprintf(json_out(), ",");
         write_vulkan_descriptor_write_report(json_out(),
@@ -10770,6 +10779,7 @@ cleanup:
                                     vk_buffers,
                                     binding_gpu_offset,
                                     buffer_fds,
+                                    probe_debug_binding_from_options(options),
                                     &cpu_oracle_report);
         fprintf(json_out(), ",");
         write_spirv_feature_report(json_out(), &spirv_summary, &effective_rt, options);

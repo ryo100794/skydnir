@@ -135,14 +135,15 @@ def parse_binding(binding: dict[str, Any]) -> dict[str, Any]:
         candidate = dispatch.get(base)
         role_code = dispatch.get(base + 1)
         value_bits = dispatch.get(base + 2)
-        status = "pass"
-        if candidate != expected["candidate_id"]:
+        unexecuted = candidate in (None, 0) and role_code in (None, 0) and value_bits in (None, 0)
+        status = "not-executed" if unexecuted else "pass"
+        if not unexecuted and candidate != expected["candidate_id"]:
             status = "fail"
             failures.append(
                 f"probe {expected['probe']} candidate mismatch: expected "
                 f"{expected['candidate_id']} got {candidate}"
             )
-        if role_code != expected["role_code"]:
+        if not unexecuted and role_code != expected["role_code"]:
             status = "fail"
             failures.append(
                 f"probe {expected['probe']} role mismatch: expected "
@@ -174,7 +175,9 @@ def parse_binding(binding: dict[str, Any]) -> dict[str, Any]:
                     ),
                 }
             )
-            if record["writeback_status"] != "pass":
+            if unexecuted:
+                record["writeback_status"] = "not-executed"
+            if record["writeback_status"] == "fail":
                 failures.append(
                     f"probe {expected['probe']} writeback metadata mismatch: "
                     f"candidate={wb_candidate} role={wb_role_code}"
@@ -195,8 +198,19 @@ def parse_binding(binding: dict[str, Any]) -> dict[str, Any]:
         "set": binding.get("set"),
         "size": binding.get("size"),
         "records": records,
+        "executed_record_count": sum(1 for record in records if record["status"] == "pass"),
+        "executed_final_record_count": sum(
+            1
+            for record in records
+            if record["status"] == "pass" and record["role"] == "final_output_store"
+        ),
         "unexpected_nonzero_slots": unexpected_nonzero,
-        "summary": "pass" if not failures else "fail",
+        "summary": "pass"
+        if not failures and any(
+            record["status"] == "pass" and record["role"] == "final_output_store"
+            for record in records
+        )
+        else "fail",
         "failures": failures,
     }
 
@@ -209,6 +223,8 @@ def parse_artifact(data: Any) -> dict[str, Any]:
         for idx, binding in enumerate(parsed)
         for failure in binding["failures"]
     ]
+    if bindings and not any(binding["summary"] == "pass" for binding in parsed):
+        failures.append("no executed final-output Q6 probe record was found")
     if not bindings:
         failures.append("no debug_probe_binding with u32_after_dispatch was found")
     return {

@@ -94,7 +94,36 @@ class Q6KProbeU32ParserTest(unittest.TestCase):
         result, report = self.run_parser(payload)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(report["summary"], "fail")
-        self.assertIn("candidate mismatch", "\n".join(report["failures"]))
+        self.assertIn("no executed final-output Q6 probe record", "\n".join(report["failures"]))
+
+    def test_parser_accepts_one_executed_phase_and_ignores_unexecuted_branch(self):
+        values = {index: 0 for index in range(96)}
+        for base, candidate, role, value in [
+            (44, 105, 1, -0.25),
+            (56, 115, 2, 0.5),
+            (68, 130, 4, 0.5),
+        ]:
+            values[base] = candidate
+            values[base + 1] = role
+            values[base + 2] = f32_bits(value)
+        payload = {
+            "binding_details": [
+                {
+                    "binding": 5,
+                    "debug_probe_binding": True,
+                    "u32_after_dispatch": [sample(index, values[index]) for index in range(96)],
+                    "u32_after_writeback": [sample(index, values[index]) for index in range(96)],
+                }
+            ]
+        }
+        result, report = self.run_parser(payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report["summary"], "pass")
+        binding = report["bindings"][0]
+        self.assertEqual(binding["executed_record_count"], 3)
+        self.assertEqual(binding["executed_final_record_count"], 1)
+        self.assertEqual([record["status"] for record in binding["records"][:3]], ["not-executed"] * 3)
+        self.assertEqual([record["status"] for record in binding["records"][3:]], ["pass"] * 3)
 
 
 if __name__ == "__main__":

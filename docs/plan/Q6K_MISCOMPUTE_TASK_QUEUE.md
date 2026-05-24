@@ -229,8 +229,8 @@ decisive step.
 
 ### Q6K-004: Valid-module probe bisection
 
-Status: manifest targets and executable probe-write module generation are now
-first-class; device-side u32 record collection is the next open step.
+Status: first device-side u32 record collection is closed for the full branch;
+the next open step is a smaller full-branch reduction bisection.
 
 Purpose: bisect native Q6 dynamic execution without submitting arbitrary SPIR-V
 fragments and without changing the V4 ABI.
@@ -269,6 +269,13 @@ Implementation note:
   `u32_after_dispatch` / `u32_after_writeback` records.  A passing parse means
   the six expected Q6 probe sites wrote their candidate/role metadata to the
   debug SSBO; it does not by itself prove numeric correctness.
+- `docs/test/llama-gpu-ngl1-q6-write-probe-abiopt-adb42493-20260524T003258Z.json`
+  reached the executable write-probe shader (`0xfd2949c11ffa33e9`).  The
+  parsed u32 evidence shows the tail branch was not executed for that dispatch,
+  while the full branch wrote partial, reduction, and final-output records.
+  The full reduction value and final store value match each other in the
+  captured records, so the next split should instrument inside the full
+  partial-to-reduction chain rather than host writeback.
 
 Initial probe candidates, in priority order:
 

@@ -161,6 +161,7 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             "icd_to_executor_size_option": {
                 "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
                 "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
+                "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
                 "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
             },
             "icd_to_executor_string_option": set(),
@@ -186,7 +187,6 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
                 "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH",
                 "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
                 "PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
-                "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
                 "PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY",
             },
         }
