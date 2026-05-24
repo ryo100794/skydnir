@@ -243,23 +243,25 @@ sequence is:
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant App as Llama Q6 dispatch
-    participant Icd as Pdocker Vulkan ICD
-    participant Exe as Android executor
-    participant Ora as CPU oracle
-    participant Drv as Android Vulkan
-    participant Rep as Compare JSON
+    participant Llama
+    participant ICD
+    participant Executor
+    participant Oracle
+    participant Driver
+    participant Report
 
-    App->>Icd: Create Q6 SPIRV pipeline and descriptors
-    Icd->>Exe: Send dispatch V4 with shader hash and object fields
-    Exe->>Exe: Classify source hash as Q6 scope
-    Exe->>Exe: Legalize Q6 LocalSize if requested
-    Exe->>Exe: Attempt scoped specialization materialization
-    Exe->>Exe: Preserve descriptors and apply SPIRV access intent
-    Exe->>Ora: Run known callsite CPU oracle when enabled
-    Exe->>Drv: Run native Android Vulkan dispatch
-    Exe->>Rep: Write hashes, descriptor evidence, oracle deltas, and materialization report
+    Llama->>ICD: create q6 shader pipeline
+    Llama->>ICD: update q6 descriptors
+    ICD->>Executor: send dispatch v4 command
+    ICD->>Executor: pass shader and buffer fds
+    Executor->>Executor: classify q6 source hash
+    Executor->>Executor: legalize local size if requested
+    Executor->>Executor: materialize specialization constants if scoped
+    Executor->>Executor: preserve descriptors and transfer intent
+    Executor->>Oracle: run cpu oracle when enabled
+    Executor->>Driver: submit android vulkan dispatch
+    Executor->>Report: write hashes and descriptor evidence
+    Executor->>Report: write oracle deltas and materialization report
 ```
 
 Known current state:
