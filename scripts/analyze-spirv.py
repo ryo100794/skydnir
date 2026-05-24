@@ -272,7 +272,9 @@ def summarize_cfg(words: list[int]) -> dict:
                 "first_non_phi_word_index": None,
                 "pre_merge_word_index": None,
                 "terminator": None,
+                "terminator_instruction": None,
                 "successors": [],
+                "predecessors": [],
                 "store_candidates": [],
             }
             current_function["blocks"].append(current_block)
@@ -334,6 +336,45 @@ def summarize_cfg(words: list[int]) -> dict:
                 current_block["pre_merge_word_index"] = word_index
             current_block["terminator"] = op_name
             current_block["successors"] = branch_targets(opcode, inst)
+            current_block["terminator_instruction"] = {
+                "op": op_name,
+                "word_index": word_index,
+            }
+            if opcode == 249 and len(inst) >= 2:
+                current_block["terminator_instruction"]["target"] = inst[1]
+            elif opcode == 250 and len(inst) >= 4:
+                current_block["terminator_instruction"].update(
+                    {
+                        "condition_id": inst[1],
+                        "true_label": inst[2],
+                        "false_label": inst[3],
+                    }
+                )
+            elif opcode == 251 and len(inst) >= 3:
+                current_block["terminator_instruction"].update(
+                    {
+                        "selector_id": inst[1],
+                        "default_label": inst[2],
+                        "case_labels": inst[4::2],
+                    }
+                )
+
+    pred_map: dict[int, list[dict]] = defaultdict(list)
+    for function in functions:
+        for ordinal, block in enumerate(function["blocks"]):
+            for successor in block.get("successors", []):
+                pred_map[int(successor)].append(
+                    {
+                        "function_id": function["id"],
+                        "block_label": block["label"],
+                        "block_ordinal": ordinal,
+                        "terminator": block["terminator"],
+                        "terminator_instruction": block["terminator_instruction"],
+                    }
+                )
+    for function in functions:
+        for block in function["blocks"]:
+            block["predecessors"] = pred_map.get(int(block["label"]), [])
 
     probe_candidates = []
     for function in functions:
@@ -409,7 +450,9 @@ def summarize_cfg(words: list[int]) -> dict:
             "block_entry_insert_after_phi_word_index": block["first_non_phi_word_index"],
             "block_exit_insert_before_word_index": block["pre_merge_word_index"],
             "terminator": block["terminator"],
+            "terminator_instruction": block["terminator_instruction"],
             "successors": block["successors"],
+            "predecessors": block["predecessors"],
             "store_candidates": block["store_candidates"],
         }
 
@@ -505,6 +548,29 @@ def build_q6_probe_targets(module: dict) -> dict:
     for candidate in module.get("control_flow", {}).get("probe_plan", {}).get("candidates", []):
         candidate_by_block[(candidate.get("function_id"), candidate.get("block_label"))] = candidate
 
+    conditional_predecessors_by_block: dict[tuple[int | None, int | None], list[dict]] = defaultdict(list)
+    for function in module.get("control_flow", {}).get("functions", []):
+        function_id = function.get("id")
+        for block in function.get("blocks", []):
+            block_label = block.get("label")
+            for predecessor in block.get("predecessors", []):
+                terminator = predecessor.get("terminator_instruction") or {}
+                if terminator.get("op") != "OpBranchConditional":
+                    continue
+                branch_side = None
+                if terminator.get("true_label") == block_label:
+                    branch_side = "true"
+                elif terminator.get("false_label") == block_label:
+                    branch_side = "false"
+                conditional_predecessors_by_block[(function_id, block_label)].append(
+                    {
+                        "predecessor_block_label": predecessor.get("block_label"),
+                        "predecessor_block_ordinal": predecessor.get("block_ordinal"),
+                        "condition_id": terminator.get("condition_id"),
+                        "branch_side": branch_side,
+                    }
+                )
+
     def annotate_store(store: dict, phase: str, role: str, output_store_word_index: int | None = None) -> dict:
         word_index = int(store.get("word_index", -1))
         block = block_for_word(word_index) or {}
@@ -533,6 +599,10 @@ def build_q6_probe_targets(module: dict) -> dict:
                 "block_entry_insert_after_phi_word_index": candidate.get("block_entry_insert_after_phi_word_index"),
                 "block_exit_insert_before_word_index": candidate.get("block_exit_insert_before_word_index"),
             },
+            "control_dependencies": conditional_predecessors_by_block.get(
+                (block.get("function_id"), block.get("block_label")),
+                [],
+            ),
             "capture": [
                 "local_invocation_id",
                 "workgroup_id",

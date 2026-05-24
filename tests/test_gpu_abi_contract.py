@@ -73,6 +73,27 @@ def v4_binding_schema(path):
     return fields, int(macro.group("count")), int(macro.group("hash"), 16), fnv
 
 
+def vulkan_dispatch_option_envs(path):
+    source = path.read_text()
+
+    def macro_envs(name):
+        macro = re.search(
+            rf"#define\s+{name}\(X\)\s+\\\n(?P<body>.*?)(?:\n\n|/\*)",
+            source,
+            re.S,
+        )
+        assert macro is not None, name
+        return set(re.findall(r"X\((PDOCKER_[A-Z0-9_]+)", macro.group("body")))
+
+    return {
+        "bool": (
+            macro_envs("PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS")
+            | macro_envs("PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS_NO_HAS")
+        ),
+        "size": macro_envs("PDOCKER_GPU_VULKAN_SIZE_DISPATCH_OPTIONS"),
+    }
+
+
 class GpuAbiContractTest(unittest.TestCase):
     def test_container_and_apk_gpu_abi_headers_stay_in_sync(self):
         self.assertEqual(defines(CONTAINER_HEADER), defines(APP_HEADER))
@@ -135,6 +156,40 @@ class GpuAbiContractTest(unittest.TestCase):
             executor,
         )
 
+    def test_llama_gpu_env_manifest_covers_abi_dispatch_options(self):
+        manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
+        app_options = vulkan_dispatch_option_envs(APP_HEADER)
+        container_options = vulkan_dispatch_option_envs(CONTAINER_HEADER)
+        self.assertEqual(app_options, container_options)
+
+        manifest_options = {"bool": set(), "size": set()}
+        for item in manifest["abi_dispatch_option_env_fields"]:
+            self.assertIn(item["type"], manifest_options)
+            manifest_options[item["type"]].add(item["env"])
+        expected_options = {
+            "bool": app_options["bool"] | {"PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE"},
+            "size": app_options["size"],
+        }
+        self.assertEqual(expected_options, manifest_options)
+        self.assertEqual(
+            expected_options["bool"],
+            set(manifest["env_bridge_classifications"]["icd_to_executor_bool_option"]),
+        )
+        self.assertEqual(
+            app_options["size"],
+            set(manifest["env_bridge_classifications"]["icd_to_executor_size_option"]),
+        )
+        self.assertLessEqual(
+            set(manifest["config_propagation_env_fields"][i]["env"] for i in range(len(manifest["config_propagation_env_fields"]))),
+            set(manifest["compare_forward_env_keys"]),
+        )
+        self.assertIn("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", manifest_options["bool"])
+        self.assertIn("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", {
+            item["env"] for item in manifest["config_propagation_env_fields"]
+        })
+        self.assertIn("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING", manifest_options["size"])
+        self.assertIn("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING", manifest["compare_probe_env_keys"])
+
     def test_spirv_probe_replay_uses_existing_v4_binding_transport(self):
         icd = VULKAN_ICD.read_text()
         for marker in [
@@ -160,8 +215,30 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("bindings[binding_count] = probe.debug_binding;", icd)
         self.assertIn("binding_count++;", icd)
         self.assertIn('env_truthy_default("PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY", false)', icd)
+        self.assertIn("sender_source_spirv_hash=0x%016llx", icd)
+        self.assertIn("sender_effective_spirv_hash=0x%016llx", icd)
+        self.assertIn("(unsigned long long)source_shader_hash", icd)
+        self.assertIn("(unsigned long long)shader_hash_to_send", icd)
+        self.assertIn("Probe replay sends an instrumented/effective SPIR-V module", icd)
+        probe_identity_block = icd.index("if (probe.enabled) {", icd.index("sender_dispatch_hash"))
+        self.assertLess(probe_identity_block, icd.index("sender_source_spirv_hash=0x%016llx"))
+        self.assertLess(icd.index("sender_source_spirv_hash=0x%016llx"), icd.index("sender_effective_spirv_hash=0x%016llx"))
+        self.assertLess(icd.index("sender_effective_spirv_hash=0x%016llx"), icd.index("typedef struct {", probe_identity_block))
         env_manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
         self.assertIn("PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY", env_manifest["compare_forward_env_keys"])
+        self.assertEqual(
+            [
+                "PDOCKER_GPU_SPIRV_PROBE_MANIFEST",
+                "PDOCKER_GPU_SPIRV_PROBE_SHADER",
+                "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH",
+                "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH",
+                "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
+                "PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
+                "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
+                "PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY",
+            ],
+            env_manifest["compare_probe_env_keys"],
+        )
         app_fields, app_count, app_hash, _ = v4_binding_schema(APP_HEADER)
         container_fields, container_count, container_hash, _ = v4_binding_schema(CONTAINER_HEADER)
         self.assertEqual(app_fields, container_fields)
@@ -393,6 +470,7 @@ class GpuAbiContractTest(unittest.TestCase):
             ("PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16", "float16_capability_added"),
             ("PDOCKER_GPU_MUTABLE_BUFFER_CACHE", "mutable_buffer_cache.enabled"),
             ("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", "materialize_specialization"),
+            ("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC", "legalize_workgroup_size_from_spec"),
             ("PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS", "spirv_descriptor_access"),
         ]:
             self.assertEqual(field_name, config_fields[env_name])
@@ -468,7 +546,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(q4_hash, q4_body)
             self.assertNotIn(q4_hash, q6_body)
         self.assertIn('return "mul-mat-vec-q4-k-large";', source)
-        self.assertIn("q4k_safe_kernel_used || is_q4k_matvec_hash(original_spirv_hash)", source)
+        self.assertIn("q4k_safe_kernel_used || is_q4k_matvec_hash(cpu_oracle_spirv_hash)", source)
         q4_safe_block = re.search(
             r"const int q4k_safe_kernel_requested =(?P<body>.*?)if \(q4k_safe_kernel_requested && is_q4k_matvec_hash",
             source,
@@ -572,6 +650,37 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('"q6-probe-writeback-cleared-oracle-missing"', source)
         self.assertIn("q6-probe-writeback-cleared-but-source-oracle-not-available-for-instrumented-module", source)
         self.assertIn("and event_has_q6_matvec_identity(e)", source)
+
+    def test_executor_cpu_oracle_uses_fail_closed_probe_source_identity(self):
+        source = GPU_EXECUTOR.read_text()
+        for token in [
+            "source_spirv_hash=",
+            "original_spirv_hash=",
+            "probe_expected_spirv_hash=",
+            "effective_spirv_hash=",
+            "instrumented_spirv_hash=",
+            "effective_probe_shader_hash=",
+        ]:
+            self.assertIn(token, source)
+        self.assertIn("resolve_cpu_oracle_spirv_identity", source)
+        self.assertIn("options->has_source_spirv_hash", source)
+        self.assertIn("options->has_effective_spirv_hash", source)
+        self.assertIn("options->sender_reconcile.has_spirv_hash", source)
+        self.assertIn("effective_relation_hash != received_spirv_hash", source)
+        self.assertIn("!options->has_spirv_probe_debug_binding", source)
+        self.assertIn("options->spirv_probe_debug_binding > UINT32_MAX", source)
+        self.assertIn("spirv-source-identity-effective-mismatch", source)
+        self.assertIn("spirv-source-identity-unverified-effective-hash", source)
+        self.assertIn("spirv-source-identity-without-probe-binding", source)
+        self.assertIn("uint64_t cpu_oracle_spirv_hash = original_spirv_hash;", source)
+        self.assertIn("cpu_oracle_spirv_hash_source = \"received\"", source)
+        self.assertIn('*oracle_spirv_hash_source = "probe-source-identity"', source)
+        self.assertIn("is_q6k_matvec_hash(cpu_oracle_spirv_hash)", source)
+        self.assertIn("run_cpu_oracle_q6k_matvec_sample(&cpu_oracle_report,\n                                         cpu_oracle_spirv_hash", source)
+        self.assertIn("resolve_spirv_local_size(&spirv_summary", source)
+        self.assertNotIn("} else if (is_q6k_matvec_hash(spirv_summary.hash))", source)
+        self.assertIn('\\"oracle_spirv_hash\\":\\"0x%016llx\\"', source)
+        self.assertIn('\\"oracle_spirv_hash_source\\":\\"%s\\"', source)
 
     def test_llama_gpu_lane_marker_and_scope_are_pinned(self):
         source = GPU_EXECUTOR.read_text()
@@ -729,7 +838,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("push_size < 27 * sizeof(uint32_t)", source)
         self.assertIn("report->executed = 1;", source)
         self.assertIn('report->mismatch_count ? "mismatch" : "match"', source)
-        self.assertIn("if (spirv_summary.hash == 0xac41e8033a67af4aull) {", source)
+        self.assertIn("if (cpu_oracle_spirv_hash == 0xac41e8033a67af4aull) {", source)
         self.assertIn("run_cpu_oracle_rope_yarn(&cpu_oracle_report", source)
         for report_field in [
             '\\"kernel_hint\\":\\"%s\\"',
@@ -1108,6 +1217,13 @@ class GpuAbiContractTest(unittest.TestCase):
                 for target in by_phase["tail"]["preceding_workgroup_stores"][:2]
             ],
         )
+        tail_post = by_phase["tail"]["preceding_workgroup_stores"][2:4]
+        self.assertEqual([61, 63], [target["candidate"]["candidate_id"] for target in tail_post])
+        self.assertEqual(
+            [2825, 2847],
+            [target["control_dependencies"][0]["condition_id"] for target in tail_post],
+        )
+        self.assertEqual(["true", "true"], [target["control_dependencies"][0]["branch_side"] for target in tail_post])
         self.assertEqual(
             [
                 ("variable", "Workgroup"),
@@ -1118,6 +1234,13 @@ class GpuAbiContractTest(unittest.TestCase):
                 for target in by_phase["full"]["preceding_workgroup_stores"][:2]
             ],
         )
+        full_post = by_phase["full"]["preceding_workgroup_stores"][2:4]
+        self.assertEqual([127, 129], [target["candidate"]["candidate_id"] for target in full_post])
+        self.assertEqual(
+            [1822, 1844],
+            [target["control_dependencies"][0]["condition_id"] for target in full_post],
+        )
+        self.assertEqual(["true", "true"], [target["control_dependencies"][0]["branch_side"] for target in full_post])
         self.assertEqual(
             [
                 ("partial_to_workgroup_candidate", 6198, 105),

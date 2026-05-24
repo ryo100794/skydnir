@@ -39,6 +39,7 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             "ui_compose_runtime_env_keys",
             "compare_diagnostic_env_keys",
             "compare_forward_env_keys",
+            "compare_probe_env_keys",
         ]:
             values = manifest[key]
             self.assertTrue(values, key)
@@ -50,6 +51,11 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertLessEqual(set(manifest["ui_compose_runtime_env_keys"]), ui_runtime)
         self.assertLessEqual(set(manifest["compare_diagnostic_env_keys"]), set(manifest["compare_forward_env_keys"]))
         self.assertLessEqual(ui_runtime, set(manifest["compare_forward_env_keys"]))
+        self.assertLessEqual(set(manifest["compare_probe_env_keys"]), set(manifest["compare_forward_env_keys"]))
+        self.assertEqual(
+            manifest["compare_probe_env_keys"],
+            manifest["env_bridge_classifications"]["spirv_probe_transport"],
+        )
         ui_compose_defaults = manifest["ui_compose_runtime_env_defaults"]
         self.assertTrue(ui_compose_defaults)
         ui_compose_default_keys = [item["env"] for item in ui_compose_defaults]
@@ -101,102 +107,57 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             "ui_compose_runtime_env_keys",
             "compare_diagnostic_env_keys",
             "compare_forward_env_keys",
+            "compare_probe_env_keys",
         ]:
             env_keys.update(manifest[key])
-        for key in ["pdockerd_runtime_env_defaults", "ui_compose_runtime_env_defaults", "config_propagation_env_fields"]:
+        for key in [
+            "pdockerd_runtime_env_defaults",
+            "ui_compose_runtime_env_defaults",
+            "config_propagation_env_fields",
+            "abi_dispatch_option_env_fields",
+        ]:
             env_keys.update(item["env"] for item in manifest[key])
         for profile in manifest["compare_mode_env_profiles"].values():
             for key in ["env", "trace_alloc_env"]:
                 env_keys.update(item["env"] for item in profile.get(key, []))
 
-        classifications = {
-            "container_env_only": {
-                "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
-                "GGML_VK_FORCE_MAX_BUFFER_SIZE",
-                "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
-                "LLAMA_ARG_N_GPU_LAYERS",
-                "PDOCKER_GPU_VIRTUAL_MEMORY",
-                "PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES",
-                "PDOCKER_VULKAN_ALIAS_COPIES",
-                "PDOCKER_VULKAN_DUMP_SPIRV_DIR",
-                "PDOCKER_VULKAN_ENABLE_16BIT_STORAGE",
-                "PDOCKER_VULKAN_ENABLE_8BIT_STORAGE",
-                "PDOCKER_VULKAN_ENABLE_INT64",
-                "PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC",
-                "PDOCKER_VULKAN_HEAP_BYTES",
-                "PDOCKER_VULKAN_ICD_DEBUG",
-                "PDOCKER_VULKAN_ICD_TRACE_ALLOC",
-                "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
-                "PDOCKER_VULKAN_SUBGROUP_SIZE",
-                "PDOCKER_GPU_SPIRV_DUMP_DIR",
-            },
-            "icd_to_executor_bool_option": {
-                "PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16",
-                "PDOCKER_GPU_CPU_ORACLE",
-                "PDOCKER_GPU_DISABLE_OVERLAP_ALIASING",
-                "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
-                "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE",
-                "PDOCKER_GPU_MATERIALIZE_DESCRIPTOR_ALIASES",
-                "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
-                "PDOCKER_GPU_MUTABLE_BUFFER_CACHE",
-                "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER",
-                "PDOCKER_GPU_Q4K_SAFE_KERNEL",
-                "PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION",
-                "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
-                "PDOCKER_GPU_Q6K_SAFE_KERNEL",
-                "PDOCKER_GPU_RESIDENT_CACHE",
-                "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
-                "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
-                "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",
-                "PDOCKER_GPU_STRICT_PASSTHROUGH",
-                "PDOCKER_GPU_STRICT_RECONCILIATION",
-                "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
-                "PDOCKER_GPU_WRITEONLY_BUFFER_CACHE",
-                "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE",
-                "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
-                "PDOCKER_VULKAN_DISABLE_16BIT_STORAGE",
-                "PDOCKER_VULKAN_DISABLE_8BIT_STORAGE",
-                "PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC",
-            },
-            "icd_to_executor_size_option": {
-                "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
-                "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
-                "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
-                "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
-            },
-            "icd_to_executor_string_option": set(),
-            "app_process_only": {
-                "PDOCKER_ANDROID_OPENCL_LIBRARY",
-                "PDOCKER_GPU_DISABLE_ANDROID_OPENCL",
-                "PDOCKER_GPU_DISABLE_ANDROID_VULKAN",
-            },
-            "deprecated_or_invalid": set(),
-            "needs_bridge": {
-                "PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS",
-                "PDOCKER_GPU_DISPATCH_PROFILE_LOG",
-                "PDOCKER_GPU_FAILED_SPIRV_DIR",
-                "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
-                "PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION",
-                "PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE",
-                "PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES",
-            },
-            "spirv_probe_transport": {
-                "PDOCKER_GPU_SPIRV_PROBE_MANIFEST",
-                "PDOCKER_GPU_SPIRV_PROBE_SHADER",
-                "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH",
-                "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH",
-                "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
-                "PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
-                "PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY",
-            },
+        classifications = manifest["env_bridge_classifications"]
+        expected_classes = {
+            "container_env_only",
+            "icd_to_executor_bool_option",
+            "icd_to_executor_size_option",
+            "icd_to_executor_string_option",
+            "app_process_only",
+            "deprecated_or_invalid",
+            "needs_bridge",
+            "spirv_probe_transport",
         }
+        self.assertEqual(expected_classes, set(classifications))
         classified = set()
         for name, values in classifications.items():
+            self.assertIsInstance(values, list, name)
+            values = set(values)
             overlap = classified & values
+            if name == "spirv_probe_transport":
+                overlap -= set(classifications["icd_to_executor_size_option"])
             self.assertFalse(overlap, f"{name} overlaps: {sorted(overlap)}")
             classified.update(values)
 
         self.assertEqual(env_keys, classified)
+        self.assertEqual(
+            {
+                item["env"] for item in manifest["abi_dispatch_option_env_fields"]
+                if item["type"] == "bool"
+            },
+            set(classifications["icd_to_executor_bool_option"]),
+        )
+        self.assertEqual(
+            {
+                item["env"] for item in manifest["abi_dispatch_option_env_fields"]
+                if item["type"] == "size"
+            },
+            set(classifications["icd_to_executor_size_option"]),
+        )
 
     def test_compare_pdockerd_and_ui_compose_env_surfaces_match_manifest(self):
         manifest = load_manifest()
@@ -234,7 +195,12 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn("requested_env_missing_from_runtime", compare)
         self.assertIn('CURRENT_STAGE="pdockerd startup"', compare)
         self.assertIn('CURRENT_STAGE="SPIR-V probe staging"', compare)
-        self.assertIn("probe_env_keys = [", compare)
+        self.assertIn('probe_env_keys = string_list("compare_probe_env_keys")', compare)
+        self.assertIn('"compare_probe_env_keys": [str(key) for key in manifest_probe_env_keys', compare)
+        self.assertIn('"spirv_probe_env_audit": spirv_probe_env_audit', compare)
+        self.assertIn("def build_spirv_probe_env_audit", compare)
+        self.assertIn("vulkan_dispatch_v4_size_option", compare)
+        self.assertIn("executor getenv is not trusted for the audit", compare)
         self.assertIn("partial SPIR-V probe env is unsafe; set all or none", compare)
         for key in [
             "PDOCKER_GPU_SPIRV_PROBE_MANIFEST",
@@ -246,7 +212,7 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
             "PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY",
         ]:
-            self.assertIn(key, compare)
+            self.assertIn(key, manifest["compare_probe_env_keys"])
 
         self.assertIn("load_gpu_env_manifest", pdockerd)
         self.assertIn("gpu_runtime_env_defaults", pdockerd)
@@ -290,6 +256,8 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
 
         self.assertIn('string_list("compare_forward_env_keys")', compare)
         self.assertIn('string_list("compare_diagnostic_env_keys")', compare)
+        self.assertIn('string_list("compare_probe_env_keys")', compare)
+        self.assertIn('"compare_probe_env_keys": probe_keys', compare)
         self.assertIn('"config_propagation_env_keys": config_keys', compare)
         self.assertIn('"host_requested_env": dict(sorted(host_env.items()))', compare)
         self.assertIn('"host_echo_recorded": bool(runtime_env_record.get("echoed_to_log"))', compare)

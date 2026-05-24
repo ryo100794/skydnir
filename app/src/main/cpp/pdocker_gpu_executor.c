@@ -867,6 +867,10 @@ typedef struct {
     size_t dirty_probe_min_bytes;
     int has_spirv_probe_debug_binding;
     size_t spirv_probe_debug_binding;
+    int has_source_spirv_hash;
+    uint64_t source_spirv_hash;
+    int has_effective_spirv_hash;
+    uint64_t effective_spirv_hash;
     int has_dirty_writeback;
     int dirty_writeback;
     int has_writeonly_buffer_cache;
@@ -2537,6 +2541,26 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
         options->sender_reconcile.has_spirv_hash = 1;
         return 0;
     }
+    if (strncmp(token, "sender_source_spirv_hash=", 25) == 0 ||
+        strncmp(token, "source_spirv_hash=", 18) == 0 ||
+        strncmp(token, "original_spirv_hash=", 20) == 0 ||
+        strncmp(token, "probe_source_spirv_hash=", 24) == 0 ||
+        strncmp(token, "probe_expected_spirv_hash=", 26) == 0) {
+        const char *value = strchr(token, '=');
+        if (!value || parse_u64_token_value(value + 1, &options->source_spirv_hash) != 0) return -1;
+        options->has_source_spirv_hash = 1;
+        return 0;
+    }
+    if (strncmp(token, "sender_effective_spirv_hash=", 28) == 0 ||
+        strncmp(token, "effective_spirv_hash=", 21) == 0 ||
+        strncmp(token, "instrumented_spirv_hash=", 24) == 0 ||
+        strncmp(token, "probe_effective_spirv_hash=", 27) == 0 ||
+        strncmp(token, "effective_probe_shader_hash=", 28) == 0) {
+        const char *value = strchr(token, '=');
+        if (!value || parse_u64_token_value(value + 1, &options->effective_spirv_hash) != 0) return -1;
+        options->has_effective_spirv_hash = 1;
+        return 0;
+    }
     if (strncmp(token, "sender_descriptor_hash=", 23) == 0 ||
         strncmp(token, "descriptor_hash=", 16) == 0 ||
         strncmp(token, "descriptors_hash=", 17) == 0) {
@@ -3890,6 +3914,61 @@ static int probe_debug_binding_from_options(const VulkanDispatchOptions *options
     unsigned long parsed = strtoul(value, &end, 0);
     if (errno != 0 || end == value || (end && *end) || parsed > UINT32_MAX) return -1;
     return (int)parsed;
+}
+
+static int resolve_cpu_oracle_spirv_identity(
+        const VulkanDispatchOptions *options,
+        uint64_t received_spirv_hash,
+        uint64_t *oracle_spirv_hash,
+        const char **oracle_spirv_hash_source,
+        const char **fail_reason) {
+    if (oracle_spirv_hash) *oracle_spirv_hash = received_spirv_hash;
+    if (oracle_spirv_hash_source) *oracle_spirv_hash_source = "received";
+    if (fail_reason) *fail_reason = NULL;
+    if (!options || !options->has_source_spirv_hash) return 0;
+
+    if (options->has_effective_spirv_hash &&
+        options->effective_spirv_hash != received_spirv_hash) {
+        if (fail_reason) *fail_reason = "spirv-source-identity-effective-mismatch";
+        return -1;
+    }
+
+    const uint64_t source_spirv_hash = options->source_spirv_hash;
+    if (source_spirv_hash == received_spirv_hash) {
+        if (oracle_spirv_hash) *oracle_spirv_hash = source_spirv_hash;
+        if (oracle_spirv_hash_source) *oracle_spirv_hash_source = "explicit-source";
+        return 0;
+    }
+
+    /*
+     * The executor hashes the SPIR-V bytes it actually receives.  During probe
+     * replay those bytes are the instrumented/effective module, so a different
+     * source identity is trusted only when the command also carries a
+     * fail-closed relationship back to the received bytes and a probe debug
+     * binding.  This keeps the CPU oracle source identity generic and manifest
+     * driven instead of hard-coding a probe hash or treating every hash
+     * mismatch as a Q6 shortcut.
+     */
+    const int has_effective_relation =
+        options->has_effective_spirv_hash ||
+        options->sender_reconcile.has_spirv_hash;
+    const uint64_t effective_relation_hash =
+        options->has_effective_spirv_hash
+            ? options->effective_spirv_hash
+            : options->sender_reconcile.spirv_hash;
+    if (!has_effective_relation || effective_relation_hash != received_spirv_hash) {
+        if (fail_reason) *fail_reason = "spirv-source-identity-unverified-effective-hash";
+        return -1;
+    }
+    if (!options->has_spirv_probe_debug_binding ||
+        options->spirv_probe_debug_binding > UINT32_MAX) {
+        if (fail_reason) *fail_reason = "spirv-source-identity-without-probe-binding";
+        return -1;
+    }
+
+    if (oracle_spirv_hash) *oracle_spirv_hash = source_spirv_hash;
+    if (oracle_spirv_hash_source) *oracle_spirv_hash_source = "probe-source-identity";
+    return 0;
 }
 
 static void write_u32_sample_array_prefix(FILE *out, const void *data, size_t size, size_t max_count) {
@@ -8683,6 +8762,8 @@ static int run_vulkan_dispatch_fd(
     if (read_fd_exact(shader_fd, shader_code, shader_size, 0) != 0) goto cleanup;
     const SpirvTraceSummary requested_spirv_summary = summarize_spirv(shader_code, shader_size);
     const uint64_t original_spirv_hash = requested_spirv_summary.hash;
+    uint64_t cpu_oracle_spirv_hash = original_spirv_hash;
+    const char *cpu_oracle_spirv_hash_source = "received";
     dump_spirv_if_requested("original", dispatch_lifecycle_id, shader_code, shader_size, &requested_spirv_summary);
     const int materialize_specialization_constants =
         strict_passthrough ? 0 :
@@ -8902,6 +8983,18 @@ static int run_vulkan_dispatch_fd(
     spirv_summary = summarize_spirv(shader_code, shader_size);
     have_spirv_summary = 1;
     dump_spirv_if_requested("effective", dispatch_lifecycle_id, shader_code, shader_size, &spirv_summary);
+    const char *source_identity_fail_reason = NULL;
+    if (resolve_cpu_oracle_spirv_identity(options,
+                                          original_spirv_hash,
+                                          &cpu_oracle_spirv_hash,
+                                          &cpu_oracle_spirv_hash_source,
+                                          &source_identity_fail_reason) != 0) {
+        fail_stage = source_identity_fail_reason
+            ? source_identity_fail_reason
+            : "spirv-source-identity-invalid";
+        ret = 64;
+        goto cleanup;
+    }
     if (strict_passthrough && options && options->has_requested_feature_mask) {
         const uint64_t required_feature_mask = spirv_required_feature_mask(&spirv_summary);
         const uint64_t missing_requested_features =
@@ -9848,7 +9941,7 @@ static int run_vulkan_dispatch_fd(
                     profile_full_hash_max_bytes);
         }
     }
-    if (spirv_summary.hash == 0xac41e8033a67af4aull) {
+    if (cpu_oracle_spirv_hash == 0xac41e8033a67af4aull) {
         run_cpu_oracle_rope_yarn(&cpu_oracle_report,
                                  buffer_fds,
                                  bindings,
@@ -9863,10 +9956,10 @@ static int run_vulkan_dispatch_fd(
                                  gx,
                                  gy,
                                  gz);
-    } else if (spirv_summary.hash == 0x4f37d4d51dd83526ull ||
-               spirv_summary.hash == 0x53c67d2aebf48739ull) {
+    } else if (cpu_oracle_spirv_hash == 0x4f37d4d51dd83526ull ||
+               cpu_oracle_spirv_hash == 0x53c67d2aebf48739ull) {
         run_cpu_oracle_rms_norm_sampled(&cpu_oracle_report,
-                                        spirv_summary.hash,
+                                        cpu_oracle_spirv_hash,
                                         buffer_fds,
                                         bindings,
                                         binding_count,
@@ -9883,7 +9976,7 @@ static int run_vulkan_dispatch_fd(
                                         gx,
                                         gy,
                                         gz);
-    } else if (spirv_summary.hash == 0xf2f988b94bd3e0dcull) {
+    } else if (cpu_oracle_spirv_hash == 0xf2f988b94bd3e0dcull) {
         run_cpu_oracle_rms_norm(&cpu_oracle_report,
                                 buffer_fds,
                                 bindings,
@@ -9902,7 +9995,7 @@ static int run_vulkan_dispatch_fd(
                                 gx,
                                 gy,
                                 gz);
-    } else if (q4k_safe_kernel_used || is_q4k_matvec_hash(original_spirv_hash)) {
+    } else if (q4k_safe_kernel_used || is_q4k_matvec_hash(cpu_oracle_spirv_hash)) {
         run_cpu_oracle_q4k_matvec_sample(&cpu_oracle_report,
                                          buffer_fds,
                                          bindings,
@@ -9913,7 +10006,7 @@ static int run_vulkan_dispatch_fd(
                                          binding_write_needed,
                                          push,
                                          push_size);
-    } else if (is_q6k_matvec_hash(spirv_summary.hash)) {
+    } else if (is_q6k_matvec_hash(cpu_oracle_spirv_hash)) {
         const int q6k_oracle_writeback =
             options && options->has_q6k_oracle_writeback
                 ? options->q6k_oracle_writeback
@@ -9926,7 +10019,7 @@ static int run_vulkan_dispatch_fd(
                                  specialization_data_size,
                                  q6_resolved_local_size);
         run_cpu_oracle_q6k_matvec_sample(&cpu_oracle_report,
-                                         spirv_summary.hash,
+                                         cpu_oracle_spirv_hash,
                                          buffer_fds,
                                          bindings,
                                          binding_count,
@@ -9940,7 +10033,7 @@ static int run_vulkan_dispatch_fd(
                                          q6k_oracle_writeback);
     } else {
         run_cpu_oracle_small_f32_indexing(&cpu_oracle_report,
-                                          spirv_summary.hash,
+                                          cpu_oracle_spirv_hash,
                                           buffer_fds,
                                           bindings,
                                           binding_count,
@@ -9962,7 +10055,7 @@ static int run_vulkan_dispatch_fd(
         ret = 76;
         goto cleanup;
     }
-    if (profile_response && is_q6k_matvec_hash(spirv_summary.hash)) {
+    if (profile_response && is_q6k_matvec_hash(cpu_oracle_spirv_hash)) {
         /*
          * Q6_K is the current llama GPU bridge split point.  The normal
          * profile response intentionally carries a rich full-dispatch record,
@@ -9996,6 +10089,8 @@ static int run_vulkan_dispatch_fd(
                 "\"shader_bytes\":%zu,"
                 "\"source_spirv_hash\":\"0x%016llx\","
                 "\"effective_spirv_hash\":\"0x%016llx\","
+                "\"oracle_spirv_hash\":\"0x%016llx\","
+                "\"oracle_spirv_hash_source\":\"%s\","
                 "\"entry\":\"%s\",\"specializations\":%zu,"
                 "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
                 "\"pipeline_key\":{\"spirv_hash\":\"0x%016llx\","
@@ -10014,6 +10109,8 @@ static int run_vulkan_dispatch_fd(
                 shader_size,
                 (unsigned long long)original_spirv_hash,
                 (unsigned long long)spirv_summary.hash,
+                (unsigned long long)cpu_oracle_spirv_hash,
+                cpu_oracle_spirv_hash_source,
                 entry_name, specialization_count, binding_count, gx, gy, gz,
                 (unsigned long long)spirv_summary.hash,
                 (unsigned long long)spec_hash,
@@ -10214,6 +10311,8 @@ static int run_vulkan_dispatch_fd(
                 "\"shader_bytes\":%zu,"
                 "\"source_spirv_hash\":\"0x%016llx\","
                 "\"effective_spirv_hash\":\"0x%016llx\","
+                "\"oracle_spirv_hash\":\"0x%016llx\","
+                "\"oracle_spirv_hash_source\":\"%s\","
                 "\"entry\":\"%s\",\"specializations\":%zu,"
                 "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
                 "\"pipeline_key\":{\"spirv_hash\":\"0x%016llx\","
@@ -10266,6 +10365,8 @@ static int run_vulkan_dispatch_fd(
                 shader_size,
                 (unsigned long long)original_spirv_hash,
                 (unsigned long long)spirv_summary.hash,
+                (unsigned long long)cpu_oracle_spirv_hash,
+                cpu_oracle_spirv_hash_source,
                 entry_name, specialization_count, binding_count, gx, gy, gz,
                 (unsigned long long)spirv_summary.hash,
                 (unsigned long long)spec_hash,
@@ -10390,6 +10491,8 @@ static int run_vulkan_dispatch_fd(
             "\"shader_bytes\":%zu,"
             "\"source_spirv_hash\":\"0x%016llx\","
             "\"effective_spirv_hash\":\"0x%016llx\","
+            "\"oracle_spirv_hash\":\"0x%016llx\","
+            "\"oracle_spirv_hash_source\":\"%s\","
             "\"entry\":\"%s\",\"specializations\":%zu,"
             "\"bindings\":%zu,\"dispatch\":[%u,%u,%u],"
             "\"backend_cached\":%s,\"pipeline_cache\":{\"hit\":%s,\"entries\":%u},"
@@ -10451,6 +10554,8 @@ static int run_vulkan_dispatch_fd(
             shader_size,
             (unsigned long long)original_spirv_hash,
             (unsigned long long)spirv_summary.hash,
+            (unsigned long long)cpu_oracle_spirv_hash,
+            cpu_oracle_spirv_hash_source,
             entry_name, specialization_count, binding_count, gx, gy, gz,
             was_ready ? "true" : "false",
             pipeline_cache_hit ? "true" : "false",

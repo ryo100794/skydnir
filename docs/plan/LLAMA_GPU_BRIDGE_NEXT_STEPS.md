@@ -219,6 +219,41 @@ set/binding pair and, until set-aware executor reflection is broader, a globally
 unused binding number.  The V4 schema, required command tokens, model, prompt,
 Dockerfile, and llama.cpp source remain unchanged; original/effective/probe
 hashes are correlated through the probe manifest and artifact logs.
+
+2026-05-24 Q6 write10 probe integration status:
+
+- Evidence artifact:
+  `docs/test/llama-gpu-ngl1-q6-write10-classified2-adb40309-20260524T021223Z.json`
+  (ignored runtime evidence).  This run used the 10-point executable probe
+  from commit `1368734`; commit `81e57c1` preserves the probe hash as the Q6
+  diagnostic identity instead of dropping the event after shader substitution.
+- Cleared for this run: Q6/probe reachability is visible
+  (`q6_probe_event_count=3`), all writable/probe writebacks sampled by the
+  diagnostic path verify (`q6_writeback_verified_all=true`), and the bounded
+  probe parser summary is `pass`.
+- Not cleared: prompt sanity still fails (`2+3=` does not produce the expected
+  answer), the native source-oracle path is still not attached for the original
+  Q6 source hash `0x1bf751845c5dce75`, and `served=true` is only liveness -- it
+  is not a correctness or benchmark success signal.
+- Current blocker wording: `q6-probe-writeback-cleared-oracle-missing`.  This
+  means Q6 writeback is no longer the first suspect for this artifact, but it
+  also does **not** prove native Q6 shader arithmetic or model correctness; the
+  source oracle must be connected before the blocker can move to arithmetic,
+  synchronization, or final output semantics.
+- Implemented after this artifact: the ICD now carries
+  `sender_source_spirv_hash` and `sender_effective_spirv_hash` on probe replay,
+  and the executor resolves CPU-oracle identity through a fail-closed
+  source/effective relation before it may classify the original Q6 source
+  shader.  This fixes the structural misunderstanding where the executor only
+  saw the instrumented/effective probe module hash and therefore could not
+  safely attach the source Q6 oracle.
+- Next task: keep llama.cpp, Dockerfile, model, and prompt unchanged; rerun the
+  same bounded probe only after installing the APK containing that source/effective
+  identity transport, then decide whether the next concrete blocker is native Q6
+  arithmetic, dynamic shader execution, synchronization, or final output
+  semantics.  Do not add more device tries before the static SPIR-V control-flow
+  and descriptor/push-constant interpretation above has been reviewed.
+
 If the run stops before Q6_K, the artifact verifier now preserves bounded
 `pre_http_failure_evidence` for the first failed generic SPIR-V event
 (`fail_stage`/`error`, `vk_result`, SPIR-V hash, pipeline key, feature

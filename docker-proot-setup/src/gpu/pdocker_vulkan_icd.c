@@ -1516,6 +1516,24 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
         off += (size_t)n;
     }
+    if (probe.enabled) {
+        /*
+         * Probe replay sends an instrumented/effective SPIR-V module through
+         * fd[0], so the executor cannot recover the original llama.cpp source
+         * shader identity by hashing the received bytes.  Carry the
+         * source/effective relation explicitly and fail closed on the executor
+         * side if it does not match the received module hash or if the debug
+         * binding option is absent.  Pipeline cache/reconciliation still use
+         * sender_spirv_hash above, which is the actual transmitted shader.
+         */
+        n = snprintf(command + off, sizeof(command) - off,
+                     " sender_source_spirv_hash=0x%016llx"
+                     " sender_effective_spirv_hash=0x%016llx",
+                     (unsigned long long)source_shader_hash,
+                     (unsigned long long)shader_hash_to_send);
+        if (n < 0 || (size_t)n >= sizeof(command) - off) PDOCKER_VK_APPEND_TOO_LONG("append-option");
+        off += (size_t)n;
+    }
     typedef struct {
         const char *env;
         const char *option;

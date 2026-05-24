@@ -186,6 +186,7 @@ def string_list(name):
 
 forward_keys = string_list("compare_forward_env_keys")
 diagnostic_keys = string_list("compare_diagnostic_env_keys")
+probe_keys = string_list("compare_probe_env_keys")
 config_fields = manifest.get("config_propagation_env_fields")
 if not isinstance(config_fields, list):
     raise SystemExit(f"invalid config_propagation_env_fields in llama GPU env manifest: {manifest_path}")
@@ -204,6 +205,7 @@ record = {
         "path": manifest_path,
         "compare_forward_env_keys": forward_keys,
         "compare_diagnostic_env_keys": diagnostic_keys,
+        "compare_probe_env_keys": probe_keys,
         "config_propagation_env_keys": config_keys,
     },
     "run_settings": {
@@ -1234,22 +1236,17 @@ manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
 if manifest.get("schema") != "pdocker.llama.gpu.env-manifest.v1":
     raise SystemExit(f"unsupported llama GPU env manifest schema: {manifest_path}")
 
-forward_env_keys = manifest.get("compare_forward_env_keys")
-if not isinstance(forward_env_keys, list) or not all(isinstance(key, str) and key for key in forward_env_keys):
-    raise SystemExit(f"invalid compare_forward_env_keys in llama GPU env manifest: {manifest_path}")
+def string_list(name):
+    values = manifest.get(name)
+    if not isinstance(values, list) or not all(isinstance(value, str) and value for value in values):
+        raise SystemExit(f"invalid {name} in llama GPU env manifest: {manifest_path}")
+    return values
+
+forward_env_keys = string_list("compare_forward_env_keys")
 mode_profiles = manifest.get("compare_mode_env_profiles")
 if not isinstance(mode_profiles, dict):
     raise SystemExit(f"invalid compare_mode_env_profiles in llama GPU env manifest: {manifest_path}")
-probe_env_keys = [
-    "PDOCKER_GPU_SPIRV_PROBE_MANIFEST",
-    "PDOCKER_GPU_SPIRV_PROBE_SHADER",
-    "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH",
-    "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH",
-    "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
-    "PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
-    "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
-    "PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY",
-]
+probe_env_keys = string_list("compare_probe_env_keys")
 missing_probe_forward = [key for key in probe_env_keys if key not in forward_env_keys]
 if missing_probe_forward:
     raise SystemExit(
@@ -2222,6 +2219,9 @@ for name, value in startup_env.items():
 manifest_forward_env_keys = env_manifest.get("compare_forward_env_keys")
 if not isinstance(manifest_forward_env_keys, list):
     manifest_forward_env_keys = []
+manifest_probe_env_keys = env_manifest.get("compare_probe_env_keys")
+if not isinstance(manifest_probe_env_keys, list):
+    manifest_probe_env_keys = []
 manifest_requested_env = runtime_env_record.get("host_requested_env") if isinstance(runtime_env_record, dict) else {}
 if not isinstance(manifest_requested_env, dict):
     manifest_requested_env = {}
@@ -2231,6 +2231,7 @@ runtime_env_manifest = {
     "manifest_schema": env_manifest.get("schema"),
     "manifest_path": manifest_path,
     "compare_forward_env_keys": [str(key) for key in manifest_forward_env_keys if isinstance(key, str)],
+    "compare_probe_env_keys": [str(key) for key in manifest_probe_env_keys if isinstance(key, str)],
     "host_requested_env": {str(k): str(v) for k, v in sorted(manifest_requested_env.items())},
     "host_echo_recorded": bool(runtime_env_record.get("echoed_to_log")) if isinstance(runtime_env_record, dict) else False,
     "planned_container_mode": runtime_env_record.get("planned_container_mode") if isinstance(runtime_env_record, dict) else None,
@@ -3127,6 +3128,146 @@ q6_dispatch_lifecycle_events = [
     and e.get("event") == "begin"
     and event_has_q6_matvec_identity(e)
 ]
+
+def parse_spirv_probe_icd_events(raw_log):
+    events = []
+    armed_re = re.compile(
+        r"SPIR-V probe replay armed: manifest=(?P<manifest>\\S+) "
+        r"source_hash=(?P<source_hash>0x[0-9a-fA-F]+) "
+        r"effective_hash=(?P<effective_hash>0x[0-9a-fA-F]+) "
+        r"debug_set=(?P<debug_set>\\d+) debug_binding=(?P<debug_binding>\\d+) "
+        r"debug_bytes=(?P<debug_bytes>\\d+) transport=(?P<transport>\\S+)"
+    )
+    skipped_re = re.compile(
+        r"SPIR-V probe replay skipped non-target shader expected=(?P<expected>0x[0-9a-fA-F]+) "
+        r"actual=(?P<actual>0x[0-9a-fA-F]+)"
+    )
+    rejected_re = re.compile(r"SPIR-V probe replay rejected: (?P<reason>.*)")
+    for line in raw_log.splitlines():
+        match = armed_re.search(line)
+        if match:
+            event = {"event": "armed", **match.groupdict()}
+            for field in ("debug_set", "debug_binding", "debug_bytes"):
+                event[field] = int(event[field])
+            events.append(event)
+            continue
+        match = skipped_re.search(line)
+        if match:
+            events.append({"event": "skipped_non_target", **match.groupdict()})
+            continue
+        match = rejected_re.search(line)
+        if match:
+            events.append({"event": "rejected", "reason": match.group("reason")[:500]})
+    return events
+
+def build_spirv_probe_env_audit():
+    keys = [str(key) for key in manifest_probe_env_keys if isinstance(key, str)]
+    requested = {str(k): str(v) for k, v in manifest_requested_env.items() if str(k) in keys}
+    planned = {str(k): str(v) for k, v in planned_env.items() if str(k) in keys}
+    observed = {str(k): str(v) for k, v in effective_runtime_env.items() if str(k) in keys}
+    requested_any = bool(requested or planned or observed)
+    icd_events = parse_spirv_probe_icd_events(log)
+    expected_source = normalized_spirv_hash(observed.get("PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH"))
+    expected_effective = normalized_spirv_hash(observed.get("PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH"))
+    try:
+        expected_debug_binding = int(str(observed.get("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING", "")), 0)
+    except ValueError:
+        expected_debug_binding = None
+    try:
+        expected_debug_set = int(str(observed.get("PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET", "")), 0)
+    except ValueError:
+        expected_debug_set = None
+    try:
+        expected_debug_bytes = int(str(observed.get("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES", "")), 0)
+    except ValueError:
+        expected_debug_bytes = None
+
+    def armed_matches(event):
+        if event.get("event") != "armed":
+            return False
+        if expected_source and normalized_spirv_hash(event.get("source_hash")) != expected_source:
+            return False
+        if expected_effective and normalized_spirv_hash(event.get("effective_hash")) != expected_effective:
+            return False
+        if expected_debug_binding is not None and event.get("debug_binding") != expected_debug_binding:
+            return False
+        if expected_debug_set is not None and event.get("debug_set") != expected_debug_set:
+            return False
+        if expected_debug_bytes is not None and event.get("debug_bytes") != expected_debug_bytes:
+            return False
+        return True
+
+    matching_armed = [event for event in icd_events if armed_matches(event)]
+    executor_probe_events = []
+    executor_debug_binding_events = []
+    for event_index, event in enumerate(executor_events):
+        if not isinstance(event, dict):
+            continue
+        event_source = normalized_spirv_hash(event.get("source_spirv_hash"))
+        event_effective = normalized_spirv_hash(event.get("effective_spirv_hash"))
+        source_matches = not expected_source or event_source == expected_source
+        effective_matches = not expected_effective or event_effective == expected_effective
+        has_debug_binding = False
+        for detail in event.get("binding_details") or []:
+            if not isinstance(detail, dict):
+                continue
+            if detail.get("debug_probe_binding") is True:
+                has_debug_binding = True
+                break
+        if source_matches and effective_matches:
+            executor_probe_events.append(event_index)
+            if has_debug_binding:
+                executor_debug_binding_events.append(event_index)
+    host_to_container_missing = sorted(key for key in requested if key not in observed)
+    summary = (
+        "not-requested"
+        if not requested_any
+        else "fail"
+        if host_to_container_missing
+        else "pass"
+        if matching_armed and executor_debug_binding_events
+        else "partial"
+    )
+    return {
+        "schema": "pdocker.llama.spirv-probe-env-audit.v1",
+        "summary": summary,
+        "keys": keys,
+        "transport_path": [
+            "host_env",
+            "engine_create_payload",
+            "container_runtime_env",
+            "vulkan_icd_log",
+            "vulkan_dispatch_v4_size_option",
+            "executor_binding_details",
+            "compare_artifact",
+        ],
+        "debug_binding_transport": "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING is forwarded as a VULKAN_DISPATCH_V4 size option; executor getenv is not trusted for the audit.",
+        "host_requested": requested,
+        "planned_container": planned,
+        "runtime_observed": observed,
+        "host_to_container": {
+            "summary": "not-requested" if not requested else "fail" if host_to_container_missing else "pass",
+            "missing": host_to_container_missing,
+        },
+        "icd": {
+            "summary": "not-requested" if not requested_any else "pass" if matching_armed else "missing-evidence",
+            "event_count": len(icd_events),
+            "matching_armed_count": len(matching_armed),
+            "events": icd_events[-8:],
+        },
+        "executor": {
+            "summary": "not-requested" if not requested_any else "pass" if executor_debug_binding_events else "missing-evidence",
+            "matching_source_effective_event_indices": executor_probe_events[-16:],
+            "debug_binding_event_indices": executor_debug_binding_events[-16:],
+        },
+        "artifact": {
+            "summary": "pass",
+            "runtime_env_manifest_recorded": bool(runtime_env_manifest),
+            "runtime_env_record_schema": runtime_env_manifest.get("record_schema"),
+        },
+    }
+
+spirv_probe_env_audit = build_spirv_probe_env_audit()
 
 
 def retain_diagnostic_events(priority_events, tail_events, limit=8):
@@ -4234,6 +4375,7 @@ result = {
             "spirv_hashes": spirv_hashes[-4:],
             "runtime_freshness": runtime_freshness,
             "config_propagation": config_propagation,
+            "spirv_probe_env_audit": spirv_probe_env_audit,
             "api_executor_reconciliation": api_executor_reconciliation,
             "api_understanding": api_understanding,
             "service_prompt_sanity": service_prompt_sanity,
