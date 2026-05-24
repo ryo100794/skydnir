@@ -8829,7 +8829,7 @@ static int run_vulkan_dispatch_fd(
     dump_spirv_if_requested("original", dispatch_lifecycle_id, shader_code, shader_size, &requested_spirv_summary);
     const char *materialize_specialization_env =
         getenv("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS");
-    const int materialize_specialization_constants =
+    const int materialize_specialization_requested =
         options && options->has_materialize_specialization_constants
             ? options->materialize_specialization_constants
             : strict_passthrough
@@ -8837,25 +8837,21 @@ static int run_vulkan_dispatch_fd(
                 ? env_truthy("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", 0)
                 : 0)
             : env_truthy("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", 0);
+    const int materialize_specialization_q6_scope =
+        is_q6k_matvec_hash(original_spirv_hash) ||
+        (options && options->has_source_spirv_hash &&
+         is_q6k_matvec_hash(options->source_spirv_hash));
     /*
-     * VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT is a diagnostic driver
-     * compiler hint.  Do not enable it by default: strict passthrough should
-     * preserve the application's natural pipeline-create flags unless a test
-     * explicitly asks for this isolation knob.
+     * Do not globally fold specialization constants.  The Q6_K Android
+     * compatibility path needs specialization materialization only after the
+     * literal LocalSize / BuiltIn WorkgroupSize mismatch has been legalized;
+     * applying it to unrelated ggml shaders can change driver compilation
+     * behaviour and has produced VK_ERROR_DEVICE_LOST before Q6 is reached.
+     * Keep strict passthrough byte-for-byte for every non-Q6 dispatch unless a
+     * future call-site explicitly earns its own scoped gate.
      */
-    const int disable_pipeline_optimization =
-        options && options->has_disable_pipeline_optimization
-            ? options->disable_pipeline_optimization
-            : env_truthy("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", 0);
-    if (materialize_specialization_constants) {
-        specialization_materialized = materialize_spirv_specialization_constants(
-            shader_code,
-            &shader_size,
-            specializations,
-            specialization_count,
-            specialization_data,
-            specialization_data_size);
-    }
+    const int materialize_specialization_constants =
+        materialize_specialization_requested && materialize_specialization_q6_scope;
     const char *legalize_workgroup_env =
         getenv("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC");
     const int legalize_workgroup_size_from_spec =
@@ -8889,6 +8885,35 @@ static int run_vulkan_dispatch_fd(
             specialization_data,
             specialization_data_size);
     }
+    /*
+     * Materialize after LocalSize legalization, not before.  The Q6_K module
+     * has both a literal OpExecutionMode LocalSize and a BuiltIn WorkgroupSize
+     * specialization subtree.  Folding specialization constants first sees the
+     * still-inconsistent LocalSize 1,1,1 shape and intentionally preserves the
+     * WorkgroupSize subtree; if we then patch only LocalSize, shader code that
+     * reads gl_WorkGroupSize observes stale defaults.  Legalize first, then
+     * fold so both execution shape and shader-visible WorkgroupSize are the
+     * same Vulkan-specialized value.
+     */
+    if (materialize_specialization_constants) {
+        specialization_materialized = materialize_spirv_specialization_constants(
+            shader_code,
+            &shader_size,
+            specializations,
+            specialization_count,
+            specialization_data,
+            specialization_data_size);
+    }
+    /*
+     * VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT is a diagnostic driver
+     * compiler hint.  Do not enable it by default: strict passthrough should
+     * preserve the application's natural pipeline-create flags unless a test
+     * explicitly asks for this isolation knob.
+     */
+    const int disable_pipeline_optimization =
+        options && options->has_disable_pipeline_optimization
+            ? options->disable_pipeline_optimization
+            : env_truthy("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", 0);
     const int add_float16_capability_for_storage16 =
         options && options->has_add_float16_capability_for_storage16
             ? options->add_float16_capability_for_storage16
@@ -9125,8 +9150,18 @@ static int run_vulkan_dispatch_fd(
         strict_passthrough && q6k_safe_kernel_used;
     const int transfer_skip_unused_descriptor_transfers =
         skip_unused_descriptor_transfers || safe_kernel_reflection_transfer_pruning;
+    /*
+     * Strict passthrough preserves descriptor object identity, but transfer
+     * direction must still honor the shader's declared access qualifiers.
+     * Uploading NonReadable outputs or writing back NonWritable inputs is not
+     * part of the application-visible Vulkan contract and can obscure aliasing
+     * diagnostics for llama.cpp Q6_K, where bindings 2/3/4 may intentionally
+     * point at the same buffer range.
+     */
     const int transfer_use_spirv_descriptor_access =
-        use_spirv_descriptor_access || safe_kernel_reflection_transfer_pruning;
+        use_spirv_descriptor_access ||
+        safe_kernel_reflection_transfer_pruning ||
+        strict_passthrough;
     if (transfer_skip_unused_descriptor_transfers) {
         for (size_t i = 0; i < binding_alias_count; ++i) {
             if (binding_aliases[i].rewritten_binding < sizeof(shader_used_bindings) &&

@@ -2564,7 +2564,7 @@ for item in config_expectations_raw:
     if not isinstance(item, dict) or not item.get("env") or not item.get("executor_field"):
         raise SystemExit(f"invalid config_propagation_env_fields entry in llama GPU env manifest: {manifest_path}")
     evidence_policy = str(item.get("evidence_policy") or "always")
-    if evidence_policy not in {"always", "callsite_gated", "q4k_callsite_gated"}:
+    if evidence_policy not in {"always", "callsite_gated", "q4k_callsite_gated", "q6_callsite_gated"}:
         raise SystemExit(f"invalid evidence_policy for {item['env']} in llama GPU env manifest: {manifest_path}")
     config_expectations.append((str(item["env"]), str(item["executor_field"]), evidence_policy))
 config_checks = []
@@ -2575,7 +2575,7 @@ for env_name, event_field, evidence_policy in config_expectations:
         status = "not-requested"
     elif not observed:
         status = "missing-evidence"
-    elif evidence_policy == "callsite_gated" and expected in observed:
+    elif evidence_policy in {"callsite_gated", "q6_callsite_gated"} and expected in observed:
         status = "pass"
     elif (
         evidence_policy == "q4k_callsite_gated"
@@ -2588,6 +2588,19 @@ for env_name, event_field, evidence_policy in config_expectations:
         # q4k_pipeline_retry_ladder=false even though the environment variable
         # was forwarded.  Do not turn "Q4_K not reached" into a false
         # config-propagation mismatch.
+        status = "pass"
+    elif (
+        evidence_policy == "q6_callsite_gated"
+        and expected is True
+        and observed
+        and not any(
+            str(value) == "mul-mat-vec-q6-k-large"
+            for value in observed_event_values(executor_events, "cpu_oracle.kernel_hint")
+        )
+    ):
+        # Q6_K-only compatibility lowerings must not be reported as env
+        # propagation failures when earlier non-Q6 shaders correctly keep
+        # strict passthrough and do not apply the Q6 gate.
         status = "pass"
     elif all(value == expected for value in observed):
         status = "pass"

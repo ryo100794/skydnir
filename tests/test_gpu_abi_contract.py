@@ -911,6 +911,21 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("the stale default gl_WorkGroupSize value", source)
         self.assertIn("materialize_specialization_env", source)
         self.assertIn("? (materialize_specialization_env", source)
+        self.assertIn("materialize_specialization_q6_scope", source)
+        self.assertIn("Do not globally fold specialization constants", source)
+        self.assertIn("is_q6k_matvec_hash(options->source_spirv_hash)", source)
+        self.assertIn("Materialize after LocalSize legalization", source)
+        self.assertLess(
+            source.index("local_size_patched = patch_spirv_literal_local_size_from_spec"),
+            source.index("specialization_materialized = materialize_spirv_specialization_constants"),
+        )
+        manifest = (ROOT / "scripts" / "llama-gpu-env-manifest.json").read_text()
+        self.assertIn('"evidence_policy": "q6_callsite_gated"', manifest)
+        compare = LLAMA_COMPARE.read_text()
+        self.assertIn('"q6_callsite_gated"', compare)
+        self.assertIn('"cpu_oracle.kernel_hint"', compare)
+        self.assertIn("Strict passthrough preserves descriptor object identity", source)
+        self.assertIn("strict_passthrough;", source)
 
     def test_vulkan_dispatch_can_skip_unused_descriptor_transfers(self):
         source = GPU_EXECUTOR.read_text()

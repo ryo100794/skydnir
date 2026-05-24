@@ -1372,3 +1372,60 @@ Next concrete action when ADB is available:
 6. If static dataflow matches, the next blocker is dynamic: Android Vulkan
    execution, synchronization, memory visibility, writeback, or a valid-module
    instrumentation probe.
+
+### 2026-05-24 Update: Q6 strict-passthrough scoping and reflection transfer intent
+
+Latest device artifacts on `192.168.179.21:46565`:
+
+- `docs/test/llama-gpu-ngl1-q6-specialized-adb46565-20260524T153925Z.json`
+- `docs/test/llama-gpu-ngl1-q6-scoped-specialization-adb46565-20260524T155335Z.json`
+- `docs/test/llama-gpu-ngl1-q6-legalize-before-materialize-adb46565-20260524T160750Z.json`
+- `docs/test/llama-gpu-ngl1-q6-reflection-access-adb46565-20260524T162113Z.json`
+
+Findings:
+
+1. Global `PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS=1` is too
+   broad.  It reached a non-Q6 shader (`0x7bf05c459ac87f2b`) and produced a
+   `VK_ERROR_DEVICE_LOST` submit failure before Q6 evidence.  The executor now
+   scopes specialization materialization to known Q6 hashes or an instrumented
+   probe whose `source_spirv_hash` maps back to Q6.
+2. Q6 `LocalSize` legalization remains cleared: the Q6 probe reports
+   `local_size == local_size_resolved == [32, 1, 1]`, and the workgroup-shape
+   blocker remains false.
+3. Specialization materialization is requested for Q6 but currently does not
+   rewrite the module (`specialization_materialized == false` on the Q6 probe),
+   so the Vulkan specialization payload is still passed to the driver.  Do not
+   treat materialization as a completed correctness fix until the materializer
+   exposes a changed effective hash or an explicit skip reason.
+4. Native strict passthrough now uses SPIR-V access qualifiers for transfer
+   intent while preserving all descriptor bindings.  This corrects the evidence
+   model for Q6: binding 2 is write-only, bindings 3/4 are read-only, and the
+   executor no longer reports all native bindings as read-write solely because
+   their backing ranges alias.
+5. Correctness is still not achieved.  `/health` and `/v1/models` pass, but the
+   deterministic prompt probe (`2+3=`) still returns an incorrect token
+   (`"Marvel"`/similar), and Q6 remains classified at the native final-store /
+   device-execution boundary.
+
+Current blocker:
+
+- Q6 shader-like CPU oracle and native reduction-tree oracle are internally
+  consistent, but Android Vulkan execution writes different values to the output
+  range.  Writeback from GPU memory to the container is verified, so the next
+  investigation must focus on descriptor/object-graph semantics, feature-chain
+  enablement, memory visibility/barrier scope, or a driver-facing SPIR-V
+  semantic mismatch.  Do not change llama.cpp, the Dockerfile, model, or prompt.
+
+Next concrete actions:
+
+1. Add executor evidence for why Q6 specialization materialization did not
+   rewrite the module (`changed`, `unsupported`, first unsupported opcode, and
+   whether WorkgroupSize spec subtree was preserved).
+2. Compare Q6 descriptor/access evidence before and after reflection transfer
+   intent to ensure no application-visible descriptor write was removed.
+3. Run one targeted device-local staging diagnostic only after static evidence
+   is recorded; its purpose is to split memory visibility/coherency from shader
+   arithmetic, not to tune performance.
+4. If staging does not change Q6 output, continue with static SPIR-V dataflow
+   around the two final `OpStore` paths into binding 2 and the relevant push
+   constants (`push[7]` fuse flags, output base, row/column strides).

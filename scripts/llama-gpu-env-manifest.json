@@ -246,7 +246,8 @@
     },
     {
       "env": "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
-      "executor_field": "materialize_specialization"
+      "executor_field": "materialize_specialization",
+      "evidence_policy": "q6_callsite_gated"
     },
     {
       "env": "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
