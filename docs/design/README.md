@@ -21,6 +21,7 @@ tradeoffs, accepted behavior, and non-goals.
 | [`API29_DIRECT_EXEC_FEASIBILITY.md`](API29_DIRECT_EXEC_FEASIBILITY.md) | API 29+ direct execution feasibility notes |
 | [`GPU_COMPAT.md`](GPU_COMPAT.md) | Android GPU, Vulkan, cuVK, and benchmark design direction |
 | [`LLAMA_VULKAN_RECONCILIATION_CONTRACT.md`](LLAMA_VULKAN_RECONCILIATION_CONTRACT.md) | llama.cpp Vulkan API-to-executor reconciliation evidence contract |
+| [`VULKAN_BRIDGE_SEQUENCE.md`](VULKAN_BRIDGE_SEQUENCE.md) | Vulkan bridge call sequence, data flow, and recorded transformation points |
 | [`MEDIA_BRIDGE.md`](MEDIA_BRIDGE.md) | Android Camera2/AudioRecord/AudioTrack media bridge contract, plus future Bluetooth/BLE/GPS public-API broker plan |
 | [`APK_MEMORY_PAGER.md`](APK_MEMORY_PAGER.md) | APK-scoped swap-like memory pager feasibility and page-fault strategy |
 | [`RUNTIME_OOM_SURVIVAL.md`](RUNTIME_OOM_SURVIVAL.md) | Runtime OOM survival, large-workload mode, and post-kill evidence strategy |
@@ -48,6 +49,10 @@ tradeoffs, accepted behavior, and non-goals.
   to [`../../docker-proot-setup/docs/GPU_COMPAT.md`](../../docker-proot-setup/docs/GPU_COMPAT.md).
   Active bridge tasks belong in [`../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](../plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md);
   measured evidence belongs in [`../test/README.md`](../test/README.md).
+- Treat [`VULKAN_BRIDGE_SEQUENCE.md`](VULKAN_BRIDGE_SEQUENCE.md) as the
+  implementation sequence map for the glibc ICD, command ABI, Android executor,
+  Vulkan driver, and JSON evidence flow.  It should be updated whenever the
+  bridge adds or removes a data transformation step.
 - Treat [`MEDIA_BRIDGE.md`](MEDIA_BRIDGE.md) as the media contract; test files
   should record probes and link back here for readiness rules.
 - Treat [`APK_MEMORY_PAGER.md`](APK_MEMORY_PAGER.md) as the feasibility boundary
