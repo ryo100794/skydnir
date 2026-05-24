@@ -34,7 +34,7 @@ def passing_config_propagation():
 
 def q6_verified_writeback(hash_value="0x1111111111111111"):
     return {
-        "local_size_resolved": [32, 2, 1],
+        "local_size_resolved": [32, 1, 1],
         "q6_writeback_verified_all": True,
         "q6_row_indexed_sample_indices": [257],
         "q6_row_indexed_writeback_verified": True,
@@ -121,7 +121,36 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                 json.dumps(
                     {
                         "schema": "pdocker.llama.gpu.compare.v1",
+                        "comparison": {
+                            "speedup": 2.0,
+                            "target_tokens_per_second": 1.0,
+                            "target_met": True,
+                        },
+                        "bridge_overhead_phase": {
+                            "cpu_tokens_per_second": 0.1,
+                            "gpu_tokens_per_second": 0.2,
+                            "speedup": 2.0,
+                            "target_speedup": 10.0,
+                            "target_tokens_per_second": 1.0,
+                            "target_met": True,
+                        },
                         "gpu": {
+                            "correctness": {
+                                "schema": "pdocker.llama.correctness.v1.compare",
+                                "endpoint": "http://127.0.0.1:28081",
+                                "probes": [
+                                    {
+                                        "name": "addition",
+                                        "prompt": "2+3=",
+                                        "expected": ["5"],
+                                        "required": True,
+                                        "passed": True,
+                                        "content": "5",
+                                        "status_code": 200,
+                                    }
+                                ],
+                                "summary": {"correctness": "pass", "required_failures": 0},
+                            },
                             "diagnostics": {
                                 "runtime_freshness": {
                                     "summary": "pass",
@@ -205,6 +234,89 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
             self.assertEqual(entry["classification"], "q6-workgroup-cleared-and-oracle-match")
             self.assertEqual(entry["q6_blocker_class"], "cleared")
             self.assertEqual(entry["q6_raw_blocker_class"], "stale-workgroup-shape")
+
+    def test_sweep_retains_q6_probe_writeback_cleared_oracle_missing_from_synthetic_artifact(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            artifact = root / "q6-probe-oracle-missing.json"
+            artifact.write_text(
+                json.dumps(
+                    {
+                        "schema": "pdocker.llama.gpu.compare.v1",
+                        "comparison": {
+                            "speedup": 2.0,
+                            "target_tokens_per_second": 1.0,
+                            "target_met": True,
+                        },
+                        "bridge_overhead_phase": {
+                            "cpu_tokens_per_second": 0.1,
+                            "gpu_tokens_per_second": 0.2,
+                            "speedup": 2.0,
+                            "target_speedup": 10.0,
+                            "target_tokens_per_second": 1.0,
+                            "target_met": True,
+                        },
+                        "gpu": {
+                            "correctness": {
+                                "schema": "pdocker.llama.correctness.v1.compare",
+                                "endpoint": "http://127.0.0.1:28081",
+                                "probes": [
+                                    {
+                                        "name": "addition",
+                                        "prompt": "2+3=",
+                                        "expected": ["5"],
+                                        "required": True,
+                                        "passed": True,
+                                        "content": "5",
+                                        "status_code": 200,
+                                    }
+                                ],
+                                "summary": {"correctness": "pass", "required_failures": 0},
+                            },
+                            "diagnostics": {
+                                "runtime_freshness": {
+                                    "summary": "pass",
+                                    "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                                    "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
+                                    "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
+                                    "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
+                                    "executor_event_count": 1,
+                                },
+                                "config_propagation": passing_config_propagation(),
+                                "q6_workgroup_diagnostics": {
+                                    "event_count": 0,
+                                    "q6_probe_event_count": 1,
+                                    "q6_dispatch_seen": True,
+                                    "q6_dispatch_event_count": 1,
+                                    "q6_oracle_capture_missing": True,
+                                    "blocker_class": "q6-probe-writeback-cleared-oracle-missing",
+                                    "diagnostic_interpretation": (
+                                        "q6-probe-writeback-cleared-but-source-oracle-not-available-for-instrumented-module"
+                                    ),
+                                    **q6_verified_writeback(),
+                                    "local_size_resolved": [32, 1, 1],
+                                },
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [str(SWEEP), str(artifact)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            entry = json.loads(result.stdout)["artifacts"][0]
+            self.assertEqual(entry["classification"], "q6-probe-writeback-cleared-oracle-missing")
+            self.assertEqual(entry["q6_blocker_class"], "q6-probe-writeback-cleared-oracle-missing")
+            self.assertEqual(entry["q6_raw_blocker_class"], "q6-probe-writeback-cleared-oracle-missing")
+            self.assertEqual(entry["q6_writeback_summary"], "pass")
+            self.assertTrue(entry["q6_writeback_verified_all"])
 
     def test_sweep_surfaces_q6_probe_details(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -351,6 +351,33 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         )
         self.assert_claims_blocked(report)
 
+    def test_q6_probe_writeback_cleared_oracle_missing_is_retained_by_verifier(self):
+        payload = wrong_completion_payload(api_executor_reconciliation())
+        payload["gpu"]["diagnostics"]["q6_workgroup_diagnostics"] = {
+            "event_count": 0,
+            "q6_probe_event_count": 1,
+            "q6_dispatch_seen": True,
+            "q6_dispatch_event_count": 1,
+            "q6_oracle_capture_missing": True,
+            "blocker_class": "q6-probe-writeback-cleared-oracle-missing",
+            "diagnostic_interpretation": (
+                "q6-probe-writeback-cleared-but-source-oracle-not-available-for-instrumented-module"
+            ),
+            **q6_verified_writeback(),
+        }
+        result = self.run_verifier(payload)
+        self.assertEqual(result.returncode, 48, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-probe-writeback-cleared-oracle-missing")
+        self.assertEqual(report["responsibility_boundary"], "q6-diagnostic-evidence")
+        self.assertEqual(
+            report["q6_effective_blocker_class"],
+            "q6-probe-writeback-cleared-oracle-missing",
+        )
+        self.assertEqual(report["q6_writeback_evidence"]["summary"], "pass")
+        self.assertEqual(report["observed_service_failure"], "llama-completion-wrong-output")
+        self.assert_claims_blocked(report)
+
     def test_completion_wrong_output_rejects_empty_reconciliation_pass(self):
         payload = wrong_completion_payload({"summary": "pass"})
         result = self.run_verifier(payload)

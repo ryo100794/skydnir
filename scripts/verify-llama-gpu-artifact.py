@@ -1363,6 +1363,28 @@ def _q6_dispatch_seen_without_oracle(q6: Any) -> bool:
     )
 
 
+
+
+def _q6_probe_writeback_cleared_oracle_missing(q6: Any, q6_writeback_evidence: dict[str, Any]) -> bool:
+    if not isinstance(q6, dict):
+        return False
+    try:
+        event_count = int(q6.get("event_count", 0))
+    except (TypeError, ValueError):
+        event_count = 0
+    try:
+        probe_event_count = int(q6.get("q6_probe_event_count", 0))
+    except (TypeError, ValueError):
+        probe_event_count = 0
+    return (
+        event_count == 0
+        and q6_writeback_evidence.get("summary") == "pass"
+        and (
+            probe_event_count > 0
+            or str(q6.get("blocker_class") or "") == "q6-probe-writeback-cleared-oracle-missing"
+        )
+    )
+
 def _q6_shader_like_interpretation(q6: Any) -> dict[str, Any]:
     """Explain whether the Q6 shader-like CPU oracle cleared.
 
@@ -1634,6 +1656,25 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         and completion_readiness.get("completion_ok") is True
         and completion_readiness.get("completion_passed") is False
     ):
+        completion_q6_writeback_evidence = _q6_writeback_evidence(q6)
+        if _q6_probe_writeback_cleared_oracle_missing(q6, completion_q6_writeback_evidence):
+            return _claim_base(
+                "q6-probe-writeback-cleared-oracle-missing",
+                next_action=(
+                    "fix compare/executor source-oracle retention for the instrumented Q6_K probe; "
+                    "writeback is verified, but the source-module CPU oracle is missing"
+                ),
+                runtime_freshness=runtime_freshness,
+                runtime_env_manifest=runtime_env_manifest,
+                responsibility_boundary="q6-diagnostic-evidence",
+            ) | {
+                "observed_service_failure": "llama-completion-wrong-output",
+                "service_readiness": completion_readiness,
+                "q6_workgroup_diagnostics": q6,
+                "q6_effective_blocker_class": "q6-probe-writeback-cleared-oracle-missing",
+                "q6_writeback_evidence": completion_q6_writeback_evidence,
+                "runtime_env": nested(data, "gpu", "runtime_env") or {},
+            }
         if _q6_dispatch_seen_without_oracle(q6):
             return _claim_base(
                 "q6-oracle-capture-missing",
@@ -1906,6 +1947,14 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         classification = "q6-not-reached"
         responsibility_boundary = "q6-not-reached"
         next_action = data.get("next_action") or "collect an ngl=1 artifact with Q6_K oracle enabled"
+    elif _q6_probe_writeback_cleared_oracle_missing(q6, q6_writeback_evidence):
+        classification = "q6-probe-writeback-cleared-oracle-missing"
+        responsibility_boundary = "q6-diagnostic-evidence"
+        q6_blocker_class = "q6-probe-writeback-cleared-oracle-missing"
+        next_action = (
+            data.get("next_action")
+            or "fix compare/executor source-oracle retention for the instrumented Q6_K probe; writeback is verified, but the source-module CPU oracle is missing"
+        )
     elif _q6_dispatch_seen_without_oracle(q6):
         classification = "q6-oracle-capture-missing"
         responsibility_boundary = "q6-diagnostic-evidence"
@@ -2031,6 +2080,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-native-final-store-or-readback",
                 "q6-native-device-execution-or-final-store",
                 "q6-native-reduction-or-device-execution",
+                "q6-probe-writeback-cleared-oracle-missing",
             }
             else None
         ),
@@ -2101,7 +2151,7 @@ def main(argv: list[str]) -> int:
         return 37
     if classification == "generic-spirv-cpu-oracle-mismatch":
         return 47
-    if classification == "q6-oracle-capture-missing":
+    if classification in {"q6-oracle-capture-missing", "q6-probe-writeback-cleared-oracle-missing"}:
         return 48
     if classification == "api-prompt-sanity-missing":
         return 38
