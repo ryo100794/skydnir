@@ -232,6 +232,8 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn('"planned_container_env_keys": sorted(str(key) for key in planned_env)', compare)
         self.assertIn('"runtime_env_manifest": runtime_env_manifest', compare)
         self.assertIn("requested_env_missing_from_runtime", compare)
+        self.assertIn('CURRENT_STAGE="pdockerd startup"', compare)
+        self.assertIn('CURRENT_STAGE="SPIR-V probe staging"', compare)
         self.assertIn("probe_env_keys = [", compare)
         self.assertIn("partial SPIR-V probe env is unsafe; set all or none", compare)
         for key in [

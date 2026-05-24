@@ -2002,15 +2002,21 @@ raise SystemExit(0 if report["summary"]["ready"] else 1)
 PY
 }
 
-CURRENT_STAGE="memory preflight"
+CURRENT_STAGE="runtime env record"
 record_manifest_runtime_env "$RUNTIME_ENV_RECORD_JSON"
+CURRENT_STAGE="stale target cleanup"
 stop_stale_target_if_engine_alive
+CURRENT_STAGE="memory preflight"
 wait_for_memory_headroom "preflight before daemon start"
+CURRENT_STAGE="app daemon startup"
 restart_app_daemon_for_test
+CURRENT_STAGE="pdockerd startup"
 wait_for_engine
+CURRENT_STAGE="project path resolution"
 DEVICE_PROJECT="$(run_as "cd $(remote_quote "$PROJECT") && pwd" | tr -d '\r')"
 DEVICE_MODEL_HOST="$(run_as "cd $(remote_quote "$PROJECT") && . ./.env >/dev/null 2>&1 && printf '%s' \"\${PDOCKER_MODEL_HOST:-$DEVICE_PROJECT/models}\"" | tr -d '\r')"
 DEVICE_WORKSPACE_HOST="$(run_as "cd $(remote_quote "$PROJECT") && . ./.env >/dev/null 2>&1 && printf '%s' \"\${PDOCKER_FAST_WORKSPACE_HOST:-$DEVICE_PROJECT/workspace}\"" | tr -d '\r')"
+CURRENT_STAGE="SPIR-V probe staging"
 stage_spirv_probe_artifacts_for_container
 CPU_JSON="$TMP/cpu.json"
 CPU_CORRECTNESS_JSON="$TMP/cpu-correctness.json"
