@@ -475,7 +475,19 @@ stage_probe_artifact_for_container() {
   base="$(basename "$source_path")"
   staged_host="$DEVICE_WORKSPACE_HOST/.pdocker-probes/$base"
   staged_container="/workspace/.pdocker-probes/$base"
-  run_as "mkdir -p $(remote_quote "$DEVICE_WORKSPACE_HOST/.pdocker-probes") && cp -f $(remote_quote "$source_path") $(remote_quote "$staged_host") && chmod 0644 $(remote_quote "$staged_host")" >/dev/null
+  if [[ -f "$source_path" ]]; then
+    # Host-side probe paths such as /tmp/q6write10-bundle/*.spv are not visible
+    # from Android run-as.  Push them through /data/local/tmp first, then copy
+    # into the app-owned workspace that is mounted as /workspace in the
+    # container view.  Device/app-private paths still use the original run-as
+    # copy below.
+    local device_tmp="/data/local/tmp/pdocker-probe-$$-$RANDOM-$base"
+    "$ADB" push "$source_path" "$device_tmp" >/dev/null
+    run_as "mkdir -p $(remote_quote "$DEVICE_WORKSPACE_HOST/.pdocker-probes") && cp -f $(remote_quote "$device_tmp") $(remote_quote "$staged_host") && chmod 0644 $(remote_quote "$staged_host")" >/dev/null
+    "$ADB" shell "rm -f $(remote_quote "$device_tmp")" >/dev/null 2>&1 || true
+  else
+    run_as "mkdir -p $(remote_quote "$DEVICE_WORKSPACE_HOST/.pdocker-probes") && cp -f $(remote_quote "$source_path") $(remote_quote "$staged_host") && chmod 0644 $(remote_quote "$staged_host")" >/dev/null
+  fi
   export "$env_name=$staged_container"
   echo "[pdocker llama compare] staged $env_name for container: $source_path -> $staged_container" >&2
 }
