@@ -1240,6 +1240,29 @@ if not isinstance(forward_env_keys, list) or not all(isinstance(key, str) and ke
 mode_profiles = manifest.get("compare_mode_env_profiles")
 if not isinstance(mode_profiles, dict):
     raise SystemExit(f"invalid compare_mode_env_profiles in llama GPU env manifest: {manifest_path}")
+probe_env_keys = [
+    "PDOCKER_GPU_SPIRV_PROBE_MANIFEST",
+    "PDOCKER_GPU_SPIRV_PROBE_SHADER",
+    "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH",
+    "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH",
+    "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
+    "PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
+    "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
+    "PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY",
+]
+missing_probe_forward = [key for key in probe_env_keys if key not in forward_env_keys]
+if missing_probe_forward:
+    raise SystemExit(
+        "llama GPU env manifest does not forward all SPIR-V probe env keys: "
+        + ",".join(missing_probe_forward)
+    )
+present_probe_env = [key for key in probe_env_keys if os.environ.get(key) is not None]
+if present_probe_env and len(present_probe_env) != len(probe_env_keys):
+    missing = [key for key in probe_env_keys if os.environ.get(key) is None]
+    raise SystemExit(
+        "partial SPIR-V probe env is unsafe; set all or none. missing: "
+        + ",".join(missing)
+    )
 
 def env_key(item):
     return item.split("=", 1)[0]

@@ -198,7 +198,8 @@ For Q6_K executable probe writes, `scripts/prepare-q6k-noop-probe.sh
 V4 schema unchanged.  The executor now emits `debug_probe_binding`,
 `u32_after_dispatch`, and `u32_after_writeback` samples for the configured
 debug binding.  The next device-side evidence run should inspect those u32
-records before adding more shader substitutions.
+records with `scripts/parse-q6k-probe-u32.py` before adding more shader
+substitutions.
 `scripts/analyze-spirv.py` also emits a control-flow graph with function,
 basic-block, successor, store-site, and probe-candidate inventories.  Do not
 try to submit arbitrary SPIR-V fragments to Vulkan: the valid-module boundary

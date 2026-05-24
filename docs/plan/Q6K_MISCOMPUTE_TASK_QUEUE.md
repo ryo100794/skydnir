@@ -265,6 +265,10 @@ Implementation note:
 - The debug binding is set `0`, binding `5`, transported as a normal
   `VULKAN_DISPATCH_V4` storage-buffer binding.  This is diagnostic transport,
   not a new command ABI.
+- `scripts/parse-q6k-probe-u32.py` parses the resulting
+  `u32_after_dispatch` / `u32_after_writeback` records.  A passing parse means
+  the six expected Q6 probe sites wrote their candidate/role metadata to the
+  debug SSBO; it does not by itself prove numeric correctness.
 
 Initial probe candidates, in priority order:
 

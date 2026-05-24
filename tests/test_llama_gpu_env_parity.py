@@ -128,6 +128,7 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
                 "PDOCKER_VULKAN_ICD_TRACE_ALLOC",
                 "PDOCKER_VULKAN_MAX_BUFFER_BYTES",
                 "PDOCKER_VULKAN_SUBGROUP_SIZE",
+                "PDOCKER_GPU_SPIRV_DUMP_DIR",
             },
             "icd_to_executor_bool_option": {
                 "PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16",
@@ -178,6 +179,16 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
                 "PDOCKER_GPU_UNSAFE_DIRTY_WRITEBACK_CACHE",
                 "PDOCKER_GPU_WRITEBACK_FULL_HASH_MAX_BYTES",
             },
+            "spirv_probe_transport": {
+                "PDOCKER_GPU_SPIRV_PROBE_MANIFEST",
+                "PDOCKER_GPU_SPIRV_PROBE_SHADER",
+                "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH",
+                "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH",
+                "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
+                "PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
+                "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
+                "PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY",
+            },
         }
         classified = set()
         for name, values in classifications.items():
@@ -221,6 +232,19 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn('"planned_container_env_keys": sorted(str(key) for key in planned_env)', compare)
         self.assertIn('"runtime_env_manifest": runtime_env_manifest', compare)
         self.assertIn("requested_env_missing_from_runtime", compare)
+        self.assertIn("probe_env_keys = [", compare)
+        self.assertIn("partial SPIR-V probe env is unsafe; set all or none", compare)
+        for key in [
+            "PDOCKER_GPU_SPIRV_PROBE_MANIFEST",
+            "PDOCKER_GPU_SPIRV_PROBE_SHADER",
+            "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH",
+            "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH",
+            "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES",
+            "PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET",
+            "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
+            "PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY",
+        ]:
+            self.assertIn(key, compare)
 
         self.assertIn("load_gpu_env_manifest", pdockerd)
         self.assertIn("gpu_runtime_env_defaults", pdockerd)
