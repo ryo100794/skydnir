@@ -906,6 +906,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("code[i + 3] == 80", source)
         self.assertIn("skip_spec_materialization", source)
         self.assertIn("code[i + 2] == 11 && code[i + 3] == 25", source)
+        self.assertIn("preserve_workgroup_size_spec_subtree", source)
+        self.assertIn("pre_materialize_local_size", source)
+        self.assertIn("the stale default gl_WorkGroupSize value", source)
+        self.assertIn("materialize_specialization_env", source)
+        self.assertIn("? (materialize_specialization_env", source)
 
     def test_vulkan_dispatch_can_skip_unused_descriptor_transfers(self):
         source = GPU_EXECUTOR.read_text()
@@ -990,7 +995,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "strict binding contract mismatch",
             "binding_offset != memory_offset + descriptor_offset",
             "binding_size > buffer_size - descriptor_offset",
+            "binding_size > descriptor_range",
             "buffer_size > memory_size - memory_offset",
+            "vulkan_binding_descriptor_range",
             "vkBindBufferMemory(device, buffers[b].buffer, memory->memory, buffers[b].memory_offset)",
             "strict_object_graph",
             "unsupported_descriptor_set_layout",
@@ -1014,6 +1021,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "binding_gpu_offset[i] = (size_t)(descriptor_absolute - binding_group_base[rep]);",
             ": (size_t)descriptor_absolute;",
             "binding_descriptor_offset[i] = (size_t)bindings[i].api_offset;",
+            "infos[write_count].range = (VkDeviceSize)\n            vulkan_binding_descriptor_range(&bindings[i], strict_passthrough);",
             "VkDescriptorBufferInfo.offset",
             "object-graph coordinate fidelity",
         ]:
@@ -2216,6 +2224,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("android-llama-gpu-readiness.sh", runner)
         self.assertIn("PDOCKER_GPU_STRICT_PASSTHROUGH=1", runner)
         self.assertIn("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC=1", runner)
+        self.assertIn("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS=1", runner)
         self.assertIn("PDOCKER_GPU_CPU_ORACLE=1", runner)
         self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1", runner)
         self.assertIn("android-llama-gpu-compare.sh", runner)

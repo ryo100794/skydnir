@@ -827,6 +827,16 @@ typedef struct {
     uint64_t api_buffer_id;
 } VulkanDispatchBinding;
 
+static size_t vulkan_binding_descriptor_range(
+        const VulkanDispatchBinding *binding,
+        int strict_passthrough) {
+    if (!binding) return 0;
+    if (strict_passthrough && binding->api_range > 0) {
+        return binding->api_range;
+    }
+    return binding->size;
+}
+
 typedef struct {
     int valid;
     size_t raw_command_bytes;
@@ -2229,9 +2239,14 @@ static int validate_strict_vulkan_binding_contract(
             const uint64_t buffer_size = (uint64_t)b->api_buffer_size;
             const uint64_t memory_size = (uint64_t)b->api_memory_size;
             const uint64_t binding_size = (uint64_t)b->size;
+            const uint64_t descriptor_range = (uint64_t)b->api_range;
             if (descriptor_offset > buffer_size ||
                 binding_size > buffer_size - descriptor_offset) {
                 field = "api_offset";
+            } else if (descriptor_range == 0 ||
+                       descriptor_range > buffer_size - descriptor_offset ||
+                       binding_size > descriptor_range) {
+                field = "api_range";
             } else if (memory_offset > memory_size ||
                        buffer_size > memory_size - memory_offset) {
                 field = "api_memory_offset";
@@ -3136,6 +3151,24 @@ static int materialize_spirv_specialization_constants(
         free(out);
         return 0;
     }
+    const SpirvTraceSummary pre_materialize_summary =
+        summarize_spirv(code, *bytes);
+    uint64_t pre_materialize_local_size[3] = {0, 0, 0};
+    resolve_spirv_local_size(&pre_materialize_summary,
+                             specializations,
+                             specialization_count,
+                             specialization_data,
+                             specialization_data_size,
+                             pre_materialize_local_size);
+    const int preserve_workgroup_size_spec_subtree =
+        !pre_materialize_summary.valid ||
+        pre_materialize_summary.truncated ||
+        pre_materialize_summary.local_size_id[0] ||
+        pre_materialize_summary.local_size_id[1] ||
+        pre_materialize_summary.local_size_id[2] ||
+        pre_materialize_summary.local_size[0] != pre_materialize_local_size[0] ||
+        pre_materialize_summary.local_size[1] != pre_materialize_local_size[1] ||
+        pre_materialize_summary.local_size[2] != pre_materialize_local_size[2];
 
     for (size_t i = 5; i < words;) {
         uint32_t inst = code[i];
@@ -3154,11 +3187,17 @@ static int materialize_spirv_specialization_constants(
                  * that composite while leaving LocalSize unchanged, the shader
                  * observes a gl_WorkGroupSize that does not match the actual
                  * number of local invocations.  Keep that specialization
-                 * subtree at its SPIR-V default unless LocalSizeId support is
-                 * explicitly implemented.
+                 * subtree at its SPIR-V default while the module is still in
+                 * that inconsistent state.  If an earlier compatibility
+                 * lowering has made literal LocalSize equal to the requested
+                 * WorkgroupSize specialization, materialize this subtree too;
+                 * otherwise the driver can still run code paths derived from
+                 * the stale default gl_WorkGroupSize value.
                  */
                 workgroup_size_id[code[i + 1]] = 1;
-                skip_spec_materialization[code[i + 1]] = 1;
+                if (preserve_workgroup_size_spec_subtree) {
+                    skip_spec_materialization[code[i + 1]] = 1;
+                }
             }
         }
         i += word_count;
@@ -8788,10 +8827,15 @@ static int run_vulkan_dispatch_fd(
     uint64_t cpu_oracle_spirv_hash = original_spirv_hash;
     const char *cpu_oracle_spirv_hash_source = "received";
     dump_spirv_if_requested("original", dispatch_lifecycle_id, shader_code, shader_size, &requested_spirv_summary);
+    const char *materialize_specialization_env =
+        getenv("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS");
     const int materialize_specialization_constants =
-        strict_passthrough ? 0 :
         options && options->has_materialize_specialization_constants
             ? options->materialize_specialization_constants
+            : strict_passthrough
+            ? (materialize_specialization_env
+                ? env_truthy("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", 0)
+                : 0)
             : env_truthy("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS", 0);
     /*
      * VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT is a diagnostic driver
@@ -9654,7 +9698,8 @@ static int run_vulkan_dispatch_fd(
         if (!active_bindings[i]) continue;
         infos[write_count].buffer = vk_buffers[i]->buffer;
         infos[write_count].offset = (VkDeviceSize)binding_descriptor_offset[i];
-        infos[write_count].range = (VkDeviceSize)bindings[i].size;
+        infos[write_count].range = (VkDeviceSize)
+            vulkan_binding_descriptor_range(&bindings[i], strict_passthrough);
         writes[write_count].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[write_count].dstSet = descriptor_sets[bindings[i].descriptor_set];
         writes[write_count].dstBinding = bindings[i].binding;
@@ -9714,7 +9759,9 @@ static int run_vulkan_dispatch_fd(
             infos[write_count].buffer = vk_buffers[original_index]->buffer;
             infos[write_count].offset = (VkDeviceSize)binding_descriptor_offset[original_index];
         }
-        infos[write_count].range = (VkDeviceSize)bindings[original_index].size;
+        infos[write_count].range = (VkDeviceSize)
+            vulkan_binding_descriptor_range(&bindings[original_index],
+                                            strict_passthrough);
         writes[write_count].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[write_count].dstSet = descriptor_set;
         writes[write_count].dstBinding = binding_aliases[i].rewritten_binding;
