@@ -40,10 +40,14 @@ class Q6KProbeU32ParserTest(unittest.TestCase):
         for base, candidate, role, value in [
             (8, 39, 1, 1.25),
             (20, 49, 2, 2.5),
-            (32, 64, 4, 3.75),
-            (44, 105, 1, 4.25),
-            (56, 115, 2, 5.5),
-            (68, 130, 4, 6.75),
+            (32, 61, 3, 3.25),
+            (44, 63, 3, 3.5),
+            (56, 64, 4, 3.75),
+            (68, 105, 1, 4.25),
+            (80, 115, 2, 5.5),
+            (92, 127, 3, 6.0),
+            (104, 129, 3, 6.25),
+            (116, 130, 4, 6.75),
         ]:
             values[base] = candidate
             values[base + 1] = role
@@ -59,11 +63,11 @@ class Q6KProbeU32ParserTest(unittest.TestCase):
                                 "debug_probe_binding": True,
                                 "u32_after_dispatch": [
                                     sample(index, values.get(index, 0))
-                                    for index in range(96)
+                                    for index in range(144)
                                 ],
                                 "u32_after_writeback": [
                                     sample(index, values.get(index, 0))
-                                    for index in range(96)
+                                    for index in range(144)
                                 ],
                             }
                         ]
@@ -76,8 +80,11 @@ class Q6KProbeU32ParserTest(unittest.TestCase):
         self.assertEqual(report["summary"], "pass")
         self.assertEqual(report["debug_binding_count"], 1)
         records = report["bindings"][0]["records"]
-        self.assertEqual([record["candidate_id"] for record in records], [39, 49, 64, 105, 115, 130])
-        self.assertEqual([record["role_code"] for record in records], [1, 2, 4, 1, 2, 4])
+        self.assertEqual(
+            [record["candidate_id"] for record in records],
+            [39, 49, 61, 63, 64, 105, 115, 127, 129, 130],
+        )
+        self.assertEqual([record["role_code"] for record in records], [1, 2, 3, 3, 4, 1, 2, 3, 3, 4])
         self.assertAlmostEqual(records[0]["value_f32"], 1.25)
         self.assertAlmostEqual(records[-1]["writeback_value_f32"], 6.75)
 
@@ -87,7 +94,7 @@ class Q6KProbeU32ParserTest(unittest.TestCase):
                 {
                     "binding": 5,
                     "debug_probe_binding": True,
-                    "u32_after_dispatch": [sample(index, 0) for index in range(96)],
+                    "u32_after_dispatch": [sample(index, 0) for index in range(144)],
                 }
             ]
         }
@@ -99,9 +106,11 @@ class Q6KProbeU32ParserTest(unittest.TestCase):
     def test_parser_accepts_one_executed_phase_and_ignores_unexecuted_branch(self):
         values = {index: 0 for index in range(96)}
         for base, candidate, role, value in [
-            (44, 105, 1, -0.25),
-            (56, 115, 2, 0.5),
-            (68, 130, 4, 0.5),
+            (68, 105, 1, -0.25),
+            (80, 115, 2, 0.5),
+            (92, 127, 3, 0.5),
+            (104, 129, 3, 0.5),
+            (116, 130, 4, 0.5),
         ]:
             values[base] = candidate
             values[base + 1] = role
@@ -111,8 +120,8 @@ class Q6KProbeU32ParserTest(unittest.TestCase):
                 {
                     "binding": 5,
                     "debug_probe_binding": True,
-                    "u32_after_dispatch": [sample(index, values[index]) for index in range(96)],
-                    "u32_after_writeback": [sample(index, values[index]) for index in range(96)],
+                    "u32_after_dispatch": [sample(index, values.get(index, 0)) for index in range(144)],
+                    "u32_after_writeback": [sample(index, values.get(index, 0)) for index in range(144)],
                 }
             ]
         }
@@ -120,10 +129,10 @@ class Q6KProbeU32ParserTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(report["summary"], "pass")
         binding = report["bindings"][0]
-        self.assertEqual(binding["executed_record_count"], 3)
+        self.assertEqual(binding["executed_record_count"], 5)
         self.assertEqual(binding["executed_final_record_count"], 1)
-        self.assertEqual([record["status"] for record in binding["records"][:3]], ["not-executed"] * 3)
-        self.assertEqual([record["status"] for record in binding["records"][3:]], ["pass"] * 3)
+        self.assertEqual([record["status"] for record in binding["records"][:5]], ["not-executed"] * 5)
+        self.assertEqual([record["status"] for record in binding["records"][5:]], ["pass"] * 5)
 
 
 if __name__ == "__main__":

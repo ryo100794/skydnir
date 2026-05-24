@@ -1354,15 +1354,19 @@ class GpuAbiContractTest(unittest.TestCase):
         payload = json.loads(result.stdout)
         instrumentation = payload["instrumentation"]
         self.assertEqual(instrumentation["kind"], "q6-debug-ssbo-probe-writes")
-        self.assertEqual(instrumentation["executable_probe_writes"], 6)
+        self.assertEqual(instrumentation["executable_probe_writes"], 10)
         self.assertEqual(
             [item["role"] for item in instrumentation["probe_writes"]],
             [
                 "partial_to_workgroup_candidate",
                 "reduction_candidate",
+                "post_reduction_workgroup_candidate",
+                "post_reduction_workgroup_candidate",
                 "final_output_store",
                 "partial_to_workgroup_candidate",
                 "reduction_candidate",
+                "post_reduction_workgroup_candidate",
+                "post_reduction_workgroup_candidate",
                 "final_output_store",
             ],
         )

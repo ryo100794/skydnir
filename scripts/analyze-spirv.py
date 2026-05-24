@@ -610,7 +610,7 @@ def build_q6_probe_targets(module: dict) -> dict:
 
     priority_targets = []
     for phase in phases:
-        priority_targets.extend(phase["preceding_workgroup_stores"][:2])
+        priority_targets.extend(phase["preceding_workgroup_stores"])
         priority_targets.append(phase["output_store"])
 
     return {

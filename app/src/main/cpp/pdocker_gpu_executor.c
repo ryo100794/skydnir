@@ -4225,10 +4225,10 @@ static void write_vulkan_binding_report(
                 out,
                 (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
                 local_size,
-                96);
+                144);
             if (buffer_fds && buffer_fds[i] >= 0 && fd_after_hash && fd_after_hash[i] != 0) {
                 fprintf(out, ",\"u32_after_writeback\":");
-                write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 96);
+                write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 144);
             }
         }
         fprintf(out, "}");
@@ -7235,10 +7235,10 @@ static void write_vulkan_binding_compact_report(
                     out,
                     (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
                     local_size,
-                    96);
+                    144);
                 if (buffer_fds && buffer_fds[i] >= 0 && fd_after_hash && fd_after_hash[i] != 0) {
                     fprintf(out, ",\"u32_after_writeback\":");
-                    write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 96);
+                    write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 144);
                 }
             } else {
                 fprintf(out, ",\"f32_after_dispatch\":");
