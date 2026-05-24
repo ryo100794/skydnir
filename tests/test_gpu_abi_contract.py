@@ -544,6 +544,35 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertFalse(helpers["event_has_q6_matvec_identity"]({}))
         self.assertFalse(helpers["event_has_q6_matvec_identity"](None))
 
+        probe_hash = "0x3f14f34b0679040e"
+        helpers["effective_runtime_env"] = {
+            "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH": q6_hash,
+            "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH": probe_hash,
+        }
+        probe_event = {
+            "source_spirv_hash": probe_hash,
+            "effective_spirv_hash": "0x579577e98a3af80f",
+        }
+        self.assertEqual(
+            [probe_hash, q6_hash, "0x579577e98a3af80f"],
+            helpers["event_spirv_identity_hashes"](probe_event),
+        )
+        self.assertTrue(helpers["event_has_q6_matvec_identity"](probe_event))
+
+        helpers["effective_runtime_env"] = {
+            "PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH": non_q6_hash,
+            "PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH": probe_hash,
+        }
+        self.assertFalse(helpers["event_has_q6_matvec_identity"](probe_event))
+
+    def test_llama_gpu_compare_keeps_q6_probe_diagnostics_distinct_from_oracle(self):
+        source = LLAMA_COMPARE.read_text()
+        self.assertIn("q6_probe_events = [", source)
+        self.assertIn('"q6_probe_event_count": len(q6_probe_events)', source)
+        self.assertIn('"q6-probe-writeback-cleared-oracle-missing"', source)
+        self.assertIn("q6-probe-writeback-cleared-but-source-oracle-not-available-for-instrumented-module", source)
+        self.assertIn("and event_has_q6_matvec_identity(e)", source)
+
     def test_llama_gpu_lane_marker_and_scope_are_pinned(self):
         source = GPU_EXECUTOR.read_text()
         marker = re.search(

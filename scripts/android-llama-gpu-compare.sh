@@ -3066,12 +3066,46 @@ Q6_K_MATVEC_SPIRV_HASHES = {
     "0x7ec0292e948c9b41",
 }
 
+def normalized_spirv_hash(value):
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    return text
+
+def q6_probe_equivalent_hashes():
+    """Map valid-module probe hashes back to the original Q6 source hash.
+
+    Q6 probes deliberately replace the submitted SPIR-V with an instrumented
+    still-valid module.  The event therefore carries the probe hash, not the
+    original llama.cpp Q6 hash.  Treating that as "not Q6" makes the evidence
+    disappear from the Q6 diagnostics even though the manifest explicitly says
+    it is a probe for the Q6 source shader.  This mapping is fail-closed: it is
+    enabled only when the runtime env records an original hash that is already
+    in the Q6 allow-list and a concrete effective probe hash.
+    """
+
+    env = globals().get("effective_runtime_env", {})
+    if not isinstance(env, dict):
+        return {}
+    expected = normalized_spirv_hash(env.get("PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH"))
+    effective = normalized_spirv_hash(env.get("PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH"))
+    if expected in Q6_K_MATVEC_SPIRV_HASHES and effective:
+        return {effective: expected}
+    return {}
+
 def event_spirv_identity_hashes(event):
     hashes = []
+    equivalents = q6_probe_equivalent_hashes()
     for field in ("source_spirv_hash", "spirv_hash", "effective_spirv_hash"):
         value = event.get(field) if isinstance(event, dict) else None
         if value:
-            hashes.append(str(value).lower())
+            normalized = normalized_spirv_hash(value)
+            if normalized:
+                hashes.append(normalized)
+                if normalized in equivalents:
+                    hashes.append(equivalents[normalized])
     return hashes
 
 def event_has_q6_matvec_identity(event):
@@ -3091,7 +3125,7 @@ q6_dispatch_lifecycle_events = [
     e for e in dispatch_lifecycle_events
     if isinstance(e, dict)
     and e.get("event") == "begin"
-    and str(e.get("spirv_hash") or "").lower() in Q6_K_MATVEC_SPIRV_HASHES
+    and event_has_q6_matvec_identity(e)
 ]
 
 
@@ -3278,7 +3312,18 @@ q6_oracle_events = [
     if isinstance(e.get("cpu_oracle"), dict)
     and e.get("cpu_oracle", {}).get("kernel_hint") == "mul-mat-vec-q6-k-large"
 ]
-q6_latest = q6_oracle_events[-1] if q6_oracle_events else {}
+q6_probe_events = [
+    e for e in q6_valid_spirv_events
+    if isinstance(e.get("cpu_oracle"), dict)
+    and e.get("cpu_oracle", {}).get("status") == "unsupported-shader-hash"
+]
+q6_latest = (
+    q6_oracle_events[-1]
+    if q6_oracle_events
+    else q6_probe_events[-1]
+    if q6_probe_events
+    else {}
+)
 q6_latest_dispatch_event = (
     q6_valid_spirv_events[-1]
     if q6_valid_spirv_events
@@ -3694,7 +3739,9 @@ if not q6_shader_like_64_required:
 elif numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_64_abs_delta")):
     q6_shader_like_clear_basis.append("q6_shader_like_64_abs_delta")
 q6_blocker_class = (
-    "q6-oracle-capture-missing"
+    "q6-probe-writeback-cleared-oracle-missing"
+    if (not q6_oracle_events and q6_probe_events and q6_writeback_verified_all)
+    else "q6-oracle-capture-missing"
     if not q6_oracle_events and q6_dispatch_seen
     else "not-reached"
     if not q6_oracle_events
@@ -3740,6 +3787,7 @@ q6_blocker_class = (
 )
 q6_workgroup_diagnostics = {
     "event_count": len(q6_oracle_events),
+    "q6_probe_event_count": len(q6_probe_events),
     "q6_dispatch_seen": q6_dispatch_seen,
     "q6_dispatch_event_count": len(q6_valid_spirv_events) + len(q6_dispatch_lifecycle_events),
     "q6_dispatch_latest": {
@@ -3802,6 +3850,9 @@ q6_workgroup_diagnostics = {
     "workgroup_shape_blocker": q6_workgroup_shape_blocker,
     "blocker_class": q6_blocker_class,
     "diagnostic_interpretation": (
+        "q6-probe-writeback-cleared-but-source-oracle-not-available-for-instrumented-module"
+        if q6_blocker_class == "q6-probe-writeback-cleared-oracle-missing"
+        else
         "q6-dispatch-seen-without-oracle-response"
         if not q6_oracle_events and q6_dispatch_seen
         else "no-q6-oracle-event"
