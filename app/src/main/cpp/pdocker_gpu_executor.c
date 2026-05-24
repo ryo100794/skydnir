@@ -984,6 +984,30 @@ typedef struct {
 } SpirvCompositeConstant;
 
 typedef struct {
+    int requested;
+    int changed;
+    const char *failure_reason;
+    size_t input_words;
+    size_t output_words;
+    uint32_t bound;
+    int preserve_workgroup_size_spec_subtree;
+    uint64_t pre_local_size[3];
+    uint64_t resolved_local_size[3];
+    size_t spec_id_decorations_seen;
+    size_t workgroup_size_ids_seen;
+    size_t skipped_spec_subtree_ids;
+    size_t spec_constants_seen;
+    size_t spec_constants_folded;
+    size_t spec_composites_seen;
+    size_t spec_composites_folded;
+    size_t spec_ops_seen;
+    size_t spec_ops_folded;
+    uint32_t first_unsupported_op;
+    uint32_t first_unsupported_spec_op;
+    uint16_t first_unsupported_word_count;
+} SpirvSpecializationMaterializeReport;
+
+typedef struct {
     int ready;
     VkInstance instance;
     VkPhysicalDevice physical_device;
@@ -3119,19 +3143,87 @@ static int specialization_value_for_id(
     return 0;
 }
 
+static void init_spirv_specialization_materialize_report(
+        SpirvSpecializationMaterializeReport *report) {
+    if (!report) return;
+    memset(report, 0, sizeof(*report));
+    report->failure_reason = "not-requested";
+}
+
+static void write_spirv_specialization_materialize_report(
+        FILE *out,
+        const SpirvSpecializationMaterializeReport *report) {
+    if (!out || !report) return;
+    fprintf(out,
+            "\"specialization_materialize_report\":{"
+            "\"requested\":%s,"
+            "\"changed\":%s,"
+            "\"failure_reason\":\"%s\","
+            "\"input_words\":%zu,"
+            "\"output_words\":%zu,"
+            "\"bound\":%u,"
+            "\"preserve_workgroup_size_spec_subtree\":%s,"
+            "\"pre_local_size\":[%llu,%llu,%llu],"
+            "\"resolved_local_size\":[%llu,%llu,%llu],"
+            "\"spec_id_decorations\":%zu,"
+            "\"workgroup_size_ids\":%zu,"
+            "\"skipped_spec_subtree_ids\":%zu,"
+            "\"spec_constants\":{\"seen\":%zu,\"folded\":%zu},"
+            "\"spec_composites\":{\"seen\":%zu,\"folded\":%zu},"
+            "\"spec_ops\":{\"seen\":%zu,\"folded\":%zu},"
+            "\"first_unsupported\":{\"op\":%u,\"spec_op\":%u,\"word_count\":%u}"
+            "}",
+            report->requested ? "true" : "false",
+            report->changed ? "true" : "false",
+            report->failure_reason ? report->failure_reason : "unknown",
+            report->input_words,
+            report->output_words,
+            report->bound,
+            report->preserve_workgroup_size_spec_subtree ? "true" : "false",
+            (unsigned long long)report->pre_local_size[0],
+            (unsigned long long)report->pre_local_size[1],
+            (unsigned long long)report->pre_local_size[2],
+            (unsigned long long)report->resolved_local_size[0],
+            (unsigned long long)report->resolved_local_size[1],
+            (unsigned long long)report->resolved_local_size[2],
+            report->spec_id_decorations_seen,
+            report->workgroup_size_ids_seen,
+            report->skipped_spec_subtree_ids,
+            report->spec_constants_seen,
+            report->spec_constants_folded,
+            report->spec_composites_seen,
+            report->spec_composites_folded,
+            report->spec_ops_seen,
+            report->spec_ops_folded,
+            report->first_unsupported_op,
+            report->first_unsupported_spec_op,
+            (unsigned)report->first_unsupported_word_count);
+}
+
 static int materialize_spirv_specialization_constants(
         uint32_t *code,
         size_t *bytes,
         const VulkanDispatchSpecialization *specializations,
         size_t specialization_count,
         const uint8_t *specialization_data,
-        size_t specialization_data_size) {
+        size_t specialization_data_size,
+        SpirvSpecializationMaterializeReport *report) {
+    init_spirv_specialization_materialize_report(report);
+    if (report) {
+        report->requested = 1;
+        report->failure_reason = "invalid-module";
+    }
     if (!code || !bytes || *bytes < 20 || (*bytes % sizeof(uint32_t)) != 0 ||
         code[0] != 0x07230203u || !specializations || specialization_count == 0) {
         return 0;
     }
     const size_t words = *bytes / sizeof(uint32_t);
     const uint32_t bound = code[3];
+    if (report) {
+        report->input_words = words;
+        report->output_words = words;
+        report->bound = bound;
+    }
     if (bound == 0 || bound > 65536) return 0;
     uint32_t *spec_ids = (uint32_t *)calloc(bound, sizeof(uint32_t));
     uint8_t *has_spec_id = (uint8_t *)calloc(bound, sizeof(uint8_t));
@@ -3149,6 +3241,7 @@ static int materialize_spirv_specialization_constants(
         free(scalars);
         free(composites);
         free(out);
+        if (report) report->failure_reason = "allocation-failed";
         return 0;
     }
     const SpirvTraceSummary pre_materialize_summary =
@@ -3169,6 +3262,14 @@ static int materialize_spirv_specialization_constants(
         pre_materialize_summary.local_size[0] != pre_materialize_local_size[0] ||
         pre_materialize_summary.local_size[1] != pre_materialize_local_size[1] ||
         pre_materialize_summary.local_size[2] != pre_materialize_local_size[2];
+    if (report) {
+        report->preserve_workgroup_size_spec_subtree =
+            preserve_workgroup_size_spec_subtree;
+        for (size_t dim = 0; dim < 3; ++dim) {
+            report->pre_local_size[dim] = pre_materialize_summary.local_size[dim];
+            report->resolved_local_size[dim] = pre_materialize_local_size[dim];
+        }
+    }
 
     for (size_t i = 5; i < words;) {
         uint32_t inst = code[i];
@@ -3179,6 +3280,7 @@ static int materialize_spirv_specialization_constants(
             if (code[i + 2] == 1) {
                 has_spec_id[code[i + 1]] = 1;
                 spec_ids[code[i + 1]] = code[i + 3];
+                if (report) report->spec_id_decorations_seen++;
             } else if (code[i + 2] == 11 && code[i + 3] == 25) {
                 /*
                  * Some ggml Vulkan shaders carry a BuiltIn WorkgroupSize
@@ -3193,8 +3295,9 @@ static int materialize_spirv_specialization_constants(
                  * WorkgroupSize specialization, materialize this subtree too;
                  * otherwise the driver can still run code paths derived from
                  * the stale default gl_WorkGroupSize value.
-                 */
+                */
                 workgroup_size_id[code[i + 1]] = 1;
+                if (report) report->workgroup_size_ids_seen++;
                 if (preserve_workgroup_size_spec_subtree) {
                     skip_spec_materialization[code[i + 1]] = 1;
                 }
@@ -3238,6 +3341,11 @@ static int materialize_spirv_specialization_constants(
             i += word_count;
         }
     }
+    if (report) {
+        for (uint32_t id = 0; id < bound; ++id) {
+            if (skip_spec_materialization[id]) report->skipped_spec_subtree_ids++;
+        }
+    }
 
     memcpy(out, code, 5 * sizeof(uint32_t));
     size_t out_words = 5;
@@ -3249,6 +3357,10 @@ static int materialize_spirv_specialization_constants(
         uint16_t op = (uint16_t)(inst & 0xffffu);
         if (word_count == 0 || i + word_count > words) {
             unsupported = 1;
+            if (report && !report->first_unsupported_op) {
+                report->first_unsupported_op = op;
+                report->first_unsupported_word_count = word_count;
+            }
             break;
         }
 
@@ -3276,6 +3388,7 @@ static int materialize_spirv_specialization_constants(
             }
         } else if (op == 50 && word_count >= 4 && code[i + 2] < bound &&
                    !skip_spec_materialization[code[i + 2]]) {
+            if (report) report->spec_constants_seen++;
             uint64_t value = code[i + 3];
             if (has_spec_id[code[i + 2]]) {
                 (void)specialization_value_for_id(
@@ -3294,10 +3407,12 @@ static int materialize_spirv_specialization_constants(
             scalars[code[i + 2]].value = (uint32_t)value;
             out_words += 4;
             changed = 1;
+            if (report) report->spec_constants_folded++;
             i += word_count;
             continue;
         } else if (op == 51 && word_count >= 3 && code[i + 2] < bound &&
                    !skip_spec_materialization[code[i + 2]]) {
+            if (report) report->spec_composites_seen++;
             out[out_words++] = ((uint32_t)word_count << 16) | 44u;
             for (uint16_t j = 1; j < word_count; ++j) out[out_words++] = code[i + j];
             SpirvCompositeConstant *cc = &composites[code[i + 2]];
@@ -3312,9 +3427,11 @@ static int materialize_spirv_specialization_constants(
                 cc->values[cc->count++] = scalars[id].value;
             }
             changed = 1;
+            if (report) report->spec_composites_folded++;
             i += word_count;
             continue;
         } else if (op == 52 && word_count >= 5 && code[i + 2] < bound) {
+            if (report) report->spec_ops_seen++;
             int uses_skipped_spec = skip_spec_materialization[code[i + 2]];
             for (uint16_t j = 4; j < word_count; ++j) {
                 if (code[i + j] < bound && skip_spec_materialization[code[i + j]]) {
@@ -3350,6 +3467,11 @@ static int materialize_spirv_specialization_constants(
             }
             if (!folded) {
                 unsupported = 1;
+                if (report && !report->first_unsupported_op) {
+                    report->first_unsupported_op = op;
+                    report->first_unsupported_spec_op = spec_op;
+                    report->first_unsupported_word_count = word_count;
+                }
                 break;
             }
             uint32_t rewritten[4] = {
@@ -3363,6 +3485,7 @@ static int materialize_spirv_specialization_constants(
             scalars[code[i + 2]].value = (uint32_t)value;
             out_words += 4;
             changed = 1;
+            if (report) report->spec_ops_folded++;
             i += word_count;
             continue;
         }
@@ -3375,7 +3498,23 @@ static int materialize_spirv_specialization_constants(
     if (changed && !unsupported && out_words <= words) {
         memcpy(code, out, out_words * sizeof(uint32_t));
         *bytes = out_words * sizeof(uint32_t);
+        if (report) {
+            report->changed = 1;
+            report->failure_reason = "ok";
+            report->output_words = out_words;
+        }
     } else {
+        if (report) {
+            report->changed = 0;
+            report->output_words = out_words;
+            if (unsupported) {
+                report->failure_reason = "unsupported-spec-expression";
+            } else if (out_words > words) {
+                report->failure_reason = "output-grew";
+            } else {
+                report->failure_reason = "no-changes";
+            }
+        }
         changed = 0;
     }
     free(spec_ids);
@@ -8713,6 +8852,8 @@ static int run_vulkan_dispatch_fd(
     int q4k_pipeline_retry_enabled = 0;
     int q4k_pipeline_retry_attempted = 0;
     int q4k_targeted_specialization_materialized = 0;
+    SpirvSpecializationMaterializeReport specialization_materialize_report;
+    init_spirv_specialization_materialize_report(&specialization_materialize_report);
     CpuOracleReport cpu_oracle_report;
     init_cpu_oracle_report(&cpu_oracle_report, cpu_oracle_requested, 0);
     const int dirty_probe_enabled = options && options->has_dirty_probe
@@ -8902,7 +9043,8 @@ static int run_vulkan_dispatch_fd(
             specializations,
             specialization_count,
             specialization_data,
-            specialization_data_size);
+            specialization_data_size,
+            &specialization_materialize_report);
     }
     /*
      * VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT is a diagnostic driver
@@ -9045,7 +9187,8 @@ static int run_vulkan_dispatch_fd(
                 specializations,
                 specialization_count,
                 specialization_data,
-                specialization_data_size);
+                specialization_data_size,
+                NULL);
         if (q4k_targeted_specialization_materialized) {
             specialization_materialized = 1;
             q4k_callsite_detected = 1;
@@ -9639,7 +9782,8 @@ static int run_vulkan_dispatch_fd(
                     specializations,
                     specialization_count,
                     specialization_data,
-                    specialization_data_size)) {
+                    specialization_data_size,
+                    NULL)) {
                 specialization_materialized = 1;
                 spirv_summary = summarize_spirv(shader_code, shader_size);
                 VkShaderModuleCreateInfo retry_smci = {
@@ -10521,6 +10665,9 @@ static int run_vulkan_dispatch_fd(
                 mutable_bytes,
                 pre_barrier_count,
                 post_barrier_count);
+        write_spirv_specialization_materialize_report(
+            json_out(), &specialization_materialize_report);
+        fprintf(json_out(), ",");
         write_vulkan_reconciliation_report(json_out(), options,
                                             bindings, binding_count,
                                             shader_size,
@@ -10720,6 +10867,9 @@ static int run_vulkan_dispatch_fd(
             active_binding_count, read_binding_count, write_binding_count,
             skipped_binding_count, skipped_binding_bytes,
             skipped_upload_bytes, skipped_download_bytes);
+    fprintf(json_out(), ",");
+    write_spirv_specialization_materialize_report(
+        json_out(), &specialization_materialize_report);
     fprintf(json_out(), ",");
     write_vulkan_reconciliation_report(json_out(), options,
                                         bindings, binding_count,

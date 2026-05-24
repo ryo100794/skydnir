@@ -1418,9 +1418,14 @@ Current blocker:
 
 Next concrete actions:
 
-1. Add executor evidence for why Q6 specialization materialization did not
-   rewrite the module (`changed`, `unsupported`, first unsupported opcode, and
-   whether WorkgroupSize spec subtree was preserved).
+1. Re-run Q6 with the new executor-side
+   `specialization_materialize_report` evidence.  This report records the
+   materializer's exact decision path (`failure_reason`, folded spec constants,
+   folded composites, folded spec ops, first unsupported opcode/spec-op, output
+   word count, and whether the WorkgroupSize spec subtree was preserved).  Use
+   it to decide whether Q6 is still passing live specialization data to the
+   Android driver because of an unsupported SPIR-V expression, a guarded
+   WorkgroupSize subtree, or a no-op rewrite.
 2. Compare Q6 descriptor/access evidence before and after reflection transfer
    intent to ensure no application-visible descriptor write was removed.
 3. Run one targeted device-local staging diagnostic only after static evidence
