@@ -34,48 +34,48 @@ executor reconstructs Android Vulkan objects from that state.
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant App as Container app / llama.cpp ggml-vulkan
-    participant Loader as Vulkan loader in glibc image
-    participant ICD as pdocker-vulkan-icd.so
-    participant Sock as pdocker GPU command socket
-    participant Exec as pdocker-gpu-executor
-    participant Vk as Android Vulkan driver
-    participant Fs as Container buffer files / memfd-like fds
-    participant Log as JSON evidence stream
+    participant App
+    participant Loader
+    participant ICD
+    participant Socket
+    participant Executor
+    participant Driver
+    participant Files
+    participant Evidence
 
-    App->>Loader: vkCreateInstance / vkEnumeratePhysicalDevices / feature probes
+    App->>Loader: create instance and query devices
     Loader->>ICD: ICD entry points
-    ICD-->>App: Android-compatible advertised limits/features
+    ICD-->>App: advertise limits and features
 
-    App->>ICD: vkCreateBuffer / vkAllocateMemory / vkBindBufferMemory
-    ICD->>ICD: allocate logical Vk* handles and remember object graph
-    ICD->>Fs: keep storage buffer backing fds and offsets
+    App->>ICD: create buffers and memory
+    ICD->>ICD: remember logical object graph
+    ICD->>Files: keep backing fds and offsets
 
-    App->>ICD: vkCreateShaderModule(SPIR-V)
-    ICD->>Fs: stage SPIR-V bytes in a shader fd
-    ICD->>ICD: hash original SPIR-V for callsite identity
+    App->>ICD: create shader module
+    ICD->>Files: stage shader bytes in a shader fd
+    ICD->>ICD: hash source shader bytes
 
     App->>ICD: vkUpdateDescriptorSets
-    ICD->>ICD: record descriptor set, binding, range, api_offset, buffer/memory ids
+    ICD->>ICD: record set binding range and ids
 
-    App->>ICD: vkCmdPushConstants / vkCmdDispatch
+    App->>ICD: push constants and dispatch
     ICD->>ICD: record push bytes and dispatch dimensions
 
-    App->>ICD: vkQueueSubmit / vkQueueWaitIdle or fence wait
-    ICD->>Sock: send VULKAN_DISPATCH_V4 + fds via SCM_RIGHTS
-    Sock->>Exec: shader fd + buffer fds + text command fields
+    App->>ICD: submit queue work
+    ICD->>Socket: send dispatch v4 command
+    ICD->>Socket: pass shader and buffer fds
+    Socket->>Executor: deliver command and fds
 
-    Exec->>Exec: parse and validate V4 command
-    Exec->>Exec: summarize SPIR-V, reflect bindings/access, resolve specialization
-    Exec->>Exec: optional scoped compatibility lowerings
-    Exec->>Vk: create/reuse VkInstance, VkDevice, buffers, descriptors, pipeline
-    Exec->>Vk: upload/flush/barrier as required
-    Exec->>Vk: vkQueueSubmit + fence wait
-    Exec->>Vk: invalidate/read mapped memory
-    Exec->>Fs: write changed output ranges back to container fds
-    Exec->>Log: emit profile/reconciliation/oracle JSON
-    Exec-->>ICD: dispatch result status
+    Executor->>Executor: parse and validate command
+    Executor->>Executor: reflect shader and resolve specialization
+    Executor->>Executor: apply scoped compatibility lowerings
+    Executor->>Driver: create android vulkan objects
+    Executor->>Driver: upload and synchronize inputs
+    Executor->>Driver: submit compute work
+    Executor->>Driver: wait and read mapped memory
+    Executor->>Files: write changed output ranges
+    Executor->>Evidence: emit json evidence
+    Executor-->>ICD: dispatch result
     ICD-->>App: Vulkan call returns status
 ```
 
@@ -86,22 +86,21 @@ the fd array are both part of the payload; either one alone is incomplete.
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant ICD as glibc ICD
-    participant ABI as pdocker_gpu_abi.h contract
-    participant Unix as Unix socket + SCM_RIGHTS
-    participant Exec as Android executor
+    participant ICD
+    participant ABI
+    participant Socket
+    participant Executor
 
-    ICD->>ABI: choose command VULKAN_DISPATCH_V4
+    ICD->>ABI: choose dispatch v4 command
     ICD->>ICD: canonicalize entry name, push bytes, specialization data
     ICD->>ICD: enumerate descriptor bindings in application order
     ICD->>ICD: append strict object fields per binding
-    ICD->>Unix: send text line with sizes, hashes, options, descriptors
-    ICD->>Unix: pass fds: shader fd, then one fd per storage binding
-    Unix->>Exec: deliver command line and fd table atomically enough for one dispatch
-    Exec->>Exec: validate field counts, ranges, fd count, max binding count
-    Exec->>ABI: interpret options with env/manifest defaults
-    Exec->>Exec: build VulkanDispatchBinding[] and option flags
+    ICD->>Socket: send text command fields
+    ICD->>Socket: pass shader fd and buffer fds
+    Socket->>Executor: deliver command line and fd table
+    Executor->>Executor: validate counts ranges and fd count
+    Executor->>ABI: interpret options and defaults
+    Executor->>Executor: build binding records and option flags
 ```
 
 The command includes these field groups:
@@ -145,31 +144,30 @@ requires it.  Every transformation must be visible in JSON evidence.
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant Exec as Executor
-    participant SPV as SPIR-V bytes
-    participant Reflect as Static SPIR-V reflection
-    participant Lower as Scoped lowerings
-    participant Driver as Android Vulkan driver
+    participant Executor
+    participant Shader
+    participant Reflection
+    participant Lowering
+    participant Driver
 
-    Exec->>SPV: read shader fd exactly
-    Exec->>Reflect: summarize_spirv()
-    Reflect-->>Exec: hash, capabilities, LocalSize, WorkgroupSize SpecIds
-    Exec->>Reflect: collect descriptor bindings and access qualifiers
-    Reflect-->>Exec: used/readable/writable binding table
+    Executor->>Shader: read shader fd exactly
+    Executor->>Reflection: summarize shader
+    Reflection-->>Executor: hash capabilities and local size
+    Executor->>Reflection: collect descriptor access
+    Reflection-->>Executor: used readable writable table
 
-    alt Q6/Q4 scoped compatibility is enabled
-        Exec->>Lower: patch_spirv_literal_local_size_from_spec()
-        Lower-->>Exec: local_size_patched true/false
-        Exec->>Lower: materialize_spirv_specialization_constants()
-        Lower-->>Exec: changed true/false + materialization report
+    alt scoped compatibility enabled
+        Executor->>Lowering: patch literal local size
+        Lowering-->>Executor: local size patched result
+        Executor->>Lowering: materialize specialization constants
+        Lowering-->>Executor: materialization report
     else normal strict passthrough
-        Exec->>Driver: pass original SPIR-V + VkSpecializationInfo
+        Executor->>Driver: pass original shader and specialization data
     end
 
-    Exec->>Reflect: summarize effective SPIR-V
-    Exec->>Driver: vkCreateShaderModule(effective SPIR-V)
-    Exec->>Driver: vkCreateComputePipelines(pSpecializationInfo or NULL)
+    Executor->>Reflection: summarize effective shader
+    Executor->>Driver: create shader module
+    Executor->>Driver: create compute pipeline
 ```
 
 ### SPIR-V processing rules
@@ -192,36 +190,35 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant ICD as ICD descriptor recorder
-    participant Exec as Executor
-    participant Obj as Strict object graph
-    participant Buf as Android VkBuffer/VkDeviceMemory
-    participant Vk as Android Vulkan
-    participant FD as Container backing fd
+    participant ICD
+    participant Executor
+    participant ObjectGraph
+    participant Buffer
+    participant Driver
+    participant BackingFd
 
-    ICD->>ICD: record VkBuffer, VkDeviceMemory, bind offset, size
-    ICD->>ICD: record VkDescriptorBufferInfo offset/range
-    ICD->>Exec: send binding fields + fd
+    ICD->>ICD: record buffer memory and bind range
+    ICD->>ICD: record descriptor offset and range
+    ICD->>Executor: send binding fields and fd
 
-    Exec->>Exec: validate binding ranges and ids
-    Exec->>Exec: reflect shader access qualifiers
-    Exec->>Exec: compute active/read/write binding intent
-    Exec->>Exec: group overlapping fd ranges for transfer only
+    Executor->>Executor: validate ranges and ids
+    Executor->>Executor: reflect shader access
+    Executor->>Executor: compute transfer intent
+    Executor->>Executor: group overlap ranges for transfer
 
     alt strict passthrough
-        Exec->>Obj: create Android memory/buffer objects per captured object
-        Obj->>Buf: preserve buffer size, memory offset, descriptor offset
+        Executor->>ObjectGraph: create captured objects
+        ObjectGraph->>Buffer: preserve buffer and descriptor coordinates
     else compatibility staging
-        Exec->>Buf: create compact staging buffer for transfer span
+        Executor->>Buffer: create compact staging buffer
     end
 
-    Exec->>FD: pre-dispatch read for readable ranges
-    Exec->>Buf: copy/upload bytes to mapped memory
-    Exec->>Vk: bind descriptors with preserved set/binding/range
-    Vk-->>Buf: shader reads/writes
-    Exec->>Buf: invalidate/read mapped memory after fence
-    Exec->>FD: write writable ranges back
+    Executor->>BackingFd: read readable ranges
+    Executor->>Buffer: upload bytes to mapped memory
+    Executor->>Driver: bind descriptors
+    Driver-->>Buffer: shader reads and writes
+    Executor->>Buffer: read mapped memory after fence
+    Executor->>BackingFd: write writable ranges
 ```
 
 The important distinction is between **descriptor coordinates** and **backing
@@ -279,20 +276,19 @@ Known current state:
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant Exec as Executor
-    participant JSON as JSON event
-    participant Verifier as Artifact verifier
-    participant Plan as docs/plan
+    participant Executor
+    participant Json
+    participant Verifier
+    participant Plan
 
-    Exec->>JSON: compact event for every dispatch
-    Exec->>JSON: optional profile_response details
-    Exec->>JSON: reconciliation report
-    Exec->>JSON: descriptor write/alias/access reports
-    Exec->>JSON: CPU oracle report when requested
-    Exec->>JSON: specialization materialization report
-    Verifier->>JSON: classify readiness, prompt sanity, Q6 oracle status
-    Verifier->>Plan: evidence path referenced in task notes
+    Executor->>Json: compact event for every dispatch
+    Executor->>Json: optional profile details
+    Executor->>Json: reconciliation report
+    Executor->>Json: descriptor reports
+    Executor->>Json: cpu oracle report
+    Executor->>Json: materialization report
+    Verifier->>Json: classify readiness and correctness
+    Verifier->>Plan: reference evidence path
 ```
 
 Evidence must be specific enough to answer:

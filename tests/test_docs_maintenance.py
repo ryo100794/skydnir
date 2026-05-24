@@ -499,6 +499,34 @@ class DocsMaintenanceVerifierTest(unittest.TestCase):
 
         verifier.check_historical_agent_assignments(self.tmp)
 
+    def test_mermaid_sequence_safe_subset_accepts_plain_participants(self):
+        doc = self.tmp / "docs" / "design" / "DIAGRAM.md"
+        doc.write_text(
+            "```mermaid\n"
+            "sequenceDiagram\n"
+            "    participant App\n"
+            "    participant Executor\n"
+            "    App->>Executor: send command\n"
+            "```\n",
+            encoding="utf-8",
+        )
+
+        verifier.check_mermaid_sequence_safe_subset(self.tmp)
+
+    def test_mermaid_sequence_safe_subset_rejects_fragile_aliases(self):
+        doc = self.tmp / "docs" / "design" / "DIAGRAM.md"
+        doc.write_text(
+            "```mermaid\n"
+            "sequenceDiagram\n"
+            "    participant App as Container app / llama.cpp\n"
+            "    App->>App: vkCreateShaderModule(SPIR-V)\n"
+            "```\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(verifier.CheckFailure):
+            verifier.check_mermaid_sequence_safe_subset(self.tmp)
+
     def test_todo_source_quality_rejects_vague_active_item(self):
         todo = self.tmp / "docs" / "plan" / "TODO.md"
         todo.write_text("- [doing] Vague public roadmap item without proof cue\n", encoding="utf-8")

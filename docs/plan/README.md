@@ -16,6 +16,7 @@ which temporary accommodations must be replaced.
 | [`TODO.md`](TODO.md) | Live unfinished-work ledger and temporary workaround tracker |
 | [`ADB_OFF_TASK_QUEUE_20260520.md`](ADB_OFF_TASK_QUEUE_20260520.md) | Completed/maintenance ledger for host-only ADB-off work from 2026-05-20 |
 | [`LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](LLAMA_GPU_BRIDGE_NEXT_STEPS.md) | Active llama.cpp GPU bridge procedure, stage gates, and compact-model handoff |
+| [`Q6K_MISCOMPUTE_TASK_QUEUE.md`](Q6K_MISCOMPUTE_TASK_QUEUE.md) | Q6_K miscompute investigation queue and evidence-driven task split |
 | [`VULKAN_ICD_LLAMA_LIMITS_GAP.md`](VULKAN_ICD_LLAMA_LIMITS_GAP.md) | Vulkan ICD advertised limits/features gap table for llama.cpp/ggml-vulkan bridge work |
 | [`ARM32_DIRECT_EXEC_PORTING.md`](ARM32_DIRECT_EXEC_PORTING.md) | Porting plan and promotion gates for replacing the `armeabi-v7a` unsupported direct-exec stub |
 | [`INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md`](INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md) | Consolidated P0/P1/P2 incomplete-work audit |
@@ -40,6 +41,9 @@ which temporary accommodations must be replaced.
   host-only work that must not promote device-gated features.
 - Use [`LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](LLAMA_GPU_BRIDGE_NEXT_STEPS.md) for
   the current llama.cpp GPU bridge continuation plan and handoff instructions.
+- Use [`Q6K_MISCOMPUTE_TASK_QUEUE.md`](Q6K_MISCOMPUTE_TASK_QUEUE.md) for the
+  Q6_K miscompute investigation queue when splitting static analysis, probe
+  design, and evidence review tasks.
 - Use [`VULKAN_ICD_LLAMA_LIMITS_GAP.md`](VULKAN_ICD_LLAMA_LIMITS_GAP.md) when
   deciding whether a Q6/llama GPU artifact is blocked by an advertised
   property/feature mismatch rather than shader or writeback behavior.

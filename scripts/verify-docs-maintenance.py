@@ -29,6 +29,7 @@ ROADMAP_CUE_RE = re.compile(
 )
 TABLE_SEPARATOR_RE = re.compile(r"^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$")
 MARKDOWN_TABLE_ROW_RE = re.compile(r"^\|(.+)\|$")
+MERMAID_BLOCK_RE = re.compile(r"```mermaid\n(?P<body>.*?)\n```", re.DOTALL)
 OPEN_GAP_RE = re.compile(r"\b(remains open|remain open|non-promoting|planned-gap|still need|still needs)\b", re.IGNORECASE)
 PROMOTING_STATUS_RE = re.compile(r"^\s*(good|pass|green)\s*$", re.IGNORECASE)
 FORBIDDEN_CURRENT_EVIDENCE_PHRASES = (
@@ -681,6 +682,45 @@ def check_pdocker_extension_surface(root: Path = ROOT) -> None:
         )
 
 
+def check_mermaid_sequence_safe_subset(root: Path = ROOT) -> None:
+    """Keep durable Mermaid sequence diagrams in the conservative subset.
+
+    GitHub and local Markdown renderers do not always accept the same Mermaid
+    grammar.  These docs are design evidence, not artwork, so prefer a narrow
+    sequence-diagram subset that has rendered reliably across both.
+    """
+
+    for path in sorted((root / "docs").rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        for block in MERMAID_BLOCK_RE.finditer(text):
+            body = block.group("body")
+            if not body.lstrip().startswith("sequenceDiagram"):
+                continue
+            base_line = text.count("\n", 0, block.start("body")) + 1
+            for offset, raw_line in enumerate(body.splitlines()):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                line_no = base_line + offset
+                if line == "autonumber":
+                    fail(
+                        f"{rel(path, root)}:{line_no} uses Mermaid autonumber; "
+                        "avoid it in durable docs for renderer compatibility"
+                    )
+                if line.startswith("participant ") and " as " in line:
+                    fail(
+                        f"{rel(path, root)}:{line_no} uses participant alias syntax; "
+                        "use simple participant names in durable docs"
+                    )
+                if "->>" in line or "-->>" in line:
+                    label = line.split(":", 1)[1] if ":" in line else ""
+                    if any(token in label for token in ("`", "[", "]", "(", ")", "{", "}")):
+                        fail(
+                            f"{rel(path, root)}:{line_no} uses punctuation-heavy "
+                            "Mermaid message text; move exact code names into prose"
+                        )
+
+
 def run(root: Path = ROOT) -> None:
     check_backlog(root)
     check_links(root)
@@ -694,6 +734,7 @@ def run(root: Path = ROOT) -> None:
     check_todo_roadmap_source_quality(root)
     check_historical_evidence_language(root)
     check_pdocker_extension_surface(root)
+    check_mermaid_sequence_safe_subset(root)
 
 
 def main(argv: list[str] | None = None) -> int:

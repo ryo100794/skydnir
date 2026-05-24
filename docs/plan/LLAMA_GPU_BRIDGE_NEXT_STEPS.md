@@ -1431,6 +1431,10 @@ Next concrete actions:
    inconsistent literal/specialized workgroup shape.  After LocalSize
    legalization makes the literal shape match the requested specialization, the
    WorkgroupSize subtree is allowed to fold with the rest of the Q6 module.
+   The run must follow the pre-flight matrix in
+   [`../design/VULKAN_BRIDGE_PROBE_MATRIX.md`](../design/VULKAN_BRIDGE_PROBE_MATRIX.md):
+   the expected artifact path, required evidence fields, pass branch, and fail
+   branches must be named before ADB is requested.
 2. Compare Q6 descriptor/access evidence before and after reflection transfer
    intent to ensure no application-visible descriptor write was removed.
 3. Run one targeted device-local staging diagnostic only after static evidence
