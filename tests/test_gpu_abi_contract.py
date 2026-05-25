@@ -27,6 +27,7 @@ SPIRV_PROBE_MANIFEST_VERIFIER = ROOT / "scripts" / "verify-spirv-probe-manifest.
 SPIRV_NOOP_INSTRUMENTER = ROOT / "scripts" / "instrument-spirv-noop-probe.py"
 SPIRV_DATAFLOW_COMPARE = ROOT / "scripts" / "compare-spirv-dataflow.py"
 LLAMA_Q6_PREFLIGHT_PLANNER = ROOT / "scripts" / "plan-llama-gpu-q6-run.py"
+LLAMA_Q6_PLAN_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-q6-run-against-plan.py"
 
 
 def load_llama_gpu_artifact_verifier():
@@ -2283,6 +2284,155 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("unsupported-spec-expression", json.dumps(plan["fail_branches"]))
         self.assertFalse(plan["inputs"]["llama_cpp_may_change"])
         self.assertFalse(plan["inputs"]["dockerfile_may_change"])
+
+    def test_q6_plan_verifier_selects_next_action_from_collected_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            plan = tmp_path / "plan.json"
+            artifact = tmp_path / "artifact.json"
+            verdict = tmp_path / "verdict.json"
+            subprocess.run(
+                [
+                    "python3",
+                    str(LLAMA_Q6_PREFLIGHT_PLANNER),
+                    "--artifact",
+                    str(artifact),
+                    "--out",
+                    str(plan),
+                ],
+                check=True,
+                cwd=ROOT,
+            )
+            artifact.write_text(
+                json.dumps(
+                    {
+                        "schema": "pdocker.llama.gpu.compare.v1",
+                        "runtime_freshness": {
+                            "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
+                            "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                            "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
+                            "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
+                        },
+                        "gpu": {
+                            "diagnostics": {
+                                "runtime_freshness": {
+                                    "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
+                                    "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                                    "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
+                                    "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
+                                },
+                                "q6_workgroup_diagnostics": {
+                                    "event_count": 1,
+                                    "latest_status": "mismatch",
+                                    "local_size": [32, 1, 1],
+                                    "local_size_resolved": [32, 1, 1],
+                                    "local_size_consistent": True,
+                                    "q6_local_size": [32, 1, 1],
+                                    "q6_writeback_verified_all": True,
+                                    "q6_row_indexed_sample_indices": [0],
+                                    "q6_row_indexed_writeback_verified": True,
+                                    "q6_row_indexed_writeback_evidence": [
+                                        {
+                                            "index": 0,
+                                            "binding": 2,
+                                            "q6_row_indexed": True,
+                                            "q6_sample_indices": [0],
+                                            "row_indexed_samples_match_oracle": True,
+                                            "f32_after_dispatch": [{"index": 0, "value": 1.0}],
+                                            "f32_after_writeback": [{"index": 0, "value": 1.0}],
+                                        }
+                                    ],
+                                    "q6_writable_bindings": [
+                                        {
+                                            "index": 0,
+                                            "binding": 2,
+                                            "writable": True,
+                                            "gpu_after_dispatch_hash": "0x1111111111111111",
+                                            "fd_after_hash": "0x1111111111111111",
+                                            "writeback_verified": True,
+                                            "writeback_mismatch": False,
+                                        }
+                                    ],
+                                },
+                                "generic_spirv_dispatch": [
+                                    {
+                                        "specialization_materialize_report": {
+                                            "changed": False,
+                                            "failure_reason": "no-changes",
+                                        },
+                                        "executor_build_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                                        "source_spirv_hash": "0x1111111111111111",
+                                        "effective_spirv_hash": "0x2222222222222222",
+                                        "oracle_spirv_hash": "0x1111111111111111",
+                                        "specialization_materialized": False,
+                                        "local_size_patched": True,
+                                        "spirv_local_size": [32, 1, 1],
+                                        "spirv_local_size_resolved": [32, 1, 1],
+                                        "spirv_local_size_consistent": True,
+                                        "strict_object_graph": {"used": True},
+                                        "reconciliation": {"summary": "pass"},
+                                        "binding_details": [],
+                                        "descriptor_usage": {},
+                                        "cpu_oracle": {"candidate": True, "executed": True, "status": "match"},
+                                        "q6_row_indexed": True,
+                                        "pre_barriers": 1,
+                                        "post_barriers": 1,
+                                        "upload_ms": 1.0,
+                                        "dispatch_ms": 1.0,
+                                        "download_ms": 1.0,
+                                    }
+                                ],
+                            },
+                            "correctness": {
+                                "summary": {"correctness": "fail", "required_failures": 1},
+                                "schema": "pdocker.llama.correctness.v1.compare",
+                                "endpoint": "/completion",
+                                "probes": [{"name": "addition", "passed": False}],
+                            },
+                        },
+                        "comparison": {"speedup": 0.5, "target_tokens_per_second": 1.0, "target_met": False},
+                        "bridge_overhead_phase": {
+                            "cpu_tokens_per_second": 1.0,
+                            "gpu_tokens_per_second": 0.5,
+                            "speedup": 0.5,
+                            "target_speedup": 10.0,
+                            "target_met": False,
+                        },
+                        "config_propagation": {
+                            "summary": "pass",
+                            "checks": [
+                                {"env": env, "executor_field": field, "status": "pass"}
+                                for env, field in load_llama_gpu_artifact_verifier().LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS
+                            ],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(LLAMA_Q6_PLAN_VERIFIER),
+                    "--plan",
+                    str(plan),
+                    "--artifact",
+                    str(artifact),
+                    "--out",
+                    str(verdict),
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(10, result.returncode, result.stdout + result.stderr)
+            data = json.loads(verdict.read_text(encoding="utf-8"))
+        self.assertEqual("q6-workgroup-cleared-but-oracle-mismatch", data["classification"])
+        self.assertEqual([], data["missing_required_evidence_fields"])
+        self.assertEqual(
+            "specialization_materialize_report.failure_reason == no-changes",
+            data["selected_branch"]["condition"],
+        )
 
     def test_gpu_env_propagation_parity_is_documented_and_guarded(self):
         compare = LLAMA_COMPARE.read_text()
