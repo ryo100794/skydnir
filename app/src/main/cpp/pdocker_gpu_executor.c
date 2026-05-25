@@ -114,10 +114,14 @@ typedef struct {
 
 typedef struct {
     uint64_t dst_index;
+    uint64_t expected_store_index;
     float expected;
     float gpu_at_dst;
     double abs_error_at_dst;
     uint64_t best_index;
+    int best_index_in_store_window;
+    int64_t best_store_row;
+    int64_t best_store_row_delta;
     float best_value;
     double best_abs_error;
     int64_t best_relative_offset;
@@ -4903,6 +4907,10 @@ struct CpuOracleReport {
     uint64_t q6_accum_mask;
     uint64_t q6_base_work_group_y;
     uint64_t q6_output_base_index;
+    uint64_t q6_stride_d;
+    uint64_t q6_batch_stride_d;
+    uint64_t q6_store_window_begin;
+    uint64_t q6_store_window_end;
     uint64_t q6_weight_base_blocks;
     double q6_accumulator_sum;
     double q6_shader_like_64_sum;
@@ -5339,6 +5347,10 @@ static void write_cpu_oracle_report(
                 "\"q6_accum_mask\":%llu,"
                 "\"q6_base_work_group_y\":%llu,"
                 "\"q6_output_base_index\":%llu,"
+                "\"q6_stride_d\":%llu,"
+                "\"q6_batch_stride_d\":%llu,"
+                "\"q6_store_window_begin\":%llu,"
+                "\"q6_store_window_end\":%llu,"
                 "\"q6_weight_base_blocks\":%llu,"
                 "\"q6_accumulator_sum\":%.9g,"
                 "\"q6_shader_like_64_sum\":%.9g,"
@@ -5365,6 +5377,10 @@ static void write_cpu_oracle_report(
                 (unsigned long long)report->q6_accum_mask,
                 (unsigned long long)report->q6_base_work_group_y,
                 (unsigned long long)report->q6_output_base_index,
+                (unsigned long long)report->q6_stride_d,
+                (unsigned long long)report->q6_batch_stride_d,
+                (unsigned long long)report->q6_store_window_begin,
+                (unsigned long long)report->q6_store_window_end,
                 (unsigned long long)report->q6_weight_base_blocks,
                 report->q6_accumulator_sum,
                 report->q6_shader_like_64_sum,
@@ -5435,17 +5451,24 @@ static void write_cpu_oracle_report(
             const Q6OutputLayoutProbeSample *sample =
                 &report->q6_output_layout_probe_samples[i];
             fprintf(out,
-                    "%s{\"dst_index\":%llu,\"expected\":%.9g,"
+                    "%s{\"dst_index\":%llu,\"expected_store_index\":%llu,"
+                    "\"expected\":%.9g,"
                     "\"gpu_at_dst\":%.9g,\"abs_error_at_dst\":%.9g,"
-                    "\"best_index\":%llu,\"best_value\":%.9g,"
+                    "\"best_index\":%llu,\"best_index_in_store_window\":%s,"
+                    "\"best_store_row\":%lld,\"best_store_row_delta\":%lld,"
+                    "\"best_value\":%.9g,"
                     "\"best_abs_error\":%.9g,\"best_relative_offset\":%lld,"
                     "\"canonical_match\":%s,\"found_elsewhere\":%s}",
                     i ? "," : "",
                     (unsigned long long)sample->dst_index,
+                    (unsigned long long)sample->expected_store_index,
                     sample->expected,
                     sample->gpu_at_dst,
                     sample->abs_error_at_dst,
                     (unsigned long long)sample->best_index,
+                    sample->best_index_in_store_window ? "true" : "false",
+                    (long long)sample->best_store_row,
+                    (long long)sample->best_store_row_delta,
                     sample->best_value,
                     sample->best_abs_error,
                     (long long)sample->best_relative_offset,
@@ -6413,6 +6436,7 @@ static void q6k_record_output_layout_probe_sample(
         const unsigned char *dst_base,
         size_t dst_size,
         uint64_t output_base_index,
+        uint64_t store_window_end,
         uint64_t dst_index,
         float expected,
         float gpu_at_dst) {
@@ -6442,6 +6466,7 @@ static void q6k_record_output_layout_probe_sample(
         &report->q6_output_layout_probe_samples[report->q6_output_layout_probe_sample_count++];
     memset(sample, 0, sizeof(*sample));
     sample->dst_index = dst_index;
+    sample->expected_store_index = dst_index;
     sample->expected = expected;
     sample->gpu_at_dst = gpu_at_dst;
     sample->abs_error_at_dst = fabs((double)expected - (double)gpu_at_dst);
@@ -6468,6 +6493,15 @@ static void q6k_record_output_layout_probe_sample(
             sample->best_relative_offset = (int64_t)index - (int64_t)dst_index;
         }
     }
+    sample->best_index_in_store_window =
+        sample->best_index >= output_base_index &&
+        sample->best_index < store_window_end;
+    sample->best_store_row = sample->best_index_in_store_window
+        ? (int64_t)(sample->best_index - output_base_index)
+        : -1;
+    sample->best_store_row_delta = sample->best_index_in_store_window
+        ? sample->best_store_row - (int64_t)(dst_index - output_base_index)
+        : 0;
     sample->found_elsewhere =
         !sample->canonical_match &&
         sample->best_index != dst_index &&
@@ -6830,6 +6864,10 @@ static void run_cpu_oracle_q6k_matvec_sample(
     report->q6_accum_mask = accum_mask;
     report->q6_base_work_group_y = base_work_group_y;
     report->q6_output_base_index = output_base_index;
+    report->q6_stride_d = stride_d;
+    report->q6_batch_stride_d = batch_stride_d;
+    report->q6_store_window_begin = output_base_index;
+    report->q6_store_window_end = output_base_index + (uint64_t)stride_d;
     report->q6_weight_base_blocks = weight_base_blocks;
     if (!spirv_local_invocation_count(report->q6_local_size, &report->q6_local_invocations)) {
         report->skipped = 1;
@@ -6990,6 +7028,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
             dst_base,
             bindings[idx2].size,
             output_base_index,
+            output_base_index + (uint64_t)stride_d,
             dst_index,
             expected,
             gpu_before_oracle_writeback);

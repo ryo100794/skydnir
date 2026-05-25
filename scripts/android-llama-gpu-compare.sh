@@ -4040,6 +4040,47 @@ if not q6_shader_like_64_required:
         ])
 elif numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_64_abs_delta")):
     q6_shader_like_clear_basis.append("q6_shader_like_64_abs_delta")
+
+
+def classify_q6_output_index_probe(probe, native_reduction_cleared):
+    samples = probe.get("samples") if isinstance(probe, dict) else None
+    if not isinstance(samples, list) or not samples:
+        return "not-run"
+    mismatch_samples = [
+        sample for sample in samples
+        if isinstance(sample, dict) and sample.get("canonical_match") is not True
+    ]
+    if not mismatch_samples:
+        return "canonical-match"
+    found_elsewhere = [
+        sample for sample in mismatch_samples
+        if sample.get("found_elsewhere") is True
+    ]
+    if len(found_elsewhere) == len(mismatch_samples):
+        in_window = [
+            sample for sample in found_elsewhere
+            if sample.get("best_index_in_store_window") is True
+        ]
+        if len(in_window) == len(found_elsewhere):
+            deltas = {
+                sample.get("best_store_row_delta")
+                for sample in in_window
+                if sample.get("best_store_row_delta") is not None
+            }
+            if len(deltas) == 1:
+                return "fixed-offset"
+            return "scatter"
+        return "elsewhere-outside-store-window"
+    if not found_elsewhere and native_reduction_cleared:
+        return "final-store-value"
+    if found_elsewhere:
+        return "mixed-found-and-missing"
+    return "inconclusive"
+
+
+q6_output_index_probe_summary = classify_q6_output_index_probe(
+    q6_output_layout_probe, q6_shader_like_oracle_cleared
+)
 q6_blocker_class = (
     "q6-probe-writeback-cleared-oracle-missing"
     if (not q6_oracle_events and q6_probe_events and q6_writeback_verified_all)
@@ -4119,6 +4160,10 @@ q6_workgroup_diagnostics = {
     "q6_accum_mask": q6_latest_partial.get("q6_accum_mask"),
     "q6_base_work_group_y": q6_latest_partial.get("q6_base_work_group_y"),
     "q6_output_base_index": q6_latest_partial.get("q6_output_base_index"),
+    "q6_stride_d": q6_latest_partial.get("q6_stride_d"),
+    "q6_batch_stride_d": q6_latest_partial.get("q6_batch_stride_d"),
+    "q6_store_window_begin": q6_latest_partial.get("q6_store_window_begin"),
+    "q6_store_window_end": q6_latest_partial.get("q6_store_window_end"),
     "q6_weight_base_blocks": q6_latest_partial.get("q6_weight_base_blocks"),
     "q6_accumulator_sum": q6_latest_partial.get("q6_accumulator_sum"),
     "q6_shader_like_abs_delta": q6_latest_partial.get("q6_shader_like_abs_delta"),
@@ -4130,6 +4175,7 @@ q6_workgroup_diagnostics = {
     "q6_native_vs_writeback_split": q6_native_vs_writeback_split,
     "q6_output_layout_probe": q6_output_layout_probe,
     "q6_output_layout_probe_summary": q6_output_layout_probe_summary,
+    "q6_output_index_probe_summary": q6_output_index_probe_summary,
     "q6_output_layout_fixed_offset_rejected": q6_output_layout_fixed_offset_rejected,
     "q6_row_provenance_probe": q6_row_provenance_probe,
     "q6_row_provenance_probe_summary": q6_row_provenance_probe_summary,

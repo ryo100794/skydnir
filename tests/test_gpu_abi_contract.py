@@ -60,6 +60,15 @@ def classify_q6_readonly_alias_side_effects(binding_details):
     return namespace
 
 
+def load_q6_output_index_probe_classifier():
+    source = LLAMA_COMPARE.read_text()
+    start = source.index("def classify_q6_output_index_probe")
+    end = source.index("\n\nq6_output_index_probe_summary =", start)
+    namespace = {}
+    exec(compile(source[start:end], str(LLAMA_COMPARE), "exec"), namespace)
+    return namespace["classify_q6_output_index_probe"]
+
+
 def defines(path):
     result = {}
     for line in path.read_text().splitlines():
@@ -1747,6 +1756,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "q6_unexpected_readonly_dispatch_mutations",
             "q6_readonly_mutation_is_alias_side_effect",
             "same_q6_storage_window",
+            "classify_q6_output_index_probe",
+            "q6_output_index_probe_summary",
+            "q6_store_window_begin",
+            "q6_store_window_end",
+            "best_index_in_store_window",
+            "best_store_row_delta",
             "writeback_offset",
             "writeback_bytes",
             "device_local_staged",
@@ -1803,6 +1818,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("invalid-q6-local-size", source)
         self.assertIn('\\"q6_local_size\\":[%llu,%llu,%llu]', source)
         self.assertIn('\\"q6_local_invocations\\":%llu', source)
+        self.assertIn('\\"q6_stride_d\\":%llu', source)
+        self.assertIn('\\"q6_batch_stride_d\\":%llu', source)
+        self.assertIn('\\"q6_store_window_begin\\":%llu', source)
+        self.assertIn('\\"q6_store_window_end\\":%llu', source)
+        self.assertIn('\\"expected_store_index\\":%llu', source)
+        self.assertIn('\\"best_index_in_store_window\\":%s', source)
+        self.assertIn('\\"best_store_row_delta\\":%lld', source)
         self.assertIn('\\"q6_accum_mask\\":%llu', source)
         self.assertIn('\\"q6_base_work_group_y\\":%llu', source)
         self.assertIn('\\"q6_output_base_index\\":%llu', source)
@@ -2704,6 +2726,72 @@ class GpuAbiContractTest(unittest.TestCase):
         classified = classify_q6_readonly_alias_side_effects(bindings)
         self.assertEqual([], classified["q6_readonly_dispatch_alias_side_effects"])
         self.assertEqual(1, len(classified["q6_unexpected_readonly_dispatch_mutations"]))
+
+    def test_q6_output_index_probe_classifier_distinguishes_fixed_offset_scatter_and_value(self):
+        classify = load_q6_output_index_probe_classifier()
+        self.assertEqual("not-run", classify({}, True))
+        self.assertEqual(
+            "canonical-match",
+            classify({"samples": [{"canonical_match": True}]}, True),
+        )
+        self.assertEqual(
+            "fixed-offset",
+            classify(
+                {
+                    "samples": [
+                        {
+                            "canonical_match": False,
+                            "found_elsewhere": True,
+                            "best_index_in_store_window": True,
+                            "best_store_row_delta": 2,
+                        },
+                        {
+                            "canonical_match": False,
+                            "found_elsewhere": True,
+                            "best_index_in_store_window": True,
+                            "best_store_row_delta": 2,
+                        },
+                    ]
+                },
+                True,
+            ),
+        )
+        self.assertEqual(
+            "scatter",
+            classify(
+                {
+                    "samples": [
+                        {
+                            "canonical_match": False,
+                            "found_elsewhere": True,
+                            "best_index_in_store_window": True,
+                            "best_store_row_delta": 2,
+                        },
+                        {
+                            "canonical_match": False,
+                            "found_elsewhere": True,
+                            "best_index_in_store_window": True,
+                            "best_store_row_delta": 7,
+                        },
+                    ]
+                },
+                True,
+            ),
+        )
+        self.assertEqual(
+            "final-store-value",
+            classify(
+                {
+                    "samples": [
+                        {
+                            "canonical_match": False,
+                            "found_elsewhere": False,
+                        }
+                    ]
+                },
+                True,
+            ),
+        )
 
     def test_gpu_env_propagation_parity_is_documented_and_guarded(self):
         compare = LLAMA_COMPARE.read_text()

@@ -259,10 +259,13 @@ Latest 2026-05-25 Q6 workgroup run:
   and its plan verdict are runtime evidence for this boundary.  They still do
   not allow correctness or benchmark claims.
 - Next implementation target: add final-store/output-index diagnostics around
-  binding 2 (`store_window_begin/end`, per-sample expected store index,
-  best-index-in-window, and fixed-offset/scatter/final-value classification)
-  before another device run.  Do not modify llama.cpp, Dockerfile, model, or
-  prompt.
+  binding 2.  The executor records `q6_stride_d`, `q6_batch_stride_d`,
+  `q6_store_window_begin`, `q6_store_window_end`, per-sample
+  `expected_store_index`, `best_index_in_store_window`, `best_store_row`, and
+  `best_store_row_delta`.  The compare artifact summarizes these as
+  `q6_output_index_probe_summary` with `fixed-offset`, `scatter`,
+  `final-store-value`, or `inconclusive`.  Do not modify llama.cpp,
+  Dockerfile, model, or prompt.
 
 The tracked safe baseline currently has source hash `0x7ec0292e948c9b41`,
 entry point `main`, local size `[1,1,1]`, descriptors set 0 bindings
