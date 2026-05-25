@@ -61,8 +61,6 @@ ADB_KEEPALIVE="${PDOCKER_ADB_KEEPALIVE:-1}"
 ADB_KEEPALIVE_INTERVAL_SEC="${PDOCKER_ADB_KEEPALIVE_INTERVAL_SEC:-8}"
 ADB_KEEPALIVE_TIMEOUT_SEC="${PDOCKER_ADB_KEEPALIVE_TIMEOUT_SEC:-5}"
 ANDROID_SAME_DEVICE_HTTP="${PDOCKER_ANDROID_SAME_DEVICE_HTTP:-0}"
-EXPECTED_GPU_EXECUTOR_MARKER="${PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER:-gpu-executor-llama-q4k-callsite-20260520}"
-EXPECTED_VULKAN_ICD_MARKER="${PDOCKER_VULKAN_ICD_EXPECTED_MARKER:-vulkan-icd-feature-chain-marker-20260518}"
 OP_ID="llama-gpu-compare-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 CURRENT_CONTAINER_ID=""
 COMPARE_RESULT_READY=0
@@ -4569,7 +4567,6 @@ q6_workgroup_diagnostics = {
     "q6_store_index_sampled_nonzero_j": q6_latest_partial.get("q6_store_index_sampled_nonzero_j"),
     "q6_store_index_sampled_nonzero_y": q6_latest_partial.get("q6_store_index_sampled_nonzero_y"),
     "q6_store_index_full_coverage": q6_latest_partial.get("q6_store_index_full_coverage"),
-    "q6_output_layout_formula_sample_count": q6_output_layout_formula_sample_count,
     "q6_store_window_begin": q6_latest_partial.get("q6_store_window_begin"),
     "q6_store_window_end": q6_latest_partial.get("q6_store_window_end"),
     "q6_weight_base_blocks": q6_latest_partial.get("q6_weight_base_blocks"),
