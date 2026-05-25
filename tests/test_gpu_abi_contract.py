@@ -47,6 +47,19 @@ def load_llama_gpu_compare_q6_helpers():
     return namespace
 
 
+def classify_q6_readonly_alias_side_effects(binding_details):
+    """Run the real compare-script Q6 binding classifier on synthetic details."""
+    source = LLAMA_COMPARE.read_text()
+    start = source.index("def compact_q6_binding_detail")
+    end = source.index("\nq6_first_mismatch =", start)
+    namespace = {
+        "q6_latest": {"binding_details": binding_details},
+        "q6_latest_oracle": {},
+    }
+    exec(compile(source[start:end], str(LLAMA_COMPARE), "exec"), namespace)
+    return namespace
+
+
 def defines(path):
     result = {}
     for line in path.read_text().splitlines():
@@ -1730,6 +1743,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "q6_writable_bindings",
             "q6_readonly_upload_hash_mismatches",
             "q6_readonly_dispatch_mutations",
+            "q6_readonly_dispatch_alias_side_effects",
+            "q6_unexpected_readonly_dispatch_mutations",
+            "q6_readonly_mutation_is_alias_side_effect",
+            "same_q6_storage_window",
             "writeback_offset",
             "writeback_bytes",
             "device_local_staged",
@@ -2576,6 +2593,117 @@ class GpuAbiContractTest(unittest.TestCase):
             data = json.loads(result.stdout)
         self.assertIn("specialization_materialize_report", data["missing_required_evidence_fields"])
         self.assertTrue(data["artifact_matches_plan_path"])
+
+    def test_q6_readonly_alias_side_effects_do_not_block_final_store_diagnosis(self):
+        bindings = [
+            {
+                "index": 2,
+                "binding": 2,
+                "alias_rep": 1,
+                "offset": 16384,
+                "size": 607744,
+                "readable": True,
+                "writable": True,
+                "gpu_after_dispatch_hash": "0x2222222222222222",
+                "fd_after_hash": "0x2222222222222222",
+                "writeback_verified": True,
+            },
+            {
+                "index": 3,
+                "binding": 3,
+                "alias_rep": 1,
+                "offset": 16384,
+                "size": 607744,
+                "readable": True,
+                "writable": False,
+                "gpu_after_upload_hash": "0x1111111111111111",
+                "gpu_after_dispatch_hash": "0x2222222222222222",
+                "fd_after_hash": "0x2222222222222222",
+            },
+        ]
+        classified = classify_q6_readonly_alias_side_effects(bindings)
+        self.assertEqual(1, len(classified["q6_readonly_dispatch_mutations"]))
+        self.assertEqual(1, len(classified["q6_readonly_dispatch_alias_side_effects"]))
+        self.assertEqual([], classified["q6_unexpected_readonly_dispatch_mutations"])
+
+        compare = LLAMA_COMPARE.read_text()
+        self.assertIn(
+            "if q6_unexpected_readonly_dispatch_mutations",
+            compare,
+            "raw readonly mutations must not directly select the barrier blocker",
+        )
+        self.assertNotIn(
+            "if q6_readonly_dispatch_mutations\n    else \"writeback\"",
+            compare,
+            "raw/all readonly mutations include legal alias side-effects",
+        )
+
+    def test_q6_readonly_mutation_without_same_storage_window_still_blocks(self):
+        writable = {
+            "index": 2,
+            "binding": 2,
+            "alias_rep": 1,
+            "offset": 16384,
+            "size": 607744,
+            "readable": True,
+            "writable": True,
+            "gpu_after_dispatch_hash": "0x2222222222222222",
+            "fd_after_hash": "0x2222222222222222",
+            "writeback_verified": True,
+        }
+        readonly = {
+            "index": 3,
+            "binding": 3,
+            "alias_rep": 1,
+            "offset": 16384,
+            "size": 607744,
+            "readable": True,
+            "writable": False,
+            "gpu_after_upload_hash": "0x1111111111111111",
+            "gpu_after_dispatch_hash": "0x3333333333333333",
+            "fd_after_hash": "0x3333333333333333",
+        }
+        for key, value in [
+            ("alias_rep", 9),
+            ("offset", 16388),
+            ("size", 607740),
+        ]:
+            mutated = dict(readonly)
+            mutated[key] = value
+            classified = classify_q6_readonly_alias_side_effects([writable, mutated])
+            self.assertEqual([], classified["q6_readonly_dispatch_alias_side_effects"], key)
+            self.assertEqual(1, len(classified["q6_unexpected_readonly_dispatch_mutations"]), key)
+
+    def test_q6_readonly_alias_side_effect_detection_fails_closed_without_hash_evidence(self):
+        bindings = [
+            {
+                "index": 2,
+                "binding": 2,
+                "alias_rep": 1,
+                "offset": 16384,
+                "size": 607744,
+                "readable": True,
+                "writable": True,
+                "gpu_after_dispatch_hash": "0x0000000000000000",
+                "fd_after_hash": None,
+                "writeback_verified": True,
+            },
+            {
+                "index": 3,
+                "binding": 3,
+                "alias_rep": 1,
+                "offset": 16384,
+                "size": 607744,
+                "readable": True,
+                "writable": False,
+                "gpu_after_upload_hash": "0x1111111111111111",
+                "gpu_after_dispatch_hash": "0x2222222222222222",
+                "fd_after_hash": "",
+            },
+        ]
+        classified = classify_q6_readonly_alias_side_effects(bindings)
+        self.assertEqual([], classified["q6_readonly_dispatch_alias_side_effects"])
+        self.assertEqual(1, len(classified["q6_unexpected_readonly_dispatch_mutations"]))
 
     def test_gpu_env_propagation_parity_is_documented_and_guarded(self):
         compare = LLAMA_COMPARE.read_text()

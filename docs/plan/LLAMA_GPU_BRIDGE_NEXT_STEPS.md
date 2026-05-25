@@ -239,17 +239,30 @@ or before sharing a planned Q6 run for review.
 
 Latest 2026-05-25 Q6 workgroup run:
 
+- Strict API-to-executor reconciliation and strict duplicate descriptor
+  normalization now propagate to the executor.  The stale-ICD false negative
+  was removed by rebuilding the packaged Vulkan ICD payloads.
 - Device run reached `/health`, `/v1/models`, and deterministic completion,
-  but prompt sanity returned `" Marvel"` and did not pass.
-- The plan verdict classified the run as
-  `api-executor-reconciliation-ambiguous`, so correctness and benchmark claims
-  remain blocked.
-- The next implementation target is stronger API request to executor dispatch
-  reconciliation with canonical command evidence; do not spend the next run on
-  blind shader tuning until that proof is available.
-- Local artifacts: `docs/test/llama-gpu-ngl1-q6-workgroup-20260525T092713Z.json`
-  and `docs/test/llama-gpu-ngl1-q6-workgroup-20260525T092713Z-plan-verdict.json`
-  may be ignored runtime evidence in the working tree.
+  but prompt sanity still returned `" Marvel"` and did not pass.
+- Q6 writeback evidence is no longer the first suspect:
+  `q6_writeback_verified_all=true`, row-indexed writeback evidence is present,
+  and fd-after-writeback matches the native GPU output samples.  The remaining
+  blocker is the native Q6 final-store/output-index path.
+- `q6_readonly_dispatch_mutations` is retained as a raw/all observation.  It
+  may include legal alias side-effects when llama.cpp binds the same storage
+  window through writable and read-only descriptor views.  Blocker selection
+  must use `q6_unexpected_readonly_dispatch_mutations` only.  Expected alias
+  visibility is reported separately in
+  `q6_readonly_dispatch_alias_side_effects`.
+- Local artifacts:
+  `docs/test/llama-gpu-ngl1-q6-strict-normalized-adb34413b-20260525T135302Z.json`
+  and its plan verdict are runtime evidence for this boundary.  They still do
+  not allow correctness or benchmark claims.
+- Next implementation target: add final-store/output-index diagnostics around
+  binding 2 (`store_window_begin/end`, per-sample expected store index,
+  best-index-in-window, and fixed-offset/scatter/final-value classification)
+  before another device run.  Do not modify llama.cpp, Dockerfile, model, or
+  prompt.
 
 The tracked safe baseline currently has source hash `0x7ec0292e948c9b41`,
 entry point `main`, local size `[1,1,1]`, descriptors set 0 bindings

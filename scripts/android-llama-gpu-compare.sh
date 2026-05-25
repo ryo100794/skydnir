@@ -3699,8 +3699,54 @@ q6_writable_binding_details = [
 ]
 q6_readonly_upload_hash_mismatches = []
 q6_readonly_dispatch_mutations = []
+q6_readonly_dispatch_alias_side_effects = []
+q6_unexpected_readonly_dispatch_mutations = []
 q6_writable_writeback_mismatches = []
 q6_writable_writeback_unknown = []
+
+
+def same_q6_storage_window(left, right):
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    try:
+        return (
+            int(left.get("alias_rep")) == int(right.get("alias_rep"))
+            and int(left.get("offset")) == int(right.get("offset"))
+            and int(left.get("size")) == int(right.get("size"))
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def q6_readonly_mutation_is_alias_side_effect(readonly_detail):
+    """Separate expected alias visibility from true read-only mutation.
+
+    llama.cpp may bind the same VkBuffer range through a writable output
+    descriptor and read-only descriptor views.  A post-dispatch hash change on
+    such read-only views is expected visibility of the same backing storage,
+    not proof that the shader wrote through a read-only descriptor.
+    """
+    if not isinstance(readonly_detail, dict):
+        return False
+    for writable_detail in q6_writable_binding_details:
+        if not same_q6_storage_window(readonly_detail, writable_detail):
+            continue
+        if (
+            hash_evidence_present(readonly_detail.get("gpu_after_dispatch_hash"))
+            and hash_evidence_present(writable_detail.get("gpu_after_dispatch_hash"))
+            and readonly_detail.get("gpu_after_dispatch_hash")
+            == writable_detail.get("gpu_after_dispatch_hash")
+        ):
+            return True
+        if (
+            hash_evidence_present(readonly_detail.get("fd_after_hash"))
+            and hash_evidence_present(writable_detail.get("fd_after_hash"))
+            and readonly_detail.get("fd_after_hash") == writable_detail.get("fd_after_hash")
+        ):
+            return True
+    return False
+
+
 for detail in q6_binding_details:
     if detail.get("writable"):
         dispatch_hash = detail.get("gpu_after_dispatch_hash")
@@ -3755,6 +3801,10 @@ for detail in q6_binding_details:
         q6_readonly_upload_hash_mismatches.append(compact)
     elif upload_hash and dispatch_hash and upload_hash != dispatch_hash:
         q6_readonly_dispatch_mutations.append(compact)
+        if q6_readonly_mutation_is_alias_side_effect(compact):
+            q6_readonly_dispatch_alias_side_effects.append(compact)
+        else:
+            q6_unexpected_readonly_dispatch_mutations.append(compact)
 q6_row_indexed_writeback_verified = bool(q6_row_indexed_writeback_evidence) and all(
     item.get("row_indexed_samples_match_oracle") is True
     for item in q6_row_indexed_writeback_evidence
@@ -4004,7 +4054,7 @@ q6_blocker_class = (
     else "descriptor-effective-range-or-upload"
     if q6_readonly_upload_hash_mismatches
     else "shader-readonly-mutation-or-barrier-scope"
-    if q6_readonly_dispatch_mutations
+    if q6_unexpected_readonly_dispatch_mutations
     else "writeback"
     if q6_writable_writeback_mismatches
     else "executor-final-writeback"
@@ -4096,6 +4146,8 @@ q6_workgroup_diagnostics = {
     "q6_writable_bindings": q6_writable_binding_details[:8],
     "q6_readonly_upload_hash_mismatches": q6_readonly_upload_hash_mismatches[:8],
     "q6_readonly_dispatch_mutations": q6_readonly_dispatch_mutations[:8],
+    "q6_readonly_dispatch_alias_side_effects": q6_readonly_dispatch_alias_side_effects[:8],
+    "q6_unexpected_readonly_dispatch_mutations": q6_unexpected_readonly_dispatch_mutations[:8],
     "q6_writable_writeback_mismatches": q6_writable_writeback_mismatches[:8],
     "q6_writable_writeback_unknown": q6_writable_writeback_unknown[:8],
     "q6_writeback_verified_all": q6_writeback_verified_all,
