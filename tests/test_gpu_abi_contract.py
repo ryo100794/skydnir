@@ -2348,6 +2348,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("verdict was still written", runner)
         self.assertIn("--dry-run", runner)
         self.assertIn("dry-run complete; no ADB", runner)
+        self.assertIn("refreshing default probe bundle", runner)
+        self.assertIn("scripts/prepare-q6k-noop-probe.sh", runner)
+        self.assertIn("--probe-writes", runner)
+        self.assertIn("instrument-spirv-noop-probe.py", runner)
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

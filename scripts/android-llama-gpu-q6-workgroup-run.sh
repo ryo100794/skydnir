@@ -6,8 +6,11 @@ cd "$ROOT"
 
 SERIAL="${ANDROID_SERIAL:-}"
 OUT=""
-SPV="/tmp/q6write10-bundle/native-q6.write.spv"
-PROBE_ENV="/tmp/q6write10-bundle/noop-probe.env"
+DEFAULT_PROBE_DIR="/tmp/q6write10-bundle"
+DEFAULT_SPV="$DEFAULT_PROBE_DIR/native-q6.write.spv"
+DEFAULT_PROBE_ENV="$DEFAULT_PROBE_DIR/noop-probe.env"
+SPV="$DEFAULT_SPV"
+PROBE_ENV="$DEFAULT_PROBE_ENV"
 CPU_TPS="0.04702448956650603"
 CPU_CTX="512"
 GPU_CTX="512"
@@ -86,6 +89,30 @@ python3 scripts/plan-llama-gpu-q6-run.py \
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "[pdocker q6 workgroup] dry-run complete; no ADB, SPIR-V, probe-env, or compare step was executed."
   exit 0
+fi
+
+if [[ "$SPV" == "$DEFAULT_SPV" && "$PROBE_ENV" == "$DEFAULT_PROBE_ENV" ]]; then
+  SOURCE_SPV="$ROOT/docs/test/spirv-q6k-native-adb45055/native-q6-source.spv"
+  NEED_PREPARE=0
+  if [[ ! -f "$SPV" || ! -f "$PROBE_ENV" ]]; then
+    NEED_PREPARE=1
+  elif [[ "$SPV" -ot "$ROOT/scripts/instrument-spirv-noop-probe.py" ||
+          "$SPV" -ot "$ROOT/scripts/analyze-spirv.py" ||
+          "$SPV" -ot "$ROOT/scripts/prepare-q6k-noop-probe.sh" ||
+          "$SPV" -ot "$SOURCE_SPV" ||
+          "$PROBE_ENV" -ot "$ROOT/scripts/instrument-spirv-noop-probe.py" ||
+          "$PROBE_ENV" -ot "$ROOT/scripts/analyze-spirv.py" ||
+          "$PROBE_ENV" -ot "$ROOT/scripts/prepare-q6k-noop-probe.sh" ||
+          "$PROBE_ENV" -ot "$SOURCE_SPV" ]]; then
+    NEED_PREPARE=1
+  fi
+  if [[ "$NEED_PREPARE" -eq 1 ]]; then
+    echo "[pdocker q6 workgroup] refreshing default probe bundle: $DEFAULT_PROBE_DIR"
+    bash scripts/prepare-q6k-noop-probe.sh \
+      --spv "$SOURCE_SPV" \
+      --out-dir "$DEFAULT_PROBE_DIR" \
+      --probe-writes >/dev/null
+  fi
 fi
 
 if [[ ! -f "$SPV" ]]; then
