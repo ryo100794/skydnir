@@ -2256,6 +2256,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("plan-llama-gpu-q6-run.py", runner)
         self.assertIn("verify-llama-gpu-q6-run-against-plan.py", runner)
         self.assertIn("--allow-nonterminal", runner)
+        self.assertIn("VERIFY_RC=$?", runner)
+        self.assertIn("VERDICT_RC=$?", runner)
+        self.assertIn("verdict was still written", runner)
 
     def test_q6_preflight_planner_names_evidence_and_branches_before_adb(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2431,6 +2434,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertEqual(10, result.returncode, result.stdout + result.stderr)
             data = json.loads(verdict.read_text(encoding="utf-8"))
             self.assertEqual("q6-workgroup-cleared-but-oracle-mismatch", data["classification"])
+            self.assertTrue(data["artifact_matches_plan_path"])
             self.assertEqual([], data["missing_required_evidence_fields"])
             self.assertEqual(
                 "specialization_materialize_report.failure_reason == no-changes",
@@ -2451,6 +2455,58 @@ class GpuAbiContractTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
             self.assertEqual(0, allowed.returncode, allowed.stdout.decode() + allowed.stderr.decode())
+
+    def test_q6_plan_verifier_fails_when_planned_evidence_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            plan = tmp_path / "plan.json"
+            artifact = tmp_path / "artifact.json"
+            subprocess.run(
+                [
+                    "python3",
+                    str(LLAMA_Q6_PREFLIGHT_PLANNER),
+                    "--artifact",
+                    str(artifact),
+                    "--out",
+                    str(plan),
+                ],
+                check=True,
+                cwd=ROOT,
+            )
+            artifact.write_text(
+                json.dumps(
+                    {
+                        "schema": "pdocker.llama.gpu.compare.v1",
+                        "runtime_freshness": {
+                            "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
+                            "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                            "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
+                            "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
+                        },
+                        "gpu": {"diagnostics": {"q6_workgroup_diagnostics": {"event_count": 0}}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(LLAMA_Q6_PLAN_VERIFIER),
+                    "--plan",
+                    str(plan),
+                    "--artifact",
+                    str(artifact),
+                    "--allow-nonterminal",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(12, result.returncode, result.stdout + result.stderr)
+            data = json.loads(result.stdout)
+        self.assertIn("specialization_materialize_report", data["missing_required_evidence_fields"])
+        self.assertTrue(data["artifact_matches_plan_path"])
 
     def test_gpu_env_propagation_parity_is_documented_and_guarded(self):
         compare = LLAMA_COMPARE.read_text()

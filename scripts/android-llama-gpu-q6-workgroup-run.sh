@@ -120,11 +120,26 @@ bash scripts/android-llama-gpu-compare.sh \
   --out "$OUT"
 
 echo "[pdocker q6 workgroup] verify: $OUT"
+set +e
 python3 scripts/verify-llama-gpu-artifact.py "$OUT" --require-q6-workgroup-clear
+VERIFY_RC=$?
+set -e
 
 echo "[pdocker q6 workgroup] verdict: $VERDICT_OUT"
+set +e
 python3 scripts/verify-llama-gpu-q6-run-against-plan.py \
   --plan "$PLAN_OUT" \
   --artifact "$OUT" \
   --out "$VERDICT_OUT" \
   --allow-nonterminal
+VERDICT_RC=$?
+set -e
+
+if [[ "$VERIFY_RC" -ne 0 ]]; then
+  echo "[pdocker q6 workgroup] artifact verifier exited with $VERIFY_RC; verdict was still written to $VERDICT_OUT" >&2
+  exit "$VERIFY_RC"
+fi
+if [[ "$VERDICT_RC" -ne 0 ]]; then
+  echo "[pdocker q6 workgroup] plan verdict exited with $VERDICT_RC" >&2
+  exit "$VERDICT_RC"
+fi

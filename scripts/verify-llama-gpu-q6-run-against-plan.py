@@ -68,6 +68,21 @@ def missing_evidence_fields(data: dict[str, Any], plan: dict[str, Any]) -> list[
     return missing
 
 
+def artifact_matches_plan_path(artifact: Path, planned: Any) -> bool:
+    if not isinstance(planned, str) or not planned:
+        return False
+    planned_path = Path(planned)
+    if not planned_path.is_absolute():
+        planned_path = ROOT / planned_path
+    artifact_path = artifact
+    if not artifact_path.is_absolute():
+        artifact_path = ROOT / artifact_path
+    try:
+        return artifact_path.resolve() == planned_path.resolve()
+    except OSError:
+        return artifact_path.absolute() == planned_path.absolute()
+
+
 def select_branch(report: dict[str, Any], artifact: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
     classification = str(report.get("classification") or "")
     q6 = report.get("q6_workgroup_diagnostics")
@@ -156,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema": "pdocker.llama.gpu.q6.plan-verdict.v1",
         "plan": str(args.plan),
         "artifact": str(args.artifact),
-        "artifact_matches_plan_path": str(args.artifact) == str(plan.get("artifact_path")),
+        "artifact_matches_plan_path": artifact_matches_plan_path(args.artifact, plan.get("artifact_path")),
         "classification": report.get("classification"),
         "terminal": report.get("terminal"),
         "correctness_claim_allowed": report.get("correctness_claim_allowed"),
