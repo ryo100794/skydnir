@@ -1609,6 +1609,45 @@ def _q6_output_layout_fixed_offset_rejected(probe: dict[str, Any]) -> bool:
     )
 
 
+def _q6_store_index_model_valid(q6: Any, probe: dict[str, Any]) -> bool:
+    if not isinstance(q6, dict) or q6.get("q6_store_index_model_valid") is not True:
+        return False
+    if q6.get("q6_store_index_full_coverage") is not True:
+        return False
+    groups = q6.get("q6_dispatch_groups")
+    if not (
+        isinstance(groups, list)
+        and len(groups) == 3
+        and all(isinstance(value, int) and value > 0 for value in groups)
+    ):
+        return False
+    for key in ("q6_block_size", "q6_num_rows", "q6_num_cols",
+                "q6_store_window_begin", "q6_store_window_end"):
+        if not isinstance(q6.get(key), int):
+            return False
+    samples = probe.get("samples")
+    if not isinstance(samples, list):
+        return False
+    if not samples:
+        return False
+    for sample in samples:
+        if not isinstance(sample, dict) or sample.get("store_formula_valid") is not True:
+            return False
+        if not isinstance(sample.get("expected_store_index"), int):
+            return False
+        workgroup = sample.get("store_workgroup")
+        if not (
+            isinstance(workgroup, list)
+            and len(workgroup) == 3
+            and all(isinstance(value, int) and value >= 0 for value in workgroup)
+        ):
+            return False
+        for key in ("store_j", "store_row_in_group", "store_row"):
+            if not isinstance(sample.get(key), int):
+                return False
+    return True
+
+
 def _q6_row_provenance_probe(q6: Any) -> dict[str, Any]:
     if not isinstance(q6, dict):
         return {"summary": "not-run", "samples": []}
@@ -2118,6 +2157,15 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 classification = q6_debug_u32_probe_blocker
                 responsibility_boundary = "q6-debug-u32-probe"
                 q6_blocker_class = q6_debug_u32_probe_blocker
+            elif (
+                str(q6_output_layout.get("summary") or "").startswith("canonical-mismatch")
+                and isinstance(q6_output_layout.get("samples"), list)
+                and len(q6_output_layout.get("samples")) > 0
+                and not _q6_store_index_model_valid(q6, q6_output_layout)
+            ):
+                classification = "q6-store-index-model-incomplete"
+                responsibility_boundary = "q6-oracle"
+                q6_blocker_class = "q6-store-index-model-incomplete"
             elif q6_native_vs_writeback_split.get("summary") == "executor-final-writeback":
                 classification = "q6-writeback-mismatch"
                 responsibility_boundary = "q6-writeback"
@@ -2126,14 +2174,22 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 classification = "q6-native-final-store-or-readback"
                 responsibility_boundary = "q6-native-final-store-readback"
                 q6_blocker_class = "native-q6-final-store-or-readback"
-            elif q6_output_layout.get("summary") == "canonical-mismatch-found-elsewhere":
+            elif (
+                q6_output_layout.get("summary") == "canonical-mismatch-found-elsewhere"
+                and _q6_store_index_model_valid(q6, q6_output_layout)
+            ):
                 classification = "q6-native-output-layout"
                 responsibility_boundary = "q6-output-layout"
                 q6_blocker_class = "native-q6-output-layout"
             elif q6_row_provenance.get("summary") == "other-row-match":
-                classification = "q6-native-other-row-output-layout"
-                responsibility_boundary = "q6-output-layout"
-                q6_blocker_class = "native-q6-other-row-output-layout"
+                if _q6_store_index_model_valid(q6, q6_output_layout):
+                    classification = "q6-native-other-row-output-layout"
+                    responsibility_boundary = "q6-output-layout"
+                    q6_blocker_class = "native-q6-other-row-output-layout"
+                else:
+                    classification = "q6-store-index-model-incomplete"
+                    responsibility_boundary = "q6-oracle"
+                    q6_blocker_class = "q6-store-index-model-incomplete"
             elif q6_partial_signature.get("summary") == "local-y-partial":
                 classification = "q6-native-local-y-partial-store"
                 responsibility_boundary = "q6-native-partial-store"
@@ -2145,11 +2201,15 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             elif (
                 _q6_output_layout_fixed_offset_rejected(q6_output_layout)
                 and q6_shader_like["q6_shader_like_oracle_cleared"] is True
+                and _q6_store_index_model_valid(q6, q6_output_layout)
             ):
                 classification = "q6-native-device-execution-or-final-store"
                 responsibility_boundary = "q6-native-device-execution"
                 q6_blocker_class = "native-q6-device-execution-or-final-store"
-            elif q6_output_layout.get("summary") == "canonical-mismatch-inconclusive":
+            elif (
+                q6_output_layout.get("summary") == "canonical-mismatch-inconclusive"
+                and _q6_store_index_model_valid(q6, q6_output_layout)
+            ):
                 classification = "q6-native-output-layout-inconclusive"
                 responsibility_boundary = "q6-output-layout"
                 q6_blocker_class = "native-q6-output-layout-inconclusive"

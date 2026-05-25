@@ -1,6 +1,6 @@
 # llama.cpp GPU Bridge Next Steps
 
-Snapshot date: 2026-05-23.
+Snapshot date: 2026-05-25.
 
 This document is the handoff plan for continuing the llama.cpp GPU bridge work
 with a smaller or faster coding model.  It assumes the repository is on or
@@ -33,6 +33,7 @@ Confirmed facts:
 | 2026-05-23 valid-module probe lane | Native Q6 no-op replay reaches the known wrong-output blocker without changing llama.cpp/model/prompt, and executable Q6 debug-SSBO write probes are generated/validated locally for the next device run | commits `139fa83`, `5956a41`, `8515829`; `docs/test/llama-gpu-ngl1-q6-noop-probe-strictid-adb39419-20260523T230924Z.json`; `scripts/prepare-q6k-noop-probe.sh --probe-writes`; effective probe hash `0xfd2949c11ffa33e9` |
 | 2026-05-24 Q6 write-probe lane | Native Q6 valid-module replay now emits a 10-record debug SSBO split across tail/full partial, reduction, post-reduction, and final stores.  Device evidence shows the full branch executes partial/reduction/final records and writeback matches dispatch samples; post-reduction candidate stores are not dynamically executed for this prompt.  Compare now maps the instrumented probe hash back to the original Q6 source hash through the probe manifest env, so the diagnostics classify this as `q6-probe-writeback-cleared-oracle-missing` instead of silently losing the Q6 event.  Prompt sanity still fails (`" Marvel"` for `2+3=`), so Q6 writeback is no longer the first suspected boundary for this run. | local artifacts `docs/test/llama-gpu-ngl1-q6-write10-probe-adb42493-20260524T005341Z.json`, `docs/test/llama-gpu-ngl1-q6-write10-classified2-adb40309-20260524T021223Z.json` (ignored runtime evidence); parsed summary `pass`; effective probe hash `0x3f14f34b0679040e`; original/source hash `0x1bf751845c5dce75` |
 | 2026-05-24 strict passthrough/object-graph lane | Strict passthrough now preserves descriptor/push/specialization bytes by default and no longer hard-stops on local-size disagreement.  Android Vulkan object handles still cannot be copied across the glibc/Bionic process boundary: the executor reconstructs an equivalent Android `VkDeviceMemory`/`VkBuffer`/descriptor object graph from IDs, offsets, ranges, and shared backing fds.  Q6 WorkgroupSize literal lowering now clears the local-size blocker on device, but prompt sanity still fails.  Static inspection shows the native Q6 module also uses a specialized `BuiltIn WorkgroupSize` value in reduction control flow; the next compatibility lane explicitly materializes specialization constants after the LocalSize lowering so Android drivers cannot execute code derived from stale default `gl_WorkGroupSize`. | host tests `tests/test_gpu_abi_contract.py tests/test_llama_gpu_env_parity.py`; artifacts `docs/test/llama-gpu-ngl1-q6-workgroup-legalized-adb34929-20260524T045343Z.json`, `docs/test/llama-gpu-ngl1-q6-workgroup-native-legalized-adb34929-20260524T050109Z.json`; source hash `0x1bf751845c5dce75`, effective localized hash `0xe38f6a6a906d765c` |
+| 2026-05-25 static-proof lane | New runtime collection is not the default next step.  Q6 store-index diagnostics now fail closed unless dispatch dimensions, specialization constants, store-window bounds, and every layout sample's decoded store coordinates are present.  Missing or column-0-only store-index evidence is classified as oracle/model-incomplete, not as a Vulkan passthrough/native shader failure. | `app/src/main/cpp/pdocker_gpu_executor.c`; `scripts/android-llama-gpu-compare.sh`; `scripts/verify-llama-gpu-artifact.py`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_artifact_verifier` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -42,6 +43,12 @@ safe-kernel is a pdocker bridge compatibility substitution selected under
 change, and not proof that the original native Q6 shader/driver path is fixed.
 The memory readiness gate is still required before heavy compare or benchmark
 evidence can promote anything.
+
+Device execution is not a substitute for static proof.  Before any new ADB or
+runtime collection, the repository must contain a static hypothesis, a dry-run
+plan, the exact evidence fields expected from that run, and explicit branch
+decisions for every plausible outcome.  If a static-only review is requested,
+do not answer it by collecting fresh artifacts.
 
 ### Passthrough boundary terminology
 
@@ -69,6 +76,18 @@ narrow driver-compatibility lane: a valid module with exactly one literal
 must not rewrite descriptors, push constants, specialization data, bindings, or
 buffer contents.
 
+Use three separate lanes when discussing Vulkan work:
+
+1. **Raw vendor passthrough** is not the product path on Android.  It means a
+   process calls the vendor driver directly with native process-local handles.
+2. **Native strict object-graph passthrough** is the pdocker product target:
+   preserve app-visible Vulkan bytes and semantics while reconstructing Android
+   handles from recorded object IDs, offsets, ranges, and shared backing fds.
+3. **Diagnostic or compatibility transformations** are explicit, labeled
+   deviations such as scoped LocalSize legalization, specialization
+   materialization, probe insertion, or Q4/Q6 safe-kernel substitution.  A pass
+   in this lane can split causes, but it is not native Q6 passthrough proof.
+
 When this lowering is enabled, `PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS=1`
 is the next allowed compatibility step.  It is still API-equivalent Vulkan
 specialization lowering, not a llama.cpp/kernel substitution: descriptor bytes,
@@ -86,6 +105,10 @@ or the driver may keep using the stale default `gl_WorkGroupSize` value.
 - Do not rebuild the llama image unless the user explicitly allows it.
 - Do not add external libraries or copied upstream code without explicit user
   approval.
+- Do not run trial-and-error device jobs or collect new runtime data while a
+  static-proof task is active.  A runtime run requires a preflight plan,
+  expected evidence schema, pass/fail branches, and explicit user/device
+  authorization.
 - Keep Android vendor GPU libraries behind the APK/executor boundary.  Do not
   bind Bionic vendor libraries directly into the glibc image as a product path.
 - Benchmark claims require a passing correctness report.  Speed without

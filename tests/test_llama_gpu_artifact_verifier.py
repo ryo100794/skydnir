@@ -133,6 +133,37 @@ def q6_verified_writeback(hash_value="0x1111111111111111"):
     }
 
 
+def q6_store_index_model_reflection():
+    return {
+        "q6_dispatch_groups": [1187, 1, 64],
+        "q6_block_size": 32,
+        "q6_num_rows": 2,
+        "q6_num_cols": 1,
+        "q6_store_index_model_valid": True,
+        "q6_store_index_sampled_nonzero_j": True,
+        "q6_store_index_sampled_nonzero_y": True,
+        "q6_store_index_full_coverage": True,
+        "q6_store_window_begin": 0,
+        "q6_store_window_end": 151936,
+    }
+
+
+def q6_layout_sample_with_store_model(dst_index=0, expected=7.5, gpu_at_dst=3.2, **extra):
+    sample = {
+        "dst_index": dst_index,
+        "expected_store_index": dst_index,
+        "store_formula_valid": True,
+        "store_j": 0,
+        "store_workgroup": [dst_index // 2, 0, 0],
+        "store_row_in_group": dst_index % 2,
+        "store_row": dst_index,
+        "expected": expected,
+        "gpu_at_dst": gpu_at_dst,
+    }
+    sample.update(extra)
+    return sample
+
+
 def api_executor_reconciliation(
     summary="pass",
     api_hash="0xaaaaaaaaaaaaaaaa",
@@ -886,30 +917,31 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                             "consistent_relative_offset": True,
                             "relative_offset": 2,
                             "samples": [
-                                {
-                                    "dst_index": 0,
-                                    "expected": 7.5,
-                                    "gpu_at_dst": 3.2,
-                                    "abs_error_at_dst": 4.3,
-                                    "best_index": 2,
-                                    "best_value": 7.5,
-                                    "best_abs_error": 0.0,
-                                    "best_relative_offset": 2,
-                                    "found_elsewhere": True,
-                                },
-                                {
-                                    "dst_index": 1,
-                                    "expected": 8.5,
-                                    "gpu_at_dst": 4.2,
-                                    "abs_error_at_dst": 4.3,
-                                    "best_index": 3,
-                                    "best_value": 8.5,
-                                    "best_abs_error": 0.0,
-                                    "best_relative_offset": 2,
-                                    "found_elsewhere": True,
-                                }
+                                q6_layout_sample_with_store_model(
+                                    0,
+                                    expected=7.5,
+                                    gpu_at_dst=3.2,
+                                    abs_error_at_dst=4.3,
+                                    best_index=2,
+                                    best_value=7.5,
+                                    best_abs_error=0.0,
+                                    best_relative_offset=2,
+                                    found_elsewhere=True,
+                                ),
+                                q6_layout_sample_with_store_model(
+                                    1,
+                                    expected=8.5,
+                                    gpu_at_dst=4.2,
+                                    abs_error_at_dst=4.3,
+                                    best_index=3,
+                                    best_value=8.5,
+                                    best_abs_error=0.0,
+                                    best_relative_offset=2,
+                                    found_elsewhere=True,
+                                )
                             ],
                         },
+                        **q6_store_index_model_reflection(),
                         **q6_verified_writeback(),
                     },
                 },
@@ -943,28 +975,29 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                             "found_elsewhere_count": 1,
                             "consistent_relative_offset": False,
                             "samples": [
-                                {
-                                    "dst_index": 0,
-                                    "expected": 7.5,
-                                    "gpu_at_dst": 3.2,
-                                    "best_index": 2,
-                                    "best_value": 7.5,
-                                    "best_abs_error": 0.0,
-                                    "best_relative_offset": 2,
-                                    "found_elsewhere": True,
-                                },
-                                {
-                                    "dst_index": 1,
-                                    "expected": 8.5,
-                                    "gpu_at_dst": 4.2,
-                                    "best_index": 1,
-                                    "best_value": 4.2,
-                                    "best_abs_error": 4.3,
-                                    "best_relative_offset": 0,
-                                    "found_elsewhere": False,
-                                },
+                                q6_layout_sample_with_store_model(
+                                    0,
+                                    expected=7.5,
+                                    gpu_at_dst=3.2,
+                                    best_index=2,
+                                    best_value=7.5,
+                                    best_abs_error=0.0,
+                                    best_relative_offset=2,
+                                    found_elsewhere=True,
+                                ),
+                                q6_layout_sample_with_store_model(
+                                    1,
+                                    expected=8.5,
+                                    gpu_at_dst=4.2,
+                                    best_index=1,
+                                    best_value=4.2,
+                                    best_abs_error=4.3,
+                                    best_relative_offset=0,
+                                    found_elsewhere=False,
+                                ),
                             ],
                         },
+                        **q6_store_index_model_reflection(),
                         **q6_verified_writeback(),
                     },
                 },
@@ -976,20 +1009,60 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["classification"], "q6-native-output-layout-inconclusive")
         self.assertEqual(report["q6_effective_blocker_class"], "native-q6-output-layout-inconclusive")
 
+    def test_q6_store_index_model_requires_full_reflection(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "local_size_resolved": [32, 1, 1],
+                        "q6_shader_like_abs_delta": 1.0e-7,
+                        "q6_store_index_model_valid": True,
+                        "q6_output_layout_probe": {
+                            "summary": "canonical-mismatch-found-elsewhere",
+                            "mismatch_count": 1,
+                            "found_elsewhere_count": 1,
+                            "samples": [
+                                {
+                                    "dst_index": 0,
+                                    "expected_store_index": 0,
+                                    "store_formula_valid": True,
+                                    "expected": 1.0,
+                                    "gpu_at_dst": 0.0,
+                                    "found_elsewhere": True,
+                                }
+                            ],
+                        },
+                        **q6_verified_writeback(),
+                    },
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 31, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-store-index-model-incomplete")
+        self.assertEqual(report["responsibility_boundary"], "q6-oracle")
+
     def test_q6_broad_inconsistent_elsewhere_probe_rejects_fixed_output_layout(self):
         samples = []
         for index in range(16):
             samples.append(
-                {
-                    "dst_index": index,
-                    "expected": float(index + 1),
-                    "gpu_at_dst": 0.0,
-                    "best_index": index + 100 + index,
-                    "best_value": float(index + 1),
-                    "best_abs_error": 0.0,
-                    "best_relative_offset": 100 + index,
-                    "found_elsewhere": index < 4,
-                }
+                q6_layout_sample_with_store_model(
+                    index,
+                    expected=float(index + 1),
+                    gpu_at_dst=0.0,
+                    best_index=index + 100 + index,
+                    best_value=float(index + 1),
+                    best_abs_error=0.0,
+                    best_relative_offset=100 + index,
+                    found_elsewhere=index < 4,
+                )
             )
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",
@@ -1011,6 +1084,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                             "consistent_relative_offset": False,
                             "samples": samples,
                         },
+                        **q6_store_index_model_reflection(),
                         **q6_verified_writeback(),
                     },
                 },
@@ -1068,11 +1142,10 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             },
         }
         result = self.run_verifier(payload, "--require-q6-workgroup-clear")
-        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.returncode, 31, result.stdout)
         report = json.loads(result.stdout)
-        self.assertEqual(report["classification"], "q6-native-other-row-output-layout")
-        self.assertEqual(report["responsibility_boundary"], "q6-output-layout")
-        self.assertEqual(report["q6_effective_blocker_class"], "native-q6-other-row-output-layout")
+        self.assertEqual(report["classification"], "q6-store-index-model-incomplete")
+        self.assertEqual(report["responsibility_boundary"], "q6-oracle")
 
     def test_q6_partial_signature_probe_classifies_local_y_partial_store(self):
         payload = {
@@ -1102,6 +1175,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                             "samples": [
                                 {
                                     "dst_index": 0,
+                                    "store_formula_valid": True,
                                     "expected": 7.5,
                                     "gpu_at_dst": 3.75,
                                     "local_y0_sum": 3.75,
@@ -1163,6 +1237,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                             "samples": [
                                 {
                                     "dst_index": 0,
+                                    "store_formula_valid": True,
                                     "expected": 7.5,
                                     "gpu_at_dst": 1.0,
                                     "best_lane": 3,
@@ -1202,19 +1277,20 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                         "q6_output_layout_probe": {
                             "summary": "canonical-mismatch-not-found",
                             "samples": [
-                                {
-                                    "dst_index": 0,
-                                    "expected": 7.5,
-                                    "gpu_at_dst": 3.2,
-                                    "abs_error_at_dst": 4.3,
-                                    "best_index": 5,
-                                    "best_value": 3.1,
-                                    "best_abs_error": 4.4,
-                                    "best_relative_offset": 5,
-                                    "found_elsewhere": False,
-                                }
+                                q6_layout_sample_with_store_model(
+                                    0,
+                                    expected=7.5,
+                                    gpu_at_dst=3.2,
+                                    abs_error_at_dst=4.3,
+                                    best_index=5,
+                                    best_value=3.1,
+                                    best_abs_error=4.4,
+                                    best_relative_offset=5,
+                                    found_elsewhere=False,
+                                )
                             ],
                         },
+                        **q6_store_index_model_reflection(),
                         **q6_verified_writeback(),
                     },
                 },

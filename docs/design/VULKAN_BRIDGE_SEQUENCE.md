@@ -125,11 +125,26 @@ The command includes these field groups:
 
 The design rule is simple: preserve application-visible Vulkan semantics first;
 only apply narrow, recorded compatibility lowerings when Android driver behavior
-requires it.  Every transformation must be visible in JSON evidence.
+requires it.  Every transformation must be visible in JSON evidence.  New
+device runs are not used as open-ended exploration: before ADB/runtime
+collection, the static source model, expected evidence fields, and pass/fail
+branches must be written down.
+
+The bridge uses four evidence lanes:
+
+- **Observation**: hash, reflection, and summaries that do not change bytes.
+- **Native strict object-graph passthrough**: preserve application-visible
+  SPIR-V, push, specialization, descriptor, buffer, and dispatch semantics while
+  rebuilding Android process-local Vulkan handles.
+- **Scoped compatibility lowering**: small, recorded API-equivalent changes
+  such as Q6 WorkgroupSize LocalSize legalization or specialization
+  materialization.
+- **Diagnostic substitution**: probe modules or safe kernels used only to split
+  causes.  These are never proof that native Q6 passthrough is correct.
 
 | Data item | ICD capture | Executor use | Allowed processing | Evidence fields |
 |---|---|---|---|---|
-| SPIR-V module | copied byte-for-byte into shader fd | read from fd, summarized, optionally patched | hash, reflection, scoped LocalSize legalization, scoped specialization materialization, optional diagnostic safe-kernel replacement | `source_spirv_hash`, `effective_spirv_hash`, `oracle_spirv_hash`, `local_size_patched`, `specialization_materialized`, `q6k_safe_kernel` |
+| SPIR-V module | copied byte-for-byte into shader fd | read from fd, summarized, optionally patched | observation hash/reflection; native strict path keeps source bytes; scoped LocalSize/specialization lowering is compatibility-only; safe-kernel replacement is diagnostic-only | `source_spirv_hash`, `effective_spirv_hash`, `oracle_spirv_hash`, `local_size_patched`, `specialization_materialized`, `q6k_safe_kernel` |
 | Entry point | Vulkan string from app | pipeline shader stage `pName` | length validation and NUL termination only | `entry` |
 | Specialization constants | raw `VkSpecializationInfo` map/data | either passed to driver or materialized into SPIR-V | validate ranges; scoped Q6/Q4 materialization only | `specializations`, `pipeline_key.spec_hash`, `specialization_materialize_report` |
 | Push constants | raw bytes | `vkCmdPushConstants` | no product-path interpretation; diagnostic oracles may decode known callsites | `push`, `push_size`, oracle reports |

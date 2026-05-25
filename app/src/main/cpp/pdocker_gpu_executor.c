@@ -110,11 +110,25 @@ typedef struct {
     float src0;
     float src1;
     double abs_error;
+    int q6_store_formula_valid;
+    uint32_t q6_store_j;
+    uint32_t q6_store_workgroup_x;
+    uint32_t q6_store_workgroup_y;
+    uint32_t q6_store_workgroup_z;
+    uint32_t q6_store_row_in_group;
+    uint64_t q6_store_row;
 } CpuOracleSample;
 
 typedef struct {
     uint64_t dst_index;
     uint64_t expected_store_index;
+    int store_formula_valid;
+    uint32_t store_j;
+    uint32_t store_workgroup_x;
+    uint32_t store_workgroup_y;
+    uint32_t store_workgroup_z;
+    uint32_t store_row_in_group;
+    uint64_t store_row;
     float expected;
     float gpu_at_dst;
     double abs_error_at_dst;
@@ -4917,6 +4931,14 @@ struct CpuOracleReport {
     uint64_t q6_output_base_index;
     uint64_t q6_stride_d;
     uint64_t q6_batch_stride_d;
+    uint64_t q6_dispatch_groups[3];
+    uint64_t q6_block_size;
+    uint64_t q6_num_rows;
+    uint64_t q6_num_cols;
+    int q6_store_index_model_valid;
+    int q6_store_index_sampled_nonzero_j;
+    int q6_store_index_sampled_nonzero_y;
+    int q6_store_index_full_coverage;
     uint64_t q6_store_window_begin;
     uint64_t q6_store_window_end;
     uint64_t q6_weight_base_blocks;
@@ -5165,7 +5187,8 @@ static void write_q6_row_provenance_probe(FILE *out, const CpuOracleReport *repo
     const char *summary = "inconclusive";
     if (same_row_match_count == report->row_window_count) {
         summary = "same-row-match";
-    } else if (mismatch_count >= 2 &&
+    } else if (report->q6_store_index_full_coverage &&
+               mismatch_count >= 2 &&
                other_row_match_count == mismatch_count &&
                consistent_delta) {
         summary = "other-row-match";
@@ -5214,19 +5237,28 @@ static void write_q6_row_provenance_probe(FILE *out, const CpuOracleReport *repo
             (int64_t)sample->dst_index;
         const char *klass = canonical ? "same-row" : (other_row ? "other-row" : "not-row");
         fprintf(out,
-                "%s{\"dst_index\":%llu,\"dst_row\":%llu,"
+                "%s{\"dst_index\":%llu,"
+                "\"store_formula_valid\":%s,"
+                "\"store_j\":%u,"
+                "\"store_workgroup\":[%u,%u,%u],"
+                "\"store_row_in_group\":%u,"
+                "\"store_row\":%llu,"
                 "\"gpu_at_dst\":%.9g,\"canonical_expected\":%.9g,"
-                "\"best_expected_row\":%llu,"
                 "\"best_expected_dst_index\":%llu,"
                 "\"best_expected_value\":%.9g,"
                 "\"best_expected_abs_error\":%.9g,"
                 "\"row_delta\":%lld,\"class\":\"%s\"}",
                 i ? "," : "",
                 (unsigned long long)sample->dst_index,
-                (unsigned long long)sample->dst_index,
+                sample->q6_store_formula_valid ? "true" : "false",
+                sample->q6_store_j,
+                sample->q6_store_workgroup_x,
+                sample->q6_store_workgroup_y,
+                sample->q6_store_workgroup_z,
+                sample->q6_store_row_in_group,
+                (unsigned long long)sample->q6_store_row,
                 sample->gpu,
                 sample->expected,
-                (unsigned long long)report->row_window[best_index].dst_index,
                 (unsigned long long)report->row_window[best_index].dst_index,
                 report->row_window[best_index].expected,
                 best_abs_error,
@@ -5369,6 +5401,14 @@ static void write_cpu_oracle_report(
                 "\"q6_output_base_index\":%llu,"
                 "\"q6_stride_d\":%llu,"
                 "\"q6_batch_stride_d\":%llu,"
+                "\"q6_dispatch_groups\":[%llu,%llu,%llu],"
+                "\"q6_block_size\":%llu,"
+                "\"q6_num_rows\":%llu,"
+                "\"q6_num_cols\":%llu,"
+                "\"q6_store_index_model_valid\":%s,"
+                "\"q6_store_index_sampled_nonzero_j\":%s,"
+                "\"q6_store_index_sampled_nonzero_y\":%s,"
+                "\"q6_store_index_full_coverage\":%s,"
                 "\"q6_store_window_begin\":%llu,"
                 "\"q6_store_window_end\":%llu,"
                 "\"q6_weight_base_blocks\":%llu,"
@@ -5399,6 +5439,16 @@ static void write_cpu_oracle_report(
                 (unsigned long long)report->q6_output_base_index,
                 (unsigned long long)report->q6_stride_d,
                 (unsigned long long)report->q6_batch_stride_d,
+                (unsigned long long)report->q6_dispatch_groups[0],
+                (unsigned long long)report->q6_dispatch_groups[1],
+                (unsigned long long)report->q6_dispatch_groups[2],
+                (unsigned long long)report->q6_block_size,
+                (unsigned long long)report->q6_num_rows,
+                (unsigned long long)report->q6_num_cols,
+                report->q6_store_index_model_valid ? "true" : "false",
+                report->q6_store_index_sampled_nonzero_j ? "true" : "false",
+                report->q6_store_index_sampled_nonzero_y ? "true" : "false",
+                report->q6_store_index_full_coverage ? "true" : "false",
                 (unsigned long long)report->q6_store_window_begin,
                 (unsigned long long)report->q6_store_window_end,
                 (unsigned long long)report->q6_weight_base_blocks,
@@ -5472,6 +5522,11 @@ static void write_cpu_oracle_report(
                 &report->q6_output_layout_probe_samples[i];
             fprintf(out,
                     "%s{\"dst_index\":%llu,\"expected_store_index\":%llu,"
+                    "\"store_formula_valid\":%s,"
+                    "\"store_j\":%u,"
+                    "\"store_workgroup\":[%u,%u,%u],"
+                    "\"store_row_in_group\":%u,"
+                    "\"store_row\":%llu,"
                     "\"expected\":%.9g,"
                     "\"gpu_at_dst\":%.9g,\"abs_error_at_dst\":%.9g,"
                     "\"best_index\":%llu,\"best_index_in_store_window\":%s,"
@@ -5482,6 +5537,13 @@ static void write_cpu_oracle_report(
                     i ? "," : "",
                     (unsigned long long)sample->dst_index,
                     (unsigned long long)sample->expected_store_index,
+                    sample->store_formula_valid ? "true" : "false",
+                    sample->store_j,
+                    sample->store_workgroup_x,
+                    sample->store_workgroup_y,
+                    sample->store_workgroup_z,
+                    sample->store_row_in_group,
+                    (unsigned long long)sample->store_row,
                     sample->expected,
                     sample->gpu_at_dst,
                     sample->abs_error_at_dst,
@@ -6351,8 +6413,7 @@ static int q6k_accumulate_tid_partial_shader_like(
         uint32_t tid,
         uint32_t ncols,
         uint64_t weight_base_blocks,
-        uint32_t batch_stride_b,
-        uint32_t base_work_group_y,
+        uint64_t vector_base_elements,
         double *out_sum) {
     if (!weight_binding || !vector_binding || !out_sum || ncols == 0 || (ncols % 256u) != 0) {
         return 0;
@@ -6413,7 +6474,7 @@ static int q6k_accumulate_tid_partial_shader_like(
             for (uint32_t q = 0; q < 4u; ++q) {
                 float b = 0.0f;
                 const off_t b_off = vector_binding->offset +
-                                    (off_t)((uint64_t)base_work_group_y * batch_stride_b * sizeof(float)) +
+                                    (off_t)(vector_base_elements * sizeof(float)) +
                                     (off_t)((uint64_t)b_indices[q] * sizeof(float));
                 if (pread(vector_fd, &b, sizeof(b), b_off) != (ssize_t)sizeof(b)) return 0;
                 sum[q] = fmaf(b, (float)(unpack8_u32_lane(q_u32[q], l) - 32), sum[q]);
@@ -6458,6 +6519,13 @@ static void q6k_record_output_layout_probe_sample(
         uint64_t output_base_index,
         uint64_t store_window_end,
         uint64_t dst_index,
+        int store_formula_valid,
+        uint32_t store_j,
+        uint32_t store_workgroup_x,
+        uint32_t store_workgroup_y,
+        uint32_t store_workgroup_z,
+        uint32_t store_row_in_group,
+        uint64_t store_row,
         float expected,
         float gpu_at_dst) {
     if (!report || !dst_base || dst_size < sizeof(float)) return;
@@ -6487,6 +6555,13 @@ static void q6k_record_output_layout_probe_sample(
     memset(sample, 0, sizeof(*sample));
     sample->dst_index = dst_index;
     sample->expected_store_index = dst_index;
+    sample->store_formula_valid = store_formula_valid ? 1 : 0;
+    sample->store_j = store_j;
+    sample->store_workgroup_x = store_workgroup_x;
+    sample->store_workgroup_y = store_workgroup_y;
+    sample->store_workgroup_z = store_workgroup_z;
+    sample->store_row_in_group = store_row_in_group;
+    sample->store_row = store_row;
     sample->expected = expected;
     sample->gpu_at_dst = gpu_at_dst;
     sample->abs_error_at_dst = fabs((double)expected - (double)gpu_at_dst);
@@ -6516,10 +6591,12 @@ static void q6k_record_output_layout_probe_sample(
     sample->best_index_in_store_window =
         sample->best_index >= output_base_index &&
         sample->best_index < store_window_end;
-    sample->best_store_row = sample->best_index_in_store_window
+    sample->best_store_row =
+        sample->best_index_in_store_window && report->q6_store_index_full_coverage
         ? (int64_t)(sample->best_index - output_base_index)
         : -1;
-    sample->best_store_row_delta = sample->best_index_in_store_window
+    sample->best_store_row_delta =
+        sample->best_index_in_store_window && report->q6_store_index_full_coverage
         ? sample->best_store_row - (int64_t)(dst_index - output_base_index)
         : 0;
     sample->found_elsewhere =
@@ -6706,8 +6783,7 @@ static int q6k_accumulate_tid_partial(
         uint32_t tid,
         uint32_t ncols,
         uint64_t weight_base_blocks,
-        uint32_t batch_stride_b,
-        uint32_t base_work_group_y,
+        uint64_t vector_base_elements,
         double *out_sum) {
     if (!weight_binding || !vector_binding || !out_sum || ncols == 0 || (ncols % 256u) != 0) {
         return 0;
@@ -6736,7 +6812,7 @@ static int q6k_accumulate_tid_partial(
             for (uint32_t q = 0; q < 4u; ++q) {
                 float b = 0.0f;
                 const off_t b_off = vector_binding->offset +
-                                    (off_t)((uint64_t)base_work_group_y * batch_stride_b * sizeof(float)) +
+                                    (off_t)(vector_base_elements * sizeof(float)) +
                                     (off_t)((uint64_t)(block_index * 256u + elems[q]) * sizeof(float));
                 if (pread(vector_fd, &b, sizeof(b), b_off) != (ssize_t)sizeof(b)) return 0;
                 sum += (double)q6k_value_at(block, elems[q]) * (double)b;
@@ -6783,6 +6859,145 @@ static int q6k_decode_batch_index(
     return 1;
 }
 
+static int checked_mul_u64(uint64_t a, uint64_t b, uint64_t *out) {
+    if (!out) return 0;
+    if (a != 0 && b > UINT64_MAX / a) return 0;
+    *out = a * b;
+    return 1;
+}
+
+static int checked_add_u64(uint64_t a, uint64_t b, uint64_t *out) {
+    if (!out) return 0;
+    if (b > UINT64_MAX - a) return 0;
+    *out = a + b;
+    return 1;
+}
+
+static uint32_t q6k_specialization_or_default_u32(
+        const VulkanDispatchSpecialization *specializations,
+        size_t specialization_count,
+        const uint8_t *specialization_data,
+        size_t specialization_data_size,
+        uint32_t constant_id,
+        uint32_t default_value) {
+    uint64_t value = 0;
+    if (specialization_value_for_id(specializations,
+                                    specialization_count,
+                                    specialization_data,
+                                    specialization_data_size,
+                                    constant_id,
+                                    &value) &&
+        value <= UINT32_MAX) {
+        return (uint32_t)value;
+    }
+    return default_value;
+}
+
+static int q6k_row_to_dispatch_coordinates(
+        uint64_t row,
+        uint32_t dispatch_x,
+        uint32_t dispatch_z,
+        uint32_t num_rows,
+        uint32_t *out_workgroup_x,
+        uint32_t *out_workgroup_z,
+        uint32_t *out_row_in_group) {
+    if (!out_workgroup_x || !out_workgroup_z || !out_row_in_group ||
+        dispatch_x == 0 || dispatch_z == 0 || num_rows == 0) {
+        return 0;
+    }
+    const uint64_t linear_group = row / (uint64_t)num_rows;
+    const uint64_t row_in_group = row % (uint64_t)num_rows;
+    const uint64_t workgroup_z = linear_group / (uint64_t)dispatch_x;
+    const uint64_t workgroup_x = linear_group % (uint64_t)dispatch_x;
+    if (workgroup_x > UINT32_MAX || workgroup_z > UINT32_MAX ||
+        row_in_group > UINT32_MAX || workgroup_z >= dispatch_z) {
+        return 0;
+    }
+    *out_workgroup_x = (uint32_t)workgroup_x;
+    *out_workgroup_z = (uint32_t)workgroup_z;
+    *out_row_in_group = (uint32_t)row_in_group;
+    return 1;
+}
+
+static int q6k_matvec_store_index_from_dispatch(
+        uint32_t store_j,
+        uint32_t workgroup_x,
+        uint32_t workgroup_y,
+        uint32_t workgroup_z,
+        uint32_t row_in_group,
+        uint32_t dispatch_x,
+        uint32_t dispatch_y,
+        uint32_t dispatch_z,
+        uint32_t num_rows,
+        uint32_t num_cols,
+        uint32_t base_work_group_y,
+        uint32_t batch_stride_d,
+        uint32_t stride_d,
+        uint64_t *out_store_index,
+        uint64_t *out_store_row) {
+    if (!out_store_index || !out_store_row ||
+        dispatch_x == 0 || dispatch_y == 0 || dispatch_z == 0 ||
+        num_rows == 0 || num_cols == 0 || batch_stride_d == 0 ||
+        workgroup_x >= dispatch_x || workgroup_y >= dispatch_y ||
+        workgroup_z >= dispatch_z || row_in_group >= num_rows ||
+        store_j >= num_cols) {
+        return 0;
+    }
+
+    uint64_t group_linear = 0;
+    uint64_t z_term = 0;
+    if (!checked_mul_u64((uint64_t)dispatch_x, (uint64_t)workgroup_z, &z_term) ||
+        !checked_add_u64((uint64_t)workgroup_x, z_term, &group_linear)) {
+        return 0;
+    }
+
+    uint64_t first_row = 0;
+    uint64_t store_row = 0;
+    if (!checked_mul_u64((uint64_t)num_rows, group_linear, &first_row) ||
+        !checked_add_u64(first_row, (uint64_t)row_in_group, &store_row) ||
+        store_row >= (uint64_t)stride_d) {
+        return 0;
+    }
+
+    uint64_t j_term = 0;
+    uint64_t y_term = 0;
+    uint64_t y_index = 0;
+    uint64_t prefix = 0;
+    if (!checked_mul_u64((uint64_t)store_j, (uint64_t)batch_stride_d, &j_term) ||
+        !checked_add_u64((uint64_t)workgroup_y, (uint64_t)base_work_group_y, &y_index) ||
+        !checked_mul_u64(y_index, (uint64_t)batch_stride_d, &y_term) ||
+        !checked_add_u64(j_term, y_term, &prefix) ||
+        !checked_add_u64(prefix, store_row, out_store_index)) {
+        return 0;
+    }
+    *out_store_row = store_row;
+    return 1;
+}
+
+static int q6k_matvec_store_window_end_from_dispatch(
+        uint32_t dispatch_y,
+        uint32_t num_cols,
+        uint32_t base_work_group_y,
+        uint32_t batch_stride_d,
+        uint32_t stride_d,
+        uint64_t *out_store_window_end) {
+    if (!out_store_window_end ||
+        dispatch_y == 0 || num_cols == 0 || batch_stride_d == 0) {
+        return 0;
+    }
+    uint64_t max_plane = 0;
+    uint64_t max_prefix = 0;
+    if (!checked_add_u64((uint64_t)base_work_group_y,
+                         (uint64_t)dispatch_y - 1u,
+                         &max_plane) ||
+        !checked_add_u64(max_plane, (uint64_t)num_cols - 1u, &max_plane) ||
+        !checked_mul_u64(max_plane, (uint64_t)batch_stride_d, &max_prefix) ||
+        !checked_add_u64(max_prefix, (uint64_t)stride_d, out_store_window_end)) {
+        return 0;
+    }
+    return 1;
+}
+
 static int q6k_read_accumulator_value(
         const int *buffer_fds,
         const VulkanDispatchBinding *bindings,
@@ -6819,6 +7034,13 @@ static void run_cpu_oracle_q6k_matvec_sample(
         const uint8_t *push,
         size_t push_size,
         const uint64_t resolved_local_size[3],
+        const VulkanDispatchSpecialization *specializations,
+        size_t specialization_count,
+        const uint8_t *specialization_data,
+        size_t specialization_data_size,
+        uint32_t dispatch_x,
+        uint32_t dispatch_y,
+        uint32_t dispatch_z,
         int q6k_oracle_writeback) {
     if (!report || !report->requested) return;
     init_cpu_oracle_report(report, report->requested, spirv_hash);
@@ -6844,10 +7066,21 @@ static void run_cpu_oracle_q6k_matvec_sample(
     const uint32_t ne12 = load_le_u32(push, push_size, 10);
     const uint32_t broadcast2 = load_le_u32(push, push_size, 11);
     const uint32_t broadcast3 = load_le_u32(push, push_size, 12);
+    const uint32_t q6_block_size = q6k_specialization_or_default_u32(
+        specializations, specialization_count, specialization_data, specialization_data_size,
+        0, 32u);
+    const uint32_t q6_num_rows = q6k_specialization_or_default_u32(
+        specializations, specialization_count, specialization_data, specialization_data_size,
+        1, 1u);
+    const uint32_t q6_num_cols = q6k_specialization_or_default_u32(
+        specializations, specialization_count, specialization_data, specialization_data_size,
+        2, 1u);
     if (ncols == 0 || ncols > 16384 || (ncols % 256u) != 0 ||
         bindings[idx1].size < (size_t)ncols * sizeof(float) ||
         bindings[idx2].size < sizeof(float) ||
         batch_stride_b == 0 || batch_stride_d == 0 ||
+        dispatch_x == 0 || dispatch_y == 0 || dispatch_z == 0 ||
+        q6_block_size == 0 || q6_num_rows == 0 || q6_num_cols == 0 ||
         (accum_mask & ~3u) != 0 ||
         (weight_batch_stride_elements % 256u) != 0) {
         report->skipped = 1;
@@ -6862,8 +7095,14 @@ static void run_cpu_oracle_q6k_matvec_sample(
     }
     const uint64_t weight_base_blocks =
         batch_index * (uint64_t)(weight_batch_stride_elements / 256u);
-    const uint64_t output_base_index =
-        (uint64_t)base_work_group_y * (uint64_t)batch_stride_d;
+    uint64_t output_base_index = 0;
+    if (!checked_mul_u64((uint64_t)base_work_group_y,
+                         (uint64_t)batch_stride_d,
+                         &output_base_index)) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "unsupported-q6k-output-base");
+        return;
+    }
     if ((accum_mask & 1u) &&
         binding_index_for_number(bindings, binding_count, 3) < 0) {
         report->skipped = 1;
@@ -6886,8 +7125,29 @@ static void run_cpu_oracle_q6k_matvec_sample(
     report->q6_output_base_index = output_base_index;
     report->q6_stride_d = stride_d;
     report->q6_batch_stride_d = batch_stride_d;
+    report->q6_dispatch_groups[0] = dispatch_x;
+    report->q6_dispatch_groups[1] = dispatch_y;
+    report->q6_dispatch_groups[2] = dispatch_z;
+    report->q6_block_size = q6_block_size;
+    report->q6_num_rows = q6_num_rows;
+    report->q6_num_cols = q6_num_cols;
+    report->q6_store_index_model_valid = 1;
+    report->q6_store_index_sampled_nonzero_j = q6_num_cols <= 1u ? 1 : 0;
+    report->q6_store_index_sampled_nonzero_y = dispatch_y <= 1u ? 1 : 0;
+    report->q6_store_index_full_coverage =
+        report->q6_store_index_sampled_nonzero_j &&
+        report->q6_store_index_sampled_nonzero_y;
     report->q6_store_window_begin = output_base_index;
-    report->q6_store_window_end = output_base_index + (uint64_t)stride_d;
+    if (!q6k_matvec_store_window_end_from_dispatch(dispatch_y,
+                                                   q6_num_cols,
+                                                   base_work_group_y,
+                                                   batch_stride_d,
+                                                   stride_d,
+                                                   &report->q6_store_window_end)) {
+        report->skipped = 1;
+        snprintf(report->status, sizeof(report->status), "%s", "unsupported-q6k-store-window");
+        return;
+    }
     report->q6_weight_base_blocks = weight_base_blocks;
     if (!spirv_local_invocation_count(report->q6_local_size, &report->q6_local_invocations)) {
         report->skipped = 1;
@@ -6920,11 +7180,82 @@ static void run_cpu_oracle_q6k_matvec_sample(
     for (size_t si = 0; si < sample_row_count; ++si) {
         if (sample_rows[si] > UINT32_MAX) continue;
         const uint32_t row = (uint32_t)sample_rows[si];
-        const uint64_t dst_index = output_base_index + (uint64_t)row;
+        uint32_t store_workgroup_x = 0;
+        uint32_t store_workgroup_y = 0;
+        uint32_t store_workgroup_z = 0;
+        uint32_t store_row_in_group = 0;
+        uint64_t store_row = 0;
+        uint64_t dst_index = 0;
+        const uint32_t store_j =
+            q6_num_cols > 1u && (si % 4u == 1u || si % 4u == 3u)
+                ? q6_num_cols - 1u
+                : 0u;
+        store_workgroup_y =
+            dispatch_y > 1u && (si % 4u == 2u || si % 4u == 3u)
+                ? dispatch_y - 1u
+                : 0u;
+        const int store_formula_valid =
+            q6k_row_to_dispatch_coordinates((uint64_t)row,
+                                             dispatch_x,
+                                             dispatch_z,
+                                             q6_num_rows,
+                                             &store_workgroup_x,
+                                             &store_workgroup_z,
+                                             &store_row_in_group) &&
+            q6k_matvec_store_index_from_dispatch(store_j,
+                                                 store_workgroup_x,
+                                                 store_workgroup_y,
+                                                 store_workgroup_z,
+                                                 store_row_in_group,
+                                                 dispatch_x,
+                                                 dispatch_y,
+                                                 dispatch_z,
+                                                 q6_num_rows,
+                                                 q6_num_cols,
+                                                 base_work_group_y,
+                                                 batch_stride_d,
+                                                 stride_d,
+                                                 &dst_index,
+                                                 &store_row);
+        if (!store_formula_valid) {
+            continue;
+        }
+        if (store_j != 0) report->q6_store_index_sampled_nonzero_j = 1;
+        if (store_workgroup_y != 0) report->q6_store_index_sampled_nonzero_y = 1;
+        report->q6_store_index_full_coverage =
+            report->q6_store_index_sampled_nonzero_j &&
+            report->q6_store_index_sampled_nonzero_y;
         if (row >= stride_d ||
-            dst_index >= (uint64_t)stride_d + output_base_index ||
+            dst_index < report->q6_store_window_begin ||
+            dst_index >= report->q6_store_window_end ||
             (dst_index + 1ull) > (uint64_t)SIZE_MAX / sizeof(float) ||
             (size_t)(dst_index + 1ull) * sizeof(float) > bindings[idx2].size) {
+            continue;
+        }
+        const uint64_t effective_batch_y =
+            (uint64_t)base_work_group_y + (uint64_t)store_workgroup_y;
+        if (effective_batch_y > UINT32_MAX) {
+            continue;
+        }
+        uint64_t sample_batch_index = 0;
+        if (!q6k_decode_batch_index((uint32_t)effective_batch_y,
+                                    ne02,
+                                    ne12,
+                                    broadcast2,
+                                    broadcast3,
+                                    &sample_batch_index)) {
+            continue;
+        }
+        const uint64_t sample_weight_base_blocks =
+            sample_batch_index * (uint64_t)(weight_batch_stride_elements / 256u);
+        uint64_t vector_plane = 0;
+        uint64_t vector_base_elements = 0;
+        if (!checked_add_u64((uint64_t)store_j,
+                             effective_batch_y,
+                             &vector_plane) ||
+            !checked_mul_u64(vector_plane,
+                             (uint64_t)batch_stride_b,
+                             &vector_base_elements)) {
             continue;
         }
         double sum = 0.0;
@@ -6947,7 +7278,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
         for (uint32_t block_index = 0; block_index < num_blocks_per_row; ++block_index) {
             uint8_t block[210];
             off_t off = bindings[idx0].offset +
-                        (off_t)((weight_base_blocks +
+                        (off_t)((sample_weight_base_blocks +
                                  (uint64_t)row * num_blocks_per_row + block_index) *
                                 block_bytes);
             if (!q6k_read_block(buffer_fds[idx0], off, block)) {
@@ -6958,7 +7289,7 @@ static void run_cpu_oracle_q6k_matvec_sample(
             for (uint32_t e = 0; e < 256u; ++e) {
                 float b = 0.0f;
                 const off_t b_off = bindings[idx1].offset +
-                                    (off_t)((uint64_t)base_work_group_y * batch_stride_b * sizeof(float)) +
+                                    (off_t)(vector_base_elements * sizeof(float)) +
                                     (off_t)((uint64_t)(block_index * 256u + e) * sizeof(float));
                 if (pread(buffer_fds[idx1], &b, sizeof(b), b_off) != (ssize_t)sizeof(b)) {
                     report->skipped = 1;
@@ -6997,9 +7328,8 @@ static void run_cpu_oracle_q6k_matvec_sample(
                                            row,
                                            tid,
                                            ncols,
-                                           weight_base_blocks,
-                                           batch_stride_b,
-                                           base_work_group_y,
+                                           sample_weight_base_blocks,
+                                           vector_base_elements,
                                            &partials[tid])) {
                 have_partials = 0;
                 break;
@@ -7013,9 +7343,8 @@ static void run_cpu_oracle_q6k_matvec_sample(
                                                        row,
                                                        tid,
                                                        ncols,
-                                                       weight_base_blocks,
-                                                       batch_stride_b,
-                                                       base_work_group_y,
+                                                       sample_weight_base_blocks,
+                                                       vector_base_elements,
                                                        &shader_like_partials[tid])) {
                 have_shader_like_partials = 0;
                 break;
@@ -7044,9 +7373,8 @@ static void run_cpu_oracle_q6k_matvec_sample(
                                                        row,
                                                        tid,
                                                        ncols,
-                                                       weight_base_blocks,
-                                                       batch_stride_b,
-                                                       base_work_group_y,
+                                                       sample_weight_base_blocks,
+                                                       vector_base_elements,
                                                        &shader_like_partials64[tid])) {
                 have_shader_like_partials64 = 0;
                 break;
@@ -7068,8 +7396,15 @@ static void run_cpu_oracle_q6k_matvec_sample(
             dst_base,
             bindings[idx2].size,
             output_base_index,
-            output_base_index + (uint64_t)stride_d,
+            report->q6_store_window_end,
             dst_index,
+            store_formula_valid,
+            store_j,
+            store_workgroup_x,
+            store_workgroup_y,
+            store_workgroup_z,
+            store_row_in_group,
+            store_row,
             expected,
             gpu_before_oracle_writeback);
         q6k_record_partial_signature_probe_sample(
@@ -7158,6 +7493,13 @@ static void run_cpu_oracle_q6k_matvec_sample(
             sample->src0 = (float)row;
             sample->src1 = (float)ncols;
             sample->abs_error = abs_error;
+            sample->q6_store_formula_valid = store_formula_valid;
+            sample->q6_store_j = store_j;
+            sample->q6_store_workgroup_x = store_workgroup_x;
+            sample->q6_store_workgroup_y = store_workgroup_y;
+            sample->q6_store_workgroup_z = store_workgroup_z;
+            sample->q6_store_row_in_group = store_row_in_group;
+            sample->q6_store_row = store_row;
         }
         if (abs_error > 1e-3 && rel_error > 1e-4) {
             if (!report->has_first_mismatch) {
@@ -7168,6 +7510,13 @@ static void run_cpu_oracle_q6k_matvec_sample(
                 report->first_mismatch.src0 = (float)row;
                 report->first_mismatch.src1 = (float)ncols;
                 report->first_mismatch.abs_error = abs_error;
+                report->first_mismatch.q6_store_formula_valid = store_formula_valid;
+                report->first_mismatch.q6_store_j = store_j;
+                report->first_mismatch.q6_store_workgroup_x = store_workgroup_x;
+                report->first_mismatch.q6_store_workgroup_y = store_workgroup_y;
+                report->first_mismatch.q6_store_workgroup_z = store_workgroup_z;
+                report->first_mismatch.q6_store_row_in_group = store_row_in_group;
+                report->first_mismatch.q6_store_row = store_row;
             }
             report->mismatch_count++;
             if (gpu == 0.0f && expected != 0.0f) report->zero_gpu_mismatch_count++;
@@ -7182,6 +7531,13 @@ static void run_cpu_oracle_q6k_matvec_sample(
             window->src0 = expected * 0.5f;
             window->src1 = (float)ncols;
             window->abs_error = abs_error;
+            window->q6_store_formula_valid = store_formula_valid;
+            window->q6_store_j = store_j;
+            window->q6_store_workgroup_x = store_workgroup_x;
+            window->q6_store_workgroup_y = store_workgroup_y;
+            window->q6_store_workgroup_z = store_workgroup_z;
+            window->q6_store_row_in_group = store_row_in_group;
+            window->q6_store_row = store_row;
         }
     }
     q6k_finalize_output_layout_probe(report);
@@ -10539,6 +10895,13 @@ static int run_vulkan_dispatch_fd(
                                          push,
                                          push_size,
                                          q6_resolved_local_size,
+                                         specializations,
+                                         specialization_count,
+                                         specialization_data,
+                                         specialization_data_size,
+                                         gx,
+                                         gy,
+                                         gz,
                                          q6k_oracle_writeback);
     } else {
         run_cpu_oracle_small_f32_indexing(&cpu_oracle_report,

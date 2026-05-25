@@ -4181,6 +4181,19 @@ q6_output_layout_fixed_offset_rejected = (
     and q6_output_layout_found_elsewhere_count > 0
     and q6_output_layout_probe.get("consistent_relative_offset") is False
 )
+q6_output_layout_samples = q6_output_layout_probe.get("samples")
+q6_output_layout_formula_sample_count = (
+    sum(1 for sample in q6_output_layout_samples if isinstance(sample, dict) and sample.get("store_formula_valid") is True)
+    if isinstance(q6_output_layout_samples, list)
+    else 0
+)
+q6_store_index_model_valid = (
+    q6_latest_partial.get("q6_store_index_model_valid") is True
+    and q6_latest_partial.get("q6_store_index_full_coverage") is True
+    and isinstance(q6_output_layout_samples, list)
+    and len(q6_output_layout_samples) > 0
+    and q6_output_layout_formula_sample_count == len(q6_output_layout_samples)
+)
 q6_native_spirv_identity = {
     "source_spirv_hash": q6_latest.get("source_spirv_hash"),
     "effective_spirv_hash": q6_latest.get("effective_spirv_hash"),
@@ -4433,18 +4446,27 @@ q6_blocker_class = (
     if q6_native_vs_writeback_split.get("summary") == "executor-final-writeback"
     else "native-q6-final-store-or-readback"
     if q6_native_vs_writeback_split.get("summary") == "native-final-store-or-readback"
+    else "q6-store-index-model-incomplete"
+    if (
+        q6_output_layout_probe_summary.startswith("canonical-mismatch")
+        and isinstance(q6_output_layout_samples, list)
+        and len(q6_output_layout_samples) > 0
+        and not q6_store_index_model_valid
+    )
+    else "q6-store-index-model-incomplete"
+    if q6_row_provenance_probe_summary == "other-row-match" and not q6_store_index_model_valid
     else "native-q6-output-layout"
-    if q6_output_layout_probe_summary == "canonical-mismatch-found-elsewhere" and q6_writeback_verified_all
+    if q6_output_layout_probe_summary == "canonical-mismatch-found-elsewhere" and q6_writeback_verified_all and q6_store_index_model_valid
     else "native-q6-other-row-output-layout"
-    if q6_row_provenance_probe_summary == "other-row-match" and q6_writeback_verified_all
+    if q6_row_provenance_probe_summary == "other-row-match" and q6_writeback_verified_all and q6_store_index_model_valid
     else "native-q6-local-y-partial-store"
     if q6_partial_signature_probe_summary == "local-y-partial" and q6_writeback_verified_all
     else "native-q6-lane-partial-store"
     if q6_partial_signature_probe_summary == "lane-partial" and q6_writeback_verified_all
     else "native-q6-device-execution-or-final-store"
-    if q6_output_layout_fixed_offset_rejected and q6_shader_like_oracle_cleared and q6_writeback_verified_all
+    if q6_output_layout_fixed_offset_rejected and q6_shader_like_oracle_cleared and q6_writeback_verified_all and q6_store_index_model_valid
     else "native-q6-output-layout-inconclusive"
-    if q6_output_layout_probe_summary == "canonical-mismatch-inconclusive" and q6_writeback_verified_all
+    if q6_output_layout_probe_summary == "canonical-mismatch-inconclusive" and q6_writeback_verified_all and q6_store_index_model_valid
     else "native-q6-reduction-or-device-execution"
     if (
         q6_output_layout_probe_summary == "canonical-mismatch-not-found"
@@ -4493,6 +4515,15 @@ q6_workgroup_diagnostics = {
     "q6_output_base_index": q6_latest_partial.get("q6_output_base_index"),
     "q6_stride_d": q6_latest_partial.get("q6_stride_d"),
     "q6_batch_stride_d": q6_latest_partial.get("q6_batch_stride_d"),
+    "q6_dispatch_groups": q6_latest_partial.get("q6_dispatch_groups"),
+    "q6_block_size": q6_latest_partial.get("q6_block_size"),
+    "q6_num_rows": q6_latest_partial.get("q6_num_rows"),
+    "q6_num_cols": q6_latest_partial.get("q6_num_cols"),
+    "q6_store_index_model_valid": q6_store_index_model_valid,
+    "q6_store_index_sampled_nonzero_j": q6_latest_partial.get("q6_store_index_sampled_nonzero_j"),
+    "q6_store_index_sampled_nonzero_y": q6_latest_partial.get("q6_store_index_sampled_nonzero_y"),
+    "q6_store_index_full_coverage": q6_latest_partial.get("q6_store_index_full_coverage"),
+    "q6_output_layout_formula_sample_count": q6_output_layout_formula_sample_count,
     "q6_store_window_begin": q6_latest_partial.get("q6_store_window_begin"),
     "q6_store_window_end": q6_latest_partial.get("q6_store_window_end"),
     "q6_weight_base_blocks": q6_latest_partial.get("q6_weight_base_blocks"),
