@@ -2187,6 +2187,7 @@ import hashlib
 import math
 import os
 import re
+import struct
 import sys
 import time
 from pathlib import Path
@@ -3648,6 +3649,138 @@ def f32_sample_values(samples):
     return values
 
 
+Q6_FINAL_STORE_TRACE_EXPECTED_RECORDS = (
+    {"probe": 4, "slot_base": 56, "phase": "tail", "candidate_id": 64, "role_code": 4},
+    {"probe": 9, "slot_base": 116, "phase": "full", "candidate_id": 130, "role_code": 4},
+)
+
+
+def q6_u32_samples_to_map(samples):
+    result = {}
+    if not isinstance(samples, list):
+        return result
+    for item in samples:
+        if not isinstance(item, dict):
+            continue
+        index = item.get("index")
+        value = item.get("value")
+        if isinstance(index, int):
+            result[index] = value if isinstance(value, int) else None
+    return result
+
+
+def q6_bits_to_f32(bits):
+    if not isinstance(bits, int):
+        return None
+    return struct.unpack("<f", struct.pack("<I", bits & 0xFFFFFFFF))[0]
+
+
+def parse_q6_final_store_trace_v2(bindings):
+    parsed_bindings = []
+    failures = []
+    for binding in bindings:
+        if not isinstance(binding, dict):
+            continue
+        if binding.get("debug_probe_binding") is not True:
+            continue
+        dispatch = q6_u32_samples_to_map(binding.get("u32_after_dispatch"))
+        writeback = q6_u32_samples_to_map(binding.get("u32_after_writeback"))
+        if not dispatch:
+            continue
+        records = []
+        for expected in Q6_FINAL_STORE_TRACE_EXPECTED_RECORDS:
+            base = int(expected["slot_base"])
+            candidate = dispatch.get(base)
+            role_code = dispatch.get(base + 1)
+            value_bits = dispatch.get(base + 2)
+            output_index = dispatch.get(base + 3)
+            workgroup_id = [dispatch.get(base + offset) for offset in (4, 5, 6)]
+            local_invocation_id = [dispatch.get(base + offset) for offset in (7, 8, 9)]
+            record_schema_version = dispatch.get(base + 10)
+            unexecuted = candidate in (None, 0) and role_code in (None, 0) and value_bits in (None, 0)
+            status = "not-executed" if unexecuted else "pass"
+            record_failures = []
+            if not unexecuted and candidate != expected["candidate_id"]:
+                status = "fail"
+                record_failures.append("candidate-id")
+            if not unexecuted and role_code != expected["role_code"]:
+                status = "fail"
+                record_failures.append("role-code")
+            if unexecuted:
+                trace_status = "not-executed"
+            elif (
+                record_schema_version == 2
+                and isinstance(output_index, int)
+                and all(isinstance(value, int) for value in workgroup_id)
+                and all(isinstance(value, int) for value in local_invocation_id)
+            ):
+                trace_status = "pass"
+            else:
+                trace_status = "fail"
+                record_failures.append("trace-v2-metadata")
+            record = {
+                **expected,
+                "observed_candidate_id": candidate,
+                "observed_role_code": role_code,
+                "value_bits": value_bits,
+                "value_f32": q6_bits_to_f32(value_bits),
+                "output_index": output_index,
+                "workgroup_id": workgroup_id,
+                "local_invocation_id": local_invocation_id,
+                "record_schema_version": record_schema_version,
+                "status": status,
+                "trace_status": trace_status,
+                "failures": record_failures,
+            }
+            if writeback:
+                record.update({
+                    "writeback_candidate_id": writeback.get(base),
+                    "writeback_role_code": writeback.get(base + 1),
+                    "writeback_value_bits": writeback.get(base + 2),
+                    "writeback_value_f32": q6_bits_to_f32(writeback.get(base + 2)),
+                    "writeback_output_index": writeback.get(base + 3),
+                    "writeback_workgroup_id": [writeback.get(base + offset) for offset in (4, 5, 6)],
+                    "writeback_local_invocation_id": [writeback.get(base + offset) for offset in (7, 8, 9)],
+                    "writeback_record_schema_version": writeback.get(base + 10),
+                })
+            if record_failures and not unexecuted:
+                failures.append(
+                    "binding %s probe %s final-store trace failed: %s"
+                    % (binding.get("binding"), expected["probe"], ",".join(record_failures))
+                )
+            records.append(record)
+        parsed_bindings.append({
+            "binding": binding.get("binding"),
+            "set": binding.get("set"),
+            "size": binding.get("size"),
+            "records": records,
+            "executed_final_trace_v2_count": sum(
+                1 for record in records
+                if record.get("status") == "pass" and record.get("trace_status") == "pass"
+            ),
+            "summary": (
+                "pass"
+                if any(
+                    record.get("status") == "pass" and record.get("trace_status") == "pass"
+                    for record in records
+                )
+                else "fail"
+            ),
+        })
+    if parsed_bindings and not any(item["summary"] == "pass" for item in parsed_bindings):
+        failures.append("no executed Q6 final-store trace-v2 record was found")
+    return {
+        "schema": "pdocker.q6k.final-store-trace.v2",
+        "debug_binding_count": len(parsed_bindings),
+        "executed_final_trace_v2_count": sum(
+            item.get("executed_final_trace_v2_count", 0) for item in parsed_bindings
+        ),
+        "bindings": parsed_bindings[:8],
+        "summary": "pass" if parsed_bindings and not failures else "fail" if parsed_bindings else "not-run",
+        "failures": failures[:8],
+    }
+
+
 def q6_oracle_sample_indices(oracle):
     indices = []
 
@@ -3697,6 +3830,7 @@ q6_binding_details = [
     for detail in (q6_latest.get("binding_details") or [])
     if isinstance(detail, dict)
 ]
+
 q6_writable_binding_details = [
     compact_q6_binding_detail(detail)
     for detail in q6_binding_details
@@ -3857,6 +3991,61 @@ q6_first_mismatch = (
     if isinstance(q6_latest_oracle.get("first_mismatch"), dict)
     else {}
 )
+
+def collect_q6_debug_probe_bindings(events):
+    bindings = []
+    seen = set()
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        for detail in event.get("binding_details") or []:
+            if not isinstance(detail, dict):
+                continue
+            if detail.get("debug_probe_binding") is not True:
+                continue
+            if "u32_after_dispatch" not in detail:
+                continue
+            key = (
+                event.get("dispatch_id"),
+                detail.get("set"),
+                detail.get("binding"),
+                detail.get("gpu_after_dispatch_hash"),
+                detail.get("fd_after_hash"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            bindings.append(detail)
+    return bindings
+
+
+q6_debug_u32_probe = parse_q6_final_store_trace_v2(
+    collect_q6_debug_probe_bindings(q6_valid_spirv_events)
+)
+
+
+def classify_q6_debug_u32_probe_blocker(report):
+    if not isinstance(report, dict):
+        return ""
+    if report.get("summary") in {"pass", "not-run"}:
+        return ""
+    failures = "\n".join(str(item) for item in report.get("failures") or [])
+    if "candidate-id" in failures or "role-code" in failures:
+        return "q6-debug-u32-probe-metadata-mismatch"
+    if "writeback" in failures:
+        return "q6-debug-u32-writeback-mismatch"
+    if (
+        "trace-v2-metadata" in failures
+        or "no executed Q6 final-store trace-v2 record" in failures
+        or report.get("executed_final_trace_v2_count") == 0
+    ):
+        return "q6-debug-u32-final-store-trace-missing"
+    if report.get("debug_binding_count") == 0:
+        return "q6-debug-u32-probe-missing"
+    return "q6-debug-u32-probe-invalid"
+
+
+q6_debug_u32_probe_blocker = classify_q6_debug_u32_probe_blocker(q6_debug_u32_probe)
 q6_output_layout_probe = (
     q6_latest_oracle.get("q6_output_layout_probe")
     if isinstance(q6_latest_oracle.get("q6_output_layout_probe"), dict)
@@ -4131,6 +4320,8 @@ q6_blocker_class = (
     if q6_latest_oracle.get("status") == "match"
     else "descriptor-effective-range-or-upload"
     if q6_readonly_upload_hash_mismatches or q6_descriptor_range_mismatches
+    else q6_debug_u32_probe_blocker
+    if q6_debug_u32_probe_blocker
     else "shader-readonly-mutation-or-barrier-scope"
     if q6_unexpected_readonly_dispatch_mutations
     else "writeback"
@@ -4210,6 +4401,8 @@ q6_workgroup_diagnostics = {
     "q6_native_reduction_tree_gpu_abs_error": q6_latest_partial.get("q6_native_reduction_tree_gpu_abs_error"),
     "q6_native_spirv_identity": q6_native_spirv_identity,
     "q6_native_vs_writeback_split": q6_native_vs_writeback_split,
+    "q6_debug_u32_probe": q6_debug_u32_probe,
+    "q6_debug_u32_probe_blocker": q6_debug_u32_probe_blocker,
     "q6_output_layout_probe": q6_output_layout_probe,
     "q6_output_layout_probe_summary": q6_output_layout_probe_summary,
     "q6_output_index_probe_summary": q6_output_index_probe_summary,

@@ -46,7 +46,7 @@ collect these fields before it is considered useful:
 | Transform log | local-size patch result, specialization materialization report, safe-kernel flag, feature policy |
 | Execution | upload/dispatch/download ms, pre/post barriers, fence result, Vulkan result code |
 | Data integrity | before-upload hash, after-upload hash, after-dispatch hash, after-writeback hash |
-| Correctness | prompt result, CPU oracle result when enabled, Q6 sample indices and deltas |
+| Correctness | prompt result, CPU oracle result when enabled, Q6 sample indices and deltas, Q6 final-store trace-v2 record when a debug probe is active |
 | Environment | host Vulkan driver/API version, memory pressure snapshot, swap/low-memory mode |
 
 ## Failure-mode matrix
@@ -65,7 +65,7 @@ collect these fields before it is considered useful:
 | Transfer | Input upload missed bytes | readable binding list, upload hash, skipped upload bytes | Fix descriptor-access reflection or transfer intent |
 | Transfer | Output writeback missed bytes | writable binding list, writeback hash, dirty/writeback evidence | Fix writeback range and alias policy |
 | Synchronization | GPU writes not visible to host | barrier count, fence result, invalidate path, device-local staging result | Fix barrier/fence/cache maintenance path |
-| Shader execution | Native GPU result differs from CPU oracle | CPU oracle, Q6 sample indices, output sample hashes, SPIR-V final-store map | Analyze shader semantics and driver-facing layout before performance work |
+| Shader execution | Native GPU result differs from CPU oracle | CPU oracle, Q6 sample indices, output sample hashes, SPIR-V final-store map, final-store trace-v2 metadata | Analyze shader semantics and driver-facing layout before performance work |
 | Correctness | Prompt result wrong despite oracle pass | prompt response, token log, all dispatch classifications | Expand oracle coverage to the later wrong dispatch family |
 | Performance | Correct output but slow | upload/dispatch/download split, cache hit stats, buffer residency | Tune only after correctness gate passes |
 | Resource pressure | Run killed or partial logs | memory snapshot, last event id, journal path, command lifecycle marker | Add resumable evidence and early ENOMEM; do not infer compute result |
@@ -80,6 +80,7 @@ The next Q6 run should be interpreted as follows:
 | `changed == true` but Q6 still mismatches | Materialization was not sufficient | Compare final-store dataflow and synchronization evidence |
 | `failure_reason == unsupported-spec-expression` | SPIR-V expression support is incomplete | Add exact expression support only if static SPIR-V proves it is specialization-only |
 | `failure_reason == no-changes` | Rewrite request was unnecessary or skip logic still masks all specs | Inspect skip counts and WorkgroupSize subtree evidence |
+| Final-output probe record exists but trace-v2 metadata is missing or invalid | The run cannot distinguish shader final-store math, output index, and readback | Fix probe instrumentation or stale probe bundle handling before interpreting native Q6 |
 | Pipeline/device-lost before Q6 | A non-Q6 shader or driver feature path was affected | Keep Q6 scoping; record offending source/effective hash |
 | Writeback unverified | The result cannot judge shader math | Fix fd/writeback integrity first |
 
@@ -97,4 +98,3 @@ plan already names:
 This is the difference between a trial-and-error loop and a probe.  The device
 run is allowed to surprise us, but it should not leave us without the next
 piece of telemetry.
-

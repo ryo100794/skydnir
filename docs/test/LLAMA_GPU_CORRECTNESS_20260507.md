@@ -35,6 +35,7 @@ match the same model's CPU/no-offload output for the same prompt.
 
 | Artifact | NGL | Variant | GPU tok/s | Speedup vs CPU baseline | Correctness | Probe outputs |
 | --- | ---: | --- | ---: | ---: | --- | --- |
+| `llama-gpu-ngl1-q6-final-store-trace-v2-adb34413-20260525T150834Z.json` | 1 | Q6 final-store trace v2 probe; stale probe bundle was still in use | 0.4702 | 0.0x claim blocked | fail | service reached `/completion` but returned `Marvel`; probe-v2 failed closed |
 | `llama-gpu-compare-20260507-ngl0-correctness-control.json` | 0 | Vulkan path, no GPU layers | 0.2373 | 0.66x | fail | `3`, `7`, empty |
 | `llama-gpu-compare-20260507-ngl1-correctness-gate.json` | 1 | Default bridge settings | 0.2300 | 0.64x | fail | `!`, `!`, `!!!!` |
 | `llama-gpu-compare-20260507-ngl1-no-materialize.json` | 1 | SPIR-V specialization materialization disabled | 0.2858 | 0.79x | fail | `!`, `!`, `!!!!` |
@@ -1170,3 +1171,27 @@ Follow-up implementation:
   `effective_skip_unused_descriptor_transfers`, and
   `effective_spirv_descriptor_access` before claiming this optimization is
   active.
+
+### Q6 final-store trace v2 status (2026-05-25, ADB 192.168.179.21:34413)
+
+Artifacts:
+
+- `docs/test/llama-gpu-ngl1-q6-final-store-trace-v2-adb34413-20260525T150834Z.json`
+- `docs/test/llama-gpu-ngl1-q6-final-store-trace-v2-adb34413-20260525T150834Z-plan-verdict.json`
+- `docs/test/llama-gpu-ngl1-q6-final-store-trace-v2-adb34413-20260525T150834Z-probe-v2.json`
+
+Result: non-promoting fail.  Runtime/service reached HTTP and
+API-executor reconciliation was diagnostic-match, but deterministic
+`/completion` still failed and the probe-v2 report failed closed.
+
+The probe-v2 report found final-output probe records with writeback metadata,
+but no valid executed final-store trace v2 metadata:
+`executed_final_trace_v2_count=0`, `final_store_trace_v2=false`,
+`record_schema_version=0`, and `trace_status=fail` for the observed final-store
+records.  This artifact therefore does not prove native Q6 final-store
+behavior.  It narrowed the next implementation step to preventing stale
+`/tmp/q6write10-bundle` reuse and embedding final-store trace-v2 parsing into
+the compare artifact before interpreting native shader math or output layout.
+
+Current blocker: `final-store-trace-v2-missing-or-invalid`.  No benchmark or
+correctness claim is allowed from this run.

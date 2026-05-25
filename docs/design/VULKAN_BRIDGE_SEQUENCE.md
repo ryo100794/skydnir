@@ -137,7 +137,7 @@ requires it.  Every transformation must be visible in JSON evidence.
 | Descriptor offset/range | `VkDescriptorBufferInfo.offset/range` | descriptor write offset/range | preserve descriptor coordinate system; do not confuse with memory-file offset | `api_offset`, `api_range`, `binding_gpu_offset`, `binding_descriptor_offset` |
 | Buffer/memory identity | ICD logical ids and backing fd | strict object graph or staged buffers | preserve logical identity in strict mode; alias grouping only for transfer efficiency | `strict_object_graph`, `api_memory_id`, `api_buffer_id`, alias hazards |
 | Input bytes | backing fd range | upload to mapped Android VkBuffer memory | read/upload when shader reflection says readable or strict transfer requires it | upload hashes, `read_bindings`, skipped upload bytes |
-| Output bytes | backing fd range | read back after fence/invalidate | write back only shader-writable bindings; preserve alias evidence | writeback hashes, `write_bindings`, dirty/writeback reports |
+| Output bytes | backing fd range | read back after fence/invalidate | write back only shader-writable bindings; preserve alias evidence | writeback hashes, `write_bindings`, dirty/writeback reports, Q6 final-store trace-v2 records when probing |
 | Barriers/fences | submit/wait sequence | Android command buffer barriers + fence wait | required host/device visibility synchronization | `pre_barriers`, `post_barriers`, dispatch timings |
 
 ## SPIR-V processing sequence
@@ -259,6 +259,7 @@ sequenceDiagram
     Executor->>Driver: submit android vulkan dispatch
     Executor->>Report: write hashes and descriptor evidence
     Executor->>Report: write oracle deltas and materialization report
+    Executor->>Report: write optional Q6 final-store trace-v2 records
 ```
 
 Known current state:
@@ -268,9 +269,12 @@ Known current state:
 - Q6 strict passthrough reaches Android Vulkan execution.
 - Q6 writeback from GPU memory to the container range is verified, but output
   correctness is not yet proven.
-- The newest evidence point being added is the specialization materialization
-  decision report, because Q6 currently requests materialization but has not
-  shown an effective rewrite.
+- The newest evidence point is Q6 final-store trace v2.  It records the native
+  shader's final-store candidate id, stored bits, computed output index,
+  workgroup id, and local invocation id before readback/writeback
+  interpretation.  A stale probe bundle produced invalid trace-v2 metadata on
+  2026-05-25; the runner now refreshes the default bundle when probe scripts
+  change.
 
 ## JSON evidence sequence
 
@@ -287,6 +291,7 @@ sequenceDiagram
     Executor->>Json: descriptor reports
     Executor->>Json: cpu oracle report
     Executor->>Json: materialization report
+    Executor->>Json: q6_debug_u32_probe final-store trace-v2 report
     Verifier->>Json: classify readiness and correctness
     Verifier->>Plan: reference evidence path
 ```

@@ -38,7 +38,7 @@ llama.cpp remains unmodified.  The current exact callsite map is:
 |---|---|---|---|
 | Q4_K pre-Q6 pipeline | `0xf3cd7d18f0276b42` | `ggml-vulkan.cpp` creates pipeline `mul_mat_vec_q4_k_f32_f32` from `vulkan-shaders/mul_mat_vec_q4_k.comp`; push struct is `vk_mat_vec_push_constants`; five descriptor buffers are `A/B/D/Fuse0/Fuse1`; specialization constants are `{ BLOCK_SIZE=32, NUM_ROWS=2, NUM_COLS=1/2 }`.  The shader declares three typed views of binding 0 for the same Q4_K block: `block_q4_K`, `block_q4_K_packed16`, and `block_q4_K_packed32`. | Mapped callsite; not a Q5/Q6 dispatch mix-up and not a llama.cpp ABI change. |
 | Q4_K diagnostic variants | `0x853c49b4900eed3c`, `0x22ab0152b230e983` | Same Q4_K callsite after pdocker diagnostic Float16-capability insertion and duplicate-descriptor materialization respectively. | Diagnostic variants only. |
-| Q6_K/final projection | `0x274f68a67dfef210`, `0x1bf751845c5dce75`, `0xe38f6a6a906d765c`, `0xbefdfb97e9734eb3`, `0x09c4622d92c6acb9`, `0x498c69a047eb3b2f`, `0xe5cd19682257a368`, `0x7ec0292e948c9b41` | `mul_mat_vec_q6_k`-like large quantized matvec/final projection with multiple binding-0 views, storage8/storage16/int8 features, `BLOCK_SIZE=32`, `NUM_ROWS=2`, `NUM_COLS=1`; row-indexed writeback and workgroup shape evidence exist. | Full reconciliation not proven; current blocker remains `native-q6-device-execution-or-final-store`. |
+| Q6_K/final projection | `0x274f68a67dfef210`, `0x1bf751845c5dce75`, `0xe38f6a6a906d765c`, `0xbefdfb97e9734eb3`, `0x09c4622d92c6acb9`, `0x498c69a047eb3b2f`, `0xe5cd19682257a368`, `0x7ec0292e948c9b41` | `mul_mat_vec_q6_k`-like large quantized matvec/final projection with multiple binding-0 views, storage8/storage16/int8 features, `BLOCK_SIZE=32`, `NUM_ROWS=2`, `NUM_COLS=1`; row-indexed writeback and workgroup shape evidence exist. | Full reconciliation not proven; final-store trace v2 is now required before promoting any native final-store conclusion. |
 | RoPE/Yarn | `0xac41e8033a67af4a` | llama Vulkan RoPE/Yarn front-blocker shader. | CPU oracle matched in prior evidence; keep as regression guard. |
 | RMSNorm | `0xf2f988b94bd3e0dc` | RMSNorm with optional multiply. | CPU oracle matched in prior evidence; keep as regression guard. |
 | Small f32/indexing controls | `0x7bf05c459ac87f2b`, `0x11d5243c43b23a7b`, `0x11c0523df6c795b8` | Small zero-layer/control shaders used to validate oracle and transport plumbing. | Controls only; not proof of transformer-layer offload. |
@@ -97,6 +97,10 @@ Executor evidence must report these values back in JSON through fields such as
 `binding_details[]`, descriptor write/alias reports, SPIR-V feature and binding
 reflection reports, CPU-oracle report, hashes before upload / after upload /
 after dispatch / after writeback, and Android enabled feature bits on failures.
+When a Q6 debug probe is active, evidence must also include
+`q6_debug_u32_probe` with final-store trace-v2 metadata: candidate id, role,
+stored value bits, computed output index, workgroup id, local invocation id,
+and record schema version.
 
 ## Lossy risk list
 
@@ -211,7 +215,8 @@ blocker:
 17. Missing required API prompt sanity, unless Q6 oracle evidence was reached.
 18. Missing speedup fields, unless Q6 oracle evidence was reached.
 19. Q6 path: not reached, workgroup-shape blocker, writeback mismatch,
-    writeback unverified, oracle match, oracle mismatch, and then more specific
+    writeback unverified, malformed debug probe/final-store trace-v2 evidence,
+    oracle match, oracle mismatch, and then more specific
     native/output-layout/final-store/reduction classifications.
 
 Only `q6-workgroup-cleared-and-oracle-match` can be terminal for correctness,
