@@ -1582,6 +1582,16 @@ class GpuAbiContractTest(unittest.TestCase):
         instrumentation = payload["instrumentation"]
         self.assertEqual(instrumentation["kind"], "q6-debug-ssbo-probe-writes")
         self.assertEqual(instrumentation["executable_probe_writes"], 10)
+        self.assertTrue(
+            all(item.get("schema_version") == 2 for item in instrumentation["probe_writes"])
+        )
+        self.assertTrue(
+            all(
+                "computed_output_index" in item.get("record_layout", {})
+                for item in instrumentation["probe_writes"]
+                if item.get("role") == "final_output_store"
+            )
+        )
         self.assertEqual(
             [item["role"] for item in instrumentation["probe_writes"]],
             [

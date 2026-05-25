@@ -126,6 +126,11 @@ ROLE_CODES = {
     "final_output_store": 4,
 }
 
+PHASE_CODES = {
+    "tail": 1,
+    "full": 2,
+}
+
 
 def collect_probe_targets(manifest_path: Path | None, enabled: bool) -> list[dict[str, Any]]:
     if not enabled:
@@ -171,6 +176,42 @@ def result_type_by_id(lines: list[str]) -> dict[int, str]:
     return result_types
 
 
+def pointer_access_chain_operands_by_id(lines: list[str]) -> dict[int, list[str]]:
+    access_chains: dict[int, list[str]] = {}
+    pattern = re.compile(
+        r"^\s*%(?P<id>\d+)\s*=\s*OpAccessChain\s+%\d+\s+%(?P<base>\d+)(?P<operands>.*)$"
+    )
+    operand_pattern = re.compile(r"%\d+")
+    for line in lines:
+        match = pattern.match(line)
+        if not match:
+            continue
+        operands = [f"%{match.group('base')}"]
+        operands.extend(operand_pattern.findall(match.group("operands")))
+        access_chains[int(match.group("id"))] = operands
+    return access_chains
+
+
+def find_pointer_type_id(lines: list[str], storage_class: str, pointee_type: str) -> str | None:
+    pattern = re.compile(
+        rf"^\s*(%\d+)\s*=\s*OpTypePointer\s+{re.escape(storage_class)}\s+{re.escape(pointee_type)}\s*$"
+    )
+    for line in lines:
+        match = pattern.match(line)
+        if match:
+            return match.group(1)
+    return None
+
+
+def find_builtin_variable_id(lines: list[str], builtin_name: str) -> str | None:
+    pattern = re.compile(rf"^\s*OpDecorate\s+(%\d+)\s+BuiltIn\s+{re.escape(builtin_name)}\s*$")
+    for line in lines:
+        match = pattern.match(line)
+        if match:
+            return match.group(1)
+    return None
+
+
 def insert_probe_writes(
         lines: list[str],
         targets: list[dict[str, Any]],
@@ -181,6 +222,10 @@ def insert_probe_writes(
     if not targets:
         return lines, [], next_id
     types = result_type_by_id(lines)
+    access_chains = pointer_access_chain_operands_by_id(lines)
+    ptr_input_u32_id = find_pointer_type_id(lines, "Input", uint32_type)
+    workgroup_id_var = find_builtin_variable_id(lines, "WorkgroupId")
+    local_invocation_id_var = find_builtin_variable_id(lines, "LocalInvocationId")
     slot_constants: dict[int, int] = {}
     value_constants: dict[int, int] = {}
     constants: list[str] = []
@@ -204,10 +249,13 @@ def insert_probe_writes(
     for target_index, target in enumerate(targets):
         base = 8 + target_index * 12
         target["slot_base"] = base
-        for offset in range(4):
+        for offset in range(11):
             slot_id(base + offset)
         const_id(int(target["candidate_id"]))
         const_id(int(target["role_code"]))
+    const_id(0)
+    const_id(1)
+    const_id(2)
 
     insert_at = find_first_function_index(lines)
     lines[insert_at:insert_at] = constants
@@ -245,6 +293,51 @@ def insert_probe_writes(
             (1, const_id(int(target["role_code"]))),
             (2, value_id),
         ]
+        computed_index_id: int | None = None
+        if target.get("role") == "final_output_store":
+            if not ptr_input_u32_id or not workgroup_id_var or not local_invocation_id_var:
+                raise SystemExit("final-output Q6 probe requires WorkgroupId and LocalInvocationId builtins")
+            pointer_operands = access_chains.get(pointer)
+            if not pointer_operands:
+                raise SystemExit(f"final-output Q6 probe pointer %{pointer} has no access-chain operands")
+            computed_index = pointer_operands[-1]
+            try:
+                computed_index_id = int(computed_index.lstrip("%"))
+            except ValueError as exc:
+                raise SystemExit(f"final-output Q6 computed output index is not an id: {computed_index}") from exc
+            if types.get(computed_index_id) != uint32_type:
+                raise SystemExit(
+                    f"final-output Q6 computed output index %{computed_index_id} has unsupported type "
+                    f"{types.get(computed_index_id)}"
+                )
+
+            def load_builtin_component(variable: str, component: int) -> int:
+                nonlocal next_id
+                ptr = next_id
+                value = next_id + 1
+                next_id += 2
+                out.append(f"{indent}%{ptr} = OpAccessChain {ptr_input_u32_id} {variable} %{const_id(component)}\n")
+                out.append(f"{indent}%{value} = OpLoad {uint32_type} %{ptr}\n")
+                return value
+
+            workgroup_values = [
+                load_builtin_component(workgroup_id_var, component) for component in range(3)
+            ]
+            local_values = [
+                load_builtin_component(local_invocation_id_var, component) for component in range(3)
+            ]
+            fields.extend(
+                [
+                    (3, computed_index_id),
+                    (4, workgroup_values[0]),
+                    (5, workgroup_values[1]),
+                    (6, workgroup_values[2]),
+                    (7, local_values[0]),
+                    (8, local_values[1]),
+                    (9, local_values[2]),
+                    (10, const_id(2)),
+                ]
+            )
         for slot_offset, source_id in fields:
             ptr_id = next_id
             next_id += 1
@@ -253,13 +346,29 @@ def insert_probe_writes(
             )
             out.append(f"{indent}OpStore %{ptr_id} %{source_id}\n")
         emitted.append({
+            "schema_version": 2,
             "candidate_id": int(target["candidate_id"]),
             "role": target["role"],
+            "role_code": int(target["role_code"]),
             "phase": target["phase"],
+            "phase_code": int(PHASE_CODES.get(str(target.get("phase") or ""), 0)),
             "pointer_id": pointer,
             "object_id": obj,
             "value_bitcast": bool(bitcast_id),
             "slot_base": base,
+            "record_layout": {
+                "candidate_id": base,
+                "role_code": base + 1,
+                "stored_value_bits": base + 2,
+                "computed_output_index": base + 3,
+                "workgroup_x": base + 4,
+                "workgroup_y": base + 5,
+                "workgroup_z": base + 6,
+                "local_x": base + 7,
+                "local_y": base + 8,
+                "local_z": base + 9,
+                "schema_version": base + 10,
+            },
         })
     missing = [
         f"{t['role']}:{t['candidate_id']} %{t['pointer_id']} %{t['object_id']}"

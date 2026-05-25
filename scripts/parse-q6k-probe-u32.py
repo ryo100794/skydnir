@@ -171,6 +171,10 @@ def parse_binding(binding: dict[str, Any]) -> dict[str, Any]:
         candidate = dispatch.get(base)
         role_code = dispatch.get(base + 1)
         value_bits = dispatch.get(base + 2)
+        output_index = dispatch.get(base + 3)
+        workgroup_id = [dispatch.get(base + offset) for offset in (4, 5, 6)]
+        local_invocation_id = [dispatch.get(base + offset) for offset in (7, 8, 9)]
+        record_schema_version = dispatch.get(base + 10)
         unexecuted = candidate in (None, 0) and role_code in (None, 0) and value_bits in (None, 0)
         status = "not-executed" if unexecuted else "pass"
         if not unexecuted and candidate != expected["candidate_id"]:
@@ -185,24 +189,55 @@ def parse_binding(binding: dict[str, Any]) -> dict[str, Any]:
                 f"probe {expected['probe']} role mismatch: expected "
                 f"{expected['role_code']} got {role_code}"
             )
+        is_final_output = expected["role"] == "final_output_store"
+        trace_status = "not-applicable"
+        if is_final_output:
+            if unexecuted:
+                trace_status = "not-executed"
+            elif (
+                record_schema_version == 2
+                and isinstance(output_index, int)
+                and all(isinstance(value, int) for value in workgroup_id)
+                and all(isinstance(value, int) for value in local_invocation_id)
+            ):
+                trace_status = "pass"
+            else:
+                trace_status = "fail"
+                failures.append(
+                    f"probe {expected['probe']} final-output trace metadata missing or invalid"
+                )
         record = {
             **expected,
             "observed_candidate_id": candidate,
             "observed_role_code": role_code,
             "value_bits": value_bits,
             "value_f32": bits_to_f32(value_bits),
+            "record_schema_version": record_schema_version,
+            "output_index": output_index,
+            "workgroup_id": workgroup_id,
+            "local_invocation_id": local_invocation_id,
+            "trace_status": trace_status,
+            "final_store_trace_v2": trace_status == "pass",
             "status": status,
         }
         if writeback:
             wb_candidate = writeback.get(base)
             wb_role_code = writeback.get(base + 1)
             wb_value_bits = writeback.get(base + 2)
+            wb_output_index = writeback.get(base + 3)
+            wb_workgroup_id = [writeback.get(base + offset) for offset in (4, 5, 6)]
+            wb_local_invocation_id = [writeback.get(base + offset) for offset in (7, 8, 9)]
+            wb_record_schema_version = writeback.get(base + 10)
             record.update(
                 {
                     "writeback_candidate_id": wb_candidate,
                     "writeback_role_code": wb_role_code,
                     "writeback_value_bits": wb_value_bits,
                     "writeback_value_f32": bits_to_f32(wb_value_bits),
+                    "writeback_record_schema_version": wb_record_schema_version,
+                    "writeback_output_index": wb_output_index,
+                    "writeback_workgroup_id": wb_workgroup_id,
+                    "writeback_local_invocation_id": wb_local_invocation_id,
                     "writeback_status": (
                         "pass"
                         if wb_candidate == expected["candidate_id"]
@@ -223,7 +258,7 @@ def parse_binding(binding: dict[str, Any]) -> dict[str, Any]:
     expected_slots = set(range(0, 8))
     for expected in EXPECTED_RECORDS:
         base = int(expected["slot_base"])
-        expected_slots.update((base, base + 1, base + 2))
+        expected_slots.update(range(base, base + 11))
     unexpected_nonzero = [
         {"index": index, "value": value}
         for index, value in sorted(dispatch.items())
@@ -240,10 +275,19 @@ def parse_binding(binding: dict[str, Any]) -> dict[str, Any]:
             for record in records
             if record["status"] == "pass" and record["role"] == "final_output_store"
         ),
+        "executed_final_trace_v2_count": sum(
+            1
+            for record in records
+            if record["status"] == "pass"
+            and record["role"] == "final_output_store"
+            and record.get("trace_status") == "pass"
+        ),
         "unexpected_nonzero_slots": unexpected_nonzero,
         "summary": "pass"
         if not failures and any(
-            record["status"] == "pass" and record["role"] == "final_output_store"
+            record["status"] == "pass"
+            and record["role"] == "final_output_store"
+            and record.get("trace_status") == "pass"
             for record in records
         )
         else "fail",
@@ -264,7 +308,7 @@ def parse_artifact(data: Any) -> dict[str, Any]:
     if not bindings:
         failures.append("no debug_probe_binding with u32_after_dispatch was found")
     return {
-        "schema": "pdocker.q6k.debug-u32-probe-report.v1",
+        "schema": "pdocker.q6k.debug-u32-probe-report.v2",
         "debug_binding_count": len(bindings),
         "expected_record_count": len(EXPECTED_RECORDS),
         "bindings": parsed,
