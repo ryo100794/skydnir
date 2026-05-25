@@ -57,11 +57,16 @@ WAIT_SERVER_PROGRESS_INTERVAL_SEC="${PDOCKER_LLAMA_WAIT_SERVER_PROGRESS_INTERVAL
 WAIT_SERVER_CURL_TIMEOUT_SEC="${PDOCKER_LLAMA_WAIT_SERVER_CURL_TIMEOUT_SEC:-2}"
 COMPARE_ARTIFACT_DIR="${PDOCKER_LLAMA_COMPARE_ARTIFACT_DIR:-}"
 STOP_STALE_TARGET_BEFORE_PREFLIGHT="${PDOCKER_LLAMA_STOP_STALE_TARGET_BEFORE_PREFLIGHT:-1}"
+ADB_KEEPALIVE="${PDOCKER_ADB_KEEPALIVE:-1}"
+ADB_KEEPALIVE_INTERVAL_SEC="${PDOCKER_ADB_KEEPALIVE_INTERVAL_SEC:-8}"
+ADB_KEEPALIVE_TIMEOUT_SEC="${PDOCKER_ADB_KEEPALIVE_TIMEOUT_SEC:-5}"
+ANDROID_SAME_DEVICE_HTTP="${PDOCKER_ANDROID_SAME_DEVICE_HTTP:-0}"
 EXPECTED_GPU_EXECUTOR_MARKER="${PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER:-gpu-executor-llama-q4k-callsite-20260520}"
 EXPECTED_VULKAN_ICD_MARKER="${PDOCKER_VULKAN_ICD_EXPECTED_MARKER:-vulkan-icd-feature-chain-marker-20260518}"
 OP_ID="llama-gpu-compare-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 CURRENT_CONTAINER_ID=""
 COMPARE_RESULT_READY=0
+ADB_KEEPALIVE_PID=""
 
 usage() {
   cat <<EOF
@@ -131,6 +136,18 @@ compare_artifact_dir() {
     printf "%s" "$COMPARE_ARTIFACT_DIR"
   else
     printf "%s/%s-artifacts" "$(dirname "$OUT")" "$(basename "${OUT%.json}")"
+  fi
+}
+
+same_device_http_enabled() {
+  [[ "$ANDROID_SAME_DEVICE_HTTP" == "1" ]]
+}
+
+llama_base_url() {
+  if same_device_http_enabled; then
+    printf "http://127.0.0.1:%s" "$REMOTE_PORT"
+  else
+    printf "http://127.0.0.1:%s" "$LOCAL_PORT"
   fi
 }
 
@@ -297,6 +314,7 @@ PY
 
 cleanup() {
   local status="$?"
+  stop_adb_keepalive
   if [[ "$status" -ne 0 ]]; then
     write_failure_artifact "$status" >/dev/null 2>&1 || true
     operation_notify "failed" "$CURRENT_STAGE failed with exit code $status" 1 >/dev/null 2>&1 || true
@@ -309,7 +327,9 @@ cleanup() {
     fi
   fi
   rm -rf "$TMP"
-  "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
+  if ! same_device_http_enabled; then
+    "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 
@@ -411,6 +431,47 @@ run_as() {
   return "$rc"
 }
 
+adb_transport_state() {
+  "$ADB" get-state 2>/dev/null | tr -d '\r' || true
+}
+
+adb_transport_ok() {
+  [[ "$(adb_transport_state)" == "device" ]]
+}
+
+start_adb_keepalive() {
+  if [[ "$ADB_KEEPALIVE" != "1" ]]; then
+    return 0
+  fi
+  mkdir -p "$(compare_artifact_dir)"
+  local log_path
+  log_path="$(compare_artifact_dir)/adb-keepalive.jsonl"
+  (
+    while true; do
+      python3 - "$log_path" "tick" <<'PY' || true
+import json, sys, time
+with open(sys.argv[1], "a", encoding="utf-8") as f:
+    f.write(json.dumps({"ts": time.time(), "event": sys.argv[2]}, separators=(",", ":")) + "\n")
+PY
+      if command -v timeout >/dev/null 2>&1; then
+        timeout "${ADB_KEEPALIVE_TIMEOUT_SEC}s" "$ADB" shell ':' >/dev/null 2>&1 || true
+      else
+        "$ADB" shell ':' >/dev/null 2>&1 || true
+      fi
+      sleep "$ADB_KEEPALIVE_INTERVAL_SEC"
+    done
+  ) &
+  ADB_KEEPALIVE_PID="$!"
+}
+
+stop_adb_keepalive() {
+  if [[ -n "${ADB_KEEPALIVE_PID:-}" ]]; then
+    kill "$ADB_KEEPALIVE_PID" >/dev/null 2>&1 || true
+    wait "$ADB_KEEPALIVE_PID" >/dev/null 2>&1 || true
+    ADB_KEEPALIVE_PID=""
+  fi
+}
+
 start_daemon_for_test() {
   "$ADB" shell am broadcast \
     -n "$PKG/$CLASS_PREFIX.PdockerdDebugReceiver" \
@@ -470,8 +531,16 @@ stop_stale_target_if_engine_alive() {
 
 wait_for_engine() {
   local i
+  if ! adb_transport_ok; then
+    echo "[pdocker llama compare] adb transport lost before pdockerd startup: state=$(adb_transport_state)" >&2
+    return 111
+  fi
   start_daemon_for_test
   for i in $(seq 1 45); do
+    if ! adb_transport_ok; then
+      echo "[pdocker llama compare] adb transport lost while waiting for pdockerd: state=$(adb_transport_state) attempt=$i/45" >&2
+      return 111
+    fi
     if run_as 'cd files && test -S pdocker/pdockerd.sock && { printf "GET /_ping HTTP/1.1\r\nHost: pdocker\r\nConnection: close\r\n\r\n"; } | toybox nc -U -W 3 pdocker/pdockerd.sock | grep -q OK' >/dev/null 2>&1; then
       return 0
     fi
@@ -1415,13 +1484,21 @@ wait_server() {
   local started now elapsed next_progress http_status container_status ref curl_exit curl_http_code http_probe port_forward_state wait_failure_class
   started="$(date +%s)"
   next_progress=0
-  "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
-  port_forward_state="ok"
-  if ! "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null 2>&1; then
-    port_forward_state="failed"
-    ref="$(container_ref)"
-    record_wait_server_event "$phase" 0 "$seconds" "fail" "not-checked" "$ref" "" "" "curl-error" "$port_forward_state" "port-forward-failed"
-    return 1
+  if same_device_http_enabled; then
+    port_forward_state="same-device-direct"
+  else
+    "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
+    port_forward_state="ok"
+    if ! "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null 2>&1; then
+      port_forward_state="failed"
+      ref="$(container_ref)"
+      if ! adb_transport_ok; then
+        record_wait_server_event "$phase" 0 "$seconds" "fail" "not-checked" "$ref" "" "" "adb-transport-lost" "$port_forward_state" "adb-transport-lost"
+      else
+        record_wait_server_event "$phase" 0 "$seconds" "fail" "not-checked" "$ref" "" "" "curl-error" "$port_forward_state" "port-forward-failed"
+      fi
+      return 1
+    fi
   fi
   curl_exit=""
   curl_http_code=""
@@ -1444,13 +1521,21 @@ wait_server() {
       record_wait_server_event "$phase" "$elapsed" "$seconds" "timeout" "$container_status" "$ref" "$curl_exit" "$curl_http_code" "$http_probe" "$port_forward_state" "$wait_failure_class"
       return 1
     fi
-    runtime_memory_headroom_ok "wait-server" || return 2
+    if ! same_device_http_enabled && ! adb_transport_ok; then
+      ref="$(container_ref)"
+      echo "[pdocker llama compare] adb transport lost while waiting for $phase server: elapsed=${elapsed}/${seconds}s state=$(adb_transport_state)" >&2
+      record_wait_server_event "$phase" "$elapsed" "$seconds" "fail" "not-checked" "$ref" "$curl_exit" "$curl_http_code" "adb-transport-lost" "$port_forward_state" "adb-transport-lost"
+      return 111
+    fi
+    if ! same_device_http_enabled; then
+      runtime_memory_headroom_ok "wait-server" || return 2
+    fi
     http_status="fail"
     container_status="not-checked"
     curl_http_code="$(
       curl -sS -o /dev/null -w '%{http_code}' \
         --max-time "$WAIT_SERVER_CURL_TIMEOUT_SEC" \
-        "http://127.0.0.1:$LOCAL_PORT/v1/models" 2>/dev/null
+        "$(llama_base_url)/v1/models" 2>/dev/null
     )"
     curl_exit="$?"
     case "$curl_exit:$curl_http_code" in
@@ -1464,6 +1549,14 @@ wait_server() {
     wait_failure_class="$http_probe"
     if [[ "$http_probe" == "ok" ]]; then
       http_status="ok"
+      if same_device_http_enabled; then
+        container_status="http-ready-direct"
+        ref="$(container_ref)"
+        echo "[pdocker llama compare] $phase server is reachable via same-device HTTP: elapsed=${elapsed}/${seconds}s id=${ref:0:12}" >&2
+        operation_notify "running" "$phase: llama HTTP server reachable after ${elapsed}s"
+        record_wait_server_event "$phase" "$elapsed" "$seconds" "$http_status" "$container_status" "$ref" "$curl_exit" "$curl_http_code" "$http_probe" "$port_forward_state" "ready"
+        return 0
+      fi
       if container_running; then
         container_status="running"
         ref="$(container_ref)"
@@ -1799,9 +1892,13 @@ bench_http() {
 probe_http_correctness() {
   local mode="$1"
   local out="$2"
-  "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
-  "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
-  python3 - "http://127.0.0.1:$LOCAL_PORT" "$mode" "$GPU_LAYERS" "$MODEL_PATH" "$out" "$CORRECTNESS_TIMEOUT_SEC" <<'PY'
+  local base_url
+  base_url="$(llama_base_url)"
+  if ! same_device_http_enabled; then
+    "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
+    "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
+  fi
+  python3 - "$base_url" "$mode" "$GPU_LAYERS" "$MODEL_PATH" "$out" "$CORRECTNESS_TIMEOUT_SEC" <<'PY'
 import json
 import os
 import sys
@@ -1929,9 +2026,13 @@ PY
 probe_service_readiness() {
   local mode="$1"
   local out="$2"
-  "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
-  "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
-  python3 - "http://127.0.0.1:$LOCAL_PORT" "$mode" "$GPU_LAYERS" "$MODEL_PATH" "$out" "$COMPLETION_READY_TIMEOUT_SEC" <<'PY'
+  local base_url
+  base_url="$(llama_base_url)"
+  if ! same_device_http_enabled; then
+    "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
+    "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
+  fi
+  python3 - "$base_url" "$mode" "$GPU_LAYERS" "$MODEL_PATH" "$out" "$COMPLETION_READY_TIMEOUT_SEC" <<'PY'
 import json
 import sys
 import time
@@ -2079,6 +2180,8 @@ print(json.dumps(report["summary"], indent=2))
 raise SystemExit(0 if report["summary"]["ready"] else 1)
 PY
 }
+
+start_adb_keepalive
 
 CURRENT_STAGE="runtime env record"
 record_manifest_runtime_env "$RUNTIME_ENV_RECORD_JSON"
