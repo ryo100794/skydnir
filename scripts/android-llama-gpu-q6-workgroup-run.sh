@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+ENV_MANIFEST="$ROOT/scripts/llama-gpu-env-manifest.json"
 
 SERIAL="${ANDROID_SERIAL:-}"
 OUT=""
@@ -44,6 +45,34 @@ Options:
 This runner intentionally does not rebuild the llama image and does not modify
 llama.cpp, Dockerfiles, models, or prompts.
 USAGE
+}
+
+export_q6_required_env_overlay() {
+  local env_file
+  env_file="$(mktemp)"
+  python3 - "$ENV_MANIFEST" >"$env_file" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+overlay = manifest.get("q6_required_env_overlay")
+if not isinstance(overlay, dict) or not overlay:
+    raise SystemExit(f"missing q6_required_env_overlay in {manifest_path}")
+for key, value in sorted(overlay.items()):
+    if not isinstance(key, str) or not re.fullmatch(r"PDOCKER_[A-Z0-9_]+", key):
+        raise SystemExit(f"invalid Q6 env key in {manifest_path}: {key!r}")
+    if not isinstance(value, str) or "\n" in value or "\0" in value:
+        raise SystemExit(f"invalid Q6 env value for {key} in {manifest_path}")
+    print(f"{key}={value}")
+PY
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    export "$line"
+  done <"$env_file"
+  rm -f "$env_file"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -147,17 +176,10 @@ set -a
 # shellcheck source=/dev/null
 . "$PROBE_ENV"
 set +a
+export_q6_required_env_overlay
 
 echo "[pdocker q6 workgroup] compare output: $OUT"
 ANDROID_SERIAL="$SERIAL" \
-PDOCKER_GPU_CPU_ORACLE=1 \
-PDOCKER_GPU_STRICT_PASSTHROUGH=1 \
-PDOCKER_GPU_STRICT_RECONCILIATION=1 \
-PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION=1 \
-PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC=1 \
-PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS=1 \
-PDOCKER_GPU_DISPATCH_PROFILE_LOG=1 \
-PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1 \
 PDOCKER_ADB_KEEPALIVE="${PDOCKER_ADB_KEEPALIVE:-1}" \
 PDOCKER_ANDROID_SAME_DEVICE_HTTP="${PDOCKER_ANDROID_SAME_DEVICE_HTTP:-1}" \
 bash scripts/android-llama-gpu-compare.sh \

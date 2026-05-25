@@ -238,6 +238,21 @@ class GpuAbiContractTest(unittest.TestCase):
         })
         self.assertIn("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING", manifest_options["size"])
         self.assertIn("PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING", manifest["compare_probe_env_keys"])
+        q6_overlay = manifest["q6_required_env_overlay"]
+        self.assertEqual(
+            {
+                "PDOCKER_GPU_CPU_ORACLE": "1",
+                "PDOCKER_GPU_STRICT_PASSTHROUGH": "1",
+                "PDOCKER_GPU_STRICT_RECONCILIATION": "1",
+                "PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION": "1",
+                "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC": "1",
+                "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS": "1",
+                "PDOCKER_GPU_DISPATCH_PROFILE_LOG": "1",
+                "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE": "1",
+            },
+            q6_overlay,
+        )
+        self.assertLessEqual(set(q6_overlay), set(manifest["compare_forward_env_keys"]))
 
     def test_spirv_probe_replay_uses_existing_v4_binding_transport(self):
         icd = VULKAN_ICD.read_text()
@@ -2374,13 +2389,9 @@ class GpuAbiContractTest(unittest.TestCase):
         runner = (ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh").read_text()
         self.assertIn("verify-q6-workgroup-lowering-preflight.py", runner)
         self.assertIn("android-llama-gpu-readiness.sh", runner)
-        self.assertIn("PDOCKER_GPU_STRICT_PASSTHROUGH=1", runner)
-        self.assertIn("PDOCKER_GPU_STRICT_RECONCILIATION=1", runner)
-        self.assertIn("PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION=1", runner)
-        self.assertIn("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC=1", runner)
-        self.assertIn("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS=1", runner)
-        self.assertIn("PDOCKER_GPU_CPU_ORACLE=1", runner)
-        self.assertIn("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1", runner)
+        self.assertNotIn("PDOCKER_GPU_STRICT_PASSTHROUGH=1", runner)
+        self.assertNotIn("PDOCKER_GPU_STRICT_RECONCILIATION=1", runner)
+        self.assertNotIn("PDOCKER_GPU_CPU_ORACLE=1", runner)
         self.assertIn("android-llama-gpu-compare.sh", runner)
         self.assertIn("--require-q6-workgroup-clear", runner)
         self.assertIn("does not rebuild the llama image", runner)
@@ -2396,9 +2407,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("scripts/prepare-q6k-noop-probe.sh", runner)
         self.assertIn("--probe-writes", runner)
         self.assertIn("instrument-spirv-noop-probe.py", runner)
-        inline_required_env = dict(
-            re.findall(r'^((?:PDOCKER_GPU|PDOCKER_ADB|PDOCKER_ANDROID)_[A-Z0-9_]+)="?([^"\s]+)"? \\', runner, re.M)
-        )
+        self.assertIn("llama-gpu-env-manifest.json", runner)
+        self.assertIn("q6_required_env_overlay", runner)
+        manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text(encoding="utf-8"))
+        manifest_overlay = manifest["q6_required_env_overlay"]
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -2438,10 +2450,8 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("--cpu-ctx", compare_step["required_flags"])
             self.assertIn("--gpu-ctx", compare_step["required_flags"])
             self.assertEqual(plan_data["q6_required_env_overlay"], compare_step["required_env_overlay"])
-            self.assertEqual(plan_data["q6_required_env_overlay"], {
-                key: inline_required_env[key]
-                for key in plan_data["q6_required_env_overlay"]
-            })
+            self.assertEqual(manifest_overlay, plan_data["q6_required_env_overlay"])
+            self.assertEqual(manifest_overlay, compare_step["required_env_overlay"])
 
     def test_q6_preflight_planner_names_evidence_and_branches_before_adb(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2459,6 +2469,8 @@ class GpuAbiContractTest(unittest.TestCase):
                 cwd=ROOT,
             )
             plan = json.loads(out.read_text(encoding="utf-8"))
+        manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text(encoding="utf-8"))
+        manifest_overlay = manifest["q6_required_env_overlay"]
 
         self.assertEqual("pdocker.llama.gpu.q6.preflight-plan.v1", plan["schema"])
         self.assertEqual(
@@ -2480,6 +2492,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         compare_step = next(step for step in plan["runner_step_contract"] if step["name"] == "compare")
         self.assertTrue(compare_step["touches_adb"])
+        self.assertEqual(manifest_overlay, plan["q6_required_env_overlay"])
+        self.assertEqual(manifest_overlay, compare_step["required_env_overlay"])
         self.assertEqual("1", compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_PASSTHROUGH"])
         self.assertEqual("1", compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_RECONCILIATION"])
         self.assertEqual(

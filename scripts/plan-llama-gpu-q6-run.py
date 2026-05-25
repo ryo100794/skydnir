@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MATRIX = ROOT / "docs" / "design" / "VULKAN_BRIDGE_PROBE_MATRIX.md"
 RUNNER = ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh"
+ENV_MANIFEST = ROOT / "scripts" / "llama-gpu-env-manifest.json"
 
 
 REQUIRED_EVIDENCE_FIELDS = [
@@ -39,16 +40,22 @@ REQUIRED_EVIDENCE_FIELDS = [
     "download_ms",
 ]
 
-Q6_REQUIRED_ENV_OVERLAY = {
-    "PDOCKER_GPU_CPU_ORACLE": "1",
-    "PDOCKER_GPU_STRICT_PASSTHROUGH": "1",
-    "PDOCKER_GPU_STRICT_RECONCILIATION": "1",
-    "PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION": "1",
-    "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC": "1",
-    "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS": "1",
-    "PDOCKER_GPU_DISPATCH_PROFILE_LOG": "1",
-    "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE": "1",
-}
+def load_q6_required_env_overlay() -> dict[str, str]:
+    manifest = json.loads(ENV_MANIFEST.read_text(encoding="utf-8"))
+    overlay = manifest.get("q6_required_env_overlay")
+    if not isinstance(overlay, dict) or not overlay:
+        raise SystemExit(f"missing q6_required_env_overlay in {ENV_MANIFEST}")
+    result: dict[str, str] = {}
+    for key, value in overlay.items():
+        if not isinstance(key, str) or not key.startswith("PDOCKER_"):
+            raise SystemExit(f"invalid Q6 env key in {ENV_MANIFEST}: {key!r}")
+        if not isinstance(value, str):
+            raise SystemExit(f"invalid Q6 env value for {key} in {ENV_MANIFEST}")
+        result[key] = value
+    return result
+
+
+Q6_REQUIRED_ENV_OVERLAY = load_q6_required_env_overlay()
 
 RUNNER_STEP_CONTRACT = [
     {
