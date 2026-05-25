@@ -16,6 +16,7 @@ PREDICT="4"
 REPEAT="1"
 PLAN_OUT="docs/test/llama-gpu-q6-preflight-plan-latest.json"
 VERDICT_OUT=""
+DRY_RUN=0
 
 usage() {
   cat <<'USAGE'
@@ -33,6 +34,7 @@ Options:
   --repeat N            Repeat count. Default: 1.
   --plan-out PATH       Pre-flight plan path. Default: docs/test/llama-gpu-q6-preflight-plan-latest.json.
   --verdict-out PATH    Plan verdict path. Defaults to <out>-plan-verdict.json.
+  --dry-run             Write the pre-flight plan only. Do not touch ADB or device files.
 
 This runner intentionally does not rebuild the llama image and does not modify
 llama.cpp, Dockerfiles, models, or prompts.
@@ -51,28 +53,25 @@ while [[ $# -gt 0 ]]; do
     --repeat) REPEAT="${2:?missing repeat}"; shift 2 ;;
     --plan-out) PLAN_OUT="${2:?missing plan output path}"; shift 2 ;;
     --verdict-out) VERDICT_OUT="${2:?missing verdict output path}"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
-if [[ -z "$SERIAL" ]]; then
-  echo "ANDROID_SERIAL or --serial is required" >&2
-  exit 2
-fi
-if [[ ! -f "$SPV" ]]; then
-  echo "missing Q6 SPIR-V sample: $SPV" >&2
-  exit 2
-fi
-if [[ ! -f "$PROBE_ENV" ]]; then
-  echo "missing probe env: $PROBE_ENV" >&2
-  exit 2
-fi
 if [[ -z "$OUT" ]]; then
   OUT="docs/test/llama-gpu-ngl${GPU_LAYERS}-q6-workgroup-legalized-$(date -u +%Y%m%dT%H%M%SZ).json"
 fi
 if [[ -z "$VERDICT_OUT" ]]; then
   VERDICT_OUT="${OUT%.json}-plan-verdict.json"
+fi
+if [[ -z "$SERIAL" ]]; then
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    SERIAL="adb-not-used"
+  else
+    echo "ANDROID_SERIAL or --serial is required" >&2
+    exit 2
+  fi
 fi
 
 echo "[pdocker q6 workgroup] plan: $PLAN_OUT"
@@ -83,6 +82,20 @@ python3 scripts/plan-llama-gpu-q6-run.py \
   --predict "$PREDICT" \
   --repeat "$REPEAT" \
   --out "$PLAN_OUT"
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "[pdocker q6 workgroup] dry-run complete; no ADB, SPIR-V, probe-env, or compare step was executed."
+  exit 0
+fi
+
+if [[ ! -f "$SPV" ]]; then
+  echo "missing Q6 SPIR-V sample: $SPV" >&2
+  exit 2
+fi
+if [[ ! -f "$PROBE_ENV" ]]; then
+  echo "missing probe env: $PROBE_ENV" >&2
+  exit 2
+fi
 
 echo "[pdocker q6 workgroup] preflight: $SPV"
 python3 scripts/maintenance/verify-q6-workgroup-lowering-preflight.py \

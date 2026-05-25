@@ -39,6 +39,58 @@ REQUIRED_EVIDENCE_FIELDS = [
     "download_ms",
 ]
 
+Q6_REQUIRED_ENV_OVERLAY = {
+    "PDOCKER_GPU_CPU_ORACLE": "1",
+    "PDOCKER_GPU_STRICT_PASSTHROUGH": "1",
+    "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC": "1",
+    "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS": "1",
+    "PDOCKER_GPU_DISPATCH_PROFILE_LOG": "1",
+    "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE": "1",
+}
+
+RUNNER_STEP_CONTRACT = [
+    {
+        "name": "plan",
+        "touches_adb": False,
+        "command": "scripts/plan-llama-gpu-q6-run.py",
+        "required_outputs": ["preflight_plan"],
+    },
+    {
+        "name": "spv-preflight",
+        "touches_adb": False,
+        "command": "scripts/maintenance/verify-q6-workgroup-lowering-preflight.py",
+        "required_outputs": ["q6_workgroup_lowering_preflight"],
+    },
+    {
+        "name": "device-readiness",
+        "touches_adb": True,
+        "command": "scripts/android-llama-gpu-readiness.sh",
+        "required_outputs": ["llama_gpu_readiness"],
+    },
+    {
+        "name": "compare",
+        "touches_adb": True,
+        "command": "scripts/android-llama-gpu-compare.sh",
+        "required_env_overlay": Q6_REQUIRED_ENV_OVERLAY,
+        "required_flags": ["--gpu-only", "--cpu-tps", "--gpu-layers", "--predict", "--repeat", "--out"],
+        "required_outputs": ["compare_artifact"],
+    },
+    {
+        "name": "artifact-verifier",
+        "touches_adb": False,
+        "command": "scripts/verify-llama-gpu-artifact.py",
+        "required_flags": ["--require-q6-workgroup-clear"],
+        "required_outputs": ["verifier_report_stdout"],
+    },
+    {
+        "name": "plan-verdict",
+        "touches_adb": False,
+        "command": "scripts/verify-llama-gpu-q6-run-against-plan.py",
+        "required_flags": ["--plan", "--artifact", "--out", "--allow-nonterminal"],
+        "required_outputs": ["plan_verdict_artifact"],
+    },
+]
+
 
 PASS_BRANCH = {
     "condition": (
@@ -120,6 +172,8 @@ def build_plan(args: argparse.Namespace) -> dict:
         "probe_matrix": str(MATRIX.relative_to(ROOT)),
         "runner": str(RUNNER.relative_to(ROOT)),
         "runner_command": " ".join(runner_cmd),
+        "runner_step_contract": RUNNER_STEP_CONTRACT,
+        "q6_required_env_overlay": Q6_REQUIRED_ENV_OVERLAY,
         "required_evidence_fields": REQUIRED_EVIDENCE_FIELDS,
         "pass_branch": PASS_BRANCH,
         "fail_branches": FAIL_BRANCHES,

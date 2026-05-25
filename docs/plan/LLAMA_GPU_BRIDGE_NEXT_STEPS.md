@@ -226,6 +226,29 @@ The runner performs the SPIR-V preflight, records readiness, sets
 `PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC=1`, reuses the CPU baseline, and
 runs the artifact verifier with `--require-q6-workgroup-clear`.
 
+For host-only review, add `--dry-run` to the runner.  Dry-run mode writes only
+the pre-flight plan (using `adb-not-used` when no serial is supplied) and exits
+before SPIR-V/probe-env checks, readiness, ADB, or compare steps can touch a
+device.  The plan also carries a machine-readable `runner_step_contract` and
+`q6_required_env_overlay`, so review and tests can validate the intended
+preflight, readiness, compare, artifact-verifier, and plan-verdict sequence
+without relying on shell string drift.  Use this first when ADB is unavailable
+or before sharing a planned Q6 run for review.
+
+Latest 2026-05-25 Q6 workgroup run:
+
+- Device run reached `/health`, `/v1/models`, and deterministic completion,
+  but prompt sanity returned `" Marvel"` and did not pass.
+- The plan verdict classified the run as
+  `api-executor-reconciliation-ambiguous`, so correctness and benchmark claims
+  remain blocked.
+- The next implementation target is stronger API request to executor dispatch
+  reconciliation with canonical command evidence; do not spend the next run on
+  blind shader tuning until that proof is available.
+- Local artifacts: `docs/test/llama-gpu-ngl1-q6-workgroup-20260525T092713Z.json`
+  and `docs/test/llama-gpu-ngl1-q6-workgroup-20260525T092713Z-plan-verdict.json`
+  may be ignored runtime evidence in the working tree.
+
 The tracked safe baseline currently has source hash `0x7ec0292e948c9b41`,
 entry point `main`, local size `[1,1,1]`, descriptors set 0 bindings
 `0`/`1` read-only and `2` writable, and 13 push-constant uints

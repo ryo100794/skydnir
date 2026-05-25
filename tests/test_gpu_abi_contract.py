@@ -2259,6 +2259,34 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VERIFY_RC=$?", runner)
         self.assertIn("VERDICT_RC=$?", runner)
         self.assertIn("verdict was still written", runner)
+        self.assertIn("--dry-run", runner)
+        self.assertIn("dry-run complete; no ADB", runner)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            plan = tmp_path / "plan.json"
+            artifact = tmp_path / "artifact.json"
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(ROOT / "scripts" / "android-llama-gpu-q6-workgroup-run.sh"),
+                    "--dry-run",
+                    "--plan-out",
+                    str(plan),
+                    "--out",
+                    str(artifact),
+                ],
+                check=True,
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("dry-run complete; no ADB", result.stdout)
+            self.assertTrue(plan.exists())
+            self.assertFalse(artifact.exists())
+            plan_data = json.loads(plan.read_text(encoding="utf-8"))
+            self.assertEqual("adb-not-used", plan_data["inputs"]["serial"])
+            self.assertEqual(str(artifact), plan_data["artifact_path"])
 
     def test_q6_preflight_planner_names_evidence_and_branches_before_adb(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2290,6 +2318,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("unsupported-spec-expression", json.dumps(plan["fail_branches"]))
         self.assertFalse(plan["inputs"]["llama_cpp_may_change"])
         self.assertFalse(plan["inputs"]["dockerfile_may_change"])
+        step_names = [step["name"] for step in plan["runner_step_contract"]]
+        self.assertEqual(
+            ["plan", "spv-preflight", "device-readiness", "compare", "artifact-verifier", "plan-verdict"],
+            step_names,
+        )
+        compare_step = next(step for step in plan["runner_step_contract"] if step["name"] == "compare")
+        self.assertTrue(compare_step["touches_adb"])
+        self.assertEqual("1", compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_PASSTHROUGH"])
+        self.assertEqual(plan["q6_required_env_overlay"], compare_step["required_env_overlay"])
+        self.assertIn("--require-q6-workgroup-clear", json.dumps(plan["runner_step_contract"]))
 
     def test_q6_plan_verifier_selects_next_action_from_collected_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
