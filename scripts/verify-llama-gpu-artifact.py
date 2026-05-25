@@ -1117,6 +1117,61 @@ def _api_executor_reconciliation(data: dict[str, Any]) -> dict[str, Any]:
             return any(reconciliation_has_promoting_proof(child) for child in value)
         return False
 
+    def reconciliation_has_strict_transport_match(value: Any) -> bool:
+        if not isinstance(value, dict):
+            return False
+        if value.get("summary") != "diagnostic":
+            return False
+        if value.get("proof_strength") != "diagnostic":
+            return False
+        dispatches = value.get("dispatches")
+        if not isinstance(dispatches, list) or not dispatches:
+            return False
+        if value.get("duplicate_dispatch_ids"):
+            return False
+        if value.get("unmatched_api_outputs"):
+            return False
+        for index, dispatch in enumerate(dispatches):
+            if not isinstance(dispatch, dict):
+                add_ambiguous(
+                    f"gpu.diagnostics.api_executor_reconciliation.dispatches[{index}]",
+                    "dispatch reconciliation record is not an object",
+                    dispatch,
+                )
+                return False
+            if dispatch.get("match_status") != "diagnostic-match":
+                return False
+            matches = dispatch.get("matches")
+            if not isinstance(matches, dict) or not matches:
+                return False
+            required = (
+                "core_command_hash_comparable",
+                "core_command_hash",
+                "spirv_hash",
+                "descriptor_hash",
+                "push_hash",
+                "spec_hash",
+                "dispatch_hash",
+            )
+            missing_or_false = [key for key in required if matches.get(key) is not True]
+            if missing_or_false:
+                add_ambiguous(
+                    f"gpu.diagnostics.api_executor_reconciliation.dispatches[{index}].matches",
+                    "strict transport match is missing required true matches",
+                    missing_or_false,
+                )
+                return False
+            transport = dispatch.get("transport")
+            if isinstance(transport, dict):
+                if transport.get("msg_trunc") is True or transport.get("msg_ctrunc") is True:
+                    add_mismatch(
+                        f"gpu.diagnostics.api_executor_reconciliation.dispatches[{index}].transport",
+                        "transport was truncated",
+                        transport,
+                    )
+                    return False
+        return True
+
     def compare_hash_pair(path: str, item: dict[str, Any], left_key: str, right_key: str) -> None:
         left = item.get(left_key)
         right = item.get(right_key)
@@ -1163,6 +1218,8 @@ def _api_executor_reconciliation(data: dict[str, Any]) -> dict[str, Any]:
             reconciliation,
         )
 
+    strict_transport_match = reconciliation_has_strict_transport_match(reconciliation)
+
     if summary in {"ambiguous", "inconclusive", "duplicate", "unmatched"}:
         add_ambiguous("gpu.diagnostics.api_executor_reconciliation.summary", "ambiguous summary", raw_summary)
     if summary in {"fail", "failed", "mismatch", "hash-mismatch", "canonical-mismatch"}:
@@ -1172,7 +1229,7 @@ def _api_executor_reconciliation(data: dict[str, Any]) -> dict[str, Any]:
         result_summary = "ambiguous"
     elif mismatches:
         result_summary = "mismatch"
-    elif summary == "pass":
+    elif summary == "pass" or strict_transport_match:
         result_summary = "pass"
     else:
         result_summary = "ambiguous"

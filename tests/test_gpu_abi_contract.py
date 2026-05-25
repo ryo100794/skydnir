@@ -794,7 +794,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("has_descriptor_set[code[i + 1]] = 1;", source)
         self.assertIn("!has_descriptor_set[code[i + 1]] || descriptor_sets[code[i + 1]] != 0", source)
         self.assertIn("rewrite_duplicate_descriptor_bindings(\n                shader_code,\n                shader_size,\n                bindings,\n                binding_count,", source)
-        self.assertIn("strict_passthrough ? 0 :\n        options && options->has_rewrite_duplicate_descriptors", source)
+        self.assertIn("strict descriptor ABI normalization transform", source)
+        self.assertIn("legacy_duplicate_descriptor_rewrite", source)
+        self.assertIn("strict_duplicate_descriptor_normalization", source)
+        self.assertIn("PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION", source)
+        self.assertIn("strict duplicate descriptor normalization requires full reconciliation", source)
+        self.assertIn("strict duplicate descriptor normalization cannot mix with safe kernels", source)
+        self.assertIn("if (q6k_safe_kernel_requested || q4k_safe_kernel_requested)", source)
+        self.assertIn("!strict_passthrough &&\n        (options && options->has_rewrite_duplicate_descriptors", source)
+        self.assertIn("for (size_t i = 0; i < binding_alias_count; ++i)", source)
+        self.assertIn("binding_aliases[i].rewritten_binding + 1", source)
+        self.assertIn("set_binding_counts[alias_set] = needed;", source)
+        self.assertIn("writes[write_count].dstSet = descriptor_sets[binding_aliases[i].descriptor_set];", source)
 
     def test_vulkan_feature_contract_matches_android_subset(self):
         icd = VULKAN_ICD.read_text()
@@ -2096,6 +2107,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "X(PDOCKER_GPU_STRICT_PASSTHROUGH, strict_passthrough, has_strict_passthrough, strict_passthrough, 0)",
             "X(PDOCKER_GPU_STRICT_RECONCILIATION, strict_reconciliation, has_strict_reconciliation, strict_reconciliation, 0)",
             "X(PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING, strict_device_local_staging, has_strict_device_local_staging, strict_device_local_staging, 0)",
+            "X(PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION, strict_duplicate_descriptor_normalization, has_strict_duplicate_descriptor_normalization, strict_duplicate_descriptor_normalization, 0)",
             "X(PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS, materialize_specialization, has_materialize_specialization_constants, materialize_specialization_constants, 1)",
             "X(PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC, legalize_workgroup_size_from_spec, has_legalize_workgroup_size_from_spec, legalize_workgroup_size_from_spec, 1)",
             "X(PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION, disable_pipeline_optimization, has_disable_pipeline_optimization, disable_pipeline_optimization, 1)",

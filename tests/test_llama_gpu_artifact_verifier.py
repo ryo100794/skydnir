@@ -433,6 +433,43 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertIn("unrecognized summary", json.dumps(report["api_executor_reconciliation"]["ambiguous"]))
         self.assert_claims_blocked(report)
 
+    def test_completion_wrong_output_accepts_strict_transport_match_reconciliation(self):
+        payload = wrong_completion_payload(
+            {
+                "schema": "pdocker.llama.api-executor-reconciliation.v1",
+                "summary": "diagnostic",
+                "proof_strength": "diagnostic",
+                "hash_algorithm": "fnv1a64",
+                "canonical_raw_fields_present": False,
+                "duplicate_dispatch_ids": [],
+                "dispatches": [
+                    {
+                        "dispatch_id": "1",
+                        "match_status": "diagnostic-match",
+                        "matches": {
+                            "core_command_hash_comparable": True,
+                            "core_command_hash": True,
+                            "spirv_hash": True,
+                            "descriptor_hash": True,
+                            "push_hash": True,
+                            "spec_hash": True,
+                            "dispatch_hash": True,
+                        },
+                        "transport": {
+                            "msg_trunc": False,
+                            "msg_ctrunc": False,
+                        },
+                    }
+                ],
+            }
+        )
+        result = self.run_verifier(payload)
+        self.assertNotEqual(result.returncode, 45, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["api_executor_reconciliation"]["summary"], "pass")
+        self.assertNotEqual(report["classification"], "api-executor-reconciliation-ambiguous")
+        self.assert_claims_blocked(report)
+
     def test_completion_wrong_output_with_reconciliation_still_requires_fresh_executor_marker(self):
         payload = wrong_completion_payload(api_executor_reconciliation())
         payload["gpu"]["diagnostics"]["runtime_freshness"] = {

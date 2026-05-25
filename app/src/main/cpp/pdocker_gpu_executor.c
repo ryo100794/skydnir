@@ -904,6 +904,8 @@ typedef struct {
     int strict_reconciliation;
     int has_strict_device_local_staging;
     int strict_device_local_staging;
+    int has_strict_duplicate_descriptor_normalization;
+    int strict_duplicate_descriptor_normalization;
     int has_rewrite_duplicate_descriptors;
     int rewrite_duplicate_descriptors;
     int has_materialize_descriptor_aliases;
@@ -964,6 +966,7 @@ static int specialization_value_for_id(
         uint64_t *out_value);
 
 typedef struct {
+    uint32_t descriptor_set;
     uint32_t target_id;
     uint32_t original_binding;
     uint32_t rewritten_binding;
@@ -2916,6 +2919,72 @@ static int strict_reconciliation_has_mismatch(
     return 0;
 }
 
+static int strict_reconciliation_has_required_transport_match(
+        const VulkanDispatchOptions *options,
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        uint64_t spirv_hash,
+        const VulkanDispatchSpecialization *specializations,
+        size_t specialization_count,
+        const uint8_t *specialization_data,
+        size_t specialization_data_size,
+        const uint8_t *push,
+        size_t push_size,
+        uint32_t gx,
+        uint32_t gy,
+        uint32_t gz,
+        const char **field_name) {
+    if (!options || !strict_vulkan_reconciliation_requested(options)) {
+        if (field_name) *field_name = "strict_reconciliation";
+        return 0;
+    }
+    const PdockerReceiveEvidence *rx =
+        options->has_receive_evidence ? &options->receive_evidence : NULL;
+    const PdockerSenderReconcileEvidence *sender = &options->sender_reconcile;
+    if (!rx) {
+        if (field_name) *field_name = "receive_evidence";
+        return 0;
+    }
+    if (rx->msg_trunc || rx->msg_ctrunc || !rx->core_command_hash_comparable) {
+        if (field_name) *field_name = "receive_transport";
+        return 0;
+    }
+    if (!sender->has_core_command_hash ||
+        sender->core_command_hash != rx->core_command_hash) {
+        if (field_name) *field_name = "core_command_hash";
+        return 0;
+    }
+    if (!sender->has_spirv_hash || sender->spirv_hash != spirv_hash) {
+        if (field_name) *field_name = "spirv_hash";
+        return 0;
+    }
+    if (!sender->has_descriptor_hash ||
+        sender->descriptor_hash != reconcile_descriptor_hash(bindings, binding_count)) {
+        if (field_name) *field_name = "descriptor_hash";
+        return 0;
+    }
+    if (!sender->has_push_hash ||
+        sender->push_hash != reconcile_bytes_hash(push, push_size)) {
+        if (field_name) *field_name = "push_hash";
+        return 0;
+    }
+    if (!sender->has_spec_hash ||
+        sender->spec_hash != pipeline_specialization_hash(
+            specializations,
+            specialization_count,
+            specialization_data,
+            specialization_data_size)) {
+        if (field_name) *field_name = "specialization_hash";
+        return 0;
+    }
+    if (!sender->has_dispatch_hash ||
+        sender->dispatch_hash != reconcile_dispatch_hash(gx, gy, gz)) {
+        if (field_name) *field_name = "dispatch_hash";
+        return 0;
+    }
+    return 1;
+}
+
 static void write_vulkan_reconciliation_report(
         FILE *out,
         const VulkanDispatchOptions *options,
@@ -3782,6 +3851,7 @@ static int rewrite_duplicate_descriptor_bindings(
                     goto cleanup;
                 }
                 used[alias_binding] = 1;
+                aliases[alias_used].descriptor_set = 0;
                 aliases[alias_used].target_id = code[i + 1];
                 aliases[alias_used].original_binding = binding;
                 aliases[alias_used].rewritten_binding = alias_binding;
@@ -3981,6 +4051,7 @@ static VulkanPipelineCacheEntry *find_pipeline_cache_entry(
 
 static uint64_t vulkan_pipeline_policy_hash(
         int rewrite_duplicate_descriptors,
+        int strict_duplicate_descriptor_normalization,
         int materialize_specialization_constants,
         int specialization_materialized,
         int float16_capability_added,
@@ -4001,6 +4072,7 @@ static uint64_t vulkan_pipeline_policy_hash(
     uint64_t hash = 1469598103934665603ull;
     const unsigned char bits[] = {
         (unsigned char)(rewrite_duplicate_descriptors ? 1 : 0),
+        (unsigned char)(strict_duplicate_descriptor_normalization ? 1 : 0),
         (unsigned char)(materialize_specialization_constants ? 1 : 0),
         (unsigned char)(specialization_materialized ? 1 : 0),
         (unsigned char)(float16_capability_added ? 1 : 0),
@@ -4568,10 +4640,12 @@ static void write_vulkan_descriptor_alias_report(
     for (size_t i = 0; i < alias_count; ++i) {
         fprintf(out,
                 "%s{\"index\":%zu,\"target_id\":%u,"
+                "\"descriptor_set\":%u,"
                 "\"original_binding\":%u,\"rewritten_binding\":%u}",
                 i ? "," : "",
                 i,
                 aliases ? aliases[i].target_id : 0,
+                aliases ? aliases[i].descriptor_set : 0,
                 aliases ? aliases[i].original_binding : 0,
                 aliases ? aliases[i].rewritten_binding : 0);
     }
@@ -9089,11 +9163,77 @@ static int run_vulkan_dispatch_fd(
         float16_capability_added =
             add_spirv_capability(&shader_code, &shader_size, 9);
     }
-    const int rewrite_duplicate_descriptors =
-        strict_passthrough ? 0 :
-        options && options->has_rewrite_duplicate_descriptors
+    const int legacy_duplicate_descriptor_rewrite =
+        !strict_passthrough &&
+        (options && options->has_rewrite_duplicate_descriptors
             ? options->rewrite_duplicate_descriptors
-            : env_truthy("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", 1);
+            : env_truthy("PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS", 1));
+    const int strict_duplicate_descriptor_normalization =
+        strict_passthrough &&
+        (options && options->has_strict_duplicate_descriptor_normalization
+            ? options->strict_duplicate_descriptor_normalization
+            : env_truthy("PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION", 0));
+    const int q4k_safe_kernel_requested =
+        options && options->has_q4k_safe_kernel
+            ? options->q4k_safe_kernel
+            : env_truthy("PDOCKER_GPU_Q4K_SAFE_KERNEL", 0);
+    const int q6k_safe_kernel_requested =
+        options && options->has_q6k_safe_kernel
+            ? options->q6k_safe_kernel
+            : env_truthy("PDOCKER_GPU_Q6K_SAFE_KERNEL", 0);
+    /*
+     * Duplicate descriptor Binding decorations are legal SPIR-V.  The legacy
+     * non-strict path keeps the historical default-on rewrite.  Strict mode is
+     * intentionally different: descriptor normalization is opt-in and must be
+     * proven against the original reconciled API command before any SPIR-V
+     * Binding decoration is rewritten.
+     *
+     * The strict descriptor ABI normalization transform rewrites only
+     * duplicate Binding decorations to spare binding numbers and writes those
+     * spare descriptors to the exact
+     * same VkBuffer/offset/range.  It does not replace shader code with a safe
+     * kernel, does not copy or reinterpret model bytes, and does not change
+     * push constants, specialization values, dispatch dimensions, or Vulkan
+     * buffer object identity.
+     */
+    const int rewrite_duplicate_descriptors =
+        legacy_duplicate_descriptor_rewrite ||
+        strict_duplicate_descriptor_normalization;
+    if (strict_duplicate_descriptor_normalization) {
+        const char *normalization_fail_field = NULL;
+        if (q6k_safe_kernel_requested || q4k_safe_kernel_requested) {
+            json_fail("vulkan-dispatch", "strict duplicate descriptor normalization cannot mix with safe kernels");
+            ret = 64;
+            goto cleanup;
+        }
+        if (materialize_descriptor_aliases) {
+            json_fail("vulkan-dispatch", "strict duplicate descriptor normalization cannot materialize aliases");
+            ret = 64;
+            goto cleanup;
+        }
+        if (!strict_reconciliation_has_required_transport_match(
+                options,
+                bindings,
+                binding_count,
+                original_spirv_hash,
+                specializations,
+                specialization_count,
+                specialization_data,
+                specialization_data_size,
+                push,
+                push_size,
+                gx, gy, gz,
+                &normalization_fail_field)) {
+            fprintf(stderr,
+                    "pdocker-gpu-executor: strict duplicate descriptor normalization "
+                    "blocked field=%s dispatch_id=%llu\n",
+                    normalization_fail_field ? normalization_fail_field : "unknown",
+                    (unsigned long long)dispatch_lifecycle_id);
+            json_fail("vulkan-reconciliation", "strict duplicate descriptor normalization requires full reconciliation");
+            ret = 64;
+            goto cleanup;
+        }
+    }
     if (rewrite_duplicate_descriptors) {
         if (multi_descriptor_set) {
             json_fail("vulkan-dispatch", "duplicate descriptor rewrite is single descriptor set only");
@@ -9169,10 +9309,6 @@ static int run_vulkan_dispatch_fd(
      * from "the Android Vulkan driver accepts llama.cpp's optimized Q4_K
      * SPIR-V" without modifying llama.cpp, Dockerfiles, models, or prompts.
      */
-    const int q4k_safe_kernel_requested =
-        options && options->has_q4k_safe_kernel
-            ? options->q4k_safe_kernel
-            : env_truthy("PDOCKER_GPU_Q4K_SAFE_KERNEL", 0);
     if (q4k_safe_kernel_requested && is_q4k_matvec_hash(original_spirv_hash)) {
         memcpy(shader_code, kQ4kSafeSpv, sizeof(kQ4kSafeSpv));
         shader_size = sizeof(kQ4kSafeSpv);
@@ -9215,10 +9351,6 @@ static int run_vulkan_dispatch_fd(
      * the native llama.cpp Q6_K SPIR-V reduction/output-layout path without
      * changing llama.cpp, Dockerfiles, models, or prompts.
      */
-    const int q6k_safe_kernel_requested =
-        options && options->has_q6k_safe_kernel
-            ? options->q6k_safe_kernel
-            : env_truthy("PDOCKER_GPU_Q6K_SAFE_KERNEL", 0);
     if (q6k_safe_kernel_requested && is_q6k_matvec_hash(original_spirv_hash)) {
         memcpy(shader_code, kQ6kSafeSpv, sizeof(kQ6kSafeSpv));
         shader_size = sizeof(kQ6kSafeSpv);
@@ -9227,6 +9359,7 @@ static int run_vulkan_dispatch_fd(
     }
     const uint64_t pipeline_policy_hash = vulkan_pipeline_policy_hash(
         rewrite_duplicate_descriptors,
+        strict_duplicate_descriptor_normalization,
         materialize_specialization_constants,
         specialization_materialized,
         float16_capability_added,
@@ -9684,6 +9817,28 @@ static int run_vulkan_dispatch_fd(
             set_binding_counts[set_index] = needed;
         }
     }
+    for (size_t i = 0; i < binding_alias_count; ++i) {
+        if (multi_descriptor_set) {
+            json_fail("vulkan-dispatch", "descriptor alias rewrite multi-set pending");
+            ret = 64;
+            goto cleanup;
+        }
+        if (binding_aliases[i].rewritten_binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+            json_fail("vulkan-dispatch", "invalid descriptor alias binding");
+            ret = 64;
+            goto cleanup;
+        }
+        const uint32_t alias_set = binding_aliases[i].descriptor_set;
+        if (alias_set >= descriptor_set_count) {
+            json_fail("vulkan-dispatch", "invalid descriptor alias set");
+            ret = 64;
+            goto cleanup;
+        }
+        const uint32_t needed = binding_aliases[i].rewritten_binding + 1;
+        if (needed > set_binding_counts[alias_set]) {
+            set_binding_counts[alias_set] = needed;
+        }
+    }
     if (!multi_descriptor_set) {
         pipeline_cache_entry = find_pipeline_cache_entry(
             spirv_summary.hash,
@@ -9854,7 +10009,6 @@ static int run_vulkan_dispatch_fd(
     fail_stage = "create-generic-descriptor-pool";
     rc = vkCreateDescriptorPool(rt->device, &dpci, NULL, &descriptor_pool);
     if (rc != VK_SUCCESS) goto cleanup;
-    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
     VkDescriptorSetAllocateInfo dsai = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
         .descriptorPool = descriptor_pool,
@@ -9864,7 +10018,6 @@ static int run_vulkan_dispatch_fd(
     fail_stage = "allocate-generic-descriptor-set";
     rc = vkAllocateDescriptorSets(rt->device, &dsai, descriptor_sets);
     if (rc != VK_SUCCESS) goto cleanup;
-    descriptor_set = descriptor_sets[0];
     VkDescriptorBufferInfo infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     VkWriteDescriptorSet writes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t descriptor_write_dst_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -9956,7 +10109,7 @@ static int run_vulkan_dispatch_fd(
             vulkan_binding_descriptor_range(&bindings[original_index],
                                             strict_passthrough);
         writes[write_count].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[write_count].dstSet = descriptor_set;
+        writes[write_count].dstSet = descriptor_sets[binding_aliases[i].descriptor_set];
         writes[write_count].dstBinding = binding_aliases[i].rewritten_binding;
         writes[write_count].descriptorCount = 1;
         writes[write_count].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -10595,6 +10748,7 @@ static int run_vulkan_dispatch_fd(
                 "\"disable_overlap_aliasing\":%s,"
                 "\"cpu_oracle_requested\":%s,"
                 "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
+                "\"strict_duplicate_descriptor_normalization\":%s,"
                 "\"materialize_descriptor_aliases\":%s,"
                 "\"materialize_specialization\":%s,"
                 "\"legalize_workgroup_size_from_spec\":%s,"
@@ -10651,6 +10805,7 @@ static int run_vulkan_dispatch_fd(
                 cpu_oracle_requested ? "true" : "false",
                 binding_alias_count,
                 rewrite_duplicate_descriptors ? "true" : "false",
+                strict_duplicate_descriptor_normalization ? "true" : "false",
                 materialize_descriptor_aliases ? "true" : "false",
                 materialize_specialization_constants ? "true" : "false",
                 legalize_workgroup_size_from_spec ? "true" : "false",
@@ -10779,6 +10934,7 @@ static int run_vulkan_dispatch_fd(
             "\"disable_overlap_aliasing\":%s,"
             "\"cpu_oracle_requested\":%s,"
             "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
+            "\"strict_duplicate_descriptor_normalization\":%s,"
             "\"materialize_descriptor_aliases\":%s,"
             "\"materialize_specialization\":%s,"
             "\"legalize_workgroup_size_from_spec\":%s,"
@@ -10846,6 +11002,7 @@ static int run_vulkan_dispatch_fd(
             cpu_oracle_requested ? "true" : "false",
             binding_alias_count,
             rewrite_duplicate_descriptors ? "true" : "false",
+            strict_duplicate_descriptor_normalization ? "true" : "false",
             materialize_descriptor_aliases ? "true" : "false",
             materialize_specialization_constants ? "true" : "false",
             legalize_workgroup_size_from_spec ? "true" : "false",
