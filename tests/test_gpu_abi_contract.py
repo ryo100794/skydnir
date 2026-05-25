@@ -2107,6 +2107,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("native-q6-output-layout", compare)
         self.assertIn("native-q6-output-layout-inconclusive", compare)
         self.assertIn("native-q6-reduction-or-device-execution", compare)
+        self.assertLess(
+            compare.index('else "q6-store-index-model-incomplete"'),
+            compare.index('else "native-q6-final-store-or-readback"'),
+        )
         self.assertIn("q6_writable_writeback_mismatches", compare)
         self.assertIn("f32_after_writeback", compare)
         self.assertIn("f32_sample_values", compare)

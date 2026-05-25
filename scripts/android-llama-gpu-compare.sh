@@ -4442,10 +4442,6 @@ q6_blocker_class = (
     if q6_unexpected_readonly_dispatch_mutations
     else "writeback"
     if q6_writable_writeback_mismatches
-    else "executor-final-writeback"
-    if q6_native_vs_writeback_split.get("summary") == "executor-final-writeback"
-    else "native-q6-final-store-or-readback"
-    if q6_native_vs_writeback_split.get("summary") == "native-final-store-or-readback"
     else "q6-store-index-model-incomplete"
     if (
         q6_output_layout_probe_summary.startswith("canonical-mismatch")
@@ -4455,6 +4451,10 @@ q6_blocker_class = (
     )
     else "q6-store-index-model-incomplete"
     if q6_row_provenance_probe_summary == "other-row-match" and not q6_store_index_model_valid
+    else "executor-final-writeback"
+    if q6_native_vs_writeback_split.get("summary") == "executor-final-writeback"
+    else "native-q6-final-store-or-readback"
+    if q6_native_vs_writeback_split.get("summary") == "native-final-store-or-readback"
     else "native-q6-output-layout"
     if q6_output_layout_probe_summary == "canonical-mismatch-found-elsewhere" and q6_writeback_verified_all and q6_store_index_model_valid
     else "native-q6-other-row-output-layout"
