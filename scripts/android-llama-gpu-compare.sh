@@ -2817,6 +2817,9 @@ def build_api_executor_reconciliation(events):
                 "msg_trunc": receive.get("msg_trunc"),
                 "msg_ctrunc": receive.get("msg_ctrunc"),
                 "scm_rights_fd_count_copied": receive.get("scm_rights_fd_count_copied", receive.get("scm_rights_fd_count")),
+                "raw_command_bytes": receive.get("raw_command_bytes"),
+                "command_bytes": receive.get("command_bytes"),
+                "core_command_bytes": receive.get("core_command_bytes"),
             },
             "sender": {
                 "core_command_hash": sender.get("core_command_hash"),
@@ -2827,6 +2830,8 @@ def build_api_executor_reconciliation(events):
                 "dispatch_hash": sender.get("dispatch_hash"),
             },
             "received": {
+                "core_command_hash": receive.get("core_command_hash"),
+                "core_command_hash_comparable": receive.get("core_command_hash_comparable"),
                 "spirv_hash": received.get("spirv_hash"),
                 "descriptor_hash": received.get("descriptor_hash"),
                 "push_hash": received.get("push_hash"),

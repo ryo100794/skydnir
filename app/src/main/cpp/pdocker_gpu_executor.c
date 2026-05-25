@@ -843,6 +843,9 @@ typedef struct {
     uint64_t raw_command_hash;
     size_t command_bytes;
     uint64_t command_hash;
+    int core_command_hash_comparable;
+    size_t core_command_bytes;
+    uint64_t core_command_hash;
     int msg_flags;
     size_t scm_rights_fd_count_copied;
     int msg_trunc;
@@ -2949,6 +2952,9 @@ static void write_vulkan_reconciliation_report(
             "\"raw_command_hash\":\"0x%016llx\","
             "\"command_bytes\":%zu,"
             "\"command_hash\":\"0x%016llx\","
+            "\"core_command_bytes\":%zu,"
+            "\"core_command_hash\":\"0x%016llx\","
+            "\"core_command_hash_comparable\":%s,"
             "\"scm_rights_fd_count_copied\":%zu,"
             "\"scm_rights_fd_count\":%zu,"
             "\"msg_flags\":%d,"
@@ -2982,7 +2988,8 @@ static void write_vulkan_reconciliation_report(
             "\"dispatch\":[%u,%u,%u],"
             "\"dispatch_hash\":\"0x%016llx\"},"
             "\"matches\":{"
-            "\"core_command_hash_comparable\":false,"
+            "\"core_command_hash_comparable\":%s,"
+            "\"core_command_hash\":%s,"
             "\"spirv_hash\":%s,"
             "\"descriptor_hash\":%s,"
             "\"push_hash\":%s,"
@@ -2993,6 +3000,9 @@ static void write_vulkan_reconciliation_report(
             (unsigned long long)(rx ? rx->raw_command_hash : 0),
             rx ? rx->command_bytes : 0,
             (unsigned long long)(rx ? rx->command_hash : 0),
+            rx ? rx->core_command_bytes : 0,
+            (unsigned long long)(rx ? rx->core_command_hash : 0),
+            (rx && rx->core_command_hash_comparable) ? "true" : "false",
             rx ? rx->scm_rights_fd_count_copied : 0,
             rx ? rx->scm_rights_fd_count_copied : 0,
             rx ? rx->msg_flags : 0,
@@ -3023,6 +3033,9 @@ static void write_vulkan_reconciliation_report(
             (unsigned long long)spec_hash,
             gx, gy, gz,
             (unsigned long long)dispatch_hash,
+            (rx && rx->core_command_hash_comparable && sender && sender->has_core_command_hash) ? "true" : "false",
+            json_match_or_null(rx && rx->core_command_hash_comparable && sender && sender->has_core_command_hash,
+                               rx && sender && rx->core_command_hash == sender->core_command_hash),
             json_match_or_null(sender && sender->has_spirv_hash,
                                sender && sender->spirv_hash == spirv_hash),
             json_match_or_null(sender && sender->has_descriptor_hash,
@@ -11969,6 +11982,17 @@ static int recv_command_with_fds(
     if (evidence) {
         evidence->command_bytes = strlen(cmd);
         evidence->command_hash = reconcile_bytes_hash(cmd, evidence->command_bytes);
+        const char *reconcile_tail = strstr(cmd, " dispatch_id=");
+        if (reconcile_tail) {
+            evidence->core_command_hash_comparable = 1;
+            evidence->core_command_bytes = (size_t)(reconcile_tail - cmd);
+            evidence->core_command_hash =
+                reconcile_bytes_hash(cmd, evidence->core_command_bytes);
+        } else {
+            evidence->core_command_hash_comparable = 0;
+            evidence->core_command_bytes = evidence->command_bytes;
+            evidence->core_command_hash = evidence->command_hash;
+        }
     }
     for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
          cmsg != NULL;
