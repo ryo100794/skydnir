@@ -38,6 +38,13 @@ DEFAULT_MEMORY_CLEANUP_COMMANDS = (
 ENV_MANIFEST_PATH = Path(__file__).resolve().with_name("llama-gpu-env-manifest.json")
 COMPACT_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{16}$")
 ZERO_COMPACT_HASH = "0x0000000000000000"
+Q6_DEBUG_U32_BLOCKERS = {
+    "q6-debug-u32-probe-metadata-mismatch",
+    "q6-debug-u32-writeback-mismatch",
+    "q6-debug-u32-final-store-trace-missing",
+    "q6-debug-u32-probe-missing",
+    "q6-debug-u32-probe-invalid",
+}
 Q6_WRITEBACK_REQUIRED_FIELDS = (
     "gpu.diagnostics.q6_workgroup_diagnostics.q6_writeback_verified_all",
     "gpu.diagnostics.q6_workgroup_diagnostics.q6_row_indexed_sample_indices",
@@ -883,6 +890,64 @@ def _q6_writeback_evidence(q6: Any) -> dict[str, Any]:
         "row_indexed_required_indices": required_row_indices[:48] if required_row_indices else [],
         "row_indexed_evidence": row_indexed_details[:16],
     }
+
+
+def _q6_debug_u32_probe(q6: Any) -> dict[str, Any]:
+    if not isinstance(q6, dict):
+        return {}
+    probe = q6.get("q6_debug_u32_probe")
+    return probe if isinstance(probe, dict) else {}
+
+
+def _q6_debug_u32_probe_blocker(q6: Any) -> str:
+    if not isinstance(q6, dict):
+        return ""
+    explicit = str(q6.get("q6_debug_u32_probe_blocker") or "")
+    if explicit in Q6_DEBUG_U32_BLOCKERS:
+        return explicit
+    report = _q6_debug_u32_probe(q6)
+    if not report:
+        return ""
+    if report.get("summary") in {"pass", "not-run"}:
+        return ""
+    failures = "\n".join(str(item) for item in report.get("failures") or []).lower()
+    if (
+        "candidate-id" in failures
+        or "candidate id" in failures
+        or "candidate mismatch" in failures
+        or "role-code" in failures
+        or "role code" in failures
+        or "role mismatch" in failures
+    ):
+        return "q6-debug-u32-probe-metadata-mismatch"
+    if "writeback" in failures:
+        return "q6-debug-u32-writeback-mismatch"
+    trace_count = report.get("executed_final_trace_v2_count")
+    if trace_count is None:
+        trace_count = 0
+        bindings = report.get("bindings")
+        if isinstance(bindings, list):
+            for binding in bindings:
+                if not isinstance(binding, dict):
+                    continue
+                try:
+                    trace_count += int(binding.get("executed_final_trace_v2_count") or 0)
+                except (TypeError, ValueError):
+                    pass
+    if (
+        "trace-v2-metadata" in failures
+        or "final-output trace metadata" in failures
+        or "no executed q6 final-store trace-v2 record" in failures
+        or "no executed final-output q6 probe record" in failures
+        or trace_count == 0
+    ):
+        return "q6-debug-u32-final-store-trace-missing"
+    try:
+        if int(report.get("debug_binding_count") or 0) == 0:
+            return "q6-debug-u32-probe-missing"
+    except (TypeError, ValueError):
+        return "q6-debug-u32-probe-invalid"
+    return "q6-debug-u32-probe-invalid"
 
 
 def _api_prompt_sanity(data: dict[str, Any]) -> dict[str, Any]:
@@ -1994,6 +2059,8 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_output_layout = _q6_output_layout_probe(q6)
     q6_row_provenance = _q6_row_provenance_probe(q6)
     q6_partial_signature = _q6_partial_signature_probe(q6)
+    q6_debug_u32_probe = _q6_debug_u32_probe(q6)
+    q6_debug_u32_probe_blocker = _q6_debug_u32_probe_blocker(q6)
     q6_native_vs_writeback_split = (
         q6.get("q6_native_vs_writeback_split")
         if isinstance(q6.get("q6_native_vs_writeback_split"), dict)
@@ -2047,7 +2114,11 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         responsibility_boundary = "q6-oracle"
         q6_blocker_class = str(q6.get("blocker_class") or "descriptor-memory-synchronization-or-q6-arithmetic")
         if q6_writeback_evidence.get("summary") == "pass":
-            if q6_native_vs_writeback_split.get("summary") == "executor-final-writeback":
+            if q6_debug_u32_probe_blocker:
+                classification = q6_debug_u32_probe_blocker
+                responsibility_boundary = "q6-debug-u32-probe"
+                q6_blocker_class = q6_debug_u32_probe_blocker
+            elif q6_native_vs_writeback_split.get("summary") == "executor-final-writeback":
                 classification = "q6-writeback-mismatch"
                 responsibility_boundary = "q6-writeback"
                 q6_blocker_class = "executor-final-writeback"
@@ -2123,6 +2194,8 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_output_layout_probe": q6_output_layout,
         "q6_row_provenance_probe": q6_row_provenance,
         "q6_partial_signature_probe": q6_partial_signature,
+        "q6_debug_u32_probe": q6_debug_u32_probe,
+        "q6_debug_u32_probe_blocker": q6_debug_u32_probe_blocker,
         "q6_native_vs_writeback_split": q6_native_vs_writeback_split,
         "q6_effective_blocker_class": (
             q6_blocker_class
@@ -2138,6 +2211,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-native-device-execution-or-final-store",
                 "q6-native-reduction-or-device-execution",
                 "q6-probe-writeback-cleared-oracle-missing",
+                *Q6_DEBUG_U32_BLOCKERS,
             }
             else None
         ),
@@ -2210,6 +2284,8 @@ def main(argv: list[str]) -> int:
         return 47
     if classification in {"q6-oracle-capture-missing", "q6-probe-writeback-cleared-oracle-missing"}:
         return 48
+    if classification in Q6_DEBUG_U32_BLOCKERS:
+        return 49
     if classification == "api-prompt-sanity-missing":
         return 38
     if classification == "speedup-fields-missing":

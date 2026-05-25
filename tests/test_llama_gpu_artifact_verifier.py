@@ -1302,6 +1302,98 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["responsibility_boundary"], "q6-native-final-store-readback")
         self.assertEqual(report["q6_effective_blocker_class"], "native-q6-final-store-or-readback")
 
+    def test_q6_debug_u32_final_store_trace_missing_is_surfaced(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "local_size_resolved": [32, 1, 1],
+                        "q6_debug_u32_probe": {
+                            "summary": "fail",
+                            "debug_binding_count": 1,
+                            "executed_final_trace_v2_count": 0,
+                            "failures": ["no executed Q6 final-store trace-v2 record was found"],
+                        },
+                        "q6_native_vs_writeback_split": {
+                            "summary": "native-final-store-or-readback",
+                            "joined_sample_count": 1,
+                        },
+                        **q6_verified_writeback(),
+                    },
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 49, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-debug-u32-final-store-trace-missing")
+        self.assertEqual(report["responsibility_boundary"], "q6-debug-u32-probe")
+        self.assertEqual(report["q6_effective_blocker_class"], "q6-debug-u32-final-store-trace-missing")
+
+    def test_q6_debug_u32_blocker_precedes_native_output_layout(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "local_size_resolved": [32, 1, 1],
+                        "q6_debug_u32_probe_blocker": "q6-debug-u32-final-store-trace-missing",
+                        "q6_debug_u32_probe": {
+                            "summary": "fail",
+                            "debug_binding_count": 1,
+                            "executed_final_trace_v2_count": 0,
+                        },
+                        "q6_output_layout_probe": {
+                            "summary": "canonical-mismatch-found-elsewhere",
+                            "mismatch_count": 1,
+                        },
+                        **q6_verified_writeback(),
+                    },
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 49, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-debug-u32-final-store-trace-missing")
+
+    def test_q6_writeback_mismatch_precedes_debug_u32_blocker(self):
+        q6 = q6_verified_writeback()
+        q6["q6_writable_writeback_mismatches"] = [{"binding": 2}]
+        q6["q6_writable_bindings"][0]["fd_after_hash"] = "0x2222222222222222"
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "mismatch",
+                        "local_size_resolved": [32, 1, 1],
+                        "q6_debug_u32_probe_blocker": "q6-debug-u32-final-store-trace-missing",
+                        **q6,
+                    },
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 40, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-writeback-mismatch")
+
     def test_q6_native_vs_writeback_split_classifies_executor_writeback(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",
