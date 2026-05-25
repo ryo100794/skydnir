@@ -26,6 +26,7 @@ SPIRV_ANALYZER = ROOT / "scripts" / "analyze-spirv.py"
 SPIRV_PROBE_MANIFEST_VERIFIER = ROOT / "scripts" / "verify-spirv-probe-manifest.py"
 SPIRV_NOOP_INSTRUMENTER = ROOT / "scripts" / "instrument-spirv-noop-probe.py"
 SPIRV_DATAFLOW_COMPARE = ROOT / "scripts" / "compare-spirv-dataflow.py"
+LLAMA_Q6_PREFLIGHT_PLANNER = ROOT / "scripts" / "plan-llama-gpu-q6-run.py"
 
 
 def load_llama_gpu_artifact_verifier():
@@ -2251,6 +2252,37 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("android-llama-gpu-compare.sh", runner)
         self.assertIn("--require-q6-workgroup-clear", runner)
         self.assertIn("does not rebuild the llama image", runner)
+
+    def test_q6_preflight_planner_names_evidence_and_branches_before_adb(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "plan.json"
+            subprocess.run(
+                [
+                    "python3",
+                    str(LLAMA_Q6_PREFLIGHT_PLANNER),
+                    "--serial",
+                    "192.0.2.10:44444",
+                    "--out",
+                    str(out),
+                ],
+                check=True,
+                cwd=ROOT,
+            )
+            plan = json.loads(out.read_text(encoding="utf-8"))
+
+        self.assertEqual("pdocker.llama.gpu.q6.preflight-plan.v1", plan["schema"])
+        self.assertEqual(
+            "do not connect until the user says the Android device is prepared",
+            plan["adb_policy"],
+        )
+        self.assertIn("docs/design/VULKAN_BRIDGE_PROBE_MATRIX.md", plan["probe_matrix"])
+        self.assertIn("scripts/android-llama-gpu-q6-workgroup-run.sh", plan["runner"])
+        self.assertIn("specialization_materialize_report", plan["required_evidence_fields"])
+        self.assertIn("reconciliation", plan["required_evidence_fields"])
+        self.assertIn("writeback", " ".join(branch["condition"] for branch in plan["fail_branches"]))
+        self.assertIn("unsupported-spec-expression", json.dumps(plan["fail_branches"]))
+        self.assertFalse(plan["inputs"]["llama_cpp_may_change"])
+        self.assertFalse(plan["inputs"]["dockerfile_may_change"])
 
     def test_gpu_env_propagation_parity_is_documented_and_guarded(self):
         compare = LLAMA_COMPARE.read_text()

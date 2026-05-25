@@ -1435,6 +1435,8 @@ Next concrete actions:
    [`../design/VULKAN_BRIDGE_PROBE_MATRIX.md`](../design/VULKAN_BRIDGE_PROBE_MATRIX.md):
    the expected artifact path, required evidence fields, pass branch, and fail
    branches must be named before ADB is requested.
+   Use `scripts/plan-llama-gpu-q6-run.py --out docs/test/llama-gpu-q6-preflight-plan-latest.json`
+   to generate that run plan without touching ADB.
 2. Compare Q6 descriptor/access evidence before and after reflection transfer
    intent to ensure no application-visible descriptor write was removed.
 3. Run one targeted device-local staging diagnostic only after static evidence
