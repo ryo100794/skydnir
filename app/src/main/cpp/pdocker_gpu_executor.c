@@ -129,7 +129,7 @@ typedef struct {
     int found_elsewhere;
 } Q6OutputLayoutProbeSample;
 
-#define PDOCKER_GPU_Q6_OUTPUT_LAYOUT_PROBE_MAX_SAMPLES 32u
+#define PDOCKER_GPU_Q6_OUTPUT_LAYOUT_PROBE_MAX_SAMPLES 48u
 
 typedef struct {
     uint64_t dst_index;
@@ -4482,6 +4482,7 @@ static void write_vulkan_binding_report(
         const size_t *alias_rep,
         VulkanVectorBuffer * const *vk_buffers,
         const size_t *binding_gpu_offset,
+        const size_t *binding_descriptor_offset,
         const int *buffer_fds,
         int debug_probe_binding,
         const CpuOracleReport *cpu_oracle_report) {
@@ -4499,6 +4500,9 @@ static void write_vulkan_binding_report(
                 "\"api_dynamic\":%s,\"api_memory_offset\":%lld,"
                 "\"api_memory_size\":%zu,\"api_memory_id\":\"0x%016llx\","
                 "\"api_buffer_id\":\"0x%016llx\","
+                "\"binding_gpu_offset\":%zu,"
+                "\"binding_descriptor_offset\":%zu,"
+                "\"descriptor_range_mismatch\":%s,"
                 "\"alias_rep\":%zu,\"active\":%s,\"readable\":%s,\"writable\":%s,"
                 "\"resident\":%s,\"cache_hit\":%s,"
                 "\"mutable_reused\":%s,\"mutable_cache_hit\":%s,"
@@ -4528,6 +4532,10 @@ static void write_vulkan_binding_report(
                 bindings[i].api_memory_size,
                 (unsigned long long)bindings[i].api_memory_id,
                 (unsigned long long)bindings[i].api_buffer_id,
+                binding_gpu_offset ? binding_gpu_offset[i] : (size_t)0,
+                binding_descriptor_offset ? binding_descriptor_offset[i] : (size_t)0,
+                bindings[i].api_range != 0 && bindings[i].api_range != bindings[i].size
+                    ? "true" : "false",
                 alias_rep ? alias_rep[i] : i,
                 active && active[i] ? "true" : "false",
                 readable && readable[i] ? "true" : "false",
@@ -4919,7 +4927,7 @@ struct CpuOracleReport {
     size_t partial_lane_count;
     int oracle_writeback;
     size_t oracle_writeback_rows;
-    CpuOracleSample row_window[32];
+    CpuOracleSample row_window[48];
     size_t row_window_count;
     int q6_output_layout_probe_ran;
     char q6_output_layout_probe_summary[64];
@@ -5053,6 +5061,18 @@ static void append_unique_q6_sample_index(
         if (indices[i] == value) return;
     }
     indices[(*index_count)++] = value;
+}
+
+static void append_unique_u64_value(
+        uint64_t *values,
+        size_t *value_count,
+        size_t capacity,
+        uint64_t value) {
+    if (!values || !value_count || *value_count >= capacity) return;
+    for (size_t i = 0; i < *value_count; ++i) {
+        if (values[i] == value) return;
+    }
+    values[(*value_count)++] = value;
 }
 
 static size_t collect_q6_row_indexed_sample_indices(
@@ -6874,12 +6894,32 @@ static void run_cpu_oracle_q6k_matvec_sample(
         snprintf(report->status, sizeof(report->status), "%s", "invalid-q6-local-size");
         return;
     }
-    uint32_t sample_rows[32];
-    for (uint32_t i = 0; i < 32u; ++i) sample_rows[i] = i;
+    uint64_t sample_rows[48];
+    size_t sample_row_count = 0;
+    for (uint32_t i = 0; i < 32u; ++i) {
+        append_unique_u64_value(sample_rows, &sample_row_count,
+                                sizeof(sample_rows) / sizeof(sample_rows[0]), i);
+    }
+    if (stride_d > 0) {
+        append_unique_u64_value(sample_rows, &sample_row_count,
+                                sizeof(sample_rows) / sizeof(sample_rows[0]),
+                                (uint64_t)stride_d / 2u);
+        append_unique_u64_value(sample_rows, &sample_row_count,
+                                sizeof(sample_rows) / sizeof(sample_rows[0]),
+                                (uint64_t)stride_d - 1u);
+    }
+    if (stride_d > 8u) {
+        for (uint32_t i = 8u; i > 0u; --i) {
+            append_unique_u64_value(sample_rows, &sample_row_count,
+                                    sizeof(sample_rows) / sizeof(sample_rows[0]),
+                                    (uint64_t)stride_d - i);
+        }
+    }
     report->expected_hash = 1469598103934665603ull;
     report->gpu_hash = 1469598103934665603ull;
-    for (size_t si = 0; si < sizeof(sample_rows) / sizeof(sample_rows[0]); ++si) {
-        const uint32_t row = sample_rows[si];
+    for (size_t si = 0; si < sample_row_count; ++si) {
+        if (sample_rows[si] > UINT32_MAX) continue;
+        const uint32_t row = (uint32_t)sample_rows[si];
         const uint64_t dst_index = output_base_index + (uint64_t)row;
         if (row >= stride_d ||
             dst_index >= (uint64_t)stride_d + output_base_index ||
@@ -7538,6 +7578,7 @@ static void write_vulkan_binding_compact_report(
         const int *buffer_fds,
         VulkanVectorBuffer * const *vk_buffers,
         const size_t *binding_gpu_offset,
+        const size_t *binding_descriptor_offset,
         const size_t *dirty_writeback_bytes,
         const uint8_t *active,
         const uint8_t *readable,
@@ -7565,6 +7606,9 @@ static void write_vulkan_binding_compact_report(
                 "\"api_dynamic\":%s,\"api_memory_offset\":%lld,"
                 "\"api_memory_size\":%zu,\"api_memory_id\":\"0x%016llx\","
                 "\"api_buffer_id\":\"0x%016llx\","
+                "\"binding_gpu_offset\":%zu,"
+                "\"binding_descriptor_offset\":%zu,"
+                "\"descriptor_range_mismatch\":%s,"
                 "\"alias_rep\":%zu,\"active\":%s,"
                 "\"readable\":%s,\"writable\":%s,\"resident\":%s,"
                 "\"cache_hit\":%s,\"fd_before_hash\":\"0x%016llx\","
@@ -7589,6 +7633,10 @@ static void write_vulkan_binding_compact_report(
                 bindings[i].api_memory_size,
                 (unsigned long long)bindings[i].api_memory_id,
                 (unsigned long long)bindings[i].api_buffer_id,
+                binding_gpu_offset ? binding_gpu_offset[i] : (size_t)0,
+                binding_descriptor_offset ? binding_descriptor_offset[i] : (size_t)0,
+                bindings[i].api_range != 0 && bindings[i].api_range != bindings[i].size
+                    ? "true" : "false",
                 alias_rep ? alias_rep[i] : i,
                 active && active[i] ? "true" : "false",
                 readable && readable[i] ? "true" : "false",
@@ -10591,6 +10639,7 @@ static int run_vulkan_dispatch_fd(
                                             buffer_fds,
                                             vk_buffers,
                                             binding_gpu_offset,
+                                            binding_descriptor_offset,
                                             binding_dirty_writeback_bytes,
                                             active_bindings,
                                             binding_read_needed, binding_write_needed,
@@ -10891,6 +10940,7 @@ static int run_vulkan_dispatch_fd(
                                             buffer_fds,
                                             vk_buffers,
                                             binding_gpu_offset,
+                                            binding_descriptor_offset,
                                             binding_dirty_writeback_bytes,
                                             active_bindings,
                                             binding_read_needed, binding_write_needed,
@@ -11131,6 +11181,7 @@ static int run_vulkan_dispatch_fd(
                                     binding_alias_rep,
                                     vk_buffers,
                                     binding_gpu_offset,
+                                    binding_descriptor_offset,
                                     buffer_fds,
                                     probe_debug_binding_from_options(options),
                                     &cpu_oracle_report);
@@ -11354,6 +11405,7 @@ cleanup:
                                     binding_alias_rep,
                                     vk_buffers,
                                     binding_gpu_offset,
+                                    binding_descriptor_offset,
                                     buffer_fds,
                                     probe_debug_binding_from_options(options),
                                     &cpu_oracle_report);

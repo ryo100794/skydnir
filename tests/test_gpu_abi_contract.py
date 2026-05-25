@@ -349,7 +349,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q6_first_mismatch", source)
         self.assertIn("row_window", source)
         self.assertIn("Q6OutputLayoutProbeSample", source)
-        self.assertIn("PDOCKER_GPU_Q6_OUTPUT_LAYOUT_PROBE_MAX_SAMPLES 32u", source)
+        self.assertIn("PDOCKER_GPU_Q6_OUTPUT_LAYOUT_PROBE_MAX_SAMPLES 48u", source)
         self.assertIn("PDOCKER_GPU_Q6_OUTPUT_LAYOUT_PROBE_MAX_FLOATS 4096u", source)
         self.assertIn(
             "q6_output_layout_probe_samples[\n"
@@ -1754,12 +1754,21 @@ class GpuAbiContractTest(unittest.TestCase):
             "q6_readonly_dispatch_mutations",
             "q6_readonly_dispatch_alias_side_effects",
             "q6_unexpected_readonly_dispatch_mutations",
+            "q6_descriptor_range_mismatches",
             "q6_readonly_mutation_is_alias_side_effect",
             "same_q6_storage_window",
             "classify_q6_output_index_probe",
             "q6_output_index_probe_summary",
             "q6_store_window_begin",
             "q6_store_window_end",
+            "binding_gpu_offset",
+            "binding_descriptor_offset",
+            "descriptor_range_mismatch",
+            "api_memory_id",
+            "api_buffer_id",
+            "parse_int(left.get(\"api_buffer_id\"))",
+            "parse_int(left.get(\"binding_descriptor_offset\"))",
+            "q6_readonly_upload_hash_mismatches or q6_descriptor_range_mismatches",
             "best_index_in_store_window",
             "best_store_row_delta",
             "writeback_offset",
@@ -1825,6 +1834,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"expected_store_index\\":%llu', source)
         self.assertIn('\\"best_index_in_store_window\\":%s', source)
         self.assertIn('\\"best_store_row_delta\\":%lld', source)
+        self.assertIn('\\"binding_gpu_offset\\":%zu', source)
+        self.assertIn('\\"binding_descriptor_offset\\":%zu', source)
+        self.assertIn('\\"descriptor_range_mismatch\\":%s', source)
         self.assertIn('\\"q6_accum_mask\\":%llu', source)
         self.assertIn('\\"q6_base_work_group_y\\":%llu', source)
         self.assertIn('\\"q6_output_base_index\\":%llu', source)

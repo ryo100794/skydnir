@@ -3601,6 +3601,11 @@ def compact_q6_binding_detail(detail):
         "api_range": detail.get("api_range"),
         "api_memory_offset": detail.get("api_memory_offset"),
         "api_buffer_size": detail.get("api_buffer_size"),
+        "api_memory_id": detail.get("api_memory_id"),
+        "api_buffer_id": detail.get("api_buffer_id"),
+        "binding_gpu_offset": detail.get("binding_gpu_offset"),
+        "binding_descriptor_offset": detail.get("binding_descriptor_offset"),
+        "descriptor_range_mismatch": detail.get("descriptor_range_mismatch"),
         "readable": detail.get("readable"),
         "writable": detail.get("writable"),
         "resident": detail.get("resident"),
@@ -3697,6 +3702,7 @@ q6_writable_binding_details = [
     for detail in q6_binding_details
     if detail.get("writable")
 ]
+q6_descriptor_range_mismatches = []
 q6_readonly_upload_hash_mismatches = []
 q6_readonly_dispatch_mutations = []
 q6_readonly_dispatch_alias_side_effects = []
@@ -3708,11 +3714,40 @@ q6_writable_writeback_unknown = []
 def same_q6_storage_window(left, right):
     if not isinstance(left, dict) or not isinstance(right, dict):
         return False
+
+    def parse_int(value):
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            return int(value, 0)
+        return int(value)
+
     try:
+        left_buffer = parse_int(left.get("api_buffer_id"))
+        right_buffer = parse_int(right.get("api_buffer_id"))
+        left_memory = parse_int(left.get("api_memory_id"))
+        right_memory = parse_int(right.get("api_memory_id"))
+        if (left_buffer is not None or right_buffer is not None) and left_buffer != right_buffer:
+            return False
+        if (left_memory is not None or right_memory is not None) and left_memory != right_memory:
+            return False
+
+        left_offset = parse_int(left.get("binding_descriptor_offset"))
+        right_offset = parse_int(right.get("binding_descriptor_offset"))
+        if left_offset is None:
+            left_offset = parse_int(left.get("offset"))
+        if right_offset is None:
+            right_offset = parse_int(right.get("offset"))
+
         return (
-            int(left.get("alias_rep")) == int(right.get("alias_rep"))
-            and int(left.get("offset")) == int(right.get("offset"))
-            and int(left.get("size")) == int(right.get("size"))
+            parse_int(left.get("alias_rep")) == parse_int(right.get("alias_rep"))
+            and left_offset == right_offset
+            and parse_int(left.get("size")) == parse_int(right.get("size"))
         )
     except (TypeError, ValueError):
         return False
@@ -3748,6 +3783,8 @@ def q6_readonly_mutation_is_alias_side_effect(readonly_detail):
 
 
 for detail in q6_binding_details:
+    if detail.get("descriptor_range_mismatch") is True:
+        q6_descriptor_range_mismatches.append(compact_q6_binding_detail(detail))
     if detail.get("writable"):
         dispatch_hash = detail.get("gpu_after_dispatch_hash")
         after_hash = detail.get("fd_after_hash")
@@ -4093,7 +4130,7 @@ q6_blocker_class = (
     else "cleared"
     if q6_latest_oracle.get("status") == "match"
     else "descriptor-effective-range-or-upload"
-    if q6_readonly_upload_hash_mismatches
+    if q6_readonly_upload_hash_mismatches or q6_descriptor_range_mismatches
     else "shader-readonly-mutation-or-barrier-scope"
     if q6_unexpected_readonly_dispatch_mutations
     else "writeback"
@@ -4194,6 +4231,7 @@ q6_workgroup_diagnostics = {
     "q6_readonly_dispatch_mutations": q6_readonly_dispatch_mutations[:8],
     "q6_readonly_dispatch_alias_side_effects": q6_readonly_dispatch_alias_side_effects[:8],
     "q6_unexpected_readonly_dispatch_mutations": q6_unexpected_readonly_dispatch_mutations[:8],
+    "q6_descriptor_range_mismatches": q6_descriptor_range_mismatches[:8],
     "q6_writable_writeback_mismatches": q6_writable_writeback_mismatches[:8],
     "q6_writable_writeback_unknown": q6_writable_writeback_unknown[:8],
     "q6_writeback_verified_all": q6_writeback_verified_all,
