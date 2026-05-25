@@ -222,7 +222,9 @@ scripts/android-llama-gpu-q6-workgroup-run.sh \
 ```
 
 The runner performs the SPIR-V preflight, records readiness, sets
-`PDOCKER_GPU_STRICT_PASSTHROUGH=1` and
+`PDOCKER_GPU_STRICT_PASSTHROUGH=1`,
+`PDOCKER_GPU_STRICT_RECONCILIATION=1`,
+`PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION=1`, and
 `PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC=1`, reuses the CPU baseline, and
 runs the artifact verifier with `--require-q6-workgroup-clear`.
 

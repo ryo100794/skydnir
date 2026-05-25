@@ -2270,6 +2270,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("verify-q6-workgroup-lowering-preflight.py", runner)
         self.assertIn("android-llama-gpu-readiness.sh", runner)
         self.assertIn("PDOCKER_GPU_STRICT_PASSTHROUGH=1", runner)
+        self.assertIn("PDOCKER_GPU_STRICT_RECONCILIATION=1", runner)
+        self.assertIn("PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION=1", runner)
         self.assertIn("PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC=1", runner)
         self.assertIn("PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS=1", runner)
         self.assertIn("PDOCKER_GPU_CPU_ORACLE=1", runner)
@@ -2350,6 +2352,11 @@ class GpuAbiContractTest(unittest.TestCase):
         compare_step = next(step for step in plan["runner_step_contract"] if step["name"] == "compare")
         self.assertTrue(compare_step["touches_adb"])
         self.assertEqual("1", compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_PASSTHROUGH"])
+        self.assertEqual("1", compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_RECONCILIATION"])
+        self.assertEqual(
+            "1",
+            compare_step["required_env_overlay"]["PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION"],
+        )
         self.assertEqual(plan["q6_required_env_overlay"], compare_step["required_env_overlay"])
         self.assertIn("--require-q6-workgroup-clear", json.dumps(plan["runner_step_contract"]))
 
