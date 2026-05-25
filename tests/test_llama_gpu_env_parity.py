@@ -187,6 +187,8 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn('not str(key).endswith("_comparable")', compare)
         self.assertIn('"diagnostic_record_sha256"', compare)
         self.assertIn('"diagnostic_set_sha256"', compare)
+        self.assertIn("identical_duplicate_dispatch_ids", compare)
+        self.assertIn("previous_identity == identity_sha256", compare)
         self.assertIn("[pdocker llama compare] runtime env", compare)
         self.assertIn("record_planned_container_payload_env", compare)
         self.assertIn('"planned_container_env": planned_env', compare)

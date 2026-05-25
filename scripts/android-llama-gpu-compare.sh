@@ -141,15 +141,33 @@ record_wait_server_event() {
   local http_status="$4"
   local container_status="$5"
   local container_id="${6:-}"
+  local curl_exit="${7:-}"
+  local curl_http_code="${8:-}"
+  local http_probe="${9:-}"
+  local port_forward="${10:-}"
+  local wait_failure_class="${11:-}"
   local path
   path="$(compare_artifact_dir)/wait-server.jsonl"
   mkdir -p "$(dirname "$path")"
-  python3 - "$path" "$phase" "$elapsed" "$timeout_sec" "$http_status" "$container_status" "$container_id" <<'PY' || true
+  python3 - "$path" "$phase" "$elapsed" "$timeout_sec" "$http_status" "$container_status" "$container_id" "$curl_exit" "$curl_http_code" "$http_probe" "$port_forward" "$wait_failure_class" <<'PY' || true
 import json
 import sys
 from datetime import datetime, timezone
 
-path, phase, elapsed, timeout_s, http_status, container_status, container_id = sys.argv[1:8]
+(
+    path,
+    phase,
+    elapsed,
+    timeout_s,
+    http_status,
+    container_status,
+    container_id,
+    curl_exit,
+    curl_http_code,
+    http_probe,
+    port_forward,
+    wait_failure_class,
+) = sys.argv[1:13]
 event = {
     "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "phase": phase,
@@ -159,6 +177,16 @@ event = {
     "container_running": container_status,
     "container_id": container_id,
 }
+if curl_exit:
+    event["curl_exit"] = int(curl_exit) if curl_exit.isdigit() else curl_exit
+if curl_http_code:
+    event["curl_http_code"] = curl_http_code
+if http_probe:
+    event["http_probe"] = http_probe
+if port_forward:
+    event["port_forward"] = port_forward
+if wait_failure_class:
+    event["wait_failure_class"] = wait_failure_class
 with open(path, "a", encoding="utf-8") as f:
     f.write(json.dumps(event, separators=(",", ":")) + "\n")
 PY
@@ -1384,11 +1412,21 @@ PY
 wait_server() {
   local seconds="$1"
   local phase="${2:-wait-server}"
-  local started now elapsed next_progress http_status container_status ref
+  local started now elapsed next_progress http_status container_status ref curl_exit curl_http_code http_probe port_forward_state wait_failure_class
   started="$(date +%s)"
   next_progress=0
   "$ADB" forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1 || true
-  "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null
+  port_forward_state="ok"
+  if ! "$ADB" forward "tcp:$LOCAL_PORT" "tcp:$REMOTE_PORT" >/dev/null 2>&1; then
+    port_forward_state="failed"
+    ref="$(container_ref)"
+    record_wait_server_event "$phase" 0 "$seconds" "fail" "not-checked" "$ref" "" "" "curl-error" "$port_forward_state" "port-forward-failed"
+    return 1
+  fi
+  curl_exit=""
+  curl_http_code=""
+  http_probe=""
+  wait_failure_class=""
   while true; do
     now="$(date +%s)"
     elapsed=$(( now - started ))
@@ -1396,29 +1434,60 @@ wait_server() {
       ref="$(container_ref)"
       echo "[pdocker llama compare] waiting for $phase server timed out: elapsed=${elapsed}/${seconds}s id=${ref:0:12}" >&2
       operation_notify "running" "$phase: llama HTTP server wait timed out at ${elapsed}/${seconds}s; collecting logs"
-      record_wait_server_event "$phase" "$elapsed" "$seconds" "timeout" "unknown" "$ref"
+      if container_running; then
+        container_status="running"
+        wait_failure_class="${wait_failure_class:-timeout}"
+      else
+        container_status="not-running"
+        wait_failure_class="container-not-running"
+      fi
+      record_wait_server_event "$phase" "$elapsed" "$seconds" "timeout" "$container_status" "$ref" "$curl_exit" "$curl_http_code" "$http_probe" "$port_forward_state" "$wait_failure_class"
       return 1
     fi
     runtime_memory_headroom_ok "wait-server" || return 2
     http_status="fail"
     container_status="not-checked"
-    if curl -fsS --max-time "$WAIT_SERVER_CURL_TIMEOUT_SEC" "http://127.0.0.1:$LOCAL_PORT/v1/models" >/dev/null 2>&1; then
+    curl_http_code="$(
+      curl -sS -o /dev/null -w '%{http_code}' \
+        --max-time "$WAIT_SERVER_CURL_TIMEOUT_SEC" \
+        "http://127.0.0.1:$LOCAL_PORT/v1/models" 2>/dev/null
+    )"
+    curl_exit="$?"
+    case "$curl_exit:$curl_http_code" in
+      0:2*) http_probe="ok"; http_status="ok" ;;
+      0:503) http_probe="http-503" ;;
+      0:*) http_probe="http-error" ;;
+      7:*) http_probe="connection-refused" ;;
+      28:*) http_probe="curl-timeout" ;;
+      *) http_probe="curl-error" ;;
+    esac
+    wait_failure_class="$http_probe"
+    if [[ "$http_probe" == "ok" ]]; then
       http_status="ok"
       if container_running; then
         container_status="running"
         ref="$(container_ref)"
         echo "[pdocker llama compare] $phase server is reachable: elapsed=${elapsed}/${seconds}s id=${ref:0:12}" >&2
         operation_notify "running" "$phase: llama HTTP server reachable after ${elapsed}s"
-        record_wait_server_event "$phase" "$elapsed" "$seconds" "$http_status" "$container_status" "$ref"
+        record_wait_server_event "$phase" "$elapsed" "$seconds" "$http_status" "$container_status" "$ref" "$curl_exit" "$curl_http_code" "$http_probe" "$port_forward_state" "ready"
         return 0
       fi
       container_status="not-running"
+      wait_failure_class="container-not-running"
     fi
     if (( elapsed >= next_progress )); then
       ref="$(container_ref)"
+      if [[ "$container_status" == "not-checked" ]]; then
+        if container_running; then
+          container_status="running"
+        else
+          container_status="not-running"
+          wait_failure_class="container-not-running"
+        fi
+      fi
       echo "[pdocker llama compare] waiting for $phase server: elapsed=${elapsed}/${seconds}s http=$http_status container=$container_status id=${ref:0:12}" >&2
       operation_notify "running" "$phase: waiting for llama HTTP server ${elapsed}/${seconds}s; http=$http_status; container=$container_status"
-      record_wait_server_event "$phase" "$elapsed" "$seconds" "$http_status" "$container_status" "$ref"
+      record_wait_server_event "$phase" "$elapsed" "$seconds" "$http_status" "$container_status" "$ref" "$curl_exit" "$curl_http_code" "$http_probe" "$port_forward_state" "$wait_failure_class"
       next_progress=$(( elapsed + WAIT_SERVER_PROGRESS_INTERVAL_SEC ))
     fi
     sleep 1
@@ -2710,7 +2779,8 @@ def build_api_executor_reconciliation(events):
 
     records = []
     duplicate_dispatch_ids = []
-    seen_dispatch_ids = set()
+    identical_duplicate_dispatch_ids = []
+    seen_dispatch_ids = {}
     for event_index, event in enumerate(events):
         if not isinstance(event, dict):
             continue
@@ -2725,9 +2795,6 @@ def build_api_executor_reconciliation(events):
         if dispatch_id in (None, ""):
             dispatch_id = f"event-{event_index}"
         dispatch_id = str(dispatch_id)
-        if dispatch_id in seen_dispatch_ids:
-            duplicate_dispatch_ids.append(dispatch_id)
-        seen_dispatch_ids.add(dispatch_id)
         comparable = {
             key: value
             for key, value in matches.items()
@@ -2769,6 +2836,18 @@ def build_api_executor_reconciliation(events):
             "matches": matches,
         }
         record["diagnostic_record_sha256"] = canonical_sha256(record)
+        identity_record = dict(record)
+        identity_record.pop("event_index", None)
+        identity_record["diagnostic_record_sha256"] = canonical_sha256(identity_record)
+        identity_sha256 = identity_record["diagnostic_record_sha256"]
+        previous_identity = seen_dispatch_ids.get(dispatch_id)
+        if previous_identity is not None:
+            if previous_identity == identity_sha256:
+                identical_duplicate_dispatch_ids.append(dispatch_id)
+                continue
+            duplicate_dispatch_ids.append(dispatch_id)
+        else:
+            seen_dispatch_ids[dispatch_id] = identity_sha256
         records.append(record)
     if not records:
         return {
@@ -2794,6 +2873,7 @@ def build_api_executor_reconciliation(events):
         "canonical_raw_fields_present": False,
         "record_count": len(records),
         "duplicate_dispatch_ids": duplicate_dispatch_ids,
+        "identical_duplicate_dispatch_ids": identical_duplicate_dispatch_ids,
         "dispatches": records[-16:],
         "promotion_allowed": False,
         "promotion_blocker": "FNV-1a transport correlation is diagnostic only; require SHA-256/full proof or canonical raw fields before correctness claims",
@@ -2803,6 +2883,7 @@ def build_api_executor_reconciliation(events):
         "summary": result["summary"],
         "record_count": result["record_count"],
         "duplicate_dispatch_ids": result["duplicate_dispatch_ids"],
+        "identical_duplicate_dispatch_ids": result["identical_duplicate_dispatch_ids"],
         "dispatches": result["dispatches"],
     })
     return result
