@@ -2253,6 +2253,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("android-llama-gpu-compare.sh", runner)
         self.assertIn("--require-q6-workgroup-clear", runner)
         self.assertIn("does not rebuild the llama image", runner)
+        self.assertIn("plan-llama-gpu-q6-run.py", runner)
+        self.assertIn("verify-llama-gpu-q6-run-against-plan.py", runner)
+        self.assertIn("--allow-nonterminal", runner)
 
     def test_q6_preflight_planner_names_evidence_and_branches_before_adb(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2427,12 +2430,27 @@ class GpuAbiContractTest(unittest.TestCase):
             )
             self.assertEqual(10, result.returncode, result.stdout + result.stderr)
             data = json.loads(verdict.read_text(encoding="utf-8"))
-        self.assertEqual("q6-workgroup-cleared-but-oracle-mismatch", data["classification"])
-        self.assertEqual([], data["missing_required_evidence_fields"])
-        self.assertEqual(
-            "specialization_materialize_report.failure_reason == no-changes",
-            data["selected_branch"]["condition"],
-        )
+            self.assertEqual("q6-workgroup-cleared-but-oracle-mismatch", data["classification"])
+            self.assertEqual([], data["missing_required_evidence_fields"])
+            self.assertEqual(
+                "specialization_materialize_report.failure_reason == no-changes",
+                data["selected_branch"]["condition"],
+            )
+            allowed = subprocess.run(
+                [
+                    "python3",
+                    str(LLAMA_Q6_PLAN_VERIFIER),
+                    "--plan",
+                    str(plan),
+                    "--artifact",
+                    str(artifact),
+                    "--allow-nonterminal",
+                ],
+                cwd=ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(0, allowed.returncode, allowed.stdout.decode() + allowed.stderr.decode())
 
     def test_gpu_env_propagation_parity_is_documented_and_guarded(self):
         compare = LLAMA_COMPARE.read_text()

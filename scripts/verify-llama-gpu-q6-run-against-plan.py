@@ -136,6 +136,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--artifact", type=Path, required=True)
     parser.add_argument("--out", type=Path)
+    parser.add_argument(
+        "--allow-nonterminal",
+        action="store_true",
+        help="Return success when evidence is complete but the selected branch is not terminal.",
+    )
     args = parser.parse_args(argv)
 
     plan = load_json(args.plan)
@@ -168,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
     print(text, end="")
     if missing:
         return 12
+    if args.allow_nonterminal:
+        return 0
     return 0 if report.get("terminal") is True else 10
 
 

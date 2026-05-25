@@ -14,6 +14,8 @@ GPU_CTX="512"
 GPU_LAYERS="1"
 PREDICT="4"
 REPEAT="1"
+PLAN_OUT="docs/test/llama-gpu-q6-preflight-plan-latest.json"
+VERDICT_OUT=""
 
 usage() {
   cat <<'USAGE'
@@ -29,6 +31,8 @@ Options:
   --gpu-layers N        llama.cpp -ngl value. Default: 1.
   --predict N           Tokens to predict. Default: 4.
   --repeat N            Repeat count. Default: 1.
+  --plan-out PATH       Pre-flight plan path. Default: docs/test/llama-gpu-q6-preflight-plan-latest.json.
+  --verdict-out PATH    Plan verdict path. Defaults to <out>-plan-verdict.json.
 
 This runner intentionally does not rebuild the llama image and does not modify
 llama.cpp, Dockerfiles, models, or prompts.
@@ -45,6 +49,8 @@ while [[ $# -gt 0 ]]; do
     --gpu-layers) GPU_LAYERS="${2:?missing gpu layers}"; shift 2 ;;
     --predict) PREDICT="${2:?missing predict}"; shift 2 ;;
     --repeat) REPEAT="${2:?missing repeat}"; shift 2 ;;
+    --plan-out) PLAN_OUT="${2:?missing plan output path}"; shift 2 ;;
+    --verdict-out) VERDICT_OUT="${2:?missing verdict output path}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -65,6 +71,18 @@ fi
 if [[ -z "$OUT" ]]; then
   OUT="docs/test/llama-gpu-ngl${GPU_LAYERS}-q6-workgroup-legalized-$(date -u +%Y%m%dT%H%M%SZ).json"
 fi
+if [[ -z "$VERDICT_OUT" ]]; then
+  VERDICT_OUT="${OUT%.json}-plan-verdict.json"
+fi
+
+echo "[pdocker q6 workgroup] plan: $PLAN_OUT"
+python3 scripts/plan-llama-gpu-q6-run.py \
+  --serial "$SERIAL" \
+  --artifact "$OUT" \
+  --gpu-layers "$GPU_LAYERS" \
+  --predict "$PREDICT" \
+  --repeat "$REPEAT" \
+  --out "$PLAN_OUT"
 
 echo "[pdocker q6 workgroup] preflight: $SPV"
 python3 scripts/maintenance/verify-q6-workgroup-lowering-preflight.py \
@@ -103,3 +121,10 @@ bash scripts/android-llama-gpu-compare.sh \
 
 echo "[pdocker q6 workgroup] verify: $OUT"
 python3 scripts/verify-llama-gpu-artifact.py "$OUT" --require-q6-workgroup-clear
+
+echo "[pdocker q6 workgroup] verdict: $VERDICT_OUT"
+python3 scripts/verify-llama-gpu-q6-run-against-plan.py \
+  --plan "$PLAN_OUT" \
+  --artifact "$OUT" \
+  --out "$VERDICT_OUT" \
+  --allow-nonterminal
