@@ -38,6 +38,18 @@ def load_llama_gpu_artifact_verifier():
     return verifier
 
 
+def q6_required_runtime_env_manifest(plan_path):
+    plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
+    required = {str(k): str(v) for k, v in plan["q6_required_env_overlay"].items()}
+    return {
+        "schema": "pdocker.llama.gpu.runtime-env-artifact.v1",
+        "host_requested_env": required,
+        "requested_env_missing_from_runtime": [],
+        "requested_env_observed_keys": sorted(required),
+        "runtime_env_observed_keys": sorted(required),
+    }
+
+
 def load_llama_gpu_compare_q6_helpers():
     source = LLAMA_COMPARE.read_text()
     start = source.index("Q6_K_MATVEC_SPIRV_HASHES = {")
@@ -2384,6 +2396,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("scripts/prepare-q6k-noop-probe.sh", runner)
         self.assertIn("--probe-writes", runner)
         self.assertIn("instrument-spirv-noop-probe.py", runner)
+        inline_required_env = dict(
+            re.findall(r'^((?:PDOCKER_GPU|PDOCKER_ADB|PDOCKER_ANDROID)_[A-Z0-9_]+)="?([^"\s]+)"? \\', runner, re.M)
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -2398,6 +2413,12 @@ class GpuAbiContractTest(unittest.TestCase):
                     str(plan),
                     "--out",
                     str(artifact),
+                    "--cpu-tps",
+                    "0.125",
+                    "--cpu-ctx",
+                    "256",
+                    "--gpu-ctx",
+                    "768",
                 ],
                 check=True,
                 cwd=ROOT,
@@ -2410,6 +2431,17 @@ class GpuAbiContractTest(unittest.TestCase):
             plan_data = json.loads(plan.read_text(encoding="utf-8"))
             self.assertEqual("adb-not-used", plan_data["inputs"]["serial"])
             self.assertEqual(str(artifact), plan_data["artifact_path"])
+            self.assertEqual("0.125", plan_data["inputs"]["cpu_tps"])
+            self.assertEqual(256, plan_data["inputs"]["cpu_ctx"])
+            self.assertEqual(768, plan_data["inputs"]["gpu_ctx"])
+            compare_step = next(step for step in plan_data["runner_step_contract"] if step["name"] == "compare")
+            self.assertIn("--cpu-ctx", compare_step["required_flags"])
+            self.assertIn("--gpu-ctx", compare_step["required_flags"])
+            self.assertEqual(plan_data["q6_required_env_overlay"], compare_step["required_env_overlay"])
+            self.assertEqual(plan_data["q6_required_env_overlay"], {
+                key: inline_required_env[key]
+                for key in plan_data["q6_required_env_overlay"]
+            })
 
     def test_q6_preflight_planner_names_evidence_and_branches_before_adb(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2486,6 +2518,7 @@ class GpuAbiContractTest(unittest.TestCase):
                             "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                         },
                         "gpu": {
+                            "runtime_env_manifest": q6_required_runtime_env_manifest(plan),
                             "diagnostics": {
                                 "runtime_freshness": {
                                     "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
@@ -2602,6 +2635,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertEqual("q6-workgroup-cleared-but-oracle-mismatch", data["classification"])
             self.assertTrue(data["artifact_matches_plan_path"])
             self.assertEqual([], data["missing_required_evidence_fields"])
+            self.assertEqual([], data["required_env_mismatches"])
             self.assertEqual(
                 "specialization_materialize_report.failure_reason == no-changes",
                 data["selected_branch"]["condition"],
@@ -2621,6 +2655,63 @@ class GpuAbiContractTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
             self.assertEqual(0, allowed.returncode, allowed.stdout.decode() + allowed.stderr.decode())
+
+            wrong_plan = tmp_path / "wrong-plan.json"
+            subprocess.run(
+                [
+                    "python3",
+                    str(LLAMA_Q6_PREFLIGHT_PLANNER),
+                    "--artifact",
+                    str(tmp_path / "different-artifact.json"),
+                    "--out",
+                    str(wrong_plan),
+                ],
+                check=True,
+                cwd=ROOT,
+            )
+            wrong_path = subprocess.run(
+                [
+                    "python3",
+                    str(LLAMA_Q6_PLAN_VERIFIER),
+                    "--plan",
+                    str(wrong_plan),
+                    "--artifact",
+                    str(artifact),
+                    "--allow-nonterminal",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(13, wrong_path.returncode, wrong_path.stdout + wrong_path.stderr)
+            self.assertFalse(json.loads(wrong_path.stdout)["artifact_matches_plan_path"])
+
+            artifact_data = json.loads(artifact.read_text(encoding="utf-8"))
+            artifact_data["gpu"]["runtime_env_manifest"]["host_requested_env"].pop(
+                "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS"
+            )
+            artifact.write_text(json.dumps(artifact_data), encoding="utf-8")
+            env_mismatch = subprocess.run(
+                [
+                    "python3",
+                    str(LLAMA_Q6_PLAN_VERIFIER),
+                    "--plan",
+                    str(plan),
+                    "--artifact",
+                    str(artifact),
+                    "--allow-nonterminal",
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(14, env_mismatch.returncode, env_mismatch.stdout + env_mismatch.stderr)
+            self.assertEqual(
+                "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
+                json.loads(env_mismatch.stdout)["required_env_mismatches"][0]["key"],
+            )
 
     def test_q6_plan_verifier_fails_when_planned_evidence_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:

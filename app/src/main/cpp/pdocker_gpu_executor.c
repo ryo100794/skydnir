@@ -7220,11 +7220,6 @@ static void run_cpu_oracle_q6k_matvec_sample(
         if (!store_formula_valid) {
             continue;
         }
-        if (store_j != 0) report->q6_store_index_sampled_nonzero_j = 1;
-        if (store_workgroup_y != 0) report->q6_store_index_sampled_nonzero_y = 1;
-        report->q6_store_index_full_coverage =
-            report->q6_store_index_sampled_nonzero_j &&
-            report->q6_store_index_sampled_nonzero_y;
         if (row >= stride_d ||
             dst_index < report->q6_store_window_begin ||
             dst_index >= report->q6_store_window_end ||
@@ -7391,6 +7386,8 @@ static void run_cpu_oracle_q6k_matvec_sample(
         }
         float expected = (float)(sum + accumulator_sum);
         const float gpu_before_oracle_writeback = gpu;
+        const size_t output_layout_sample_count_before =
+            report->q6_output_layout_probe_sample_count;
         q6k_record_output_layout_probe_sample(
             report,
             dst_base,
@@ -7407,6 +7404,14 @@ static void run_cpu_oracle_q6k_matvec_sample(
             store_row,
             expected,
             gpu_before_oracle_writeback);
+        if (report->q6_output_layout_probe_sample_count >
+            output_layout_sample_count_before) {
+            if (store_j != 0) report->q6_store_index_sampled_nonzero_j = 1;
+            if (store_workgroup_y != 0) report->q6_store_index_sampled_nonzero_y = 1;
+            report->q6_store_index_full_coverage =
+                report->q6_store_index_sampled_nonzero_j &&
+                report->q6_store_index_sampled_nonzero_y;
+        }
         q6k_record_partial_signature_probe_sample(
             report,
             dst_index,

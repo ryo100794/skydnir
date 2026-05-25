@@ -74,7 +74,16 @@ RUNNER_STEP_CONTRACT = [
         "touches_adb": True,
         "command": "scripts/android-llama-gpu-compare.sh",
         "required_env_overlay": Q6_REQUIRED_ENV_OVERLAY,
-        "required_flags": ["--gpu-only", "--cpu-tps", "--gpu-layers", "--predict", "--repeat", "--out"],
+        "required_flags": [
+            "--gpu-only",
+            "--cpu-tps",
+            "--cpu-ctx",
+            "--gpu-ctx",
+            "--gpu-layers",
+            "--predict",
+            "--repeat",
+            "--out",
+        ],
         "required_outputs": ["compare_artifact"],
     },
     {
@@ -146,6 +155,12 @@ def build_plan(args: argparse.Namespace) -> dict:
         "scripts/android-llama-gpu-q6-workgroup-run.sh",
         "--out",
         artifact,
+        "--cpu-tps",
+        str(args.cpu_tps),
+        "--cpu-ctx",
+        str(args.cpu_ctx),
+        "--gpu-ctx",
+        str(args.gpu_ctx),
         "--gpu-layers",
         str(args.gpu_layers),
         "--predict",
@@ -162,6 +177,9 @@ def build_plan(args: argparse.Namespace) -> dict:
         "adb_policy": "do not connect until the user says the Android device is prepared",
         "inputs": {
             "serial": args.serial or "<prepared-device>",
+            "cpu_tps": args.cpu_tps,
+            "cpu_ctx": args.cpu_ctx,
+            "gpu_ctx": args.gpu_ctx,
             "gpu_layers": args.gpu_layers,
             "predict": args.predict,
             "repeat": args.repeat,
@@ -192,6 +210,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", default="", help="ADB serial to record in the plan; does not connect")
     parser.add_argument("--artifact", default="", help="planned output artifact path")
+    parser.add_argument("--cpu-tps", default="0.04702448956650603")
+    parser.add_argument("--cpu-ctx", type=int, default=512)
+    parser.add_argument("--gpu-ctx", type=int, default=512)
     parser.add_argument("--gpu-layers", type=int, default=1)
     parser.add_argument("--predict", type=int, default=4)
     parser.add_argument("--repeat", type=int, default=1)
@@ -199,6 +220,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.gpu_layers < 1:
         parser.error("--gpu-layers must be >= 1 for Q6 GPU probing")
+    if args.cpu_ctx < 1:
+        parser.error("--cpu-ctx must be >= 1")
+    if args.gpu_ctx < 1:
+        parser.error("--gpu-ctx must be >= 1")
     if args.predict < 2:
         parser.error("--predict must be >= 2")
     if args.repeat < 1:

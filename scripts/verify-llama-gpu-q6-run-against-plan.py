@@ -83,6 +83,53 @@ def artifact_matches_plan_path(artifact: Path, planned: Any) -> bool:
         return artifact_path.absolute() == planned_path.absolute()
 
 
+def runtime_env_manifest_record(data: dict[str, Any]) -> dict[str, Any]:
+    gpu = data.get("gpu")
+    if isinstance(gpu, dict):
+        value = gpu.get("runtime_env_manifest")
+        if isinstance(value, dict):
+            return value
+    value = data.get("runtime_env_manifest")
+    return value if isinstance(value, dict) else {}
+
+
+def required_env_mismatches(data: dict[str, Any], plan: dict[str, Any]) -> list[dict[str, Any]]:
+    required = plan.get("q6_required_env_overlay")
+    if not isinstance(required, dict):
+        return [{
+            "key": "<plan.q6_required_env_overlay>",
+            "reason": "missing-or-invalid-plan-required-env-overlay",
+        }]
+    manifest = runtime_env_manifest_record(data)
+    requested = manifest.get("host_requested_env")
+    if not isinstance(requested, dict):
+        requested = {}
+    missing_from_runtime = manifest.get("requested_env_missing_from_runtime")
+    if not isinstance(missing_from_runtime, list):
+        missing_from_runtime = []
+    missing_set = {str(value) for value in missing_from_runtime}
+    mismatches: list[dict[str, Any]] = []
+    for key, value in sorted(required.items()):
+        key_s = str(key)
+        value_s = str(value)
+        observed = requested.get(key_s)
+        if observed != value_s:
+            mismatches.append({
+                "key": key_s,
+                "reason": "host-requested-env-mismatch",
+                "expected": value_s,
+                "observed": observed,
+            })
+            continue
+        if key_s in missing_set:
+            mismatches.append({
+                "key": key_s,
+                "reason": "requested-env-missing-from-runtime",
+                "expected": value_s,
+            })
+    return mismatches
+
+
 def select_branch(report: dict[str, Any], artifact: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
     classification = str(report.get("classification") or "")
     q6 = report.get("q6_workgroup_diagnostics")
@@ -166,17 +213,20 @@ def main(argv: list[str] | None = None) -> int:
     verifier = load_artifact_verifier()
     report = verifier.classify(artifact)
     missing = missing_evidence_fields(artifact, plan)
+    path_matches = artifact_matches_plan_path(args.artifact, plan.get("artifact_path"))
+    env_mismatches = required_env_mismatches(artifact, plan)
     branch = select_branch(report, artifact, plan)
     result = {
         "schema": "pdocker.llama.gpu.q6.plan-verdict.v1",
         "plan": str(args.plan),
         "artifact": str(args.artifact),
-        "artifact_matches_plan_path": artifact_matches_plan_path(args.artifact, plan.get("artifact_path")),
+        "artifact_matches_plan_path": path_matches,
         "classification": report.get("classification"),
         "terminal": report.get("terminal"),
         "correctness_claim_allowed": report.get("correctness_claim_allowed"),
         "benchmark_claim_allowed": report.get("benchmark_claim_allowed"),
         "missing_required_evidence_fields": missing,
+        "required_env_mismatches": env_mismatches,
         "selected_branch": branch,
         "next_action": branch.get("action"),
         "verifier_report": report,
@@ -188,6 +238,10 @@ def main(argv: list[str] | None = None) -> int:
     print(text, end="")
     if missing:
         return 12
+    if not path_matches:
+        return 13
+    if env_mismatches:
+        return 14
     if args.allow_nonterminal:
         return 0
     return 0 if report.get("terminal") is True else 10

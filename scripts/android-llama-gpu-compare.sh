@@ -4182,17 +4182,61 @@ q6_output_layout_fixed_offset_rejected = (
     and q6_output_layout_probe.get("consistent_relative_offset") is False
 )
 q6_output_layout_samples = q6_output_layout_probe.get("samples")
-q6_output_layout_formula_sample_count = (
-    sum(1 for sample in q6_output_layout_samples if isinstance(sample, dict) and sample.get("store_formula_valid") is True)
-    if isinstance(q6_output_layout_samples, list)
-    else 0
-)
-q6_store_index_model_valid = (
-    q6_latest_partial.get("q6_store_index_model_valid") is True
-    and q6_latest_partial.get("q6_store_index_full_coverage") is True
-    and isinstance(q6_output_layout_samples, list)
-    and len(q6_output_layout_samples) > 0
-    and q6_output_layout_formula_sample_count == len(q6_output_layout_samples)
+
+
+def q6_store_index_model_has_full_evidence(q6, samples):
+    if not isinstance(q6, dict):
+        return False
+    if q6.get("q6_store_index_model_valid") is not True:
+        return False
+    if q6.get("q6_store_index_full_coverage") is not True:
+        return False
+    if q6.get("q6_store_index_sampled_nonzero_j") is not True:
+        return False
+    if q6.get("q6_store_index_sampled_nonzero_y") is not True:
+        return False
+    groups = q6.get("q6_dispatch_groups")
+    if not (
+        isinstance(groups, list)
+        and len(groups) == 3
+        and all(isinstance(value, int) and value > 0 for value in groups)
+    ):
+        return False
+    for key in ("q6_block_size", "q6_num_rows", "q6_num_cols",
+                "q6_store_window_begin", "q6_store_window_end"):
+        if not isinstance(q6.get(key), int):
+            return False
+    if not isinstance(samples, list) or not samples:
+        return False
+    sampled_nonzero_j = False
+    sampled_nonzero_y = False
+    for sample in samples:
+        if not isinstance(sample, dict) or sample.get("store_formula_valid") is not True:
+            return False
+        if not isinstance(sample.get("expected_store_index"), int):
+            return False
+        workgroup = sample.get("store_workgroup")
+        if not (
+            isinstance(workgroup, list)
+            and len(workgroup) == 3
+            and all(isinstance(value, int) and value >= 0 for value in workgroup)
+        ):
+            return False
+        for key in ("store_j", "store_row_in_group", "store_row"):
+            if not isinstance(sample.get(key), int):
+                return False
+        sampled_nonzero_j = sampled_nonzero_j or int(sample.get("store_j")) != 0
+        sampled_nonzero_y = sampled_nonzero_y or int(workgroup[1]) != 0
+    if q6.get("q6_num_cols") > 1 and not sampled_nonzero_j:
+        return False
+    if groups[1] > 1 and not sampled_nonzero_y:
+        return False
+    return True
+
+
+q6_store_index_model_valid = q6_store_index_model_has_full_evidence(
+    q6_latest_partial,
+    q6_output_layout_samples,
 )
 q6_native_spirv_identity = {
     "source_spirv_hash": q6_latest.get("source_spirv_hash"),
@@ -4334,6 +4378,15 @@ def build_q6_native_vs_writeback_split():
 
 
 q6_native_vs_writeback_split = build_q6_native_vs_writeback_split()
+q6_store_index_model_required = (
+    q6_output_layout_probe_summary.startswith("canonical-mismatch")
+    or q6_row_provenance_probe_summary == "other-row-match"
+    or q6_partial_signature_probe_summary in {"local-y-partial", "lane-partial"}
+    or q6_native_vs_writeback_split.get("summary") in {
+        "executor-final-writeback",
+        "native-final-store-or-readback",
+    }
+)
 q6_safe_kernel_used = q6_latest.get("q6k_safe_kernel") is True
 q6_expected_local_size = [1, 1, 1] if q6_safe_kernel_used else [32, 1, 1]
 q6_workgroup_shape_blocker = bool(
@@ -4443,14 +4496,7 @@ q6_blocker_class = (
     else "writeback"
     if q6_writable_writeback_mismatches
     else "q6-store-index-model-incomplete"
-    if (
-        q6_output_layout_probe_summary.startswith("canonical-mismatch")
-        and isinstance(q6_output_layout_samples, list)
-        and len(q6_output_layout_samples) > 0
-        and not q6_store_index_model_valid
-    )
-    else "q6-store-index-model-incomplete"
-    if q6_row_provenance_probe_summary == "other-row-match" and not q6_store_index_model_valid
+    if q6_store_index_model_required and not q6_store_index_model_valid
     else "executor-final-writeback"
     if q6_native_vs_writeback_split.get("summary") == "executor-final-writeback"
     else "native-q6-final-store-or-readback"

@@ -1614,6 +1614,10 @@ def _q6_store_index_model_valid(q6: Any, probe: dict[str, Any]) -> bool:
         return False
     if q6.get("q6_store_index_full_coverage") is not True:
         return False
+    if q6.get("q6_store_index_sampled_nonzero_j") is not True:
+        return False
+    if q6.get("q6_store_index_sampled_nonzero_y") is not True:
+        return False
     groups = q6.get("q6_dispatch_groups")
     if not (
         isinstance(groups, list)
@@ -1630,6 +1634,8 @@ def _q6_store_index_model_valid(q6: Any, probe: dict[str, Any]) -> bool:
         return False
     if not samples:
         return False
+    sampled_nonzero_j = False
+    sampled_nonzero_y = False
     for sample in samples:
         if not isinstance(sample, dict) or sample.get("store_formula_valid") is not True:
             return False
@@ -1645,7 +1651,30 @@ def _q6_store_index_model_valid(q6: Any, probe: dict[str, Any]) -> bool:
         for key in ("store_j", "store_row_in_group", "store_row"):
             if not isinstance(sample.get(key), int):
                 return False
+        sampled_nonzero_j = sampled_nonzero_j or int(sample.get("store_j")) != 0
+        sampled_nonzero_y = sampled_nonzero_y or int(workgroup[1]) != 0
+    if q6.get("q6_num_cols") > 1 and not sampled_nonzero_j:
+        return False
+    if groups[1] > 1 and not sampled_nonzero_y:
+        return False
     return True
+
+
+def _q6_store_index_model_required(
+        q6_output_layout: dict[str, Any],
+        q6_row_provenance: dict[str, Any],
+        q6_partial_signature: dict[str, Any],
+        q6_native_vs_writeback_split: dict[str, Any]) -> bool:
+    layout_summary = str(q6_output_layout.get("summary") or "")
+    return (
+        layout_summary.startswith("canonical-mismatch")
+        or q6_row_provenance.get("summary") == "other-row-match"
+        or q6_partial_signature.get("summary") in {"local-y-partial", "lane-partial"}
+        or q6_native_vs_writeback_split.get("summary") in {
+            "executor-final-writeback",
+            "native-final-store-or-readback",
+        }
+    )
 
 
 def _q6_row_provenance_probe(q6: Any) -> dict[str, Any]:
@@ -2158,9 +2187,12 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 responsibility_boundary = "q6-debug-u32-probe"
                 q6_blocker_class = q6_debug_u32_probe_blocker
             elif (
-                str(q6_output_layout.get("summary") or "").startswith("canonical-mismatch")
-                and isinstance(q6_output_layout.get("samples"), list)
-                and len(q6_output_layout.get("samples")) > 0
+                _q6_store_index_model_required(
+                    q6_output_layout,
+                    q6_row_provenance,
+                    q6_partial_signature,
+                    q6_native_vs_writeback_split,
+                )
                 and not _q6_store_index_model_valid(q6, q6_output_layout)
             ):
                 classification = "q6-store-index-model-incomplete"
