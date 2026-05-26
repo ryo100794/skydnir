@@ -131,7 +131,12 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             self.assertFalse(overlap, f"{name} overlaps: {sorted(overlap)}")
             classified.update(values)
 
-        self.assertEqual(env_keys, classified)
+        self.assertLessEqual(env_keys, classified)
+        self.assertEqual(
+            set(classifications["app_process_only"]),
+            classified - env_keys,
+        )
+        self.assertFalse(set(classifications["app_process_only"]) & set(manifest["compare_forward_env_keys"]))
         self.assertEqual(
             {
                 item["env"] for item in manifest["abi_dispatch_option_env_fields"]
@@ -254,6 +259,7 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertNotIn('string_list("compare_diagnostic_env_keys")', compare)
         self.assertIn('string_list("compare_probe_env_keys")', compare)
         self.assertIn('"compare_probe_env_keys": probe_keys', compare)
+        self.assertIn('"app_process_only_env_keys": app_process_only_env_keys', compare)
         self.assertIn('"config_propagation_env_keys": config_keys', compare)
         self.assertIn('"host_requested_env": dict(sorted(host_env.items()))', compare)
         self.assertIn('"host_echo_recorded": bool(runtime_env_record.get("echoed_to_log"))', compare)
@@ -261,6 +267,7 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn('effective_runtime_env.update({str(name): str(value) for name, value in planned_env.items()})', compare)
         self.assertIn('"runtime_env_observed_keys": sorted(effective_runtime_env)', compare)
         self.assertIn('"requested_env_observed_keys"', compare)
+        self.assertIn('"app_process_only_not_host_container_forwarded_keys"', compare)
 
         self.assertIn("def _runtime_env_manifest_record", verifier)
         self.assertIn('"runtime_env_manifest": runtime_env_manifest', verifier)

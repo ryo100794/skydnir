@@ -2166,18 +2166,21 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_MUTABLE_BUFFER_CACHE",
             "PDOCKER_GPU_VIRTUAL_MEMORY",
             "PDOCKER_GPU_VIRTUAL_MEMORY_MIN_BYTES",
-            "PDOCKER_GPU_DISABLE_ANDROID_VULKAN",
-            "PDOCKER_GPU_DISABLE_ANDROID_OPENCL",
             "PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS",
             "PDOCKER_GPU_RETRY_MATERIALIZE_SPECIALIZATION",
             "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
             "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",
-            "PDOCKER_ANDROID_OPENCL_LIBRARY",
             "PDOCKER_VULKAN_HEAP_BYTES",
             "PDOCKER_VULKAN_ICD_DEBUG",
             "PDOCKER_VULKAN_SUBGROUP_SIZE",
         ]:
             self.assertIn(key, forward_envs)
+        for key in [
+            "PDOCKER_GPU_DISABLE_ANDROID_VULKAN",
+            "PDOCKER_GPU_DISABLE_ANDROID_OPENCL",
+            "PDOCKER_ANDROID_OPENCL_LIBRARY",
+        ]:
+            self.assertNotIn(key, forward_envs)
         self.assertIn("compare_forward_env_keys", compare)
         self.assertIn("value = os.environ.get(key)", compare)
         self.assertIn("PDOCKER_LLAMA_MIN_FREE_MB", compare)
@@ -2358,11 +2361,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_QUEUE_SOCKET",
             "PDOCKER_GPU_SHARED_DIR",
         }
+        app_process_only = set(
+            manifest.get("env_bridge_classifications", {}).get("app_process_only", [])
+        )
         missing = sorted(
-            key for key in native_envs - internal_only
+            key for key in native_envs - internal_only - app_process_only
             if key not in forward_envs and key not in profile_envs and f"{key}=" not in compare
         )
         self.assertEqual([], missing)
+        self.assertFalse(app_process_only & forward_envs)
 
         self.assertIn("descriptor_array_layout_seen", compare)
         self.assertIn("descriptor_array_layouts", compare)

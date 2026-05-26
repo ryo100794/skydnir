@@ -227,8 +227,18 @@ def string_list(name):
         raise SystemExit(f"invalid {name} in llama GPU env manifest: {manifest_path}")
     return values
 
+def classification_list(name):
+    classifications = manifest.get("env_bridge_classifications")
+    if not isinstance(classifications, dict):
+        raise SystemExit(f"invalid env_bridge_classifications in llama GPU env manifest: {manifest_path}")
+    values = classifications.get(name)
+    if not isinstance(values, list) or not all(isinstance(value, str) and value for value in values):
+        raise SystemExit(f"invalid env_bridge_classifications.{name} in llama GPU env manifest: {manifest_path}")
+    return values
+
 forward_keys = string_list("compare_forward_env_keys")
 probe_keys = string_list("compare_probe_env_keys")
+app_process_only_env_keys = classification_list("app_process_only")
 config_fields = manifest.get("config_propagation_env_fields")
 if not isinstance(config_fields, list):
     raise SystemExit(f"invalid config_propagation_env_fields in llama GPU env manifest: {manifest_path}")
@@ -247,6 +257,7 @@ record = {
         "path": manifest_path,
         "compare_forward_env_keys": forward_keys,
         "compare_probe_env_keys": probe_keys,
+        "app_process_only_env_keys": app_process_only_env_keys,
         "config_propagation_env_keys": config_keys,
     },
     "run_settings": {
@@ -2403,16 +2414,33 @@ if not isinstance(manifest_forward_env_keys, list):
 manifest_probe_env_keys = env_manifest.get("compare_probe_env_keys")
 if not isinstance(manifest_probe_env_keys, list):
     manifest_probe_env_keys = []
+manifest_app_process_only_env_keys = (
+    env_manifest.get("env_bridge_classifications", {}).get("app_process_only")
+    if isinstance(env_manifest.get("env_bridge_classifications"), dict)
+    else []
+)
+if not isinstance(manifest_app_process_only_env_keys, list):
+    manifest_app_process_only_env_keys = []
 manifest_requested_env = runtime_env_record.get("host_requested_env") if isinstance(runtime_env_record, dict) else {}
 if not isinstance(manifest_requested_env, dict):
     manifest_requested_env = {}
+runtime_forward_env_keys = [
+    str(key) for key in manifest_forward_env_keys if isinstance(key, str)
+]
+runtime_app_process_only_env_keys = [
+    str(key) for key in manifest_app_process_only_env_keys if isinstance(key, str)
+]
 runtime_env_manifest = {
     "schema": "pdocker.llama.gpu.runtime-env-artifact.v1",
     "record_schema": runtime_env_record.get("schema") if isinstance(runtime_env_record, dict) else None,
     "manifest_schema": env_manifest.get("schema"),
     "manifest_path": manifest_path,
-    "compare_forward_env_keys": [str(key) for key in manifest_forward_env_keys if isinstance(key, str)],
+    "compare_forward_env_keys": runtime_forward_env_keys,
     "compare_probe_env_keys": [str(key) for key in manifest_probe_env_keys if isinstance(key, str)],
+    "app_process_only_env_keys": runtime_app_process_only_env_keys,
+    "app_process_only_not_host_container_forwarded_keys": sorted(
+        key for key in runtime_app_process_only_env_keys if key not in runtime_forward_env_keys
+    ),
     "host_requested_env": {str(k): str(v) for k, v in sorted(manifest_requested_env.items())},
     "host_echo_recorded": bool(runtime_env_record.get("echoed_to_log")) if isinstance(runtime_env_record, dict) else False,
     "planned_container_mode": runtime_env_record.get("planned_container_mode") if isinstance(runtime_env_record, dict) else None,
