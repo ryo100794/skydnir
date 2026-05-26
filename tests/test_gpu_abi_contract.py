@@ -38,6 +38,14 @@ def load_llama_gpu_artifact_verifier():
     return verifier
 
 
+def load_llama_q6_plan_verifier():
+    spec = importlib.util.spec_from_file_location("llama_q6_plan_verifier", LLAMA_Q6_PLAN_VERIFIER)
+    verifier = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(verifier)
+    return verifier
+
+
 def q6_required_runtime_env_manifest(plan_path):
     plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
     required = {str(k): str(v) for k, v in plan["q6_required_env_overlay"].items()}
@@ -2832,6 +2840,104 @@ class GpuAbiContractTest(unittest.TestCase):
             data = json.loads(result.stdout)
         self.assertIn("specialization_materialize_report", data["missing_required_evidence_fields"])
         self.assertTrue(data["artifact_matches_plan_path"])
+
+    def test_q6_plan_verifier_selects_final_store_boundary_branches(self):
+        verifier = load_llama_q6_plan_verifier()
+        plan = {"pass_branch": {"condition": "pass", "action": "promote"}}
+
+        native = verifier.select_branch(
+            {
+                "classification": "q6-native-final-store",
+                "q6_workgroup_diagnostics": {
+                    "q6_final_store_boundary": {"summary": "native-final-store-mismatch"}
+                },
+            },
+            {},
+            plan,
+        )
+        self.assertEqual(
+            "q6_final_store_boundary.summary == native-final-store-mismatch",
+            native["condition"],
+        )
+        self.assertEqual("native Q6 final-store path", native["owner"])
+
+        writeback = verifier.select_branch(
+            {
+                "classification": "q6-writeback-mismatch",
+                "q6_workgroup_diagnostics": {
+                    "q6_final_store_boundary": {"summary": "executor-writeback-mismatch"}
+                },
+            },
+            {},
+            plan,
+        )
+        self.assertEqual(
+            "q6_final_store_boundary.summary == executor-writeback-mismatch",
+            writeback["condition"],
+        )
+        self.assertEqual("Vulkan writeback and binding report path", writeback["owner"])
+
+        inconclusive = verifier.select_branch(
+            {
+                "classification": "q6-workgroup-cleared-but-oracle-mismatch",
+                "q6_workgroup_diagnostics": {
+                    "q6_final_store_boundary": {"summary": "inconclusive"}
+                },
+            },
+            {},
+            plan,
+        )
+        self.assertEqual(
+            "q6_final_store_boundary.summary == inconclusive",
+            inconclusive["condition"],
+        )
+        self.assertEqual("Q6 final-store boundary instrumentation", inconclusive["owner"])
+
+    def test_q6_plan_verifier_selects_terminal_and_pre_q6_branches(self):
+        verifier = load_llama_q6_plan_verifier()
+        pass_branch = {
+            "condition": "q6 oracle/prompt correctness passes",
+            "action": "promote this run to correctness-gated performance measurement",
+        }
+        plan = {"pass_branch": pass_branch}
+
+        terminal = verifier.select_branch(
+            {"classification": "q6-workgroup-cleared-and-oracle-match"},
+            {},
+            plan,
+        )
+        self.assertEqual(pass_branch, terminal)
+
+        unsupported = verifier.select_branch(
+            {"classification": "q6-workgroup-cleared-but-oracle-mismatch"},
+            {
+                "gpu": {
+                    "diagnostics": {
+                        "generic_spirv_dispatch": [
+                            {
+                                "specialization_materialize_report": {
+                                    "failure_reason": "unsupported-spec-expression"
+                                }
+                            }
+                        ]
+                    }
+                }
+            },
+            plan,
+        )
+        self.assertEqual(
+            "specialization_materialize_report.failure_reason == unsupported-spec-expression",
+            unsupported["condition"],
+        )
+        self.assertEqual("app/src/main/cpp/pdocker_gpu_executor.c", unsupported["owner"])
+
+        pre_q6 = verifier.select_branch(
+            {"classification": "q6-not-reached"},
+            {},
+            plan,
+        )
+        self.assertEqual("pipeline/device-lost before Q6 evidence", pre_q6["condition"])
+        self.assertEqual("pipeline creation policy and hash scope", pre_q6["owner"])
 
     def test_q6_readonly_alias_side_effects_do_not_block_final_store_diagnosis(self):
         bindings = [
