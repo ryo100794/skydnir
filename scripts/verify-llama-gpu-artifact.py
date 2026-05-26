@@ -890,6 +890,32 @@ def _q6_debug_u32_probe(q6: Any) -> dict[str, Any]:
     return probe if isinstance(probe, dict) else {}
 
 
+def _q6_final_store_boundary(q6: Any) -> dict[str, Any]:
+    if not isinstance(q6, dict):
+        return {"summary": "not-run", "samples": []}
+    boundary = q6.get("q6_final_store_boundary")
+    if not isinstance(boundary, dict):
+        return {"summary": "not-run", "samples": []}
+    summary = boundary.get("summary")
+    if summary not in {
+        "pass",
+        "native-final-store-mismatch",
+        "executor-writeback-mismatch",
+        "inconclusive",
+        "not-run",
+    }:
+        summary = "inconclusive"
+    samples = boundary.get("samples")
+    if not isinstance(samples, list):
+        samples = []
+    return {
+        **boundary,
+        "summary": summary,
+        "joined_sample_count": boundary.get("joined_sample_count"),
+        "samples": samples,
+    }
+
+
 def _q6_debug_u32_probe_blocker(q6: Any) -> str:
     if not isinstance(q6, dict):
         return ""
@@ -2120,6 +2146,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_partial_signature = _q6_partial_signature_probe(q6)
     q6_debug_u32_probe = _q6_debug_u32_probe(q6)
     q6_debug_u32_probe_blocker = _q6_debug_u32_probe_blocker(q6)
+    q6_final_store_boundary = _q6_final_store_boundary(q6)
     q6_native_vs_writeback_split = (
         q6.get("q6_native_vs_writeback_split")
         if isinstance(q6.get("q6_native_vs_writeback_split"), dict)
@@ -2178,17 +2205,31 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 responsibility_boundary = "q6-debug-u32-probe"
                 q6_blocker_class = q6_debug_u32_probe_blocker
             elif (
-                _q6_store_index_model_required(
-                    q6_output_layout,
-                    q6_row_provenance,
-                    q6_partial_signature,
-                    q6_native_vs_writeback_split,
+                (
+                    _q6_store_index_model_required(
+                        q6_output_layout,
+                        q6_row_provenance,
+                        q6_partial_signature,
+                        q6_native_vs_writeback_split,
+                    )
+                    or q6_final_store_boundary.get("summary") in {
+                        "executor-writeback-mismatch",
+                        "native-final-store-mismatch",
+                    }
                 )
                 and not _q6_store_index_model_valid(q6, q6_output_layout)
             ):
                 classification = "q6-store-index-model-incomplete"
                 responsibility_boundary = "q6-oracle"
                 q6_blocker_class = "q6-store-index-model-incomplete"
+            elif q6_final_store_boundary.get("summary") == "executor-writeback-mismatch":
+                classification = "q6-writeback-mismatch"
+                responsibility_boundary = "q6-writeback"
+                q6_blocker_class = "executor-final-writeback"
+            elif q6_final_store_boundary.get("summary") == "native-final-store-mismatch":
+                classification = "q6-native-final-store"
+                responsibility_boundary = "q6-native-final-store"
+                q6_blocker_class = "native-q6-final-store"
             elif q6_native_vs_writeback_split.get("summary") == "executor-final-writeback":
                 classification = "q6-writeback-mismatch"
                 responsibility_boundary = "q6-writeback"
@@ -2279,6 +2320,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_partial_signature_probe": q6_partial_signature,
         "q6_debug_u32_probe": q6_debug_u32_probe,
         "q6_debug_u32_probe_blocker": q6_debug_u32_probe_blocker,
+        "q6_final_store_boundary": q6_final_store_boundary,
         "q6_native_vs_writeback_split": q6_native_vs_writeback_split,
         "q6_effective_blocker_class": (
             q6_blocker_class
@@ -2290,6 +2332,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-native-other-row-output-layout",
                 "q6-native-local-y-partial-store",
                 "q6-native-lane-partial-store",
+                "q6-native-final-store",
                 "q6-native-final-store-or-readback",
                 "q6-native-device-execution-or-final-store",
                 "q6-native-reduction-or-device-execution",
@@ -2388,6 +2431,7 @@ def main(argv: list[str]) -> int:
             "q6-native-other-row-output-layout",
             "q6-native-local-y-partial-store",
             "q6-native-lane-partial-store",
+            "q6-native-final-store",
             "q6-native-final-store-or-readback",
             "q6-native-device-execution-or-final-store",
             "q6-native-reduction-or-device-execution",

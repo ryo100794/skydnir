@@ -4402,6 +4402,143 @@ def build_q6_native_vs_writeback_split():
 
 
 q6_native_vs_writeback_split = build_q6_native_vs_writeback_split()
+
+
+def build_q6_final_store_boundary():
+    """Join final-store trace records to output/writeback samples.
+
+    This keeps the next device run fail-closed at a narrower boundary:
+    - final-store value differs from the oracle, and writeback preserved it:
+      native Q6 final-store/device execution.
+    - final-store value matches the oracle, but post-writeback output differs:
+      executor writeback.
+    It is diagnostic-only and does not rewrite llama.cpp, shaders, prompts, or
+    model files.
+    """
+    records = []
+    for binding in q6_debug_u32_probe.get("bindings") or []:
+        if not isinstance(binding, dict):
+            continue
+        for record in binding.get("records") or []:
+            if not isinstance(record, dict):
+                continue
+            if record.get("status") == "pass" and record.get("trace_status") == "pass":
+                records.append({
+                    **record,
+                    "binding": binding.get("binding"),
+                    "set": binding.get("set"),
+                })
+    if not records:
+        return {
+            "schema": "pdocker.q6k.final-store-boundary.v1",
+            "summary": "not-run",
+            "reason": "missing-executed-final-store-trace",
+            "joined_sample_count": 0,
+            "class_counts": {},
+            "samples": [],
+        }
+
+    layout_by_dst = {}
+    layout_by_expected_store = {}
+    if isinstance(q6_output_layout_samples, list):
+        for sample in q6_output_layout_samples:
+            if not isinstance(sample, dict):
+                continue
+            if isinstance(sample.get("dst_index"), int):
+                layout_by_dst[int(sample["dst_index"])] = sample
+            if isinstance(sample.get("expected_store_index"), int):
+                layout_by_expected_store[int(sample["expected_store_index"])] = sample
+
+    fd_after_by_index = {}
+    for evidence in q6_row_indexed_writeback_evidence:
+        if not isinstance(evidence, dict):
+            continue
+        fd_after_by_index.update(samples_by_index(evidence.get("f32_after_writeback")))
+
+    joined = []
+    class_counts = {
+        "native-final-store-mismatch": 0,
+        "executor-writeback-mismatch": 0,
+        "pass": 0,
+        "mixed-or-inconclusive": 0,
+    }
+    for record in records:
+        output_index = record.get("output_index")
+        if not isinstance(output_index, int):
+            continue
+        layout = layout_by_dst.get(output_index) or layout_by_expected_store.get(output_index)
+        if not isinstance(layout, dict):
+            continue
+        expected = layout.get("expected")
+        final_value = record.get("value_f32")
+        fd_after = fd_after_by_index.get(output_index)
+        expected_store_index = layout.get("expected_store_index")
+        dst_index = layout.get("dst_index")
+        final_matches_expected = values_close(final_value, expected)
+        writeback_matches_final_store = values_close(fd_after, final_value)
+        writeback_matches_expected = values_close(fd_after, expected)
+        if not (
+            finite_number(expected)
+            and finite_number(final_value)
+            and finite_number(fd_after)
+        ):
+            sample_class = "mixed-or-inconclusive"
+        elif final_matches_expected and writeback_matches_expected:
+            sample_class = "pass"
+        elif (not final_matches_expected) and writeback_matches_final_store:
+            sample_class = "native-final-store-mismatch"
+        elif final_matches_expected and (not writeback_matches_final_store):
+            sample_class = "executor-writeback-mismatch"
+        else:
+            sample_class = "mixed-or-inconclusive"
+        class_counts[sample_class] = class_counts.get(sample_class, 0) + 1
+        joined.append({
+            "probe": record.get("probe"),
+            "candidate_id": record.get("candidate_id"),
+            "binding": record.get("binding"),
+            "output_index": output_index,
+            "expected_store_index": expected_store_index,
+            "dst_index": dst_index,
+            "final_store_value_f32": final_value,
+            "expected": expected,
+            "fd_after_writeback": fd_after,
+            "final_store_matches_expected": final_matches_expected,
+            "writeback_matches_final_store": writeback_matches_final_store,
+            "writeback_matches_expected": writeback_matches_expected,
+            "sample_class": sample_class,
+            "source_spirv_hash": q6_native_spirv_identity.get("source_spirv_hash"),
+            "effective_spirv_hash": q6_native_spirv_identity.get("effective_spirv_hash"),
+        })
+
+    if not joined:
+        summary = "inconclusive"
+        reason = "no-joined-final-store-layout-and-writeback-samples"
+    elif class_counts["native-final-store-mismatch"] == len(joined):
+        summary = "native-final-store-mismatch"
+        reason = None
+    elif class_counts["executor-writeback-mismatch"] == len(joined):
+        summary = "executor-writeback-mismatch"
+        reason = None
+    elif class_counts["pass"] == len(joined):
+        summary = "pass"
+        reason = None
+    else:
+        summary = "inconclusive"
+        reason = "mixed-sample-classes"
+    result = {
+        "schema": "pdocker.q6k.final-store-boundary.v1",
+        "summary": summary,
+        "joined_sample_count": len(joined),
+        "class_counts": class_counts,
+        "samples": joined[:32],
+        "store_index_model_valid": q6_store_index_model_valid,
+    }
+    if reason:
+        result["reason"] = reason
+    return result
+
+
+q6_final_store_boundary = build_q6_final_store_boundary()
 q6_store_index_model_required = (
     q6_output_layout_probe_summary.startswith("canonical-mismatch")
     or q6_row_provenance_probe_summary == "other-row-match"
@@ -4409,6 +4546,10 @@ q6_store_index_model_required = (
     or q6_native_vs_writeback_split.get("summary") in {
         "executor-final-writeback",
         "native-final-store-or-readback",
+    }
+    or q6_final_store_boundary.get("summary") in {
+        "executor-writeback-mismatch",
+        "native-final-store-mismatch",
     }
 )
 q6_safe_kernel_used = q6_latest.get("q6k_safe_kernel") is True
@@ -4459,6 +4600,8 @@ if not q6_shader_like_64_required:
         ])
 elif numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_64_abs_delta")):
     q6_shader_like_clear_basis.append("q6_shader_like_64_abs_delta")
+
+q6_final_store_boundary["native_reduction_cleared"] = q6_shader_like_oracle_cleared
 
 
 def classify_q6_output_index_probe(probe, native_reduction_cleared):
@@ -4604,6 +4747,7 @@ q6_workgroup_diagnostics = {
     "q6_native_reduction_tree_gpu_abs_error": q6_latest_partial.get("q6_native_reduction_tree_gpu_abs_error"),
     "q6_native_spirv_identity": q6_native_spirv_identity,
     "q6_native_vs_writeback_split": q6_native_vs_writeback_split,
+    "q6_final_store_boundary": q6_final_store_boundary,
     "q6_debug_u32_probe": q6_debug_u32_probe,
     "q6_debug_u32_probe_blocker": q6_debug_u32_probe_blocker,
     "q6_output_layout_probe": q6_output_layout_probe,
