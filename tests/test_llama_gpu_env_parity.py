@@ -35,8 +35,6 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertEqual(manifest["schema"], "pdocker.llama.gpu.env-manifest.v1")
         for key in [
             "ui_runtime_env_keys",
-            "pdockerd_runtime_env_keys",
-            "ui_compose_runtime_env_keys",
             "compare_forward_env_keys",
             "compare_probe_env_keys",
         ]:
@@ -46,8 +44,6 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             self.assertTrue(all(isinstance(value, str) and value for value in values), key)
 
         ui_runtime = set(manifest["ui_runtime_env_keys"])
-        self.assertEqual(manifest["ui_runtime_env_keys"], manifest["pdockerd_runtime_env_keys"])
-        self.assertLessEqual(set(manifest["ui_compose_runtime_env_keys"]), ui_runtime)
         self.assertLessEqual(ui_runtime, set(manifest["compare_forward_env_keys"]))
         self.assertLessEqual(set(manifest["compare_probe_env_keys"]), set(manifest["compare_forward_env_keys"]))
         self.assertEqual(
@@ -57,14 +53,14 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         ui_compose_defaults = manifest["ui_compose_runtime_env_defaults"]
         self.assertTrue(ui_compose_defaults)
         ui_compose_default_keys = [item["env"] for item in ui_compose_defaults]
-        self.assertEqual(ui_compose_default_keys, manifest["ui_compose_runtime_env_keys"])
+        self.assertLessEqual(set(ui_compose_default_keys), ui_runtime)
         for item in ui_compose_defaults:
             self.assertIsInstance(item.get("default"), str)
         defaults = manifest["pdockerd_runtime_env_defaults"]
         self.assertTrue(defaults)
         default_keys = [item["env"] for item in defaults]
         self.assertEqual(len(default_keys), len(set(default_keys)))
-        self.assertLessEqual(set(manifest["pdockerd_runtime_env_keys"]), set(default_keys))
+        self.assertLessEqual(ui_runtime, set(default_keys))
         for item in defaults:
             self.assertIsInstance(item.get("env"), str)
             self.assertIsInstance(item.get("default"), str)
@@ -90,8 +86,6 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         manifest = load_manifest()
         verifier = load_verifier()
         self.assertEqual(tuple(manifest["ui_runtime_env_keys"]), verifier.LLAMA_GPU_UI_RUNTIME_ENV_KEYS)
-        self.assertEqual(tuple(manifest["pdockerd_runtime_env_keys"]), verifier.LLAMA_GPU_PDOCKERD_RUNTIME_ENV_KEYS)
-        self.assertEqual(tuple(manifest["ui_compose_runtime_env_keys"]), verifier.LLAMA_GPU_UI_COMPOSE_RUNTIME_ENV_KEYS)
         self.assertEqual(tuple(manifest["compare_forward_env_keys"]), verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
 
     def test_manifest_env_bridge_classification_is_exhaustive(self):
@@ -100,8 +94,6 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         env_keys = set()
         for key in [
             "ui_runtime_env_keys",
-            "pdockerd_runtime_env_keys",
-            "ui_compose_runtime_env_keys",
             "compare_forward_env_keys",
             "compare_probe_env_keys",
         ]:
@@ -221,10 +213,11 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertIn('gpu_runtime_env_defaults("vulkan")', pdockerd)
         self.assertNotIn('gpu_runtime_env_defaults("vulkan", {', pdockerd)
         self.assertNotIn('"PDOCKER_VULKAN_MAX_BUFFER_BYTES": os.environ.get("PDOCKER_VULKAN_MAX_BUFFER_BYTES", "2147483648")', pdockerd)
-        for key in manifest["pdockerd_runtime_env_keys"]:
+        for key in manifest["ui_runtime_env_keys"]:
             self.assertIn(key, json.dumps(manifest["pdockerd_runtime_env_defaults"]), key)
 
-        for key in manifest["ui_compose_runtime_env_keys"]:
+        ui_compose_keys = [item["env"] for item in manifest["ui_compose_runtime_env_defaults"]]
+        for key in ui_compose_keys:
             self.assertIn(f"{key}:", compose, key)
             self.assertIn(f"${{{key}:-", compose, key)
             self.assertNotIn(f'LlamaComposeEnvDefault("{key}",', MAIN_ACTIVITY.read_text(encoding="utf-8"))
@@ -240,7 +233,7 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         compare_only_keys = set(manifest["q6_required_env_overlay"]) | {
             item["env"] for item in manifest["config_propagation_env_fields"]
         }
-        for key in sorted(compare_only_keys - set(manifest["ui_compose_runtime_env_keys"])):
+        for key in sorted(compare_only_keys - set(ui_compose_keys)):
             self.assertNotIn(f"{key}:", compose, key)
 
     def test_packaged_pdockerd_runtime_carries_gpu_env_manifest(self):

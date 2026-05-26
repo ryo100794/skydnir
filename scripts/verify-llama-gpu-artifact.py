@@ -115,12 +115,6 @@ LLAMA_GPU_ENV_MANIFEST = _load_env_manifest()
 # diverge while still leaving the executor, Dockerfiles, llama.cpp, and UI
 # untouched.
 LLAMA_GPU_UI_RUNTIME_ENV_KEYS = _manifest_string_tuple(LLAMA_GPU_ENV_MANIFEST, "ui_runtime_env_keys")
-LLAMA_GPU_PDOCKERD_RUNTIME_ENV_KEYS = _manifest_string_tuple(
-    LLAMA_GPU_ENV_MANIFEST, "pdockerd_runtime_env_keys"
-)
-LLAMA_GPU_UI_COMPOSE_RUNTIME_ENV_KEYS = _manifest_string_tuple(
-    LLAMA_GPU_ENV_MANIFEST, "ui_compose_runtime_env_keys"
-)
 LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS = _manifest_string_tuple(
     LLAMA_GPU_ENV_MANIFEST, "compare_forward_env_keys"
 )

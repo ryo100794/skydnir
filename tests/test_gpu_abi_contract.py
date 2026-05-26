@@ -2996,6 +2996,8 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(env_name, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
 
         self.assertIn("LLAMA_GPU_UI_RUNTIME_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
+        self.assertNotIn("LLAMA_GPU_PDOCKERD_RUNTIME_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
+        self.assertNotIn("LLAMA_GPU_UI_COMPOSE_RUNTIME_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         self.assertNotIn("LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         self.assertIn("LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         self.assertIn("LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
