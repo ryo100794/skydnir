@@ -390,7 +390,7 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             entry = json.loads(result.stdout)["artifacts"][0]
-            self.assertEqual(entry["classification"], "q6-native-device-execution-or-final-store")
+            self.assertEqual(entry["classification"], "q6-store-index-model-incomplete")
             self.assertEqual(entry["q6_output_layout_probe_summary"], "canonical-mismatch-inconclusive")
             self.assertTrue(entry["q6_output_layout_fixed_offset_rejected"])
             self.assertEqual(entry["q6_row_provenance_probe_summary"], "not-row-provenance")

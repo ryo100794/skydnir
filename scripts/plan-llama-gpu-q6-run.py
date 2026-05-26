@@ -38,6 +38,10 @@ REQUIRED_EVIDENCE_FIELDS = [
     "upload_ms",
     "dispatch_ms",
     "download_ms",
+    "q6_final_store_boundary",
+    "final_store_value_f32",
+    "final_store_matches_expected",
+    "writeback_matches_final_store",
 ]
 
 def load_q6_required_env_overlay() -> dict[str, str]:
@@ -137,8 +141,23 @@ FAIL_BRANCHES = [
     },
     {
         "condition": "changed == true but Q6 oracle still mismatches",
-        "action": "compare final-store dataflow, descriptor coordinates, and synchronization evidence",
-        "owner": "SPIR-V final-store map and strict object graph",
+        "action": "classify q6_final_store_boundary before changing shader, descriptor, or writeback code",
+        "owner": "Q6 final-store boundary classifier",
+    },
+    {
+        "condition": "q6_final_store_boundary.summary == native-final-store-mismatch",
+        "action": "inspect native Q6 final-store arithmetic/dataflow with descriptor coordinates preserved; do not blame executor writeback",
+        "owner": "native Q6 final-store path",
+    },
+    {
+        "condition": "q6_final_store_boundary.summary == executor-writeback-mismatch",
+        "action": "fix executor writeback/range synchronization before judging native Q6 arithmetic",
+        "owner": "Vulkan writeback and binding report path",
+    },
+    {
+        "condition": "q6_final_store_boundary.summary == inconclusive",
+        "action": "fix final-store trace/output-layout/writeback join evidence before another device run",
+        "owner": "Q6 final-store boundary instrumentation",
     },
     {
         "condition": "pipeline/device-lost before Q6 evidence",

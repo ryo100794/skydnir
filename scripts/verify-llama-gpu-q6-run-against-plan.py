@@ -165,16 +165,36 @@ def select_branch(report: dict[str, Any], artifact: dict[str, Any], plan: dict[s
             "owner": "materialize_spirv_specialization_constants",
         }
     if classification in {"q6-writeback-mismatch", "q6-writeback-unverified"}:
+        boundary = q6.get("q6_final_store_boundary")
+        if isinstance(boundary, dict) and boundary.get("summary") == "executor-writeback-mismatch":
+            return {
+                "condition": "q6_final_store_boundary.summary == executor-writeback-mismatch",
+                "action": "fix executor writeback/range synchronization before judging native Q6 arithmetic",
+                "owner": "Vulkan writeback and binding report path",
+            }
         return {
             "condition": "writeback verification is false or missing",
             "action": "fix fd/writeback integrity before judging shader arithmetic",
             "owner": "Vulkan writeback and binding report path",
         }
+    if classification == "q6-native-final-store":
+        return {
+            "condition": "q6_final_store_boundary.summary == native-final-store-mismatch",
+            "action": "inspect native Q6 final-store arithmetic/dataflow with descriptor coordinates preserved; do not blame executor writeback",
+            "owner": "native Q6 final-store path",
+        }
+    boundary = q6.get("q6_final_store_boundary")
+    if isinstance(boundary, dict) and boundary.get("summary") == "inconclusive":
+        return {
+            "condition": "q6_final_store_boundary.summary == inconclusive",
+            "action": "fix final-store trace/output-layout/writeback join evidence before another device run",
+            "owner": "Q6 final-store boundary instrumentation",
+        }
     if changed is True and classification.startswith("q6-"):
         return {
             "condition": "changed == true but Q6 oracle still mismatches",
-            "action": "compare final-store dataflow, descriptor coordinates, and synchronization evidence",
-            "owner": "SPIR-V final-store map and strict object graph",
+            "action": "classify q6_final_store_boundary before changing shader, descriptor, or writeback code",
+            "owner": "Q6 final-store boundary classifier",
         }
     if classification in {
         "vulkan-pipeline-feature-evidence-missing",

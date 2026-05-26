@@ -2488,7 +2488,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("scripts/android-llama-gpu-q6-workgroup-run.sh", plan["runner"])
         self.assertIn("specialization_materialize_report", plan["required_evidence_fields"])
         self.assertIn("reconciliation", plan["required_evidence_fields"])
+        self.assertIn("q6_final_store_boundary", plan["required_evidence_fields"])
+        self.assertIn("final_store_value_f32", plan["required_evidence_fields"])
         self.assertIn("writeback", " ".join(branch["condition"] for branch in plan["fail_branches"]))
+        self.assertIn("q6_final_store_boundary.summary", json.dumps(plan["fail_branches"]))
         self.assertIn("unsupported-spec-expression", json.dumps(plan["fail_branches"]))
         self.assertFalse(plan["inputs"]["llama_cpp_may_change"])
         self.assertFalse(plan["inputs"]["dockerfile_may_change"])
@@ -2579,6 +2582,50 @@ class GpuAbiContractTest(unittest.TestCase):
                                             "writeback_mismatch": False,
                                         }
                                     ],
+                                    "q6_dispatch_groups": [1, 1, 1],
+                                    "q6_block_size": 32,
+                                    "q6_num_rows": 1,
+                                    "q6_num_cols": 1,
+                                    "q6_store_index_model_valid": True,
+                                    "q6_store_index_sampled_nonzero_j": True,
+                                    "q6_store_index_sampled_nonzero_y": True,
+                                    "q6_store_index_full_coverage": True,
+                                    "q6_store_window_begin": 0,
+                                    "q6_store_window_end": 1,
+                                    "q6_output_layout_probe": {
+                                        "summary": "canonical-mismatch-inconclusive",
+                                        "samples": [
+                                            {
+                                                "dst_index": 0,
+                                                "expected_store_index": 0,
+                                                "store_formula_valid": True,
+                                                "store_j": 0,
+                                                "store_workgroup": [0, 0, 0],
+                                                "store_row_in_group": 0,
+                                                "store_row": 0,
+                                                "expected": 1.0,
+                                                "gpu_at_dst": 1.0,
+                                            }
+                                        ],
+                                    },
+                                    "q6_final_store_boundary": {
+                                        "schema": "pdocker.q6k.final-store-boundary.v1",
+                                        "summary": "pass",
+                                        "joined_sample_count": 1,
+                                        "samples": [
+                                            {
+                                                "output_index": 0,
+                                                "expected_store_index": 0,
+                                                "dst_index": 0,
+                                                "final_store_value_f32": 1.0,
+                                                "expected": 1.0,
+                                                "fd_after_writeback": 1.0,
+                                                "final_store_matches_expected": True,
+                                                "writeback_matches_final_store": True,
+                                                "writeback_matches_expected": True,
+                                            }
+                                        ],
+                                    },
                                 },
                                 "generic_spirv_dispatch": [
                                     {
@@ -2653,7 +2700,7 @@ class GpuAbiContractTest(unittest.TestCase):
             )
             self.assertEqual(10, result.returncode, result.stdout + result.stderr)
             data = json.loads(verdict.read_text(encoding="utf-8"))
-            self.assertEqual("q6-workgroup-cleared-but-oracle-mismatch", data["classification"])
+            self.assertEqual("q6-native-output-layout-inconclusive", data["classification"])
             self.assertTrue(data["artifact_matches_plan_path"])
             self.assertEqual([], data["missing_required_evidence_fields"])
             self.assertEqual([], data["required_env_mismatches"])

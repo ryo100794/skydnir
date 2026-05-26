@@ -1,6 +1,6 @@
 # Vulkan bridge probe matrix
 
-Snapshot date: 2026-05-24.
+Snapshot date: 2026-05-26.
 
 The Vulkan bridge must be treated like a probe spacecraft: before a device run
 starts, the run plan must already say what can go wrong, what evidence will be
@@ -46,7 +46,7 @@ collect these fields before it is considered useful:
 | Transform log | local-size patch result, specialization materialization report, safe-kernel flag, feature policy |
 | Execution | upload/dispatch/download ms, pre/post barriers, fence result, Vulkan result code |
 | Data integrity | before-upload hash, after-upload hash, after-dispatch hash, after-writeback hash |
-| Correctness | prompt result, CPU oracle result when enabled, Q6 sample indices and deltas, Q6 final-store trace-v2 record when a debug probe is active |
+| Correctness | prompt result, CPU oracle result when enabled, Q6 sample indices and deltas, Q6 final-store trace-v2 record when a debug probe is active, `q6_final_store_boundary` join evidence |
 | Environment | host Vulkan driver/API version, memory pressure snapshot, swap/low-memory mode |
 
 ## Failure-mode matrix
@@ -66,6 +66,8 @@ collect these fields before it is considered useful:
 | Transfer | Output writeback missed bytes | writable binding list, writeback hash, dirty/writeback evidence | Fix writeback range and alias policy |
 | Synchronization | GPU writes not visible to host | barrier count, fence result, invalidate path, device-local staging result | Fix barrier/fence/cache maintenance path |
 | Shader execution | Native GPU result differs from CPU oracle | CPU oracle, Q6 sample indices, output sample hashes, SPIR-V final-store map, final-store trace-v2 metadata | Analyze shader semantics and driver-facing layout before performance work |
+| Shader execution | Final-store trace differs from CPU oracle and writeback preserves the same value | `q6_final_store_boundary.summary`, final-store value, expected value, post-writeback value | Classify as native final-store/device execution; do not change executor writeback first |
+| Transfer | Final-store trace matches CPU oracle but post-writeback differs | `q6_final_store_boundary.summary`, writable binding range, post-dispatch/writeback hashes | Fix executor writeback/range synchronization before judging shader arithmetic |
 | Correctness | Prompt result wrong despite oracle pass | prompt response, token log, all dispatch classifications | Expand oracle coverage to the later wrong dispatch family |
 | Performance | Correct output but slow | upload/dispatch/download split, cache hit stats, buffer residency | Tune only after correctness gate passes |
 | Resource pressure | Run killed or partial logs | memory snapshot, last event id, journal path, command lifecycle marker | Add resumable evidence and early ENOMEM; do not infer compute result |
@@ -83,6 +85,9 @@ The next Q6 run should be interpreted as follows:
 | Final-output probe record exists but trace-v2 metadata is missing or invalid | The run cannot distinguish shader final-store math, output index, and readback | Fix probe instrumentation or stale probe bundle handling before interpreting native Q6 |
 | Pipeline/device-lost before Q6 | A non-Q6 shader or driver feature path was affected | Keep Q6 scoping; record offending source/effective hash |
 | Writeback unverified | The result cannot judge shader math | Fix fd/writeback integrity first |
+| `q6_final_store_boundary.summary == native-final-store-mismatch` | Native Q6 final-store/device execution produced the wrong value and writeback preserved it | Inspect SPIR-V dataflow, descriptor coordinates, and synchronization at the native final-store boundary |
+| `q6_final_store_boundary.summary == executor-writeback-mismatch` | Native final-store value matched the oracle but executor readback/writeback did not | Fix executor writeback/range/cache maintenance before shader work |
+| `q6_final_store_boundary.summary == inconclusive` | The run did not join final-store trace, output layout, and writeback samples | Fix instrumentation or stale probe bundle handling before another device run |
 
 ## Instrumentation rule
 
