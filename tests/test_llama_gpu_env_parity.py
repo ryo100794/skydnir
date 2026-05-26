@@ -37,7 +37,6 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             "ui_runtime_env_keys",
             "pdockerd_runtime_env_keys",
             "ui_compose_runtime_env_keys",
-            "compare_diagnostic_env_keys",
             "compare_forward_env_keys",
             "compare_probe_env_keys",
         ]:
@@ -49,7 +48,6 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         ui_runtime = set(manifest["ui_runtime_env_keys"])
         self.assertEqual(manifest["ui_runtime_env_keys"], manifest["pdockerd_runtime_env_keys"])
         self.assertLessEqual(set(manifest["ui_compose_runtime_env_keys"]), ui_runtime)
-        self.assertLessEqual(set(manifest["compare_diagnostic_env_keys"]), set(manifest["compare_forward_env_keys"]))
         self.assertLessEqual(ui_runtime, set(manifest["compare_forward_env_keys"]))
         self.assertLessEqual(set(manifest["compare_probe_env_keys"]), set(manifest["compare_forward_env_keys"]))
         self.assertEqual(
@@ -94,7 +92,6 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         self.assertEqual(tuple(manifest["ui_runtime_env_keys"]), verifier.LLAMA_GPU_UI_RUNTIME_ENV_KEYS)
         self.assertEqual(tuple(manifest["pdockerd_runtime_env_keys"]), verifier.LLAMA_GPU_PDOCKERD_RUNTIME_ENV_KEYS)
         self.assertEqual(tuple(manifest["ui_compose_runtime_env_keys"]), verifier.LLAMA_GPU_UI_COMPOSE_RUNTIME_ENV_KEYS)
-        self.assertEqual(tuple(manifest["compare_diagnostic_env_keys"]), verifier.LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS)
         self.assertEqual(tuple(manifest["compare_forward_env_keys"]), verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
 
     def test_manifest_env_bridge_classification_is_exhaustive(self):
@@ -105,7 +102,6 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
             "ui_runtime_env_keys",
             "pdockerd_runtime_env_keys",
             "ui_compose_runtime_env_keys",
-            "compare_diagnostic_env_keys",
             "compare_forward_env_keys",
             "compare_probe_env_keys",
         ]:
@@ -241,7 +237,10 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
 
         # Compare-only diagnostics must remain absent from the UI compose
         # template until promoted to ordinary runtime behavior.
-        for key in sorted(set(manifest["compare_diagnostic_env_keys"]) - set(manifest["ui_compose_runtime_env_keys"])):
+        compare_only_keys = set(manifest["q6_required_env_overlay"]) | {
+            item["env"] for item in manifest["config_propagation_env_fields"]
+        }
+        for key in sorted(compare_only_keys - set(manifest["ui_compose_runtime_env_keys"])):
             self.assertNotIn(f"{key}:", compose, key)
 
     def test_packaged_pdockerd_runtime_carries_gpu_env_manifest(self):
@@ -259,7 +258,7 @@ class LlamaGpuEnvParityTest(unittest.TestCase):
         verifier = VERIFIER.read_text(encoding="utf-8")
 
         self.assertIn('string_list("compare_forward_env_keys")', compare)
-        self.assertIn('string_list("compare_diagnostic_env_keys")', compare)
+        self.assertNotIn('string_list("compare_diagnostic_env_keys")', compare)
         self.assertIn('string_list("compare_probe_env_keys")', compare)
         self.assertIn('"compare_probe_env_keys": probe_keys', compare)
         self.assertIn('"config_propagation_env_keys": config_keys', compare)

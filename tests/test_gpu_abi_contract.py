@@ -2987,11 +2987,6 @@ class GpuAbiContractTest(unittest.TestCase):
         for key in ui_compose_runtime_keys:
             self.assertNotIn(f'LlamaComposeEnvDefault("{key}",', main_activity)
 
-        diagnostic_keys = verifier.LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS
-        for key in diagnostic_keys:
-            self.assertIn(key, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
-            self.assertIn(key, next_steps)
-
         manifest_config_pairs = [
             (item["env"], item["executor_field"])
             for item in manifest["config_propagation_env_fields"]
@@ -3001,7 +2996,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(env_name, verifier.LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS)
 
         self.assertIn("LLAMA_GPU_UI_RUNTIME_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
-        self.assertIn("LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
+        self.assertNotIn("LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         self.assertIn("LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         self.assertIn("LLAMA_GPU_CONFIG_PROPAGATION_ENV_FIELDS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())
         self.assertIn("UNSUPPORTED_GPU_WORK_TOKENS", LLAMA_GPU_ARTIFACT_VERIFIER.read_text())

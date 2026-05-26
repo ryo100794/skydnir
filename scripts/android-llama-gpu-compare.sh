@@ -228,7 +228,6 @@ def string_list(name):
     return values
 
 forward_keys = string_list("compare_forward_env_keys")
-diagnostic_keys = string_list("compare_diagnostic_env_keys")
 probe_keys = string_list("compare_probe_env_keys")
 config_fields = manifest.get("config_propagation_env_fields")
 if not isinstance(config_fields, list):
@@ -238,7 +237,7 @@ config_keys = [
     for item in config_fields
     if isinstance(item, dict) and isinstance(item.get("env"), str) and item.get("env")
 ]
-manifest_keys = list(dict.fromkeys(forward_keys + diagnostic_keys + config_keys))
+manifest_keys = list(dict.fromkeys(forward_keys + config_keys))
 host_env = {key: os.environ[key] for key in manifest_keys if key in os.environ}
 record = {
     "schema": "pdocker.llama.gpu.runtime-env-record.v1",
@@ -247,7 +246,6 @@ record = {
         "schema": manifest["schema"],
         "path": manifest_path,
         "compare_forward_env_keys": forward_keys,
-        "compare_diagnostic_env_keys": diagnostic_keys,
         "compare_probe_env_keys": probe_keys,
         "config_propagation_env_keys": config_keys,
     },

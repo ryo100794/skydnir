@@ -121,9 +121,6 @@ LLAMA_GPU_PDOCKERD_RUNTIME_ENV_KEYS = _manifest_string_tuple(
 LLAMA_GPU_UI_COMPOSE_RUNTIME_ENV_KEYS = _manifest_string_tuple(
     LLAMA_GPU_ENV_MANIFEST, "ui_compose_runtime_env_keys"
 )
-LLAMA_GPU_COMPARE_DIAGNOSTIC_ENV_KEYS = _manifest_string_tuple(
-    LLAMA_GPU_ENV_MANIFEST, "compare_diagnostic_env_keys"
-)
 LLAMA_GPU_COMPARE_FORWARD_ENV_KEYS = _manifest_string_tuple(
     LLAMA_GPU_ENV_MANIFEST, "compare_forward_env_keys"
 )
