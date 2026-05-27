@@ -3,7 +3,7 @@
 Snapshot date: 2026-05-20.
 
 This document defines the evidence contract for reconciling unmodified
-llama.cpp `ggml-vulkan` API calls with the pdocker glibc Vulkan ICD and the
+llama.cpp `ggml-vulkan` API calls with the Skydnir glibc Vulkan ICD and the
 APK-owned Android Vulkan executor.  It is a documentation-only contract; it
 must not be read as proof that llama GPU inference is correct or fast.
 
@@ -37,7 +37,7 @@ llama.cpp remains unmodified.  The current exact callsite map is:
 | Scope | Hash / marker | llama.cpp callsite summary | Status |
 |---|---|---|---|
 | Q4_K pre-Q6 pipeline | `0xf3cd7d18f0276b42` | `ggml-vulkan.cpp` creates pipeline `mul_mat_vec_q4_k_f32_f32` from `vulkan-shaders/mul_mat_vec_q4_k.comp`; push struct is `vk_mat_vec_push_constants`; five descriptor buffers are `A/B/D/Fuse0/Fuse1`; specialization constants are `{ BLOCK_SIZE=32, NUM_ROWS=2, NUM_COLS=1/2 }`.  The shader declares three typed views of binding 0 for the same Q4_K block: `block_q4_K`, `block_q4_K_packed16`, and `block_q4_K_packed32`. | Mapped callsite; not a Q5/Q6 dispatch mix-up and not a llama.cpp ABI change. |
-| Q4_K diagnostic variants | `0x853c49b4900eed3c`, `0x22ab0152b230e983` | Same Q4_K callsite after pdocker diagnostic Float16-capability insertion and duplicate-descriptor materialization respectively. | Diagnostic variants only. |
+| Q4_K diagnostic variants | `0x853c49b4900eed3c`, `0x22ab0152b230e983` | Same Q4_K callsite after Skydnir diagnostic Float16-capability insertion and duplicate-descriptor materialization respectively. | Diagnostic variants only. |
 | Q6_K/final projection | `0x274f68a67dfef210`, `0x1bf751845c5dce75`, `0xe38f6a6a906d765c`, `0xbefdfb97e9734eb3`, `0x09c4622d92c6acb9`, `0x498c69a047eb3b2f`, `0xe5cd19682257a368`, `0x7ec0292e948c9b41` | `mul_mat_vec_q6_k`-like large quantized matvec/final projection with multiple binding-0 views, storage8/storage16/int8 features, `BLOCK_SIZE=32`, `NUM_ROWS=2`, `NUM_COLS=1`; row-indexed writeback and workgroup shape evidence exist. | Full reconciliation not proven; final-store trace v2 is now required before promoting any native final-store conclusion. |
 | RoPE/Yarn | `0xac41e8033a67af4a` | llama Vulkan RoPE/Yarn front-blocker shader. | CPU oracle matched in prior evidence; keep as regression guard. |
 | RMSNorm | `0xf2f988b94bd3e0dc` | RMSNorm with optional multiply. | CPU oracle matched in prior evidence; keep as regression guard. |

@@ -33,7 +33,7 @@ From an aarch64 Android/Linux shell:
 
 ```sh
 git clone <this repo>
-cd pdocker-android
+cd skydnir
 bash scripts/setup-env.sh
 ```
 
@@ -151,7 +151,7 @@ outside Git and passing it through the environment:
 ```sh
 export PDOCKER_SIGNING_STORE_FILE=$HOME/.pdocker/release.jks
 export PDOCKER_SIGNING_STORE_PASSWORD=...
-export PDOCKER_SIGNING_KEY_ALIAS=pdocker
+export PDOCKER_SIGNING_KEY_ALIAS=skydnir
 export PDOCKER_SIGNING_KEY_PASSWORD=...
 bash scripts/build-all.sh --compat --build-type release
 ```

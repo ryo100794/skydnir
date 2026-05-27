@@ -103,21 +103,44 @@ def classify(path: str, token: str, line: str) -> dict[str, Any]:
         category = "artifact_schema"
         phase = "do-not-rewrite-history"
         rationale = "schema names are compatibility contracts"
+    elif "pdocker." in lower_line or "io.pdocker" in lower_line or "pdocker-prefixed" in lower_line:
+        category = "artifact_schema"
+        phase = "do-not-rewrite-history"
+        rationale = "extension schema, label, or response field name; preserve until schema migration exists"
     elif "pdockerd.sock" in lower_line or "files/pdocker" in lower_line or "filesdir/pdocker" in lower_line or "/run/pdocker" in lower_line:
         category = "socket_or_storage_path"
         phase = "phase-4-or-later-migration-required"
         migration_required = True
         rationale = "socket/storage paths need compatibility and data migration"
+    elif any(marker in lower_line for marker in ("pdocker/projects", "pdocker-exports", "pdocker/diagnostics")):
+        category = "socket_or_storage_path"
+        phase = "phase-4-or-later-migration-required"
+        migration_required = True
+        rationale = "project/export storage paths need compatibility and data migration"
     elif any(
         marker in lower_line
         for marker in (
             "pdocker-direct",
             "libpdocker",
             "pdocker-gpu-",
+            "pdocker-media-",
             "pdocker-opencl-",
             "pdocker-vulkan-",
             "pdocker_gpu_",
             "pdocker_vulkan_",
+            "pdocker_trace_",
+            "pdocker_direct_",
+            "scripts/pdocker",
+            "docker.io/pdocker/",
+            "pdocker-dev",
+            "pdocker-smoke",
+            "pdocker smoke",
+            "pdocker-llama",
+            "pdocker-service-",
+            "pdocker-new-project",
+            "pdocker-ui-it-ok",
+            "/pdocker-",
+            "/usr/local/bin/pdocker",
         )
     ):
         category = "internal_reference"

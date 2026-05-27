@@ -838,7 +838,7 @@ implementation change plus a focused verification artifact.
 - [next] Prevent duplicate container truth after interrupted compose attempts.
   The current device had an old exited `pdocker-llama-cpp` plus the new running
   one, which makes name-based `docker logs` and `docker ps` display ambiguous.
-  Compose reconciliation must prefer Engine container IDs plus pdocker
+  Compose reconciliation must prefer Engine container IDs plus Skydnir
   project/service labels and reserve names for display or legacy fallback.
   Acceptance: a restart/interruption artifact proves stale same-name containers
   do not override current Engine IDs.
@@ -972,7 +972,7 @@ implementation change plus a focused verification artifact.
   receivers now run there too so daemon-only test starts do not wake the UI
   process. Heavy service startup work (runtime prepare, executor launch, Python
   init) is off the lifecycle main thread. SOG15 debug install on 2026-05-05
-  verified receiver-only daemon start, socket ping, no pdocker ANR/FATAL during
+  verified receiver-only daemon start, socket ping, no Skydnir ANR/FATAL during
   the observation window, and no default UI process after receiver startup.
   Next check: container process reconciliation across UI process death.
   Acceptance: a device artifact proves UI-process death does not kill pdockerd
