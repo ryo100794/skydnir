@@ -257,7 +257,9 @@ def run_daemon(
     os.environ["PDOCKER_LINK_MODE"] = "hard" if link_ok else "symlink"
 
     pdockerd_path = os.path.join(runtime_dir, "bin", "pdockerd")
-    sys.argv = ["pdockerd", "--socket", sock_path]
+    os.environ.setdefault("SKYDNIR_DAEMON_NAME", "skydnird")
+    os.environ.setdefault("PDOCKER_SUPPRESS_DEPRECATION_WARNING", "1")
+    sys.argv = ["skydnird", "--socket", sock_path]
     runpy.run_path(pdockerd_path, run_name="__main__")
 
 

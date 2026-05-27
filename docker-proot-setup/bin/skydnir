@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Skydnir CLI compatibility front door.
+#
+# The implementation is still the historical pdocker script during the
+# rename transition. Keep this wrapper intentionally thin so Phase 2 changes
+# do not rewrite storage paths, environment variables, or artifact schemas.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PDOCKER_SUPPRESS_DEPRECATION_WARNING=1
+export SKYDNIR_CLI_NAME=skydnir
+exec "$SCRIPT_DIR/pdocker" "$@"

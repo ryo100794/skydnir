@@ -12,6 +12,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BIN_DIR="$PROJECT_DIR/docker-bin"
 LIB_DIR="$PROJECT_DIR/lib"
+INVOKED_AS="$(basename "${BASH_SOURCE[0]}")"
+CLI_NAME="${SKYDNIR_CLI_NAME:-$INVOKED_AS}"
+
+if [[ "$INVOKED_AS" == "pdocker" && "${PDOCKER_SUPPRESS_DEPRECATION_WARNING:-0}" != "1" ]]; then
+    echo "Warning: pdocker is deprecated. Use skydnir instead." >&2
+fi
 
 CRANE="$BIN_DIR/crane"
 LIBCOW="$LIB_DIR/libcow.so"        # CoW shim — glibc variant (debian/ubuntu)
@@ -640,7 +646,7 @@ cmd_load() {
 
 cmd_version() {
     cat <<EOF
-pdocker — Docker-compatible CLI for PRoot environments
+${CLI_NAME} — Skydnir legacy-compatible CLI
   crane:   $("$CRANE" version 2>/dev/null || echo unknown)
   platform: $PLATFORM
   home:    $PDOCKER_HOME

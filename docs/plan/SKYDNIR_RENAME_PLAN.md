@@ -191,10 +191,17 @@ Goal: introduce `skydnir` and `skydnird` without breaking old commands.
 
 Allowed changes:
 
-- Add `skydnir` CLI entrypoint.
-- Keep `pdocker` as a deprecated wrapper.
-- Add `skydnird` daemon entrypoint.
+- Add `skydnir` CLI entrypoint. **Done on `rename/skydnir`:**
+  `docker-proot-setup/bin/skydnir` is a thin wrapper over the legacy script.
+- Keep `pdocker` as a deprecated wrapper. **Done on `rename/skydnir`:**
+  direct `pdocker` invocation emits a deprecation warning unless explicitly
+  suppressed for internal routing.
+- Add `skydnird` daemon entrypoint. **Done on `rename/skydnir`:**
+  `docker-proot-setup/bin/skydnird` is a thin wrapper over `pdockerd`.
 - Keep `pdockerd` as a deprecated wrapper or symlink-equivalent launcher.
+  **Done on `rename/skydnir`:** direct `pdockerd` invocation emits a
+  deprecation warning; the Android bridge suppresses it and presents the
+  daemon program name as `skydnird` without renaming storage.
 - Update `--help` and `--version` output to prefer Skydnir.
 - Update build artifact names where safe.
 
@@ -337,9 +344,9 @@ wrapper. New documentation and examples use `skydnir`.
 - [x] Update README opening to Skydnir.
 - [x] Add trademark/non-affiliation notice.
 - [ ] Update GitHub About/topics.
-- [ ] Add `skydnir` CLI alias.
-- [ ] Add `pdocker` deprecation warning.
-- [ ] Add `skydnird` daemon alias.
+- [x] Add `skydnir` CLI alias.
+- [x] Add `pdocker` deprecation warning.
+- [x] Add `skydnird` daemon alias.
 - [ ] Add config path migration.
 - [ ] Add service migration documentation.
 - [ ] Update CI artifact display names.

@@ -10078,7 +10078,13 @@ class ThreadingTCPHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Docker Engine API-compatible daemon for PRoot")
+    invoked_as = os.path.basename(sys.argv[0])
+    daemon_name = os.environ.get("SKYDNIR_DAEMON_NAME", invoked_as)
+    if invoked_as == "pdockerd" and os.environ.get("PDOCKER_SUPPRESS_DEPRECATION_WARNING", "0") != "1":
+        sys.stderr.write("Warning: pdockerd is deprecated. Use skydnird instead.\n")
+        sys.stderr.flush()
+
+    parser = argparse.ArgumentParser(description=f"{daemon_name} Engine API-compatible daemon")
     parser.add_argument("--socket", default="/var/run/docker.sock",
                         help="Unix socket path")
     parser.add_argument("--host", default=None,

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Skydnir daemon compatibility front door.
+#
+# The daemon implementation remains pdockerd while external naming migrates.
+# Do not change PDOCKER_* env vars, sockets, or data directories here.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PDOCKER_SUPPRESS_DEPRECATION_WARNING=1
+export SKYDNIR_DAEMON_NAME=skydnird
+exec "$SCRIPT_DIR/pdockerd" "$@"
