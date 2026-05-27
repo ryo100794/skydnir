@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}"
-APK="${PDOCKER_APK:-$ROOT/app/build/outputs/apk/debug/app-debug.apk}"
+PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}}"
+APK="${SKYDNIR_APK:-${PDOCKER_APK:-$ROOT/app/build/outputs/apk/debug/app-debug.apk}}"
 ADB="${ADB:-adb}"
 INSTALL=1
 SERIAL="${PDOCKER_ADB_SERIAL:-}"

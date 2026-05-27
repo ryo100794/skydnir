@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
-PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
 CONTAINER="${PDOCKER_LLAMA_CONTAINER:-pdocker-llama-cpp}"
 OUT="${PDOCKER_LLAMA_READINESS_OUT:-$ROOT/docs/test/llama-gpu-device-readiness-latest.json}"
 MIN_AVAILABLE_MB="${PDOCKER_LLAMA_MIN_FREE_MB:-512}"

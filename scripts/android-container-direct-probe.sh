@@ -8,7 +8,7 @@ if [[ -n "${ADB_SERIAL:-}" ]]; then
 else
   ADB_ARGS=()
 fi
-PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
 CONTAINER="pdocker-llama-cpp"
 ROOTFS=""
 MEMORY_GUARD=0

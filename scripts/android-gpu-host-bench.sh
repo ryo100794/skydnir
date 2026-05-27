@@ -6,7 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
-PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
 CLASS_PREFIX="${PDOCKER_CLASS_PREFIX:-io.github.ryo100794.pdocker}"
 RUNS="${PDOCKER_GPU_HOST_RUNS:-5}"
 OUT_JSON="${PDOCKER_GPU_HOST_OUT:-$ROOT/docs/test/gpu-host-native-latest.json}"

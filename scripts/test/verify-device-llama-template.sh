@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DEVICE="${1:-${ANDROID_SERIAL:-}}"
-PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
 ADB=(adb)
 if [[ -n "$DEVICE" ]]; then
   ADB+=( -s "$DEVICE" )

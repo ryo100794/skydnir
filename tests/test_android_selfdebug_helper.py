@@ -32,7 +32,10 @@ class AndroidSelfDebugHelperTest(unittest.TestCase):
         self.assertIn("run-as \"$PKG\"", source)
         self.assertIn("--unix-socket files/pdocker/pdockerd.sock", source)
         self.assertIn("http://d/_ping", source)
+        self.assertIn("SKYDNIR_ANDROID_FLAVOR", source)
         self.assertIn("PDOCKER_ANDROID_FLAVOR", source)
+        self.assertIn("SKYDNIR_PACKAGE", source)
+        self.assertIn("SKYDNIR_APK", source)
         self.assertIn("io.github.ryo100794.pdocker.compat", source)
         self.assertIn("app-compat-debug.apk", source)
         self.assertIn("app-modern-debug.apk", source)
@@ -88,7 +91,7 @@ class AndroidSelfDebugHelperTest(unittest.TestCase):
             env = os.environ.copy()
             env["ADB"] = str(fake_adb)
             env["ANDROID_SERIAL"] = "127.0.0.1:37777"
-            env["PDOCKER_APK"] = str(apk)
+            env["SKYDNIR_APK"] = str(apk)
 
             commands = [
                 [str(SCRIPT), "pair", "127.0.0.1:37111", "123456"],

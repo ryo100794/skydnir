@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PKG="${PDOCKER_ANDROID_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+PKG="${SKYDNIR_ANDROID_PACKAGE:-${SKYDNIR_PACKAGE:-${PDOCKER_ANDROID_PACKAGE:-io.github.ryo100794.pdocker.compat}}}"
 SERIAL="${ANDROID_SERIAL:-}"
 OUT="${OUT:-$ROOT/docs/test/apk-memory-pager-managed-latest.json}"
 APK="${APK:-$ROOT/app/build/outputs/apk/compat/debug/app-compat-debug.apk}"

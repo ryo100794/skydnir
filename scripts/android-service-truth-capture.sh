@@ -7,7 +7,7 @@ ADB_BIN="${ADB:-adb}"
 TARGET="default-workspace"
 NO_INSTALL=1
 PRINT_PLAN=0
-ARTIFACT_DIR="${PDOCKER_SMOKE_ARTIFACT_DIR:-$ROOT/tmp/device-smoke-artifacts/service-truth-$(date -u +%Y%m%dT%H%M%SZ)}"
+ARTIFACT_DIR="${SKYDNIR_SMOKE_ARTIFACT_DIR:-${PDOCKER_SMOKE_ARTIFACT_DIR:-$ROOT/tmp/device-smoke-artifacts/service-truth-$(date -u +%Y%m%dT%H%M%SZ)}}"
 
 usage() {
   cat <<USAGE
@@ -73,7 +73,7 @@ Service truth device capture plan (no device pass is claimed here)
 
 1. Connect one Android device with the debug app installed/runnable via run-as.
 2. Run:
-     export PDOCKER_SMOKE_ARTIFACT_DIR=$(printf '%q' "$ARTIFACT_DIR")
+     export SKYDNIR_SMOKE_ARTIFACT_DIR=$(printf '%q' "$ARTIFACT_DIR")
      export ADB=$(printf '%q' "$ADB_BIN")
      bash scripts/android-device-smoke.sh ${install_arg:+$install_arg }--service-truth $(printf '%q' "$TARGET")
 3. Inspect host artifacts copied from the device:
@@ -112,6 +112,7 @@ if ! "$ADB_BIN" get-state >/dev/null 2>&1; then
 fi
 
 mkdir -p "$ARTIFACT_DIR"
+export SKYDNIR_SMOKE_ARTIFACT_DIR="$ARTIFACT_DIR"
 export PDOCKER_SMOKE_ARTIFACT_DIR="$ARTIFACT_DIR"
 export ADB="$ADB_BIN"
 cmd=(bash "$SMOKE")

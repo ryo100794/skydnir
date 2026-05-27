@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 ADB="${ADB:-adb}"
-PKG="${PDOCKER_ANDROID_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+PKG="${SKYDNIR_ANDROID_PACKAGE:-${SKYDNIR_PACKAGE:-${PDOCKER_ANDROID_PACKAGE:-io.github.ryo100794.pdocker.compat}}}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 PROBE="/tmp/pdocker-path-boundary-probe-$STAMP"
 DIRECT="/tmp/pdocker-direct-path-boundary-$STAMP"

@@ -17,8 +17,8 @@ case "$FLAVOR" in
     exit 2
     ;;
 esac
-PKG="${PDOCKER_PACKAGE:-$DEFAULT_PKG}"
-APK="${PDOCKER_APK:-$DEFAULT_APK}"
+PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-$DEFAULT_PKG}}"
+APK="${SKYDNIR_APK:-${PDOCKER_APK:-$DEFAULT_APK}}"
 CLASS_PREFIX="io.github.ryo100794.pdocker"
 ACTION_PREFIX="io.github.ryo100794.pdocker"
 PROJECT="device-smoke"
@@ -28,7 +28,7 @@ SERVICE_TRUTH_TARGET=""
 RUNTIME_TEARDOWN_TARGET=""
 DOCKER_CP_E2E_TARGET=""
 SINGLE_CONTAINER_ECHO_HI=0
-SMOKE_ARTIFACT_DIR_RESOLVED="${PDOCKER_SMOKE_ARTIFACT_DIR:-$ROOT/tmp/device-smoke-artifacts/$(date -u +%Y%m%dT%H%M%SZ)}"
+SMOKE_ARTIFACT_DIR_RESOLVED="${SKYDNIR_SMOKE_ARTIFACT_DIR:-${PDOCKER_SMOKE_ARTIFACT_DIR:-$ROOT/tmp/device-smoke-artifacts/$(date -u +%Y%m%dT%H%M%SZ)}}"
 
 usage() {
   cat <<EOF
@@ -42,8 +42,8 @@ Runs a repeatable pdocker Android device smoke through adb + run-as.
 
 Environment:
   ADB               adb executable (default: adb)
-  PDOCKER_PACKAGE   Android package (default: $PKG)
-  PDOCKER_APK       debug APK path (default: $APK)
+  SKYDNIR_PACKAGE   Android package override (PDOCKER_PACKAGE is still accepted; default: $PKG)
+  SKYDNIR_APK       debug APK override (PDOCKER_APK is still accepted; default: $APK)
   PDOCKER_STAGE_TEST_CLI
                     stage repository Docker CLI/Compose into app files for
                     compatibility tests (default: 1)
@@ -53,9 +53,9 @@ Environment:
   PDOCKER_SMOKE_FORCE_STOP
                     force-stop the app before the smoke run. This kills any
                     running pdocker containers, so it is opt-in (default: 0)
-  PDOCKER_SMOKE_ARTIFACT_DIR
+  SKYDNIR_SMOKE_ARTIFACT_DIR
                     host directory for collected device diagnostics (default:
-                    tmp/device-smoke-artifacts/<timestamp>)
+                    tmp/device-smoke-artifacts/<timestamp>; PDOCKER_SMOKE_ARTIFACT_DIR is still accepted)
   PDOCKER_UI_IT_SELFTEST_CONTAINER
                     optional existing container ID/name to drive through
                     ACTION_PREFIX.action.SMOKE_UI_IT_SELFTEST before the full

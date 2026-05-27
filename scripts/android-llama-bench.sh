@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
-PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
 LOCAL_PORT="${PDOCKER_LLAMA_LOCAL_PORT:-28081}"
 REMOTE_PORT="${PDOCKER_LLAMA_REMOTE_PORT:-18081}"
 PREDICT="${PDOCKER_LLAMA_BENCH_PREDICT:-8}"

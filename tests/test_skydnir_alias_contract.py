@@ -21,6 +21,8 @@ BUILD_APK = ROOT / "scripts" / "build-apk.sh"
 BUILD_ALL = ROOT / "scripts" / "build-all.sh"
 VERIFY_FAST = ROOT / "scripts" / "verify-fast.sh"
 COMPAT_AUDIT = ROOT / "scripts" / "compat-audit.py"
+ANDROID_SMOKE = ROOT / "scripts" / "android-device-smoke.sh"
+ANDROID_SELFDEBUG = ROOT / "scripts" / "android-selfdebug.sh"
 MIGRATION_DOC = ROOT / "docs" / "manual" / "SKYDNIR_MIGRATION.md"
 
 
@@ -311,6 +313,20 @@ class SkydnirAliasContractTest(unittest.TestCase):
         self.assertIn('PDOCKER_ANDROID_FLAVOR="${SKYDNIR_ANDROID_FLAVOR:-${PDOCKER_ANDROID_FLAVOR:-compat}}"', verify_fast)
         self.assertIn('FLAVOR_ENV = "SKYDNIR_ANDROID_FLAVOR"', compat_audit)
         self.assertIn('LEGACY_FLAVOR_ENV = "PDOCKER_ANDROID_FLAVOR"', compat_audit)
+
+    def test_android_device_env_prefers_skydnir_with_pdocker_fallback(self):
+        android_smoke = ANDROID_SMOKE.read_text(encoding="utf-8")
+        android_selfdebug = ANDROID_SELFDEBUG.read_text(encoding="utf-8")
+
+        self.assertIn('PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-$DEFAULT_PKG}}"', android_smoke)
+        self.assertIn('APK="${SKYDNIR_APK:-${PDOCKER_APK:-$DEFAULT_APK}}"', android_smoke)
+        self.assertIn('SMOKE_ARTIFACT_DIR_RESOLVED="${SKYDNIR_SMOKE_ARTIFACT_DIR:-${PDOCKER_SMOKE_ARTIFACT_DIR:-', android_smoke)
+        self.assertIn("SKYDNIR_PACKAGE", android_smoke)
+        self.assertIn("SKYDNIR_APK", android_smoke)
+        self.assertIn("SKYDNIR_SMOKE_ARTIFACT_DIR", android_smoke)
+        self.assertIn('PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-$DEFAULT_PKG}}"', android_selfdebug)
+        self.assertIn('APK="${SKYDNIR_APK:-${PDOCKER_APK:-$DEFAULT_APK}}"', android_selfdebug)
+        self.assertIn("export SKYDNIR_PACKAGE", android_selfdebug)
 
     def test_documents_env_dual_writes_skydnir_and_pdocker_aliases(self):
         main = MAIN_ACTIVITY.read_text(encoding="utf-8")

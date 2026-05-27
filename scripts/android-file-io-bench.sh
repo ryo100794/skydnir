@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 ADB="${ADB:-adb}"
-PKG="${PDOCKER_ANDROID_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+PKG="${SKYDNIR_ANDROID_PACKAGE:-${SKYDNIR_PACKAGE:-${PDOCKER_ANDROID_PACKAGE:-io.github.ryo100794.pdocker.compat}}}"
 SIZE_MB="${PDOCKER_FILE_IO_SIZE_MB:-16}"
 SMALL_FILES="${PDOCKER_FILE_IO_SMALL_FILES:-256}"
 TRACE_MODE="${PDOCKER_DIRECT_TRACE_MODE:-seccomp}"

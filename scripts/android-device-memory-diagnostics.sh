@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
-PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
 CONTAINER="${PDOCKER_LLAMA_CONTAINER:-pdocker-llama-cpp}"
 OUT="${PDOCKER_DEVICE_MEMORY_DIAGNOSTICS_OUT:-$ROOT/docs/test/android-device-memory-diagnostics-latest.json}"
 PROCESS_LIMIT="${PDOCKER_DEVICE_MEMORY_PROCESS_LIMIT:-32}"

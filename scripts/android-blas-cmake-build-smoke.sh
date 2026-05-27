@@ -6,8 +6,8 @@ cd "$ROOT"
 
 FLAVOR="${SKYDNIR_ANDROID_FLAVOR:-${PDOCKER_ANDROID_FLAVOR:-compat}}"
 case "$FLAVOR" in
-  compat) PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}" ;;
-  modern) PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}" ;;
+  compat) PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}" ;;
+  modern) PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}}" ;;
   *) echo "SKYDNIR_ANDROID_FLAVOR/PDOCKER_ANDROID_FLAVOR must be compat or modern" >&2; exit 2 ;;
 esac
 

@@ -19,8 +19,8 @@ case "$FLAVOR" in
 esac
 
 ADB_BIN="${ADB:-adb}"
-PKG="${PDOCKER_PACKAGE:-$DEFAULT_PKG}"
-APK="${PDOCKER_APK:-$DEFAULT_APK}"
+PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-$DEFAULT_PKG}}"
+APK="${SKYDNIR_APK:-${PDOCKER_APK:-$DEFAULT_APK}}"
 SERIAL="${ANDROID_SERIAL:-${ADB_SERIAL:-}}"
 
 usage() {
@@ -48,8 +48,8 @@ Environment:
   ANDROID_SERIAL/ADB_SERIAL
                           adb serial for post-connect commands
   SKYDNIR_ANDROID_FLAVOR  compat or modern (default: compat; PDOCKER_ANDROID_FLAVOR is still accepted)
-  PDOCKER_PACKAGE         package override (default: $PKG)
-  PDOCKER_APK             debug APK override (default: $APK)
+  SKYDNIR_PACKAGE         package override (PDOCKER_PACKAGE is still accepted; default: $PKG)
+  SKYDNIR_APK             debug APK override (PDOCKER_APK is still accepted; default: $APK)
 EOF
 }
 
@@ -205,6 +205,7 @@ case "$command" in
     printf 'export ANDROID_SERIAL=%q\n' "$target"
     printf 'export SKYDNIR_ANDROID_FLAVOR=%q\n' "$FLAVOR"
     printf 'export PDOCKER_ANDROID_FLAVOR=%q\n' "$FLAVOR"
+    printf 'export SKYDNIR_PACKAGE=%q\n' "$PKG"
     printf 'export PDOCKER_PACKAGE=%q\n' "$PKG"
     ;;
   *)

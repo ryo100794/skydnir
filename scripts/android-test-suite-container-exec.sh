@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 ADB="${ADB:-adb}"
-PKG="${PDOCKER_ANDROID_PACKAGE:-io.github.ryo100794.pdocker.compat}"
+PKG="${SKYDNIR_ANDROID_PACKAGE:-${SKYDNIR_PACKAGE:-${PDOCKER_ANDROID_PACKAGE:-io.github.ryo100794.pdocker.compat}}}"
 CLASS_PREFIX="io.github.ryo100794.pdocker"
 ACTION_PREFIX="io.github.ryo100794.pdocker"
 PROJECT="${PDOCKER_TEST_SUITE_PROJECT:-pdocker/projects/pdocker-test-suite}"
