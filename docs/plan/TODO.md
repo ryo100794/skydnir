@@ -12,6 +12,16 @@ This board is the operating task list. Keep the detailed sections below as the
 source of context, but update this board first when work starts, gets blocked,
 or closes.
 
+### Branding and Rename Track
+
+- [planned] **Skydnir public rename**: adopt Skydnir as the public project name
+  while preserving existing runtime compatibility aliases and historical
+  evidence.  Canonical plan:
+  [`SKYDNIR_RENAME_PLAN.md`](SKYDNIR_RENAME_PLAN.md).  First executable slice:
+  generate a rename inventory for `pdocker`, `pdockerd`, `PDocker`, `PDOCKER`,
+  `pDocker`, and `pdocker-android`; do not broad-replace names or rename
+  package/data/schema/env surfaces before that inventory and alias plan exist.
+
 ### Audit Synchronization 2026-05-13
 
 The May 13 multi-agent audits promoted the following order as the current

@@ -17,6 +17,7 @@ which temporary accommodations must be replaced.
 | [`ADB_OFF_TASK_QUEUE_20260520.md`](ADB_OFF_TASK_QUEUE_20260520.md) | Completed/maintenance ledger for host-only ADB-off work from 2026-05-20 |
 | [`LLAMA_GPU_BRIDGE_NEXT_STEPS.md`](LLAMA_GPU_BRIDGE_NEXT_STEPS.md) | Active llama.cpp GPU bridge procedure, stage gates, and compact-model handoff |
 | [`Q6K_MISCOMPUTE_TASK_QUEUE.md`](Q6K_MISCOMPUTE_TASK_QUEUE.md) | Q6_K miscompute investigation queue and evidence-driven task split |
+| [`SKYDNIR_RENAME_PLAN.md`](SKYDNIR_RENAME_PLAN.md) | Public rename plan from `pdocker-android` to Skydnir, including compatibility aliases, migration phases, and guard rails |
 | [`VULKAN_ICD_LLAMA_LIMITS_GAP.md`](VULKAN_ICD_LLAMA_LIMITS_GAP.md) | Vulkan ICD advertised limits/features gap table for llama.cpp/ggml-vulkan bridge work |
 | [`ARM32_DIRECT_EXEC_PORTING.md`](ARM32_DIRECT_EXEC_PORTING.md) | Porting plan and promotion gates for replacing the `armeabi-v7a` unsupported direct-exec stub |
 | [`INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md`](INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md) | Consolidated P0/P1/P2 incomplete-work audit |
@@ -44,6 +45,10 @@ which temporary accommodations must be replaced.
 - Use [`Q6K_MISCOMPUTE_TASK_QUEUE.md`](Q6K_MISCOMPUTE_TASK_QUEUE.md) for the
   Q6_K miscompute investigation queue when splitting static analysis, probe
   design, and evidence review tasks.
+- Use [`SKYDNIR_RENAME_PLAN.md`](SKYDNIR_RENAME_PLAN.md) before changing public
+  project, CLI, daemon, config, package, route, environment, or schema names.
+  The rename must start with an inventory and compatibility aliases; do not
+  broad-replace `pdocker` strings.
 - Use [`VULKAN_ICD_LLAMA_LIMITS_GAP.md`](VULKAN_ICD_LLAMA_LIMITS_GAP.md) when
   deciding whether a Q6/llama GPU artifact is blocked by an advertised
   property/feature mismatch rather than shader or writeback behavior.
