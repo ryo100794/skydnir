@@ -135,12 +135,12 @@ require_cmd() {
 
 require_gpu_shim_compilers() {
     local arch cc
-    for arch in ${PDOCKER_GLIBC_ARCHES:-arm64 armhf}; do
+    for arch in ${SKYDNIR_GLIBC_ARCHES:-${PDOCKER_GLIBC_ARCHES:-arm64 armhf}}; do
         case "$arch" in
             arm64) cc="${CC_ARM64:-${CC:-aarch64-linux-gnu-gcc}}" ;;
             armhf) cc="${CC_ARMHF:-arm-linux-gnueabihf-gcc}" ;;
             *)
-                echo "ABORT: unsupported PDOCKER_GLIBC_ARCHES entry '$arch'" >&2
+                echo "ABORT: unsupported SKYDNIR_GLIBC_ARCHES/PDOCKER_GLIBC_ARCHES entry '$arch'" >&2
                 return 1
                 ;;
         esac

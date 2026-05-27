@@ -85,13 +85,15 @@ val verifyPackagedPayloadFresh by tasks.registering {
 
         val abiDir = project.file("src/main/jniLibs/arm64-v8a")
 
-        val fdroidNoCrane = System.getenv("PDOCKER_FDROID_NO_CRANE")?.let {
+        val fdroidNoCrane = (
+            System.getenv("SKYDNIR_FDROID_NO_CRANE") ?: System.getenv("PDOCKER_FDROID_NO_CRANE")
+        )?.let {
             it.isNotBlank() && it != "0" && !it.equals("false", ignoreCase = true)
         } ?: false
         if (fdroidNoCrane) {
             if (abiDir.resolve("libcrane.so").exists()) {
                 throw GradleException(
-                    "F-Droid no-crane build must not stage libcrane.so; run PDOCKER_FDROID_NO_CRANE=1 bash scripts/copy-native.sh"
+                    "F-Droid no-crane build must not stage libcrane.so; run SKYDNIR_FDROID_NO_CRANE=1 bash scripts/copy-native.sh"
                 )
             }
         } else {
@@ -102,7 +104,9 @@ val verifyPackagedPayloadFresh by tasks.registering {
         if (rootfsShim.isFile) {
             requireFresh(abiDir.resolve("libpdocker-rootfs-shim.so"), rootfsShim, stageHint)
         }
-        val glibcLoader = System.getenv("PDOCKER_GLIBC_LOADER")?.takeIf { it.isNotBlank() }?.let(::File)
+        val glibcLoader = (
+            System.getenv("SKYDNIR_GLIBC_LOADER") ?: System.getenv("PDOCKER_GLIBC_LOADER")
+        )?.takeIf { it.isNotBlank() }?.let(::File)
         if (glibcLoader?.isFile == true) {
             requireFresh(abiDir.resolve("libpdocker-ld-linux-aarch64.so"), glibcLoader, stageHint)
         }
@@ -129,8 +133,10 @@ fun pdockerVersionValue(name: String): String =
 fun buildConfigString(value: String): String =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-fun nonBlankEnv(name: String): String? =
-    System.getenv(name)?.takeIf { it.isNotBlank() }
+fun nonBlankEnv(vararg names: String): String? =
+    names.firstNotNullOfOrNull { name ->
+        System.getenv(name)?.takeIf { it.isNotBlank() }
+    }
 
 fun gitOutput(vararg args: String): String? {
     return try {
@@ -147,14 +153,14 @@ fun gitOutput(vararg args: String): String? {
 
 val pdockerBuildInstant = Instant.now()
 val pdockerBuildTimeUtc =
-    nonBlankEnv("PDOCKER_BUILD_TIME_UTC")
+    nonBlankEnv("SKYDNIR_BUILD_TIME_UTC", "PDOCKER_BUILD_TIME_UTC")
         ?: DateTimeFormatter.ISO_INSTANT.format(pdockerBuildInstant)
 val pdockerBuildCommit =
-    nonBlankEnv("PDOCKER_BUILD_COMMIT")
+    nonBlankEnv("SKYDNIR_BUILD_COMMIT", "PDOCKER_BUILD_COMMIT")
         ?: gitOutput("git", "rev-parse", "--short=12", "HEAD")
         ?: pdockerVersionValue("buildCommit")
 val pdockerBuildNumber =
-    nonBlankEnv("PDOCKER_BUILD_NUMBER")
+    nonBlankEnv("SKYDNIR_BUILD_NUMBER", "PDOCKER_BUILD_NUMBER")
         ?: DateTimeFormatter.ofPattern("yyyyMMdd.HHmmss")
             .withZone(ZoneOffset.UTC)
             .format(pdockerBuildInstant)

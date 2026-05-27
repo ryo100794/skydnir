@@ -20,7 +20,7 @@ export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
 case "$PDOCKER_ANDROID_BUILD_TYPE" in
     debug|release) ;;
     *)
-        echo "ABORT: PDOCKER_ANDROID_BUILD_TYPE must be 'debug' or 'release' (got '$PDOCKER_ANDROID_BUILD_TYPE')" >&2
+        echo "ABORT: SKYDNIR_ANDROID_BUILD_TYPE/PDOCKER_ANDROID_BUILD_TYPE must be 'debug' or 'release' (got '$PDOCKER_ANDROID_BUILD_TYPE')" >&2
         exit 2
         ;;
 esac
@@ -37,7 +37,7 @@ case "$PDOCKER_ANDROID_FLAVOR" in
         APK="$ROOT/app/build/outputs/apk/compat/$PDOCKER_ANDROID_BUILD_TYPE/app-compat-$PDOCKER_ANDROID_BUILD_TYPE.apk"
         ;;
     *)
-        echo "ABORT: PDOCKER_ANDROID_FLAVOR must be 'modern' or 'compat' (got '$PDOCKER_ANDROID_FLAVOR')" >&2
+        echo "ABORT: SKYDNIR_ANDROID_FLAVOR/PDOCKER_ANDROID_FLAVOR must be 'modern' or 'compat' (got '$PDOCKER_ANDROID_FLAVOR')" >&2
         exit 2
         ;;
 esac
@@ -52,7 +52,7 @@ if [[ "$PDOCKER_SKIP_NATIVE_BUILD" == "0" ]]; then
     # Standard packaged path: official NDK clang on a glibc Linux host.
     bash scripts/build-native-android-ndk.sh
 else
-    echo "==> skipping Android native build (PDOCKER_SKIP_NATIVE_BUILD=$PDOCKER_SKIP_NATIVE_BUILD)"
+    echo "==> skipping Android native build (SKYDNIR_SKIP_NATIVE_BUILD/PDOCKER_SKIP_NATIVE_BUILD=$PDOCKER_SKIP_NATIVE_BUILD)"
 fi
 
 # External PRoot is not part of the default or compat runtime. The SDK28

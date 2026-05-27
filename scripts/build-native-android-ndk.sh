@@ -113,7 +113,7 @@ show_elf() {
 
 strip_if_requested() {
     local path="$1"
-    if [[ "${PDOCKER_NATIVE_STRIP:-0}" == "1" ]]; then
+    if [[ "${SKYDNIR_NATIVE_STRIP:-${PDOCKER_NATIVE_STRIP:-0}}" == "1" ]]; then
         if [[ -x "$STRIP" ]] && "$STRIP" --version >/dev/null 2>&1; then
             "$STRIP" --strip-unneeded "$path"
         else

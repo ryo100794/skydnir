@@ -9,7 +9,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DIR="$ROOT/docker-proot-setup/src/gpu"
-ARCHES="${PDOCKER_GLIBC_ARCHES:-arm64 armhf}"
+ARCHES="${SKYDNIR_GLIBC_ARCHES:-${PDOCKER_GLIBC_ARCHES:-arm64 armhf}}"
 
 arch_cc() {
     case "$1" in
@@ -65,7 +65,7 @@ build_arch() {
 
     if ! command -v "$cc" >/dev/null 2>&1; then
         echo "ABORT: missing $arch Linux/glibc cross compiler '$cc'" >&2
-        echo "       Install the compiler or set CC_ARM64/CC_ARMHF/PDOCKER_GLIBC_ARCHES." >&2
+        echo "       Install the compiler or set CC_ARM64/CC_ARMHF/SKYDNIR_GLIBC_ARCHES." >&2
         exit 1
     fi
 
