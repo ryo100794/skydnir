@@ -364,7 +364,7 @@ wrapper. New documentation and examples use `skydnir`.
 - [x] Create GitHub tracking issue.
 - [x] Update README opening to Skydnir.
 - [x] Add trademark/non-affiliation notice.
-- [ ] Update GitHub About/topics.
+- [x] Update GitHub repository name/About/topics.
 - [x] Add `skydnir` CLI alias.
 - [x] Add `pdocker` deprecation warning.
 - [x] Add `skydnird` daemon alias.
