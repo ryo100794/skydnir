@@ -120,7 +120,7 @@ class StorageAccountingUiContractTest(unittest.TestCase):
         self.assertIn("storage_documents_scope_external_fmt", self.main + self.strings)
 
     def test_overview_wording_distinguishes_app_private_physical_from_image_logical_views(self):
-        self.assertIn("app-private allocated pdocker", self.strings)
+        self.assertIn("app-private allocated Skydnir", self.strings)
         self.assertIn("physical allocated app-private", self.strings)
         self.assertIn("Images tab is logical image-layer views", self.strings)
         self.assertIn("projects/workspaces/models/volumes/document mirrors", self.strings)

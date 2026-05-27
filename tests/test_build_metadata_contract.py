@@ -12,11 +12,11 @@ class BuildMetadataContractTest(unittest.TestCase):
     def test_apk_build_metadata_is_generated_at_build_time(self):
         gradle = APP_GRADLE.read_text(encoding="utf-8")
 
-        self.assertIn('nonBlankEnv("PDOCKER_BUILD_TIME_UTC")', gradle)
+        self.assertIn('nonBlankEnv("SKYDNIR_BUILD_TIME_UTC", "PDOCKER_BUILD_TIME_UTC")', gradle)
         self.assertIn("DateTimeFormatter.ISO_INSTANT.format(pdockerBuildInstant)", gradle)
         self.assertIn('gitOutput("git", "rev-parse", "--short=12", "HEAD")', gradle)
-        self.assertIn('nonBlankEnv("PDOCKER_BUILD_COMMIT")', gradle)
-        self.assertIn('nonBlankEnv("PDOCKER_BUILD_NUMBER")', gradle)
+        self.assertIn('nonBlankEnv("SKYDNIR_BUILD_COMMIT", "PDOCKER_BUILD_COMMIT")', gradle)
+        self.assertIn('nonBlankEnv("SKYDNIR_BUILD_NUMBER", "PDOCKER_BUILD_NUMBER")', gradle)
 
         default_config = re.search(
             r"defaultConfig \{(?P<body>.*?)\n    \}",

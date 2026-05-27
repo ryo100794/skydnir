@@ -1425,7 +1425,7 @@ class MainActivity : AppCompatActivity() {
             "engine pull $image --platform $platform",
         ) { emit ->
             emit(getString(R.string.message_image_pull_start_fmt, image))
-            emit("[pdocker] platform=$platform")
+            emit("[skydnir] platform=$platform")
             pullImage(image, platform)
         }
     }
@@ -1916,7 +1916,7 @@ class MainActivity : AppCompatActivity() {
         val documentsTarget = latestExport.optString("Target", "pdocker/diagnostics/self-debug-bundle-latest.json")
         val documentsActiveHostPath = latestExport.optString("ActiveHostPath", "-")
         return buildString {
-            appendLine("pdocker self-debug bundle")
+            appendLine("Skydnir self-debug bundle")
             appendLine("ADB-independent=true")
             appendLine("local=${bundleFile.absolutePath}")
             appendLine("local.evidence=${evidenceFile.absolutePath}")
@@ -2142,7 +2142,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun boundedDebugText(text: String, maxChars: Int = 64 * 1024): String =
-        if (text.length <= maxChars) text else "[pdocker] truncated to last $maxChars chars\n" + text.takeLast(maxChars)
+        if (text.length <= maxChars) text else "[skydnir] truncated to last $maxChars chars\n" + text.takeLast(maxChars)
 
     private fun engineTextOrError(path: String): JSONObject =
         runCatching {
@@ -2478,7 +2478,7 @@ class MainActivity : AppCompatActivity() {
         ).joinToString("\n")
 
     private fun memoryLayerSnapshotText(snapshot: MemoryLayerSnapshot): String = buildString {
-        appendLine("pdocker memory layer visualization")
+        appendLine("Skydnir memory layer visualization")
         appendLine("source=${snapshot.source}")
         appendLine("artifact.created_at_epoch=${snapshot.artifactCreatedAtEpoch}")
         appendLine("artifact.age=${formatArtifactAge(snapshot.artifactAgeSeconds, snapshot.artifactCreatedAtEpoch)}")
@@ -2493,13 +2493,13 @@ class MainActivity : AppCompatActivity() {
         appendLine("swap.total=${formatBytes(snapshot.swapTotal)}")
         appendLine("swap.used=${formatBytes((snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L))}")
         appendLine("swap.free=${formatBytes(snapshot.swapFree)}")
-        appendLine("pdocker.processes=${snapshot.pdockerProcessCount}")
-        appendLine("pdocker.VmSize=${formatBytes(snapshot.pdockerVmSize)}")
-        appendLine("pdocker.RSS=${formatBytes(snapshot.pdockerRss)}")
-        appendLine("pdocker.RSS.percent_of_RAM=${formatPercent(snapshot.pdockerRss, snapshot.memTotal)}")
-        appendLine("pdocker.RSS.percent_of_used_RAM=${formatPercent(snapshot.pdockerRss, (snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L))}")
-        appendLine("pdocker.VmSwap=${formatBytes(snapshot.pdockerSwap)}")
-        appendLine("pdocker.VmSwap.percent_of_used_swap=${formatPercent(snapshot.pdockerSwap, (snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L))}")
+        appendLine("skydnir.processes=${snapshot.pdockerProcessCount}")
+        appendLine("skydnir.VmSize=${formatBytes(snapshot.pdockerVmSize)}")
+        appendLine("skydnir.RSS=${formatBytes(snapshot.pdockerRss)}")
+        appendLine("skydnir.RSS.percent_of_RAM=${formatPercent(snapshot.pdockerRss, snapshot.memTotal)}")
+        appendLine("skydnir.RSS.percent_of_used_RAM=${formatPercent(snapshot.pdockerRss, (snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L))}")
+        appendLine("skydnir.VmSwap=${formatBytes(snapshot.pdockerSwap)}")
+        appendLine("skydnir.VmSwap.percent_of_used_swap=${formatPercent(snapshot.pdockerSwap, (snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L))}")
         appendLine()
         appendLine("== App process allocation view ==")
         appendLine("app.vm_metrics=${if (snapshot.appVmMetricsAvailable) "available" else "N/A"}")
@@ -2534,7 +2534,7 @@ class MainActivity : AppCompatActivity() {
         appendLine()
         appendLine("Layer model:")
         appendLine("Linux/Android kernel owns physical RAM, swap/zram, page tables, and LMK.")
-        appendLine("pdocker only wraps selected large private anonymous mappings.")
+        appendLine("Skydnir only wraps selected large private anonymous mappings.")
         appendLine("The wrapper reserves guest virtual address space as PROT_NONE, pages data into a bounded resident window, and writes evicted pages into an app-owned backing file.")
     }
 
@@ -2640,7 +2640,7 @@ class MainActivity : AppCompatActivity() {
                 File(testDir, "apk-memory-pager-managed-latest.json").writeText(managedJson.toString(2))
                 File(testDir, "apk-memory-pager-transparent-latest.json").writeText(transparentJson.toString(2))
                 buildString {
-                    appendLine("pdocker memory pager self-test")
+                    appendLine("Skydnir memory pager self-test")
                     appendLine("managed=${managed.status} rc=${managed.exitCode}")
                     appendLine(managed.output.trim())
                     appendLine()
@@ -2725,7 +2725,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun debugMemorySnapshot(): String = buildString {
-        appendLine("pdocker memory snapshot")
+        appendLine("Skydnir memory snapshot")
         appendLine("package=$packageName uid=${applicationInfo.uid}")
         appendLine("time=${System.currentTimeMillis()}")
         appendLine()
@@ -2747,7 +2747,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun debugProcessSnapshot(): String = buildString {
-        appendLine("pdocker process snapshot")
+        appendLine("Skydnir process snapshot")
         appendLine("package=$packageName uid=${applicationInfo.uid}")
         appendLine()
         appendLine("PID     PPID    STATE        THR  FD    RSS        NAME / CMDLINE")
@@ -2768,7 +2768,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun debugHandleSnapshot(): String = buildString {
-        appendLine("pdocker handle snapshot")
+        appendLine("Skydnir handle snapshot")
         appendLine("package=$packageName uid=${applicationInfo.uid}")
         debugProcesses().forEach { proc ->
             appendLine()
@@ -2948,7 +2948,7 @@ class MainActivity : AppCompatActivity() {
                 job.progress = progress
                 changed = true
             }
-            val line = "[pdocker] reconnected daemon ${op.kind} ${op.status}: $progress"
+            val line = "[skydnir] reconnected daemon ${op.kind} ${op.status}: $progress"
             if (job.output.lastOrNull() != line) {
                 job.output += line
                 while (job.output.size > MAX_JOB_LINES) job.output.removeAt(0)
@@ -4057,7 +4057,7 @@ class MainActivity : AppCompatActivity() {
         val bytes = text.toByteArray(Charsets.UTF_8)
         if (bytes.size <= MAX_TEXT_TOOL_VIEW_BYTES) return text
         val start = bytes.size - MAX_TEXT_TOOL_VIEW_BYTES
-        return "[pdocker] text truncated to last ${MAX_TEXT_TOOL_VIEW_BYTES / 1024} KiB\n" +
+        return "[skydnir] text truncated to last ${MAX_TEXT_TOOL_VIEW_BYTES / 1024} KiB\n" +
             bytes.copyOfRange(start, bytes.size).toString(Charsets.UTF_8)
     }
 
@@ -5526,8 +5526,8 @@ class MainActivity : AppCompatActivity() {
         job.endedAt = System.currentTimeMillis()
         dockerJobBuffers.remove(jobId)
         dockerJobPendingCarriageReturn.remove(jobId)
-        job.output += "[pdocker] job stopped from UI"
-        appendPersistentJobLog(job.id, "[pdocker] job stopped from UI\n")
+        job.output += "[skydnir] job stopped from UI"
+        appendPersistentJobLog(job.id, "[skydnir] job stopped from UI\n")
         job.progress = getString(R.string.job_stopped)
         while (job.output.size > MAX_JOB_LINES) job.output.removeAt(0)
         saveDockerJobs()
@@ -5579,14 +5579,14 @@ class MainActivity : AppCompatActivity() {
     private fun jobTerminalPrelude(job: DockerJob): String =
         terminalRecordText(
             listOf(
-                "[pdocker] job=${job.title} group=${job.group}",
-                "[pdocker] command=${job.command}",
+                "[skydnir] job=${job.title} group=${job.group}",
+                "[skydnir] command=${job.command}",
                 "",
             ).joinToString("\n")
         )
 
     private fun ensureJobTerminalPrelude(job: DockerJob, text: String): String =
-        if ("[pdocker] command=" in text.take(2048) || "[pdocker command]" in text.take(2048)) text else jobTerminalPrelude(job) + text
+        if ("[skydnir] command=" in text.take(2048) || "[pdocker] command=" in text.take(2048) || "[pdocker command]" in text.take(2048)) text else jobTerminalPrelude(job) + text
 
     private fun normalizeTerminalNewlines(text: String): String {
         val out = StringBuilder(text.length + 8)
@@ -5868,7 +5868,7 @@ class MainActivity : AppCompatActivity() {
         return runCatching {
             val bytes = file.readBytes()
             val start = (bytes.size - MAX_JOB_LOG_VIEW_BYTES).coerceAtLeast(0)
-            val prefix = if (start > 0) "[pdocker] log truncated to last ${MAX_JOB_LOG_VIEW_BYTES / 1024} KiB\n" else ""
+            val prefix = if (start > 0) "[skydnir] log truncated to last ${MAX_JOB_LOG_VIEW_BYTES / 1024} KiB\n" else ""
             prefix + bytes.copyOfRange(start, bytes.size).toString(Charsets.UTF_8)
         }.getOrDefault("")
     }
@@ -5915,7 +5915,7 @@ class MainActivity : AppCompatActivity() {
                 }.toMutableList(),
             )
             if (job.exitCode == null) {
-                val line = "[pdocker] UI was restarted; reconnecting to daemon operation"
+                val line = "[skydnir] UI was restarted; reconnecting to daemon operation"
                 if (job.output.lastOrNull() != line) job.output += line
                 job.status = getString(R.string.job_running)
                 job.progress = line

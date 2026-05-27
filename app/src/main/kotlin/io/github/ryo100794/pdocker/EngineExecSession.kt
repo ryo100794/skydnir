@@ -35,14 +35,14 @@ class EngineExecSession(
 
     fun start(containerId: String): Boolean {
         if (containerId.isBlank()) {
-            sendTerminalText("[pdocker] missing container id\n")
+            sendTerminalText("[skydnir] missing container id\n")
             return false
         }
         if (!alive.compareAndSet(false, true)) return false
         resetEngineExecInputDiagnostics(containerId)
         reader = Thread({
             runCatching {
-                sendTerminalText("[pdocker] Engine exec -it: $containerId\n")
+                sendTerminalText("[skydnir] Engine exec -it: $containerId\n")
                 val execId = createEngineExec(containerId)
                 execIdRef.set(execId)
                 recordEngineExecEvent("created", execId = execId)
@@ -62,7 +62,7 @@ class EngineExecSession(
                 }
             }.onFailure {
                 recordEngineExecEvent("failure", error = it.message.orEmpty())
-                sendTerminalText("\n[pdocker] Engine exec failed: ${it.message.orEmpty()}\n")
+                sendTerminalText("\n[skydnir] Engine exec failed: ${it.message.orEmpty()}\n")
             }
             recordEngineExecEvent("reader-ended")
             execIdRef.set(null)
