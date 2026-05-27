@@ -93,16 +93,17 @@ For reproducible release packaging, pass explicit metadata through the build
 environment:
 
 ```sh
-PDOCKER_BUILD_TIME_UTC=2026-05-20T00:00:00Z \
-PDOCKER_BUILD_COMMIT="$(git rev-parse --short=12 HEAD)" \
-PDOCKER_BUILD_NUMBER=20260520.1 \
+SKYDNIR_BUILD_TIME_UTC=2026-05-20T00:00:00Z \
+SKYDNIR_BUILD_COMMIT="$(git rev-parse --short=12 HEAD)" \
+SKYDNIR_BUILD_NUMBER=20260520.1 \
 bash scripts/build-apk.sh
 ```
 
 When those environment variables are absent, Gradle uses the current UTC time
 for `BUILD_TIME_UTC`/`BUILD_NUMBER` and `git rev-parse --short=12 HEAD` for
 `BUILD_GIT_COMMIT`, falling back to `version.properties` only if git metadata
-is unavailable.
+is unavailable. The older `PDOCKER_BUILD_*` names remain accepted as
+compatibility aliases.
 
 Build only the default configured APK package step:
 

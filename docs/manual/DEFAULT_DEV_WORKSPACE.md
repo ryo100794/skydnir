@@ -89,9 +89,10 @@ default-project/
   conflicts with edits from Android file managers must be surfaced instead of
   resolved silently.
 - The template mounts the selected Documents folder at `/documents` and the
-  cross-project shared folder at `/shared`. Override `PDOCKER_DOCUMENTS_HOST`
-  or `PDOCKER_SHARED_DOCUMENTS_HOST` when two projects intentionally need the
-  same folder.
+  cross-project shared folder at `/shared`. Override `SKYDNIR_DOCUMENTS_HOST`
+  or `SKYDNIR_SHARED_DOCUMENTS_HOST` when two projects intentionally need the
+  same folder; the older `PDOCKER_*` names remain accepted for existing
+  workspaces.
 - Hot editor state, build caches, databases, and high-frequency logs should use
   app-private fast storage such as `/workspace`; copy selected artifacts to
   `/documents` when they need to be shared.

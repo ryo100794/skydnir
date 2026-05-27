@@ -117,7 +117,7 @@ Use "confirmed on" language for device-specific results. Example:
 Before recording:
 
 - Build or install the APK version named in the demo.
-- Start pdockerd from the app UI.
+- Start skydnird from the app UI.
 - Confirm `_ping`, image pull, Compose up, and log streaming on the target
   device.
 - Clear old containers or explain why they are visible.
