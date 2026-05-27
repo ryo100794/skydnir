@@ -1,4 +1,4 @@
-# pdocker-android: implementation status
+# Skydnir: implementation status
 
 Snapshot at v0.5.3 / build 20260505.1. This document covers fixed-build
 implementation evidence: (1) what pdockerd implemented for that build,
@@ -31,7 +31,7 @@ are release-process notes, with signing material kept outside Git.
 | layer | size | status |
 |---|---|---|
 | **pdockerd** (Python single-file daemon, docker-proot-setup/bin) | 3500 LOC | Engine API 1.43-compatible, ~30 endpoints |
-| **APK** (pdocker-android) | 31 MB | install, foreground service, Engine API, image pull/browse/edit flows; SDK28 compat smoke paths have historical device evidence, while modern/API29+, terminal, service truth, and teardown remain gated |
+| **APK** (Skydnir) | 31 MB | install, foreground service, Engine API, image pull/browse/edit flows; SDK28 compat smoke paths have historical device evidence, while modern/API29+, terminal, service truth, and teardown remain gated |
 | **Workspace UI** | native widgets + xterm.js 5.3 + JNI pty tabs + editor | Compose, Dockerfile, images, containers, and `-it`-style sessions share one console surface |
 
 ## Implementation overview
@@ -63,7 +63,7 @@ shape.
 
 What was confirmed on the Android 15 test device for this fixed build:
 
-- `adb install pdocker-android.apk` → MainActivity launches → "Start pdockerd" → unix socket binds at `filesDir/pdocker/pdockerd.sock`
+- `adb install Skydnir.apk` → MainActivity launches → "Start pdockerd" → unix socket binds at `filesDir/pdocker/pdockerd.sock`
 - `curl --unix-socket .../pdockerd.sock http://d/_ping` → `OK`
 - `docker version` (CLI 29.4 client → pdockerd 0.1 server) → both sides report API 1.43
 - `docker pull ubuntu:latest` → 132 MB image landed under `filesDir/pdocker/{images,layers}/` in 52s
@@ -95,9 +95,9 @@ What was confirmed on the Android 15 test device for this fixed build:
   Containers, and Sessions. Tabs show widget-style state, counts, paths, and
   log previews in the native UI instead of immediately dropping into a console.
 - Container widgets show `State.Status`, synthetic IP, Docker-visible ports,
-  planned port-hook rewrite count, and pdocker networking warnings such as
+  planned port-hook rewrite count, and Skydnir networking warnings such as
   metadata-only port publishing. The next reconciliation pass must treat Engine
-  container IDs plus pdocker project/service labels as truth; names are display
+  container IDs plus Skydnir project/service labels as truth; names are display
   hints or legacy fallbacks only, especially after interrupted compose runs.
   Widgets also expose direct start/stop/restart, log, file-browser,
   known-service URL, and grouped interactive console actions.
@@ -223,7 +223,7 @@ The active implementation plan for closing those gaps lives in
 ## File map (Android APK)
 
 ```
-pdocker-android/
+skydnir/
 ├── app/src/main/
 │   ├── AndroidManifest.xml           — INTERNET, ACCESS_NETWORK_STATE,
 │   │                                   FOREGROUND_SERVICE_DATA_SYNC,

@@ -4,7 +4,7 @@ Snapshot date: 2026-05-05.
 
 ## Purpose
 
-This document evaluates a pdocker extension that behaves like swap inside the
+This document evaluates a Skydnir extension that behaves like swap inside the
 APK boundary. It is not Docker compatibility. It is an Android survival layer
 for memory-heavy containers such as llama.cpp when the device does not allow
 ADB/root swap tuning.
@@ -49,7 +49,7 @@ Normal Linux page faults are handled by the kernel and are not delivered to user
 space. An APK cannot observe every ordinary major/minor page fault from another
 process.
 
-pdocker can only catch page-fault-like events that it deliberately creates:
+Skydnir can only catch page-fault-like events that it deliberately creates:
 
 - `userfaultfd` faults on registered ranges, if a future device permits it.
 - `SIGSEGV` faults on ranges pdocker marks `PROT_NONE` or write-protected.
@@ -89,7 +89,7 @@ For data that is naturally file-backed, prefer real files and `mmap`:
 - Use application-level chunking and streaming before inventing fault handling.
 
 This is the safest path. It lets the kernel reclaim clean pages without a
-pdocker-specific pager.
+Skydnir-specific pager.
 
 ### B. Managed Anonymous Memory Pager
 
@@ -161,7 +161,7 @@ Implementation slice:
 If a device allows unprivileged userfaultfd from the APK process:
 
 1. Register managed ranges with `UFFDIO_REGISTER`.
-2. Run a pager thread in the same process or a pdocker helper process.
+2. Run a pager thread in the same process or a Skydnir helper process.
 3. Resolve missing pages with `UFFDIO_COPY`.
 4. Track dirty pages with write-protect mode where available.
 
@@ -352,7 +352,7 @@ large mappings.  Required constraints:
 
 `sigaction` constraints:
 
-- Application `SIGSEGV` handlers are allowed.  pdocker may suppress only faults
+- Application `SIGSEGV` handlers are allowed.  Skydnir may suppress only faults
   that match a registered managed page.  Non-managed faults and pager-internal
   fatal faults must be delivered according to normal Linux signal semantics.
 - The pager must not install a process-global handler that steals unrelated
@@ -404,7 +404,7 @@ both a feature opt-in and a size/shape match:
 
 Memory outcomes must be classified with stable strings:
 
-- `allocation_denied_enomem`: pdocker guard or pager admission rejected the
+- `allocation_denied_enomem`: Skydnir guard or pager admission rejected the
   request before mapping; expected syscall result is `ENOMEM` or unchanged `brk`.
 - `pager_storage_exhausted`: backing file reservation/write failed because
   app-private storage is low; fail closed and do not continue with unbacked
@@ -630,11 +630,11 @@ The first implementation must preserve Docker/llama.cpp compatibility:
    the default path.
 2. Keep GGUF files mmap-friendly and avoid copying a whole model into an
    anonymous buffer.
-3. Build a pdocker-owned GGUF tensor range index that records tensor names,
+3. Build a Skydnir-owned GGUF tensor range index that records tensor names,
    offsets, sizes, quantization metadata, and expert-like grouping when it can
    be inferred from names or metadata.
 4. Map page faults, file reads, and GPU bridge dispatch buffers back to those
-   model ranges so pdocker can report which tensor/expert ranges are hot. The
+   model ranges so Skydnir can report which tensor/expert ranges are hot. The
    first diagnostic implementation is `scripts/gguf-tensor-range-index.py`,
    which streams the GGUF header/tensor table without loading tensor payloads
    and can reverse-map an absolute or payload-relative byte range to matching
@@ -653,14 +653,14 @@ around the MoE contract. Ordinary glibc processes may opt into large anonymous
 mapping management, but unsupported file-backed mappings, executable mappings,
 fixed-address mappings, partial unmaps, or uncertain fault semantics must
 pass through or fail with structured diagnostics instead of pretending that
-pdocker expanded memory safely.
+Skydnir expanded memory safely.
 
 ## GPU Bridge Virtual Memory Contract
 
-llama.cpp reads GGUF model files with mmap by default. The pdocker llama
+llama.cpp reads GGUF model files with mmap by default. The Skydnir llama
 template does not pass `--no-mmap`, and the recorded `llama-bench` artifacts show
 `use_mmap: true`. That model-file mapping should stay owned by llama.cpp and the
-kernel. pdocker must not copy or page the whole 5 GB model just to make the GPU
+kernel. Skydnir must not copy or page the whole 5 GB model just to make the GPU
 bridge work.
 
 The GPU-specific virtual memory work is a separate contract inside
@@ -692,7 +692,7 @@ The current llama GPU evidence makes this the next useful slice:
 - The 8B GGUF is mmap-backed on the CPU side.
 - The offloaded Vulkan model buffer is about 486.87 MiB.
 - `--n-gpu-layers 3` serves with repeating transformer layers through the
-  pdocker Vulkan ICD and APK-side Android Vulkan executor.
+  Skydnir Vulkan ICD and APK-side Android Vulkan executor.
 - Current best measured short run is 0.1436 tokens/s, 2.56x the CPU baseline,
   with llama.cpp unmodified.
 - Trace evidence now shows `vkCmdCopyBuffer` replay is almost entirely
@@ -790,7 +790,7 @@ or narrow the feature:
 - Threads: another thread may touch or mutate the same managed page while the
   tracer is resolving a fault. The first production mode should be single-thread
   or stop-the-process-group until locking is designed.
-- Signal semantics: real programs may install SIGSEGV handlers. pdocker must
+- Signal semantics: real programs may install SIGSEGV handlers. Skydnir must
   only suppress faults for registered managed ranges and must deliver all other
   SIGSEGV events unchanged.
 - Allocator coverage: wrapping only large anonymous `mmap` calls will miss

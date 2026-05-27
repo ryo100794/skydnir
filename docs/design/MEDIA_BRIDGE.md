@@ -81,7 +81,7 @@ The Engine/API truth surfaces for this phase are:
 - `PdockerMedia` in `GET /containers/{id}/json` for the per-container media
   request and injected environment result.
 
-Both are pdocker extensions. They document control-plane readiness only; they
+Both are Skydnir extensions. They document control-plane readiness only; they
 do not claim Linux `/dev/video*` or `/dev/snd/*` passthrough.
 
 ## Readiness Rules

@@ -14,7 +14,7 @@ overlay/COW path metadata. SQLite must never become payload storage.
   service names, image tags, and volume names are display and lookup labels,
   not durable identity.
 - Keep the index disposable. If the database is missing, corrupt, stale, or
-  inconsistent with filesystem evidence, pdocker can rebuild it.
+  inconsistent with filesystem evidence, Skydnir can rebuild it.
 - Preserve enough replica and snapshot metadata to recover from overlay/COW
   metadata loss, partial writes, and interrupted app updates.
 
@@ -50,7 +50,7 @@ itself fails validation.
 
 ## Identity Model
 
-Every pdocker-owned object gets an immutable ID at creation time:
+Every Skydnir-owned object gets an immutable ID at creation time:
 
 | Object | ID |
 |---|---|

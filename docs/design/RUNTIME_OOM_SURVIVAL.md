@@ -4,14 +4,14 @@ Snapshot date: 2026-05-05.
 
 ## Purpose
 
-This document defines how pdocker should behave when a running build,
+This document defines how Skydnir should behave when a running build,
 container, or llama/GPU workload approaches Android low-memory conditions.
 The goal is not to hide every out-of-memory condition. The goal is to turn a
 hard app/process death into one of three controlled outcomes:
 
 - the allocation is rejected early with `ENOMEM` and structured diagnostics;
 - the workload is kept alive through an explicit managed-memory feature;
-- the process is killed by Android, but pdocker can classify and explain it
+- the process is killed by Android, but Skydnir can classify and explain it
   from persisted evidence after restart.
 
 ## Android Reality
@@ -27,7 +27,7 @@ The durable strategy must be proactive:
 - persist operation state outside the foreground UI;
 - reconcile process/container state after restart.
 
-This still leaves the important product requirement: pdocker should not only
+This still leaves the important product requirement: Skydnir should not only
 fail safely. It also needs a mode that can run workloads larger than comfortable
 RAM. That mode is intentionally separate from the default guard path.
 
@@ -121,7 +121,7 @@ cleanup.  Required final summary fields are `summary_seq`, `started_unix_ms`,
 Telemetry must fail closed.  If a mandatory sample or final summary cannot be
 serialized, fsynced, or atomically renamed, the operation must be classified as
 `telemetry_persistence_failed` or a more specific fatal memory classification,
-and pdocker must not resume a managed pager operation with unknown page contents
+and Skydnir must not resume a managed pager operation with unknown page contents
 or allow the UI to show `running`/`Up` from stale persisted state.  The only
 permitted fallback is a smaller bounded final summary with
 `summary_write_degraded=true`, the write errno, and enough fields to explain the
@@ -130,7 +130,7 @@ failure classification.
 ### 2. Early Allocation Denial
 
 The memory guard remains the default survival mechanism for unmodified Linux
-programs. For a large request, pdocker should deny before Android LMK has to
+programs. For a large request, Skydnir should deny before Android LMK has to
 kill the app process:
 
 - `mmap` and `mremap` return `-ENOMEM`;
@@ -146,10 +146,10 @@ exit in a diagnosable way.
 ### 3. Managed Pager For Opt-In Large Buffers
 
 `PDOCKER_MEMORY_PAGER=managed` and `io.pdocker.memory-pager=managed` are the
-explicit opt-ins for pdocker-owned anonymous regions. Standard Docker/Compose
+explicit opt-ins for Skydnir-owned anonymous regions. Standard Docker/Compose
 memory keys such as `mem_limit`, `memswap_limit`, and
 `deploy.resources.limits.memory` must remain metadata/budget inputs; they do
-not silently enable the pdocker-specific pager.
+not silently enable the Skydnir-specific pager.
 
 The pager is appropriate for selected large anonymous buffers. It is not a
 general allocator replacement. It must not page executable text, stacks, libc
@@ -197,7 +197,7 @@ The mode combines three strategies:
 
 1. File-backed first: keep models, datasets, build artifacts, and caches as
    files or sparse files and use mmap/streaming instead of eager copies.
-2. Managed anonymous fallback: for pdocker-owned large anonymous buffers,
+2. Managed anonymous fallback: for Skydnir-owned large anonymous buffers,
    reserve virtual address ranges and back pages with app-private sparse files.
 3. Bridge-aware GPU memory: for Vulkan/OpenCL staging and model offload, use
    chunked registered buffers plus dirty-span synchronization rather than
@@ -231,7 +231,7 @@ the work it is already good at.
 
 ### 5. Kill Classification After Restart
 
-When Android still kills a process, pdocker should classify rather than guess:
+When Android still kills a process, Skydnir should classify rather than guess:
 
 - if the tracer sees `SIGKILL`, record exit code `137` plus the last memory
   ring sample;

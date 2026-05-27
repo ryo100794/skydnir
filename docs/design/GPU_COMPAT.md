@@ -1,8 +1,8 @@
-# pdocker GPU compatibility extensions
+# Skydnir GPU compatibility extensions
 
 Snapshot date: 2026-05-01.
 
-pdocker has an experimental Docker-compatible GPU request surface. It is
+Skydnir has an experimental Docker-compatible GPU request surface. It is
 designed for Android devices where native Docker GPU runtimes such as
 `nvidia-container-runtime` do not exist.
 
@@ -15,7 +15,7 @@ Canonical split:
 
 ## Design principle
 
-pdocker treats Android GPU support as a Vulkan-first compatibility stack.
+Skydnir treats Android GPU support as a Vulkan-first compatibility stack.
 Native NVIDIA CUDA is not expected on ordinary Android phones; it is only an
 external baseline for Jetson or NVIDIA Linux devices. The Android path is:
 
@@ -65,7 +65,7 @@ The production direction is therefore:
 
 ```text
 glibc container process
-  -> pdocker-owned glibc shim library or device ABI
+  -> Skydnir-owned glibc shim library or device ABI
   -> stable shared-memory command queue or narrow ioctl-like control plane
   -> Android/Bionic GPU executor owned by the APK
   -> Vulkan/OpenCL/NNAPI/other Android GPU API
@@ -87,7 +87,7 @@ The Engine/API truth surfaces for the GPU bridge are:
   Vulkan/OpenCL/GL/NNAPI availability, driver/API versions where discoverable,
   and APK-side executor capability state.
 
-Both are pdocker extensions. Docker-compatible request parsing still accepts
+Both are Skydnir extensions. Docker-compatible request parsing still accepts
 common `HostConfig.DeviceRequests`, runtime, and label forms, but correctness
 and performance claims require separate llama/GPU artifacts.
 
@@ -117,7 +117,7 @@ load Bionic vendor libraries.
 
 ## Backend Affinity Policy
 
-pdocker should preserve the application-facing GPU API as far down the stack as
+Skydnir should preserve the application-facing GPU API as far down the stack as
 possible:
 
 - GL/GLES-looking work should run through the Android GL/GLES backend.

@@ -1,4 +1,4 @@
-# pdocker TODO ledger
+# Skydnir TODO ledger
 
 Snapshot date: 2026-05-20.
 
@@ -28,7 +28,7 @@ The May 13 multi-agent audits promoted the following order as the current
 planning ledger truth.  Keep this order when assigning agents, updating GitHub
 issues, and deciding which planned gaps become hard gates.
 
-1. **[#6](https://github.com/ryo100794/pdocker-android/issues/6)
+1. **[#6](https://github.com/ryo100794/skydnir/issues/6)
    Service truth same-container-ID** `[P0 doing]`: UI cards,
    `docker ps`, Engine `/containers/json`, persisted state, process table,
    listener probes, and logs must prove the same current Engine container ID.
@@ -39,7 +39,7 @@ issues, and deciding which planned gaps become hard gates.
    docker ps/API running state, state, selected process PID, listener owner
    PID, UI card current reason, and a matching
    `pdocker-service-truth-marker`, before the gate can leave `planned-gap`.
-2. **[#10](https://github.com/ryo100794/pdocker-android/issues/10)
+2. **[#10](https://github.com/ryo100794/skydnir/issues/10)
    Runtime teardown** `[P0 device-evidence next]`: stop/kill must prove direct children,
    GPU executor helpers, listeners, logs, and stale PIDs are gone before the
    UI or API reports stopped. Current slice complete: focused
@@ -58,7 +58,7 @@ issues, and deciding which planned gaps become hard gates.
    CI Showcase check is green for that commit. Remaining slice: produce that
    stricter evidence from a real adb/run-as device run before allowing
    promotion.
-3. **[#4](https://github.com/ryo100794/pdocker-android/issues/4)
+3. **[#4](https://github.com/ryo100794/skydnir/issues/4)
    llama GPU Q6_K and environment propagation** `[P0 doing]`: continue the
    Q6_K blocker without touching llama.cpp, Dockerfiles, models, or prompts.
    The compare script, pdockerd defaults, UI/compose path, and artifact
@@ -81,14 +81,14 @@ issues, and deciding which planned gaps become hard gates.
    and simple other-row provenance as sufficient explanations. This artifact is
    diagnostic only: it is not benchmark evidence, inference correctness
    evidence, or device-success promotion.
-4. **[#11](https://github.com/ryo100794/pdocker-android/issues/11)
+4. **[#11](https://github.com/ryo100794/skydnir/issues/11)
    Image-pull crash safety** `[P0 doing]`: partial pulls, `.pull-*`,
    `.tmp-*`, `.old-*`, interrupted layer extraction, tag publish, and startup
    recovery must be tested with an actual kill/restart device artifact. The
    synthetic residue runner is represented in the manifest; the timed live
    registry-pull interruption remains device-gated, scenario-owned only, and
    non-promoting until it proves no partial/user tag is published.
-5. **[#12](https://github.com/ryo100794/pdocker-android/issues/12)
+5. **[#12](https://github.com/ryo100794/skydnir/issues/12)
    COW/overlay mutation safety** `[P0 doing]`: host-local `libcow` coverage now
    fails closed for copy-up, metadata, `rename()`/`renameat()` over hardlinked
    destinations, whiteout/rename/archive staging models, low-space, corrupt
@@ -100,7 +100,7 @@ issues, and deciding which planned gaps become hard gates.
    evidence for the same mutation checkpoints. The COW kill-at-step device lane
    is present but non-promoting until adb/run-as evidence covers each required
    copy-up, rename, whiteout, archive, and metadata checkpoint.
-6. **[#5](https://github.com/ryo100794/pdocker-android/issues/5)
+6. **[#5](https://github.com/ryo100794/skydnir/issues/5)
    Terminal hard gate** `[P1 next]`: `exec -it` is not closed until an actual
    UI-driven container terminal passes Enter, Ctrl-C, cursor keys, `top`, `q`,
    resize, and IME regression checks. Static or skipped self-tests are not
@@ -117,11 +117,11 @@ issues, and deciding which planned gaps become hard gates.
    resize/IME regression replay; and an explicit decision on the bundled
    `xterm.css` IME composition-position TODO marker. Host-only verifier results
    remain non-promoting.
-7. **[#14](https://github.com/ryo100794/pdocker-android/issues/14)
+7. **[#14](https://github.com/ryo100794/skydnir/issues/14)
    VS Code health gate** `[P1 next]`: default workspace success requires
    compose/build/run, `pdocker-dev` current Engine state, port `18080` listener,
    code-server reachability, extension evidence, and UI card truth agreement.
-8. **[#15](https://github.com/ryo100794/pdocker-android/issues/15)
+8. **[#15](https://github.com/ryo100794/skydnir/issues/15)
    SAF direct output** `[P1 next]`: `/documents` must be a SAF-backed UnixFS
    exchange layer with sidecar metadata and direct-write evidence. Host
    contract coverage now requires `DirectWriteEvidence`, non-promoting
@@ -132,7 +132,7 @@ issues, and deciding which planned gaps become hard gates.
    `pdocker-new-project` wording must be tied to this gate so SAF fallback UX
    cannot drift from the UnixFS mediator design; real device SAF pass evidence
    remains separate and must not be fabricated.
-9. **[#9](https://github.com/ryo100794/pdocker-android/issues/9)
+9. **[#9](https://github.com/ryo100794/skydnir/issues/9)
    Release evidence honesty gate** `[P0 doing]`: planned-gap artifacts,
    skipped or unrun device lanes, and host-only checks that merely prove a gap
    is still visible are non-promoting. `tests/test_driver_manifest.json`,
@@ -251,7 +251,7 @@ evidence proves the real behavior or the limitation remains visible.
    directly `execve()`'d, and Docker/OCI image layout must remain upstream
    compatible.  If the gate fails, API29+ remains metadata/UI/image management
    or moves process execution to an explicitly separated compat/helper path.
-6. **Docker API versus pdocker extension boundary** `[P1 next]`: standard
+6. **Docker API versus Skydnir extension boundary** `[P1 next]`: standard
    Engine API responses must remain a Docker-compatible subset.  `/system/*`
    endpoints and `Pdocker*` fields are Android diagnostics only and must not
    hide unsupported OCI/runtime gaps.  Swarm, BuildKit/buildx, OCI hooks,
@@ -361,9 +361,9 @@ evidence proves the real behavior or the limitation remains visible.
   Acceptance: `scripts/verify-script-inventory.py` and the docs-maintenance
   verifier reject any unclassified script, stale top-level wrapper reference,
   or premature wrapper removal.
-- [doing] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
+- [doing] [#4](https://github.com/ryo100794/skydnir/issues/4)
   llama GPU bridge ABI: keep llama.cpp unmodified while expanding the
-  pdocker Vulkan/OpenCL bridge from discovery and model-buffer allocation toward
+  Skydnir Vulkan/OpenCL bridge from discovery and model-buffer allocation toward
   generic ggml SPIR-V dispatch and measured CPU-vs-GPU comparison artifacts.
   Canonical current classifier:
   `q6-native-device-execution-or-final-store`, with diagnostic evidence in
@@ -375,8 +375,8 @@ evidence proves the real behavior or the limitation remains visible.
   versus device-execution bisection. This lane is non-promoting until native
   Q6_K matches and `benchmark_claim_allowed=true`; do not use current artifacts
   for benchmark, inference, or device-success claims.
-- [next] [#10](https://github.com/ryo100794/pdocker-android/issues/10)
-  / [#5](https://github.com/ryo100794/pdocker-android/issues/5) runtime
+- [next] [#10](https://github.com/ryo100794/skydnir/issues/10)
+  / [#5](https://github.com/ryo100794/skydnir/issues/5) runtime
   teardown and terminal exec-it scheduling: gate hardening landed as `2ce8396`
   and the CI Showcase check is green. The lanes remain non-promoting until a
   real adb/run-as device run provides the focused runtime-teardown and
@@ -384,7 +384,7 @@ evidence proves the real behavior or the limitation remains visible.
   service-truth, image-pull, and COW workers. Acceptance: only one owner edits
   the smoke helper at a time, and each lane reports its focused device artifact
   before promotion.
-- [next] [#5](https://github.com/ryo100794/pdocker-android/issues/5)
+- [next] [#5](https://github.com/ryo100794/skydnir/issues/5)
   Terminal `-it` interactive path: refactor the terminal stack according to
   `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`. The UI must remain a generic
   terminal surface, while Docker exec/attach, local diagnostic PTY, daemon log,
@@ -395,8 +395,8 @@ evidence proves the real behavior or the limitation remains visible.
   `c`, cursor-key history, stable `top` repaint, `q` exit, and resize route.
   Audit note: the bundled xterm stylesheet still contains an upstream-style IME
   composition-position TODO marker. Either close it with device IME evidence or
-  explicitly exclude the vendored marker from pdocker-owned TODO scans.
-- [doing] [#6](https://github.com/ryo100794/pdocker-android/issues/6)
+  explicitly exclude the vendored marker from Skydnir-owned TODO scans.
+- [doing] [#6](https://github.com/ryo100794/skydnir/issues/6)
   Service truth same-container-ID device gate: the listener health and
   ID/label truth work are one gate. Probe default workspace `18080` and llama
   `18081`, then accept only when UI card, `docker ps`, Engine
@@ -404,14 +404,14 @@ evidence proves the real behavior or the limitation remains visible.
   process table, listener owner map, and current logs all agree on the same
   exact 64-hex Engine container ID. Project/service labels help select the
   candidate; names and configured ports remain display/debug hints only.
-- [next] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
+- [next] [#4](https://github.com/ryo100794/skydnir/issues/4)
   llama GPU performance workflow after Vulkan clamp: keep CPU fallback
   hiding Vulkan devices, force Vulkan only for measured GPU attempts, run the
   compare flow after every bridge fix, and report `target_met`, speedup, GPU
   layer count, current blocker, thermal/device metadata, artifact paths, and
   the `pdocker-llama-correctness` result. Benchmark claims are blocked when the
   correctness report fails or is missing.
-- [next] [#4](https://github.com/ryo100794/pdocker-android/issues/4)
+- [next] [#4](https://github.com/ryo100794/skydnir/issues/4)
   MoE-aware out-of-core LLM execution and GPU residency layer: start this work
   in parallel with dense llama GPU correctness instead of waiting for the final
   10x path.  The first target is running a model larger than physical RAM by
@@ -423,7 +423,7 @@ evidence proves the real behavior or the limitation remains visible.
   loading, Cache-Conditional Experts mobile routing/cache locality,
   MoE-Infinity activation-aware expert caching and prefetch, HOBBIT
   mixed-precision expert offload, and llama.cpp/ik_llama `--cpu-moe` /
-  `--n-cpu-moe` / tensor override workflows.  pdocker-specific implementation
+  `--n-cpu-moe` / tensor override workflows.  Skydnir-specific implementation
   slices: (1) GGUF tensor/expert range index, (2) access telemetry that maps
   page faults or GPU buffer dispatches back to model ranges, (3) hot/cold
   expert cache with app-private backing and optional SAF exchange storage,
@@ -433,7 +433,7 @@ evidence proves the real behavior or the limitation remains visible.
   first prove CPU out-of-core correctness against an in-memory/small fixture,
   then prove GPU-resident expert reuse improves latency; all non-green runs
   remain non-promoting diagnostics.
-  2026-05-20 update: the first pdocker-owned GGUF range indexer exists as a
+  2026-05-20 update: the first Skydnir-owned GGUF range indexer exists as a
   read-only diagnostic tool and now streams the GGUF header/tensor table without
   loading tensor payloads. It also supports byte-range lookup so future page
   fault, file-read, or GPU-dispatch telemetry can be mapped back to
@@ -451,19 +451,19 @@ evidence proves the real behavior or the limitation remains visible.
   evidence; Docker/Compose metadata and bare active flags remain planned or
   inactive. Foreign listeners and peer host-port claims surface as conflicts,
   and container cards show active/inactive/planned/conflict counts.
-- [doing] [#7](https://github.com/ryo100794/pdocker-android/issues/7)
+- [doing] [#7](https://github.com/ryo100794/skydnir/issues/7)
   Android storage metrics verification: add device smoke/manual coverage
   that layer, image-view, container-private, total, and free-space values are
   nonnegative and refresh after build, prune, rebuild, and container edit flows.
   Host-side sequence validation now exists via
   `python3 scripts/verify-storage-metrics.py --sequence ...`; promotion still
   requires a real device sequence artifact for baseline/build/rebuild/edit/prune.
-- [next] [#8](https://github.com/ryo100794/pdocker-android/issues/8)
+- [next] [#8](https://github.com/ryo100794/skydnir/issues/8)
   Reproducible release/F-Droid readiness: turn the local build wrapper
   into a broader pinned CI/release process with source-built native payloads,
   no silent APK self-extension, signing outside Git, license/source audit, and
   explicit user-directed runtime container download policy.
-- [doing] [#9](https://github.com/ryo100794/pdocker-android/issues/9)
+- [doing] [#9](https://github.com/ryo100794/skydnir/issues/9)
   First public release candidate gate: define and satisfy the minimum GitHub
   Release criteria for a build that is honest, repeatable, recoverable, and
   safe to test. Current evidence-honesty slice: classify host-only planned-gap
@@ -759,7 +759,7 @@ implementation change plus a focused verification artifact.
   keeps the device evidence contract in
   `docs/test/runtime-teardown-latest.json`.
 - [next] llama GPU layer evidence sub-gate for
-  [#4](https://github.com/ryo100794/pdocker-android/issues/4): keep NGL>=2
+  [#4](https://github.com/ryo100794/skydnir/issues/4): keep NGL>=2
   repeating-layer proof blocked behind the current Q6_K classifier. Ordered
   gate: readiness/headroom check, env propagation diff, NGL=1 Q6_K correctness
   proof, NGL>=2 `offloading N repeating layers` evidence, artifact verifier
@@ -826,7 +826,7 @@ implementation change plus a focused verification artifact.
   baseline and `vulkaninfo` fails to load Android's Bionic-dependent
   `libvulkan.so` from the Ubuntu/glibc container. Recorded in
   `docs/test/LLAMA_BENCHMARKS.md`.
-- [done] Probe OpenCL after Vulkan. pdocker now records `opencl` mode, injects
+- [done] Probe OpenCL after Vulkan. Skydnir now records `opencl` mode, injects
   OpenCL ICD metadata, and binds the host OpenCL library when present. The
   library is visible but fails to load because Android/Bionic dependencies
   such as `liblog.so` are not available to the glibc container.
@@ -915,7 +915,7 @@ implementation change plus a focused verification artifact.
   `stable_checkpoint_eligible=false`. Detailed acceptance for managed-region
   counters, OOM/LMK replay, UI stale-evidence rejection, and future
   mmap/userfault capability lives in issue
-  [#13](https://github.com/ryo100794/pdocker-android/issues/13) and the memory
+  [#13](https://github.com/ryo100794/skydnir/issues/13) and the memory
   diagnostics gates; this row is only the ownership/status pointer.
   Task H virtual memory feasibility gate is explicitly
   planned-gap/non-promoting until connected-device evidence proves every
@@ -934,10 +934,10 @@ implementation change plus a focused verification artifact.
   large-workload memory management.
 - [next] Revisit Dockerfile build memory pressure without changing upstream
   Dockerfiles. The managed-region pager remains explicit and opt-in; ordinary
-  toolchain heap allocations such as `cc1plus` are not yet under pdocker memory
+  toolchain heap allocations such as `cc1plus` are not yet under Skydnir memory
   ownership. Acceptance: a large-build artifact distinguishes guard-denied,
   LMK-suspected, and successful cases without modifying the Dockerfile.
-- [next] [#13](https://github.com/ryo100794/pdocker-android/issues/13)
+- [next] [#13](https://github.com/ryo100794/skydnir/issues/13)
   Implement Runtime OOM Survival and Large Workload Mode. The default
   path should keep using large-allocation guardrails to return `ENOMEM` before
   Android LMK kills the app, while the opt-in large-workload path should make
@@ -1329,7 +1329,7 @@ Temporary behavior:
 
 - Legacy builder supports only a Docker-compatible subset.
 - Unsupported standard Docker/BuildKit features must fail clearly.
-- pdocker-specific Dockerfile instructions are forbidden.
+- Skydnir-specific Dockerfile instructions are forbidden.
 
 Real implementation needed:
 
@@ -1492,7 +1492,7 @@ Temporary behavior:
 - llama.cpp GPU template, model volume, optional model download, and logs script
   exist.
 - Current SOG15 run starts the real `llama-server` and serves HTTP on
-  `127.0.0.1:18081`. GPU diagnostics can now expose the pdocker Vulkan/OpenCL
+  `127.0.0.1:18081`. GPU diagnostics can now expose the Skydnir Vulkan/OpenCL
   bridge path, but normal product mode must stay on CPU fallback until the
   bridge can serve tokens faster than CPU with validated llama.cpp workloads.
 
@@ -1566,7 +1566,7 @@ Tasks:
    `scripts/android-llama-bench.sh` and `scripts/android-llama-gpu-compare.sh`
    record the current HTTP throughput for Qwen3 8B Q4_K_M.
 2. **[done] Vulkan device discovery reaches llama.cpp.**
-   Forced Vulkan mode now reaches `Vulkan0 (pdocker Vulkan bridge (queue))`
+   Forced Vulkan mode now reaches `Vulkan0 (Skydnir Vulkan bridge (queue))`
    instead of `ggml_vulkan: No devices found`.
 3. **[done] Make the first GPU model-buffer allocation pass.**
    The forced `--n-gpu-layers 1` path now allocates the offloaded output-layer
@@ -1710,7 +1710,7 @@ Scaffold completed:
 - Container-side Linux/glibc `pdocker-gpu-shim` capability probe injected into
   GPU-requesting containers.
 - Container-side Linux/glibc `pdocker-vulkan-icd.so` minimal Vulkan ICD surface
-  injected through `/etc/vulkan/icd.d/pdocker-android.json`; this lets
+  injected through `/etc/vulkan/icd.d/Skydnir.json`; this lets
   unmodified apps use the standard Vulkan loader path, but it is still marked
   `PDOCKER_VULKAN_ICD_READY=0`.
 - First shared-buffer transport probe: the glibc shim creates a mapped vector

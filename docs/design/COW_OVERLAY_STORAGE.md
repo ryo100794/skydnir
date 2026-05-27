@@ -27,7 +27,7 @@ pdocker currently has two storage modes in play:
    already exposes a basic merged view that prefers upper entries and honors
    upper whiteouts.
 
-Neither mode is kernel overlayfs. The accepted design is a pdocker-owned
+Neither mode is kernel overlayfs. The accepted design is a Skydnir-owned
 snapshotter and path-mediation layer that implements the Docker-visible subset
 of overlay semantics in userspace.
 
@@ -81,7 +81,7 @@ Required rules:
 - Metadata rows must not be committed until the filesystem operation they
   describe is already durable enough to survive a restart.
 - If any step returns `ENOSPC`, `ENOMEM`, `EIO`, `EACCES`, `EPERM`, or an
-  unexpected short write, pdocker must stop the operation, record a diagnostic,
+  unexpected short write, Skydnir must stop the operation, record a diagnostic,
   and avoid exposing a half-applied merged view.
 - If Android kills the app, daemon, direct runtime, or helper process during a
   mutation, startup reconciliation must classify the operation as interrupted
@@ -392,7 +392,7 @@ SAF plan:
   high-frequency logs.
 - Conflict handling must be explicit. When the same logical guest path is
   changed through both container exchange metadata and Android/Documents apps,
-  pdocker should preserve both payloads or quarantine the entry rather than
+  Skydnir should preserve both payloads or quarantine the entry rather than
   silently overwriting one side.
 - Never claim Docker mount propagation, device mounts, tmpfs, SELinux relabel,
   executable-bit enforcement, uid/gid authority, complete symlink behavior, all

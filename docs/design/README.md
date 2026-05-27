@@ -60,7 +60,7 @@ tradeoffs, accepted behavior, and non-goals.
 - Treat [`MEDIA_BRIDGE.md`](MEDIA_BRIDGE.md) as the media contract; test files
   should record probes and link back here for readiness rules.
 - Treat [`APK_MEMORY_PAGER.md`](APK_MEMORY_PAGER.md) as the feasibility boundary
-  for swap-like behavior inside the APK. It is a pdocker extension, not Docker
+  for swap-like behavior inside the APK. It is a Skydnir extension, not Docker
   compatibility.
 - Treat [`RUNTIME_OOM_SURVIVAL.md`](RUNTIME_OOM_SURVIVAL.md) as the operational
   policy for low-memory runtime behavior, including early ENOMEM, Large

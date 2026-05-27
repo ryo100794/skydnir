@@ -2,7 +2,7 @@
 
 Snapshot date: 2026-05-03.
 
-This document defines the intended product boundary for pdocker as a
+This document defines the intended product boundary for Skydnir as a
 Docker-compatible Android app backend. The goal is not to clone every kernel
 feature behind Docker Desktop or Moby. The goal is to provide a useful,
 repeatable Docker-like workflow on unrooted Android while keeping data formats,
@@ -27,21 +27,21 @@ Compatibility has three tiers:
      of the shipped APK. Test suites may stage them separately to validate
      Engine API compatibility.
 
-3. **May expose pdocker-specific limitations explicitly**
+3. **May expose Skydnir-specific limitations explicitly**
    - Unsupported resource isolation, kernel networking, mount propagation, or
      BuildKit features must fail clearly or surface warnings in API/UI state.
-   - pdocker must not silently start fake listeners, mutate Dockerfile syntax,
+   - Skydnir must not silently start fake listeners, mutate Dockerfile syntax,
      or run commands on the Android host when the user asked for a container.
 
 ## pdocker Extension API Boundary
 
-Docker-compatible endpoints and pdocker extensions are intentionally separate:
+Docker-compatible endpoints and Skydnir extensions are intentionally separate:
 
 - Standard Docker clients should use the Docker Engine API subset documented in
   [`../test/COMPATIBILITY.md`](../test/COMPATIBILITY.md). These endpoints keep
   Docker response shapes where practical and must fail clearly when a Docker or
   OCI feature is unsupported.
-- Android UI, diagnostics, and Android-only bridges may use pdocker extension
+- Android UI, diagnostics, and Android-only bridges may use Skydnir extension
   endpoints under selected `/system/*` paths, excluding Docker-standard
   `GET /system/df` and `POST /system/prune`, and pdocker-prefixed response
   fields such as `PdockerGpu`, `PdockerMedia`, `PdockerNetwork`,
@@ -51,14 +51,14 @@ Docker-compatible endpoints and pdocker extensions are intentionally separate:
   service ownership, GPU/media bridge status, memory pressure, Documents/SAF
   mediation, and long-running operation state.
 - OCI/runtime gaps must be stated as unsupported or partial rather than hidden
-  behind pdocker extensions. In particular, pdocker extensions do not make
+  behind Skydnir extensions. In particular, Skydnir extensions do not make
   Swarm, BuildKit, OCI runtime hooks, cgroups, namespaces, zstd layers,
   manifest-list preservation, registry push, OCI artifacts/referrers, or
   signatures supported.
 
 ## Default Product Line
 
-pdocker should be positioned as:
+Skydnir should be positioned as:
 
 - A **Docker Engine API-compatible userspace runtime for Android**, optimized
   for development containers, AI tooling, image inspection, and repeatable
@@ -98,7 +98,7 @@ These are not product goals for the default unrooted Android app:
 | Network | Host-network-like userspace model with explicit metadata. | Record Compose networks, service aliases, synthetic identity fields, exposed/published ports, and warnings. Inject `/etc/hosts` service aliases. Add container-aware port proxy or syscall-mediated bind/connect rewrite for practical `host:container` port mapping. | No bridge IP claims/isolation, veth, iptables/nftables, embedded DNS server, `macvlan`, `ipvlan`, or true network namespace. Never mark a port healthy unless a real container-owned listener/proxy/rewrite is evidenced. |
 | Volumes | Host-directory-backed named volumes and best-effort binds. | Map engine-owned named volumes under app-private storage. Treat the selected Android Documents folder as the user workspace root for project definitions under `pdocker/projects` when it is writable by normal app-UID paths, and as the explicit import/export target through `/documents`. Persist SAF tree URI metadata and expose whether the selected storage is `direct-path-writable` or `saf-mediated`; in mediated mode use an app-private mirror plus sidecar metadata and Android `DocumentProvider` calls for create/list/exists/read/write instead of pretending a URI-backed SD-card tree is a writable POSIX path. Keep hot container homes, workspaces, model caches, databases, and high-frequency logs in app-private storage unless the Compose file explicitly maps them elsewhere. Keep bind mount metadata and mediate paths in direct runtime. Make UI show volume host path and container path. Support archive/copy against volume-backed paths. | No kernel mount propagation, tmpfs, block devices, privileged device mounts, SELinux relabel flags, exact read-only bind enforcement, or removable-SD SAF paths as direct Linux bind mounts; SAF access is a mediated exchange contract, not a direct executable rootfs or hot upperdir. |
 | cgroups/resources | Report unsupported honestly; optionally approximate stats. | Parse common resource flags so Compose/CLI does not crash. Store requested limits in metadata. Return predictable warnings. Approximate CPU/memory stats from `/proc` where possible. | No hard enforcement for `--memory`, `--cpus`, pids limit, blkio, cpuset, cgroup namespaces, OOMScoreAdj parity, or Docker Desktop-style resource isolation. |
-| overlayfs/storage | pdocker-owned snapshotter with overlay-like semantics. | Keep content-addressed layers and per-container writable state. Implement whiteouts, copy-up, rename/unlink/chmod/chown/xattr/link semantics in pdockerd/direct runtime. Make `docker cp` and image browsing use merged lower/upper views. | Do not promise exact overlayfs inode identity, d_type, hardlink counts, all xattrs, opaque directory behavior, or mount-level semantics until tested. Avoid patched external overlay runtimes. |
+| overlayfs/storage | Skydnir-owned snapshotter with overlay-like semantics. | Keep content-addressed layers and per-container writable state. Implement whiteouts, copy-up, rename/unlink/chmod/chown/xattr/link semantics in pdockerd/direct runtime. Make `docker cp` and image browsing use merged lower/upper views. | Do not promise exact overlayfs inode identity, d_type, hardlink counts, all xattrs, opaque directory behavior, or mount-level semantics until tested. Avoid patched external overlay runtimes. |
 | signals/process supervision | Docker-like lifecycle for common cases. | Track process groups, exit codes, waits, logs, stop timeout, and cleanup. Map `docker stop` to configured signal then kill after timeout. Keep `PTRACE_O_EXITKILL` and tracer signal handling. | No cgroup-wide kill guarantees, PID namespace semantics, init process reaping parity, `--pid=host`, or full `STOPSIGNAL` edge-case parity at first. |
 | TTY/attach/exec | Real PTY-backed interactive sessions are in scope. | Connect Engine attach/exec TTY to the same native PTY infrastructure used by the app terminal. Support `docker run -it`, `docker exec -it`, resize, detach keys where practical, and UI tab persistence. | Do not use Android host shell as a fallback for container console. Full Docker hijack edge cases and every detach-key combination can be staged after basic `-it` works. |
 | archive API / `docker cp` | Keep Docker tar/header compatibility high. | Maintain `GET/PUT/HEAD /containers/{id}/archive`, `X-Docker-Container-Path-Stat`, tar streaming, path traversal defense, lower/upper merge, writable upper copy-in, and tests. | Sparse files, all device nodes, all xattrs, exact ownership mapping, opaque dirs, and every overlayfs whiteout edge case can be partial with documented warnings. |
@@ -116,7 +116,7 @@ Rationale:
   not just a protocol flag.
 - Most Android value today comes from Compose workspaces, `apt-get`, Node,
   code-server, llama.cpp, image browsing, and repeatable basic builds.
-- Supporting standard Dockerfiles without pdocker-specific syntax keeps project
+- Supporting standard Dockerfiles without Skydnir-specific syntax keeps project
   files portable to real Docker.
 
 Decision point:
@@ -174,7 +174,7 @@ source trees. It is not the same as kernel mounts. The UI should make the
 backing location inspectable so data is not mysterious.
 
 Selected SD-card/Documents storage may be FAT32 or exFAT and may only be
-available through SAF `DocumentProvider` calls. pdocker can use such storage as
+available through SAF `DocumentProvider` calls. Skydnir can use such storage as
 an exchange payload area, but Unix metadata must live in app-private sidecar
 metadata: emulated mode/uid/gid, symlink targets, xattr digests, hash/mtime
 evidence, and conflict state. That sidecar must be rebuildable and checkable
@@ -198,7 +198,7 @@ Implement:
 - Store them in inspect output. The in-app Compose orchestrator accepts
   `mem_limit`, `memswap_limit`, and `deploy.resources.limits.memory` and maps
   them to Docker Engine-style `HostConfig.Memory` and `HostConfig.MemorySwap`.
-- Keep pdocker memory paging separate from Docker cgroup compatibility:
+- Keep Skydnir memory paging separate from Docker cgroup compatibility:
   `PDOCKER_MEMORY_PAGER=managed` or `io.pdocker.memory-pager=managed` may use
   the requested memory budget as a pager policy input, but standard Compose
   memory keys alone must not silently opt a container into pdocker-specific

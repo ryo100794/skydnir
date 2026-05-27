@@ -9,7 +9,7 @@ llama.cpp itself remains unmodified.
 
 ## Current Ground Truth
 
-The current implementation is a pdocker-owned glibc Vulkan ICD bridge plus an
+The current implementation is a Skydnir-owned glibc Vulkan ICD bridge plus an
 APK-owned Android Vulkan executor.  The container still owns llama.cpp model
 loading, graph construction, sampling, and HTTP serving.  The bridge only
 lowers selected Vulkan buffer/descriptor/dispatch work to Android Vulkan.

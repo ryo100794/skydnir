@@ -29,7 +29,7 @@ as an APK native library extracted into `nativeLibraryDir`.
 ## Compatibility invariant
 
 The Docker/OCI image rootfs remains standard. This plan must not introduce a
-pdocker-specific base image, Dockerfile syntax, or rootfs layout.
+Skydnir-specific base image, Dockerfile syntax, or rootfs layout.
 
 The Android-specific work is only the execution layer:
 
