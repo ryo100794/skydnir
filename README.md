@@ -31,9 +31,10 @@ tablet, this repository is the experiment.
 
 - **Manage projects visually**: Compose files, Dockerfiles, images, containers,
   ports, jobs, logs, storage, terminals, and editor tabs live in one Android UI.
-- **Use Docker-shaped workflows**: `pdockerd` speaks the Docker Engine API over
-  a Unix socket, so compatibility can be tested against real Docker clients
-  while the product UI uses native Engine API calls.
+- **Use Docker-shaped workflows**: `skydnird` speaks the Docker Engine API over
+  a Unix socket, with `pdockerd` retained as a deprecated compatibility alias,
+  so compatibility can be tested against real Docker clients while the product
+  UI uses native Engine API calls.
 - **Inspect without starting a shell**: browse image rootfs trees and container
   lower/upper views, copy files into editable projects, and edit writable
   container layers directly.
@@ -186,10 +187,10 @@ For a fixed-signature release APK, keep signing material outside Git and pass
 it through environment variables:
 
 ```sh
-export PDOCKER_SIGNING_STORE_FILE=$HOME/.pdocker/release.jks
-export PDOCKER_SIGNING_STORE_PASSWORD=...
-export PDOCKER_SIGNING_KEY_ALIAS=skydnir
-export PDOCKER_SIGNING_KEY_PASSWORD=...
+export SKYDNIR_SIGNING_STORE_FILE=$HOME/.skydnir/release.jks
+export SKYDNIR_SIGNING_STORE_PASSWORD=...
+export SKYDNIR_SIGNING_KEY_ALIAS=skydnir
+export SKYDNIR_SIGNING_KEY_PASSWORD=...
 PDOCKER_ANDROID_FLAVOR=compat PDOCKER_ANDROID_BUILD_TYPE=release bash scripts/build-apk.sh
 ```
 

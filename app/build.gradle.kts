@@ -221,13 +221,14 @@ android {
         }
     }
     fun signingValue(name: String): String? =
-        providers.environmentVariable("PDOCKER_${name}").orNull
+        providers.environmentVariable("SKYDNIR_${name}").orNull
+            ?: providers.environmentVariable("PDOCKER_${name}").orNull
             ?: releaseSigningProps.getProperty(name.lowercase().replace('_', '.'))
 
     signingConfigs {
         val storeFilePath = signingValue("SIGNING_STORE_FILE")
         if (!storeFilePath.isNullOrBlank()) {
-            create("pdockerRelease") {
+            create("skydnirRelease") {
                 storeFile = file(storeFilePath)
                 storePassword = signingValue("SIGNING_STORE_PASSWORD")
                 keyAlias = signingValue("SIGNING_KEY_ALIAS")
@@ -248,7 +249,7 @@ android {
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
-            signingConfigs.findByName("pdockerRelease")?.let { signingConfig = it }
+            signingConfigs.findByName("skydnirRelease")?.let { signingConfig = it }
         }
         getByName("debug") {
             isDebuggable = true

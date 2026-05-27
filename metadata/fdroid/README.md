@@ -3,7 +3,7 @@
 This directory is reserved for draft F-Droid/readiness support files.
 
 It is not active F-Droid submission metadata and does not claim that
-pdocker-android is ready for inclusion. The canonical process and policy owner
+Skydnir is ready for inclusion. The canonical process and policy owner
 for F-Droid-oriented builds is
 [`docs/release/FDROID_RELEASE_PROCESS.md`](../../docs/release/FDROID_RELEASE_PROCESS.md).
 

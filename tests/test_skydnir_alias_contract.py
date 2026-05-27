@@ -15,6 +15,7 @@ SKYDNIR = BIN / "skydnir"
 PDOCKERD = BIN / "pdockerd"
 SKYDNIRD = BIN / "skydnird"
 BRIDGE = ROOT / "app" / "src" / "main" / "python" / "pdockerd_bridge.py"
+APP_GRADLE = ROOT / "app" / "build.gradle.kts"
 MIGRATION_DOC = ROOT / "docs" / "manual" / "SKYDNIR_MIGRATION.md"
 
 
@@ -248,6 +249,14 @@ class SkydnirAliasContractTest(unittest.TestCase):
             sys.argv = saved_argv
             os.environ.clear()
             os.environ.update(saved_env)
+
+    def test_release_signing_env_prefers_skydnir_with_pdocker_fallback(self):
+        gradle = APP_GRADLE.read_text(encoding="utf-8")
+
+        self.assertIn('providers.environmentVariable("SKYDNIR_${name}").orNull', gradle)
+        self.assertIn('?: providers.environmentVariable("PDOCKER_${name}").orNull', gradle)
+        self.assertIn('create("skydnirRelease")', gradle)
+        self.assertIn('signingConfigs.findByName("skydnirRelease")', gradle)
 
     def test_migration_doc_records_service_and_no_rename_boundaries(self):
         text = MIGRATION_DOC.read_text(encoding="utf-8")
