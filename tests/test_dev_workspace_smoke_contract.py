@@ -18,10 +18,10 @@ class DevWorkspaceSmokeContractTest(unittest.TestCase):
         mode = SCRIPT.stat().st_mode
         self.assertTrue(mode & stat.S_IXUSR, "dev workspace smoke script must be executable")
         self.assertIn("ACTION_PREFIX.action.SMOKE_COMPOSE_UP", self.script)
-        self.assertIn('PROJECT="${PDOCKER_DEV_WORKSPACE_PROJECT:-default}"', self.script)
-        self.assertIn('SERVICE="${PDOCKER_DEV_WORKSPACE_SERVICE:-dev}"', self.script)
-        self.assertIn('CONTAINER="${PDOCKER_DEV_WORKSPACE_CONTAINER:-pdocker-dev}"', self.script)
-        self.assertIn('PORT="${PDOCKER_DEV_WORKSPACE_PORT:-18080}"', self.script)
+        self.assertIn('PROJECT="${SKYDNIR_DEV_WORKSPACE_PROJECT:-${PDOCKER_DEV_WORKSPACE_PROJECT:-default}}"', self.script)
+        self.assertIn('SERVICE="${SKYDNIR_DEV_WORKSPACE_SERVICE:-${PDOCKER_DEV_WORKSPACE_SERVICE:-dev}}"', self.script)
+        self.assertIn('CONTAINER="${SKYDNIR_DEV_WORKSPACE_CONTAINER:-${PDOCKER_DEV_WORKSPACE_CONTAINER:-skydnir-dev}}"', self.script)
+        self.assertIn('PORT="${SKYDNIR_DEV_WORKSPACE_PORT:-${PDOCKER_DEV_WORKSPACE_PORT:-18080}}"', self.script)
         self.assertIn("--es project \"$PROJECT\"", self.script)
         self.assertNotIn("docker compose up", self.script)
         self.assertNotIn("docker build", self.script)
@@ -40,8 +40,9 @@ class DevWorkspaceSmokeContractTest(unittest.TestCase):
             "job-logs",
             "code-server --list-extensions",
             "Continue.continue OpenAI.chatgpt Anthropic.claude-code",
+            "Successfully tagged skydnir/dev-workspace:latest",
+            "Using image cache for skydnir/dev-workspace:latest",
             "Successfully tagged pdocker/dev-workspace:latest",
-            "Using image cache for pdocker/dev-workspace:latest",
         ]:
             self.assertIn(token, self.script)
 

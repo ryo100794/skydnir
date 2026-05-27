@@ -8146,6 +8146,7 @@ class MainActivity : AppCompatActivity() {
         val compose = File(project, "compose.yaml")
         if (compose.isFile) {
             var text = compose.readText()
+            text = migrateDefaultDevWorkspaceComposeText(text)
             if (!text.contains("CLAUDE_CODE_NPM_PACKAGE")) {
                 text = text.replace(
                     "        CODEX_NPM_PACKAGE: \"@openai/codex\"\n",
@@ -8214,6 +8215,13 @@ class MainActivity : AppCompatActivity() {
             val migrated = migrateDefaultDevWorkspaceTaskText(original)
             if (migrated != original) tasks.writeText(migrated)
         }
+    }
+
+    private fun migrateDefaultDevWorkspaceComposeText(original: String): String {
+        return original
+            .replace("image: pdocker/dev-workspace:latest", "image: skydnir/dev-workspace:latest")
+            .replace("container_name: pdocker-dev", "container_name: skydnir-dev")
+            .replace("/documents/pdocker-exports", "/documents/skydnir-exports")
     }
 
     private fun migrateDefaultDevWorkspaceTaskText(original: String): String {

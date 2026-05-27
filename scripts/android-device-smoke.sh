@@ -285,7 +285,8 @@ collect_engine_candidates() {
     case "$hay" in *"$target_lc"*) score=$((score + 8)); reasons="${reasons}target-match," ;; esac
     case "$target_lc" in
       default-workspace|workspace|vscode)
-        case "$names" in *pdocker-dev*) score=$((score + 20)); reasons="${reasons}pdocker-dev-name," ;; esac
+        case "$names" in *skydnir-dev*) score=$((score + 24)); reasons="${reasons}skydnir-dev-name," ;; esac
+        case "$names" in *pdocker-dev*) score=$((score + 20)); reasons="${reasons}legacy-pdocker-dev-name," ;; esac
         case "$hay" in *workspace*|*code-server*|*vscode*) score=$((score + 5)); reasons="${reasons}workspace-service-hint," ;; esac
         case "$ports" in *18080*) score=$((score + 6)); reasons="${reasons}vscode-port-18080," ;; esac
         ;;
@@ -315,7 +316,7 @@ write_engine_candidates_json() {
     score=0; reasons=
     case "$hay" in *pdocker*) score=$((score + 10)); reasons="${reasons}pdocker-label-or-name," ;; esac
     case "$hay" in *"$target_lc"*) score=$((score + 8)); reasons="${reasons}target-match," ;; esac
-    case "$target_lc" in default-workspace|workspace|vscode) case "$names" in *pdocker-dev*) score=$((score + 20)); reasons="${reasons}pdocker-dev-name," ;; esac; case "$hay" in *workspace*|*code-server*|*vscode*) score=$((score + 5)); reasons="${reasons}workspace-service-hint," ;; esac; case "$ports" in *18080*) score=$((score + 6)); reasons="${reasons}vscode-port-18080," ;; esac ;; llama) case "$hay" in *llama*) score=$((score + 5)); reasons="${reasons}llama-service-hint," ;; esac ;; esac
+    case "$target_lc" in default-workspace|workspace|vscode) case "$names" in *skydnir-dev*) score=$((score + 24)); reasons="${reasons}skydnir-dev-name," ;; esac; case "$names" in *pdocker-dev*) score=$((score + 20)); reasons="${reasons}legacy-pdocker-dev-name," ;; esac; case "$hay" in *workspace*|*code-server*|*vscode*) score=$((score + 5)); reasons="${reasons}workspace-service-hint," ;; esac; case "$ports" in *18080*) score=$((score + 6)); reasons="${reasons}vscode-port-18080," ;; esac ;; llama) case "$hay" in *llama*) score=$((score + 5)); reasons="${reasons}llama-service-hint," ;; esac ;; esac
     case "$labels" in *com.docker.compose.service*|*pdocker.service*|*pdocker.project*) score=$((score + 4)); reasons="${reasons}service-label," ;; esac
     case "$ports" in *18080*|*18081*) score=$((score + 3)); reasons="${reasons}known-service-port," ;; esac
     [ "$first" = 1 ] || printf ',\n' >>"$DIAG/engine-candidates.json"

@@ -504,6 +504,22 @@ def main() -> int:
         and "migrateDefaultDevWorkspaceTaskText" in main_src
         and "copyAssetFile(\"default-project/workspace/.vscode/tasks.json\", tasks)" in main_src,
     )
+    default_compose_src = (ROOT / "app/src/main/assets/default-project/compose.yaml").read_text()
+    require(
+        "default dev workspace uses Skydnir public image and container names",
+        "image: skydnir/dev-workspace:latest" in default_compose_src
+        and "container_name: skydnir-dev" in default_compose_src
+        and "pdocker/dev-workspace:latest" not in default_compose_src
+        and "container_name: pdocker-dev" not in default_compose_src,
+    )
+    require(
+        "default dev workspace migrates legacy public image and container names",
+        "migrateDefaultDevWorkspaceComposeText" in main_src
+        and "image: pdocker/dev-workspace:latest" in main_src
+        and "image: skydnir/dev-workspace:latest" in main_src
+        and "container_name: pdocker-dev" in main_src
+        and "container_name: skydnir-dev" in main_src,
+    )
 
     require("interactive terminal font remains 12pt", "const initialFontSize = readOnly ? 8 : 12" in xterm_src and "fontSize: initialFontSize" in xterm_src)
     require("terminal shortcut key palette is present", 'id="keybar"' in xterm_src and 'data-toggle="ctrl"' in xterm_src)

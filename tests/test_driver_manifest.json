@@ -719,7 +719,7 @@
       ]
     },
     "android-dev-workspace": {
-      "description": "Device route: UI-triggered default dev-workspace compose up with build/run, current pdocker-dev Engine state, port 18080 listener, code-server HTTP, configured extension, and UI service-truth evidence.",
+      "description": "Device route: UI-triggered default dev-workspace compose up with build/run, current skydnir-dev Engine state, port 18080 listener, code-server HTTP, configured extension, and UI service-truth evidence.",
       "requires": [
         "adb",
         "installed-debug-apk"

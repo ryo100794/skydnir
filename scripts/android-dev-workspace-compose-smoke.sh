@@ -14,15 +14,15 @@ esac
 ADB="${ADB:-adb}"
 CLASS_PREFIX="io.github.ryo100794.pdocker"
 ACTION_PREFIX="io.github.ryo100794.pdocker"
-PROJECT="${PDOCKER_DEV_WORKSPACE_PROJECT:-default}"
-SERVICE="${PDOCKER_DEV_WORKSPACE_SERVICE:-dev}"
-CONTAINER="${PDOCKER_DEV_WORKSPACE_CONTAINER:-pdocker-dev}"
-PORT="${PDOCKER_DEV_WORKSPACE_PORT:-18080}"
-TIMEOUT_SECONDS="${PDOCKER_DEV_WORKSPACE_TIMEOUT_SECONDS:-900}"
-OUT="${PDOCKER_DEV_WORKSPACE_SMOKE_ARTIFACT:-$ROOT/docs/test/dev-workspace-compose-latest.json}"
-WORKDIR="${PDOCKER_DEV_WORKSPACE_SMOKE_WORKDIR:-$ROOT/tmp/dev-workspace-compose-smoke/$(date -u +%Y%m%dT%H%M%SZ)}"
+PROJECT="${SKYDNIR_DEV_WORKSPACE_PROJECT:-${PDOCKER_DEV_WORKSPACE_PROJECT:-default}}"
+SERVICE="${SKYDNIR_DEV_WORKSPACE_SERVICE:-${PDOCKER_DEV_WORKSPACE_SERVICE:-dev}}"
+CONTAINER="${SKYDNIR_DEV_WORKSPACE_CONTAINER:-${PDOCKER_DEV_WORKSPACE_CONTAINER:-skydnir-dev}}"
+PORT="${SKYDNIR_DEV_WORKSPACE_PORT:-${PDOCKER_DEV_WORKSPACE_PORT:-18080}}"
+TIMEOUT_SECONDS="${SKYDNIR_DEV_WORKSPACE_TIMEOUT_SECONDS:-${PDOCKER_DEV_WORKSPACE_TIMEOUT_SECONDS:-900}}"
+OUT="${SKYDNIR_DEV_WORKSPACE_SMOKE_ARTIFACT:-${PDOCKER_DEV_WORKSPACE_SMOKE_ARTIFACT:-$ROOT/docs/test/dev-workspace-compose-latest.json}}"
+WORKDIR="${SKYDNIR_DEV_WORKSPACE_SMOKE_WORKDIR:-${PDOCKER_DEV_WORKSPACE_SMOKE_WORKDIR:-$ROOT/tmp/dev-workspace-compose-smoke/$(date -u +%Y%m%dT%H%M%SZ)}}"
 EVIDENCE_DIR="$WORKDIR/evidence"
-REQUIRED_EXTENSIONS="${PDOCKER_DEV_WORKSPACE_REQUIRED_EXTENSIONS:-Continue.continue OpenAI.chatgpt Anthropic.claude-code}"
+REQUIRED_EXTENSIONS="${SKYDNIR_DEV_WORKSPACE_REQUIRED_EXTENSIONS:-${PDOCKER_DEV_WORKSPACE_REQUIRED_EXTENSIONS:-Continue.continue OpenAI.chatgpt Anthropic.claude-code}}"
 
 mkdir -p "$EVIDENCE_DIR" "$(dirname "$OUT")"
 
@@ -315,9 +315,14 @@ job_text = "\n".join(
     for path in sorted((evidence / "pdocker/diagnostics/dev-workspace-compose-smoke/job-logs").glob("*.log"))
 )
 build_started = f"Service {os.environ['DEV_WORKSPACE_SERVICE']} Building" in job_text
-build_completed = (
-    "Successfully tagged pdocker/dev-workspace:latest" in job_text
-    or "Using image cache for pdocker/dev-workspace:latest" in job_text
+build_completed = any(
+    marker in job_text
+    for marker in (
+        "Successfully tagged skydnir/dev-workspace:latest",
+        "Using image cache for skydnir/dev-workspace:latest",
+        "Successfully tagged pdocker/dev-workspace:latest",
+        "Using image cache for pdocker/dev-workspace:latest",
+    )
 )
 container_create_seen = f"Container {container} Creating" in job_text
 container_start_seen = f"Container {container} Starting" in job_text
@@ -411,8 +416,8 @@ artifact = {
         "job_logs_dir": str(evidence / "pdocker/diagnostics/dev-workspace-compose-smoke/job-logs"),
     },
     "acceptance_contract": {
-        "no_fake_success": "The script exits zero only when compose/build/run, current Engine state for pdocker-dev, port 18080 listener, code-server HTTP reachability, configured required extensions, and UI service-truth all pass.",
-        "extensions_if_configured": "Required extension evidence is enforced when PDOCKER_DEV_WORKSPACE_REQUIRED_EXTENSIONS is non-empty; the default requires Continue.continue, OpenAI.chatgpt, and Anthropic.claude-code.",
+        "no_fake_success": "The script exits zero only when compose/build/run, current Engine state for the configured Skydnir dev workspace container, port 18080 listener, code-server HTTP reachability, configured required extensions, and UI service-truth all pass.",
+        "extensions_if_configured": "Required extension evidence is enforced when SKYDNIR_DEV_WORKSPACE_REQUIRED_EXTENSIONS or the legacy PDOCKER_DEV_WORKSPACE_REQUIRED_EXTENSIONS is non-empty; the default requires Continue.continue, OpenAI.chatgpt, and Anthropic.claude-code.",
         "ui_truth": "TruthState stale/unknown/ambiguous is never accepted as success; a current UI card must match the running Engine container ID.",
     },
 }

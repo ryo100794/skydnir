@@ -35,6 +35,9 @@ and installs:
   the historical `chatgpt` suffix).
 - Workspace tasks `Codex: start` and `Codex: version`, so Codex is available
   from `Tasks: Run Task` even when the side panel is hidden by code-server.
+- Skydnir management tasks such as `Skydnir: show paths`,
+  `Skydnir: docker version`, `Skydnir: compose up current project`, and
+  `Skydnir: compose logs current project`.
 - Common development tools: git, Python, Node/npm, ripgrep, jq, SSH client,
   vim, nano, Vulkan tools, and shell utilities.
 - Common IDE extensions for Python, YAML, Docker, formatting, linting, Jupyter,
@@ -58,6 +61,8 @@ default-project/
 
 ## Runtime Notes
 
+- `compose.yaml` names the default image `skydnir/dev-workspace:latest` and
+  the default container `skydnir-dev`.
 - `compose.yaml` starts code-server on `0.0.0.0:18080`, offset from common
   Android/Termux development ports.
 - The compose header includes `# skydnir.service-url: 18080=VS Code`. Skydnir

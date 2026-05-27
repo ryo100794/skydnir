@@ -99,10 +99,10 @@ the Codex CLI in a VS Code terminal inside `/workspace`.
 
 Useful Skydnir tasks are also available from `Tasks: Run Task`:
 
-- `pdocker: show paths`
-- `pdocker: list projects`
-- `pdocker: create project from template`
-- `pdocker: docker version`
-- `pdocker: build current project`
-- `pdocker: compose up current project`
-- `pdocker: compose logs current project`
+- `Skydnir: show paths`
+- `Skydnir: list projects`
+- `Skydnir: create project from template`
+- `Skydnir: docker version`
+- `Skydnir: build current project`
+- `Skydnir: compose up current project`
+- `Skydnir: compose logs current project`

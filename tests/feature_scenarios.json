@@ -202,7 +202,7 @@
         "docs/manual/DEFAULT_DEV_WORKSPACE.md",
         "docs/test/DEV_WORKSPACE_HEALTH_GATE.md"
       ],
-      "checks": "Static template contract for code-server, Continue, Codex, Claude Code hooks, pdocker management helpers, paths, and default workspace repair/migration; paired device hard gate requires compose/build/run, current pdocker-dev Engine state, 18080 listener, code-server HTTP 2xx/3xx, configured extension evidence, and UI card truth agreement."
+      "checks": "Static template contract for code-server, Continue, Codex, Claude Code hooks, pdocker management helpers, paths, and default workspace repair/migration; paired device hard gate requires compose/build/run, current skydnir-dev Engine state, 18080 listener, code-server HTTP 2xx/3xx, configured extension evidence, and UI card truth agreement."
     },
     {
       "id": "documents.saf.mediator.device",
