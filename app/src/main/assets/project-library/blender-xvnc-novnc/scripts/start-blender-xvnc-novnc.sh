@@ -33,10 +33,10 @@ case "$PDOCKER_GL_BACKEND" in
     export PDOCKER_GL_BACKEND=llvmpipe
     export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
     export GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}"
-    echo "pdocker GL backend: PDOCKER_GL_BACKEND=llvmpipe (Mesa llvmpipe software rendering)"
+    echo "Skydnir GL backend: PDOCKER_GL_BACKEND=llvmpipe (Mesa llvmpipe software rendering)"
     ;;
   zink-experimental)
-    echo "pdocker GL backend: PDOCKER_GL_BACKEND=zink-experimental (future Mesa Zink path; acceleration is not validated by this template)"
+    echo "Skydnir GL backend: PDOCKER_GL_BACKEND=zink-experimental (future Mesa Zink path; acceleration is not validated by this template)"
     if [ "${LIBGL_ALWAYS_SOFTWARE:-1}" = "1" ]; then
       export LIBGL_ALWAYS_SOFTWARE=0
     fi

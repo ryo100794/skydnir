@@ -508,9 +508,14 @@ def main() -> int:
         and 'if [ ! -f "${novnc_web}/vnc.html" ]; then' in ros_start
         and 'novnc_web="/usr/share/novnc/www"' in ros_start,
         "ros start logs explicit GL backend": 'PDOCKER_GL_BACKEND="${PDOCKER_GL_BACKEND:-llvmpipe}"' in ros_start
-        and "pdocker GL backend: PDOCKER_GL_BACKEND=llvmpipe (Mesa llvmpipe software rendering)" in ros_start
-        and "pdocker GL backend: PDOCKER_GL_BACKEND=zink-experimental (future Mesa Zink path; acceleration is not validated by this template)" in ros_start
+        and "Skydnir GL backend: PDOCKER_GL_BACKEND=llvmpipe (Mesa llvmpipe software rendering)" in ros_start
+        and "Skydnir GL backend: PDOCKER_GL_BACKEND=zink-experimental (future Mesa Zink path; acceleration is not validated by this template)" in ros_start
         and "Unsupported PDOCKER_GL_BACKEND" in ros_start,
+        "ros compose uses Skydnir public image and container names": "image: skydnir/ros2-humble-rviz-novnc:latest" in ros_compose
+        and "container_name: skydnir-ros2-rviz" in ros_compose
+        and "image: pdocker/ros2-humble-rviz-novnc:latest" not in ros_compose
+        and "container_name: pdocker-ros2-rviz" not in ros_compose
+        and "/documents/skydnir-exports" in ros_compose,
         "ros start records OpenGL diagnostics": "glxinfo -B" in ros_start
         and "OpenGL diagnostics" in ros_start
         and "tee -a \"$glxinfo_log\"" in ros_start,
@@ -626,9 +631,14 @@ def main() -> int:
         "blender start records OpenGL diagnostics": "glxinfo -B" in blender_start
         and "OpenGL/GLSL diagnostics" in blender_start,
         "blender start logs explicit GL backend": 'PDOCKER_GL_BACKEND="${PDOCKER_GL_BACKEND:-llvmpipe}"' in blender_start
-        and "pdocker GL backend: PDOCKER_GL_BACKEND=llvmpipe (Mesa llvmpipe software rendering)" in blender_start
-        and "pdocker GL backend: PDOCKER_GL_BACKEND=zink-experimental (future Mesa Zink path; acceleration is not validated by this template)" in blender_start
+        and "Skydnir GL backend: PDOCKER_GL_BACKEND=llvmpipe (Mesa llvmpipe software rendering)" in blender_start
+        and "Skydnir GL backend: PDOCKER_GL_BACKEND=zink-experimental (future Mesa Zink path; acceleration is not validated by this template)" in blender_start
         and "Unsupported PDOCKER_GL_BACKEND" in blender_start,
+        "blender compose uses Skydnir public image and container names": "image: skydnir/blender-xvnc-novnc:latest" in blender_compose
+        and "container_name: skydnir-blender-xvnc" in blender_compose
+        and "image: pdocker/blender-xvnc-novnc:latest" not in blender_compose
+        and "container_name: pdocker-blender-xvnc" not in blender_compose
+        and "/documents/skydnir-exports" in blender_compose,
         "blender start exposes future Zink/Vulkan switches without claim": "PDOCKER_ZINK_EXPERIMENTAL=1 exposes Mesa Zink/Vulkan env switches for future validation only" in blender_start
         and "acceleration is not validated by this template" in blender_start,
         "blender logs stream to stdout": "tee -a \"$vnc_log\"" in blender_start
