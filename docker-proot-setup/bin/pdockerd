@@ -58,15 +58,52 @@ class BadRequest(Exception):
 
 # ---- Configuration ----
 
+def _runtime_home_config_paths():
+    return [
+        os.path.join(os.getcwd(), "pdocker.yml"),
+        os.path.join(os.getcwd(), "skydnir.yml"),
+        os.path.expanduser("~/.pdocker/config.yml"),
+        os.path.expanduser("~/.skydnir/config.yml"),
+    ]
+
+
+def _read_runtime_home_config_value(paths=None):
+    """Read the small rename-transition config surface without dependencies.
+
+    This is intentionally not a general YAML parser.  It only accepts simple
+    top-level scalar keys used for runtime-home migration:
+    ``home:``, ``runtime_home:``, and ``skydnir_home:``.  Files are read in
+    legacy-to-new order so the Skydnir file can override a pdocker file.
+    """
+    selected = ""
+    for path in paths or _runtime_home_config_paths():
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = list(f)
+        except OSError:
+            continue
+        for raw in lines:
+            match = re.match(r"^\s*(home|runtime_home|skydnir_home)\s*:\s*(.*?)\s*(?:#.*)?$", raw)
+            if not match:
+                continue
+            value = match.group(2).strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            if value:
+                selected = os.path.expandvars(os.path.expanduser(value))
+    return selected
+
+
 def _select_runtime_home():
     """Return the runtime home while preserving legacy data by default.
 
     Precedence is intentionally conservative:
     1. PDOCKER_HOME remains the canonical compatibility override.
     2. SKYDNIR_HOME is accepted for new Skydnir callers.
-    3. Existing ~/.skydnir wins over existing ~/.pdocker.
-    4. Existing ~/.pdocker is reused so old data is not abandoned.
-    5. New skydnird invocations default to ~/.skydnir; legacy pdockerd keeps
+    3. pdocker.yml/skydnir.yml and ~/.*/config.yml are dual-read.
+    4. Existing ~/.skydnir wins over existing ~/.pdocker.
+    5. Existing ~/.pdocker is reused so old data is not abandoned.
+    6. New skydnird invocations default to ~/.skydnir; legacy pdockerd keeps
        ~/.pdocker.
     """
     explicit_legacy = os.environ.get("PDOCKER_HOME")
@@ -75,6 +112,9 @@ def _select_runtime_home():
     explicit_skydnir = os.environ.get("SKYDNIR_HOME")
     if explicit_skydnir:
         return explicit_skydnir
+    configured = _read_runtime_home_config_value()
+    if configured:
+        return configured
 
     skydnir_home = os.path.expanduser("~/.skydnir")
     legacy_home = os.path.expanduser("~/.pdocker")

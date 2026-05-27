@@ -58,12 +58,51 @@ if [[ "${1:-}" == "__which_runner" ]]; then
 fi
 
 # Storage layout
+read_configured_skydnir_home() {
+    local selected="" file line key value
+    local files=(
+        "$PWD/pdocker.yml"
+        "$PWD/skydnir.yml"
+        "$HOME/.pdocker/config.yml"
+        "$HOME/.skydnir/config.yml"
+    )
+    for file in "${files[@]}"; do
+        [[ -f "$file" ]] || continue
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ "$line" =~ ^[[:space:]]*(home|runtime_home|skydnir_home)[[:space:]]*:[[:space:]]*(.*)$ ]] || continue
+            key="${BASH_REMATCH[1]}"
+            value="${BASH_REMATCH[2]}"
+            value="${value%%#*}"
+            value="${value#"${value%%[![:space:]]*}"}"
+            value="${value%"${value##*[![:space:]]}"}"
+            if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+                value="${value:1:${#value}-2}"
+            elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+                value="${value:1:${#value}-2}"
+            fi
+            [[ -n "$key" && -n "$value" ]] || continue
+            if [[ "$value" == "~" ]]; then
+                value="$HOME"
+            elif [[ "$value" == "~/"* ]]; then
+                value="$HOME/${value#~/}"
+            fi
+            selected="$value"
+        done < "$file"
+    done
+    [[ -n "$selected" ]] && echo "$selected"
+}
+
 resolve_skydnir_home() {
     if [[ -n "${PDOCKER_HOME:-}" ]]; then
         echo "$PDOCKER_HOME"; return
     fi
     if [[ -n "${SKYDNIR_HOME:-}" ]]; then
         echo "$SKYDNIR_HOME"; return
+    fi
+    local configured
+    configured="$(read_configured_skydnir_home)"
+    if [[ -n "$configured" ]]; then
+        echo "$configured"; return
     fi
 
     local skydnir_home="$HOME/.skydnir"

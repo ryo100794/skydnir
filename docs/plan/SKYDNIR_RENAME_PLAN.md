@@ -231,8 +231,9 @@ Current implementation status on `rename/skydnir`:
 
 Still pending:
 
-- Dual-read support for top-level `skydnir.yml` / `pdocker.yml` once a real
-  general config file parser is introduced.
+- Top-level `pdocker.yml` / `skydnir.yml` and home config files are dual-read
+  for the rename-transition runtime-home keys only.  This is intentionally a
+  small parser, not a general YAML config system.
 - A user-facing migration report under `~/.skydnir/migration/` for desktop
   host usage.
 
@@ -369,7 +370,7 @@ wrapper. New documentation and examples use `skydnir`.
 - [x] Add `skydnird` daemon alias.
 - [x] Add runtime home alias migration.
 - [x] Add common env file dual-read migration.
-- [ ] Add top-level config file dual-read migration.
+- [x] Add top-level config file dual-read migration.
 - [x] Add service migration documentation.
 - [x] Update CI/Wiki display names that are safe before repository rename.
 - [x] Update release note draft.

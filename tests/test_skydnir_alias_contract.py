@@ -43,7 +43,7 @@ class SkydnirAliasContractTest(unittest.TestCase):
         merged_env.pop("SKYDNIR_HOME", None)
         return subprocess.run(
             [str(executable), *args],
-            cwd=ROOT,
+            cwd=home_dir,
             env=merged_env,
             text=True,
             stdout=subprocess.PIPE,
@@ -121,6 +121,16 @@ class SkydnirAliasContractTest(unittest.TestCase):
             self.assertEqual(preserve_legacy.returncode, 0, preserve_legacy.stderr)
             self.assertIn(f"home:    {legacy_dir}", preserve_legacy.stdout)
 
+    def test_top_level_config_files_are_dual_read_for_cli_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / "pdocker.yml").write_text("runtime_home: ./legacy-home\n", encoding="utf-8")
+            (work / "skydnir.yml").write_text("runtime_home: ./skydnir-home\n", encoding="utf-8")
+
+            proc = self.run_cli_without_forced_home(SKYDNIR, work, "version")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("home:    ./skydnir-home", proc.stdout)
+
     def test_pdockerd_home_selection_accepts_skydnir_home_alias(self):
         def load_home(argv0, env):
             saved_env = os.environ.copy()
@@ -167,6 +177,41 @@ class SkydnirAliasContractTest(unittest.TestCase):
                 ),
                 str(home / "explicit-legacy"),
             )
+
+    def test_pdockerd_dual_reads_top_level_config_files_for_home(self):
+        saved_env = os.environ.copy()
+        saved_argv = sys.argv[:]
+        saved_cwd = os.getcwd()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp)
+                (work / "pdocker.yml").write_text("home: ./legacy\n", encoding="utf-8")
+                (work / "skydnir.yml").write_text("home: ./new\n", encoding="utf-8")
+                os.chdir(work)
+                os.environ.clear()
+                os.environ.update({"HOME": tmp})
+                sys.argv = ["skydnird"]
+                module_name = f"pdockerd_skydnir_top_config_{os.getpid()}_{len(sys.modules)}"
+                loader = importlib.machinery.SourceFileLoader(module_name, str(PDOCKERD))
+                spec = importlib.util.spec_from_loader(module_name, loader)
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                assert spec.loader is not None
+                spec.loader.exec_module(module)
+
+                self.assertEqual(module.PDOCKER_HOME, "./new")
+                self.assertEqual(
+                    module._read_runtime_home_config_value([
+                        str(work / "pdocker.yml"),
+                        str(work / "skydnir.yml"),
+                    ]),
+                    "./new",
+                )
+        finally:
+            os.chdir(saved_cwd)
+            sys.argv = saved_argv
+            os.environ.clear()
+            os.environ.update(saved_env)
 
     def test_pdockerd_reads_legacy_and_skydnir_common_env_files(self):
         saved_env = os.environ.copy()

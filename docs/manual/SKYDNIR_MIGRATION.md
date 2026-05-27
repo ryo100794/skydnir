@@ -76,10 +76,16 @@ Runtime-home selection is intentionally conservative:
 
 1. `PDOCKER_HOME` wins for compatibility.
 2. `SKYDNIR_HOME` is accepted for new host-side Skydnir usage.
-3. Existing `~/.skydnir` wins over existing `~/.pdocker`.
-4. Existing `~/.pdocker` is reused when `~/.skydnir` does not exist.
-5. Fresh `skydnir` / `skydnird` host invocations default to `~/.skydnir`.
-6. Fresh legacy `pdocker` / `pdockerd` host invocations default to `~/.pdocker`.
+3. Top-level config files are dual-read in this order:
+   `./pdocker.yml`, `./skydnir.yml`, `~/.pdocker/config.yml`,
+   `~/.skydnir/config.yml`.
+4. Those config files may set a simple scalar `home:`, `runtime_home:`, or
+   `skydnir_home:` value. The Skydnir file wins when both old and new files
+   define the same setting.
+5. Existing `~/.skydnir` wins over existing `~/.pdocker`.
+6. Existing `~/.pdocker` is reused when `~/.skydnir` does not exist.
+7. Fresh `skydnir` / `skydnird` host invocations default to `~/.skydnir`.
+8. Fresh legacy `pdocker` / `pdockerd` host invocations default to `~/.pdocker`.
 
 This avoids abandoning old images, layers, and containers during the rename.
 
