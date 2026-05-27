@@ -640,9 +640,20 @@ def _project_common_env():
     ])
 
 
+def _skydnir_env_alias(key):
+    return "SKYDNIR_" + key[len("PDOCKER_"):] if key.startswith("PDOCKER_") else key
+
+
 def collect_documents_environment():
     common_env = _project_common_env()
-    get = lambda key: os.environ.get(key) or common_env.get(key, "")
+    def get(key):
+        alias = _skydnir_env_alias(key)
+        return (
+            os.environ.get(alias)
+            or os.environ.get(key)
+            or common_env.get(alias)
+            or common_env.get(key, "")
+        )
     mirror = get("PDOCKER_DOCUMENTS_SAF_MIRROR_HOST")
     sidecar = get("PDOCKER_DOCUMENTS_SAF_SIDECAR_HOST")
     contract = _read_json_file(os.path.join(sidecar, "contract.json")) if sidecar else {}

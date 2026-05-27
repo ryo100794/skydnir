@@ -516,6 +516,30 @@ class MainActivity : AppCompatActivity() {
         private const val PREF_DOCUMENTS_HOST_PATH = "documents.hostPath"
         private const val PREF_DOCUMENTS_DISPLAY_NAME = "documents.displayName"
         private const val PDOCKER_DOCUMENTS_MOUNT = "/documents"
+        private val SKYDNIR_ENV_ALIASES = listOf(
+            "PDOCKER_DOCUMENTS_ROOT" to "SKYDNIR_DOCUMENTS_ROOT",
+            "PDOCKER_PROJECTS_HOST" to "SKYDNIR_PROJECTS_HOST",
+            "PDOCKER_VOLUME_ROOT" to "SKYDNIR_VOLUME_ROOT",
+            "PDOCKER_DOCUMENTS_HOST" to "SKYDNIR_DOCUMENTS_HOST",
+            "PDOCKER_DOCUMENTS_MOUNT" to "SKYDNIR_DOCUMENTS_MOUNT",
+            "PDOCKER_SHARED_DOCUMENTS_HOST" to "SKYDNIR_SHARED_DOCUMENTS_HOST",
+            "PDOCKER_SHARED_DOCUMENTS_MOUNT" to "SKYDNIR_SHARED_DOCUMENTS_MOUNT",
+            "PDOCKER_DOCUMENTS_MODE" to "SKYDNIR_DOCUMENTS_MODE",
+            "PDOCKER_DOCUMENTS_ACCESS" to "SKYDNIR_DOCUMENTS_ACCESS",
+            "PDOCKER_DOCUMENTS_TREE_URI" to "SKYDNIR_DOCUMENTS_TREE_URI",
+            "PDOCKER_DOCUMENTS_SELECTED_HOST" to "SKYDNIR_DOCUMENTS_SELECTED_HOST",
+            "PDOCKER_DOCUMENTS_DIRECT_HOST" to "SKYDNIR_DOCUMENTS_DIRECT_HOST",
+            "PDOCKER_DOCUMENTS_MEDIATED_HOST" to "SKYDNIR_DOCUMENTS_MEDIATED_HOST",
+            "PDOCKER_DOCUMENTS_MEDIATOR" to "SKYDNIR_DOCUMENTS_MEDIATOR",
+            "PDOCKER_DOCUMENTS_SAF_MIRROR_HOST" to "SKYDNIR_DOCUMENTS_SAF_MIRROR_HOST",
+            "PDOCKER_DOCUMENTS_SAF_SIDECAR_HOST" to "SKYDNIR_DOCUMENTS_SAF_SIDECAR_HOST",
+            "PDOCKER_APP_HOME_HOST" to "SKYDNIR_APP_HOME_HOST",
+            "PDOCKER_PROJECT_NAME" to "SKYDNIR_PROJECT_NAME",
+            "PDOCKER_PROJECT_VOLUME_HOST" to "SKYDNIR_PROJECT_VOLUME_HOST",
+            "PDOCKER_FAST_WORKSPACE_HOST" to "SKYDNIR_FAST_WORKSPACE_HOST",
+            "PDOCKER_DEV_STATE_HOST" to "SKYDNIR_DEV_STATE_HOST",
+            "PDOCKER_MODEL_HOST" to "SKYDNIR_MODEL_HOST",
+        )
     }
 
     private val ui = Handler(Looper.getMainLooper())
@@ -3873,6 +3897,7 @@ class MainActivity : AppCompatActivity() {
                 env[key] = envFileValue(line.substringAfter('='))
             }
         }
+        applySkydnirEnvAliases(env)
         if ("PDOCKER_DOCUMENTS_HOST" !in env) env["PDOCKER_DOCUMENTS_HOST"] = documentsHostPath()
         if ("PDOCKER_DOCUMENTS_MOUNT" !in env) env["PDOCKER_DOCUMENTS_MOUNT"] = PDOCKER_DOCUMENTS_MOUNT
         if ("PDOCKER_DOCUMENTS_ROOT" !in env) env["PDOCKER_DOCUMENTS_ROOT"] = documentsHostPath()
@@ -3901,7 +3926,19 @@ class MainActivity : AppCompatActivity() {
         if ("PDOCKER_MODEL_HOST" !in env) env["PDOCKER_MODEL_HOST"] = modelHostPath(projectDir.name)
         if ("PDOCKER_APP_HOME_HOST" !in env) env["PDOCKER_APP_HOME_HOST"] = pdockerHome.absolutePath
         if ("PDOCKER_PROJECT_NAME" !in env) env["PDOCKER_PROJECT_NAME"] = projectDir.name
+        applySkydnirEnvAliases(env)
         return env
+    }
+
+    private fun applySkydnirEnvAliases(env: MutableMap<String, String>) {
+        SKYDNIR_ENV_ALIASES.forEach { (legacy, skydnir) ->
+            val legacyValue = env[legacy]
+            val skydnirValue = env[skydnir]
+            when {
+                skydnirValue != null && legacyValue == null -> env[legacy] = skydnirValue
+                legacyValue != null && skydnirValue == null -> env[skydnir] = legacyValue
+            }
+        }
     }
 
     private fun envFileValue(raw: String): String {
@@ -4847,6 +4884,13 @@ class MainActivity : AppCompatActivity() {
             File(modelHostPath(projectName)).mkdirs()
         }
         val existing = if (file.isFile) file.readLines().toMutableList() else mutableListOf()
+        applySkydnirEnvAliases(updates)
+        SKYDNIR_ENV_ALIASES.forEach { (legacy, skydnir) ->
+            val legacyExisting = existingEnvValue(existing, legacy)
+            val skydnirExisting = existingEnvValue(existing, skydnir)
+            if (legacyExisting != null && skydnirExisting == null) updates[skydnir] = legacyExisting
+            if (skydnirExisting != null && legacyExisting == null) updates[legacy] = skydnirExisting
+        }
         val preserveUserOverride = setOf(
             "PDOCKER_DOCUMENTS_HOST",
             "PDOCKER_DOCUMENTS_MOUNT",
@@ -4855,7 +4899,7 @@ class MainActivity : AppCompatActivity() {
             "PDOCKER_FAST_WORKSPACE_HOST",
             "PDOCKER_DEV_STATE_HOST",
             "PDOCKER_MODEL_HOST",
-        )
+        ) + SKYDNIR_ENV_ALIASES.map { it.second }
         updates.forEach { (key, value) ->
             if (key in preserveUserOverride && existing.any { it.trimStart().startsWith("$key=") }) return@forEach
             val line = "$key=${envFileQuote(value)}"
@@ -4864,6 +4908,12 @@ class MainActivity : AppCompatActivity() {
         }
         file.parentFile?.mkdirs()
         file.writeText(existing.joinToString("\n").trimEnd() + "\n")
+    }
+
+    private fun existingEnvValue(lines: List<String>, key: String): String? {
+        return lines.firstOrNull { it.trimStart().startsWith("$key=") }
+            ?.substringAfter('=')
+            ?.let { envFileValue(it) }
     }
 
     private fun envFileQuote(value: String): String =

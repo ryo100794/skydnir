@@ -15,6 +15,7 @@ SKYDNIR = BIN / "skydnir"
 PDOCKERD = BIN / "pdockerd"
 SKYDNIRD = BIN / "skydnird"
 BRIDGE = ROOT / "app" / "src" / "main" / "python" / "pdockerd_bridge.py"
+MAIN_ACTIVITY = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "MainActivity.kt"
 APP_GRADLE = ROOT / "app" / "build.gradle.kts"
 BUILD_APK = ROOT / "scripts" / "build-apk.sh"
 BUILD_ALL = ROOT / "scripts" / "build-all.sh"
@@ -263,7 +264,7 @@ class SkydnirAliasContractTest(unittest.TestCase):
                     "PDOCKER_DOCUMENTS_ACCESS=legacy\nSHARED=old\n", encoding="utf-8"
                 )
                 (projects / ".skydnir-common.env").write_text(
-                    "PDOCKER_DOCUMENTS_ACCESS=skydnir\nSKYDNIR_ONLY=yes\n", encoding="utf-8"
+                    "SKYDNIR_DOCUMENTS_ACCESS=skydnir\nSKYDNIR_ONLY=yes\n", encoding="utf-8"
                 )
                 os.environ.clear()
                 os.environ.update({"HOME": tmp, "PDOCKER_HOME": str(home)})
@@ -279,7 +280,8 @@ class SkydnirAliasContractTest(unittest.TestCase):
                 common = module._project_common_env()
                 self.assertEqual(common["SHARED"], "old")
                 self.assertEqual(common["SKYDNIR_ONLY"], "yes")
-                self.assertEqual(common["PDOCKER_DOCUMENTS_ACCESS"], "skydnir")
+                self.assertEqual(common["PDOCKER_DOCUMENTS_ACCESS"], "legacy")
+                self.assertEqual(common["SKYDNIR_DOCUMENTS_ACCESS"], "skydnir")
                 status = module.collect_documents_environment()
                 self.assertEqual(status["Access"], "skydnir")
         finally:
@@ -309,6 +311,27 @@ class SkydnirAliasContractTest(unittest.TestCase):
         self.assertIn('PDOCKER_ANDROID_FLAVOR="${SKYDNIR_ANDROID_FLAVOR:-${PDOCKER_ANDROID_FLAVOR:-compat}}"', verify_fast)
         self.assertIn('FLAVOR_ENV = "SKYDNIR_ANDROID_FLAVOR"', compat_audit)
         self.assertIn('LEGACY_FLAVOR_ENV = "PDOCKER_ANDROID_FLAVOR"', compat_audit)
+
+    def test_documents_env_dual_writes_skydnir_and_pdocker_aliases(self):
+        main = MAIN_ACTIVITY.read_text(encoding="utf-8")
+        pdockerd = PDOCKERD.read_text(encoding="utf-8")
+
+        for key in [
+            "DOCUMENTS_HOST",
+            "DOCUMENTS_MOUNT",
+            "SHARED_DOCUMENTS_HOST",
+            "DOCUMENTS_ACCESS",
+            "DOCUMENTS_SAF_MIRROR_HOST",
+            "PROJECT_VOLUME_HOST",
+            "MODEL_HOST",
+        ]:
+            self.assertIn(f'"PDOCKER_{key}" to "SKYDNIR_{key}"', main)
+        self.assertIn("applySkydnirEnvAliases(env)", main)
+        self.assertIn("applySkydnirEnvAliases(updates)", main)
+        self.assertIn("existingEnvValue(existing, skydnir)", main)
+        self.assertIn('return "SKYDNIR_" + key[len("PDOCKER_"):] if key.startswith("PDOCKER_") else key', pdockerd)
+        self.assertIn("os.environ.get(alias)", pdockerd)
+        self.assertIn("common_env.get(alias)", pdockerd)
 
     def test_migration_doc_records_service_and_no_rename_boundaries(self):
         text = MIGRATION_DOC.read_text(encoding="utf-8")
