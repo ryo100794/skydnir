@@ -83,6 +83,19 @@ Runtime-home selection is intentionally conservative:
 
 This avoids abandoning old images, layers, and containers during the rename.
 
+## Common Environment Files
+
+Project-wide environment files now use a dual-read transition:
+
+1. `.pdocker-common.env` is read first for compatibility.
+2. `.skydnir-common.env` is read second and may override duplicate keys.
+3. Per-project `.env` is still read last by the UI Compose path.
+
+The Android UI writes both common files during this transition. Keep
+`PDOCKER_*` variable names inside those files until the environment-variable
+dual-read migration is explicitly designed; renaming file names and renaming
+variable names are separate compatibility steps.
+
 ## Service Migration
 
 If you created a host-side user service manually, migrate it by adding a new

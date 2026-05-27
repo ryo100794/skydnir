@@ -3,7 +3,7 @@
 Snapshot date: 2026-05-18.
 
 This inventory covers externally sourced code and binary payloads bundled by
-pdocker-android. The current default APK set is usable for distribution when
+Skydnir. The current default APK set is usable for distribution when
 the notice asset is included and upstream license texts/notices are preserved.
 
 | Component | Where used | License | Distribution condition | Status |
@@ -50,4 +50,4 @@ the notice asset is included and upstream license texts/notices are preserved.
   repository notice for test-tool redistribution only.
 - No external source in this inventory blocks distribution under the current
   packaging model. The top-level `LICENSE` file records the current license
-  status for pdocker's own original code.
+  status for Skydnir's own original code.

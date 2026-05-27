@@ -4,7 +4,7 @@ Snapshot date: 2026-05-04.
 
 ## Purpose
 
-This category contains user-facing operating notes for bundled pdocker
+This category contains user-facing operating notes for bundled Skydnir
 workflows. These documents should explain how a user or operator works with the
 app, not why the architecture is shaped a certain way.
 

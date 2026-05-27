@@ -1,6 +1,6 @@
 # Contributing
 
-pdocker-android is experimental and Android-device-dependent. Good
+Skydnir is experimental and Android-device-dependent. Good
 contributions are small, reproducible, and clear about which route they tested:
 native UI, Engine API, test-staged Docker CLI, or Android direct executor.
 
@@ -33,7 +33,7 @@ Include:
 - whether the failure is reproducible after restarting the app.
 
 For device reports, please say whether the route covered install, app launch,
-`pdockerd` start, image pull or build, Compose up/down, logs, `docker exec`,
+Skydnir daemon start, image pull or build, Compose up/down, logs, Engine API exec,
 Engine API `exec -it`, and service-port checks.
 
 ## Development Checks

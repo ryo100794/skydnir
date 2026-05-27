@@ -223,13 +223,16 @@ Current implementation status on `rename/skydnir`:
 - Fresh `skydnir` / `skydnird` invocations default to `~/.skydnir`.
 - If an old `~/.pdocker` directory already exists and `~/.skydnir` does not,
   the old directory is reused so existing data is not abandoned.
+- Project-wide common env files are dual-read as `.pdocker-common.env` then
+  `.skydnir-common.env`; duplicate keys in the Skydnir file override the
+  legacy file.
 - Android continues to pass an explicit app-private `PDOCKER_HOME`; package
   data and sockets are not renamed in this phase.
 
 Still pending:
 
-- Dual-read support for `skydnir.yml` / `pdocker.yml` once a real config file
-  parser is introduced.
+- Dual-read support for top-level `skydnir.yml` / `pdocker.yml` once a real
+  general config file parser is introduced.
 - A user-facing migration report under `~/.skydnir/migration/` for desktop
   host usage.
 
@@ -365,7 +368,8 @@ wrapper. New documentation and examples use `skydnir`.
 - [x] Add `pdocker` deprecation warning.
 - [x] Add `skydnird` daemon alias.
 - [x] Add runtime home alias migration.
-- [ ] Add config file dual-read migration.
+- [x] Add common env file dual-read migration.
+- [ ] Add top-level config file dual-read migration.
 - [x] Add service migration documentation.
 - [x] Update CI/Wiki display names that are safe before repository rename.
 - [x] Update release note draft.

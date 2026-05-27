@@ -3855,7 +3855,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun composeEnvironment(projectDir: File): Map<String, String> {
         val env = linkedMapOf<String, String>()
-        listOf(File(projectRoot, ".pdocker-common.env"), File(projectDir, ".env")).forEach fileLoop@ { file ->
+        listOf(
+            File(projectRoot, ".pdocker-common.env"),
+            File(projectRoot, ".skydnir-common.env"),
+            File(projectDir, ".env")
+        ).forEach fileLoop@ { file ->
             if (!file.isFile) return@fileLoop
             file.readLines().forEach lineLoop@ { raw ->
                 val line = raw.trim()
@@ -4789,6 +4793,7 @@ class MainActivity : AppCompatActivity() {
         File(documentsVolumeRootPath()).mkdirs()
         File(sharedDocumentsHostPath()).mkdirs()
         writeDocumentsEnv(File(projectRoot, ".pdocker-common.env"))
+        writeDocumentsEnv(File(projectRoot, ".skydnir-common.env"))
         projectDirs().forEach { writeDocumentsEnv(File(it, ".env")) }
     }
 
@@ -4796,6 +4801,7 @@ class MainActivity : AppCompatActivity() {
         project.mkdirs()
         writeDocumentsEnv(File(project, ".env"))
         writeDocumentsEnv(File(projectRoot, ".pdocker-common.env"))
+        writeDocumentsEnv(File(projectRoot, ".skydnir-common.env"))
     }
 
     private fun writeDocumentsEnv(file: File) {

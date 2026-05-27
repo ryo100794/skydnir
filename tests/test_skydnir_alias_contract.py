@@ -168,6 +168,42 @@ class SkydnirAliasContractTest(unittest.TestCase):
                 str(home / "explicit-legacy"),
             )
 
+    def test_pdockerd_reads_legacy_and_skydnir_common_env_files(self):
+        saved_env = os.environ.copy()
+        saved_argv = sys.argv[:]
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                home = Path(tmp) / "home"
+                projects = home / "projects"
+                projects.mkdir(parents=True)
+                (projects / ".pdocker-common.env").write_text(
+                    "PDOCKER_DOCUMENTS_ACCESS=legacy\nSHARED=old\n", encoding="utf-8"
+                )
+                (projects / ".skydnir-common.env").write_text(
+                    "PDOCKER_DOCUMENTS_ACCESS=skydnir\nSKYDNIR_ONLY=yes\n", encoding="utf-8"
+                )
+                os.environ.clear()
+                os.environ.update({"HOME": tmp, "PDOCKER_HOME": str(home)})
+                sys.argv = ["skydnird"]
+                module_name = f"pdockerd_skydnir_env_{os.getpid()}_{len(sys.modules)}"
+                loader = importlib.machinery.SourceFileLoader(module_name, str(PDOCKERD))
+                spec = importlib.util.spec_from_loader(module_name, loader)
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                assert spec.loader is not None
+                spec.loader.exec_module(module)
+
+                common = module._project_common_env()
+                self.assertEqual(common["SHARED"], "old")
+                self.assertEqual(common["SKYDNIR_ONLY"], "yes")
+                self.assertEqual(common["PDOCKER_DOCUMENTS_ACCESS"], "skydnir")
+                status = module.collect_documents_environment()
+                self.assertEqual(status["Access"], "skydnir")
+        finally:
+            sys.argv = saved_argv
+            os.environ.clear()
+            os.environ.update(saved_env)
+
     def test_migration_doc_records_service_and_no_rename_boundaries(self):
         text = MIGRATION_DOC.read_text(encoding="utf-8")
         self.assertIn("skydnird.service", text)

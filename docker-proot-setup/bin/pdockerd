@@ -573,8 +573,23 @@ def _read_env_file(path):
     return env
 
 
+def _read_env_files(paths):
+    env = {}
+    for path in paths:
+        env.update(_read_env_file(path))
+    return env
+
+
+def _project_common_env():
+    projects = os.path.join(PDOCKER_HOME, "projects")
+    return _read_env_files([
+        os.path.join(projects, ".pdocker-common.env"),
+        os.path.join(projects, ".skydnir-common.env"),
+    ])
+
+
 def collect_documents_environment():
-    common_env = _read_env_file(os.path.join(PDOCKER_HOME, "projects", ".pdocker-common.env"))
+    common_env = _project_common_env()
     get = lambda key: os.environ.get(key) or common_env.get(key, "")
     mirror = get("PDOCKER_DOCUMENTS_SAF_MIRROR_HOST")
     sidecar = get("PDOCKER_DOCUMENTS_SAF_SIDECAR_HOST")

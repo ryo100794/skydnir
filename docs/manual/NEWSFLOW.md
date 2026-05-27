@@ -1,4 +1,4 @@
-# pdocker-android Newsflow
+# Skydnir Newsflow
 
 Snapshot date: 2026-05-04.
 
@@ -11,7 +11,7 @@ link back to those facts.
 
 ## Scope
 
-- Present pdocker-android as an attractive, practical Android container
+- Present Skydnir as an attractive, practical Android container
   workbench.
 - Keep public updates honest about the current experimental state.
 - Make releases, issues, README highlights, Wiki pages, and demos tell the
@@ -207,7 +207,8 @@ python3 scripts/update-showcase.py
 
 GitHub Actions checks the generated files on pull requests and refreshes
 `docs/showcase/` on `main`, scheduled runs, and manual dispatches. Wiki
-publication is optional: set the repository variable `PDOCKER_SYNC_WIKI=1`
+publication is optional: set the repository variable `SKYDNIR_SYNC_WIKI=1`
+or the temporary compatibility variable `PDOCKER_SYNC_WIKI=1`
 after enabling the GitHub Wiki to let the workflow copy exactly these generated
 pages into the Wiki repository:
 
@@ -226,7 +227,7 @@ A safe manual sync pass is:
 5. Put this footer on mirrored Wiki pages:
 
 ```text
-Source: docs/... in ryo100794/pdocker-android
+Source: docs/... in ryo100794/skydnir
 Snapshot: YYYY-MM-DD
 If this page differs from the repository docs, the repository docs win.
 ```

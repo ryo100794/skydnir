@@ -4,7 +4,7 @@ Snapshot date: 2026-05-04.
 
 ## Purpose
 
-pdocker ships a default project template under
+Skydnir ships a default project template under
 `app/src/main/assets/default-project/`. On first app launch it is copied to:
 
 ```text
@@ -60,19 +60,19 @@ default-project/
 
 - `compose.yaml` starts code-server on `0.0.0.0:18080`, offset from common
   Android/Termux development ports.
-- The compose header includes `# pdocker.service-url: 18080=VS Code`. pdocker
+- The compose header includes `# pdocker.service-url: 18080=VS Code`. Skydnir
   reads this comment as UI metadata and uses it to label the browser shortcut;
   the Compose service definition remains standard.
-- The header also includes `# pdocker.auto-open: VS Code`, which asks pdocker to
+- The header also includes `# pdocker.auto-open: VS Code`, which asks Skydnir to
   open that declared service after compose up reports a healthy listener.
-- `compose.yaml` requests `gpus: all`, which maps to pdocker's experimental
+- `compose.yaml` requests `gpus: all`, which maps to Skydnir's experimental
   Vulkan passthrough / CUDA-compatible API negotiation.
-- The selected Android Documents folder is the default pdocker workspace root
+- The selected Android Documents folder is the default Skydnir workspace root
   only when Android exposes it as a direct app-writable path. The app records
   the persisted SAF tree URI separately and classifies storage as
   `direct-path-writable` or `saf-mediated`; removable SD-card trees that only
   allow URI writes are not advertised to containers as writable POSIX paths.
-- In `saf-mediated` mode, pdocker keeps project definitions and the `/documents`
+- In `saf-mediated` mode, Skydnir keeps project definitions and the `/documents`
   exchange surface in an app-private mirror, persists the SAF tree URI, and uses
   a lightweight Android mediator for DocumentProvider directory creation,
   listing, existence checks, and payload reads/writes. The mirror path is what
@@ -82,7 +82,7 @@ default-project/
   from app-private payload storage after the mediator successfully writes them
   to the selected Documents tree; the app keeps sidecar metadata for Unix-like
   mode, timestamp, MIME type, and payload state.
-- Removable SD-card Documents trees may be FAT32 or exFAT. pdocker treats them
+- Removable SD-card Documents trees may be FAT32 or exFAT. Skydnir treats them
   as raw file-payload exchange storage plus app-private metadata for
   Docker-like mode/uid/gid, symlink, and xattr evidence where that evidence can
   be represented. Metadata can be rebuilt or checked from the SAF tree, but
@@ -100,7 +100,7 @@ default-project/
 - If `CODE_SERVER_PASSWORD` is empty, code-server starts with `--auth none` for
   local-only development convenience. Set `CODE_SERVER_PASSWORD` before exposing
   the service outside the device.
-- pdocker's current networking model is host-style. Container cards expose
+- Skydnir's current networking model is host-style. Container cards expose
   local browser URLs from Compose ports and `pdocker.service-url` header
   comments.
 

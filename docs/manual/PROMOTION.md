@@ -25,14 +25,14 @@ checklists, and issue/release intake labels.
 
 ## Repository Tagline
 
-Docker-compatible containers for Android, packaged as a native APK.
+Not a Container. Still Contains.
 
 ## Short Description
 
-pdocker-android is an experimental Android app that embeds a Docker
-Engine-compatible daemon, Compose/Dockerfile workspace UI, image/container file
-browser, persistent build logs, and interactive terminal/editor tools inside a
-normal APK.
+Skydnir is an experimental Android app that embeds a selected Docker
+Engine API-compatible daemon, Compose/Dockerfile workspace UI, image/container
+file browser, persistent build logs, and interactive terminal/editor tools
+inside a normal APK.
 
 ## Current Showcase Facts
 
@@ -64,7 +64,7 @@ release notes, and demo captions until a newer verification record replaces
 ## One-Minute Pitch
 
 Docker was built for Linux hosts with namespaces, cgroups, overlayfs, and
-bridge networking. Android apps do not get those primitives. pdocker-android
+bridge networking. Android apps do not get those primitives. Skydnir
 explores how far a Docker-compatible workflow can go inside the Android app
 sandbox: Engine API metadata, image pull/extraction, Compose orchestration,
 container files, build logs, `-it`-style terminals, VS Code Server templates,
@@ -73,16 +73,16 @@ and a direct syscall-mediated executor path for SDK28 compatibility.
 The project is useful as a mobile development workbench, Android container
 runtime experiment, and compatibility testbed. It is intentionally clear about
 the unsupported parts so users can see what is real, what is emulated, and what
-is a pdocker-specific extension.
+is a Skydnir-specific extension.
 
 ## Honest Current-State Message
 
 Use this framing whenever writing a release note, issue update, README
 highlight, or demo caption:
 
-- pdocker-android is a Docker-compatible Android APK experiment, not upstream
+- Skydnir is a Docker-compatible Android APK experiment, not upstream
   Docker for Android.
-- The app provides a native Compose/Dockerfile workspace UI, pdockerd Engine
+- The app provides a native Compose/Dockerfile workspace UI, Skydnir daemon
   API compatibility for the supported subset, image/container browsing,
   persistent jobs/logs, editor tabs, and PTY-backed terminal sessions.
 - The product APK does not bundle upstream Docker CLI or Docker Compose; those
@@ -93,7 +93,7 @@ highlight, or demo caption:
 - The direct Android executor and syscall/path mediation are active in-tree
   work. Treat compatibility claims as device-tested snapshots, not universal
   Android guarantees.
-- GPU work is a pdocker bridge effort. Current public wording should say
+- GPU work is a Skydnir bridge effort. Current public wording should say
   "GPU bridge experiments" or "Vulkan/OpenCL bridge work", not general Docker
   GPU parity.
 - Android app-sandbox limits remain real: no normal unrooted app can promise
@@ -137,26 +137,26 @@ mobile-development
 
 ## Suggested Repository Description
 
-Docker-compatible Android APK with pdockerd, Compose/Dockerfile UI,
+Skydnir Android APK with selected Engine API support, Compose/Dockerfile UI,
 container files, persistent logs, VS Code Server templates, and direct Android
 executor experiments.
 
 ## Pinned Issue Ideas
 
 1. **Roadmap: Compose up parity on Android**
-   https://github.com/ryo100794/pdocker-android/issues/3
+   https://github.com/ryo100794/skydnir/issues/3
 
    Track direct executor maturity, TTY attach, signals, networking, volumes,
    archive APIs, and storage cleanup.
 
 2. **Compatibility report: what works vs Docker**
-   https://github.com/ryo100794/pdocker-android/issues/1
+   https://github.com/ryo100794/skydnir/issues/1
 
    Link to `docs/test/COMPATIBILITY.md`, `docs/plan/STATUS.md`, and the latest
    Android smoke logs.
 
 3. **Call for testers: Android device matrix**
-   https://github.com/ryo100794/pdocker-android/issues/2
+   https://github.com/ryo100794/skydnir/issues/2
 
    Ask users to report model, Android version, ABI, SDK route, image pull,
    build, compose up, VS Code port, and runtime benchmark output.
@@ -184,7 +184,7 @@ Keep release notes scannable by grouping changes into these categories:
 ## Release Note Template
 
 ```markdown
-## pdocker-android vX.Y.Z
+## Skydnir vX.Y.Z
 
 ### Highlights
 
@@ -217,8 +217,8 @@ Keep release notes scannable by grouping changes into these categories:
 
 ### Technical post
 
-I am building pdocker-android: an experimental Docker-compatible runtime and
-workspace app packaged as a normal Android APK. It embeds pdockerd, speaks a
+I am building Skydnir: an experimental Docker-compatible runtime and
+workspace app packaged as a normal Android APK. It embeds a Skydnir daemon, speaks a
 Docker Engine-like API, manages Compose/Dockerfile projects, streams build
 logs into the UI, and experiments with direct syscall-mediated container
 execution on Android.
@@ -226,14 +226,14 @@ execution on Android.
 ### Demo post
 
 Docker-like workflows on Android are strange in exactly the interesting way:
-no namespaces, no cgroups, no overlayfs, no bridge network. pdocker-android
+no namespaces, no cgroups, no overlayfs, no bridge network. Skydnir
 turns that constraint into an APK with Compose controls, image/container file
 browsing, persistent logs, editor tabs, terminals, and VS Code Server
 templates.
 
 ### Evidence post
 
-Latest fixed record: pdocker-android build 20260505.1 passes APK build outputs
+Latest fixed record: Skydnir build 20260505.1 passes APK build outputs
 and the historical Android full smoke route for Dockerfile build, Compose
 up/down, `docker exec`, and a basic Engine API `exec -it` path. The honest
 caveat: current terminal/service-truth/teardown promotion gates still need
@@ -243,7 +243,7 @@ literal test-density threshold, and host backend regression needs its
 
 ### Tester call
 
-Looking for Android testers for pdocker-android. The useful reports are:
+Looking for Android testers for Skydnir. The useful reports are:
 device model, Android version, APK flavor, image pull result, Compose up log,
 VS Code port check, `docker ps` view, and runtime benchmark output.
 
@@ -269,13 +269,13 @@ VS Code port check, `docker ps` view, and runtime benchmark output.
    `docs/test/COMPATIBILITY.md`.
 2. Ask testers for device model, Android version, ABI, install source, APK
    flavor, free storage, and whether battery restrictions were disabled.
-3. Ask for one short workflow at a time: start pdockerd, pull an image, build
+3. Ask for one short workflow at a time: start the Skydnir daemon, pull an image, build
    the default workspace, run Compose up, open VS Code Server, check `docker
    ps`, and capture logs.
 4. For llama/GPU reports, ask for the benchmark artifact and whether the run
    used CPU fallback, forced Vulkan, forced OpenCL, or auto mode.
 5. Triage every report into one of four labels: works, blocked by Android
-   platform limit, pdocker bug, or needs reproduction.
+   platform limit, Skydnir bug, or needs reproduction.
 6. Move durable findings into docs before updating README highlights, releases,
    or Wiki mirrors.
 
@@ -286,7 +286,7 @@ VS Code port check, `docker ps` view, and runtime benchmark output.
 - `.github/ISSUE_TEMPLATE/device_test.yml` collects Android device matrix
   results.
 - `.github/ISSUE_TEMPLATE/compatibility_gap.yml` separates upstream Docker
-  behavior from pdocker-android behavior.
+  behavior from Skydnir behavior.
 - `.github/pull_request_template.md` keeps tests, route coverage, and secret
   checks visible before merge.
 - `.github/RELEASE_TEMPLATE.md` keeps release notes aligned with compatibility,
@@ -297,7 +297,7 @@ VS Code port check, `docker ps` view, and runtime benchmark output.
 - This is Docker-compatible work, not upstream Docker.
 - Android kernel restrictions mean cgroup, namespace, overlayfs, and bridge
   parity are intentionally scoped.
-- Some GPU behavior is pdocker-specific extension design, not NVIDIA Docker.
+- Some GPU behavior is Skydnir-specific extension design, not NVIDIA Docker.
 - Upstream Docker CLI/Compose are test tools only, not APK payload.
 - Signing keys, certificates, and local debug secrets must never be committed.
 

@@ -2,7 +2,7 @@
 
 ## Supported Status
 
-pdocker-android is experimental. Security-sensitive behavior changes quickly
+Skydnir is experimental. Security-sensitive behavior changes quickly
 while the Android direct executor, syscall mediation, container filesystem
 handling, and APK packaging model are being developed.
 
