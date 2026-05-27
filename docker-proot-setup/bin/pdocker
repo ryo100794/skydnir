@@ -58,7 +58,29 @@ if [[ "${1:-}" == "__which_runner" ]]; then
 fi
 
 # Storage layout
-: "${PDOCKER_HOME:=$HOME/.pdocker}"
+resolve_skydnir_home() {
+    if [[ -n "${PDOCKER_HOME:-}" ]]; then
+        echo "$PDOCKER_HOME"; return
+    fi
+    if [[ -n "${SKYDNIR_HOME:-}" ]]; then
+        echo "$SKYDNIR_HOME"; return
+    fi
+
+    local skydnir_home="$HOME/.skydnir"
+    local legacy_home="$HOME/.pdocker"
+    if [[ -d "$skydnir_home" ]]; then
+        echo "$skydnir_home"
+    elif [[ -d "$legacy_home" ]]; then
+        echo "$legacy_home"
+    elif [[ "$CLI_NAME" == skydnir* ]]; then
+        echo "$skydnir_home"
+    else
+        echo "$legacy_home"
+    fi
+}
+
+PDOCKER_HOME="$(resolve_skydnir_home)"
+export PDOCKER_HOME
 IMAGES_DIR="$PDOCKER_HOME/images"      # Unpacked rootfs per image (shared)
 CONTAINERS_DIR="$PDOCKER_HOME/containers"  # Per-container rootfs (copy or overlay-like)
 META_DIR="$PDOCKER_HOME/meta"           # Metadata (image tags, container info)

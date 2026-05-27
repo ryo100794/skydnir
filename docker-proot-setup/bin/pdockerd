@@ -58,7 +58,37 @@ class BadRequest(Exception):
 
 # ---- Configuration ----
 
-PDOCKER_HOME = os.environ.get("PDOCKER_HOME", os.path.expanduser("~/.pdocker"))
+def _select_runtime_home():
+    """Return the runtime home while preserving legacy data by default.
+
+    Precedence is intentionally conservative:
+    1. PDOCKER_HOME remains the canonical compatibility override.
+    2. SKYDNIR_HOME is accepted for new Skydnir callers.
+    3. Existing ~/.skydnir wins over existing ~/.pdocker.
+    4. Existing ~/.pdocker is reused so old data is not abandoned.
+    5. New skydnird invocations default to ~/.skydnir; legacy pdockerd keeps
+       ~/.pdocker.
+    """
+    explicit_legacy = os.environ.get("PDOCKER_HOME")
+    if explicit_legacy:
+        return explicit_legacy
+    explicit_skydnir = os.environ.get("SKYDNIR_HOME")
+    if explicit_skydnir:
+        return explicit_skydnir
+
+    skydnir_home = os.path.expanduser("~/.skydnir")
+    legacy_home = os.path.expanduser("~/.pdocker")
+    if os.path.isdir(skydnir_home):
+        return skydnir_home
+    if os.path.isdir(legacy_home):
+        return legacy_home
+    invoked_as = os.path.basename(sys.argv[0]).lower()
+    if invoked_as.startswith("skydnir"):
+        return skydnir_home
+    return legacy_home
+
+
+PDOCKER_HOME = _select_runtime_home()
 IMAGES_DIR = os.path.join(PDOCKER_HOME, "images")
 LAYERS_DIR = os.path.join(PDOCKER_HOME, "layers")
 CONTAINERS_DIR = os.path.join(PDOCKER_HOME, "containers")

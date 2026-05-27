@@ -216,6 +216,23 @@ Acceptance:
 
 Goal: support new config names while preserving old files.
 
+Current implementation status on `rename/skydnir`:
+
+- `SKYDNIR_HOME` is accepted as a new runtime-home alias.
+- `PDOCKER_HOME` remains the highest-priority compatibility override.
+- Fresh `skydnir` / `skydnird` invocations default to `~/.skydnir`.
+- If an old `~/.pdocker` directory already exists and `~/.skydnir` does not,
+  the old directory is reused so existing data is not abandoned.
+- Android continues to pass an explicit app-private `PDOCKER_HOME`; package
+  data and sockets are not renamed in this phase.
+
+Still pending:
+
+- Dual-read support for `skydnir.yml` / `pdocker.yml` once a real config file
+  parser is introduced.
+- A user-facing migration report under `~/.skydnir/migration/` for desktop
+  host usage.
+
 Old paths:
 
 - `~/.pdocker/config.yml`
@@ -347,7 +364,8 @@ wrapper. New documentation and examples use `skydnir`.
 - [x] Add `skydnir` CLI alias.
 - [x] Add `pdocker` deprecation warning.
 - [x] Add `skydnird` daemon alias.
-- [ ] Add config path migration.
+- [x] Add runtime home alias migration.
+- [ ] Add config file dual-read migration.
 - [ ] Add service migration documentation.
 - [ ] Update CI artifact display names.
 - [ ] Update release note draft.
