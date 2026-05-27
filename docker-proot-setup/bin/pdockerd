@@ -128,6 +128,18 @@ def _select_runtime_home():
     return legacy_home
 
 
+def _daemon_product_name():
+    explicit = os.environ.get("SKYDNIR_DAEMON_NAME", "").strip()
+    if explicit:
+        return explicit
+    invoked_as = os.path.basename(sys.argv[0]).lower()
+    if invoked_as.startswith("pdocker"):
+        return "pdockerd"
+    return "skydnird"
+
+
+DAEMON_PRODUCT_NAME = _daemon_product_name()
+DAEMON_SERVER_VERSION = f"{DAEMON_PRODUCT_NAME}/0.1"
 PDOCKER_HOME = _select_runtime_home()
 IMAGES_DIR = os.path.join(PDOCKER_HOME, "images")
 LAYERS_DIR = os.path.join(PDOCKER_HOME, "layers")
@@ -7506,7 +7518,7 @@ def runtime_preflight(rootfs, env=None, workdir="/", binds=None, cow_bind=None):
 # ---- HTTP server ----
 
 class DockerAPIHandler(BaseHTTPRequestHandler):
-    server_version = "pdockerd/0.1"
+    server_version = DAEMON_SERVER_VERSION
     API_VERSION = "1.43"
 
     def log_message(self, fmt, *args):
@@ -7520,7 +7532,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         self.send_header("Api-Version", self.API_VERSION)
         self.send_header("Docker-Experimental", "false")
         self.send_header("Ostype", "linux")
-        self.send_header("Server", "pdockerd/0.1")
+        self.send_header("Server", DAEMON_SERVER_VERSION)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         try:
@@ -7954,11 +7966,11 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
 
         if path == "/version" and method == "GET":
             self._send_json(200, {
-                "Platform": {"Name": "pdockerd"},
+                "Platform": {"Name": DAEMON_PRODUCT_NAME},
                 "Components": [
                     {"Name": "Engine", "Version": "0.1.0",
                      "Details": {"ApiVersion": self.API_VERSION, "MinAPIVersion": "1.12",
-                                 "GitCommit": "pdocker", "GoVersion": "none",
+                                 "GitCommit": "skydnir", "GoVersion": "none",
                                  "Os": "linux", "Arch": "arm64",
                                  "KernelVersion": os.uname().release,
                                  "BuildTime": "2026-04-17T00:00:00.000000000+00:00",
@@ -7967,7 +7979,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 "Version": "24.0.0",
                 "ApiVersion": self.API_VERSION,
                 "MinAPIVersion": "1.12",
-                "GitCommit": "pdocker",
+                "GitCommit": "skydnir",
                 "GoVersion": "none",
                 "Os": "linux",
                 "Arch": "arm64",
@@ -8026,7 +8038,7 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
                 "Name": socket.gethostname(),
                 "Labels": [],
                 "ExperimentalBuild": False,
-                "ServerVersion": "24.0.0-pdocker",
+                "ServerVersion": "24.0.0-skydnir",
                 "Runtimes": {"pdocker-direct": {"path": "pdocker-direct"}},
                 "DefaultRuntime": "pdocker-direct",
                 "Swarm": {"NodeID": "", "NodeAddr": "", "LocalNodeState": "inactive",

@@ -183,6 +183,39 @@ class SkydnirAliasContractTest(unittest.TestCase):
                 str(home / "explicit-legacy"),
             )
 
+    def test_pdockerd_engine_identity_prefers_skydnir_daemon_name(self):
+        def load_identity(argv0, env):
+            saved_env = os.environ.copy()
+            saved_argv = sys.argv[:]
+            try:
+                os.environ.clear()
+                os.environ.update(env)
+                sys.argv = [argv0]
+                module_name = f"pdockerd_skydnir_identity_{os.getpid()}_{len(sys.modules)}"
+                loader = importlib.machinery.SourceFileLoader(module_name, str(PDOCKERD))
+                spec = importlib.util.spec_from_loader(module_name, loader)
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                assert spec.loader is not None
+                spec.loader.exec_module(module)
+                return module.DAEMON_PRODUCT_NAME, module.DAEMON_SERVER_VERSION, Path(PDOCKERD).read_text(encoding="utf-8")
+            finally:
+                sys.argv = saved_argv
+                os.environ.clear()
+                os.environ.update(saved_env)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            name, version, source = load_identity(
+                "skydnird",
+                {"HOME": tmp, "SKYDNIR_DAEMON_NAME": "skydnird"},
+            )
+
+        self.assertEqual(name, "skydnird")
+        self.assertEqual(version, "skydnird/0.1")
+        self.assertIn('"Platform": {"Name": DAEMON_PRODUCT_NAME}', source)
+        self.assertIn('"GitCommit": "skydnir"', source)
+        self.assertIn('"ServerVersion": "24.0.0-skydnir"', source)
+
     def test_pdockerd_dual_reads_top_level_config_files_for_home(self):
         saved_env = os.environ.copy()
         saved_argv = sys.argv[:]

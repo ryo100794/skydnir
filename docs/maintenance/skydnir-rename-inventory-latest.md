@@ -13,10 +13,10 @@ inventory, not a replacement script.
 
 | Token | Count |
 |---|---:|
-| `PDOCKER` | 4274 |
+| `PDOCKER` | 4276 |
 | `PDocker` | 10 |
 | `pDocker` | 8 |
-| `pdocker` | 13753 |
+| `pdocker` | 13751 |
 | `pdocker-android` | 92 |
 | `pdockerd` | 1792 |
 
@@ -26,30 +26,30 @@ inventory, not a replacement script.
 |---|---:|
 | `android_ui_or_package_surface` | 237 |
 | `artifact_schema` | 366 |
-| `cli_command` | 50 |
+| `cli_command` | 49 |
 | `config_path` | 166 |
-| `daemon_binary_or_service` | 613 |
+| `daemon_binary_or_service` | 611 |
 | `documentation_reference` | 45 |
 | `environment_variable` | 2930 |
 | `historical_evidence` | 11028 |
-| `internal_reference` | 2179 |
+| `internal_reference` | 2178 |
 | `socket_or_storage_path` | 789 |
-| `test_fixture` | 1526 |
+| `test_fixture` | 1530 |
 
 ## Counts by Phase
 
 | Phase | Count |
 |---|---:|
 | `do-not-rewrite-history` | 11394 |
-| `phase-0-guard` | 1526 |
+| `phase-0-guard` | 1530 |
 | `phase-1-or-historical-context` | 45 |
 | `phase-1-ui-copy-or-phase-4-package` | 237 |
-| `phase-2-cli-alias` | 50 |
-| `phase-2-daemon-alias` | 613 |
+| `phase-2-cli-alias` | 49 |
+| `phase-2-daemon-alias` | 611 |
 | `phase-3-config-migration` | 166 |
 | `phase-4-or-later-migration-required` | 789 |
 | `phase-5-dual-read-required` | 2930 |
-| `phase-5-internal-namespace` | 2179 |
+| `phase-5-internal-namespace` | 2178 |
 
 ## Next Action
 
