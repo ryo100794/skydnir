@@ -331,11 +331,11 @@ wrapper. New documentation and examples use `skydnir`.
 
 ## Checklist
 
-- [ ] Create `rename/skydnir`.
-- [ ] Create rename inventory artifact.
-- [ ] Create GitHub tracking issue.
-- [ ] Update README opening to Skydnir.
-- [ ] Add trademark/non-affiliation notice.
+- [x] Create `rename/skydnir`.
+- [x] Create rename inventory artifact.
+- [x] Create GitHub tracking issue.
+- [x] Update README opening to Skydnir.
+- [x] Add trademark/non-affiliation notice.
 - [ ] Update GitHub About/topics.
 - [ ] Add `skydnir` CLI alias.
 - [ ] Add `pdocker` deprecation warning.

@@ -1,22 +1,31 @@
-# pdocker-android
+# Skydnir
 
-**A Docker-compatible Android workbench in one native APK.**
+**Not a Container. Still Contains.**
 
-pdocker-android turns an Android device into a portable container workspace:
-pull images, inspect root filesystems, edit Dockerfiles and Compose projects,
-watch build logs, open `-it`-style terminals, browse container files, and run
+Skydnir is a zero-kernel userspace runtime for mobile devices, inspired by
+Skíðblaðnir, the foldable ship of Norse myth.
+
+It does not pretend to provide full kernel-level container isolation. Instead,
+it packages, launches, logs, and manages portable runtime cells within the
+limits of the host platform.
+
+Developer motto: **It's Not Isolation. It's a Vibe.**
+
+Skydnir turns a mobile device into a portable runtime workbench: pull and
+inspect layered root filesystems, edit Compose/Dockerfile-style projects, watch
+build logs, open `-it`-style terminals, browse runtime cell files, and run
 developer templates such as VS Code Server and llama.cpp from a normal app UI.
 
-This is not "Docker Desktop for Android" and it does not pretend Android gives
-apps Linux host privileges. Instead, pdocker builds a practical Docker-shaped
-surface inside the app sandbox: a Docker Engine-compatible daemon, native
+This is not a Docker product and it does not pretend mobile app sandboxes give
+apps Linux host privileges.  Skydnir exposes selected Docker Engine
+API-compatible endpoints where the host platform allows it, plus native
 Compose/Dockerfile controls, a no-PRoot Android direct executor, userspace
-storage, and explicit Android extensions for GPU, media, networking, and
+storage, and explicit mobile extensions for GPU, media, networking, and
 self-debugging.
 
-If you are interested in mobile development workstations, container runtime
-internals, Android sandbox limits, or running real developer environments from
-a phone or tablet, this repository is the experiment.
+If you are interested in mobile development workstations, runtime internals,
+mobile sandbox limits, or running real developer environments from a phone or
+tablet, this repository is the experiment.
 
 ## What You Can Do
 
@@ -231,13 +240,18 @@ Root-level standards:
 
 ## Suggested GitHub topics
 
-`android`, `docker`, `containers`, `compose`, `docker-engine-api`,
+`mobile-runtime`, `userspace-runtime`, `compose`, `docker-engine-api`,
 `android-apk`, `vscode-server`, `llama-cpp`, `vulkan`, `syscall`,
-`ptrace`, `mobile-development`
+`ptrace`, `mobile-development`, `runtime-cells`
 
 ## Project posture
 
-pdocker-android is a research-heavy product build, not a Docker trademark
-replacement. The compatibility target is Docker-like behavior where Android
-allows it, explicit pdocker extensions where Android needs a different shape,
-and honest UI feedback when a feature is metadata-only or still incomplete.
+Skydnir is a research-heavy product build, not a Docker trademark replacement.
+The compatibility target is selected Docker Engine API-compatible behavior
+where the host platform allows it, explicit Skydnir extensions where mobile
+runtime cells need a different shape, and honest UI feedback when a feature is
+metadata-only or still incomplete.
+
+Docker and the Docker logo are trademarks or registered trademarks of Docker,
+Inc. Android is a trademark of Google LLC. Skydnir is not affiliated with,
+endorsed by, or sponsored by Docker, Inc. or Google LLC.
