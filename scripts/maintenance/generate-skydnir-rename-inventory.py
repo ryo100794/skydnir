@@ -32,6 +32,11 @@ SELF_OUTPUT_NAMES = {
     "docs/maintenance/skydnir-rename-inventory-latest.json",
     "docs/maintenance/skydnir-rename-inventory-latest.md",
 }
+INTENTIONAL_LEGACY_DOCS = {
+    "docs/plan/README.md",
+    "docs/plan/SKYDNIR_RENAME_PLAN.md",
+    "docs/plan/TODO.md",
+}
 
 
 def git_lines(*args: str) -> list[str]:
@@ -89,6 +94,12 @@ def classify(path: str, token: str, line: str) -> dict[str, Any]:
         phase = "phase-1-or-historical-context"
         alias_required = False
         rationale = "migration guide intentionally names the legacy project and aliases"
+    elif path in INTENTIONAL_LEGACY_DOCS:
+        category = "documentation_reference"
+        phase = "phase-1-or-historical-context"
+        alias_required = False
+        change_allowed_now = False
+        rationale = "canonical planning ledger intentionally names legacy surfaces while tracking migration"
     elif path.startswith("tests/"):
         category = "test_fixture"
         phase = "phase-0-guard"
@@ -278,7 +289,8 @@ def write_markdown(inventory: dict[str, Any], path: Path) -> None:
         "",
         "## Next Action",
         "",
-        "Start with `phase-1-public-branding` and `documentation_reference` rows.",
+        "Start with rows where `change_allowed_now=true`; if none exist, move to",
+        "alias/migration work instead of rewriting intentional legacy references.",
         "Do not rename `environment_variable`, `artifact_schema`,",
         "`socket_or_storage_path`, or Android package/data surfaces until the",
         "Skydnir compatibility aliases and migration tests exist.",

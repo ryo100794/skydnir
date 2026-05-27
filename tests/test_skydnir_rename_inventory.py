@@ -40,6 +40,7 @@ class SkydnirRenameInventoryTest(unittest.TestCase):
         self.assertEqual("2026-05-27", data["snapshot_date"])
         self.assertEqual("2026-05-27T00:00:00Z", data["generated_utc"])
         self.assertGreater(data["entry_count"], 1000)
+        self.assertEqual(0, sum(1 for entry in data["entries"] if entry.get("change_allowed_now")))
         for token in ["pdocker", "pdockerd", "PDOCKER", "pdocker-android"]:
             self.assertIn(token, data["counts"]["by_token"])
         for category in [
@@ -62,9 +63,11 @@ class SkydnirRenameInventoryTest(unittest.TestCase):
         self.assertEqual("2026-05-27", data["snapshot_date"])
         self.assertEqual("2026-05-27T00:00:00Z", data["generated_utc"])
         self.assertEqual(data["entry_count"], sum(data["counts"]["by_token"].values()))
+        self.assertEqual(0, sum(1 for entry in data["entries"] if entry.get("change_allowed_now")))
         self.assertEqual(0, data["counts"]["by_phase"].get("phase-1-public-branding", 0))
         self.assertIn("phase-5-dual-read-required", data["counts"]["by_phase"])
         self.assertIn("Skydnir Rename Inventory", md)
+        self.assertIn("change_allowed_now=true", md)
 
     def test_rename_plan_forbids_unsafe_broad_replacement(self):
         text = PLAN.read_text(encoding="utf-8")

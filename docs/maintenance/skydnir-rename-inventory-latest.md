@@ -25,35 +25,36 @@ inventory, not a replacement script.
 | Category | Count |
 |---|---:|
 | `android_ui_or_package_surface` | 217 |
-| `artifact_schema` | 351 |
-| `cli_command` | 45 |
-| `config_path` | 173 |
-| `daemon_binary_or_service` | 608 |
-| `documentation_reference` | 45 |
-| `environment_variable` | 2929 |
+| `artifact_schema` | 344 |
+| `cli_command` | 32 |
+| `config_path` | 168 |
+| `daemon_binary_or_service` | 577 |
+| `documentation_reference` | 171 |
+| `environment_variable` | 2902 |
 | `historical_evidence` | 11028 |
-| `internal_reference` | 2150 |
-| `socket_or_storage_path` | 785 |
+| `internal_reference` | 2120 |
+| `socket_or_storage_path` | 772 |
 | `test_fixture` | 1551 |
 
 ## Counts by Phase
 
 | Phase | Count |
 |---|---:|
-| `do-not-rewrite-history` | 11379 |
+| `do-not-rewrite-history` | 11372 |
 | `phase-0-guard` | 1551 |
-| `phase-1-or-historical-context` | 45 |
+| `phase-1-or-historical-context` | 171 |
 | `phase-1-ui-copy-or-phase-4-package` | 217 |
-| `phase-2-cli-alias` | 45 |
-| `phase-2-daemon-alias` | 608 |
-| `phase-3-config-migration` | 173 |
-| `phase-4-or-later-migration-required` | 785 |
-| `phase-5-dual-read-required` | 2929 |
-| `phase-5-internal-namespace` | 2150 |
+| `phase-2-cli-alias` | 32 |
+| `phase-2-daemon-alias` | 577 |
+| `phase-3-config-migration` | 168 |
+| `phase-4-or-later-migration-required` | 772 |
+| `phase-5-dual-read-required` | 2902 |
+| `phase-5-internal-namespace` | 2120 |
 
 ## Next Action
 
-Start with `phase-1-public-branding` and `documentation_reference` rows.
+Start with rows where `change_allowed_now=true`; if none exist, move to
+alias/migration work instead of rewriting intentional legacy references.
 Do not rename `environment_variable`, `artifact_schema`,
 `socket_or_storage_path`, or Android package/data surfaces until the
 Skydnir compatibility aliases and migration tests exist.
