@@ -38,6 +38,7 @@ class SkydnirRenameInventoryTest(unittest.TestCase):
 
         self.assertEqual("skydnir.rename.inventory.v1", data["schema"])
         self.assertEqual("2026-05-27", data["snapshot_date"])
+        self.assertEqual("2026-05-27T00:00:00Z", data["generated_utc"])
         self.assertGreater(data["entry_count"], 1000)
         for token in ["pdocker", "pdockerd", "PDOCKER", "pdocker-android"]:
             self.assertIn(token, data["counts"]["by_token"])
@@ -59,6 +60,7 @@ class SkydnirRenameInventoryTest(unittest.TestCase):
 
         self.assertEqual("skydnir.rename.inventory.v1", data["schema"])
         self.assertEqual("2026-05-27", data["snapshot_date"])
+        self.assertEqual("2026-05-27T00:00:00Z", data["generated_utc"])
         self.assertEqual(data["entry_count"], sum(data["counts"]["by_token"].values()))
         self.assertEqual(0, data["counts"]["by_phase"].get("phase-1-public-branding", 0))
         self.assertIn("phase-5-dual-read-required", data["counts"]["by_phase"])

@@ -14,7 +14,6 @@ import json
 import re
 import subprocess
 from collections import Counter
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -192,7 +191,7 @@ def classify(path: str, token: str, line: str) -> dict[str, Any]:
     }
 
 
-def build_inventory(snapshot_date: str) -> dict[str, Any]:
+def build_inventory(snapshot_date: str, generated_utc: str) -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
     skipped_binary = 0
     for path in tracked_files():
@@ -222,7 +221,7 @@ def build_inventory(snapshot_date: str) -> dict[str, Any]:
     return {
         "schema": "skydnir.rename.inventory.v1",
         "snapshot_date": snapshot_date,
-        "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated_utc": generated_utc,
         "source": "git ls-files tracked text files",
         "tokens": list(TOKENS),
         "entry_count": len(entries),
@@ -291,11 +290,20 @@ def write_markdown(inventory: dict[str, Any], path: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--snapshot-date", default="2026-05-27")
+    parser.add_argument(
+        "--generated-utc",
+        default=None,
+        help=(
+            "Deterministic generation timestamp for committed evidence. "
+            "Defaults to <snapshot-date>T00:00:00Z so repeated validation does not dirty the tree."
+        ),
+    )
     parser.add_argument("--json-out", type=Path, default=Path("docs/maintenance/skydnir-rename-inventory-latest.json"))
     parser.add_argument("--md-out", type=Path, default=Path("docs/maintenance/skydnir-rename-inventory-latest.md"))
     args = parser.parse_args(argv)
 
-    inventory = build_inventory(args.snapshot_date)
+    generated_utc = args.generated_utc or f"{args.snapshot_date}T00:00:00Z"
+    inventory = build_inventory(args.snapshot_date, generated_utc)
     json_out = args.json_out if args.json_out.is_absolute() else ROOT / args.json_out
     md_out = args.md_out if args.md_out.is_absolute() else ROOT / args.md_out
     json_out.parent.mkdir(parents=True, exist_ok=True)
