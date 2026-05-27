@@ -2,7 +2,7 @@
 
 Snapshot date: 2026-05-04.
 
-This document is the storage contract for pdocker's Docker/OCI rootfs,
+This document is the storage contract for Skydnir's Docker/OCI rootfs,
 container writable state, archive exchange, and Android volume story. The goal
 is overlayfs-like behavior that is useful for Docker workloads without
 requiring kernel overlayfs, mount namespaces, privileged mounts, or PRoot.
@@ -14,7 +14,7 @@ special cases.
 
 ## Current Truth
 
-pdocker currently has two storage modes in play:
+Skydnir currently has two storage modes in play:
 
 1. **Materialized merged rootfs.** Image layers are applied into an image
    `rootfs` tree with OCI whiteout handling. Legacy container creation clones
@@ -66,7 +66,7 @@ Current gaps:
 ## Fail-Closed Mutation Contract
 
 Mutating storage operations must fail closed. A failure must leave the merged
-view at either the old committed state or a quarantined state that pdocker will
+view at either the old committed state or a quarantined state that Skydnir will
 not present as successful Docker-visible data.
 
 Required rules:
@@ -102,7 +102,7 @@ Current implementation status:
 - Runtime OOM guard and operation-ring work is tracked separately in
   `RUNTIME_OOM_SURVIVAL.md`; this document only defines the storage outcome
   expected when OOM or kill interrupts a COW operation.
-- Low-free-space and kill-at-each-step tests are still required before pdocker
+- Low-free-space and kill-at-each-step tests are still required before Skydnir
   can claim this contract as implemented.
 
 ## `libcow`
@@ -351,7 +351,7 @@ SAF plan:
   directories, model caches, databases, and high-frequency logs stay in
   app-private storage by default.
 - If the selected folder is a removable SD-card tree that rejects normal
-  app-UID path writes, pdocker falls back to the app-private project mirror.
+  app-UID path writes, Skydnir falls back to the app-private project mirror.
   Full SD-backed project storage then requires the planned SAF mediator rather
   than pretending the Linux path is writable.
 - Removable SD media may be FAT32 or exFAT. Those filesystems can carry raw
@@ -365,7 +365,7 @@ SAF plan:
   databases, and high-frequency logs stay in app-private storage unless a user
   explicitly accepts the compatibility and performance limits of an external
   bind/exchange path.
-- SAF paths are mediated through Android `DocumentProvider` operations. pdocker
+- SAF paths are mediated through Android `DocumentProvider` operations. Skydnir
   must not issue direct POSIX writes, renames, or chmod/chown/xattr-style
   mutations against removable storage unless a current probe proves the exact
   path is normal app-UID writable and not merely URI-granted.

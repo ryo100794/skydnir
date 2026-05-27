@@ -5,7 +5,7 @@ Snapshot date: 2026-05-04.
 ## Goal
 
 Phase 1 defines the container-visible audio/video contract without pretending
-that capture or playback works yet. Containers get a Linux-like pdocker contract
+that capture or playback works yet. Containers get a Linux-like Skydnir contract
 through env vars, a mounted `/run/pdocker-media` directory, and a Unix-socket
 command path. They do not get raw `/dev/video*`, `/dev/snd/*`, Android vendor
 nodes, or direct Android framework libraries.
@@ -15,14 +15,14 @@ nodes, or direct Android framework libraries.
 ```text
 glibc container process
   -> /run/pdocker-media/pdocker-media.sock + env contract
-  -> pdocker Android media executor boundary
+  -> Skydnir Android media executor boundary
   -> Android public APIs
 ```
 
 The boundary is an API proxy boundary, not a device passthrough boundary.
 Containers must not receive raw `/dev/video*` nodes, raw `/dev/snd*` nodes,
 Android vendor nodes, or Android framework libraries. Media requests are routed
-through pdocker's socket/env contract and then translated by APK-owned code onto
+through Skydnir's socket/env contract and then translated by APK-owned code onto
 Android public APIs.
 
 The Android side must use public APIs first:

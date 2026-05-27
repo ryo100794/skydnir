@@ -39,7 +39,7 @@ Confirmed facts:
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
 safe-kernel artifact, not native llama.cpp Q6 SPIR-V correctness.  The
-safe-kernel is a pdocker bridge compatibility substitution selected under
+safe-kernel is a Skydnir bridge compatibility substitution selected under
 `PDOCKER_GPU_Q6K_SAFE_KERNEL=1`; it is not a llama.cpp change, not a model
 change, and not proof that the original native Q6 shader/driver path is fixed.
 The memory readiness gate is still required before heavy compare or benchmark
@@ -65,7 +65,7 @@ object graph with real Android Vulkan handles.
 This is different from upstream Docker on Linux.  Docker usually exposes the
 host device nodes, driver libraries, ICD files, and permissions into the
 container, so the container process calls the real host driver directly.  It
-does not translate `VkBuffer` handles.  pdocker cannot rely on that path on
+does not translate `VkBuffer` handles.  Skydnir cannot rely on that path on
 Android because the product boundary is glibc-container code to APK-owned
 Bionic/vendor Vulkan code.
 
@@ -81,7 +81,7 @@ Use three separate lanes when discussing Vulkan work:
 
 1. **Raw vendor passthrough** is not the product path on Android.  It means a
    process calls the vendor driver directly with native process-local handles.
-2. **Native strict object-graph passthrough** is the pdocker product target:
+2. **Native strict object-graph passthrough** is the Skydnir product target:
    preserve app-visible Vulkan bytes and semantics while reconstructing Android
    handles from recorded object IDs, offsets, ranges, and shared backing fds.
 3. **Diagnostic or compatibility transformations** are explicit, labeled
@@ -492,7 +492,7 @@ changing llama.cpp.  It is `ggml-vulkan.cpp` creating
 `{ BLOCK_SIZE=32, NUM_ROWS=2, NUM_COLS=1/2 }`.  The shader deliberately
 declares three typed views of binding 0 for the same Q4_K block
 (`block_q4_K`, `block_q4_K_packed16`, `block_q4_K_packed32`); this is the
-llama.cpp Q4_K ABI, not a Q5/Q6 dispatch mix-up.  The pdocker-side
+llama.cpp Q4_K ABI, not a Q5/Q6 dispatch mix-up.  The Skydnir-side
 diagnostic classifier now recognizes the original hash, the Float16-capability
 insertion hash `0x853c49b4900eed3c`, and the duplicate-descriptor-materialized
 hash `0x22ab0152b230e983` as Q4_K matvec variants.  `PDOCKER_GPU_Q4K_SAFE_KERNEL`
@@ -1317,7 +1317,7 @@ Planning implications:
    a product performance win, or permission to tune by trial and error.
 3. The safe-kernel path must remain labelled as a bridge-owned compatibility
    substitution: the original llama.cpp shader source, Dockerfile, model,
-   prompt, and tensor bytes are unchanged, while the pdocker bridge substitutes
+   prompt, and tensor bytes are unchanged, while the Skydnir bridge substitutes
    the driver-facing compute kernel for a known Q6 dispatch shape.
 4. The next phase is a static-invariant implementation phase, not
    "run variants until one passes".  Before code changes, derive and document

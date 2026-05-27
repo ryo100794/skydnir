@@ -2,7 +2,7 @@
 
 Snapshot date: 2026-05-19.
 
-Scope: documentation-only audit of the current pdocker glibc Vulkan ICD surface
+Scope: documentation-only audit of the current Skydnir glibc Vulkan ICD surface
 reported through `vkGetPhysicalDevice*` and the Vulkan properties/features that
 current llama.cpp `ggml-vulkan` may consult while selecting queues, allocation
 sizes, descriptor layouts, subgroup kernels, and Q6_K matmul/dequant pipelines.

@@ -29,7 +29,7 @@ On the SOG15 test device:
 
 Therefore the product cannot rely on adding system swap, changing zram size, or
 changing VM policy. Any swap-like behavior must be scoped to processes launched
-and mediated by pdocker.
+and mediated by Skydnir.
 
 The SDK28 compat APK now carries repeatable native checks:
 `pdocker-direct --pdocker-memory-pager-probe` and
@@ -52,7 +52,7 @@ process.
 Skydnir can only catch page-fault-like events that it deliberately creates:
 
 - `userfaultfd` faults on registered ranges, if a future device permits it.
-- `SIGSEGV` faults on ranges pdocker marks `PROT_NONE` or write-protected.
+- `SIGSEGV` faults on ranges Skydnir marks `PROT_NONE` or write-protected.
 - ptrace stops caused by those `SIGSEGV` deliveries before the signal reaches
   the tracee.
 
@@ -74,7 +74,7 @@ component. It combines three established operating-system techniques:
 
 The pdocker-specific reason this became plausible is that pdocker-direct
 already controls traced container processes for syscall mediation. If a fault
-address belongs to a pdocker-managed range, the tracer can treat that stop as a
+address belongs to a Skydnir-managed range, the tracer can treat that stop as a
 pager event. If it does not, the original `SIGSEGV` must be delivered normally.
 
 ## Candidate Designs
@@ -94,7 +94,7 @@ Skydnir-specific pager.
 ### B. Managed Anonymous Memory Pager
 
 For large anonymous buffers that currently pressure RAM, add an opt-in
-pdocker-managed pager.
+Skydnir-managed pager.
 
 Container opt-in:
 
@@ -102,8 +102,8 @@ Container opt-in:
 - Optional limit: `PDOCKER_MEMORY_PAGER_MAX_BYTES`.
 - Docker-compatible Compose memory keys such as `mem_limit`,
   `memswap_limit`, and `deploy.resources.limits.memory` define the requested
-  container budget in Engine metadata. They do not enable the pdocker pager by
-  themselves; the pager remains an explicit pdocker opt-in so ordinary Compose
+  container budget in Engine metadata. They do not enable the Skydnir pager by
+  themselves; the pager remains an explicit Skydnir opt-in so ordinary Compose
   files keep Docker-compatible meaning.
 - Optional backing directory under app-private storage:
   `files/pdocker/memory/<container-id>/`.
@@ -450,7 +450,7 @@ enabled:
 - `backing_op`, `backing_errno`, and `backing_dir` so storage/admission failures
   can be distinguished from normal pass-through decisions.
 
-If a candidate large anonymous mapping succeeds in the kernel but pdocker cannot
+If a candidate large anonymous mapping succeeds in the kernel but Skydnir cannot
 register the managed region or reserve its backing store, the direct executor
 must fail closed: inject `munmap` for the just-created VMA where possible, return
 `-ENOMEM` to the tracee, and classify the event as
@@ -612,7 +612,7 @@ The memory pager is useful for:
 It is not expected to make token generation faster by itself.
 
 Dockerfile build pressure is handled separately. General build tools such as
-`cc1plus` allocate ordinary process heap and anonymous mappings that pdocker
+`cc1plus` allocate ordinary process heap and anonymous mappings that Skydnir
 does not own ahead of time, so the managed pager cannot safely reclaim those
 regions transparently. Build-time memory control must stay outside the
 managed-region pager contract unless a process explicitly opts in.

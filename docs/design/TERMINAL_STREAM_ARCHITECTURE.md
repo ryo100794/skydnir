@@ -4,7 +4,7 @@ Snapshot date: 2026-05-16.
 
 ## Purpose
 
-pdocker needs one terminal surface that behaves like a normal terminal emulator,
+Skydnir needs one terminal surface that behaves like a normal terminal emulator,
 while different backends provide bytes, resize events, lifecycle state, and
 capabilities. Docker `exec -it`, container attach, local diagnostic shells,
 build logs, daemon logs, and read-only job logs must not be hard-wired into the

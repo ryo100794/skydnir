@@ -12,7 +12,7 @@ details.
 
 ## Goals
 
-- Let SAF, SD-card, FAT32, and exFAT storage participate in selected pdocker
+- Let SAF, SD-card, FAT32, and exFAT storage participate in selected Skydnir
   storage flows without exposing Android `DocumentProvider` details to overlay,
   archive, container, or UI code.
 - Preserve Unix-like metadata that the backing medium cannot represent by
@@ -143,7 +143,7 @@ Each sidecar record should include at least:
   conflict state.
 
 For FAT32/exFAT-backed media, the sidecar records metadata the medium cannot
-carry. The metadata is part of pdocker's exchange contract, not proof that the
+carry. The metadata is part of Skydnir's exchange contract, not proof that the
 underlying SD card has native Unix semantics.
 
 ## Read And Write Semantics
@@ -193,7 +193,7 @@ to `FilesystemBackend` and `UnixMetadataBackend`. It must not contain
 
 ## External Edits And Conflict Handling
 
-SAF payloads can change outside pdocker. Startup, grant changes, and explicit
+SAF payloads can change outside Skydnir. Startup, grant changes, and explicit
 repair should compare sidecar evidence with provider enumeration.
 
 Required outcomes:
@@ -268,7 +268,7 @@ classes directly.
 ## Relation To Other Design Documents
 
 - [`COW_OVERLAY_STORAGE.md`](COW_OVERLAY_STORAGE.md) defines how this backend
-  can be stacked under the pdocker overlay/COW view.
+  can be stacked under the Skydnir overlay/COW view.
 - [`PROJECT_METADATA_INDEX.md`](PROJECT_METADATA_INDEX.md) defines the
   disposable index model that the sidecar should follow.
 - Runtime and UI designs should treat SAF-backed paths as backend-provided

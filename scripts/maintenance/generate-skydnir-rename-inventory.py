@@ -108,6 +108,21 @@ def classify(path: str, token: str, line: str) -> dict[str, Any]:
         phase = "phase-4-or-later-migration-required"
         migration_required = True
         rationale = "socket/storage paths need compatibility and data migration"
+    elif any(
+        marker in lower_line
+        for marker in (
+            "pdocker-direct",
+            "libpdocker",
+            "pdocker-gpu-",
+            "pdocker-opencl-",
+            "pdocker-vulkan-",
+            "pdocker_gpu_",
+            "pdocker_vulkan_",
+        )
+    ):
+        category = "internal_reference"
+        phase = "phase-5-internal-namespace"
+        rationale = "concrete helper/library/symbol name; defer until binary and ABI aliases exist"
     elif ".pdocker" in lower_line or "pdocker.yml" in lower_line:
         category = "config_path"
         phase = "phase-3-config-migration"

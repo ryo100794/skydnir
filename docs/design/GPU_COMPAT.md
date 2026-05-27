@@ -21,8 +21,8 @@ external baseline for Jetson or NVIDIA Linux devices. The Android path is:
 
 ```text
 Docker --gpus / HostConfig.DeviceRequests
-  -> pdocker GPU negotiation
-  -> a glibc-facing GPU bridge owned by pdocker
+  -> Skydnir GPU negotiation
+  -> a glibc-facing GPU bridge owned by Skydnir
   -> Android-side Vulkan/OpenCL execution behind that bridge
   -> cuVK, a restricted CUDA-like API lowered to the bridge runtime
 ```
@@ -96,11 +96,11 @@ and performance claims require separate llama/GPU artifacts.
 There are two different ideas that can both sound like "Vulkan passthrough":
 
 - **Raw vendor passthrough**: bind Android vendor Vulkan/OpenCL libraries from
-  `/vendor/lib64` directly into a glibc container. This is not the pdocker
+  `/vendor/lib64` directly into a glibc container. This is not the Skydnir
   target. It crosses the Bionic/glibc boundary, depends on Android linker
   namespaces, and can be blocked for untrusted apps even when the library files
   exist.
-- **pdocker ICD bridge**: expose a glibc-facing Vulkan ICD in the container and
+- **Skydnir ICD bridge**: expose a glibc-facing Vulkan ICD in the container and
   lower Vulkan calls into the APK-owned GPU executor. This is the target path.
   The container process still uses standard Vulkan loader behavior, while the
   executor hides Android GLES/Vulkan/OpenCL/vendor details below the neutral
@@ -241,7 +241,7 @@ binds the APK runtime GPU directory there and direct execution rewrites
 absolute paths.
 Until the OpenCL/Vulkan bridge covers real ggml/llama kernels and passes
 validation, llama.cpp GPU profile selection must stay on CPU fallback unless a
-raw diagnostic mode is explicitly requested or a pdocker GPU ICD is explicitly
+raw diagnostic mode is explicitly requested or a Skydnir GPU ICD is explicitly
 marked compute-ready.
 Unsupported OpenCL kernels must be traced and failed, not mapped to an
 incorrect fallback kernel. This prevents silent numerical corruption while the
@@ -250,7 +250,7 @@ coverage is expanded.
 ## CUDA-compatible API
 
 `cuda-compat` is not NVIDIA CUDA passthrough. Android normally does not expose
-NVIDIA `/dev/nvidia*` devices or the NVIDIA driver ABI. In pdocker, CUDA means
+NVIDIA `/dev/nvidia*` devices or the NVIDIA driver ABI. In Skydnir, CUDA means
 a planned compatibility API layer which can provide a CUDA-shaped userspace ABI
 backed primarily by Vulkan Compute.
 

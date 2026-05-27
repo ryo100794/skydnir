@@ -33,7 +33,7 @@ Compatibility has three tiers:
    - Skydnir must not silently start fake listeners, mutate Dockerfile syntax,
      or run commands on the Android host when the user asked for a container.
 
-## pdocker Extension API Boundary
+## Skydnir Extension API Boundary
 
 Docker-compatible endpoints and Skydnir extensions are intentionally separate:
 
@@ -201,7 +201,7 @@ Implement:
 - Keep Skydnir memory paging separate from Docker cgroup compatibility:
   `PDOCKER_MEMORY_PAGER=managed` or `io.pdocker.memory-pager=managed` may use
   the requested memory budget as a pager policy input, but standard Compose
-  memory keys alone must not silently opt a container into pdocker-specific
+  memory keys alone must not silently opt a container into Skydnir-specific
   fault handling.
 - Warn that Android app sandbox cannot enforce Docker cgroups.
 - Provide best-effort stats from `/proc` and Android process APIs.
@@ -212,7 +212,7 @@ Scope out:
 
 ## Overlayfs Position
 
-Recommended near-term stance: **build a pdocker snapshotter, not an overlayfs
+Recommended near-term stance: **build a Skydnir snapshotter, not an overlayfs
 clone**.
 
 Implement the semantics needed by package managers and `docker cp` first:

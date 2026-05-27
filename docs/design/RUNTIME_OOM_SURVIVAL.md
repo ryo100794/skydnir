@@ -18,7 +18,7 @@ hard app/process death into one of three controlled outcomes:
 
 Android LMK and process OOM kills provide no reliable, app-visible
 "about to die" callback. Once the system selects a process to kill, there may be
-no useful grace window. Therefore pdocker cannot depend on last-second cleanup.
+no useful grace window. Therefore Skydnir cannot depend on last-second cleanup.
 
 The durable strategy must be proactive:
 
@@ -153,7 +153,7 @@ not silently enable the Skydnir-specific pager.
 
 The pager is appropriate for selected large anonymous buffers. It is not a
 general allocator replacement. It must not page executable text, stacks, libc
-internal mappings, GPU command rings, or mappings that pdocker did not reserve.
+internal mappings, GPU command rings, or mappings that Skydnir did not reserve.
 
 Implementation-ready contract summary:
 
@@ -289,7 +289,7 @@ APK-side executor.
 ## Non-Goals
 
 - No attempt to change system zram, swappiness, or global swap from the APK.
-- No attempt to catch arbitrary kernel page faults outside pdocker-managed
+- No attempt to catch arbitrary kernel page faults outside Skydnir-managed
   regions.
 - No silent opt-in based solely on Docker-compatible memory keys.
 - No fake success when Android kills the process.

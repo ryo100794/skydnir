@@ -2,7 +2,7 @@
 
 Snapshot date: 2026-05-04.
 
-This document defines the first SQLite metadata index for pdocker projects. It
+This document defines the first SQLite metadata index for Skydnir projects. It
 is a rebuildable index over app-owned files, Engine state, OCI metadata, and
 overlay/COW path metadata. SQLite must never become payload storage.
 
@@ -145,7 +145,7 @@ diagnostics.
 
 Payload bytes remain in lower roots, upper dirs, and volumes. The DB only helps
 answer "where would this path resolve?" and "does the index still describe the
-filesystem?" If upper metadata is lost, stale, or impossible to verify, pdocker
+filesystem?" If upper metadata is lost, stale, or impossible to verify, Skydnir
 must rescan lower/upper trees and regenerate these rows.
 
 SAF/SD-card exchange metadata has the same trust model. A sidecar may record
@@ -153,7 +153,7 @@ the URI/document identity, display name, size, mtime, content hash evidence,
 emulated mode/uid/gid, symlink target, xattr digest, and conflict state for a
 payload stored on FAT32/exFAT media. Startup checks must compare that metadata
 with `DocumentProvider` enumeration and rescan, quarantine, or report conflicts
-when files were edited, renamed, or deleted outside pdocker. These rows support
+when files were edited, renamed, or deleted outside Skydnir. These rows support
 archive/copy/import/export semantics only; they do not make removable storage a
 direct executable rootfs or high-frequency container upperdir.
 

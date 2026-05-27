@@ -1542,7 +1542,7 @@ Reusable scenario:
   CPU fallback restore is available with `--restore`; the next run always
   recreates the mode it needs before measuring.
 - Direct Engine API containers created by the comparison scenario must carry
-  the same pdocker project/compose labels used by UI-launched compose services,
+  the same Skydnir project/compose labels used by UI-launched compose services,
   so `docker ps`, container cards, project cards, and service URL shortcuts all
   reconcile against the same state object.
 - During tight GPU bridge tuning, pass `--gpu-only` to reuse the latest recorded
@@ -1636,7 +1636,7 @@ Tasks:
 
 11. **[doing] Rework project/container identity.**
     Stop using project-name prefixes as the primary relationship key. Compose
-    launches now label containers with a stable pdocker project ID, project
+    launches now label containers with a stable Skydnir project ID, project
     directory, project name, and compose service name; UI cards must prefer
     those labels and Engine container IDs over name guesses. Name matching is
     only a legacy fallback for containers created before labels existed.
@@ -1665,7 +1665,7 @@ Tasks:
 
 Current 2026-05-04 blocker:
 
-- Qwen3 8B Q4_K_M forced Vulkan can discover the pdocker GPU bridge, allocate
+- Qwen3 8B Q4_K_M forced Vulkan can discover the Skydnir GPU bridge, allocate
   the first offloaded Vulkan model buffer, complete transfer-only queue
   submits, lower generic SPIR-V dispatch metadata through the Android Vulkan
   executor contract, and load the HTTP server. `VULKAN_DISPATCH_V2` now

@@ -28,7 +28,7 @@ Primary sources:
    unless the manager explicitly reassigns ownership.
 4. **Evidence before closure.** Every closure needs a command, artifact, or
    device/manual record that can be repeated.
-5. **llama.cpp stays unmodified.** GPU bridge work remains in pdocker
+5. **llama.cpp stays unmodified.** GPU bridge work remains in Skydnir
    ICD/executor/transport/tests, not upstream model/runtime sources.
 6. **Compaction-safe handoff.** Before context exhaustion or compaction, stop detailed risky work, summarize the lane in `AGENT_COORDINATION.md`, checkpoint only reviewed small slices, delegate the next narrow action, and never start a large new patch with low context budget.
 

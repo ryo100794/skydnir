@@ -2,14 +2,14 @@
 
 Snapshot date: 2026-05-24.
 
-This document describes the implementation sequence for pdocker's Vulkan
+This document describes the implementation sequence for Skydnir's Vulkan
 bridge as it exists in the Android project.  It focuses on the real data path
 used by unmodified container applications such as llama.cpp:
 
 ```text
 glibc Vulkan application
-  -> pdocker glibc Vulkan ICD
-  -> pdocker GPU command ABI
+  -> Skydnir glibc Vulkan ICD
+  -> Skydnir GPU command ABI
   -> APK-owned Android/Bionic Vulkan executor
   -> Android Vulkan driver
   -> writeback and JSON evidence
