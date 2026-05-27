@@ -6,17 +6,17 @@ This generated ledger classifies tracked `pdocker`-family names before
 any public Skydnir rename work proceeds.  It is intentionally an
 inventory, not a replacement script.
 
-- Entries: `19851`
+- Entries: `19842`
 - Skipped binary files: `22`
 
 ## Counts by Token
 
 | Token | Count |
 |---|---:|
-| `PDOCKER` | 4289 |
+| `PDOCKER` | 4290 |
 | `PDocker` | 10 |
 | `pDocker` | 8 |
-| `pdocker` | 13666 |
+| `pdocker` | 13656 |
 | `pdocker-android` | 87 |
 | `pdockerd` | 1791 |
 
@@ -30,10 +30,10 @@ inventory, not a replacement script.
 | `config_path` | 167 |
 | `daemon_binary_or_service` | 576 |
 | `documentation_reference` | 174 |
-| `environment_variable` | 2903 |
+| `environment_variable` | 2904 |
 | `historical_evidence` | 11025 |
-| `internal_reference` | 2081 |
-| `socket_or_storage_path` | 770 |
+| `internal_reference` | 2077 |
+| `socket_or_storage_path` | 764 |
 | `test_fixture` | 1540 |
 
 ## Counts by Phase
@@ -47,9 +47,9 @@ inventory, not a replacement script.
 | `phase-2-cli-alias` | 32 |
 | `phase-2-daemon-alias` | 576 |
 | `phase-3-config-migration` | 167 |
-| `phase-4-or-later-migration-required` | 770 |
-| `phase-5-dual-read-required` | 2903 |
-| `phase-5-internal-namespace` | 2081 |
+| `phase-4-or-later-migration-required` | 764 |
+| `phase-5-dual-read-required` | 2904 |
+| `phase-5-internal-namespace` | 2077 |
 
 ## Next Action
 

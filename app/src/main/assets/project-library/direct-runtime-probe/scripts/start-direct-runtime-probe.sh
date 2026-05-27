@@ -2,11 +2,11 @@
 set -eu
 
 mkdir -p /workspace /reports /documents /shared
-export_dir="${PDOCKER_EXPORT_DIR:-/documents/pdocker-exports}/direct-runtime-probe"
+export_dir="${PDOCKER_EXPORT_DIR:-/documents/skydnir-exports}/direct-runtime-probe"
 mkdir -p "$export_dir"
 
 cat > /reports/README.txt <<'EOF'
-pdocker direct runtime probe container
+Skydnir direct runtime probe container
 
 Default compose up runs `pdocker-container-probe` once and writes diagnostics
 to /reports and to the selected Android Documents export folder.
@@ -25,7 +25,7 @@ export_latest="$export_dir/latest.log"
 summary="/reports/latest.json"
 export_summary="$export_dir/latest.json"
 
-printf 'pdocker direct runtime probe starting\n'
+printf 'Skydnir direct runtime probe starting\n'
 printf 'workspace: /workspace\n'
 printf 'reports: /reports\n'
 printf 'documents export: %s\n' "$export_dir"
@@ -58,7 +58,7 @@ EOF
 cp "$summary" "$export_summary" 2>/dev/null || true
 
 cat "$log"
-printf 'pdocker direct runtime probe %s rc=%s\n' "$status" "$rc"
+printf 'Skydnir direct runtime probe %s rc=%s\n' "$status" "$rc"
 
 if [ "$rc" -ne 0 ]; then
   exit "$rc"

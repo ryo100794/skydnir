@@ -1,18 +1,18 @@
 # Skydnir Direct Runtime Probe
 
-This template is a small, reusable test container for pdocker direct-runtime
+This template is a small, reusable test container for the Skydnir direct-runtime
 debugging. It is intentionally separate from llama.cpp, code-server, Blender,
 or ROS so runtime regressions can be reproduced without rebuilding large
 application images.
 
 It includes:
 
-- A long-lived container named `pdocker-direct-runtime-probe`.
+- A long-lived container named `skydnir-direct-runtime-probe`.
 - A default startup probe on `compose up`.
 - `python3` for controlled large-allocation tests.
 - `/usr/local/bin/pdocker-container-probe`, the same probe payload used by
   the repository test runner.
-- Standard Compose and Dockerfile inputs only; no pdocker-specific Dockerfile
+- Standard Compose and Dockerfile inputs only; no Skydnir-specific Dockerfile
   syntax.
 - The selected Android Documents folder mounted at `/documents` for exporting
   test reports when needed.
@@ -27,11 +27,11 @@ Use from the repository test route:
 ROOTFS=/path/to/container/rootfs scripts/verify-heavy.sh --container-probe
 ```
 
-Use from pdocker:
+Use from Skydnir:
 
 1. Install `Skydnir Direct Runtime Probe` from the Library tab.
 2. Run compose up.
-3. Open `/documents/pdocker-exports/direct-runtime-probe/latest.log` from the
+3. Open `/documents/skydnir-exports/direct-runtime-probe/latest.log` from the
    selected Android Documents folder, or inspect `/reports/latest.log` inside
    the container.
 

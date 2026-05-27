@@ -522,6 +522,7 @@ def main() -> int:
     )
     ros2_rviz_compose_src = (ROOT / "app/src/main/assets/project-library/ros2-humble-rviz-novnc/compose.yaml").read_text()
     blender_compose_src = (ROOT / "app/src/main/assets/project-library/blender-xvnc-novnc/compose.yaml").read_text()
+    direct_runtime_probe_compose_src = (ROOT / "app/src/main/assets/project-library/direct-runtime-probe/compose.yaml").read_text()
     require(
         "graphics project templates use Skydnir public image and container names",
         "image: skydnir/ros2-humble-rviz-novnc:latest" in ros2_rviz_compose_src
@@ -532,6 +533,13 @@ def main() -> int:
         and "container_name: skydnir-blender-xvnc" in blender_compose_src
         and "image: pdocker/blender-xvnc-novnc:latest" not in blender_compose_src
         and "container_name: pdocker-blender-xvnc" not in blender_compose_src,
+    )
+    require(
+        "direct runtime probe template uses Skydnir public image and container names",
+        "image: skydnir/direct-runtime-probe:latest" in direct_runtime_probe_compose_src
+        and "container_name: skydnir-direct-runtime-probe" in direct_runtime_probe_compose_src
+        and "image: pdocker/direct-runtime-probe:latest" not in direct_runtime_probe_compose_src
+        and "container_name: pdocker-direct-runtime-probe" not in direct_runtime_probe_compose_src,
     )
 
     require("interactive terminal font remains 12pt", "const initialFontSize = readOnly ? 8 : 12" in xterm_src and "fontSize: initialFontSize" in xterm_src)

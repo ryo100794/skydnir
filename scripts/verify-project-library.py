@@ -221,6 +221,32 @@ def main() -> int:
             fail(f"{tid} documents README missing Documents workspace-root layout")
     ok("all compose templates include shared Documents volume")
 
+    direct = templates["direct-runtime-probe"]
+    direct_root = ASSETS / direct["assetPath"]
+    direct_compose = read(direct_root / direct["compose"])
+    direct_start = read(direct_root / "scripts" / "start-direct-runtime-probe.sh")
+    direct_readme = read(direct_root / "README.md")
+    direct_documents_readme = read(direct_root / "documents" / "README.md")
+    direct_expectations = {
+        "direct probe compose uses Skydnir public image and container names": "image: skydnir/direct-runtime-probe:latest" in direct_compose
+        and "container_name: skydnir-direct-runtime-probe" in direct_compose
+        and "image: pdocker/direct-runtime-probe:latest" not in direct_compose
+        and "container_name: pdocker-direct-runtime-probe" not in direct_compose,
+        "direct probe exports to Skydnir public Documents path": "/documents/skydnir-exports" in direct_compose
+        and 'export_dir="${PDOCKER_EXPORT_DIR:-/documents/skydnir-exports}/direct-runtime-probe"' in direct_start
+        and "/documents/skydnir-exports/direct-runtime-probe/latest.log" in direct_readme
+        and "/documents/skydnir-exports/direct-runtime-probe/latest.json" in direct_documents_readme,
+        "direct probe public wording uses Skydnir": "Skydnir direct runtime probe" in direct_start
+        and "for the Skydnir direct-runtime" in direct_readme
+        and "Use from Skydnir" in direct_readme
+        and "pdocker direct runtime probe container" not in direct_start
+        and "pdocker direct-runtime" not in direct_readme,
+    }
+    for name, passed in direct_expectations.items():
+        if not passed:
+            fail(name)
+    ok("direct-runtime-probe template uses Skydnir public naming and export path")
+
     suite = templates["pdocker-test-suite"]
     suite_root = ASSETS / suite["assetPath"]
     suite_compose = read(suite_root / suite["compose"])
