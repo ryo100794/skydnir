@@ -367,8 +367,8 @@ wrapper. New documentation and examples use `skydnir`.
 - [x] Add runtime home alias migration.
 - [ ] Add config file dual-read migration.
 - [ ] Add service migration documentation.
-- [ ] Update CI artifact display names.
-- [ ] Update release note draft.
+- [x] Update CI/Wiki display names that are safe before repository rename.
+- [x] Update release note draft.
 - [ ] Keep old package id/data path until explicitly approved.
 - [ ] Keep old artifact schemas readable.
 

@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible pdocker-android bug.
+description: Report a reproducible Skydnir bug.
 title: "Bug: "
 labels:
   - bug
@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for testing pdocker-android. Please remove tokens, passwords,
+        Thanks for testing Skydnir. Please remove tokens, passwords,
         API keys, cookies, and private paths from logs before posting.
 
         Current baseline: build 20260505.1 is committed at dd3ce31. The APK

@@ -1,4 +1,8 @@
-# pdocker-android vX.Y.Z
+# Skydnir vX.Y.Z
+
+> Rename notice: this project was formerly known as `pdocker-android`.
+> The old `pdocker` command remains as a deprecated compatibility wrapper
+> during the transition; new examples should use `skydnir`.
 
 ## Highlights
 

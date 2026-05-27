@@ -44,7 +44,7 @@ body:
     id: smoke
     attributes:
       label: Smoke results
-      description: Include install, app launch, pdockerd start, image pull/build, Compose up/down, logs, docker exec, Engine API exec -it, and docker ps/container card observations.
+      description: Include install, app launch, Skydnir daemon start, image pull/build, Compose up/down, logs, Engine API exec -it, and container card observations. If you used test-staged Docker CLI tooling, say so explicitly.
       render: text
     validations:
       required: true

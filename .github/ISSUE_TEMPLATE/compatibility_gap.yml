@@ -1,5 +1,5 @@
-name: Docker compatibility gap
-description: Report behavior that differs from upstream Docker.
+name: Selected Engine API compatibility gap
+description: Report behavior that differs from upstream Docker/Compose tooling.
 title: "Compatibility: "
 labels:
   - compatibility
@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        pdocker-android targets Docker-shaped behavior where Android allows it.
+        Skydnir targets selected Docker-shaped behavior where Android allows it.
         The product APK does not bundle upstream Docker CLI/Compose, PRoot,
         proot-loader, or talloc. Please separate product behavior from
         test-staged compatibility tools.
@@ -38,9 +38,9 @@ body:
     validations:
       required: true
   - type: textarea
-    id: pdocker
+    id: skydnir
     attributes:
-      label: pdocker-android behavior
+      label: Skydnir behavior
       render: text
     validations:
       required: true

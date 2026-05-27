@@ -1,11 +1,11 @@
 blank_issues_enabled: true
 contact_links:
   - name: Roadmap
-    url: https://github.com/ryo100794/pdocker-android/issues/3
+    url: https://github.com/ryo100794/skydnir/issues/3
     about: Public roadmap for Compose up parity on Android.
   - name: Compatibility report
-    url: https://github.com/ryo100794/pdocker-android/issues/1
+    url: https://github.com/ryo100794/skydnir/issues/1
     about: Current Docker compatibility status and references.
   - name: Device tester thread
-    url: https://github.com/ryo100794/pdocker-android/issues/2
+    url: https://github.com/ryo100794/skydnir/issues/2
     about: Share Android device matrix results.
