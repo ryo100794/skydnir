@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reusable Docker-compatibility audit for pdocker-android.
+"""Reusable Docker-compatibility audit for Skydnir.
 
 The default mode is intentionally offline and repeatable:
   - inspect pdockerd's Engine API surface
@@ -382,7 +382,7 @@ def write_report(checks: list[Check], path: Path) -> None:
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     else:
         lines = [
-            "# pdocker compatibility audit result",
+            "# Skydnir compatibility audit result",
             "",
             f"Summary: PASS={grouped.get('PASS', 0)} FAIL={grouped.get('FAIL', 0)} SKIP={grouped.get('SKIP', 0)}",
             "",
