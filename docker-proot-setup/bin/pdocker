@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# pdocker - Docker-compatible CLI for PRoot environments
-# Uses crane (image pull) + chroot (execution) — no daemon required
+# Skydnir legacy-compatible CLI entrypoint.
+# Uses crane (image pull) + chroot/direct-style execution — no daemon required
 #
 # Commands: pull, run, exec, ps, images, rm, rmi, build, inspect, logs, save, load
 # Supports: --name, -v, -e, -w, --rm, --net, --entrypoint
-# See `pdocker help` for full usage.
+# See `skydnir help` for the public CLI or `pdocker help` for the legacy alias.
 
 set -euo pipefail
 
@@ -181,7 +181,7 @@ gen_name() {
 # ---- Commands ----
 
 cmd_pull() {
-    local image="${1:?Usage: pdocker pull IMAGE[:TAG]}"
+    local image="${1:?Usage: $CLI_NAME pull IMAGE[:TAG]}"
     local norm_img
     norm_img="$(normalize_image "$image")"
 
@@ -257,7 +257,7 @@ prepare_container_rootfs() {
     cdir="$(container_dir "$container")"
 
     if [[ ! -d "$img_rootfs" ]]; then
-        die "image $image not found locally (run pdocker pull first)"
+        die "image $image not found locally (run $CLI_NAME pull first)"
     fi
 
     mkdir -p "$cdir"
@@ -577,7 +577,7 @@ EOF
 }
 
 cmd_exec() {
-    local container="${1:?Usage: pdocker exec CONTAINER CMD [ARGS]}"
+    local container="${1:?Usage: $CLI_NAME exec CONTAINER CMD [ARGS]}"
     shift
     local cdir
     cdir="$(container_dir "$container")"
@@ -637,14 +637,14 @@ cmd_rm() {
 }
 
 cmd_logs() {
-    local container="${1:?Usage: pdocker logs CONTAINER}"
+    local container="${1:?Usage: $CLI_NAME logs CONTAINER}"
     local f="$LOGS_DIR/$container.log"
     [[ -f "$f" ]] || die "no logs for $container"
     cat "$f"
 }
 
 cmd_inspect() {
-    local target="${1:?Usage: pdocker inspect CONTAINER_OR_IMAGE}"
+    local target="${1:?Usage: $CLI_NAME inspect CONTAINER_OR_IMAGE}"
     local cdir idir
     cdir="$(container_dir "$target")"
     if [[ -f "$cdir/config.json" ]]; then
@@ -662,7 +662,7 @@ cmd_inspect() {
 }
 
 cmd_save() {
-    local image="${1:?Usage: pdocker save IMAGE -o OUTPUT.tar}"
+    local image="${1:?Usage: $CLI_NAME save IMAGE -o OUTPUT.tar}"
     local out=""
     shift
     while [[ $# -gt 0 ]]; do
@@ -715,8 +715,8 @@ EOF
 }
 
 usage() {
-    cat <<'HELP'
-pdocker — Docker-compatible CLI for PRoot environments
+    cat <<HELP
+$CLI_NAME — Skydnir legacy-compatible CLI
 
 Commands:
   pull IMAGE               Pull an image from registry
@@ -730,7 +730,7 @@ Commands:
   inspect NAME             Show container/image JSON
   save IMAGE -o FILE.tar   Export image to tar archive
   load -i FILE.tar         Import image from tar archive
-  build [OPTS] DIR         Use the bundled docker CLI against pdockerd
+  build [OPTS] DIR         Use the Engine API path against skydnird/pdockerd
   version                  Show versions
   help                     Show this help
 
@@ -743,10 +743,11 @@ Run options:
   --entrypoint CMD         Override ENTRYPOINT
   -d                       Detached (background) mode
 
-Note: This is NOT Docker. It uses crane + chroot and is constrained by
-what PRoot supports. No namespaces, no cgroups, no real networking.
+Note: This is not Docker. Skydnir uses crane plus a userspace rootfs executor
+and remains constrained by the host platform. No kernel namespaces, cgroups,
+or full bridge networking are provided by this legacy CLI.
 
-Storage: $HOME/.pdocker/  (set PDOCKER_HOME to override)
+Storage: $PDOCKER_HOME  (set SKYDNIR_HOME for new callers or PDOCKER_HOME for compatibility)
 HELP
 }
 
@@ -767,9 +768,9 @@ case "$cmd" in
     inspect)    cmd_inspect "$@" ;;
     save)       cmd_save "$@" ;;
     load)       cmd_load "$@" ;;
-    build)      die "legacy pdocker-build was removed; use the bundled docker CLI against pdockerd" ;;
+    build)      die "legacy pdocker-build was removed; use the Engine API path against skydnird/pdockerd" ;;
     version|--version) cmd_version ;;
     stop|kill)  log "Note: detached containers can be killed via their PID file in $CONTAINERS_DIR/NAME/pid" ;;
     help|--help|-h) usage ;;
-    *)          die "unknown command: $cmd (try: pdocker help)" ;;
+    *)          die "unknown command: $cmd (try: $CLI_NAME help)" ;;
 esac

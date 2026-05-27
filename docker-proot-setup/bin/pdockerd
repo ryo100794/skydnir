@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """
-pdockerd — Docker Engine API-compatible daemon for Android userspace runtimes.
+skydnird — Skydnir Engine API-compatible daemon for mobile userspace runtimes.
 
 Implements a subset of the Docker Engine API v1.43 so that the original
 `docker`, `docker compose`, and `docker buildx` CLIs can target this
 daemon over a Unix domain socket.
 
-Backend: crane (image pull/export) + pdocker-direct/chroot-style userspace
-execution — no kernel namespace / mount / cgroup required.
+Backend: crane (image pull/export) + Skydnir direct/chroot-style userspace
+execution — no kernel namespace, mount namespace, or cgroup required.
 
 Usage:
+    skydnird [--socket PATH] [--host HOST:PORT]
+
+Legacy alias:
     pdockerd [--socket PATH] [--host HOST:PORT]
 
 Defaults:
     socket: /var/run/docker.sock  (or $XDG_RUNTIME_DIR/docker.sock if set)
-    data:   $PDOCKER_HOME or ~/.pdocker
+    data:   $SKYDNIR_HOME, $PDOCKER_HOME, ~/.skydnir, or ~/.pdocker
 
 Then:
     export DOCKER_HOST=unix:///var/run/docker.sock
