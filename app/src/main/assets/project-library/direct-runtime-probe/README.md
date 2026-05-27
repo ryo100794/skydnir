@@ -1,4 +1,4 @@
-# pdocker Direct Runtime Probe
+# Skydnir Direct Runtime Probe
 
 This template is a small, reusable test container for pdocker direct-runtime
 debugging. It is intentionally separate from llama.cpp, code-server, Blender,
@@ -29,7 +29,7 @@ ROOTFS=/path/to/container/rootfs scripts/verify-heavy.sh --container-probe
 
 Use from pdocker:
 
-1. Install `pdocker Direct Runtime Probe` from the Library tab.
+1. Install `Skydnir Direct Runtime Probe` from the Library tab.
 2. Run compose up.
 3. Open `/documents/pdocker-exports/direct-runtime-probe/latest.log` from the
    selected Android Documents folder, or inspect `/reports/latest.log` inside

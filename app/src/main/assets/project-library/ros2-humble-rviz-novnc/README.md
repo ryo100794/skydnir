@@ -2,7 +2,7 @@
 
 Ubuntu 22.04 workspace with ROS 2 Humble desktop, RViz, Xvnc, and noVNC.
 
-The compose header comment `# pdocker.service-url: 18082=noVNC RViz` labels
+The compose header comment `# skydnir.service-url: 18082=noVNC RViz` labels
 the local browser shortcut. Open noVNC at port `18082`; direct VNC clients can
 connect to host port `15900`.
 

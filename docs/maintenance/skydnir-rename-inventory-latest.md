@@ -6,52 +6,50 @@ This generated ledger classifies tracked `pdocker`-family names before
 any public Skydnir rename work proceeds.  It is intentionally an
 inventory, not a replacement script.
 
-- Entries: `20229`
+- Entries: `20107`
 - Skipped binary files: `22`
 
 ## Counts by Token
 
 | Token | Count |
 |---|---:|
-| `PDOCKER` | 4282 |
+| `PDOCKER` | 4281 |
 | `PDocker` | 9 |
 | `pDocker` | 7 |
-| `pdocker` | 13968 |
-| `pdocker-android` | 153 |
-| `pdockerd` | 1810 |
+| `pdocker` | 13880 |
+| `pdocker-android` | 122 |
+| `pdockerd` | 1808 |
 
 ## Counts by Category
 
 | Category | Count |
 |---|---:|
-| `android_ui_or_package_surface` | 326 |
+| `android_ui_or_package_surface` | 350 |
 | `artifact_schema` | 119 |
-| `cli_command` | 52 |
-| `config_path` | 377 |
-| `daemon_binary_or_service` | 722 |
-| `documentation_reference` | 331 |
-| `environment_variable` | 2998 |
-| `historical_evidence` | 10836 |
-| `internal_reference` | 2159 |
-| `public_branding` | 142 |
-| `socket_or_storage_path` | 658 |
+| `cli_command` | 50 |
+| `config_path` | 319 |
+| `daemon_binary_or_service` | 690 |
+| `documentation_reference` | 345 |
+| `environment_variable` | 2945 |
+| `historical_evidence` | 11028 |
+| `internal_reference` | 2080 |
+| `socket_or_storage_path` | 672 |
 | `test_fixture` | 1509 |
 
 ## Counts by Phase
 
 | Phase | Count |
 |---|---:|
-| `do-not-rewrite-history` | 10955 |
+| `do-not-rewrite-history` | 11147 |
 | `phase-0-guard` | 1509 |
-| `phase-1-or-historical-context` | 331 |
-| `phase-1-public-branding` | 142 |
-| `phase-1-ui-copy-or-phase-4-package` | 326 |
-| `phase-2-cli-alias` | 52 |
-| `phase-2-daemon-alias` | 722 |
-| `phase-3-config-migration` | 377 |
-| `phase-4-or-later-migration-required` | 658 |
-| `phase-5-dual-read-required` | 2998 |
-| `phase-5-internal-namespace` | 2159 |
+| `phase-1-or-historical-context` | 345 |
+| `phase-1-ui-copy-or-phase-4-package` | 350 |
+| `phase-2-cli-alias` | 50 |
+| `phase-2-daemon-alias` | 690 |
+| `phase-3-config-migration` | 319 |
+| `phase-4-or-later-migration-required` | 672 |
+| `phase-5-dual-read-required` | 2945 |
+| `phase-5-internal-namespace` | 2080 |
 
 ## Next Action
 

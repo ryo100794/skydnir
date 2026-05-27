@@ -3646,15 +3646,19 @@ class MainActivity : AppCompatActivity() {
             if (trimmed.isBlank()) continue
             if (!trimmed.startsWith("#")) break
             val comment = trimmed.removePrefix("#").trim()
-            comment.removePrefix("pdocker.auto-open:")
-                .takeIf { it != comment }
-                ?.trim()
-                ?.takeIf { it.isNotBlank() }
-                ?.let { autoOpenLabels += it }
-            val rest = comment
-                .removePrefix("pdocker.service-url:")
-                .takeIf { it != comment }
-                ?.trim()
+            listOf("skydnir.auto-open:", "pdocker.auto-open:").forEach { prefix ->
+                comment.removePrefix(prefix)
+                    .takeIf { it != comment }
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { autoOpenLabels += it }
+            }
+            val rest = listOf("skydnir.service-url:", "pdocker.service-url:")
+                .firstNotNullOfOrNull { prefix ->
+                    comment.removePrefix(prefix)
+                        .takeIf { it != comment }
+                        ?.trim()
+                }
                 ?: continue
             parseComposeServiceLink(rest)?.let { links += it }
         }
@@ -8280,14 +8284,14 @@ class MainActivity : AppCompatActivity() {
             return text
         }
         val additions = mutableListOf<String>()
-        if ("18080:18080" in text && "pdocker.service-url: 18080=" !in text) {
-            additions += "# pdocker.service-url: 18080=VS Code"
+        if ("18080:18080" in text && "skydnir.service-url: 18080=" !in text && "pdocker.service-url: 18080=" !in text) {
+            additions += "# skydnir.service-url: 18080=VS Code"
         }
-        if ("18080:18080" in text && "pdocker.auto-open: VS Code" !in text) {
-            additions += "# pdocker.auto-open: VS Code"
+        if ("18080:18080" in text && "skydnir.auto-open: VS Code" !in text && "pdocker.auto-open: VS Code" !in text) {
+            additions += "# skydnir.auto-open: VS Code"
         }
-        if ("18081:18081" in text && "pdocker.service-url: 18081=" !in text) {
-            additions += "# pdocker.service-url: 18081=llama.cpp"
+        if ("18081:18081" in text && "skydnir.service-url: 18081=" !in text && "pdocker.service-url: 18081=" !in text) {
+            additions += "# skydnir.service-url: 18081=llama.cpp"
         }
         if (additions.isEmpty()) return text
         return additions.joinToString("\n", postfix = "\n") + text

@@ -5,14 +5,14 @@
 Source snapshot: `2026-05-20`.
 Repository reference: source-controlled generated snapshot.
 
-This page is the GitHub-facing status board for pdocker-android. It is generated
+This page is the GitHub-facing status board for Skydnir. It is generated
 from repository-owned documents so the public story follows the implementation
 instead of drifting into a separate marketing copy.
 
 ## Product Signal
 
-pdocker-android is a Docker-compatible Android workbench packaged as a native
-APK. It combines `pdockerd`, Compose/Dockerfile controls, image/container file
+Skydnir is a Docker-compatible Android workbench packaged as a native
+APK. It combines `skydnird` / compatibility `pdockerd`, Compose/Dockerfile controls, image/container file
 browsing, persistent logs, editor tabs, and `-it`-style terminals inside the
 app UI. The current research front is real Android direct execution plus
 Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
@@ -32,9 +32,9 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 
 | Template | Name | Category | GPU mode | Feature preview |
 |---|---|---|---|---|
-| dev-workspace | pdocker Management Workspace + code-server + Codex | pdocker-management | vulkan-cuda-compat | pdocker-management, project-creation, project-maintenance, build-compose, engine-socket-helpers |
-| direct-runtime-probe | pdocker Direct Runtime Probe | runtime-test | none | pdocker-direct, runtime-test, argv-preservation, memory-guard, container-probe |
-| pdocker-test-suite | pdocker Test Suite | runtime-test | none | test-suite, docker-exec, documents-reports, direct-runtime, file-io |
+| dev-workspace | Skydnir Management Workspace + code-server + Codex | skydnir-management | vulkan-cuda-compat | skydnir-management, project-creation, project-maintenance, build-compose, engine-socket-helpers |
+| direct-runtime-probe | Skydnir Direct Runtime Probe | runtime-test | none | skydnir-direct, runtime-test, argv-preservation, memory-guard, container-probe |
+| skydnir-test-suite | Skydnir Test Suite | runtime-test | none | test-suite, docker-exec, documents-reports, direct-runtime, file-io |
 | llama-cpp-gpu | llama.cpp GPU workspace | ai-runtime | auto | llama.cpp, vulkan, cuda-compat, cpu-fallback, gguf-models |
 | ros2-humble-rviz-novnc | ROS 2 Humble RViz noVNC | robotics | none | ros2-humble, rviz, xvnc, novnc, websockify |
 | blender-xvnc-novnc | Blender Xvnc noVNC | graphics | future-vulkan-zink | blender, opengl, glsl, xvnc, novnc |
@@ -45,14 +45,14 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 |---|---|
 | doing | Cross-project incomplete implementation audit: `docs/plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md` now tracks unfinished, partial, temporary, or insufficiently verified work across... |
 | doing | Execution timeline and delegated task control: `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged gates, current agent assignments, merge checklists, and... |
-| doing | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the pdocker Vulkan/OpenCL bridge from discovery and model-buffer... |
-| next | [#10](https://github.com/ryo100794/pdocker-android/issues/10) / [#5](https://github.com/ryo100794/pdocker-android/issues/5) runtime teardown and terminal exec-it scheduling: gate hardening... |
-| next | [#5](https://github.com/ryo100794/pdocker-android/issues/5) Terminal `-it` interactive path: refactor the terminal stack according to `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`. The UI... |
-| doing | [#6](https://github.com/ryo100794/pdocker-android/issues/6) Service truth same-container-ID device gate: the listener health and ID/label truth work are one gate. Probe default workspace... |
-| next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) llama GPU performance workflow after Vulkan clamp: keep CPU fallback hiding Vulkan devices, force Vulkan only for measured GPU... |
-| next | [#4](https://github.com/ryo100794/pdocker-android/issues/4) MoE-aware out-of-core LLM execution and GPU residency layer: start this work in parallel with dense llama GPU correctness instead... |
+| doing | [#4](https://github.com/ryo100794/skydnir/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the Skydnir Vulkan/OpenCL bridge from discovery and model-buffer... |
+| next | [#10](https://github.com/ryo100794/skydnir/issues/10) / [#5](https://github.com/ryo100794/skydnir/issues/5) runtime teardown and terminal exec-it scheduling: gate hardening landed as... |
+| next | [#5](https://github.com/ryo100794/skydnir/issues/5) Terminal `-it` interactive path: refactor the terminal stack according to `docs/design/TERMINAL_STREAM_ARCHITECTURE.md`. The UI must... |
+| doing | [#6](https://github.com/ryo100794/skydnir/issues/6) Service truth same-container-ID device gate: the listener health and ID/label truth work are one gate. Probe default workspace `18080`... |
+| next | [#4](https://github.com/ryo100794/skydnir/issues/4) llama GPU performance workflow after Vulkan clamp: keep CPU fallback hiding Vulkan devices, force Vulkan only for measured GPU attempts... |
+| next | [#4](https://github.com/ryo100794/skydnir/issues/4) MoE-aware out-of-core LLM execution and GPU residency layer: start this work in parallel with dense llama GPU correctness instead of... |
 | next | Mobile-resource residency constraints for MoE: keep a concise design note with device RAM/headroom, thermal, storage bandwidth, SAF/app-private backing, cache eviction, and correctness... |
-| doing | [#7](https://github.com/ryo100794/pdocker-android/issues/7) Android storage metrics verification: add device smoke/manual coverage that layer, image-view, container-private, total, and... |
+| doing | [#7](https://github.com/ryo100794/skydnir/issues/7) Android storage metrics verification: add device smoke/manual coverage that layer, image-view, container-private, total, and free-space... |
 
 ## Timeline
 
@@ -66,7 +66,7 @@ UI/docs work, so the public timeline is intentionally a little conservative.
 ## llama.cpp GPU Pulse
 
 - Latest artifact: `2026-05-17T10:32:55Z`
-- GPU entry: standard Vulkan loader through pdocker-vulkan-icd.so
+- GPU entry: standard Vulkan loader through the Skydnir Vulkan ICD
 - Target met: `false`; speedup: `0.0`
 - Current blocker: Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT
 - llama.cpp modified: `false`

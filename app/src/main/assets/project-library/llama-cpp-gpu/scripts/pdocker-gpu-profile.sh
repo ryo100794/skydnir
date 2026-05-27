@@ -131,9 +131,9 @@ elif [[ "$pdocker_vulkan_icd_signal" = "true" && "${PDOCKER_VULKAN_ICD_READY:-0}
   backend="cpu"
   ngl="0"
   if [[ "$bridge_fd_signal" = "true" ]]; then
-    reason="pdocker Vulkan ICD is visible and the GPU bridge validates, but the Vulkan compute lowering is not complete yet; using CPU fallback"
+    reason="Skydnir Vulkan ICD is visible and the GPU bridge validates, but the Vulkan compute lowering is not complete yet; using CPU fallback"
   else
-    reason="pdocker Vulkan ICD is visible, but the GPU bridge is not validated yet; using CPU fallback"
+    reason="Skydnir Vulkan ICD is visible, but the GPU bridge is not validated yet; using CPU fallback"
   fi
 elif [[ "$mode" = "cuda" || "$mode" = "cuda-compat" || "${PDOCKER_CUDA_COMPAT:-}" = "1" || -e /dev/nvidia0 ]]; then
   backend="cpu"
@@ -208,7 +208,7 @@ cat > "$diagnostics" <<EOF
     "capability_probe": "$(json_escape "$bridge_probe_json")",
     "fd_vector_add_probe": "$(json_escape "$bridge_fd_probe_json")",
     "llama_backend_wired": false,
-    "kv_offload_guard": "$(json_escape "pdocker Vulkan ICD keeps llama.cpp KV cache on CPU until PDOCKER_VULKAN_ICD_READY=1 or PDOCKER_VULKAN_ALLOW_KV_OFFLOAD=1")"
+    "kv_offload_guard": "$(json_escape "Skydnir Vulkan ICD keeps llama.cpp KV cache on CPU until PDOCKER_VULKAN_ICD_READY=1 or PDOCKER_VULKAN_ALLOW_KV_OFFLOAD=1")"
   },
   "outputs": {
     "env": "$(json_escape "$out")",

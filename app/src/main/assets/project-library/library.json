@@ -3,31 +3,31 @@
   "templates": [
     {
       "id": "dev-workspace",
-      "name": "pdocker Management Workspace + code-server + Codex",
-      "category": "pdocker-management",
-      "description": "pdocker management and code-server workspace for project creation and project maintenance, building Dockerfiles, running Compose, using guarded Engine socket helpers, and working with Continue, OpenAI Codex/ChatGPT, and Claude Code.",
+      "name": "Skydnir Management Workspace + code-server + Codex",
+      "category": "skydnir-management",
+      "description": "Skydnir management and code-server workspace for project creation and project maintenance, building Dockerfiles, running Compose, using guarded Engine socket helpers, and working with Continue, OpenAI Codex/ChatGPT, and Claude Code.",
       "assetPath": "default-project",
       "projectDir": "default",
       "compose": "compose.yaml",
       "dockerfile": "Dockerfile",
       "gpu": "vulkan-cuda-compat",
-      "features": ["pdocker-management", "project-creation", "project-maintenance", "build-compose", "engine-socket-helpers", "code-server", "continue", "codex", "claude-code", "vscode-extensions", "vulkan"]
+      "features": ["skydnir-management", "project-creation", "project-maintenance", "build-compose", "engine-socket-helpers", "code-server", "continue", "codex", "claude-code", "vscode-extensions", "vulkan"]
     },
     {
       "id": "direct-runtime-probe",
-      "name": "pdocker Direct Runtime Probe",
+      "name": "Skydnir Direct Runtime Probe",
       "category": "runtime-test",
-      "description": "Small reusable test container for pdocker-direct argv, shell, proc, and large allocation guard checks without rebuilding large app images.",
+      "description": "Small reusable test container for Skydnir direct-executor argv, shell, proc, and large allocation guard checks without rebuilding large app images.",
       "assetPath": "project-library/direct-runtime-probe",
       "projectDir": "direct-runtime-probe",
       "compose": "compose.yaml",
       "dockerfile": "Dockerfile",
       "gpu": "none",
-      "features": ["pdocker-direct", "runtime-test", "argv-preservation", "memory-guard", "container-probe"]
+      "features": ["skydnir-direct", "runtime-test", "argv-preservation", "memory-guard", "container-probe"]
     },
     {
       "id": "pdocker-test-suite",
-      "name": "pdocker Test Suite",
+      "name": "Skydnir Test Suite",
       "category": "runtime-test",
       "description": "Reusable test-suite container. Start it with Compose, run scenarios through docker exec, and mirror JSON/log evidence to the selected Android Documents folder.",
       "assetPath": "project-library/pdocker-test-suite",
@@ -41,7 +41,7 @@
       "id": "llama-cpp-gpu",
       "name": "llama.cpp GPU workspace",
       "category": "ai-runtime",
-      "description": "llama.cpp server development workspace with pdocker GPU auto-profile generation for Vulkan, CUDA-compatible, or CPU fallback execution.",
+      "description": "llama.cpp server development workspace with Skydnir GPU auto-profile generation for Vulkan, CUDA-compatible, or CPU fallback execution.",
       "assetPath": "project-library/llama-cpp-gpu",
       "projectDir": "llama-cpp-gpu",
       "compose": "compose.yaml",
@@ -65,13 +65,13 @@
       "id": "blender-xvnc-novnc",
       "name": "Blender Xvnc noVNC",
       "category": "graphics",
-      "description": "Blender desktop template over Xvnc/noVNC for OpenGL and GLSL workload validation, defaulting to Mesa llvmpipe software rendering with future Zink/pdocker Vulkan switches exposed.",
+      "description": "Blender desktop template over Xvnc/noVNC for OpenGL and GLSL workload validation, defaulting to Mesa llvmpipe software rendering with future Zink/Skydnir Vulkan switches exposed.",
       "assetPath": "project-library/blender-xvnc-novnc",
       "projectDir": "blender-xvnc-novnc",
       "compose": "compose.yaml",
       "dockerfile": "Dockerfile",
       "gpu": "future-vulkan-zink",
-      "features": ["blender", "opengl", "glsl", "xvnc", "novnc", "llvmpipe", "mesa", "zink", "vulkan", "pdocker-vulkan-future"]
+      "features": ["blender", "opengl", "glsl", "xvnc", "novnc", "llvmpipe", "mesa", "zink", "vulkan", "skydnir-vulkan-future"]
     }
   ]
 }

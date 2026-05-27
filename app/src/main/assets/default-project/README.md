@@ -1,7 +1,7 @@
 # pdocker default dev workspace
 
 This is the `dev-workspace` container template in the pdocker project library.
-It is included in the APK's release assets as the default pdocker management
+It is included in the APK's release assets as the default Skydnir management
 workspace for project creation, project maintenance, Dockerfile builds, Compose
 runs, Engine socket helpers, code-server, Continue, OpenAI Codex/ChatGPT, and
 Claude Code.
@@ -83,8 +83,8 @@ Run from the pdocker UI:
 
 The app's current runtime uses host-style networking, so the code-server process
 binds to `0.0.0.0:18080` inside the container by default. The compose header
-comment `# pdocker.service-url: 18080=VS Code` labels the local browser
-shortcut without changing standard Compose behavior. `# pdocker.auto-open: VS Code`
+comment `# skydnir.service-url: 18080=VS Code` labels the local browser
+shortcut without changing standard Compose behavior. `# skydnir.auto-open: VS Code`
 marks that declared service as the one pdocker may open automatically after
 compose up.
 

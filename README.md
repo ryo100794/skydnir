@@ -61,7 +61,7 @@ The current fixed verification record is
 - `verify-fast`, scenario, and test-design gates currently fail on the
   intentional literal test-density threshold, not on APK packaging.
 - Host backend quick/full regressions currently fail because the host route
-  expects a staged `pdocker-direct` helper; the Android APK direct route is the
+  expects a staged direct-executor helper; the Android APK direct route is the
   release-blocking evidence for this build.
 
 The generated compatibility audit records `69` PASS and `0` FAIL entries, and
@@ -77,7 +77,7 @@ checkpoint truth.
 
 Android apps do not get Docker's normal toolbox: no privileged namespaces, no
 cgroups, no overlayfs mounts, no bridge network, and no raw host device access.
-pdocker treats that as the design challenge rather than hiding it.
+Skydnir treats that as the design challenge rather than hiding it.
 
 - The product APK does **not** bundle upstream Docker CLI or Compose binaries.
 - PRoot/talloc/proot-loader are **not** part of the default product APK.
@@ -86,7 +86,7 @@ pdocker treats that as the design challenge rather than hiding it.
 - Compatibility decisions are documented under `docs/design/` and verified by
   reusable tests under `docs/test/`.
 - Android-specific features, such as Vulkan/OpenCL GPU bridging and media
-  proxying through Camera2/AudioRecord/AudioTrack, are explicit pdocker
+  proxying through Camera2/AudioRecord/AudioTrack, are explicit Skydnir
   extensions rather than disguised raw `/dev` passthrough.
 
 ## Current status
@@ -118,7 +118,7 @@ compatibility counters, and TODO-linked timeline, see the generated
 The most useful current workflows are:
 
 1. Install the compat APK on an SDK28-capable test route.
-2. Start `pdockerd` from the app.
+2. Start `skydnird` from the app.
 3. Pull or build an image from the native UI.
 4. Open image/container files directly from the app.
 5. Run Compose-style project actions and watch logs in persistent job cards.
@@ -155,16 +155,16 @@ commands".
 
 Android apps do not get the kernel primitives that upstream Docker expects:
 namespaces, cgroups, overlayfs, netlink, privileged mounts, and bridge
-networking are unavailable or heavily constrained. pdocker replaces those with
+networking are unavailable or heavily constrained. Skydnir replaces those with
 userspace components:
 
-| Upstream Docker piece | pdocker approach |
+| Upstream Docker piece | Skydnir approach |
 |---|---|
-| dockerd | `pdockerd`, a Python Engine API daemon hosted through Chaquopy |
+| dockerd | `skydnird` / compatibility `pdockerd`, a Python Engine API daemon hosted through Chaquopy |
 | containerd image pull | `crane export` to tarball, then controlled extraction |
 | overlayfs snapshotter | content-addressed layer pool plus per-container upper data |
 | runc namespaces/cgroups | Android direct userspace executor and syscall mediation |
-| BuildKit | legacy-compatible builder path in pdockerd |
+| BuildKit | legacy-compatible builder path in the Skydnir daemon |
 | Docker CLI UX | native app actions, persistent job cards, and test-staged CLI only; upstream Docker CLI/Compose are not APK payloads |
 
 The runtime strategy and Android feasibility notes live in
@@ -188,7 +188,7 @@ it through environment variables:
 ```sh
 export PDOCKER_SIGNING_STORE_FILE=$HOME/.pdocker/release.jks
 export PDOCKER_SIGNING_STORE_PASSWORD=...
-export PDOCKER_SIGNING_KEY_ALIAS=pdocker
+export PDOCKER_SIGNING_KEY_ALIAS=skydnir
 export PDOCKER_SIGNING_KEY_PASSWORD=...
 PDOCKER_ANDROID_FLAVOR=compat PDOCKER_ANDROID_BUILD_TYPE=release bash scripts/build-apk.sh
 ```

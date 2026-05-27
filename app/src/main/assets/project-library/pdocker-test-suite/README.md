@@ -1,4 +1,4 @@
-# pdocker Test Suite
+# Skydnir Test Suite
 
 This template is the reusable in-container test harness for pdocker. It is
 separate from application templates such as VS Code Server, llama.cpp, ROS, or

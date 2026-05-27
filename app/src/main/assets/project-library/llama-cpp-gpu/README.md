@@ -45,7 +45,7 @@ Usage from pdocker:
 4. Run compose up and let the default Qwen3 8B GGUF download complete.
 5. Open the service on port `18081`.
 
-The compose header comment `# pdocker.service-url: 18081=llama.cpp` labels the
+The compose header comment `# skydnir.service-url: 18081=llama.cpp` labels the
 local browser shortcut without changing standard Compose behavior. A healthy
 server must make both `http://127.0.0.1:18081/health` and the browser UI at
 `http://127.0.0.1:18081/` usable.
@@ -75,14 +75,14 @@ UI should work even when an existing image was built before embedded Web UI
 assets were enabled. Override `LLAMA_EXTRA_ARGS` if you need different
 llama-server options. The template defaults `PDOCKER_GPU_MODE` to `vulkan-raw` and
 `LLAMA_ARG_N_GPU_LAYERS` to `1`. This keeps the first normal Compose run on the
-currently validated pdocker Vulkan bridge path while still proving real
+currently validated Skydnir Vulkan bridge path while still proving real
 container-side GPU offload. The template also clamps Vulkan max buffer,
 allocation, and ggml suballocation sizes to 512 MiB by default so llama.cpp's
 allocator plans match the current bridge-safe range instead of assuming a
 larger native driver allocation. Raise `LLAMA_ARG_N_GPU_LAYERS` for deeper offload
 while tuning the bridge; `2` currently reaches an Adreno pipeline compiler
 failure in one 18 KiB ggml SPIR-V shader and is tracked as bridge work.
-When the container-facing pdocker Vulkan ICD is visible but does not yet
+When the container-facing Skydnir Vulkan ICD is visible but does not yet
 advertise `PDOCKER_VULKAN_ICD_READY=1`, the entrypoint adds llama.cpp's
 standard `--no-kv-offload` option and keeps the KV cache on CPU. This avoids
 the known scheduler abort where cache tensors are reserved in an unfinished

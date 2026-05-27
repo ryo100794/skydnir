@@ -80,11 +80,16 @@ def classify(path: str, token: str, line: str) -> dict[str, Any]:
     change_allowed_now = False
     rationale = "internal name; classify manually before changing"
 
-    if path.startswith("docs/test/") or "/runs/" in path:
+    if path.startswith("docs/test/") or path.startswith("docs/release/builds/") or "/runs/" in path:
         category = "historical_evidence"
         phase = "do-not-rewrite-history"
         alias_required = False
         rationale = "committed evidence/history should remain readable"
+    elif path == "docs/manual/SKYDNIR_MIGRATION.md":
+        category = "documentation_reference"
+        phase = "phase-1-or-historical-context"
+        alias_required = False
+        rationale = "migration guide intentionally names the legacy project and aliases"
     elif path.startswith("tests/"):
         category = "test_fixture"
         phase = "phase-0-guard"
@@ -98,7 +103,7 @@ def classify(path: str, token: str, line: str) -> dict[str, Any]:
         category = "artifact_schema"
         phase = "do-not-rewrite-history"
         rationale = "schema names are compatibility contracts"
-    elif "pdockerd.sock" in lower_line or "files/pdocker" in lower_line or "/run/pdocker" in lower_line:
+    elif "pdockerd.sock" in lower_line or "files/pdocker" in lower_line or "filesdir/pdocker" in lower_line or "/run/pdocker" in lower_line:
         category = "socket_or_storage_path"
         phase = "phase-4-or-later-migration-required"
         migration_required = True
@@ -116,6 +121,11 @@ def classify(path: str, token: str, line: str) -> dict[str, Any]:
         category = "cli_command"
         phase = "phase-2-cli-alias"
         rationale = "CLI rename needs skydnir command and pdocker wrapper"
+    elif "io/github/ryo100794/pdocker" in lower_line:
+        category = "android_ui_or_package_surface"
+        phase = "phase-1-ui-copy-or-phase-4-package"
+        migration_required = True
+        rationale = "Android source path follows the current package namespace"
     elif path == "README.md" or path.startswith("docs/manual/") or path.startswith("docs/release/") or path.startswith("docs/showcase/"):
         category = "public_branding"
         phase = "phase-1-public-branding"

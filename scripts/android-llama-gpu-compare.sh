@@ -5112,7 +5112,7 @@ result = {
     "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     "policy": {
         "llama_cpp_modified": False,
-        "gpu_entry": "standard Vulkan loader through pdocker-vulkan-icd.so",
+        "gpu_entry": "standard Vulkan loader through the Skydnir Vulkan ICD",
         "target_speedup": 10.0,
     },
     "settings": {

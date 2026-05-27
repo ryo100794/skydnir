@@ -16,20 +16,20 @@ Run this in each clone:
 scripts/setup-git-worktree.sh
 ```
 
-The setup script creates `.git/info/pdocker-machine-id`, stores the same value
-in local Git config as `pdocker.machineId`, and installs a local
+The setup script creates `.git/info/skydnir-machine-id`, stores the same value
+in local Git config as `skydnir.machineId`, and installs a local
 `prepare-commit-msg` hook. The machine id is local state, not a tracked file.
 Commit messages receive these trailers:
 
 ```text
-Pdocker-Machine: pdocker-example-1a2b3c
-Pdocker-Branch: feature/example
+Skydnir-Machine: skydnir-example-1a2b3c
+Skydnir-Branch: feature/example
 ```
 
 If a more explicit name is needed, set it before setup:
 
 ```bash
-PDOCKER_MACHINE_ID=pdocker-phone-a scripts/setup-git-worktree.sh
+SKYDNIR_MACHINE_ID=skydnir-phone-a scripts/setup-git-worktree.sh
 ```
 
 ## Start-of-Work Preflight

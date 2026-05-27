@@ -5,7 +5,13 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 cd "$ROOT"
 
-machine_id="$(git config --get pdocker.machineId || true)"
+machine_id="$(git config --get skydnir.machineId || true)"
+if [[ -z "$machine_id" ]]; then
+    machine_id="$(git config --get pdocker.machineId || true)"
+fi
+if [[ -z "$machine_id" && -f .git/info/skydnir-machine-id ]]; then
+    machine_id="$(tr -d '\r\n' < .git/info/skydnir-machine-id)"
+fi
 if [[ -z "$machine_id" && -f .git/info/pdocker-machine-id ]]; then
     machine_id="$(tr -d '\r\n' < .git/info/pdocker-machine-id)"
 fi
@@ -16,7 +22,7 @@ fi
 branch="$(git branch --show-current)"
 upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
 
-echo "pdocker git preflight"
+echo "Skydnir git preflight"
 echo "  machine: $machine_id"
 echo "  branch:  ${branch:-detached}"
 echo "  upstream:${upstream:+ $upstream}"
@@ -44,4 +50,3 @@ git status --short
 echo
 echo "whitespace check:"
 git diff --check
-

@@ -1,10 +1,10 @@
-# pdocker-android Documentation
+# Skydnir Documentation
 
 Snapshot date: 2026-05-04.
 
 ## Purpose
 
-This tree contains supporting documentation for pdocker-android. It organizes
+This tree contains supporting documentation for Skydnir. It organizes
 operating manuals, architecture notes, build commands, test evidence, planning
 records, and generated public-facing summaries without duplicating the
 repository-level overview.
@@ -28,7 +28,7 @@ repository-level overview.
 Root-level standard files stay at the repository root:
 
 - [`../README.md`](../README.md): project overview and entry points.
-- [`../LICENSE`](../LICENSE): license status for original pdocker-android code.
+- [`../LICENSE`](../LICENSE): license status for original Skydnir code.
 - [`../SECURITY.md`](../SECURITY.md): vulnerability reporting and secret
   handling policy.
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md): issue, pull request, testing, and

@@ -1,4 +1,4 @@
-# pdocker-android News Timeline
+# Skydnir News Timeline
 
 Source snapshot: managed build commit `dd3ce31`, with build evidence in
 [`../release/builds/20260505.1/`](../release/builds/20260505.1/).
@@ -37,14 +37,14 @@ What remains blocked or not release-complete:
   the literal test-density gate: `43154 / 257036 = 0.168x`, below the required
   `2.0x` threshold.
 - Host backend heavy checks still fail because the repository backend path
-  expects a host-compatible `pdocker-direct` helper that is not staged there.
+  expects a host-compatible direct-executor helper that is not staged there.
 - Release APKs are unsigned by design; signing material must stay outside Git.
 - Existing Android packaging, Gradle deprecation, and native C warnings remain
   visible follow-ups, not hidden release notes.
 
 ## Current Announcement Summary
 
-pdocker-android has a fixed `20260505.1` historical build record with successful
+Skydnir has a fixed `20260505.1` historical build record with successful
 compat/modern APK outputs and a full Android smoke pass covering build,
 Compose, direct execution, logs, and a basic interactive exec path. The build
 is suitable for honest tester-facing project news, but not for a no-caveat
@@ -74,7 +74,7 @@ some warning cleanup remain open.
 
 ## Short GitHub Post Draft
 
-`pdocker-android` has a new fixed build record: `20260505.1` on the managed
+`Skydnir` has a new fixed build record: `20260505.1` on the managed
 `dd3ce31` snapshot. Compat/modern APKs build, and the 2026-05-05 Android smoke
 record passed Dockerfile build, Compose up/down, `docker exec`, and a basic
 Engine API interactive exec path on device. The remaining blockers are

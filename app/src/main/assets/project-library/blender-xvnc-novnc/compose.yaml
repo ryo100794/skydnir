@@ -1,4 +1,4 @@
-# pdocker.service-url: 18083=noVNC Blender
+# skydnir.service-url: 18083=noVNC Blender
 services:
   blender:
     build:

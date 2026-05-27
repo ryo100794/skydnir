@@ -1,4 +1,4 @@
-# pdocker.service-url: none=direct-runtime-probe
+# skydnir.service-url: none=direct-runtime-probe
 services:
   direct-runtime-probe:
     build:

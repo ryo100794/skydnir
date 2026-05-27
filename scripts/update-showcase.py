@@ -60,10 +60,33 @@ def compat_count(compat: str, label: str) -> str:
 
 def clean_item(text: str, max_len: int = 190) -> str:
     text = re.sub(r"\s+", " ", text).strip()
+    text = public_brand_text(text)
     if len(text) <= max_len:
         return text
     cut = text[:max_len].rsplit(" ", 1)[0]
     return cut.rstrip(".,;:") + "..."
+
+
+def public_brand_text(text: str) -> str:
+    """Translate old public branding in generated showcase summaries only.
+
+    Source ledgers may retain legacy names as compatibility or historical
+    evidence. Generated public pages should speak Skydnir first and link to the
+    renamed repository while the detailed source documents keep their original
+    compatibility context.
+    """
+    replacements = {
+        "https://github.com/ryo100794/pdocker-android/issues/": "https://github.com/ryo100794/skydnir/issues/",
+        "pdocker-android": "Skydnir",
+        "`pdocker-android`": "`Skydnir`",
+        "the pdocker Vulkan/OpenCL bridge": "the Skydnir Vulkan/OpenCL bridge",
+        "expanding the pdocker Vulkan": "expanding the Skydnir Vulkan",
+        "standard Vulkan loader through pdocker-vulkan-icd.so": "standard Vulkan loader through the Skydnir Vulkan ICD",
+        "pdocker-test-suite": "skydnir-test-suite",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
 
 
 def active_items(todo: str, limit: int = 10) -> list[tuple[str, str]]:
@@ -161,11 +184,11 @@ def status_table(library: dict) -> str:
     for template in library.get("templates", []):
         rows.append(
             "| {id} | {name} | {category} | {gpu} | {features} |".format(
-                id=template.get("id", ""),
-                name=template.get("name", ""),
-                category=template.get("category", ""),
+                id=public_brand_text(template.get("id", "")),
+                name=public_brand_text(template.get("name", "")),
+                category=public_brand_text(template.get("category", "")),
                 gpu=template.get("gpu", ""),
-                features=", ".join(template.get("features", [])[:5]),
+                features=public_brand_text(", ".join(template.get("features", [])[:5])),
             )
         )
     return "\n".join(rows)
@@ -182,7 +205,7 @@ def llama_section(llama: dict) -> str:
     target = comparison.get("target_met", False)
     blocker = llama.get("next_blocker") or diagnostics.get("blocker_detail") or "unknown"
     timestamp = llama.get("timestamp_utc", "unknown")
-    entry = policy.get("gpu_entry", "unknown")
+    entry = public_brand_text(policy.get("gpu_entry", "unknown"))
     return "\n".join(
         [
             f"- Latest artifact: `{timestamp}`",
@@ -213,14 +236,14 @@ def render_dashboard() -> str:
 Source snapshot: `{snapshot_date(readme, status, todo, compat, json.dumps(llama))}`.
 Repository reference: source-controlled generated snapshot.
 
-This page is the GitHub-facing status board for pdocker-android. It is generated
+This page is the GitHub-facing status board for Skydnir. It is generated
 from repository-owned documents so the public story follows the implementation
 instead of drifting into a separate marketing copy.
 
 ## Product Signal
 
-pdocker-android is a Docker-compatible Android workbench packaged as a native
-APK. It combines `pdockerd`, Compose/Dockerfile controls, image/container file
+Skydnir is a Docker-compatible Android workbench packaged as a native
+APK. It combines `skydnird` / compatibility `pdockerd`, Compose/Dockerfile controls, image/container file
 browsing, persistent logs, editor tabs, and `-it`-style terminals inside the
 app UI. The current research front is real Android direct execution plus
 Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
@@ -333,7 +356,7 @@ Use this page as the source for public roadmap posts:
 
 def render_wiki_home() -> str:
     library = load_library()
-    return f"""# pdocker-android Wiki Home
+    return f"""# Skydnir Wiki Home
 
 {GENERATED}
 
@@ -353,14 +376,14 @@ the Wiki `Home.md`; do not make the Wiki the only copy of product facts.
 
 ## Current Public Message
 
-pdocker-android explores Docker-compatible workflows inside a normal Android
+Skydnir explores Docker-compatible workflows inside a normal Android
 APK: Engine API behavior, Compose/Dockerfile UI, image/container files,
 persistent logs, terminals, editor tabs, VS Code Server, llama.cpp, and
 Android-specific GPU/media bridge work.
 
 ## Template Library
 
-{chr(10).join(f"- `{t.get('id')}`: {t.get('name')}" for t in library.get("templates", []))}
+{chr(10).join(f"- `{public_brand_text(t.get('id', ''))}`: {public_brand_text(t.get('name', ''))}" for t in library.get("templates", []))}
 
 ## Wiki Sync Rule
 

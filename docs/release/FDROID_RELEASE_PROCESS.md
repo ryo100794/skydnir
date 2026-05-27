@@ -3,7 +3,7 @@
 Snapshot date: 2026-05-19.
 
 This document is a readiness plan for CI and F-Droid-style release builds. It
-does not claim that pdocker-android is ready for F-Droid submission. Treat it as
+does not claim that Skydnir is ready for F-Droid submission. Treat it as
 the checklist for making future release recipes auditable, source-based, and
 repeatable.
 

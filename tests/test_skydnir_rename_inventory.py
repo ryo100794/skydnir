@@ -42,7 +42,6 @@ class SkydnirRenameInventoryTest(unittest.TestCase):
         for token in ["pdocker", "pdockerd", "PDOCKER", "pdocker-android"]:
             self.assertIn(token, data["counts"]["by_token"])
         for category in [
-            "public_branding",
             "cli_command",
             "daemon_binary_or_service",
             "environment_variable",
@@ -51,6 +50,7 @@ class SkydnirRenameInventoryTest(unittest.TestCase):
             "historical_evidence",
         ]:
             self.assertIn(category, data["counts"]["by_category"])
+        self.assertEqual(0, data["counts"]["by_category"].get("public_branding", 0))
         self.assertIn("Do not rename `environment_variable`", md)
 
     def test_committed_inventory_is_current_phase_zero_evidence(self):
@@ -60,7 +60,7 @@ class SkydnirRenameInventoryTest(unittest.TestCase):
         self.assertEqual("skydnir.rename.inventory.v1", data["schema"])
         self.assertEqual("2026-05-27", data["snapshot_date"])
         self.assertEqual(data["entry_count"], sum(data["counts"]["by_token"].values()))
-        self.assertIn("phase-1-public-branding", data["counts"]["by_phase"])
+        self.assertEqual(0, data["counts"]["by_phase"].get("phase-1-public-branding", 0))
         self.assertIn("phase-5-dual-read-required", data["counts"]["by_phase"])
         self.assertIn("Skydnir Rename Inventory", md)
 

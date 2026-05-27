@@ -1,4 +1,4 @@
-# pdocker.service-url: 18082=noVNC RViz
+# skydnir.service-url: 18082=noVNC RViz
 services:
   ros2-rviz:
     build:

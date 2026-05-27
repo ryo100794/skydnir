@@ -1,4 +1,4 @@
-# pdocker.service-url: none=pdocker test suite
+# skydnir.service-url: none=Skydnir test suite
 services:
   pdocker-test-suite:
     build:

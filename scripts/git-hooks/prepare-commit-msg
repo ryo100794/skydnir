@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# Append local pdocker machine trailers to commit messages.
+# Append local Skydnir machine trailers to commit messages.
 set -euo pipefail
 
 msg_file="${1:-}"
 [[ -n "$msg_file" && -f "$msg_file" ]] || exit 0
 
-if grep -q '^Pdocker-Machine:' "$msg_file"; then
+if grep -Eq '^(Skydnir|Pdocker)-Machine:' "$msg_file"; then
     exit 0
 fi
 
 git_dir="$(git rev-parse --git-dir 2>/dev/null || true)"
-machine_id="$(git config --get pdocker.machineId || true)"
+machine_id="$(git config --get skydnir.machineId || true)"
+if [[ -z "$machine_id" ]]; then
+    machine_id="$(git config --get pdocker.machineId || true)"
+fi
+if [[ -z "$machine_id" && -n "$git_dir" && -f "$git_dir/info/skydnir-machine-id" ]]; then
+    machine_id="$(tr -d '\r\n' < "$git_dir/info/skydnir-machine-id")"
+fi
 if [[ -z "$machine_id" && -n "$git_dir" && -f "$git_dir/info/pdocker-machine-id" ]]; then
     machine_id="$(tr -d '\r\n' < "$git_dir/info/pdocker-machine-id")"
 fi
@@ -21,7 +27,6 @@ branch="$(git branch --show-current 2>/dev/null || true)"
 
 {
     printf '\n'
-    printf 'Pdocker-Machine: %s\n' "$machine_id"
-    printf 'Pdocker-Branch: %s\n' "$branch"
+    printf 'Skydnir-Machine: %s\n' "$machine_id"
+    printf 'Skydnir-Branch: %s\n' "$branch"
 } >> "$msg_file"
-

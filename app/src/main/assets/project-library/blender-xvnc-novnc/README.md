@@ -2,7 +2,7 @@
 
 Ubuntu 24.04 workspace with Blender, Xvnc, noVNC, Matchbox, and Mesa graphics diagnostics for OpenGL/GLSL workloads.
 
-The compose header comment `# pdocker.service-url: 18083=noVNC Blender` labels
+The compose header comment `# skydnir.service-url: 18083=noVNC Blender` labels
 the local browser shortcut. Open noVNC at port `18083`; direct VNC clients can
 connect to host port `15901`.
 
@@ -23,7 +23,7 @@ The default graphics path is Mesa software rendering:
 - `PDOCKER_GL_BACKEND=llvmpipe`
 - `PDOCKER_GRAPHICS_MODE=software`
 
-Future Zink/pdocker Vulkan validation can be staged by setting
+Future Zink/Skydnir Vulkan validation can be staged by setting
 `PDOCKER_GL_BACKEND=zink-experimental`. Optional lower-level switches include
 `PDOCKER_ZINK_EXPERIMENTAL`, `LIBGL_ALWAYS_SOFTWARE`, `GALLIUM_DRIVER`,
 `MESA_LOADER_DRIVER_OVERRIDE`, `VK_ICD_FILENAMES`, or

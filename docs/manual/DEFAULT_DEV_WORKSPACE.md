@@ -25,7 +25,7 @@ the workspace, use [`PROMOTION.md`](PROMOTION.md).
 
 ## Included Container Stack
 
-The default Dockerfile builds `pdocker/dev-workspace:latest` from Ubuntu 22.04
+The default Dockerfile builds `skydnir/dev-workspace:latest` from Ubuntu 22.04
 and installs:
 
 - code-server, used as a VS Code-compatible browser IDE server.
@@ -60,10 +60,10 @@ default-project/
 
 - `compose.yaml` starts code-server on `0.0.0.0:18080`, offset from common
   Android/Termux development ports.
-- The compose header includes `# pdocker.service-url: 18080=VS Code`. Skydnir
+- The compose header includes `# skydnir.service-url: 18080=VS Code`. Skydnir
   reads this comment as UI metadata and uses it to label the browser shortcut;
   the Compose service definition remains standard.
-- The header also includes `# pdocker.auto-open: VS Code`, which asks Skydnir to
+- The header also includes `# skydnir.auto-open: VS Code`, which asks Skydnir to
   open that declared service after compose up reports a healthy listener.
 - `compose.yaml` requests `gpus: all`, which maps to Skydnir's experimental
   Vulkan passthrough / CUDA-compatible API negotiation.
@@ -78,7 +78,7 @@ default-project/
   listing, existence checks, and payload reads/writes. The mirror path is what
   Compose binds into containers; the selected SAF tree remains a mediated
   exchange endpoint rather than a fake `/storage/...` bind. Files written under
-  `/documents/pdocker-exports/` are buffered through the mirror and then evicted
+  `/documents/skydnir-exports/` are buffered through the mirror and then evicted
   from app-private payload storage after the mediator successfully writes them
   to the selected Documents tree; the app keeps sidecar metadata for Unix-like
   mode, timestamp, MIME type, and payload state.
@@ -101,7 +101,7 @@ default-project/
   local-only development convenience. Set `CODE_SERVER_PASSWORD` before exposing
   the service outside the device.
 - Skydnir's current networking model is host-style. Container cards expose
-  local browser URLs from Compose ports and `pdocker.service-url` header
+  local browser URLs from Compose ports and `skydnir.service-url` header
   comments.
 
 ## Canonical Sources

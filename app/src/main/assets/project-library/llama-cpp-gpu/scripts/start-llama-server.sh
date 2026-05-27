@@ -71,7 +71,7 @@ if [[ "${LLAMA_GPU_BACKEND:-}" = "vulkan" \
     extra_args="--no-kv-offload ${extra_args}"
     kv_offload_guard_added_arg=1
   fi
-  echo "pdocker: disabling llama.cpp KV cache offload for unfinished pdocker Vulkan ICD; set PDOCKER_VULKAN_ALLOW_KV_OFFLOAD=1 to override"
+  echo "Skydnir: disabling llama.cpp KV cache offload for unfinished Skydnir Vulkan ICD; set PDOCKER_VULKAN_ALLOW_KV_OFFLOAD=1 to override"
 fi
 
 mkdir -p "$(dirname "$startup_json")"

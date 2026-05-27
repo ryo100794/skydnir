@@ -9,7 +9,7 @@ Canonical build evidence: [`builds/20260505.1/README.md`](builds/20260505.1/READ
 ## Summary
 
 Build `20260505.1` is the current fixed Android build record for
-pdocker-android. It advances the public status to `versionName` `0.5.3` /
+Skydnir. It advances the public status to `versionName` `0.5.3` /
 `versionCode` `24` and records successful compat and modern APK outputs.
 
 The strongest historical release-news signal is the Android full smoke pass:
@@ -48,7 +48,7 @@ promotion artifacts.
 - Add enough recorded C0/C1/C2 and semantic test material to pass the
   test-density gate, or explicitly revise the threshold as a project decision.
 - Split host backend verification into metadata-only and process-exec lanes, or
-  stage a host-compatible `pdocker-direct` helper before requiring container
+  stage a host-compatible direct-executor helper before requiring container
   execution in that lane.
 - Keep `verify-heavy-android-full.log` as historical build evidence for
   20260505.1. Do not treat it as current stable/release-promoting evidence for

@@ -51,7 +51,7 @@ release notes, and demo captions until a newer verification record replaces
 - `verify-fast`, scenario, and test-design logs currently fail at the
   intentional literal test-density gate.
 - Host backend quick/full logs currently fail because the repository host path
-  expects a staged `pdocker-direct` helper; do not describe that lane as green.
+  expects a staged direct-executor helper; do not describe that lane as green.
 - The literal test-density gate is still open; describe it as an explicit
   quality/process blocker, not as an APK smoke failure.
 - The compatibility audit records 69 PASS / 0 FAIL static and packaging checks,
@@ -239,7 +239,7 @@ up/down, `docker exec`, and a basic Engine API `exec -it` path. The honest
 caveat: current terminal/service-truth/teardown promotion gates still need
 fresh named device evidence, fast/design gates still fail on the current
 literal test-density threshold, and host backend regression needs its
-`pdocker-direct` helper lane split or staged.
+direct-executor helper lane split or staged.
 
 ### Tester call
 

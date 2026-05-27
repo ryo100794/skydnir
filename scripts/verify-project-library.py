@@ -115,7 +115,7 @@ def main() -> int:
         "compare script records 10x target": '"target_speedup": 10.0' in compare_script and "target_tps = cpu_tps * 10.0" in compare_script,
         "compare script gates Vulkan allocation trace": "--trace-alloc" in compare_script and "PDOCKER_VULKAN_ICD_TRACE_ALLOC" in json.dumps(env_manifest.get("compare_mode_env_profiles", {})) and "allocation_trace_bytes" in compare_script,
         "compare script rejects one-token invalid timing": "--predict must be an integer >= 2" in compare_script,
-        "compare script uses standard Vulkan entry": "standard Vulkan loader through pdocker-vulkan-icd.so" in compare_script,
+        "compare script uses standard Vulkan entry": "standard Vulkan loader through the Skydnir Vulkan ICD" in compare_script,
         "compare script classifies dispatch blocker": "queue_submit_blocker" in compare_script and "vk::Queue::submit: ErrorFeatureNotPresent" in compare_script,
         "compare script classifies generic spirv blocker": "generic_spirv_dispatch_attempted" in compare_script and "vulkan_generic_spirv_dispatch" in compare_script and "executor_submit_generic_dispatch_error" in compare_script,
         "compare script separates gpu failure axes": '"failure_axes": failure_axes' in compare_script and '"advertised_limits": advertised_limits' in compare_script and '"chunking_pressure": chunking_pressure' in compare_script and '"generic_spirv_dispatch": generic_spirv_dispatch' in compare_script,
@@ -270,8 +270,8 @@ def main() -> int:
         ]
     ).lower()
     for token in (
-        "pdocker-management",
-        "pdocker management",
+        "skydnir-management",
+        "skydnir management",
         "project-creation",
         "project creation",
         "project-maintenance",
@@ -312,8 +312,8 @@ def main() -> int:
         "ANTHROPIC_API_KEY",
         "gpus: all",
         "18080:18080",
-        "# pdocker.service-url: 18080=VS Code",
-        "# pdocker.auto-open: VS Code",
+        "# skydnir.service-url: 18080=VS Code",
+        "# skydnir.auto-open: VS Code",
     ):
         if token not in dev_compose + dev_dockerfile + dev_workspace_extensions:
             fail(f"dev-workspace missing {token}")
@@ -357,7 +357,7 @@ def main() -> int:
         "library container template",
         "release assets",
         "available in release builds",
-        "pdocker management",
+        "Skydnir management",
         "project creation",
         "project maintenance",
         "Dockerfile builds",
@@ -378,7 +378,7 @@ def main() -> int:
     ):
         if secret_token not in dev_readme:
             fail(f"dev-workspace README must document per-user auth token {secret_token}")
-    ok("dev-workspace exposes pdocker management helpers, paths, guarded Engine wrappers, and tasks")
+    ok("dev-workspace exposes Skydnir management helpers, paths, guarded Engine wrappers, and tasks")
 
     llama = templates["llama-cpp-gpu"]
     llama_root = ASSETS / llama["assetPath"]
@@ -407,7 +407,7 @@ def main() -> int:
         "Dockerfile llama healthcheck": "HEALTHCHECK" in llama_dockerfile and "/health" in llama_dockerfile and "/v1/models" in llama_dockerfile,
         "profile Vulkan detection": "PDOCKER_VULKAN_PASSTHROUGH" in profile,
         "profile CUDA compat detection": "PDOCKER_CUDA_COMPAT" in profile,
-        "profile gates unfinished pdocker Vulkan before CUDA compat": profile.find('pdocker_vulkan_icd_signal" = "true"') < profile.find('mode" = "cuda"'),
+        "profile gates unfinished Skydnir Vulkan before CUDA compat": profile.find('pdocker_vulkan_icd_signal" = "true"') < profile.find('mode" = "cuda"'),
         "profile CPU fallback": re.search(r'backend="cpu"', profile) is not None,
         "profile diagnostics json": "-diagnostics.json" in profile and '"signals"' in profile and "json_escape" in profile,
         "profile quotes extra args for source": "shell_quote" in profile and 'LLAMA_EXTRA_ARGS=$(shell_quote "$extra")' in profile,
@@ -416,9 +416,9 @@ def main() -> int:
         "start hides gpu env during cpu fallback": 'LLAMA_GPU_BACKEND:-cpu' in start and 'export GGML_VK_VISIBLE_DEVICES=""' in start and "unset VK_ICD_FILENAMES" in start and "unset OCL_ICD_VENDORS" in start,
         "start passes gpu layers": "--n-gpu-layers" in start,
         "llama default gpu layers use validated bridge path": 'LLAMA_ARG_N_GPU_LAYERS: "${LLAMA_ARG_N_GPU_LAYERS:-1}"' in llama_compose and "LLAMA_ARG_N_GPU_LAYERS:-2" not in llama_compose,
-        "start guards unfinished pdocker Vulkan KV offload": "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in llama_compose and "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in start and "PDOCKER_VULKAN_ICD_READY" in start and "LLAMA_ARG_KV_OFFLOAD=0" in start and "--no-kv-offload" in start,
+        "start guards unfinished Skydnir Vulkan KV offload": "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in llama_compose and "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in start and "PDOCKER_VULKAN_ICD_READY" in start and "LLAMA_ARG_KV_OFFLOAD=0" in start and "--no-kv-offload" in start,
         "llama default port offset": "18081:18081" in llama_compose and "18081" in start,
-        "llama service shortcut comment": "# pdocker.service-url: 18081=llama.cpp" in llama_compose,
+        "llama service shortcut comment": "# skydnir.service-url: 18081=llama.cpp" in llama_compose,
         "llama default 8b model": "Qwen/Qwen3-8B-GGUF" in llama_compose and "Qwen3-8B-Q4_K_M.gguf" in llama_compose,
         "llama optional model download": "LLAMA_MODEL_URL" in llama_compose and "curl -fL" in start and "-C -" in start,
         "llama default chat template": "--jinja" in start,
@@ -446,7 +446,7 @@ def main() -> int:
         and ros.get("gpu") == "none"
         and "rviz" in ros.get("features", [])
         and "novnc" in ros.get("features", []),
-        "ros compose service shortcut comment": "# pdocker.service-url: 18082=noVNC RViz" in ros_compose,
+        "ros compose service shortcut comment": "# skydnir.service-url: 18082=noVNC RViz" in ros_compose,
         "ros compose avoids existing browser ports": "18080:" not in ros_compose and "18081:" not in ros_compose,
         "ros compose noVNC port": "18082:6080" in ros_compose,
         "ros compose VNC port": "15900:5900" in ros_compose,
@@ -556,7 +556,7 @@ def main() -> int:
     blender_expectations = {
         "blender template metadata": blender.get("category") == "graphics"
         and blender.get("gpu") == "future-vulkan-zink",
-        "blender compose service shortcut comment": "# pdocker.service-url: 18083=noVNC Blender" in blender_compose,
+        "blender compose service shortcut comment": "# skydnir.service-url: 18083=noVNC Blender" in blender_compose,
         "blender compose avoids existing browser ports": "18080:" not in blender_compose
         and "18081:" not in blender_compose
         and "18082:" not in blender_compose,
@@ -622,7 +622,7 @@ def main() -> int:
         and "GALLIUM_DRIVER=llvmpipe" in blender_readme
         and "PDOCKER_GL_BACKEND=llvmpipe" in blender_readme
         and "Mesa software rendering" in blender_readme,
-        "blender docs document future Zink/Vulkan caveat": "Future Zink/pdocker Vulkan validation" in blender_readme
+        "blender docs document future Zink/Vulkan caveat": "Future Zink/Skydnir Vulkan validation" in blender_readme
         and "PDOCKER_GL_BACKEND=zink-experimental" in blender_readme
         and "does not claim Vulkan/Zink acceleration works" in blender_readme,
         "blender workspace notes graphics assets": "GLSL/OpenGL" in blender_workspace_readme,

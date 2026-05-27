@@ -7,10 +7,10 @@ worktree.
 
 | Hook | Installed by | Role |
 |---|---|---|
-| `prepare-commit-msg` | `scripts/setup-git-worktree.sh` | Appends `Pdocker-Machine` and `Pdocker-Branch` trailers unless they are already present. |
+| `prepare-commit-msg` | `scripts/setup-git-worktree.sh` | Appends `Skydnir-Machine` and `Skydnir-Branch` trailers unless Skydnir or legacy pdocker trailers are already present. |
 
-Local machine identity remains untracked. The hook reads `pdocker.machineId`
-from Git config or `.git/info/pdocker-machine-id`; do not commit generated
+Local machine identity remains untracked. The hook reads `skydnir.machineId`
+from Git config or `.git/info/skydnir-machine-id`, with legacy pdocker fallbacks; do not commit generated
 machine-id state.
 
 See [`../../docs/manual/GIT_COLLABORATION.md`](../../docs/manual/GIT_COLLABORATION.md)

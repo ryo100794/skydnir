@@ -142,7 +142,7 @@ unsupported/experimental wording.
 
 ### Public claims and README
 
-- [x] Describe pdocker as a Docker-shaped Android workspace, not Docker Desktop
+- [x] Describe Skydnir as a Docker-shaped Android workspace, not Docker Desktop
   parity.
 - [x] State that upstream Docker CLI/Compose, PRoot, proot-loader, and talloc
   are not bundled in the default product APK; keep detailed distribution policy
@@ -224,7 +224,7 @@ A release candidate can be proposed only when:
 
 Use this framing until the checklist closes:
 
-> pdocker-android is an engineering preview of a Docker-shaped Android
+> Skydnir is an engineering preview of a Docker-shaped Android
 > workspace. It can demonstrate native UI image/build/Compose flows, Engine API
 > compatibility work, rootfs browsing, persistent logs/terminals, and direct
 > runtime experiments on real devices. Some release-critical correctness and
