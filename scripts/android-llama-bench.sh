@@ -24,7 +24,7 @@ CPU fallback and future GPU passthrough runs can be compared directly.
 
 Environment:
   ADB                         adb executable (default: adb)
-  PDOCKER_PACKAGE             package name (default: $PKG)
+  SKYDNIR_PACKAGE             package name (PDOCKER_PACKAGE is still accepted; default: $PKG)
   PDOCKER_LLAMA_LOCAL_PORT    host forward port (default: $LOCAL_PORT)
   PDOCKER_LLAMA_REMOTE_PORT   device server port (default: $REMOTE_PORT)
   PDOCKER_LLAMA_BENCH_PREDICT generated tokens per run (default: $PREDICT)

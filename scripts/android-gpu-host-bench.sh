@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
 PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
-CLASS_PREFIX="${PDOCKER_CLASS_PREFIX:-io.github.ryo100794.pdocker}"
+CLASS_PREFIX="${SKYDNIR_CLASS_PREFIX:-${PDOCKER_CLASS_PREFIX:-io.github.ryo100794.pdocker}}"
 RUNS="${PDOCKER_GPU_HOST_RUNS:-5}"
 OUT_JSON="${PDOCKER_GPU_HOST_OUT:-$ROOT/docs/test/gpu-host-native-latest.json}"
 OUT_MD="${PDOCKER_GPU_HOST_MD:-$ROOT/docs/test/gpu-host-native-latest.md}"
@@ -22,7 +22,8 @@ Usage: android-gpu-host-bench.sh [--runs N] [--out PATH] [--markdown PATH]
 Environment:
   ADB                         adb executable, default: adb
   ANDROID_SERIAL              adb serial, honored by adb
-  PDOCKER_PACKAGE             package name, default: io.github.ryo100794.pdocker.compat
+  SKYDNIR_PACKAGE             package name (PDOCKER_PACKAGE is still accepted), default: io.github.ryo100794.pdocker.compat
+  SKYDNIR_CLASS_PREFIX        instrumentation class prefix (PDOCKER_CLASS_PREFIX is still accepted)
   PDOCKER_GPU_HOST_RUNS       default run count
   PDOCKER_GPU_HOST_OUT        default JSON output path
   PDOCKER_GPU_HOST_MD         default Markdown output path

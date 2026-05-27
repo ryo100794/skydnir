@@ -368,7 +368,10 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
             self.assertIn(f'"{name}": false', evidence_block.group("body"))
         self.assertIn("clear_ui_it_selftest_artifacts", skip_function)
         self.assertIn("engine-exec-input-latest.jsonl", script)
-        self.assertIn('SMOKE_ARTIFACT_DIR_RESOLVED="${PDOCKER_SMOKE_ARTIFACT_DIR:-', script)
+        self.assertIn(
+            'SMOKE_ARTIFACT_DIR_RESOLVED="${SKYDNIR_SMOKE_ARTIFACT_DIR:-${PDOCKER_SMOKE_ARTIFACT_DIR:-',
+            script,
+        )
         self.assertNotIn('SMOKE_ARTIFACT_DIR_RESOLVED="$ROOT/tmp/device-smoke-artifacts/$(date', skip_function)
         self.assertIn("Ctrl-C must be an isolated ETX byte", script)
         self.assertIn("IME Enter must be proven by exactly one Enter byte", script)
@@ -378,7 +381,7 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
         timestamp_expr = "$(date -u +%Y%m%dT%H%M%SZ)"
         self.assertEqual(1, script.count(timestamp_expr))
         self.assertIn(
-            'SMOKE_ARTIFACT_DIR_RESOLVED="${PDOCKER_SMOKE_ARTIFACT_DIR:-$ROOT/tmp/device-smoke-artifacts/$(date -u +%Y%m%dT%H%M%SZ)}"\n',
+            'SMOKE_ARTIFACT_DIR_RESOLVED="${SKYDNIR_SMOKE_ARTIFACT_DIR:-${PDOCKER_SMOKE_ARTIFACT_DIR:-$ROOT/tmp/device-smoke-artifacts/$(date -u +%Y%m%dT%H%M%SZ)}}"\n',
             script,
         )
 
@@ -391,7 +394,7 @@ class TerminalExecItArtifactVerifierTest(unittest.TestCase):
                 body = smoke_script_function(script, name)
                 self.assertIn('dest_dir="$(smoke_artifact_dir)"', body)
                 self.assertNotIn(timestamp_expr, body)
-                self.assertNotIn("PDOCKER_SMOKE_ARTIFACT_DIR:-", body)
+                self.assertNotIn("SMOKE_ARTIFACT_DIR:-", body)
 
 
 if __name__ == "__main__":

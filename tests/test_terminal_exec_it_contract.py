@@ -216,6 +216,7 @@ class TerminalExecItContractTest(unittest.TestCase):
         self.assertIn("ACTION_PREFIX.action.SMOKE_UI_IT_SELFTEST", self.android_smoke)
         self.assertIn("PDOCKER_UI_IT_SELFTEST_CONTAINER", self.android_smoke)
         self.assertIn("PDOCKER_UI_IT_SELFTEST_REQUIRE_CONTAINER", self.android_smoke)
+        self.assertIn("SKYDNIR_SMOKE_ARTIFACT_DIR", self.android_smoke)
         self.assertIn("PDOCKER_SMOKE_ARTIFACT_DIR", self.android_smoke)
         self.assertIn("collect_ui_it_selftest_artifacts", self.android_smoke)
         self.assertIn("validate_ui_it_selftest_artifact", self.android_smoke)

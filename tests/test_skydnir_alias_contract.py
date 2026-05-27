@@ -328,6 +328,11 @@ class SkydnirAliasContractTest(unittest.TestCase):
         self.assertIn('APK="${SKYDNIR_APK:-${PDOCKER_APK:-$DEFAULT_APK}}"', android_selfdebug)
         self.assertIn("export SKYDNIR_PACKAGE", android_selfdebug)
 
+        gpu_compare = (ROOT / "scripts" / "android-gpu-compare-bench.sh").read_text(encoding="utf-8")
+        gpu_host = (ROOT / "scripts" / "android-gpu-host-bench.sh").read_text(encoding="utf-8")
+        self.assertIn('CLASS_PREFIX="${SKYDNIR_CLASS_PREFIX:-${PDOCKER_CLASS_PREFIX:-io.github.ryo100794.pdocker}}"', gpu_compare)
+        self.assertIn('CLASS_PREFIX="${SKYDNIR_CLASS_PREFIX:-${PDOCKER_CLASS_PREFIX:-io.github.ryo100794.pdocker}}"', gpu_host)
+
     def test_documents_env_dual_writes_skydnir_and_pdocker_aliases(self):
         main = MAIN_ACTIVITY.read_text(encoding="utf-8")
         pdockerd = PDOCKERD.read_text(encoding="utf-8")

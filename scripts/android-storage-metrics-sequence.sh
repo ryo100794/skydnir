@@ -30,7 +30,7 @@ Options:
   --workdir PATH    scratch directory for baseline/log evidence
   --adb PATH        adb executable (default: ADB env or adb)
   --serial SERIAL   adb serial passed through a temporary wrapper
-  --package NAME    Android package (default: PDOCKER_ANDROID_PACKAGE or compat package)
+  --package NAME    Android package (default: SKYDNIR_ANDROID_PACKAGE/SKYDNIR_PACKAGE or compat package)
   --verify PATH     verify-storage-metrics.py path
   --socket NAME     pdockerd socket relative to files/pdocker (default: pdockerd.sock)
   --timeout SEC     nc timeout forwarded to verify-storage-metrics.py (default: 5)

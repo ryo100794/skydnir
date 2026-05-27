@@ -19,7 +19,7 @@ not start pdockerd or containers, and does not force-stop user apps.
 Environment:
   ADB                                      adb binary/path (default: adb)
   ANDROID_SERIAL                           passed through to adb, if set
-  PDOCKER_PACKAGE                          app package for run-as probes
+  SKYDNIR_PACKAGE                          app package for run-as probes (PDOCKER_PACKAGE is still accepted)
   PDOCKER_LLAMA_CONTAINER                  container name hint
   PDOCKER_DEVICE_MEMORY_DIAGNOSTICS_OUT    default output path
 EOF_USAGE
@@ -263,6 +263,7 @@ def parse_process_rows(raw: str, source: str) -> list[dict[str, object]]:
             name = parts[-1]
             args = clean
         lowered = clean.lower()
+        skydnir_hint = "skydnir" in lowered or "pdocker" in lowered or pkg.lower() in lowered
         rows.append({
             "source": source,
             "pid": pid,
@@ -272,7 +273,8 @@ def parse_process_rows(raw: str, source: str) -> list[dict[str, object]]:
             "raw": clean[:500],
             "rss_mb": round(rss_kb / 1024.0, 1) if rss_kb is not None else None,
             "vsz_mb": round(vsz_kb / 1024.0, 1) if vsz_kb is not None else None,
-            "pdocker_hint": "pdocker" in lowered or pkg.lower() in lowered,
+            "skydnir_hint": skydnir_hint,
+            "pdocker_hint": skydnir_hint,
             "llama_hint": "llama" in lowered or container.lower() in lowered,
         })
     return rows
@@ -286,13 +288,15 @@ def parse_proc_status(raw: str) -> list[dict[str, object]]:
             continue
         m = re.match(r"^(\d+)\s+VmRSS:\s+(\d+)\s+kB\s+(.*)$", clean)
         if m:
+            skydnir_hint = "skydnir" in clean.lower() or "pdocker" in clean.lower() or pkg.lower() in clean.lower()
             rows.append({
                 "source": "proc-status",
                 "pid": m.group(1),
                 "rss_mb": round(int(m.group(2)) / 1024.0, 1),
                 "args": m.group(3)[:500],
                 "raw": clean[:500],
-                "pdocker_hint": "pdocker" in clean.lower() or pkg.lower() in clean.lower(),
+                "skydnir_hint": skydnir_hint,
+                "pdocker_hint": skydnir_hint,
                 "llama_hint": "llama" in clean.lower() or container.lower() in clean.lower(),
             })
         else:
@@ -315,7 +319,7 @@ proc_status = parse_proc_status(read("proc_status"))
 combined = all_processes + app_processes + proc_status
 pdocker_related = [
     row for row in combined
-    if bool(row.get("pdocker_hint")) or bool(row.get("llama_hint"))
+    if bool(row.get("skydnir_hint")) or bool(row.get("pdocker_hint")) or bool(row.get("llama_hint"))
 ]
 # Preserve unique raw rows while combining adb, run-as, and /proc views.
 unique: list[dict[str, object]] = []

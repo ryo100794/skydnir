@@ -24,7 +24,7 @@ pdocker-direct. This avoids APK rebuilds and large image rebuilds.
 Environment:
   ADB_SERIAL        adb serial, for example 10.8.135.134:37669
   ADB               adb executable (default: adb)
-  PDOCKER_PACKAGE   Android package (default: $PKG)
+  SKYDNIR_PACKAGE   Android package (PDOCKER_PACKAGE is still accepted; default: $PKG)
 
 Examples:
   ADB_SERIAL=10.8.135.134:37669 $0 --container pdocker-llama-cpp --memory-guard
@@ -100,7 +100,8 @@ state = json.loads(os.environ["STATE_JSON"])
 storage = state.get("Storage") or {}
 mode = storage.get("Mode") or "libcow"
 cid = state["Id"]
-base = f"/data/user/0/{os.environ.get('PDOCKER_PACKAGE', 'io.github.ryo100794.pdocker.compat')}/files/pdocker/containers/{cid}"
+pkg = os.environ.get("SKYDNIR_PACKAGE") or os.environ.get("PDOCKER_PACKAGE") or "io.github.ryo100794.pdocker.compat"
+base = f"/data/user/0/{pkg}/files/pdocker/containers/{cid}"
 if mode == "cow_bind":
     rootfs = storage.get("LowerDir") or f"{base}/rootfs"
     upper = storage.get("UpperDir") or ""

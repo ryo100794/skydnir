@@ -88,7 +88,7 @@ class TestDriverManifestTest(unittest.TestCase):
 
         service_cmd = lanes["android-service-truth"]["commands"][0]["shell"]
         self.assertIn("rm -f docs/test/service-truth-latest.json", service_cmd)
-        self.assertIn("PDOCKER_SMOKE_ARTIFACT_DIR=docs/test", service_cmd)
+        self.assertIn("SKYDNIR_SMOKE_ARTIFACT_DIR=docs/test", service_cmd)
         self.assertIn("--service-truth default-workspace", service_cmd)
         self.assertIn('test "$rc" -eq 2', service_cmd)
         self.assertIn("service truth scaffold must remain planned-gap Success=false", service_cmd)

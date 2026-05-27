@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
 PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
-CLASS_PREFIX="${PDOCKER_CLASS_PREFIX:-io.github.ryo100794.pdocker}"
+CLASS_PREFIX="${SKYDNIR_CLASS_PREFIX:-${PDOCKER_CLASS_PREFIX:-io.github.ryo100794.pdocker}}"
 RUNS="${1:-${PDOCKER_GPU_COMPARE_RUNS:-10}}"
 WARMUP_DISCARD="${PDOCKER_GPU_COMPARE_WARMUP_DISCARD:-3}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"

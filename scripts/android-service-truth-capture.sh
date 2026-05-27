@@ -17,7 +17,7 @@ Concrete command path for collecting service-truth device evidence.  The script
 is safe in hosts without adb when --print-plan is used; without --print-plan it
 requires adb and a connected device and delegates to:
 
-  PDOCKER_SMOKE_ARTIFACT_DIR=<dir> bash scripts/android-device-smoke.sh --no-install --service-truth <target>
+  SKYDNIR_SMOKE_ARTIFACT_DIR=<dir> bash scripts/android-device-smoke.sh --no-install --service-truth <target>
 
 Collected on device under files/pdocker/diagnostics/service-truth/ and copied to
 <dir> when adb/run-as is available:

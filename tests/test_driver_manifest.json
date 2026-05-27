@@ -1081,7 +1081,7 @@
       "commands": [
         {
           "id": "android-runtime-teardown-planned-gap-smoke",
-          "shell": "rm -f docs/test/runtime-teardown-latest.json\nrm -rf docs/test/runtime-teardown\nset +e\nPDOCKER_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --runtime-teardown default-workspace\nrc=$?\nset -e\ncase \"$rc\" in\n  0)\n    python3 scripts/verify-runtime-teardown-artifact.py --expect-device-pass --evidence-root docs/test/runtime-teardown docs/test/runtime-teardown-latest.json\n    ;;\n  2)\n    python3 scripts/verify-runtime-teardown-artifact.py --expect-planned-gap docs/test/runtime-teardown-latest.json\n    ;;\n  *)\n    exit \"$rc\"\n    ;;\nesac",
+          "shell": "rm -f docs/test/runtime-teardown-latest.json\nrm -rf docs/test/runtime-teardown\nset +e\nSKYDNIR_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --runtime-teardown default-workspace\nrc=$?\nset -e\ncase \"$rc\" in\n  0)\n    python3 scripts/verify-runtime-teardown-artifact.py --expect-device-pass --evidence-root docs/test/runtime-teardown docs/test/runtime-teardown-latest.json\n    ;;\n  2)\n    python3 scripts/verify-runtime-teardown-artifact.py --expect-planned-gap docs/test/runtime-teardown-latest.json\n    ;;\n  *)\n    exit \"$rc\"\n    ;;\nesac",
           "artifacts": [
             "docs/test/runtime-teardown-latest.json",
             "docs/test/runtime-teardown/*.json"
@@ -1106,7 +1106,7 @@
       "commands": [
         {
           "id": "android-service-truth-planned-gap-smoke",
-          "shell": "rm -f docs/test/service-truth-latest.json\nset +e\nPDOCKER_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --service-truth default-workspace\nrc=$?\nset -e\ntest \"$rc\" -eq 2\npython3 - <<'PY'\nimport json\nfrom pathlib import Path\np=Path('docs/test/service-truth-latest.json')\nif not p.is_file():\n    raise SystemExit('service truth artifact missing')\ndata=json.loads(p.read_text())\nif data.get('Status') != 'planned-gap' or data.get('Success') is not False:\n    raise SystemExit('service truth scaffold must remain planned-gap Success=false')\nPY",
+          "shell": "rm -f docs/test/service-truth-latest.json\nset +e\nSKYDNIR_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --service-truth default-workspace\nrc=$?\nset -e\ntest \"$rc\" -eq 2\npython3 - <<'PY'\nimport json\nfrom pathlib import Path\np=Path('docs/test/service-truth-latest.json')\nif not p.is_file():\n    raise SystemExit('service truth artifact missing')\ndata=json.loads(p.read_text())\nif data.get('Status') != 'planned-gap' or data.get('Success') is not False:\n    raise SystemExit('service truth scaffold must remain planned-gap Success=false')\nPY",
           "artifacts": [
             "docs/test/service-truth-latest.json"
           ]
@@ -1129,7 +1129,7 @@
       "commands": [
         {
           "id": "android-single-container-echo-hi",
-          "shell": "rm -f docs/test/runtime-single-container-echo-hi-latest.json; PDOCKER_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --single-container-echo-hi; python3 scripts/verify-runtime-single-container-artifact.py docs/test/runtime-single-container-echo-hi-latest.json",
+          "shell": "rm -f docs/test/runtime-single-container-echo-hi-latest.json; SKYDNIR_SMOKE_ARTIFACT_DIR=docs/test bash scripts/android-device-smoke.sh --no-install --single-container-echo-hi; python3 scripts/verify-runtime-single-container-artifact.py docs/test/runtime-single-container-echo-hi-latest.json",
           "artifacts": [
             "docs/test/runtime-single-container-echo-hi-latest.json"
           ]

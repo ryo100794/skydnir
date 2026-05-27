@@ -30,7 +30,7 @@ Trace modes:
 
 Environment:
   ADB                              adb executable (default: adb)
-  PDOCKER_ANDROID_PACKAGE          package name (default: $PKG)
+  SKYDNIR_ANDROID_PACKAGE         package name (SKYDNIR_PACKAGE/PDOCKER_ANDROID_PACKAGE are still accepted; default: $PKG)
   PDOCKER_SYSCALL_PROFILE_OUT      JSON output path
   PDOCKER_SYSCALL_PROFILE_MD       Markdown output path
   PDOCKER_SYSCALL_PROFILE_SMALL_FILES  workload fanout (default: $SMALL_FILES)

@@ -22,8 +22,8 @@ signal.
 Environment:
   ADB                 adb executable (default: adb)
   PDOCKER_ADB_SERIAL  optional adb serial
-  PDOCKER_PACKAGE     package name (default: $PKG)
-  PDOCKER_APK         debug APK path (default: $APK)
+  SKYDNIR_PACKAGE     package name (PDOCKER_PACKAGE is still accepted; default: $PKG)
+  SKYDNIR_APK         debug APK path (PDOCKER_APK is still accepted; default: $APK)
 EOF
 }
 

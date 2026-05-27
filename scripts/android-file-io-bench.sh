@@ -29,7 +29,7 @@ the Android device.
 
 Environment:
   ADB                         adb executable (default: adb)
-  PDOCKER_ANDROID_PACKAGE     package name (default: $PKG)
+  SKYDNIR_ANDROID_PACKAGE    package name (SKYDNIR_PACKAGE/PDOCKER_ANDROID_PACKAGE are still accepted; default: $PKG)
   PDOCKER_FILE_IO_SIZE_MB     sequential file size in MiB (default: $SIZE_MB)
   PDOCKER_FILE_IO_SMALL_FILES small-file count (default: $SMALL_FILES)
   PDOCKER_FILE_IO_PERSISTENT_RUNS steady-state noop samples (default: $PERSISTENT_RUNS)
