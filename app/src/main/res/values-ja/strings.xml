@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">pdocker</string>
-    <string name="pdockerd_notification_channel">pdockerd</string>
-    <string name="pdockerd_notification_title">pdockerd</string>
-    <string name="pdockerd_notification_text">Docker デーモン (PRoot, port 2375)</string>
+    <string name="app_name">Skydnir</string>
+    <string name="pdockerd_notification_channel">skydnird</string>
+    <string name="pdockerd_notification_title">skydnird</string>
+    <string name="pdockerd_notification_text">Skydnir デーモン (port 2375)</string>
     <string name="action_stop">停止</string>
 
     <string name="tab_overview">概要</string>
@@ -15,15 +15,15 @@
     <string name="tab_sessions">セッション</string>
     <string name="tab_debug">デバッグ</string>
 
-    <string name="status_unknown">pdockerd: 不明</string>
-    <string name="status_stopped">pdockerd: 停止済み</string>
-    <string name="status_starting">pdockerd: 起動中...</string>
-    <string name="status_battery_ignored">pdocker: すでに電池最適化の対象外です</string>
-    <string name="status_socket_absent">pdockerd: ソケットなし</string>
+    <string name="status_unknown">skydnird: 不明</string>
+    <string name="status_stopped">skydnird: 停止済み</string>
+    <string name="status_starting">skydnird: 起動中...</string>
+    <string name="status_battery_ignored">Skydnir: すでに電池最適化の対象外です</string>
+    <string name="status_socket_absent">skydnird: ソケットなし</string>
     <string name="status_running">実行中</string>
     <string name="status_unexpected_response">ソケットは有効、応答が想定外です</string>
     <string name="status_ping_failed">ソケットは有効、ping 失敗: %1$s</string>
-    <string name="status_pdocker_fmt">pdockerd: %1$s</string>
+    <string name="status_pdocker_fmt">skydnird: %1$s</string>
     <string name="status_library_failed">ライブラリの読み込みに失敗: %1$s</string>
     <string name="status_library_installed_fmt">テンプレートを展開しました: %1$s</string>
     <string name="status_library_install_report_fmt">テンプレートを展開しました: %1$s, コピー %2$d, 既存保持 %3$d, version %4$d</string>
@@ -36,23 +36,23 @@
     <string name="section_diagnostics">診断</string>
     <string name="section_debug_resources">デバッグリソース</string>
     <string name="action_debug_resources">アプリ内リソースを表示</string>
-    <string name="detail_debug_resources">pdocker の内部リソースツリーを直接開きます</string>
+    <string name="detail_debug_resources">Skydnir の内部リソースツリーを直接開きます</string>
     <string name="message_debug_resources">デバッグ用のアプリサンドボックス直読みブラウザです。Docker コマンドを経由せず、アプリ所有ファイルを直接表示します。</string>
     <string name="action_debug_memory">メモリスナップショット</string>
-    <string name="detail_debug_memory">/proc/meminfo と pdocker プロセスの RSS を表示</string>
+    <string name="detail_debug_memory">/proc/meminfo と Skydnir プロセスの RSS を表示</string>
     <string name="action_debug_processes">プロセススナップショット</string>
     <string name="detail_debug_processes">アプリ、デーモン、executor、コンテナ補助プロセスを表示</string>
     <string name="action_debug_handles">ハンドルスナップショット</string>
-    <string name="detail_debug_handles">pdocker 所有プロセスのファイルディスクリプタを表示</string>
+    <string name="detail_debug_handles">Skydnir 所有プロセスのファイルディスクリプタを表示</string>
     <string name="action_export_self_debug_bundle">自己診断バンドルを書き出し</string>
     <string name="detail_export_self_debug_bundle">ADB なしで使える診断をアプリ領域と Documents に保存します</string>
     <string name="section_memory_layers">メモリレイヤ</string>
     <string name="action_debug_memory_layers">メモリレイヤ詳細</string>
-    <string name="detail_debug_memory_layers">Android 管轄の RAM/swap に pdocker のアプリ仮想記憶がどう被さるかを表示</string>
+    <string name="detail_debug_memory_layers">Android 管轄の RAM/swap に Skydnir のアプリ仮想記憶がどう被さるかを表示</string>
     <string name="action_run_memory_pager_selftest">Pager セルフテストを実行</string>
     <string name="detail_run_memory_pager_selftest">managed と transparent SIGSEGV pager の probe を実行し、この可視化を更新します</string>
     <string name="memory_layers_os_summary_fmt">OS: RAM 使用 %1$s / 空き %2$s, swap 使用 %3$s / 空き %4$s</string>
-    <string name="memory_layers_pdocker_share_fmt">OS 内で pdocker が占める量: RSS %1$s (RAM 全体の %2$s, 使用中 RAM の %3$s), swap %4$s (使用中 swap の %5$s), processes %6$d</string>
+    <string name="memory_layers_pdocker_share_fmt">OS 内で Skydnir が占める量: RSS %1$s (RAM 全体の %2$s, 使用中 RAM の %3$s), swap %4$s (使用中 swap の %5$s), processes %6$d</string>
     <string name="memory_layers_app_summary_fmt">アプリ: VmSize %1$s, RSS %2$s, Java heap %3$s / %4$s; app Vm metrics %5$s</string>
     <string name="memory_layers_artifact_summary_fmt">Pager データソース: %1$s、経過 %2$s、status %3$s (past self-test。live /proc ではありません)</string>
     <string name="widget_virtual_memory_pager">仮想記憶 pager</string>
@@ -63,10 +63,10 @@
     <string name="memory_pager_detail_fmt">backing %1$s; page ops %2$d (%3$s); bytes in/out %4$s/%5$s; dirty outs %6$d; SIGSEGV stops %7$d; source %8$s age %9$s; %10$s</string>
     <string name="memory_pager_telemetry_note_selftest">過去の self-test artifact のみ — live workload telemetry ではありません</string>
     <string name="memory_pager_telemetry_note_live_gap">live pager workload telemetry source は未接続です</string>
-    <string name="memory_layers_pager_summary_fmt">pdocker のメモリ拡張: ゲストには %2$s の reserve を見せ、Android 上の resident 窓は %3$s に抑え、追い出しページは %4$s の backing に退避します。page in/out %5$d/%6$d, bytes in/out %7$s/%8$s, dirty outs %9$d (%1$s)</string>
+    <string name="memory_layers_pager_summary_fmt">Skydnir のメモリ拡張: ゲストには %2$s の reserve を見せ、Android 上の resident 窓は %3$s に抑え、追い出しページは %4$s の backing に退避します。page in/out %5$d/%6$d, bytes in/out %7$s/%8$s, dirty outs %9$d (%1$s)</string>
     <string name="memory_layers_perf_summary_fmt">Pager 性能: %1$s, %2$s, SIGSEGV stop %3$d。transparent mmap %4$s, pending %5$s, max resident pages %6$d, bytes in/out %7$s/%8$s, dirty outs %9$d</string>
     <string name="debug_resource_app_files">App files</string>
-    <string name="debug_resource_pdocker_home">pdocker home</string>
+    <string name="debug_resource_pdocker_home">Skydnir home</string>
     <string name="debug_resource_projects">Projects</string>
     <string name="debug_resource_containers">Containers</string>
     <string name="debug_resource_images">Images</string>
@@ -78,9 +78,9 @@
     <string name="debug_resource_native_libs">Native libraries</string>
     <string name="debug_resource_dir_summary_fmt">トップレベル %1$d 件</string>
     <string name="debug_resource_file_summary_fmt">%1$s file</string>
-    <string name="action_start_pdockerd">pdockerd を起動</string>
+    <string name="action_start_pdockerd">skydnird を起動</string>
     <string name="detail_start_pdockerd">前面デーモンを起動</string>
-    <string name="action_stop_pdockerd">pdockerd を停止</string>
+    <string name="action_stop_pdockerd">skydnird を停止</string>
     <string name="detail_stop_pdockerd">前面サービスを停止</string>
     <string name="action_keep_resident">常駐を維持</string>
     <string name="detail_keep_resident">電池最適化除外を開く</string>
@@ -123,19 +123,19 @@
     <string name="detail_dockerfiles_inventory">projects 配下のビルド定義</string>
     <string name="widget_storage">ストレージ</string>
     <string name="storage_scanning">計算中...</string>
-    <string name="detail_storage_scanning">pdocker の使用容量を計算しています</string>
-    <string name="storage_total_fmt">pdocker %1$s / ファイルシステム %2$s</string>
+    <string name="detail_storage_scanning">Skydnir の使用容量を計算しています</string>
+    <string name="storage_total_fmt">Skydnir %1$s / ファイルシステム %2$s</string>
     <string name="storage_detail_fmt">物理割り当て(app-private): images %1$s (layers %2$s + image metadata/rootfs views %3$s); Images タブは論理 image-layer views %4$s (共有 layer 参照の重複 %5$s); containers %6$s; cache %7$s; logs %8$s; metadata %9$s; other %10$s (projects/workspaces/models/volumes/document mirrors を含む場合あり; documents %11$s, %12$s); 空き %13$s</string>
     <string name="storage_reconcile_fmt">照合: total %1$s = images %2$s + containers %3$s + cache %4$s + logs %5$s + metadata %6$s + other %7$s; delta %8$s; checksum %9$s</string>
     <string name="widget_storage_top_consumers">app-private ストレージ使用量 上位</string>
     <string name="storage_top_consumers_value_fmt">%1$d groups / 最大 %2$s</string>
     <string name="storage_top_consumer_row_fmt">%1$s: %2$s — %3$s</string>
     <string name="storage_documents_scope_none">document mount 未選択</string>
-    <string name="storage_documents_scope_included_fmt">pdocker app data 内に含む: %1$s (%2$s)</string>
-    <string name="storage_documents_scope_external_fmt">外部 SAF/direct mount のため pdocker app data には含まない: %1$s</string>
+    <string name="storage_documents_scope_included_fmt">Skydnir app data 内に含む: %1$s (%2$s)</string>
+    <string name="storage_documents_scope_external_fmt">外部 SAF/direct mount のため Skydnir app data には含まない: %1$s</string>
     <string name="widget_host_environment">ホスト環境</string>
     <string name="host_environment_loading">読み込み中...</string>
-    <string name="detail_host_environment_loading">pdockerd が動いているホストのハード、ソフト、ランタイム、GPU bridge の諸元を読み込んでいます</string>
+    <string name="detail_host_environment_loading">skydnird が動いているホストのハード、ソフト、ランタイム、GPU bridge の諸元を読み込んでいます</string>
     <string name="host_environment_summary_fmt">%1$s / %2$s / %3$s %4$s</string>
     <string name="host_environment_kernel_fmt">Kernel: %1$s</string>
     <string name="host_environment_hardware_fmt">CPU: %1$d cores, memory %2$s total / %3$s available</string>
@@ -202,7 +202,7 @@
     <string name="detail_compose_file">Compose ファイル</string>
     <string name="action_up_fmt">%1$s を Up</string>
     <string name="detail_compose_up">docker compose up -d --build</string>
-    <string name="engine_operation_failed_fmt">pdocker 操作に失敗しました: %1$s</string>
+    <string name="engine_operation_failed_fmt">Skydnir 操作に失敗しました: %1$s</string>
 
     <string name="section_dockerfile">Dockerfile</string>
     <string name="action_new_dockerfile">新規 Dockerfile</string>
@@ -228,7 +228,7 @@
     <string name="action_browse_image_files">イメージ内ファイルを参照</string>
     <string name="detail_browse_image_files">pull 済み rootfs ツリーを確認</string>
     <string name="action_delete_image_fmt">イメージ %1$s を削除</string>
-    <string name="detail_delete_image">このタグ付きイメージを pdocker ストレージから削除</string>
+    <string name="detail_delete_image">このタグ付きイメージを Skydnir ストレージから削除</string>
     <string name="action_clean_image_cache_fmt">イメージ/キャッシュ %1$s を掃除</string>
     <string name="detail_clean_image_cache">このイメージ、中断ビルド rootfs、未参照レイヤを削除</string>
     <string name="confirm_delete_image_fmt">イメージ %1$s を削除しますか？コピー済み rootfs を使うコンテナは削除しませんが、次回の Compose/build でタグは再ビルドされます。</string>

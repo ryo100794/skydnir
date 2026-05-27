@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">pdocker</string>
-    <string name="pdockerd_notification_channel">pdockerd</string>
-    <string name="pdockerd_notification_title">pdockerd</string>
-    <string name="pdockerd_notification_text">Docker daemon (PRoot, port 2375)</string>
+    <string name="app_name">Skydnir</string>
+    <string name="pdockerd_notification_channel">skydnird</string>
+    <string name="pdockerd_notification_title">skydnird</string>
+    <string name="pdockerd_notification_text">Skydnir daemon (port 2375)</string>
     <string name="action_stop">Stop</string>
 
     <string name="tab_overview">Overview</string>
@@ -15,15 +15,15 @@
     <string name="tab_sessions">Sessions</string>
     <string name="tab_debug">Debug</string>
 
-    <string name="status_unknown">pdockerd: unknown</string>
-    <string name="status_stopped">pdockerd: stopped</string>
-    <string name="status_starting">pdockerd: starting...</string>
-    <string name="status_battery_ignored">pdocker: already excluded from battery optimization</string>
-    <string name="status_socket_absent">pdockerd: socket absent</string>
+    <string name="status_unknown">skydnird: unknown</string>
+    <string name="status_stopped">skydnird: stopped</string>
+    <string name="status_starting">skydnird: starting...</string>
+    <string name="status_battery_ignored">Skydnir: already excluded from battery optimization</string>
+    <string name="status_socket_absent">skydnird: socket absent</string>
     <string name="status_running">running</string>
     <string name="status_unexpected_response">socket up, unexpected response</string>
     <string name="status_ping_failed">socket up, ping failed: %1$s</string>
-    <string name="status_pdocker_fmt">pdockerd: %1$s</string>
+    <string name="status_pdocker_fmt">skydnird: %1$s</string>
     <string name="status_library_failed">library load failed: %1$s</string>
     <string name="status_library_installed_fmt">installed template: %1$s</string>
     <string name="status_library_install_report_fmt">installed template: %1$s, copied %2$d, kept %3$d, version %4$d</string>
@@ -36,23 +36,23 @@
     <string name="section_diagnostics">Diagnostics</string>
     <string name="section_debug_resources">Debug resources</string>
     <string name="action_debug_resources">Browse app resources</string>
-    <string name="detail_debug_resources">Open every internal pdocker resource tree directly</string>
+    <string name="detail_debug_resources">Open every internal Skydnir resource tree directly</string>
     <string name="message_debug_resources">Direct app-sandbox browser for debugging. It intentionally bypasses Docker commands and reads the app-owned files on disk.</string>
     <string name="action_debug_memory">Memory snapshot</string>
-    <string name="detail_debug_memory">Show /proc/meminfo and pdocker process RSS</string>
+    <string name="detail_debug_memory">Show /proc/meminfo and Skydnir process RSS</string>
     <string name="action_debug_processes">Process snapshot</string>
     <string name="detail_debug_processes">Show app, daemon, executor, and container helper processes</string>
     <string name="action_debug_handles">Handle snapshot</string>
-    <string name="detail_debug_handles">Show open file descriptors for pdocker-owned processes</string>
+    <string name="detail_debug_handles">Show open file descriptors for Skydnir-owned processes</string>
     <string name="action_export_self_debug_bundle">Export self-debug bundle</string>
     <string name="detail_export_self_debug_bundle">Write ADB-free diagnostics to app storage and Documents</string>
     <string name="section_memory_layers">Memory layers</string>
     <string name="action_debug_memory_layers">Memory layer details</string>
-    <string name="detail_debug_memory_layers">Show how Android-owned RAM/swap is wrapped by pdocker managed virtual memory</string>
+    <string name="detail_debug_memory_layers">Show how Android-owned RAM/swap is wrapped by Skydnir managed virtual memory</string>
     <string name="action_run_memory_pager_selftest">Run pager self-test</string>
     <string name="detail_run_memory_pager_selftest">Run managed and transparent SIGSEGV pager probes, then refresh this visualization</string>
     <string name="memory_layers_os_summary_fmt">OS: RAM used %1$s / available %2$s, swap used %3$s / free %4$s</string>
-    <string name="memory_layers_pdocker_share_fmt">pdocker footprint inside OS: RSS %1$s (%2$s of RAM, %3$s of used RAM), swap %4$s (%5$s of used swap), processes %6$d</string>
+    <string name="memory_layers_pdocker_share_fmt">Skydnir footprint inside OS: RSS %1$s (%2$s of RAM, %3$s of used RAM), swap %4$s (%5$s of used swap), processes %6$d</string>
     <string name="memory_layers_app_summary_fmt">App: VmSize %1$s, RSS %2$s, Java heap %3$s / %4$s; app Vm metrics %5$s</string>
     <string name="memory_layers_artifact_summary_fmt">Pager data source: %1$s, age %2$s, status %3$s (past self-test; not live /proc)</string>
     <string name="widget_virtual_memory_pager">Virtual memory pager</string>
@@ -63,10 +63,10 @@
     <string name="memory_pager_detail_fmt">backing %1$s; page ops %2$d (%3$s); bytes in/out %4$s/%5$s; dirty outs %6$d; SIGSEGV stops %7$d; source %8$s age %9$s; %10$s</string>
     <string name="memory_pager_telemetry_note_selftest">past self-test artifact only — not live workload telemetry</string>
     <string name="memory_pager_telemetry_note_live_gap">no live pager workload telemetry source connected</string>
-    <string name="memory_layers_pager_summary_fmt">pdocker memory illusion: guest-visible reserve %2$s while Android resident window is %3$s; evicted pages are parked in %4$s backing, page in/out %5$d/%6$d, bytes in/out %7$s/%8$s, dirty outs %9$d (%1$s)</string>
+    <string name="memory_layers_pager_summary_fmt">Skydnir memory illusion: guest-visible reserve %2$s while Android resident window is %3$s; evicted pages are parked in %4$s backing, page in/out %5$d/%6$d, bytes in/out %7$s/%8$s, dirty outs %9$d (%1$s)</string>
     <string name="memory_layers_perf_summary_fmt">Pager performance: %1$s, %2$s, SIGSEGV stops %3$d; transparent mmap %4$s, pending %5$s, max resident pages %6$d, bytes in/out %7$s/%8$s, dirty outs %9$d</string>
     <string name="debug_resource_app_files">App files</string>
-    <string name="debug_resource_pdocker_home">pdocker home</string>
+    <string name="debug_resource_pdocker_home">Skydnir home</string>
     <string name="debug_resource_projects">Projects</string>
     <string name="debug_resource_containers">Containers</string>
     <string name="debug_resource_images">Images</string>
@@ -78,9 +78,9 @@
     <string name="debug_resource_native_libs">Native libraries</string>
     <string name="debug_resource_dir_summary_fmt">%1$d top-level entries</string>
     <string name="debug_resource_file_summary_fmt">%1$s file</string>
-    <string name="action_start_pdockerd">Start pdockerd</string>
+    <string name="action_start_pdockerd">Start skydnird</string>
     <string name="detail_start_pdockerd">Launch foreground daemon</string>
-    <string name="action_stop_pdockerd">Stop pdockerd</string>
+    <string name="action_stop_pdockerd">Stop skydnird</string>
     <string name="detail_stop_pdockerd">Stop foreground service</string>
     <string name="action_keep_resident">Keep resident</string>
     <string name="detail_keep_resident">Open battery optimization exemption</string>
@@ -123,19 +123,19 @@
     <string name="detail_dockerfiles_inventory">Build definitions under projects</string>
     <string name="widget_storage">Storage</string>
     <string name="storage_scanning">scanning...</string>
-    <string name="detail_storage_scanning">Calculating pdocker storage usage</string>
-    <string name="storage_total_fmt">app-private allocated pdocker %1$s / filesystem %2$s</string>
+    <string name="detail_storage_scanning">Calculating Skydnir storage usage</string>
+    <string name="storage_total_fmt">app-private allocated Skydnir %1$s / filesystem %2$s</string>
     <string name="storage_detail_fmt">physical allocated app-private: images %1$s (layers %2$s + image metadata/rootfs views %3$s); Images tab is logical image-layer views %4$s (%5$s duplicate shared-layer references); containers %6$s; cache %7$s; logs %8$s; metadata %9$s; other %10$s (projects/workspaces/models/volumes/document mirrors may appear here; documents %11$s, %12$s); free %13$s</string>
     <string name="storage_reconcile_fmt">reconcile: total %1$s = images %2$s + containers %3$s + cache %4$s + logs %5$s + metadata %6$s + other %7$s; delta %8$s; checksum %9$s</string>
     <string name="widget_storage_top_consumers">Top app-private storage consumers</string>
     <string name="storage_top_consumers_value_fmt">%1$d allocated-block groups / largest %2$s</string>
     <string name="storage_top_consumer_row_fmt">%1$s: %2$s — %3$s</string>
     <string name="storage_documents_scope_none">no document mount selected</string>
-    <string name="storage_documents_scope_included_fmt">included under pdocker app data: %1$s (%2$s)</string>
-    <string name="storage_documents_scope_external_fmt">external SAF/direct mount not counted in pdocker app data: %1$s</string>
+    <string name="storage_documents_scope_included_fmt">included under Skydnir app data: %1$s (%2$s)</string>
+    <string name="storage_documents_scope_external_fmt">external SAF/direct mount not counted in Skydnir app data: %1$s</string>
     <string name="widget_host_environment">Host environment</string>
     <string name="host_environment_loading">loading...</string>
-    <string name="detail_host_environment_loading">Reading pdockerd host hardware, software, runtime, and GPU bridge details</string>
+    <string name="detail_host_environment_loading">Reading skydnird host hardware, software, runtime, and GPU bridge details</string>
     <string name="host_environment_summary_fmt">%1$s / %2$s / %3$s %4$s</string>
     <string name="host_environment_kernel_fmt">Kernel: %1$s</string>
     <string name="host_environment_hardware_fmt">CPU: %1$d cores, memory %2$s total / %3$s available</string>
@@ -202,7 +202,7 @@
     <string name="detail_compose_file">Compose file</string>
     <string name="action_up_fmt">Up %1$s</string>
     <string name="detail_compose_up">docker compose up -d --build</string>
-    <string name="engine_operation_failed_fmt">pdocker operation failed: %1$s</string>
+    <string name="engine_operation_failed_fmt">Skydnir operation failed: %1$s</string>
 
     <string name="section_dockerfile">Dockerfile</string>
     <string name="action_new_dockerfile">New Dockerfile</string>
@@ -228,7 +228,7 @@
     <string name="action_browse_image_files">Browse image files</string>
     <string name="detail_browse_image_files">Inspect pulled rootfs trees</string>
     <string name="action_delete_image_fmt">Delete image %1$s</string>
-    <string name="detail_delete_image">Remove this tagged image from pdocker storage</string>
+    <string name="detail_delete_image">Remove this tagged image from Skydnir storage</string>
     <string name="action_clean_image_cache_fmt">Clean image/cache %1$s</string>
     <string name="detail_clean_image_cache">Delete this image, interrupted build rootfs, and unreferenced layers</string>
     <string name="confirm_delete_image_fmt">Delete image %1$s? Containers using a copied rootfs are not removed, but the tag will be rebuilt on the next Compose/build run.</string>
