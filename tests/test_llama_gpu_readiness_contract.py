@@ -49,7 +49,7 @@ class LlamaGpuReadinessContractTest(unittest.TestCase):
     def test_readiness_reports_stale_target_and_browser_hints(self):
         self.assertIn("stale_target_hint", self.source)
         self.assertIn("browser_hint", self.source)
-        self.assertIn("Stop the pdocker llama container", self.source)
+        self.assertIn("Stop the Skydnir llama container", self.source)
         self.assertIn("readiness=false is a hard GPU-run stop", self.source)
         self.assertIn("Do not classify compare, correctness, or benchmark claims", self.source)
         self.assertIn("Do not force-stop the browser/VS Code session", self.source)

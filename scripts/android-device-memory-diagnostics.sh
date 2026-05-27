@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
 PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
-CONTAINER="${PDOCKER_LLAMA_CONTAINER:-pdocker-llama-cpp}"
+CONTAINER="${SKYDNIR_LLAMA_CONTAINER:-${PDOCKER_LLAMA_CONTAINER:-skydnir-llama-cpp}}"
 OUT="${PDOCKER_DEVICE_MEMORY_DIAGNOSTICS_OUT:-$ROOT/docs/test/android-device-memory-diagnostics-latest.json}"
 PROCESS_LIMIT="${PDOCKER_DEVICE_MEMORY_PROCESS_LIMIT:-32}"
 
@@ -20,7 +20,7 @@ Environment:
   ADB                                      adb binary/path (default: adb)
   ANDROID_SERIAL                           passed through to adb, if set
   SKYDNIR_PACKAGE                          app package for run-as probes (PDOCKER_PACKAGE is still accepted)
-  PDOCKER_LLAMA_CONTAINER                  container name hint
+  SKYDNIR_LLAMA_CONTAINER                  container name hint (PDOCKER_LLAMA_CONTAINER is still accepted)
   PDOCKER_DEVICE_MEMORY_DIAGNOSTICS_OUT    default output path
 EOF_USAGE
 }
@@ -368,7 +368,7 @@ report = {
     },
     "next_steps": [
         "Use this standalone diagnostic before launching llama compare when MemAvailable or SwapFree is suspicious.",
-        "If stale pdocker llama work is present, stop only pdocker-owned work from the app UI or Engine; do not force-stop user apps from automation.",
+        "If stale Skydnir llama work is present, stop only Skydnir-owned work from the app UI or Engine; do not force-stop user apps from automation.",
         "Low SwapFree on Android zram is advisory by default; wait or reboot only when MemAvailable/PSI/LMK evidence also indicates unsafe pressure, or when a strict swap gate was explicitly configured.",
     ],
 }

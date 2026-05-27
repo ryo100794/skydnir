@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
 PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
-CONTAINER="${PDOCKER_LLAMA_CONTAINER:-pdocker-llama-cpp}"
+CONTAINER="${SKYDNIR_LLAMA_CONTAINER:-${PDOCKER_LLAMA_CONTAINER:-skydnir-llama-cpp}}"
 OUT="${PDOCKER_LLAMA_READINESS_OUT:-$ROOT/docs/test/llama-gpu-device-readiness-latest.json}"
 MIN_AVAILABLE_MB="${PDOCKER_LLAMA_MIN_FREE_MB:-512}"
 MIN_SWAP_FREE_MB="${PDOCKER_LLAMA_MIN_SWAP_FREE_MB:-0}"
@@ -108,7 +108,7 @@ if not ready:
     actions.append("Do not start the llama GPU compare/benchmark; readiness=false is a hard GPU-run stop.")
     actions.append("Do not classify compare, correctness, or benchmark claims from a run started while readiness=false.")
     if stale_target_hint:
-        actions.append("Stop the pdocker llama container from the UI or Engine, then re-check readiness.")
+        actions.append("Stop the Skydnir llama container from the UI or Engine, then re-check readiness.")
     actions.append("Wait for Android reclaim if MemAvailable is low; low SwapFree is advisory unless a hard swap threshold was explicitly configured.")
     actions.append("Do not force-stop the browser/VS Code session from automation.")
 else:

@@ -1,6 +1,6 @@
-# pdocker llama.cpp GPU workspace
+# Skydnir llama.cpp GPU workspace
 
-This template builds a llama.cpp server workspace for pdocker.
+This template builds a llama.cpp server workspace for Skydnir.
 
 It includes:
 
@@ -37,7 +37,7 @@ It includes:
   `PDOCKER_SHARED_DOCUMENTS_HOST`, or `PDOCKER_SHARED_DOCUMENTS_MOUNT` when two
   projects intentionally need the same folder or mount path.
 
-Usage from pdocker:
+Usage from Skydnir:
 
 1. Open the Library tab.
 2. Install the `llama.cpp GPU workspace` template.
@@ -95,7 +95,7 @@ inside `/opt/llama.cpp/.pdocker-llama-cpp-commit`. It defaults CMake to
 the build inside the generic pdocker execution path without llama.cpp source
 patches or shader-compiler wrappers. Raise `LLAMA_CPP_BUILD_JOBS` only when the
 device has enough free memory and swap for shader or Vulkan backend
-compilation. pdocker may apply generic Android build-executor memory telemetry
+compilation. Skydnir may apply generic Android build-executor memory telemetry
 and guardrails outside the Dockerfile, but it must not rewrite the build tools
 by default.
 
@@ -111,7 +111,7 @@ The GPU profile action writes:
   acceleration until the llama backend is wired to the bridge.
 
 All startup, GPU profile generation, download, status-page, and `llama-server`
-output is written to stdout/stderr so `docker logs pdocker-llama-cpp` can show
+output is written to stdout/stderr so `docker logs skydnir-llama-cpp` can show
 it. The same stream is also copied to `/workspace/logs/llama-server.log`;
 override `LLAMA_LOG_FILE` to change or disable that extra file. The entrypoint
 also writes `/workspace/logs/llama-startup.json` with the profile refresh result,

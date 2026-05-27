@@ -14,9 +14,9 @@ fi
 
 profile_refresh_rc=0
 if [[ "$refresh" = "always" || ! -f "$profile" || ! -f "$diagnostics" || ( "$refresh" = "auto" && "${PDOCKER_GPU_AUTO:-}" = "1" ) ]]; then
-  echo "pdocker llama startup: refreshing GPU profile path=$profile diagnostics=$diagnostics refresh=$refresh"
+  echo "Skydnir llama startup: refreshing GPU profile path=$profile diagnostics=$diagnostics refresh=$refresh"
   LLAMA_GPU_DIAGNOSTICS="$diagnostics" pdocker-gpu-profile "$profile" || profile_refresh_rc=$?
-  echo "pdocker llama startup: GPU profile refresh rc=$profile_refresh_rc path=$profile diagnostics=$diagnostics"
+  echo "Skydnir llama startup: GPU profile refresh rc=$profile_refresh_rc path=$profile diagnostics=$diagnostics"
 fi
 if [[ -f "$profile" ]]; then
   # shellcheck disable=SC1090
@@ -171,7 +171,7 @@ report = {
 with open(out, "w", encoding="utf-8") as f:
     json.dump(report, f, indent=2, sort_keys=True)
     f.write("\n")
-print("pdocker llama startup diagnostics: " + out)
+print("Skydnir llama startup diagnostics: " + out)
 PY
 
 if [[ ! -f "$model" && -n "$model_url" ]]; then
@@ -200,9 +200,9 @@ EOF
   cat > "$status_dir/index.html" <<EOF
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>pdocker llama.cpp</title></head>
+<head><meta charset="utf-8"><title>Skydnir llama.cpp</title></head>
 <body>
-<h1>pdocker llama.cpp workspace</h1>
+<h1>Skydnir llama.cpp workspace</h1>
 <p><strong>Status:</strong> waiting for a GGUF model.</p>
 <p>Expected model path: <code>$model</code></p>
 <p>Place a model at <code>models/model.gguf</code>, set <code>LLAMA_ARG_MODEL</code>, or set <code>LLAMA_MODEL_URL</code> and compose up again. The default template downloads <code>Qwen/Qwen3-8B-GGUF</code>.</p>
@@ -212,7 +212,7 @@ EOF
 </html>
 EOF
   cat > "$status_dir/status.txt" <<EOF
-pdocker llama.cpp workspace is running.
+Skydnir llama.cpp workspace is running.
 Missing model: $model
 Port: $port
 Profile:

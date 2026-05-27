@@ -7,8 +7,8 @@ services:
         LLAMA_CPP_REF: "${LLAMA_CPP_REF:-b9030}"
         LLAMA_CPP_BUILD_JOBS: "${LLAMA_CPP_BUILD_JOBS:-1}"
         LLAMA_CPP_BUILD_TYPE: "${LLAMA_CPP_BUILD_TYPE:-Release}"
-    image: pdocker/llama-cpp-gpu:latest
-    container_name: pdocker-llama-cpp
+    image: skydnir/llama-cpp-gpu:latest
+    container_name: skydnir-llama-cpp
     gpus: all
     working_dir: /workspace
     environment:
@@ -35,7 +35,7 @@ services:
       LLAMA_MODEL_URL: "${LLAMA_MODEL_URL:-https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf}"
       PDOCKER_DOCUMENTS_MOUNT: "${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
       PDOCKER_SHARED_DOCUMENTS_MOUNT: "${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
-      PDOCKER_EXPORT_DIR: "${PDOCKER_EXPORT_DIR:-/documents/pdocker-exports}"
+      PDOCKER_EXPORT_DIR: "${PDOCKER_EXPORT_DIR:-/documents/skydnir-exports}"
       PDOCKER_FAST_WORKDIR: "${PDOCKER_FAST_WORKDIR:-/workspace}"
     command: ["/usr/local/bin/start-llama-server"]
     ports:

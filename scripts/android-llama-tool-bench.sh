@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADB="${ADB:-adb}"
 PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
-CONTAINER="${PDOCKER_LLAMA_CONTAINER:-pdocker-llama-cpp}"
+CONTAINER="${SKYDNIR_LLAMA_CONTAINER:-${PDOCKER_LLAMA_CONTAINER:-skydnir-llama-cpp}}"
 MODEL="${PDOCKER_LLAMA_MODEL:-/models/model.gguf}"
 PROMPT_TOKENS="${PDOCKER_LLAMA_TOOL_PROMPT:-16}"
 GEN_TOKENS="${PDOCKER_LLAMA_TOOL_GEN:-8}"

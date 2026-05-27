@@ -9,7 +9,7 @@ else
   ADB_ARGS=()
 fi
 PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
-CONTAINER="pdocker-llama-cpp"
+CONTAINER="${SKYDNIR_LLAMA_CONTAINER:-${PDOCKER_LLAMA_CONTAINER:-skydnir-llama-cpp}}"
 ROOTFS=""
 MEMORY_GUARD=0
 LARGE_MB="${PDOCKER_CONTAINER_PROBE_LARGE_MB:-128}"
@@ -27,7 +27,7 @@ Environment:
   SKYDNIR_PACKAGE   Android package (PDOCKER_PACKAGE is still accepted; default: $PKG)
 
 Examples:
-  ADB_SERIAL=10.8.135.134:37669 $0 --container pdocker-llama-cpp --memory-guard
+  ADB_SERIAL=10.8.135.134:37669 $0 --container skydnir-llama-cpp --memory-guard
   ROOTFS=/data/user/0/$PKG/files/pdocker/containers/build_x/rootfs $0 --rootfs "\$ROOTFS"
 EOF
 }

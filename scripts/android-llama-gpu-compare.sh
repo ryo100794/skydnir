@@ -6,8 +6,8 @@ ADB="${ADB:-adb}"
 PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
 CLASS_PREFIX="io.github.ryo100794.pdocker"
 ACTION_PREFIX="io.github.ryo100794.pdocker"
-CONTAINER="${PDOCKER_LLAMA_CONTAINER:-pdocker-llama-cpp}"
-IMAGE="${PDOCKER_LLAMA_IMAGE:-pdocker/llama-cpp-gpu:latest}"
+CONTAINER="${SKYDNIR_LLAMA_CONTAINER:-${PDOCKER_LLAMA_CONTAINER:-skydnir-llama-cpp}}"
+IMAGE="${SKYDNIR_LLAMA_IMAGE:-${PDOCKER_LLAMA_IMAGE:-skydnir/llama-cpp-gpu:latest}}"
 PROJECT="${PDOCKER_LLAMA_PROJECT:-files/pdocker/projects/llama-cpp-gpu}"
 LOCAL_PORT="${PDOCKER_LLAMA_LOCAL_PORT:-28081}"
 REMOTE_PORT="${PDOCKER_LLAMA_REMOTE_PORT:-18081}"
@@ -1091,7 +1091,7 @@ report = {
         "Do not start or classify the llama GPU compare while this memory blocker is present; this is not a GPU correctness result.",
         "Check MemAvailable with the first diagnostic command; low SwapFree on Android zram is advisory unless a hard swap threshold was explicitly configured.",
         "Use the pdocker process diagnostic commands to identify app-owned pdockerd, executor, or stale llama processes and their RSS before taking action.",
-        "If pdocker-owned stale llama work is present, use cleanup_commands in order: stop/remove only the pdocker llama container, then clear app-owned pdocker executors if needed; do not force-stop apps.",
+        "If Skydnir-owned stale llama work is present, use cleanup_commands in order: stop/remove only the Skydnir llama container, then clear app-owned executors if needed; do not force-stop apps.",
         "Close memory-heavy foreground apps only with user approval; do not force-stop the browser/VS Code session during automated runs.",
         "Wait until MemAvailable and SwapFree recover, then rerun with PDOCKER_LLAMA_WAIT_FOR_MEMORY_SEC set.",
         "Keep the generated JSON artifact with the APK/build commit for regression evidence.",
@@ -1229,7 +1229,7 @@ Path(out).write_text(json.dumps({
     "device_actions": [
         "Inspect the generated report before rerunning; it indicates a device-memory failure, not a GPU-correctness result.",
         "Use the pdocker process diagnostic commands to identify app-owned pdockerd, executor, or stale llama processes and their RSS before taking action.",
-        "If stale pdocker llama work is present, use cleanup_commands in order: stop/remove only the pdocker llama container, then clear app-owned pdocker executors if needed; do not force-stop apps.",
+        "If stale Skydnir llama work is present, use cleanup_commands in order: stop/remove only the Skydnir llama container, then clear app-owned executors if needed; do not force-stop apps.",
         "Treat low SwapFree as Android zram pressure evidence, not a hard failure unless a strict swap threshold was configured.",
         "Rerun with the same APK and output path after memory recovers; do not rebuild the llama image just because this guard fired.",
     ],
@@ -5203,7 +5203,7 @@ result = {
     "operation": {
         "kind": "llama-gpu-compare",
         "ui_surface": "Overview daemon operation/progress card",
-        "container_surface": "pdocker-llama-cpp remains the container shown by Engine container listing",
+        "container_surface": "skydnir-llama-cpp remains the container shown by Engine container listing",
         "cleanup": "remove adb port forward and mark failed operation on nonzero exit; CPU restore is opt-in with --restore because the next run recreates the required mode",
     },
     "next_blocker": blocker_detail,

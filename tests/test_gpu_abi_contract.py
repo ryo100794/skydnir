@@ -3251,7 +3251,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "kv_offload_guarded",
             "kv_offload_env",
             "kv_offload_disabled_effective",
-            "pdocker llama startup diagnostics",
+            "Skydnir llama startup diagnostics",
         ]:
             self.assertIn(marker, start_script)
 

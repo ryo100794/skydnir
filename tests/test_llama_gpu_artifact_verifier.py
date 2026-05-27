@@ -292,7 +292,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertTrue(report["device_memory_blocked"])
         self.assertIn("wait", report["device_actions"])
         self.assertTrue(
-            any("pdocker-owned" in action and "stale llama" in action for action in report["device_actions"]),
+            any("Skydnir-owned" in action and "stale llama" in action for action in report["device_actions"]),
             report["device_actions"],
         )
         self.assertTrue(
@@ -303,7 +303,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["memory_thresholds"]["swap_free_mb"]["observed_mb"], 5)
         self.assertFalse(report["memory_thresholds"]["swap_free_mb"]["ok"])
         self.assertTrue(
-            any("/containers/pdocker-llama-cpp/stop" in command for command in report["cleanup_commands"]),
+            any("/containers/skydnir-llama-cpp/stop" in command for command in report["cleanup_commands"]),
             report["cleanup_commands"],
         )
         self.assertFalse(

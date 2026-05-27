@@ -65,7 +65,8 @@ class LlamaTemplateContractTest(unittest.TestCase):
         self.assertIn("staleLlamaWebUi", self.main_activity)
         self.assertIn("staleLlamaStaticPath", self.main_activity)
         self.assertIn("staleLlamaCorrectnessProbe", self.main_activity)
-        self.assertIn('.pdocker-template-version").writeText("12', self.main_activity)
+        self.assertIn('.pdocker-template-version").writeText("13', self.main_activity)
+        self.assertIn("stalePublicLlamaNames", self.main_activity)
 
     def test_gpu_correctness_is_separate_from_http_health(self):
         self.assertIn("COPY scripts/pdocker-llama-correctness.sh", self.dockerfile)
@@ -116,7 +117,18 @@ class LlamaTemplateContractTest(unittest.TestCase):
         self.assertNotIn("staleLlamaBridgeClamps", self.main_activity)
         for item in self.env_manifest["ui_compose_runtime_env_defaults"]:
             self.assertNotIn(f'LlamaComposeEnvDefault("{item["env"]}",', self.main_activity)
-        self.assertIn('.pdocker-template-version").writeText("12', self.main_activity)
+        self.assertIn('.pdocker-template-version").writeText("13', self.main_activity)
+
+    def test_public_template_names_are_skydnir(self):
+        self.assertIn("image: skydnir/llama-cpp-gpu:latest", self.compose)
+        self.assertIn("container_name: skydnir-llama-cpp", self.compose)
+        self.assertIn("/documents/skydnir-exports", self.compose)
+        self.assertNotIn("image: pdocker/llama-cpp-gpu:latest", self.compose)
+        self.assertNotIn("container_name: pdocker-llama-cpp", self.compose)
+        readme = (LLAMA_ROOT / "README.md").read_text()
+        self.assertIn("# Skydnir llama.cpp GPU workspace", readme)
+        self.assertIn("Usage from Skydnir", readme)
+        self.assertIn("docker logs skydnir-llama-cpp", readme)
 
     def test_kv_guard_does_not_patch_llama_sources_or_build_flow(self):
         forbidden = [

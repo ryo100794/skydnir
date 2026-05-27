@@ -8046,9 +8046,14 @@ class MainActivity : AppCompatActivity() {
         val staleLlamaCorrectnessProbe =
             templateVersion < 11 ||
                 !File(project, "scripts/pdocker-llama-correctness.sh").isFile
+        val stalePublicLlamaNames =
+            templateVersion < 13 ||
+                "image: pdocker/llama-cpp-gpu:latest" in composeText ||
+                "container_name: pdocker-llama-cpp" in composeText ||
+                "/documents/pdocker-exports" in composeText
         if (!stalePdockerShaderTuning && !staleCheckout && !staleKvOffloadGuard &&
             !staleGpuLayerDefault && !staleManifestComposeDefaults && !staleLlamaWebUi &&
-            !staleLlamaStaticPath && !staleLlamaCorrectnessProbe) return
+            !staleLlamaStaticPath && !staleLlamaCorrectnessProbe && !stalePublicLlamaNames) return
         val backupDir = File(project, ".pdocker-template-backups/llama-cpp-gpu-${System.currentTimeMillis()}")
         backupDir.mkdirs()
         listOf(
@@ -8073,7 +8078,7 @@ class MainActivity : AppCompatActivity() {
             if (relative.startsWith("scripts/")) dest.setExecutable(true, false)
         }
         File(project, ".pdocker-template-id").writeText("llama-cpp-gpu\n")
-        File(project, ".pdocker-template-version").writeText("12\n")
+        File(project, ".pdocker-template-version").writeText("13\n")
         ensureProjectDocumentsEnv(project)
     }
 

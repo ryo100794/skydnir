@@ -22,8 +22,8 @@ MEMORY_ERRORS = {"insufficient_memory", "runtime_memory_pressure"}
 DEFAULT_MEMORY_DEVICE_ACTIONS = (
     "Do not start or classify the llama GPU compare while this memory blocker is present; this is not a GPU correctness result.",
     "Check MemAvailable first; low SwapFree is Android zram pressure evidence and is advisory unless the artifact enabled a hard swap threshold.",
-    "Identify pdocker-owned pdockerd, executor, or stale llama processes and their RSS before taking action.",
-    "If pdocker-owned stale llama work is present, run cleanup_commands in order to stop/remove only the pdocker llama container and app-owned pdocker executors; do not force-stop apps.",
+    "Identify Skydnir-owned pdockerd, executor, or stale llama processes and their RSS before taking action.",
+    "If Skydnir-owned stale llama work is present, run cleanup_commands in order to stop/remove only the Skydnir llama container and app-owned executors; do not force-stop apps.",
     "Wait for Android reclaim or reboot the test device only when MemAvailable remains below the hard threshold or strict swap gating was explicitly configured.",
 )
 DEFAULT_MEMORY_DIAGNOSTIC_COMMANDS = (
@@ -31,8 +31,8 @@ DEFAULT_MEMORY_DIAGNOSTIC_COMMANDS = (
     "adb shell \"run-as io.github.ryo100794.pdocker.compat sh -c 'ps -A -o PID,PPID,RSS,VSZ,NAME,ARGS 2>/dev/null | grep -E \\\"(pdocker|llama|io.github.ryo100794.pdocker.compat)\\\" || true'\"",
 )
 DEFAULT_MEMORY_CLEANUP_COMMANDS = (
-    "adb shell \"run-as io.github.ryo100794.pdocker.compat sh -c 'cd files && test -S pdocker/pdockerd.sock && printf '\\''POST /containers/pdocker-llama-cpp/stop HTTP/1.1\\r\\nHost: pdocker\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n'\\'' | toybox nc -U -W 3 pdocker/pdockerd.sock >/dev/null || true'\"",
-    "adb shell \"run-as io.github.ryo100794.pdocker.compat sh -c 'cd files && test -S pdocker/pdockerd.sock && printf '\\''DELETE /containers/pdocker-llama-cpp?force=true HTTP/1.1\\r\\nHost: pdocker\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n'\\'' | toybox nc -U -W 3 pdocker/pdockerd.sock >/dev/null || true'\"",
+    "adb shell \"run-as io.github.ryo100794.pdocker.compat sh -c 'cd files && test -S pdocker/pdockerd.sock && printf '\\''POST /containers/skydnir-llama-cpp/stop HTTP/1.1\\r\\nHost: pdocker\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n'\\'' | toybox nc -U -W 3 pdocker/pdockerd.sock >/dev/null || true'\"",
+    "adb shell \"run-as io.github.ryo100794.pdocker.compat sh -c 'cd files && test -S pdocker/pdockerd.sock && printf '\\''DELETE /containers/skydnir-llama-cpp?force=true HTTP/1.1\\r\\nHost: pdocker\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n'\\'' | toybox nc -U -W 3 pdocker/pdockerd.sock >/dev/null || true'\"",
     "adb shell \"run-as io.github.ryo100794.pdocker.compat sh -c 'pkill -x pdocker-gpu-executor 2>/dev/null; pkill -x pdocker-media-executor 2>/dev/null; true'\"",
 )
 ENV_MANIFEST_PATH = Path(__file__).resolve().with_name("llama-gpu-env-manifest.json")

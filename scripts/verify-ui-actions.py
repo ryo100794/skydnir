@@ -142,7 +142,8 @@ def main() -> int:
     require("existing compose files migrate documents mounts", "migrateComposeDocuments" in main_src and "PDOCKER_SHARED_DOCUMENTS_HOST" in main_src and "PDOCKER_MODEL_HOST:-./models" in main_src)
     require("installed project compose files migrate on startup", "migrateInstalledProjects()" in main_src and "override fun onResume()" in main_src and "projectDirs().forEach" in main_src and "migrateProjectPorts(project)" in main_src)
     require("llama template migration removes stale shader wrapper tuning", "migrateLlamaCppGpuWorkspace(project)" in main_src and "LLAMA_CPP_VULKAN_SHADER_PROFILE" in main_src and "pdocker-bridge-safe-glslc" in main_src and "git checkout --detach FETCH_HEAD" in main_src and ".pdocker-template-backups/llama-cpp-gpu-" in main_src)
-    require("llama template migration installs KV offload guard", "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in main_src and "--no-kv-offload" in main_src and ".pdocker-template-version\").writeText(\"12" in main_src)
+    require("llama template migrates legacy public names", "stalePublicLlamaNames" in main_src and "image: pdocker/llama-cpp-gpu:latest" in main_src and "container_name: pdocker-llama-cpp" in main_src and "/documents/pdocker-exports" in main_src and '.pdocker-template-version").writeText("13' in main_src)
+    require("llama template migration installs KV offload guard", "PDOCKER_VULKAN_ALLOW_KV_OFFLOAD" in main_src and "--no-kv-offload" in main_src and ".pdocker-template-version\").writeText(\"13" in main_src)
     require("llama template defaults to validated one-layer Vulkan offload", "LLAMA_ARG_N_GPU_LAYERS: \"${LLAMA_ARG_N_GPU_LAYERS:-1}\"" in llama_compose_src and "LLAMA_ARG_N_GPU_LAYERS:-2" not in llama_compose_src and "staleGpuLayerDefault" in main_src)
     ui_compose_env_block_ok = (
         "pdocker.llama-gpu-env-manifest: begin ui_compose_runtime_env_defaults" in llama_compose_src
@@ -523,6 +524,7 @@ def main() -> int:
     ros2_rviz_compose_src = (ROOT / "app/src/main/assets/project-library/ros2-humble-rviz-novnc/compose.yaml").read_text()
     blender_compose_src = (ROOT / "app/src/main/assets/project-library/blender-xvnc-novnc/compose.yaml").read_text()
     direct_runtime_probe_compose_src = (ROOT / "app/src/main/assets/project-library/direct-runtime-probe/compose.yaml").read_text()
+    llama_compose_src = (ROOT / "app/src/main/assets/project-library/llama-cpp-gpu/compose.yaml").read_text()
     require(
         "graphics project templates use Skydnir public image and container names",
         "image: skydnir/ros2-humble-rviz-novnc:latest" in ros2_rviz_compose_src
@@ -540,6 +542,13 @@ def main() -> int:
         and "container_name: skydnir-direct-runtime-probe" in direct_runtime_probe_compose_src
         and "image: pdocker/direct-runtime-probe:latest" not in direct_runtime_probe_compose_src
         and "container_name: pdocker-direct-runtime-probe" not in direct_runtime_probe_compose_src,
+    )
+    require(
+        "llama project template uses Skydnir public image and container names",
+        "image: skydnir/llama-cpp-gpu:latest" in llama_compose_src
+        and "container_name: skydnir-llama-cpp" in llama_compose_src
+        and "image: pdocker/llama-cpp-gpu:latest" not in llama_compose_src
+        and "container_name: pdocker-llama-cpp" not in llama_compose_src,
     )
 
     require("interactive terminal font remains 12pt", "const initialFontSize = readOnly ? 8 : 12" in xterm_src and "fontSize: initialFontSize" in xterm_src)

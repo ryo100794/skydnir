@@ -435,6 +435,11 @@ def main() -> int:
     start = read(llama_root / "scripts" / "start-llama-server.sh")
 
     expectations = {
+        "compose uses Skydnir public image and container names": "image: skydnir/llama-cpp-gpu:latest" in llama_compose
+        and "container_name: skydnir-llama-cpp" in llama_compose
+        and "image: pdocker/llama-cpp-gpu:latest" not in llama_compose
+        and "container_name: pdocker-llama-cpp" not in llama_compose
+        and "/documents/skydnir-exports" in llama_compose,
         "compose gpus all": "gpus: all" in llama_compose,
         "compose exposes build parallelism": "LLAMA_CPP_BUILD_JOBS" in llama_compose,
         "compose model volume": "${PDOCKER_MODEL_HOST:-./models}:/models" in llama_compose,
@@ -470,7 +475,7 @@ def main() -> int:
         "llama optional model download": "LLAMA_MODEL_URL" in llama_compose and "curl -fL" in start and "-C -" in start,
         "llama default chat template": "--jinja" in start,
         "llama docker logs stream": "LLAMA_LOG_FILE" in llama_compose and "tee -a \"$log_file\"" in start and "stdbuf -oL -eL" in start,
-        "llama startup tee captures profile generation": start.find("exec > >(tee -a \"$log_file\") 2>&1") < start.find("pdocker-gpu-profile") and "pdocker llama startup: refreshing GPU profile" in start and ">/dev/null" not in start[start.find("pdocker-gpu-profile") - 80:start.find("pdocker-gpu-profile") + 120],
+        "llama startup tee captures profile generation": start.find("exec > >(tee -a \"$log_file\") 2>&1") < start.find("pdocker-gpu-profile") and "Skydnir llama startup: refreshing GPU profile" in start and ">/dev/null" not in start[start.find("pdocker-gpu-profile") - 80:start.find("pdocker-gpu-profile") + 120],
         "llama startup json records resolved GPU contract": "LLAMA_STARTUP_JSON" in start and "profile_path" in start and "profile_refresh_rc" in start and "llama_server_argv" in start and "MemAvailable" in start and "SwapFree" in start and "PDOCKER_GPU_QUEUE_SOCKET" in start and "VK_ICD_FILENAMES" in start,
         "llama startup json records KV guard state": "kv_offload_guard" in start and "kv_offload_guard_active" in start and "added_arg" in start and "disabled_effective" in start,
         "llama missing-model status page": "http.server" in start and "waiting for a GGUF model" in start,
