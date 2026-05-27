@@ -4,6 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage: pdocker-new-project NAME [TEMPLATE]
+       skydnir-new-project NAME [TEMPLATE]
 
 Create a project under /pdocker/projects. TEMPLATE may be:
   blank                 create a minimal Dockerfile and compose.yaml
@@ -19,7 +20,7 @@ fi
 
 name="$1"
 template="${2:-blank}"
-projects="${PDOCKER_PROJECTS_DIR:-/pdocker/projects}"
+projects="${SKYDNIR_PROJECTS_DIR:-${PDOCKER_PROJECTS_DIR:-/pdocker/projects}}"
 dest="$projects/$name"
 
 if [[ ! "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
@@ -50,6 +51,7 @@ copy_template() {
       --exclude './workspace/node_modules' \
       --exclude './workspace/.vscode-server' \
       --exclude './.pdocker-template-version' \
+      --exclude './.skydnir-template-version' \
       -cf - .
   ) | (
     cd "$dest"
@@ -61,39 +63,40 @@ if [[ "$template" == "blank" ]]; then
   mkdir -p "$dest/workspace"
   cat > "$dest/Dockerfile" <<'DOCKERFILE'
 FROM ubuntu:22.04
-CMD ["/bin/bash", "-lc", "echo hello from pdocker && sleep infinity"]
+CMD ["/bin/bash", "-lc", "echo hello from Skydnir && sleep infinity"]
 DOCKERFILE
   cat > "$dest/compose.yaml" <<'COMPOSE'
 services:
   app:
     build: .
-    image: local/pdocker-blank:latest
+    image: local/skydnir-blank:latest
     command: ["/bin/bash", "-lc", "echo hello from compose && sleep infinity"]
     environment:
-      PDOCKER_DOCUMENTS_MOUNT: "${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
-      PDOCKER_SHARED_DOCUMENTS_MOUNT: "${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
-      PDOCKER_EXPORT_DIR: "${PDOCKER_EXPORT_DIR:-/documents/pdocker-exports}"
-      PDOCKER_FAST_WORKDIR: "${PDOCKER_FAST_WORKDIR:-/workspace}"
+      SKYDNIR_DOCUMENTS_MOUNT: "${SKYDNIR_DOCUMENTS_MOUNT:-/documents}"
+      SKYDNIR_SHARED_DOCUMENTS_MOUNT: "${SKYDNIR_SHARED_DOCUMENTS_MOUNT:-/shared}"
+      SKYDNIR_EXPORT_DIR: "${SKYDNIR_EXPORT_DIR:-/documents/skydnir-exports}"
+      SKYDNIR_FAST_WORKDIR: "${SKYDNIR_FAST_WORKDIR:-/workspace}"
     volumes:
-      - ${PDOCKER_FAST_WORKSPACE_HOST:-./workspace}:/workspace
-      - ${PDOCKER_DOCUMENTS_HOST:-./documents}:${PDOCKER_DOCUMENTS_MOUNT:-/documents}
-      - ${PDOCKER_SHARED_DOCUMENTS_HOST:-./shared-documents}:${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}
+      - ${SKYDNIR_FAST_WORKSPACE_HOST:-./workspace}:/workspace
+      - ${SKYDNIR_DOCUMENTS_HOST:-./documents}:${SKYDNIR_DOCUMENTS_MOUNT:-/documents}
+      - ${SKYDNIR_SHARED_DOCUMENTS_HOST:-./shared-documents}:${SKYDNIR_SHARED_DOCUMENTS_MOUNT:-/shared}
 COMPOSE
   mkdir -p "$dest/documents"
   cat > "$dest/documents/README.md" <<'README'
 # Shared Documents Volume
 
 This placeholder exists only as an app-private fallback for a new project.
-Containers see this folder at `/documents` until the pdocker Android app
+Containers see this folder at `/documents` until the Skydnir Android app
 provides either direct Documents path access or its SAF-mediated mirror.
 
 When Android grants direct path access, the selected Documents folder is mounted
-at `/documents`. On SAF-only devices, pdocker mounts an app-private mirror at
+at `/documents`. On SAF-only devices, Skydnir mounts an app-private mirror at
 `/documents` and syncs selected writes back through the Documents actions. Use
 that path for explicit exports, benchmark artifacts, models you choose to
 share, and handoff files. Containers from other projects may intentionally
-share a folder by overriding `PDOCKER_DOCUMENTS_HOST` or by using the shared
-mount at `/shared`.
+share a folder by overriding `SKYDNIR_DOCUMENTS_HOST` or by using the shared
+mount at `/shared`; existing `PDOCKER_*` names remain accepted by Skydnir for
+old workspaces.
 
 Keep hot build caches, databases, and high-frequency logs in `/workspace` or
 another app-private volume, then copy selected results to `/documents` when
@@ -109,7 +112,7 @@ elif [[ -d "/workspace/templates/$template" ]]; then
   copy_template "/workspace/templates/$template"
 else
   echo "Template not found: $template" >&2
-  echo "Run pdocker-projects to see installed templates, or use 'blank'." >&2
+  echo "Run skydnir-projects to see installed templates, or use 'blank'." >&2
   exit 1
 fi
 

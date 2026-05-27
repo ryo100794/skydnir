@@ -44,7 +44,8 @@ echo "code-server: http://0.0.0.0:$port"
 echo "codex: $(command -v codex || true)"
 echo "claude: $(command -v claude || true)"
 echo "continue config: /workspace/.continue/config.yaml"
-echo "pdocker helpers: pdocker-paths, pdocker-projects, pdocker-new-project, pdocker-docker, pdocker-compose"
+echo "Skydnir helpers: skydnir-paths, skydnir-projects, skydnir-new-project, skydnir-docker, skydnir-compose"
+echo "Legacy aliases remain: pdocker-paths, pdocker-projects, pdocker-new-project, pdocker-docker, pdocker-compose"
 pdocker-engine-env --check || true
 
 exec code-server \

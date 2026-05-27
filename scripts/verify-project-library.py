@@ -21,6 +21,8 @@ LLAMA_GPU_COMPARE_BRIDGE_LIMITS = (
 )
 DOCUMENTS_VOLUME = "${PDOCKER_DOCUMENTS_HOST:-./documents}:${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
 SHARED_DOCUMENTS_VOLUME = "${PDOCKER_SHARED_DOCUMENTS_HOST:-./shared-documents}:${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
+SKYDNIR_DOCUMENTS_VOLUME = "${SKYDNIR_DOCUMENTS_HOST:-./documents}:${SKYDNIR_DOCUMENTS_MOUNT:-/documents}"
+SKYDNIR_SHARED_DOCUMENTS_VOLUME = "${SKYDNIR_SHARED_DOCUMENTS_HOST:-./shared-documents}:${SKYDNIR_SHARED_DOCUMENTS_MOUNT:-/shared}"
 
 
 def fail(msg: str) -> None:
@@ -201,9 +203,17 @@ def main() -> int:
             fail(f"{tid} compose missing Documents export / fast workspace guidance env")
         if "PDOCKER_SHARED_DOCUMENTS_MOUNT" not in compose:
             fail(f"{tid} compose missing shared Documents mount env")
-        if "PDOCKER_DOCUMENTS_HOST" not in readme or "PDOCKER_DOCUMENTS_MOUNT" not in readme:
+        if not (
+            ("PDOCKER_DOCUMENTS_HOST" in readme and "PDOCKER_DOCUMENTS_MOUNT" in readme)
+            or ("SKYDNIR_DOCUMENTS_HOST" in readme and "SKYDNIR_DOCUMENTS_MOUNT" in readme)
+        ):
             fail(f"{tid} README missing shared Documents override docs")
-        if "PDOCKER_SHARED_DOCUMENTS_HOST" not in readme and "PDOCKER_SHARED_DOCUMENTS_HOST" not in documents_readme:
+        if (
+            "PDOCKER_SHARED_DOCUMENTS_HOST" not in readme
+            and "PDOCKER_SHARED_DOCUMENTS_HOST" not in documents_readme
+            and "SKYDNIR_SHARED_DOCUMENTS_HOST" not in readme
+            and "SKYDNIR_SHARED_DOCUMENTS_HOST" not in documents_readme
+        ):
             fail(f"{tid} docs missing cross-project shared Documents override")
         if "/documents" not in documents_readme or "Do not put hot build caches" not in documents_readme:
             fail(f"{tid} documents README missing slow-storage usage guidance")
@@ -324,6 +334,11 @@ def main() -> int:
         "docker-ce-cli",
         "docker-compose-plugin",
         "COPY scripts/pdocker-* /usr/local/bin/",
+        "skydnir-paths",
+        "skydnir-projects",
+        "skydnir-new-project",
+        "skydnir-docker",
+        "skydnir-compose",
         "/pdocker/project",
         "/pdocker/projects",
         "/pdocker/host",
@@ -334,15 +349,16 @@ def main() -> int:
         "pdocker-docker",
         "pdocker-compose",
         "DOCKER_HOST",
+        "SKYDNIR_DOCUMENTS_MOUNT",
         "PDOCKER_DOCUMENTS_MOUNT",
         "Documents/pdocker/projects",
         "filesDir/pdocker/pdockerd.sock",
     ):
         if token not in dev_management_contract:
             fail(f"dev-workspace management helper contract missing {token}")
-    if DOCUMENTS_VOLUME not in dev_helper_scripts:
+    if SKYDNIR_DOCUMENTS_VOLUME not in dev_helper_scripts:
         fail("pdocker-new-project blank template must include selected Documents folder mount")
-    if SHARED_DOCUMENTS_VOLUME not in dev_helper_scripts:
+    if SKYDNIR_SHARED_DOCUMENTS_VOLUME not in dev_helper_scripts:
         fail("pdocker-new-project blank template must include cross-project shared Documents volume")
     if 'show_path "documents"' not in dev_helper_scripts:
         fail("pdocker-paths must show the shared Documents mount")

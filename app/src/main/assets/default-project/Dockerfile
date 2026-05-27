@@ -70,7 +70,10 @@ COPY scripts/start-code-server.sh /usr/local/bin/start-code-server
 COPY scripts/pdocker-* /usr/local/bin/
 COPY vscode/settings.json /workspace/.vscode-server/data/User/settings.json
 COPY continue/config.yaml /workspace/.continue/config.yaml
-RUN chmod +x /usr/local/bin/start-code-server /usr/local/bin/pdocker-*
+RUN chmod +x /usr/local/bin/start-code-server /usr/local/bin/pdocker-* \
+    && for tool in compose docker engine-env new-project paths projects; do \
+         ln -sf "pdocker-${tool}" "/usr/local/bin/skydnir-${tool}"; \
+       done
 
 WORKDIR /workspace
 EXPOSE 18080

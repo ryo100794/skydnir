@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-projects="${PDOCKER_PROJECTS_DIR:-/pdocker/projects}"
+projects="${SKYDNIR_PROJECTS_DIR:-${PDOCKER_PROJECTS_DIR:-/pdocker/projects}}"
 if [[ ! -d "$projects" ]]; then
   echo "Project root is not mounted: $projects" >&2
   exit 1

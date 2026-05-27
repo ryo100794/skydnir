@@ -15,18 +15,18 @@ show_path() {
   printf '%-24s %s (%s)\n' "$label:" "$path" "$state"
 }
 
-workspace="${PDOCKER_WORKSPACE_DIR:-/workspace}"
-project="${PDOCKER_PROJECT_DIR:-/pdocker/project}"
-projects="${PDOCKER_PROJECTS_DIR:-/pdocker/projects}"
-home="${PDOCKER_HOME:-/pdocker/host}"
-engine="${PDOCKER_ENGINE_SOCKET:-$home/pdockerd.sock}"
-documents="${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
-shared_documents="${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
+workspace="${SKYDNIR_WORKSPACE_DIR:-${PDOCKER_WORKSPACE_DIR:-/workspace}}"
+project="${SKYDNIR_PROJECT_DIR:-${PDOCKER_PROJECT_DIR:-/pdocker/project}}"
+projects="${SKYDNIR_PROJECTS_DIR:-${PDOCKER_PROJECTS_DIR:-/pdocker/projects}}"
+home="${SKYDNIR_HOME:-${PDOCKER_HOME:-/pdocker/host}}"
+engine="${SKYDNIR_ENGINE_SOCKET:-${PDOCKER_ENGINE_SOCKET:-$home/pdockerd.sock}}"
+documents="${SKYDNIR_DOCUMENTS_MOUNT:-${PDOCKER_DOCUMENTS_MOUNT:-/documents}}"
+shared_documents="${SKYDNIR_SHARED_DOCUMENTS_MOUNT:-${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}}"
 
 show_path "workspace" "$workspace"
 show_path "current project" "$project"
 show_path "project library" "$projects"
-show_path "pdocker home" "$home"
+show_path "Skydnir home" "$home"
 show_path "engine socket" "$engine"
 show_path "documents" "$documents"
 show_path "shared documents" "$shared_documents"
@@ -44,5 +44,5 @@ echo
 if docker_host="$(pdocker-engine-env --value 2>/dev/null)"; then
   echo "Engine available: DOCKER_HOST=$docker_host"
 else
-  echo "Engine unavailable: start pdockerd in the app and mount its socket/path into this container."
+  echo "Engine unavailable: start skydnird in the app and mount its socket/path into this container."
 fi
