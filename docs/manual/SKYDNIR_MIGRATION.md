@@ -102,6 +102,31 @@ The Android UI writes both common files during this transition. Keep
 dual-read migration is explicitly designed; renaming file names and renaming
 variable names are separate compatibility steps.
 
+## Development Workspace Helpers
+
+The bundled development workspace now presents Skydnir helper commands in
+VS Code tasks and startup messages:
+
+```sh
+skydnir-paths
+skydnir-projects
+skydnir-new-project NAME [TEMPLATE]
+skydnir-docker version
+skydnir-compose -f /pdocker/project/compose.yaml up --detach --build
+skydnir-engine-env --check
+```
+
+During the transition these commands are thin aliases for the existing helper
+implementation. The older `pdocker-*` helper names remain installed for
+compatibility with already-created workspaces and user scripts. Existing
+default dev-workspace task files are migrated in place when the Android app
+repairs the workspace; if a task file is missing, the app restores the bundled
+Skydnir task asset rather than a reduced fallback.
+
+The Engine socket itself is still the compatibility socket inside the app data
+area. New scripts should call `skydnir-engine-env`; compatibility scripts may
+call `pdocker-engine-env`, which resolves the same mounted socket.
+
 ## Service Migration
 
 If you created a host-side user service manually, migrate it by adding a new
