@@ -366,7 +366,7 @@ wrapper. New documentation and examples use `skydnir`.
 - [x] Add `skydnird` daemon alias.
 - [x] Add runtime home alias migration.
 - [ ] Add config file dual-read migration.
-- [ ] Add service migration documentation.
+- [x] Add service migration documentation.
 - [x] Update CI/Wiki display names that are safe before repository rename.
 - [x] Update release note draft.
 - [ ] Keep old package id/data path until explicitly approved.

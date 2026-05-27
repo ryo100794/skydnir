@@ -6,14 +6,14 @@ This generated ledger classifies tracked `pdocker`-family names before
 any public Skydnir rename work proceeds.  It is intentionally an
 inventory, not a replacement script.
 
-- Entries: `20218`
+- Entries: `20219`
 - Skipped binary files: `22`
 
 ## Counts by Token
 
 | Token | Count |
 |---|---:|
-| `PDOCKER` | 4269 |
+| `PDOCKER` | 4270 |
 | `PDocker` | 9 |
 | `pDocker` | 7 |
 | `pdocker` | 13961 |
@@ -35,14 +35,14 @@ inventory, not a replacement script.
 | `internal_reference` | 2164 |
 | `public_branding` | 167 |
 | `socket_or_storage_path` | 657 |
-| `test_fixture` | 1493 |
+| `test_fixture` | 1494 |
 
 ## Counts by Phase
 
 | Phase | Count |
 |---|---:|
 | `do-not-rewrite-history` | 10955 |
-| `phase-0-guard` | 1493 |
+| `phase-0-guard` | 1494 |
 | `phase-1-or-historical-context` | 331 |
 | `phase-1-public-branding` | 167 |
 | `phase-1-ui-copy-or-phase-4-package` | 328 |

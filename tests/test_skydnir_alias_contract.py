@@ -15,6 +15,7 @@ SKYDNIR = BIN / "skydnir"
 PDOCKERD = BIN / "pdockerd"
 SKYDNIRD = BIN / "skydnird"
 BRIDGE = ROOT / "app" / "src" / "main" / "python" / "pdockerd_bridge.py"
+MIGRATION_DOC = ROOT / "docs" / "manual" / "SKYDNIR_MIGRATION.md"
 
 
 class SkydnirAliasContractTest(unittest.TestCase):
@@ -166,6 +167,14 @@ class SkydnirAliasContractTest(unittest.TestCase):
                 ),
                 str(home / "explicit-legacy"),
             )
+
+    def test_migration_doc_records_service_and_no_rename_boundaries(self):
+        text = MIGRATION_DOC.read_text(encoding="utf-8")
+        self.assertIn("skydnird.service", text)
+        self.assertIn("`PDOCKER_HOME` wins for compatibility", text)
+        self.assertIn("`SKYDNIR_HOME` is accepted", text)
+        self.assertIn("Android package ID", text)
+        self.assertIn("Existing JSON artifact schemas", text)
 
 
 if __name__ == "__main__":

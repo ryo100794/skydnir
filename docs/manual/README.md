@@ -16,6 +16,7 @@ app, not why the architecture is shaped a certain way.
 | [`GIT_COLLABORATION.md`](GIT_COLLABORATION.md) | Multi-machine Git identity, preflight, branch, and integration workflow |
 | [`NEWSFLOW.md`](NEWSFLOW.md) | GitHub-facing release, issue, demo, Wiki, and tester-call update workflow |
 | [`PROMOTION.md`](PROMOTION.md) | GitHub tagline, repository description, topics, release template, demo checklist, and public messaging |
+| [`SKYDNIR_MIGRATION.md`](SKYDNIR_MIGRATION.md) | Public rename, CLI/daemon aliases, runtime-home selection, and service migration |
 
 ## Canonical Sources
 
