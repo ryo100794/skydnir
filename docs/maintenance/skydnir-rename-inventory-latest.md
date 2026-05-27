@@ -16,8 +16,8 @@ inventory, not a replacement script.
 | `PDOCKER` | 4274 |
 | `PDocker` | 10 |
 | `pDocker` | 8 |
-| `pdocker` | 13752 |
-| `pdocker-android` | 93 |
+| `pdocker` | 13753 |
+| `pdocker-android` | 92 |
 | `pdockerd` | 1792 |
 
 ## Counts by Category
@@ -30,26 +30,26 @@ inventory, not a replacement script.
 | `config_path` | 166 |
 | `daemon_binary_or_service` | 613 |
 | `documentation_reference` | 45 |
-| `environment_variable` | 2937 |
+| `environment_variable` | 2930 |
 | `historical_evidence` | 11028 |
-| `internal_reference` | 2180 |
+| `internal_reference` | 2179 |
 | `socket_or_storage_path` | 789 |
-| `test_fixture` | 1518 |
+| `test_fixture` | 1526 |
 
 ## Counts by Phase
 
 | Phase | Count |
 |---|---:|
 | `do-not-rewrite-history` | 11394 |
-| `phase-0-guard` | 1518 |
+| `phase-0-guard` | 1526 |
 | `phase-1-or-historical-context` | 45 |
 | `phase-1-ui-copy-or-phase-4-package` | 237 |
 | `phase-2-cli-alias` | 50 |
 | `phase-2-daemon-alias` | 613 |
 | `phase-3-config-migration` | 166 |
 | `phase-4-or-later-migration-required` | 789 |
-| `phase-5-dual-read-required` | 2937 |
-| `phase-5-internal-namespace` | 2180 |
+| `phase-5-dual-read-required` | 2930 |
+| `phase-5-internal-namespace` | 2179 |
 
 ## Next Action
 

@@ -31,9 +31,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "docker-proot-setup"
 PDOCKERD = BACKEND / "bin" / "pdockerd"
-FLAVOR_ENV = "PDOCKER_ANDROID_FLAVOR"
-FLAVOR_WAS_EXPLICIT = FLAVOR_ENV in os.environ
-FLAVOR = os.environ.get(FLAVOR_ENV, "compat")
+FLAVOR_ENV = "SKYDNIR_ANDROID_FLAVOR"
+LEGACY_FLAVOR_ENV = "PDOCKER_ANDROID_FLAVOR"
+FLAVOR_WAS_EXPLICIT = FLAVOR_ENV in os.environ or LEGACY_FLAVOR_ENV in os.environ
+FLAVOR = os.environ.get(FLAVOR_ENV) or os.environ.get(LEGACY_FLAVOR_ENV, "compat")
 APK_BY_FLAVOR = {
     "compat": ROOT / "app" / "build" / "outputs" / "apk" / "compat" / "debug" / "app-compat-debug.apk",
     "modern": ROOT / "app" / "build" / "outputs" / "apk" / "modern" / "debug" / "app-modern-debug.apk",
@@ -216,7 +217,7 @@ def check_flavor_guard() -> list[Check]:
     if FLAVOR == "compat":
         detail = "default process-exec validation flavor"
         if not FLAVOR_WAS_EXPLICIT:
-            detail += "; modern APK artifacts are ignored unless PDOCKER_ANDROID_FLAVOR=modern"
+            detail += "; modern APK artifacts are ignored unless SKYDNIR_ANDROID_FLAVOR=modern"
         return [Check("apk flavor: compat process-exec validation", "PASS", detail)]
     return [Check("apk flavor: modern metadata-only opt-in",
                   "PASS" if FLAVOR_WAS_EXPLICIT else "FAIL",

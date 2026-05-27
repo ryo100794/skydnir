@@ -119,8 +119,9 @@ packaging.
 `scripts/build-apk.sh` still rebuilds Android native helper libraries by
 default using the official NDK clang path documented in
 [`NATIVE_BUILD_ENVIRONMENT.md`](NATIVE_BUILD_ENVIRONMENT.md). The build
-orchestrator sets `PDOCKER_SKIP_NATIVE_BUILD=1` after it has already refreshed
-native helpers.
+orchestrator sets `SKYDNIR_SKIP_NATIVE_BUILD=1` after it has already refreshed
+native helpers; the older `PDOCKER_SKIP_NATIVE_BUILD` name remains accepted as
+a compatibility alias.
 
 The `modern` flavor is useful for API 29+ metadata, image browsing, editing,
 and Engine API work, but it does not advertise `process-exec=1`.

@@ -4,11 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-FLAVOR="${PDOCKER_ANDROID_FLAVOR:-compat}"
+FLAVOR="${SKYDNIR_ANDROID_FLAVOR:-${PDOCKER_ANDROID_FLAVOR:-compat}}"
 case "$FLAVOR" in
   compat) PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}" ;;
   modern) PKG="${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}" ;;
-  *) echo "PDOCKER_ANDROID_FLAVOR must be compat or modern" >&2; exit 2 ;;
+  *) echo "SKYDNIR_ANDROID_FLAVOR/PDOCKER_ANDROID_FLAVOR must be compat or modern" >&2; exit 2 ;;
 esac
 
 ADB="${ADB:-adb}"

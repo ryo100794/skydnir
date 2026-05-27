@@ -180,7 +180,7 @@ Short form for the SDK28 direct-exec compatibility APK:
 
 ```sh
 bash scripts/setup-env.sh
-PDOCKER_ANDROID_FLAVOR=compat bash scripts/build-apk.sh
+SKYDNIR_ANDROID_FLAVOR=compat bash scripts/build-apk.sh
 ```
 
 For a fixed-signature release APK, keep signing material outside Git and pass
@@ -191,7 +191,7 @@ export SKYDNIR_SIGNING_STORE_FILE=$HOME/.skydnir/release.jks
 export SKYDNIR_SIGNING_STORE_PASSWORD=...
 export SKYDNIR_SIGNING_KEY_ALIAS=skydnir
 export SKYDNIR_SIGNING_KEY_PASSWORD=...
-PDOCKER_ANDROID_FLAVOR=compat PDOCKER_ANDROID_BUILD_TYPE=release bash scripts/build-apk.sh
+SKYDNIR_ANDROID_FLAVOR=compat SKYDNIR_ANDROID_BUILD_TYPE=release bash scripts/build-apk.sh
 ```
 
 Signing keys and certificates are intentionally ignored by Git.

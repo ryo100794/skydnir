@@ -208,7 +208,7 @@ def build_artifact(seed: int, command: str, fingerprint: str, summary: list[dict
         "schema": 1,
         "kind": "stress-regression-fast",
         "git_commit": git_commit(),
-        "build_flavor": os.environ.get("PDOCKER_ANDROID_FLAVOR", "compat"),
+        "build_flavor": os.environ.get("SKYDNIR_ANDROID_FLAVOR") or os.environ.get("PDOCKER_ANDROID_FLAVOR", "compat"),
         "timestamp_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "seed": seed,
         "command": command,

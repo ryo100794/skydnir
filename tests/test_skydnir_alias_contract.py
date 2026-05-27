@@ -16,6 +16,10 @@ PDOCKERD = BIN / "pdockerd"
 SKYDNIRD = BIN / "skydnird"
 BRIDGE = ROOT / "app" / "src" / "main" / "python" / "pdockerd_bridge.py"
 APP_GRADLE = ROOT / "app" / "build.gradle.kts"
+BUILD_APK = ROOT / "scripts" / "build-apk.sh"
+BUILD_ALL = ROOT / "scripts" / "build-all.sh"
+VERIFY_FAST = ROOT / "scripts" / "verify-fast.sh"
+COMPAT_AUDIT = ROOT / "scripts" / "compat-audit.py"
 MIGRATION_DOC = ROOT / "docs" / "manual" / "SKYDNIR_MIGRATION.md"
 
 
@@ -257,6 +261,21 @@ class SkydnirAliasContractTest(unittest.TestCase):
         self.assertIn('?: providers.environmentVariable("PDOCKER_${name}").orNull', gradle)
         self.assertIn('create("skydnirRelease")', gradle)
         self.assertIn('signingConfigs.findByName("skydnirRelease")', gradle)
+
+    def test_android_build_env_prefers_skydnir_with_pdocker_fallback(self):
+        build_apk = BUILD_APK.read_text(encoding="utf-8")
+        build_all = BUILD_ALL.read_text(encoding="utf-8")
+        verify_fast = VERIFY_FAST.read_text(encoding="utf-8")
+        compat_audit = COMPAT_AUDIT.read_text(encoding="utf-8")
+
+        self.assertIn('PDOCKER_ANDROID_FLAVOR:=${SKYDNIR_ANDROID_FLAVOR:-compat}', build_apk)
+        self.assertIn('PDOCKER_ANDROID_BUILD_TYPE:=${SKYDNIR_ANDROID_BUILD_TYPE:-debug}', build_apk)
+        self.assertIn('PDOCKER_SKIP_NATIVE_BUILD:=${SKYDNIR_SKIP_NATIVE_BUILD:-0}', build_apk)
+        self.assertIn('BUILD_TYPE="${SKYDNIR_ANDROID_BUILD_TYPE:-${PDOCKER_ANDROID_BUILD_TYPE:-debug}}"', build_all)
+        self.assertIn('SKYDNIR_ANDROID_FLAVOR="$FLAVOR"', build_all)
+        self.assertIn('PDOCKER_ANDROID_FLAVOR="${SKYDNIR_ANDROID_FLAVOR:-${PDOCKER_ANDROID_FLAVOR:-compat}}"', verify_fast)
+        self.assertIn('FLAVOR_ENV = "SKYDNIR_ANDROID_FLAVOR"', compat_audit)
+        self.assertIn('LEGACY_FLAVOR_ENV = "PDOCKER_ANDROID_FLAVOR"', compat_audit)
 
     def test_migration_doc_records_service_and_no_rename_boundaries(self):
         text = MIGRATION_DOC.read_text(encoding="utf-8")

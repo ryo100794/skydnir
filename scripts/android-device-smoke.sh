@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FLAVOR="${PDOCKER_ANDROID_FLAVOR:-compat}"
+FLAVOR="${SKYDNIR_ANDROID_FLAVOR:-${PDOCKER_ANDROID_FLAVOR:-compat}}"
 case "$FLAVOR" in
   compat)
     DEFAULT_PKG="io.github.ryo100794.pdocker.compat"
@@ -13,7 +13,7 @@ case "$FLAVOR" in
     DEFAULT_APK="$ROOT/app/build/outputs/apk/modern/debug/app-modern-debug.apk"
     ;;
   *)
-    echo "PDOCKER_ANDROID_FLAVOR must be 'compat' or 'modern' (got '$FLAVOR')" >&2
+    echo "SKYDNIR_ANDROID_FLAVOR/PDOCKER_ANDROID_FLAVOR must be 'compat' or 'modern' (got '$FLAVOR')" >&2
     exit 2
     ;;
 esac

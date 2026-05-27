@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Coherent local build entrypoint for pdocker-android.
+# Coherent local build entrypoint for Skydnir.
 #
 # Default flow:
 #   compat APK + Android native helpers + glibc GPU shim/ICDs.
@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 FLAVOR="compat"
-BUILD_TYPE="${PDOCKER_ANDROID_BUILD_TYPE:-debug}"
+BUILD_TYPE="${SKYDNIR_ANDROID_BUILD_TYPE:-${PDOCKER_ANDROID_BUILD_TYPE:-debug}}"
 DO_NATIVE=0
 DO_GPU_SHIM=0
 DO_APK=0
@@ -256,17 +256,17 @@ if [[ "$DO_APK" == "1" ]]; then
             check_gpu_shim_fresh
         fi
         check_backend_payload_inputs
-        PDOCKER_ANDROID_FLAVOR="$FLAVOR" \
-        PDOCKER_ANDROID_BUILD_TYPE="$BUILD_TYPE" \
-        PDOCKER_SKIP_NATIVE_BUILD=1 \
+        SKYDNIR_ANDROID_FLAVOR="$FLAVOR" \
+        SKYDNIR_ANDROID_BUILD_TYPE="$BUILD_TYPE" \
+        SKYDNIR_SKIP_NATIVE_BUILD=1 \
             bash scripts/build-apk.sh
     else
-        echo "dry-run: PDOCKER_ANDROID_FLAVOR=$FLAVOR PDOCKER_ANDROID_BUILD_TYPE=$BUILD_TYPE PDOCKER_SKIP_NATIVE_BUILD=1 bash scripts/build-apk.sh"
+        echo "dry-run: SKYDNIR_ANDROID_FLAVOR=$FLAVOR SKYDNIR_ANDROID_BUILD_TYPE=$BUILD_TYPE SKYDNIR_SKIP_NATIVE_BUILD=1 bash scripts/build-apk.sh"
     fi
 fi
 
 if [[ "$DO_VERIFY_FAST" == "1" ]]; then
-    run env PDOCKER_ANDROID_FLAVOR="$FLAVOR" bash scripts/verify-fast.sh
+    run env SKYDNIR_ANDROID_FLAVOR="$FLAVOR" bash scripts/verify-fast.sh
 fi
 
 echo

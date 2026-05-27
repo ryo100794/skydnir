@@ -262,7 +262,7 @@ def main() -> int:
         "environment": {
             "python": sys.version.split()[0],
             "platform": sys.platform,
-            "android_flavor": os.environ.get("PDOCKER_ANDROID_FLAVOR", "compat"),
+            "android_flavor": os.environ.get("SKYDNIR_ANDROID_FLAVOR") or os.environ.get("PDOCKER_ANDROID_FLAVOR", "compat"),
             "adb_serial": os.environ.get("ADB_SERIAL", ""),
         },
         "commands": results,

@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 export PYTHONDONTWRITEBYTECODE=1
-export PDOCKER_ANDROID_FLAVOR="${PDOCKER_ANDROID_FLAVOR:-compat}"
+export PDOCKER_ANDROID_FLAVOR="${SKYDNIR_ANDROID_FLAVOR:-${PDOCKER_ANDROID_FLAVOR:-compat}}"
+export SKYDNIR_ANDROID_FLAVOR="$PDOCKER_ANDROID_FLAVOR"
 tmp_storage_sequence=""
 cleanup_verify_fast() {
   if [ -n "$tmp_storage_sequence" ]; then
@@ -15,7 +16,7 @@ trap cleanup_verify_fast EXIT
 case "$PDOCKER_ANDROID_FLAVOR" in
   compat|modern) ;;
   *)
-    echo "verify-fast: PDOCKER_ANDROID_FLAVOR must be 'compat' or 'modern' (got '$PDOCKER_ANDROID_FLAVOR')" >&2
+    echo "verify-fast: SKYDNIR_ANDROID_FLAVOR/PDOCKER_ANDROID_FLAVOR must be 'compat' or 'modern' (got '$PDOCKER_ANDROID_FLAVOR')" >&2
     exit 2
     ;;
 esac

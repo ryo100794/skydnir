@@ -96,8 +96,8 @@ def main() -> int:
 
     docker_action_count = main_src.count("openDockerTerminal(") - 1
     require("upstream docker cli is not a normal apk ui path", docker_action_count <= 1)
-    require("default apk build targets process-exec compat flavor", 'PDOCKER_ANDROID_FLAVOR:=compat' in (ROOT / "scripts/build-apk.sh").read_text() and 'PDOCKER_ANDROID_FLAVOR:-compat' in android_smoke_src)
-    require("fast audits default to compat apk flavor", 'FLAVOR_ENV = "PDOCKER_ANDROID_FLAVOR"' in compat_audit_src and 'os.environ.get(FLAVOR_ENV, "compat")' in compat_audit_src and 'PDOCKER_ANDROID_FLAVOR="${PDOCKER_ANDROID_FLAVOR:-compat}"' in verify_fast_src)
+    require("default apk build targets process-exec compat flavor", 'PDOCKER_ANDROID_FLAVOR:=${SKYDNIR_ANDROID_FLAVOR:-compat}' in (ROOT / "scripts/build-apk.sh").read_text() and 'SKYDNIR_ANDROID_FLAVOR:-${PDOCKER_ANDROID_FLAVOR:-compat}' in android_smoke_src)
+    require("fast audits default to compat apk flavor", 'FLAVOR_ENV = "SKYDNIR_ANDROID_FLAVOR"' in compat_audit_src and 'LEGACY_FLAVOR_ENV = "PDOCKER_ANDROID_FLAVOR"' in compat_audit_src and 'os.environ.get(LEGACY_FLAVOR_ENV, "compat")' in compat_audit_src and 'PDOCKER_ANDROID_FLAVOR="${SKYDNIR_ANDROID_FLAVOR:-${PDOCKER_ANDROID_FLAVOR:-compat}}"' in verify_fast_src)
     require("fast apk flavor guard ignores stale modern artifacts", "APK_BY_FLAVOR" in compat_audit_src and 'APK = APK_BY_FLAVOR.get(FLAVOR)' in compat_audit_src and "app-debug.apk" not in compat_audit_src and "existing modern APK ignored by compat fast gate" in compat_audit_src)
     require("fast scripts reject unknown apk flavor", 'case "$PDOCKER_ANDROID_FLAVOR"' in verify_fast_src and 'case "$FLAVOR"' in android_smoke_src and "must be 'compat' or 'modern'" in verify_fast_src and "must be 'compat' or 'modern'" in android_smoke_src)
     require("public intake labels modern as metadata-only", "modern metadata-only" in bug_report_src and "modern metadata-only" in device_test_src)
