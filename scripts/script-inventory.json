@@ -94,6 +94,19 @@
   ],
   "entries": [
     {
+      "path": "scripts/analyze-spirv.py",
+      "category": "test-verification",
+      "stability": "test-helper",
+      "role": "Analyze dumped Vulkan SPIR-V modules for llama GPU bridge correctness and performance triage without hash-targeted assumptions.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/analyze-spirv.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
       "path": "scripts/android-api29-direct-feasibility.sh",
       "category": "test-verification",
       "stability": "device-helper",
@@ -270,6 +283,19 @@
       "migration": {
         "target_dir": "scripts/test",
         "candidate_path": "scripts/test/android-llama-gpu-compare.sh",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
+      "path": "scripts/android-llama-gpu-q6-workgroup-run.sh",
+      "category": "test-verification",
+      "stability": "device-helper",
+      "role": "Android device runner for planned Q6 llama GPU workgroup/lowering evidence without changing llama.cpp, Dockerfiles, models, or prompts.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/android-llama-gpu-q6-workgroup-run.sh",
         "phase": "phase-1-test-helpers-after-manifest-update",
         "action": "candidate-move-behind-wrapper",
         "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
@@ -517,6 +543,19 @@
       }
     },
     {
+      "path": "scripts/compare-spirv-dataflow.py",
+      "category": "test-verification",
+      "stability": "test-helper",
+      "role": "Compare SPIR-V dataflow summaries for structural llama GPU bridge diagnostics.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/compare-spirv-dataflow.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
       "path": "scripts/compat-audit.py",
       "category": "test-verification",
       "stability": "test-helper",
@@ -595,6 +634,19 @@
       }
     },
     {
+      "path": "scripts/instrument-spirv-noop-probe.py",
+      "category": "test-verification",
+      "stability": "test-helper",
+      "role": "Create valid whole-module SPIR-V no-op or Q6K probe instrumentation without mutating the Vulkan dispatch ABI.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/instrument-spirv-noop-probe.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
       "path": "scripts/llama-gpu-env-manifest.json",
       "category": "generated-maintenance",
       "stability": "maintenance-helper",
@@ -608,6 +660,19 @@
       }
     },
     {
+      "path": "scripts/parse-q6k-probe-u32.py",
+      "category": "test-verification",
+      "stability": "test-helper",
+      "role": "Parse deterministic Q6_K debug-SSBO u32 probe records from llama GPU artifacts.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/parse-q6k-probe-u32.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
       "path": "scripts/pdocker-test-driver.py",
       "category": "test-verification",
       "stability": "stable-entrypoint",
@@ -618,6 +683,32 @@
         "phase": "phase-1-test-helpers-after-manifest-update",
         "action": "candidate-move-behind-wrapper",
         "compat_wrapper": "wrapper required; permanent or long-lived stable entrypoint compatibility path"
+      }
+    },
+    {
+      "path": "scripts/plan-llama-gpu-q6-run.py",
+      "category": "test-verification",
+      "stability": "test-helper",
+      "role": "Create a Q6 Vulkan bridge pre-flight run plan without touching ADB.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/plan-llama-gpu-q6-run.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
+      "path": "scripts/prepare-q6k-noop-probe.sh",
+      "category": "test-verification",
+      "stability": "test-helper",
+      "role": "Prepare deterministic Q6K no-op/probe SPIR-V bundles for the next device run.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/prepare-q6k-noop-probe.sh",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
       }
     },
     {
@@ -959,6 +1050,19 @@
       }
     },
     {
+      "path": "scripts/verify-llama-gpu-q6-run-against-plan.py",
+      "category": "test-verification",
+      "stability": "test-helper",
+      "role": "Verify a llama GPU Q6 run artifact against its pre-flight plan and select the next action.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/verify-llama-gpu-q6-run-against-plan.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
       "path": "scripts/verify-memory-pager-contract.py",
       "category": "test-verification",
       "stability": "test-helper",
@@ -1174,6 +1278,19 @@
       "migration": {
         "target_dir": "scripts/test",
         "candidate_path": "scripts/test/verify-service-truth-plan.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
+      "path": "scripts/verify-spirv-probe-manifest.py",
+      "category": "test-verification",
+      "stability": "test-helper",
+      "role": "Fail-closed verifier for SPIR-V probe manifests before any instrumented Vulkan dispatch.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/verify-spirv-probe-manifest.py",
         "phase": "phase-1-test-helpers-after-manifest-update",
         "action": "candidate-move-behind-wrapper",
         "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"

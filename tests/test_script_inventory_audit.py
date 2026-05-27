@@ -219,7 +219,7 @@ class ScriptInventoryAuditTest(unittest.TestCase):
             doc.write_text(
                 "Runtime packaging | 1 top-level script\n"
                 "Build | 8 top-level scripts\n"
-                "Test | 77 top-level scripts\n"
+                "Test | 86 top-level scripts\n"
                 "Generated maintenance | 3 entries\n"
                 "Unused or legacy candidates | 1 tracked candidate\n"
                 "stale-terminal-repro.sh\n",

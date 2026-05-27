@@ -151,7 +151,7 @@ def check_docs() -> None:
     fdroid = read(FDROID_DOC)
     metadata = read(METADATA_README)
     required_fdroid_tokens = (
-        "does not claim that pdocker-android is ready for F-Droid submission",
+        "does not claim that Skydnir is ready for F-Droid submission",
         "user explicitly selected",
         "The app does not silently extend the APK",
         "Issue #9",
@@ -163,7 +163,7 @@ def check_docs() -> None:
         if token not in fdroid:
             fail(f"{rel(FDROID_DOC)} missing required release-readiness language: {token!r}")
 
-    if "does not claim that\npdocker-android is ready for inclusion" not in metadata:
+    if "does not claim that\nSkydnir is ready for inclusion" not in metadata:
         fail(f"{rel(METADATA_README)} must remain an inactive metadata placeholder")
 
     forbidden_claims = (
@@ -173,7 +173,7 @@ def check_docs() -> None:
     )
     combined = fdroid + "\n" + metadata
     for claim in forbidden_claims:
-        allowed = f"does not claim that pdocker-android is {claim}"
+        allowed = f"does not claim that Skydnir is {claim}"
         if claim in combined and allowed not in combined:
             fail(f"forbidden readiness claim found: {claim!r}")
 

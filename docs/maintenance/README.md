@@ -51,6 +51,7 @@ Use one state per document or evidence cluster:
 |---|---|
 | [`DOCUMENTATION_DEDUP_BACKLOG.md`](DOCUMENTATION_DEDUP_BACKLOG.md) | Target category tree, completion-state audit model, duplicate/scatter hotspots, canonical owners, and safe cleanup backlog |
 | [`SCRIPT_DOC_INVENTORY.md`](SCRIPT_DOC_INVENTORY.md) | Small triage ledger for flat scripts, duplicated or legacy-looking helpers, fragmented planning/test docs, and next actions |
+| [`skydnir-rename-inventory-latest.md`](skydnir-rename-inventory-latest.md) | Generated Skydnir rename inventory summary; source JSON is producer-owned evidence for guarded rename/migration work |
 
 ## Canonical Sources
 

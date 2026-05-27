@@ -25,7 +25,7 @@ Every inventory entry now also carries a `migration` object with a proposed dest
 |---|---:|---|
 | `runtime-package-needed` | 1 | Needed to stage runtime/APK payloads or otherwise part of packaging flow. |
 | `build-developer` | 8 | Build, setup, fetch, or developer environment helper. |
-| `test-verification` | 77 | Test, smoke, benchmark, contract, or device verification helper. |
+| `test-verification` | 86 | Test, smoke, benchmark, contract, or device verification helper. |
 | `generated-maintenance` | 3 | Generated-doc/evidence maintenance or manifest data. |
 | `obsolete-suspect` | 1 | Unreferenced or weakly referenced candidate; not deleted without audit. |
 
@@ -121,6 +121,7 @@ remain gitignored and intentionally absent from the inventory.
 
 | Path | Stability | Role |
 |---|---|---|
+| `scripts/analyze-spirv.py` | `test-helper` | Analyze dumped Vulkan SPIR-V modules for llama GPU bridge correctness and performance triage without hash-targeted assumptions. |
 | `scripts/android-api29-direct-feasibility.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/android-blas-cmake-build-smoke.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/android-container-direct-probe.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
@@ -135,6 +136,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/android-gpu-host-bench.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/android-llama-bench.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/android-llama-gpu-compare.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
+| `scripts/android-llama-gpu-q6-workgroup-run.sh` | `device-helper` | Android device runner for planned Q6 llama GPU workgroup/lowering evidence without changing llama.cpp, Dockerfiles, models, or prompts. |
 | `scripts/android-llama-gpu-q6k-run.py` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/android-llama-gpu-readiness.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/android-llama-tool-bench.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
@@ -147,10 +149,15 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/android-syscall-usecase-profile.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/android-test-suite-container-exec.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/bench-gpu-bridge.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
+| `scripts/compare-spirv-dataflow.py` | `test-helper` | Compare SPIR-V dataflow summaries for structural llama GPU bridge diagnostics. |
 | `scripts/compat-audit.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/container-direct-probe.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/gguf-tensor-range-index.py` | `developer-helper` | Generate GGUF tensor/range diagnostic indexes for memory-pager and MoE residency investigations. |
+| `scripts/instrument-spirv-noop-probe.py` | `test-helper` | Create valid whole-module SPIR-V no-op or Q6K probe instrumentation without mutating the Vulkan dispatch ABI. |
+| `scripts/parse-q6k-probe-u32.py` | `test-helper` | Parse deterministic Q6_K debug-SSBO u32 probe records from llama GPU artifacts. |
 | `scripts/pdocker-test-driver.py` | `stable-entrypoint` | Host-side verification/test driver or static contract gate. |
+| `scripts/plan-llama-gpu-q6-run.py` | `test-helper` | Create a Q6 Vulkan bridge pre-flight run plan without touching ADB. |
+| `scripts/prepare-q6k-noop-probe.sh` | `test-helper` | Prepare deterministic Q6K no-op/probe SPIR-V bundles for the next device run. |
 | `scripts/run-python-coverage.sh` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/run_direct_syscall_scenarios.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/smoke-opencl-bridge.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
@@ -173,6 +180,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/verify-input-grammar-coverage.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-input-validation.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-llama-gpu-artifact.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
+| `scripts/verify-llama-gpu-q6-run-against-plan.py` | `test-helper` | Verify a llama GPU Q6 run artifact against its pre-flight plan and select the next action. |
 | `scripts/verify-memory-pager-contract.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-memory-pager-design.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-metadata-index.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
@@ -190,6 +198,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/verify-self-debug-bundle.py` | `test-helper` | Host-side verifier for APK-generated ADB-free self-debug bundle JSON artifacts. |
 | `scripts/verify-script-inventory.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-service-truth-plan.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
+| `scripts/verify-spirv-probe-manifest.py` | `test-helper` | Fail-closed verifier for SPIR-V probe manifests before any instrumented Vulkan dispatch. |
 | `scripts/verify-storage-metrics.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-stress-regression.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-terminal-exec-it-artifact.py` | `test-helper` | Host-side verification/test driver or static contract gate. |

@@ -50,14 +50,14 @@ class MemoryLayerUiContractTest(unittest.TestCase):
             "pdockerSwap",
             "pdockerMemoryFootprint()",
             "memory_layers_pdocker_share_fmt",
-            "pdocker.RSS.percent_of_RAM",
-            "pdocker.VmSwap.percent_of_used_swap",
+            "skydnir.RSS.percent_of_RAM",
+            "skydnir.VmSwap.percent_of_used_swap",
         ]:
             self.assertIn(needle, self.main)
         self.assertIn("percent_of_RAM", self.main)
         self.assertIn("percent_of_used_swap", self.main)
-        self.assertIn("pdocker footprint inside OS", self.strings)
-        self.assertIn("OS 内で pdocker が占める量", self.strings_ja)
+        self.assertIn("Skydnir footprint inside OS", self.strings)
+        self.assertIn("OS 内で Skydnir が占める量", self.strings_ja)
 
     def test_graph_labels_separate_scales_instead_of_comparable_full_width_rows(self):
         view = self.main[self.main.index("private class MemoryLayerView") :]

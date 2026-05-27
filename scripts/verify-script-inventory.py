@@ -83,12 +83,12 @@ OBSOLETE_AUDIT_CONDITION_WORDS = (
     "until",
     "when",
 )
-EXPECTED_TOP_LEVEL_SCRIPT_COUNT = 90
+EXPECTED_TOP_LEVEL_SCRIPT_COUNT = 99
 EXPECTED_SUBTREE_ENTRY_COUNT = 4
 EXPECTED_CATEGORY_COUNTS = {
     "runtime-package-needed": 1,
     "build-developer": 8,
-    "test-verification": 77,
+    "test-verification": 86,
     "generated-maintenance": 3,
     "obsolete-suspect": 1,
 }
