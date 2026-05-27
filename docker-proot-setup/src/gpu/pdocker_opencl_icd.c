@@ -152,8 +152,8 @@ struct PdockerClEvent {
     int complete;
 };
 
-static struct PdockerClPlatform g_platform = { "pdocker OpenCL bridge" };
-static struct PdockerClDevice g_device = { "pdocker GPU bridge (OpenCL)" };
+static struct PdockerClPlatform g_platform = { "Skydnir OpenCL bridge" };
+static struct PdockerClDevice g_device = { "Skydnir GPU bridge (OpenCL)" };
 
 static void set_error(cl_int *errcode_ret, cl_int value) {
     if (errcode_ret) *errcode_ret = value;
@@ -331,9 +331,9 @@ static cl_int run_vector_add_cpu_emulated(cl_mem a, cl_mem b, cl_mem out, size_t
     const float *bv = (const float *)b->map;
     float *ov = (float *)out->map;
     for (size_t i = 0; i < n; ++i) ov[i] = av[i] + bv[i];
-    if (getenv("PDOCKER_OPENCL_ICD_DEBUG")) {
+    if (getenv("SKYDNIR_OPENCL_ICD_DEBUG") || getenv("PDOCKER_OPENCL_ICD_DEBUG")) {
         fprintf(stderr,
-                "pdocker-opencl-icd: vector_add CPU-emulated n=%zu reason=governor\n",
+                "skydnir-opencl-icd: vector_add CPU-emulated n=%zu reason=governor\n",
                 n);
     }
     return CL_SUCCESS;
@@ -353,9 +353,9 @@ cl_int clGetPlatformInfo(cl_platform_id platform, cl_uint param_name, size_t par
     if (platform != &g_platform) return CL_INVALID_VALUE;
     switch (param_name) {
         case CL_PLATFORM_PROFILE: return copy_string_info("FULL_PROFILE", param_value_size, param_value, param_value_size_ret);
-        case CL_PLATFORM_VERSION: return copy_string_info("OpenCL 1.2 pdocker", param_value_size, param_value, param_value_size_ret);
+        case CL_PLATFORM_VERSION: return copy_string_info("OpenCL 1.2 Skydnir", param_value_size, param_value, param_value_size_ret);
         case CL_PLATFORM_NAME: return copy_string_info(g_platform.name, param_value_size, param_value, param_value_size_ret);
-        case CL_PLATFORM_VENDOR: return copy_string_info("pdocker", param_value_size, param_value, param_value_size_ret);
+        case CL_PLATFORM_VENDOR: return copy_string_info("Skydnir", param_value_size, param_value, param_value_size_ret);
         case CL_PLATFORM_EXTENSIONS: return copy_string_info("cl_khr_icd", param_value_size, param_value, param_value_size_ret);
         default: return CL_INVALID_VALUE;
     }
@@ -386,10 +386,10 @@ cl_int clGetDeviceInfo(cl_device_id device, cl_uint param_name, size_t param_val
         case CL_DEVICE_GLOBAL_MEM_SIZE: return copy_info(&u64, sizeof(u64), param_value_size, param_value, param_value_size_ret);
         case CL_DEVICE_LOCAL_MEM_SIZE: u64 = 32768; return copy_info(&u64, sizeof(u64), param_value_size, param_value, param_value_size_ret);
         case CL_DEVICE_NAME: return copy_string_info(g_device.name, param_value_size, param_value, param_value_size_ret);
-        case CL_DEVICE_VENDOR: return copy_string_info("pdocker", param_value_size, param_value, param_value_size_ret);
+        case CL_DEVICE_VENDOR: return copy_string_info("Skydnir", param_value_size, param_value, param_value_size_ret);
         case CL_DRIVER_VERSION: return copy_string_info("0.1", param_value_size, param_value, param_value_size_ret);
         case CL_DEVICE_PROFILE: return copy_string_info("FULL_PROFILE", param_value_size, param_value, param_value_size_ret);
-        case CL_DEVICE_VERSION: return copy_string_info("OpenCL 1.2 pdocker", param_value_size, param_value, param_value_size_ret);
+        case CL_DEVICE_VERSION: return copy_string_info("OpenCL 1.2 Skydnir", param_value_size, param_value, param_value_size_ret);
         case CL_DEVICE_OPENCL_C_VERSION: return copy_string_info("OpenCL C 1.2", param_value_size, param_value, param_value_size_ret);
         case CL_DEVICE_EXTENSIONS: return copy_string_info("", param_value_size, param_value, param_value_size_ret);
         default: return CL_INVALID_VALUE;

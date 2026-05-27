@@ -23,6 +23,7 @@ VERIFY_FAST = ROOT / "scripts" / "verify-fast.sh"
 COMPAT_AUDIT = ROOT / "scripts" / "compat-audit.py"
 ANDROID_SMOKE = ROOT / "scripts" / "android-device-smoke.sh"
 ANDROID_SELFDEBUG = ROOT / "scripts" / "android-selfdebug.sh"
+OPENCL_ICD = ROOT / "docker-proot-setup" / "src" / "gpu" / "pdocker_opencl_icd.c"
 MIGRATION_DOC = ROOT / "docs" / "manual" / "SKYDNIR_MIGRATION.md"
 
 
@@ -343,6 +344,14 @@ class SkydnirAliasContractTest(unittest.TestCase):
         gpu_host = (ROOT / "scripts" / "android-gpu-host-bench.sh").read_text(encoding="utf-8")
         self.assertIn('CLASS_PREFIX="${SKYDNIR_CLASS_PREFIX:-${PDOCKER_CLASS_PREFIX:-io.github.ryo100794.pdocker}}"', gpu_compare)
         self.assertIn('CLASS_PREFIX="${SKYDNIR_CLASS_PREFIX:-${PDOCKER_CLASS_PREFIX:-io.github.ryo100794.pdocker}}"', gpu_host)
+
+    def test_opencl_public_identity_uses_skydnir_with_debug_fallback(self):
+        opencl = OPENCL_ICD.read_text(encoding="utf-8")
+        self.assertIn('"Skydnir OpenCL bridge"', opencl)
+        self.assertIn('"Skydnir GPU bridge (OpenCL)"', opencl)
+        self.assertIn('"OpenCL 1.2 Skydnir"', opencl)
+        self.assertIn('"Skydnir"', opencl)
+        self.assertIn('getenv("SKYDNIR_OPENCL_ICD_DEBUG") || getenv("PDOCKER_OPENCL_ICD_DEBUG")', opencl)
 
     def test_documents_env_dual_writes_skydnir_and_pdocker_aliases(self):
         main = MAIN_ACTIVITY.read_text(encoding="utf-8")

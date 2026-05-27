@@ -784,7 +784,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn(f"PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER={{os.environ.get('PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER', '{marker}')}}", compare)
         self.assertIn(f'expected_executor_marker = os.environ.get("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", "{marker}")', compare)
         self.assertIn('"llama_cpp_modified": False', compare)
-        self.assertIn('"gpu_entry": "standard Vulkan loader through pdocker-vulkan-icd.so"', compare)
+        self.assertIn('"gpu_entry": "standard Vulkan loader through the Skydnir Vulkan ICD"', compare)
 
         diff = subprocess.run(
             ["git", "diff", "--name-only"],
