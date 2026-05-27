@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+helper_name="$(basename "$0")"
 
 usage() {
-  cat <<'USAGE'
-Usage: pdocker-engine-env [--export|--value|--check]
+  cat <<USAGE
+Usage: $helper_name [--export|--value|--check]
 
-Find a mounted pdocker/Docker Engine socket and print the matching DOCKER_HOST.
+Find a mounted Skydnir/Docker Engine socket and print the matching DOCKER_HOST.
 USAGE
 }
 
@@ -61,8 +62,8 @@ else
     fi
   done
   if [[ -z "$resolved" ]]; then
-    echo "No mounted pdocker/Docker Engine socket found." >&2
-    echo "Checked PDOCKER_ENGINE_SOCKET, /pdocker/host/pdockerd.sock, /var/run/pdocker.sock, and /var/run/docker.sock." >&2
+    echo "No mounted Skydnir/Docker Engine socket found." >&2
+    echo "Checked SKYDNIR_ENGINE_SOCKET, PDOCKER_ENGINE_SOCKET, /pdocker/host/pdockerd.sock, /var/run/pdocker.sock, and /var/run/docker.sock." >&2
     exit 1
   fi
 fi

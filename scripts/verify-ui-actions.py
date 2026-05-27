@@ -493,7 +493,17 @@ def main() -> int:
     require("default Documents placeholder wording names SAF-mediated mirror", "SAF-mediated app-private mirror" in default_readme_src and "SAF-mediated mirror at" in default_documents_readme_src and "app-private fallback" in default_new_project_src and "syncs selected writes back through the Documents actions" in default_new_project_src)
     require("default dockerfile editor fallback uses bundled workspace asset", "defaultEditorContent(file" in main_src and 'assets.open("default-project/Dockerfile")' in main_src and "defaultContent(file" in editor_activity_src and 'assets.open("default-project/Dockerfile")' in editor_activity_src)
     require("default dev workspace installs hidden volume extensions at runtime", "install_extension_if_missing" in (ROOT / "app/src/main/assets/default-project/scripts/start-code-server.sh").read_text() and "OpenAI.chatgpt" in (ROOT / "app/src/main/assets/default-project/scripts/start-code-server.sh").read_text() and "Anthropic.claude-code" in (ROOT / "app/src/main/assets/default-project/scripts/start-code-server.sh").read_text())
-    require("default dev workspace exposes codex task", "Codex: start" in main_src and (ROOT / "app/src/main/assets/default-project/workspace/.vscode/tasks.json").read_text().count("Codex:") >= 2)
+    default_tasks_src = (ROOT / "app/src/main/assets/default-project/workspace/.vscode/tasks.json").read_text()
+    require(
+        "default dev workspace exposes codex and Skydnir tasks",
+        "Codex: start" in default_tasks_src
+        and default_tasks_src.count("Codex:") >= 2
+        and "Skydnir: show paths" in default_tasks_src
+        and "skydnir-new-project ${input:skydnirProjectName} ${input:skydnirTemplateName}" in default_tasks_src
+        and "skydnir-compose -f /pdocker/project/compose.yaml up --detach --build" in default_tasks_src
+        and "migrateDefaultDevWorkspaceTaskText" in main_src
+        and "copyAssetFile(\"default-project/workspace/.vscode/tasks.json\", tasks)" in main_src,
+    )
 
     require("interactive terminal font remains 12pt", "const initialFontSize = readOnly ? 8 : 12" in xterm_src and "fontSize: initialFontSize" in xterm_src)
     require("terminal shortcut key palette is present", 'id="keybar"' in xterm_src and 'data-toggle="ctrl"' in xterm_src)

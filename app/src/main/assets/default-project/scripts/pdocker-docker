@@ -7,5 +7,6 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 127
 fi
 
-eval "$(pdocker-engine-env --export)"
+engine_env_helper="$(command -v skydnir-engine-env || command -v pdocker-engine-env)"
+eval "$("$engine_env_helper" --export)"
 exec docker "$@"

@@ -41,7 +41,8 @@ echo "  Documents/pdocker/shared"
 echo "  filesDir/pdocker/pdockerd.sock"
 
 echo
-if docker_host="$(pdocker-engine-env --value 2>/dev/null)"; then
+engine_env_helper="$(command -v skydnir-engine-env || command -v pdocker-engine-env)"
+if docker_host="$("$engine_env_helper" --value 2>/dev/null)"; then
   echo "Engine available: DOCKER_HOST=$docker_host"
 else
   echo "Engine unavailable: start skydnird in the app and mount its socket/path into this container."

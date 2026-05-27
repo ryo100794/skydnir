@@ -44,9 +44,12 @@ echo "code-server: http://0.0.0.0:$port"
 echo "codex: $(command -v codex || true)"
 echo "claude: $(command -v claude || true)"
 echo "continue config: /workspace/.continue/config.yaml"
-echo "Skydnir helpers: skydnir-paths, skydnir-projects, skydnir-new-project, skydnir-docker, skydnir-compose"
+echo "Skydnir helpers: skydnir-paths, skydnir-projects, skydnir-new-project, skydnir-docker, skydnir-compose, skydnir-engine-env"
 echo "Legacy aliases remain: pdocker-paths, pdocker-projects, pdocker-new-project, pdocker-docker, pdocker-compose"
-pdocker-engine-env --check || true
+engine_env_helper="$(command -v skydnir-engine-env || command -v pdocker-engine-env || true)"
+if [[ -n "$engine_env_helper" ]]; then
+  "$engine_env_helper" --check || true
+fi
 
 exec code-server \
   --bind-addr "0.0.0.0:$port" \

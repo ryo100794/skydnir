@@ -29,9 +29,9 @@
       }
     },
     {
-      "label": "pdocker: show paths",
+      "label": "Skydnir: show paths",
       "type": "shell",
-      "command": "pdocker-paths",
+      "command": "skydnir-paths",
       "options": {
         "cwd": "/workspace"
       },
@@ -42,9 +42,9 @@
       }
     },
     {
-      "label": "pdocker: list projects",
+      "label": "Skydnir: list projects",
       "type": "shell",
-      "command": "pdocker-projects",
+      "command": "skydnir-projects",
       "options": {
         "cwd": "/workspace"
       },
@@ -55,9 +55,9 @@
       }
     },
     {
-      "label": "pdocker: create project from template",
+      "label": "Skydnir: create project from template",
       "type": "shell",
-      "command": "pdocker-new-project ${input:pdockerProjectName} ${input:pdockerTemplateName}",
+      "command": "skydnir-new-project ${input:skydnirProjectName} ${input:skydnirTemplateName}",
       "options": {
         "cwd": "/workspace"
       },
@@ -68,9 +68,9 @@
       }
     },
     {
-      "label": "pdocker: docker version",
+      "label": "Skydnir: docker version",
       "type": "shell",
-      "command": "pdocker-docker version",
+      "command": "skydnir-docker version",
       "options": {
         "cwd": "/workspace"
       },
@@ -81,9 +81,9 @@
       }
     },
     {
-      "label": "pdocker: build current project",
+      "label": "Skydnir: build current project",
       "type": "shell",
-      "command": "pdocker-docker build -t local/pdocker-current:latest /pdocker/project",
+      "command": "skydnir-docker build -t local/skydnir-current:latest /pdocker/project",
       "options": {
         "cwd": "/workspace"
       },
@@ -94,9 +94,9 @@
       }
     },
     {
-      "label": "pdocker: compose up current project",
+      "label": "Skydnir: compose up current project",
       "type": "shell",
-      "command": "pdocker-compose -f /pdocker/project/compose.yaml up --detach --build && pdocker-compose -f /pdocker/project/compose.yaml ps",
+      "command": "skydnir-compose -f /pdocker/project/compose.yaml up --detach --build && skydnir-compose -f /pdocker/project/compose.yaml ps",
       "options": {
         "cwd": "/workspace"
       },
@@ -107,9 +107,9 @@
       }
     },
     {
-      "label": "pdocker: compose logs current project",
+      "label": "Skydnir: compose logs current project",
       "type": "shell",
-      "command": "pdocker-compose -f /pdocker/project/compose.yaml logs --tail=120",
+      "command": "skydnir-compose -f /pdocker/project/compose.yaml logs --tail=120",
       "options": {
         "cwd": "/workspace"
       },
@@ -122,13 +122,13 @@
   ],
   "inputs": [
     {
-      "id": "pdockerProjectName",
+      "id": "skydnirProjectName",
       "type": "promptString",
       "description": "New project directory name",
       "default": "my-project"
     },
     {
-      "id": "pdockerTemplateName",
+      "id": "skydnirTemplateName",
       "type": "promptString",
       "description": "Template name, installed project name, or blank",
       "default": "blank"

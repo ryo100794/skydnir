@@ -8208,43 +8208,32 @@ class MainActivity : AppCompatActivity() {
         val tasks = File(project, "workspace/.vscode/tasks.json")
         if (!tasks.exists()) {
             tasks.parentFile?.mkdirs()
-            tasks.writeText(
-                """
-                {
-                  "version": "2.0.0",
-                  "tasks": [
-                    {
-                      "label": "Codex: start",
-                      "type": "shell",
-                      "command": "codex",
-                      "options": {
-                        "cwd": "/workspace"
-                      },
-                      "problemMatcher": [],
-                      "presentation": {
-                        "reveal": "always",
-                        "panel": "new",
-                        "focus": true
-                      }
-                    },
-                    {
-                      "label": "Codex: version",
-                      "type": "shell",
-                      "command": "codex --version",
-                      "options": {
-                        "cwd": "/workspace"
-                      },
-                      "problemMatcher": [],
-                      "presentation": {
-                        "reveal": "always",
-                        "panel": "shared"
-                      }
-                    }
-                  ]
-                }
-                """.trimIndent() + "\n",
-            )
+            copyAssetFile("default-project/workspace/.vscode/tasks.json", tasks)
+        } else {
+            val original = runCatching { tasks.readText() }.getOrDefault("")
+            val migrated = migrateDefaultDevWorkspaceTaskText(original)
+            if (migrated != original) tasks.writeText(migrated)
         }
+    }
+
+    private fun migrateDefaultDevWorkspaceTaskText(original: String): String {
+        return original
+            .replace("\"pdocker: show paths\"", "\"Skydnir: show paths\"")
+            .replace("\"pdocker: list projects\"", "\"Skydnir: list projects\"")
+            .replace("\"pdocker: create project from template\"", "\"Skydnir: create project from template\"")
+            .replace("\"pdocker: docker version\"", "\"Skydnir: docker version\"")
+            .replace("\"pdocker: build current project\"", "\"Skydnir: build current project\"")
+            .replace("\"pdocker: compose up current project\"", "\"Skydnir: compose up current project\"")
+            .replace("\"pdocker: compose logs current project\"", "\"Skydnir: compose logs current project\"")
+            .replace("\"pdocker-paths\"", "\"skydnir-paths\"")
+            .replace("\"pdocker-projects\"", "\"skydnir-projects\"")
+            .replace("pdocker-new-project \${input:pdockerProjectName} \${input:pdockerTemplateName}", "skydnir-new-project \${input:skydnirProjectName} \${input:skydnirTemplateName}")
+            .replace("pdocker-docker build -t local/pdocker-current:latest /pdocker/project", "skydnir-docker build -t local/skydnir-current:latest /pdocker/project")
+            .replace("pdocker-docker version", "skydnir-docker version")
+            .replace("pdocker-compose -f /pdocker/project/compose.yaml up --detach --build && pdocker-compose -f /pdocker/project/compose.yaml ps", "skydnir-compose -f /pdocker/project/compose.yaml up --detach --build && skydnir-compose -f /pdocker/project/compose.yaml ps")
+            .replace("pdocker-compose -f /pdocker/project/compose.yaml logs --tail=120", "skydnir-compose -f /pdocker/project/compose.yaml logs --tail=120")
+            .replace("\"pdockerProjectName\"", "\"skydnirProjectName\"")
+            .replace("\"pdockerTemplateName\"", "\"skydnirTemplateName\"")
     }
 
     // Compatibility repair for dev-workspace installs created from the short-lived

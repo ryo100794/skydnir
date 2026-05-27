@@ -302,7 +302,7 @@ def main() -> int:
     dev_tasks = read(dev_root / "workspace" / ".vscode" / "tasks.json")
     dev_readme = read(dev_root / "README.md")
     dev_helper_scripts = "\n".join(
-        read(dev_root / "scripts" / name)
+        f"# {name}\n{read(dev_root / 'scripts' / name)}"
         for name in (
             "pdocker-engine-env",
             "pdocker-docker",
@@ -348,6 +348,7 @@ def main() -> int:
         "pdocker-new-project",
         "pdocker-docker",
         "pdocker-compose",
+        "skydnir-engine-env",
         "DOCKER_HOST",
         "SKYDNIR_DOCUMENTS_MOUNT",
         "PDOCKER_DOCUMENTS_MOUNT",
@@ -362,9 +363,9 @@ def main() -> int:
         fail("pdocker-new-project blank template must include cross-project shared Documents volume")
     if 'show_path "documents"' not in dev_helper_scripts:
         fail("pdocker-paths must show the shared Documents mount")
-    if "eval \"$(pdocker-engine-env --export)\"" not in dev_helper_scripts:
+    if "engine_env_helper=\"$(command -v skydnir-engine-env || command -v pdocker-engine-env)\"" not in dev_helper_scripts:
         fail("dev-workspace Docker helpers must source guarded Engine environment")
-    if "No mounted pdocker/Docker Engine socket found." not in dev_helper_scripts:
+    if "No mounted Skydnir/Docker Engine socket found." not in dev_helper_scripts:
         fail("dev-workspace Docker helpers must report missing mounted Engine socket")
     if "The APK does not\n  bundle an upstream Docker CLI binary" not in dev_readme:
         fail("dev-workspace README must keep Docker CLI scoped to development container")
