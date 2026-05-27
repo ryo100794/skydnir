@@ -373,8 +373,8 @@ wrapper. New documentation and examples use `skydnir`.
 - [x] Add service migration documentation.
 - [x] Update CI/Wiki display names that are safe before repository rename.
 - [x] Update release note draft.
-- [ ] Keep old package id/data path until explicitly approved.
-- [ ] Keep old artifact schemas readable.
+- [x] Keep old package id/data path until explicitly approved.
+- [x] Keep old artifact schemas readable.
 
 ## Current Decision
 

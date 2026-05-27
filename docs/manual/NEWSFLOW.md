@@ -156,7 +156,7 @@ After publishing:
    flavor, install source, and battery restriction state.
 4. Provide exact actions and expected evidence: screenshot, log excerpt,
    `docker ps`, service URL result, benchmark JSON, or compatibility gap.
-5. Triage replies within two business days into works, platform limit, pdocker
+5. Triage replies within two business days into works, platform limit, Skydnir
    bug, docs confusion, or needs reproduction.
 6. Move confirmed findings to the relevant `docs/` page, then summarize back
    into the issue thread.
