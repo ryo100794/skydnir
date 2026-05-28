@@ -1,6 +1,6 @@
 # Skydnir Test Suite
 
-This template is the reusable in-container test harness for pdocker. It is
+This template is the reusable in-container test harness for Skydnir. It is
 separate from application templates such as VS Code Server, llama.cpp, ROS, or
 Blender so test runs can be repeated without rebuilding those larger images.
 
@@ -8,15 +8,15 @@ The container is intentionally idle after `compose up`. Run tests through
 Docker exec:
 
 ```sh
-docker exec pdocker-test-suite run-pdocker-test-suite --scenario all
+docker exec skydnir-test-suite run-skydnir-test-suite --scenario all
 ```
 
 The test command writes reports to `/reports` and mirrors them to the selected
 Android Documents folder:
 
 ```text
-/documents/pdocker-exports/pdocker-test-suite/latest.json
-/documents/pdocker-exports/pdocker-test-suite/latest.log
+/documents/skydnir-exports/skydnir-test-suite/latest.json
+/documents/skydnir-exports/skydnir-test-suite/latest.log
 ```
 
 The compose template mounts the selected Android Documents folder at

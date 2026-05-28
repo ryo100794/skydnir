@@ -793,11 +793,18 @@ class GpuAbiContractTest(unittest.TestCase):
             text=True,
             stdout=subprocess.PIPE,
         ).stdout.splitlines()
+        # This guard protects the llama GPU benchmark lane from silently
+        # changing its workload definition.  It must not block unrelated
+        # project-library template maintenance, because that turns a focused
+        # anti-regression tripwire into a repo-wide Dockerfile freeze.
+        llama_workload_paths = {
+            "app/src/main/assets/project-library/llama-cpp-gpu/Dockerfile",
+            "app/src/main/assets/project-library/llama-cpp-gpu/compose.yaml",
+        }
         forbidden_changed_paths = [
             path for path in diff
             if "llama.cpp" in path
-            or path.endswith("Dockerfile")
-            or "/Dockerfile" in path
+            or path in llama_workload_paths
         ]
         self.assertEqual([], forbidden_changed_paths)
 

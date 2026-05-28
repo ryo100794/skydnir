@@ -4,7 +4,7 @@ The selected Android Documents folder is mounted at `/documents` by default.
 The test suite writes report artifacts under:
 
 ```text
-/documents/pdocker-exports/pdocker-test-suite/
+/documents/skydnir-exports/skydnir-test-suite/
 ```
 
 The app stores project definitions under `pdocker/projects` in the selected

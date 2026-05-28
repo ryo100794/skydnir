@@ -8,10 +8,10 @@ ADB="${ADB:-adb}"
 PKG="${SKYDNIR_ANDROID_PACKAGE:-${SKYDNIR_PACKAGE:-${PDOCKER_ANDROID_PACKAGE:-io.github.ryo100794.pdocker.compat}}}"
 CLASS_PREFIX="io.github.ryo100794.pdocker"
 ACTION_PREFIX="io.github.ryo100794.pdocker"
-PROJECT="${PDOCKER_TEST_SUITE_PROJECT:-pdocker/projects/pdocker-test-suite}"
+PROJECT="${SKYDNIR_TEST_SUITE_PROJECT:-${PDOCKER_TEST_SUITE_PROJECT:-pdocker/projects/pdocker-test-suite}}"
 PROJECT_NAME="${PDOCKER_TEST_SUITE_PROJECT_NAME:-${PROJECT##*/}}"
-CONTAINER="${PDOCKER_TEST_SUITE_CONTAINER:-pdocker-test-suite}"
-IMAGE="${PDOCKER_TEST_SUITE_IMAGE:-pdocker/test-suite:latest}"
+CONTAINER="${SKYDNIR_TEST_SUITE_CONTAINER:-${PDOCKER_TEST_SUITE_CONTAINER:-skydnir-test-suite}}"
+IMAGE="${SKYDNIR_TEST_SUITE_IMAGE:-${PDOCKER_TEST_SUITE_IMAGE:-skydnir/test-suite:latest}}"
 SCENARIO="${PDOCKER_TEST_SUITE_SCENARIO:-all}"
 STAGE_TEMPLATE="${PDOCKER_TEST_SUITE_STAGE_TEMPLATE:-1}"
 REFRESH_TEMPLATE="${PDOCKER_TEST_SUITE_REFRESH_TEMPLATE:-1}"
@@ -126,7 +126,7 @@ import json
 import sys
 scenario = sys.argv[1]
 print(json.dumps({
-    "Cmd": ["run-pdocker-test-suite", "--scenario", scenario],
+    "Cmd": ["run-skydnir-test-suite", "--scenario", scenario],
     "AttachStdout": True,
     "AttachStderr": True,
     "Tty": False,
@@ -139,7 +139,7 @@ exec_start_payload() {
 }
 
 compose_up_project() {
-  echo "[pdocker test suite] compose up/build project $PROJECT_NAME through app route"
+  echo "[Skydnir test suite] compose up/build project $PROJECT_NAME through app route"
   engine_request DELETE "/containers/$(urlencode "$CONTAINER")?force=true" >/dev/null || true
   "$ADB" shell am start \
     -n "$PKG/$CLASS_PREFIX.MainActivity" \
@@ -177,7 +177,7 @@ raise SystemExit(1)'
       return 0
     fi
     if [ "$rc" -eq 2 ]; then
-      echo "[pdocker test suite] container exists but is not running yet" >&2
+      echo "[Skydnir test suite] container exists but is not running yet" >&2
     fi
     sleep 2
     i=$((i + 1))
@@ -189,7 +189,7 @@ raise SystemExit(1)'
 
 if [[ "$STAGE_TEMPLATE" != "0" ]]; then
   if [[ "$REFRESH_TEMPLATE" == "1" ]] || ! run_as "test -f $(printf "%q" "files/$PROJECT/compose.yaml")"; then
-    echo "[pdocker test suite] stage bundled template to files/$PROJECT"
+    echo "[Skydnir test suite] stage bundled template to files/$PROJECT"
     tar -C "$TEMPLATE_ROOT/.." -cf "$STAGE_TAR" pdocker-test-suite
     "$ADB" push "$STAGE_TAR" /data/local/tmp/pdocker-test-suite-template.tar >/dev/null
     "$ADB" shell "chmod 644 /data/local/tmp/pdocker-test-suite-template.tar" >/dev/null || true
@@ -202,7 +202,7 @@ wait_for_engine
 compose_up_project
 cid="$(wait_for_compose_container)"
 
-echo "[pdocker test suite] exec run-pdocker-test-suite --scenario $SCENARIO"
+echo "[Skydnir test suite] exec run-skydnir-test-suite --scenario $SCENARIO"
 exec_body="$(engine_body POST "/containers/$cid/exec" "$(exec_payload)")"
 exec_id="$(printf "%s" "$exec_body" | parse_engine_id)"
 engine_request POST "/exec/$exec_id/start" "$(exec_start_payload)" | decode_engine_logs
@@ -213,9 +213,9 @@ import sys
 data = json.loads(sys.argv[1])
 code = int(data.get("ExitCode") or 0)
 if code:
-    print(f"pdocker test suite exec failed with exit code {code}", file=sys.stderr)
+    print(f"Skydnir test suite exec failed with exit code {code}", file=sys.stderr)
 raise SystemExit(code)
 PY
 
-echo "[pdocker test suite] latest in-container summary"
+echo "[Skydnir test suite] latest in-container summary"
 run_as "cat files/$(printf "%q" "$PROJECT")/reports/latest.json"

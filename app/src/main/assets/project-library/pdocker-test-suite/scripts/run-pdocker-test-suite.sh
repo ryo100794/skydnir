@@ -4,7 +4,7 @@ set -eu
 report_dir="${PDOCKER_TEST_SUITE_REPORT_DIR:-/reports}"
 documents_mount="${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
 shared_mount="${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
-export_dir="${PDOCKER_EXPORT_DIR:-${documents_mount}/pdocker-exports}/pdocker-test-suite"
+export_dir="${PDOCKER_EXPORT_DIR:-${documents_mount}/skydnir-exports}/skydnir-test-suite"
 fast_workdir="${PDOCKER_FAST_WORKDIR:-/workspace}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null || date +%s)"
 scenario="all"
@@ -20,10 +20,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --help|-h)
       cat <<'EOF'
-Usage: run-pdocker-test-suite [--scenario all|smoke|direct|io|archive|documents]
+Usage: run-skydnir-test-suite [--scenario all|smoke|direct|io|archive|documents]
 
-Runs pdocker's reusable in-container test scenarios and writes JSON/log
-artifacts to /reports and /documents/pdocker-exports/pdocker-test-suite.
+Runs Skydnir's reusable in-container test scenarios and writes JSON/log
+artifacts to /reports and /documents/skydnir-exports/skydnir-test-suite.
 EOF
       exit 0
       ;;
@@ -45,12 +45,12 @@ esac
 
 mkdir -p "$report_dir" "$export_dir" "$fast_workdir" "$shared_mount"
 
-log="$report_dir/pdocker-test-suite-$timestamp.log"
-json="$report_dir/pdocker-test-suite-$timestamp.json"
+log="$report_dir/skydnir-test-suite-$timestamp.log"
+json="$report_dir/skydnir-test-suite-$timestamp.json"
 latest_log="$report_dir/latest.log"
 latest_json="$report_dir/latest.json"
-export_log="$export_dir/pdocker-test-suite-$timestamp.log"
-export_json="$export_dir/pdocker-test-suite-$timestamp.json"
+export_log="$export_dir/skydnir-test-suite-$timestamp.log"
+export_json="$export_dir/skydnir-test-suite-$timestamp.json"
 export_latest_log="$export_dir/latest.log"
 export_latest_json="$export_dir/latest.json"
 
@@ -272,7 +272,7 @@ case_invalid_inputs() {
 }
 
 : > "$log"
-log_line "pdocker test suite start: $timestamp"
+log_line "Skydnir test suite start: $timestamp"
 log_line "scenario: $scenario"
 log_line "reports: $report_dir"
 log_line "documents export: $export_dir"
@@ -332,7 +332,7 @@ cp "$log" "$export_latest_log" 2>/dev/null || true
 cp "$json" "$export_latest_json" 2>/dev/null || true
 
 rm -f "$results_file"
-log_line "pdocker test suite $status passes=$passes failures=$failures"
+log_line "Skydnir test suite $status passes=$passes failures=$failures"
 log_line "json: $json"
 log_line "documents json: $export_latest_json"
 

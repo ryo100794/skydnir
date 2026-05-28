@@ -459,8 +459,8 @@
       "description": "Local dry-run of the bundled compose/Dockerfile test-suite scripts.",
       "commands": [
         {
-          "id": "pdocker-test-suite-local",
-          "shell": "tmpdir=$(mktemp -d); PDOCKER_TEST_SUITE_REPORT_DIR=\"$tmpdir/reports\" PDOCKER_DOCUMENTS_MOUNT=\"$tmpdir/documents\" PDOCKER_SHARED_DOCUMENTS_MOUNT=\"$tmpdir/shared\" PDOCKER_EXPORT_DIR=\"$tmpdir/documents/pdocker-exports\" PDOCKER_FAST_WORKDIR=\"$tmpdir/workspace\" app/src/main/assets/project-library/pdocker-test-suite/scripts/run-pdocker-test-suite.sh --scenario all; rm -rf \"$tmpdir\""
+          "id": "skydnir-test-suite-local",
+          "shell": "tmpdir=$(mktemp -d); PDOCKER_TEST_SUITE_REPORT_DIR=\"$tmpdir/reports\" PDOCKER_DOCUMENTS_MOUNT=\"$tmpdir/documents\" PDOCKER_SHARED_DOCUMENTS_MOUNT=\"$tmpdir/shared\" PDOCKER_EXPORT_DIR=\"$tmpdir/documents/skydnir-exports\" PDOCKER_FAST_WORKDIR=\"$tmpdir/workspace\" app/src/main/assets/project-library/pdocker-test-suite/scripts/run-pdocker-test-suite.sh --scenario all; rm -rf \"$tmpdir\""
         }
       ],
       "checkpoint_class": "local-test-suite-non-promoting",

@@ -1,18 +1,18 @@
 # skydnir.service-url: none=Skydnir test suite
 services:
-  pdocker-test-suite:
+  skydnir-test-suite:
     build:
       context: .
-    image: pdocker/test-suite:latest
-    container_name: pdocker-test-suite
+    image: skydnir/test-suite:latest
+    container_name: skydnir-test-suite
     working_dir: /workspace
     environment:
       PDOCKER_DOCUMENTS_MOUNT: "${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
       PDOCKER_SHARED_DOCUMENTS_MOUNT: "${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
-      PDOCKER_EXPORT_DIR: "${PDOCKER_EXPORT_DIR:-/documents/pdocker-exports}"
+      PDOCKER_EXPORT_DIR: "${PDOCKER_EXPORT_DIR:-/documents/skydnir-exports}"
       PDOCKER_FAST_WORKDIR: "${PDOCKER_FAST_WORKDIR:-/workspace}"
       PDOCKER_TEST_SUITE_REPORT_DIR: "${PDOCKER_TEST_SUITE_REPORT_DIR:-/reports}"
-    command: ["/usr/local/bin/start-pdocker-test-suite"]
+    command: ["/usr/local/bin/start-skydnir-test-suite"]
     volumes:
       - ${PDOCKER_FAST_WORKSPACE_HOST:-./workspace}:/workspace
       - ./reports:/reports

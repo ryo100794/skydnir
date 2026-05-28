@@ -525,6 +525,7 @@ def main() -> int:
     blender_compose_src = (ROOT / "app/src/main/assets/project-library/blender-xvnc-novnc/compose.yaml").read_text()
     direct_runtime_probe_compose_src = (ROOT / "app/src/main/assets/project-library/direct-runtime-probe/compose.yaml").read_text()
     llama_compose_src = (ROOT / "app/src/main/assets/project-library/llama-cpp-gpu/compose.yaml").read_text()
+    test_suite_compose_src = (ROOT / "app/src/main/assets/project-library/pdocker-test-suite/compose.yaml").read_text()
     require(
         "graphics project templates use Skydnir public image and container names",
         "image: skydnir/ros2-humble-rviz-novnc:latest" in ros2_rviz_compose_src
@@ -549,6 +550,13 @@ def main() -> int:
         and "container_name: skydnir-llama-cpp" in llama_compose_src
         and "image: pdocker/llama-cpp-gpu:latest" not in llama_compose_src
         and "container_name: pdocker-llama-cpp" not in llama_compose_src,
+    )
+    require(
+        "test suite template uses Skydnir public image and container names",
+        "image: skydnir/test-suite:latest" in test_suite_compose_src
+        and "container_name: skydnir-test-suite" in test_suite_compose_src
+        and "image: pdocker/test-suite:latest" not in test_suite_compose_src
+        and "container_name: pdocker-test-suite" not in test_suite_compose_src,
     )
 
     require("interactive terminal font remains 12pt", "const initialFontSize = readOnly ? 8 : 12" in xterm_src and "fontSize: initialFontSize" in xterm_src)
