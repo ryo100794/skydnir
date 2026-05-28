@@ -46,7 +46,7 @@ REQUIRED_STABLE_ENTRYPOINTS = {
     "scripts/build-apk.sh",
     "scripts/verify-fast.sh",
     "scripts/verify-heavy.sh",
-    "scripts/pdocker-test-driver.py",
+    "scripts/skydnir-test-driver.py",
     "scripts/android-selfdebug.sh",
 }
 ALLOWED_MIGRATION_ACTIONS = {
@@ -83,12 +83,12 @@ OBSOLETE_AUDIT_CONDITION_WORDS = (
     "until",
     "when",
 )
-EXPECTED_TOP_LEVEL_SCRIPT_COUNT = 99
+EXPECTED_TOP_LEVEL_SCRIPT_COUNT = 100
 EXPECTED_SUBTREE_ENTRY_COUNT = 4
 EXPECTED_CATEGORY_COUNTS = {
     "runtime-package-needed": 1,
     "build-developer": 8,
-    "test-verification": 86,
+    "test-verification": 87,
     "generated-maintenance": 3,
     "obsolete-suspect": 1,
 }

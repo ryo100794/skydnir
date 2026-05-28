@@ -452,7 +452,7 @@
       "audit": {
         "date": "2026-05-18",
         "reference_scan": "rg found no runtime callers outside script inventory/README/verifier allowlist and the script file itself; pycache-only hits are ignored.",
-        "replacement_command": "python3 scripts/pdocker-test-driver.py --lane android-terminal-exec-it",
+        "replacement_command": "python3 scripts/skydnir-test-driver.py --lane android-terminal-exec-it",
         "decision": "keep as obsolete-suspect for now; do not delete until paired UI self-test and engine-exec-input JSONL device artifacts have fully replaced this ad-hoc repro.",
         "retirement_condition": "Delete only after docs/test/ui-it-selftest-latest.json and docs/test/engine-exec-input-latest.jsonl exist from a fresh ADB run and pass python3 scripts/verify-terminal-exec-it-artifact.py docs/test/ui-it-selftest-latest.json docs/test/engine-exec-input-latest.jsonl --require-container."
       },
@@ -673,16 +673,29 @@
       }
     },
     {
+      "path": "scripts/skydnir-test-driver.py",
+      "category": "test-verification",
+      "stability": "stable-entrypoint",
+      "role": "Canonical Skydnir test-driver manifest executor and artifact writer.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/skydnir-test-driver.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "wrapper required; permanent or long-lived stable entrypoint compatibility path"
+      }
+    },
+    {
       "path": "scripts/pdocker-test-driver.py",
       "category": "test-verification",
       "stability": "stable-entrypoint",
-      "role": "Host-side verification/test driver or static contract gate.",
+      "role": "Deprecated compatibility wrapper for scripts/skydnir-test-driver.py.",
       "migration": {
         "target_dir": "scripts/test",
         "candidate_path": "scripts/test/pdocker-test-driver.py",
         "phase": "phase-1-test-helpers-after-manifest-update",
         "action": "candidate-move-behind-wrapper",
-        "compat_wrapper": "wrapper required; permanent or long-lived stable entrypoint compatibility path"
+        "compat_wrapper": "legacy stable entrypoint wrapper retained for transition; new docs and manifests use scripts/skydnir-test-driver.py"
       }
     },
     {

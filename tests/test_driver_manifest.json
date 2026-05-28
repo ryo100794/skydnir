@@ -3,7 +3,7 @@
   "artifact_manifest": "docs/test/test-run-latest.json",
   "run_directory": "docs/test/runs",
   "policy": {
-    "canonical_driver": "scripts/pdocker-test-driver.py",
+    "canonical_driver": "scripts/skydnir-test-driver.py",
     "artifact_rule": "Every automated lane writes one run manifest. Individual generated files remain in their canonical locations and are referenced with sha256, size, and producer command.",
     "wrapper_rule": "Legacy shell entrypoints may exist only as compatibility wrappers around the canonical driver.",
     "stable_checkpoint_rule": "A run manifest is stable-checkpoint eligible only when release blockers in docs/release/RELEASE_READINESS.md are closed or explicitly scoped, and every device-gated artifact named by docs/test/CI_GATE_LEDGER.md is passing with the required proof. Host-only planned-gap verifiers, non-passing artifacts, device-gated lanes without promotion artifacts, missing required device artifacts, and planned-gap artifacts with success=false are non-promoting evidence.",

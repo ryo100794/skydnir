@@ -523,7 +523,7 @@ def validate_fast_wiring_text(criteria: dict[str, Any], driver_manifest_text: st
 
 def validate_fast_wiring(criteria: dict[str, Any]) -> None:
     driver_manifest = (ROOT / "tests" / "test_driver_manifest.json").read_text()
-    driver_source = (ROOT / "scripts" / "pdocker-test-driver.py").read_text()
+    driver_source = (ROOT / "scripts" / "skydnir-test-driver.py").read_text()
     if "docs/test/test-run-latest.json" not in driver_manifest:
         fail("test driver manifest must declare the canonical artifact manifest")
     if "manifest.json" not in driver_source or "sha256" not in driver_source:

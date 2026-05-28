@@ -20,19 +20,19 @@ python3 scripts/verify-refactor-resilience.py
 Run automated lanes through the canonical driver:
 
 ```sh
-scripts/pdocker-test-driver.py --lane host-smoke
+scripts/skydnir-test-driver.py --lane host-smoke
 ```
 
 Run Python coverage evidence through the same driver:
 
 ```sh
-scripts/pdocker-test-driver.py --lane python-coverage
+scripts/skydnir-test-driver.py --lane python-coverage
 ```
 
 Run the compose/Dockerfile based test-suite on an Android device with:
 
 ```sh
-scripts/pdocker-test-driver.py --lane android-test-suite
+scripts/skydnir-test-driver.py --lane android-test-suite
 ```
 
 Each run writes the single machine-readable artifact manifest at

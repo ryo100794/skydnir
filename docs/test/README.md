@@ -72,7 +72,7 @@ run it, and where the latest result is stored.
 
 ## Canonical Sources
 
-- Use `scripts/pdocker-test-driver.py` and `tests/test_driver_manifest.json` as
+- Use `scripts/skydnir-test-driver.py` and `tests/test_driver_manifest.json` as
   the single automated test entrypoint and lane manifest. Every automated run
   must write one run manifest to `docs/test/test-run-latest.json` and an
   immutable copy under `docs/test/runs/<run-id>/manifest.json`.

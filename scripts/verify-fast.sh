@@ -105,7 +105,7 @@ run python3 scripts/verify-build-profile.py
 run python3 scripts/verify-abnormal-events.py
 run python3 scripts/verify-refactor-resilience.py
 printf '\n==> governance lane note\n'
-printf '%s\n' 'strict test-design criteria is a known-failing governance lane; run scripts/pdocker-test-driver.py --lane governance to refresh docs/test/test-design-criteria-latest.json.'
+printf '%s\n' 'strict test-design criteria is a known-failing governance lane; run scripts/skydnir-test-driver.py --lane governance to refresh docs/test/test-design-criteria-latest.json.'
 run python3 scripts/verify-input-grammar-coverage.py
 run python3 scripts/verify-input-validation.py
 run python3 scripts/verify-stress-regression.py

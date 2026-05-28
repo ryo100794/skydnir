@@ -92,25 +92,25 @@ case "$MODE" in
     bash scripts/android-device-smoke.sh "${INSTALL_FLAG[@]}"
     ;;
   android-dev-workspace)
-    python3 scripts/pdocker-test-driver.py --lane android-dev-workspace
+    python3 scripts/skydnir-test-driver.py --lane android-dev-workspace
     ;;
   android-documents)
-    python3 scripts/pdocker-test-driver.py --lane android-documents
+    python3 scripts/skydnir-test-driver.py --lane android-documents
     ;;
   android-runtime-teardown)
-    python3 scripts/pdocker-test-driver.py --lane android-runtime-teardown
+    python3 scripts/skydnir-test-driver.py --lane android-runtime-teardown
     ;;
   android-service-truth)
-    python3 scripts/pdocker-test-driver.py --lane android-service-truth
+    python3 scripts/skydnir-test-driver.py --lane android-service-truth
     ;;
   android-storage-metrics-sequence)
-    python3 scripts/pdocker-test-driver.py --lane android-storage-metrics-sequence
+    python3 scripts/skydnir-test-driver.py --lane android-storage-metrics-sequence
     ;;
   android-single-container)
-    python3 scripts/pdocker-test-driver.py --lane android-single-container-echo-hi
+    python3 scripts/skydnir-test-driver.py --lane android-single-container-echo-hi
     ;;
   android-modern-runtime-truth)
-    python3 scripts/pdocker-test-driver.py --lane android-modern-runtime-truth
+    python3 scripts/skydnir-test-driver.py --lane android-modern-runtime-truth
     ;;
 esac
 

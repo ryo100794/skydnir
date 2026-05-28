@@ -371,7 +371,7 @@ class ScriptInventoryAuditTest(unittest.TestCase):
 
     def test_obsolete_suspects_have_audit_decisions_and_replacements(self):
         expected_replacements = {
-            "scripts/android-terminal-it-repro.sh": "python3 scripts/pdocker-test-driver.py --lane android-terminal-exec-it",
+            "scripts/android-terminal-it-repro.sh": "python3 scripts/skydnir-test-driver.py --lane android-terminal-exec-it",
         }
 
         obsolete = {

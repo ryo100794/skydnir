@@ -12,11 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 class TestDriverManifestTest(unittest.TestCase):
     def setUp(self):
         self.manifest = json.loads((ROOT / "tests" / "test_driver_manifest.json").read_text())
-        self.driver = (ROOT / "scripts" / "pdocker-test-driver.py").read_text()
+        self.driver = (ROOT / "scripts" / "skydnir-test-driver.py").read_text()
 
     def test_canonical_driver_and_manifest_are_declared(self):
         self.assertEqual(self.manifest["schema"], "pdocker.test-driver.v1")
-        self.assertEqual(self.manifest["policy"]["canonical_driver"], "scripts/pdocker-test-driver.py")
+        self.assertEqual(self.manifest["policy"]["canonical_driver"], "scripts/skydnir-test-driver.py")
         self.assertEqual(self.manifest["artifact_manifest"], "docs/test/test-run-latest.json")
         self.assertIn("def run_command", self.driver)
         self.assertIn("manifest.json", self.driver)
@@ -61,7 +61,7 @@ class TestDriverManifestTest(unittest.TestCase):
                 json.dumps(
                     {
                         "schema": "pdocker.test-driver.v1",
-                        "policy": {"canonical_driver": "scripts/pdocker-test-driver.py"},
+                        "policy": {"canonical_driver": "scripts/skydnir-test-driver.py"},
                         "run_directory": str(work / "runs"),
                         "artifact_manifest": str(work / "latest.json"),
                         "lanes": {
@@ -83,7 +83,7 @@ class TestDriverManifestTest(unittest.TestCase):
             proc = subprocess.run(
                 [
                     sys.executable,
-                    "scripts/pdocker-test-driver.py",
+                    "scripts/skydnir-test-driver.py",
                     "--manifest",
                     str(manifest_path.relative_to(ROOT)),
                     "--lane",

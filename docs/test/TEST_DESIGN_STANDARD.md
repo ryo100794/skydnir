@@ -3,7 +3,7 @@
 Snapshot date: 2026-05-05.
 
 This document defines the minimum test design standard for Skydnir.
-The standard is executable. `scripts/pdocker-test-driver.py` is the canonical
+The standard is executable. `scripts/skydnir-test-driver.py` is the canonical
 test entrypoint, and `scripts/verify-test-design-criteria.py` checks the
 ledgers, documentation, driver wiring, and check density on strict governance
 runs.

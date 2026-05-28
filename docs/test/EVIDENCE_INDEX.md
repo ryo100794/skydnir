@@ -40,5 +40,5 @@ record to say that the artifact is promotable.
    host-only evidence for a device gate, describe the residual blocker instead
    of calling the run green.
 4. Do not add a new standalone launcher with a new artifact convention. Route
-   automated execution through `scripts/pdocker-test-driver.py` or register the
+   automated execution through `scripts/skydnir-test-driver.py` or register the
    exception in the owning gate.

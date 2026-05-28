@@ -25,7 +25,7 @@ Every inventory entry now also carries a `migration` object with a proposed dest
 |---|---:|---|
 | `runtime-package-needed` | 1 | Needed to stage runtime/APK payloads or otherwise part of packaging flow. |
 | `build-developer` | 8 | Build, setup, fetch, or developer environment helper. |
-| `test-verification` | 86 | Test, smoke, benchmark, contract, or device verification helper. |
+| `test-verification` | 87 | Test, smoke, benchmark, contract, or device verification helper. |
 | `generated-maintenance` | 3 | Generated-doc/evidence maintenance or manifest data. |
 | `obsolete-suspect` | 1 | Unreferenced or weakly referenced candidate; not deleted without audit. |
 
@@ -91,7 +91,7 @@ remain gitignored and intentionally absent from the inventory.
 - `scripts/build-apk.sh` — APK build wrapper.
 - `scripts/verify-fast.sh` — fast host regression lane.
 - `scripts/verify-heavy.sh` — heavier/device-oriented lane wrapper.
-- `scripts/pdocker-test-driver.py` — canonical test-driver manifest executor.
+- `scripts/skydnir-test-driver.py` — canonical test-driver manifest executor.
 - `scripts/android-selfdebug.sh` — Android single-device localhost Wireless debugging helper.
 
 `scripts/android-service-truth-capture.sh` is intentionally not a stable public entrypoint; it is a device-helper wrapper for service-truth evidence capture and belongs to the `test-verification` migration bucket.
@@ -155,7 +155,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/gguf-tensor-range-index.py` | `developer-helper` | Generate GGUF tensor/range diagnostic indexes for memory-pager and MoE residency investigations. |
 | `scripts/instrument-spirv-noop-probe.py` | `test-helper` | Create valid whole-module SPIR-V no-op or Q6K probe instrumentation without mutating the Vulkan dispatch ABI. |
 | `scripts/parse-q6k-probe-u32.py` | `test-helper` | Parse deterministic Q6_K debug-SSBO u32 probe records from llama GPU artifacts. |
-| `scripts/pdocker-test-driver.py` | `stable-entrypoint` | Host-side verification/test driver or static contract gate. |
+| `scripts/skydnir-test-driver.py` | `stable-entrypoint` | Host-side verification/test driver or static contract gate. |
 | `scripts/plan-llama-gpu-q6-run.py` | `test-helper` | Create a Q6 Vulkan bridge pre-flight run plan without touching ADB. |
 | `scripts/prepare-q6k-noop-probe.sh` | `test-helper` | Prepare deterministic Q6K no-op/probe SPIR-V bundles for the next device run. |
 | `scripts/run-python-coverage.sh` | `test-helper` | Host-side verification/test driver or static contract gate. |
@@ -219,7 +219,7 @@ remain gitignored and intentionally absent from the inventory.
 
 | Path | Stability | Reference scan | Replacement command | Decision |
 |---|---|---|---|---|
-| `scripts/android-terminal-it-repro.sh` | `legacy-audit` | No runtime callers found outside inventory/README/verifier allowlist and the script itself; pycache-only hits ignored. | `python3 scripts/pdocker-test-driver.py --lane android-terminal-exec-it` | Keep for now; delete only after `docs/test/ui-it-selftest-latest.json` and `docs/test/engine-exec-input-latest.jsonl` come from a fresh ADB run and pass `python3 scripts/verify-terminal-exec-it-artifact.py docs/test/ui-it-selftest-latest.json docs/test/engine-exec-input-latest.jsonl --require-container`. |
+| `scripts/android-terminal-it-repro.sh` | `legacy-audit` | No runtime callers found outside inventory/README/verifier allowlist and the script itself; pycache-only hits ignored. | `python3 scripts/skydnir-test-driver.py --lane android-terminal-exec-it` | Keep for now; delete only after `docs/test/ui-it-selftest-latest.json` and `docs/test/engine-exec-input-latest.jsonl` come from a fresh ADB run and pass `python3 scripts/verify-terminal-exec-it-artifact.py docs/test/ui-it-selftest-latest.json docs/test/engine-exec-input-latest.jsonl --require-container`. |
 
 ## Cleanup Plan
 
