@@ -2,7 +2,7 @@
 set -eu
 
 mkdir -p /workspace /reports /documents /shared
-export_dir="${PDOCKER_EXPORT_DIR:-/documents/skydnir-exports}/direct-runtime-probe"
+export_dir="${SKYDNIR_EXPORT_DIR:-${PDOCKER_EXPORT_DIR:-/documents/skydnir-exports}}/direct-runtime-probe"
 mkdir -p "$export_dir"
 
 cat > /reports/README.txt <<'EOF'
@@ -29,7 +29,7 @@ printf 'Skydnir direct runtime probe starting\n'
 printf 'workspace: /workspace\n'
 printf 'reports: /reports\n'
 printf 'documents export: %s\n' "$export_dir"
-printf 'shared: %s\n' "${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
+printf 'shared: %s\n' "${SKYDNIR_SHARED_DOCUMENTS_MOUNT:-${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}}"
 
 set +e
 pdocker-container-probe > "$log" 2>&1

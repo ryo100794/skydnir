@@ -21,9 +21,9 @@ Android Documents folder:
 
 The compose template mounts the selected Android Documents folder at
 `/documents` by default. Use it only for explicit test reports, import/export,
-or data exchange. Override `PDOCKER_DOCUMENTS_HOST` or
-`PDOCKER_DOCUMENTS_MOUNT` to share a folder or move the mount path, or use
-`PDOCKER_SHARED_DOCUMENTS_HOST` for the cross-project `/shared` mount.
+or data exchange. Override `SKYDNIR_DOCUMENTS_HOST` or
+`SKYDNIR_DOCUMENTS_MOUNT` to share a folder or move the mount path, or use
+`SKYDNIR_SHARED_DOCUMENTS_HOST` for the cross-project `/shared` mount.
 
 The default suite covers a small but repeatable smoke set:
 

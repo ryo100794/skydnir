@@ -1,11 +1,11 @@
 #!/bin/sh
 set -eu
 
-report_dir="${PDOCKER_TEST_SUITE_REPORT_DIR:-/reports}"
-documents_mount="${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
-shared_mount="${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
-export_dir="${PDOCKER_EXPORT_DIR:-${documents_mount}/skydnir-exports}/skydnir-test-suite"
-fast_workdir="${PDOCKER_FAST_WORKDIR:-/workspace}"
+report_dir="${SKYDNIR_TEST_SUITE_REPORT_DIR:-${PDOCKER_TEST_SUITE_REPORT_DIR:-/reports}}"
+documents_mount="${SKYDNIR_DOCUMENTS_MOUNT:-${PDOCKER_DOCUMENTS_MOUNT:-/documents}}"
+shared_mount="${SKYDNIR_SHARED_DOCUMENTS_MOUNT:-${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}}"
+export_dir="${SKYDNIR_EXPORT_DIR:-${PDOCKER_EXPORT_DIR:-${documents_mount}/skydnir-exports}}/skydnir-test-suite"
+fast_workdir="${SKYDNIR_FAST_WORKDIR:-${PDOCKER_FAST_WORKDIR:-/workspace}}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null || date +%s)"
 scenario="all"
 

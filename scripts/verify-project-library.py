@@ -19,10 +19,10 @@ LLAMA_GPU_COMPARE_BRIDGE_LIMITS = (
     "GGML_VK_FORCE_MAX_ALLOCATION_SIZE",
     "GGML_VK_SUBALLOCATION_BLOCK_SIZE",
 )
-DOCUMENTS_VOLUME = "${PDOCKER_DOCUMENTS_HOST:-./documents}:${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
-SHARED_DOCUMENTS_VOLUME = "${PDOCKER_SHARED_DOCUMENTS_HOST:-./shared-documents}:${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
 SKYDNIR_DOCUMENTS_VOLUME = "${SKYDNIR_DOCUMENTS_HOST:-./documents}:${SKYDNIR_DOCUMENTS_MOUNT:-/documents}"
 SKYDNIR_SHARED_DOCUMENTS_VOLUME = "${SKYDNIR_SHARED_DOCUMENTS_HOST:-./shared-documents}:${SKYDNIR_SHARED_DOCUMENTS_MOUNT:-/shared}"
+LEGACY_DOCUMENTS_VOLUME = "${PDOCKER_DOCUMENTS_HOST:-./documents}:${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
+LEGACY_SHARED_DOCUMENTS_VOLUME = "${PDOCKER_SHARED_DOCUMENTS_HOST:-./shared-documents}:${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
 
 
 def fail(msg: str) -> None:
@@ -195,23 +195,30 @@ def main() -> int:
         compose = read(template_root / compose_name)
         readme = read(template_root / "README.md")
         documents_readme = read(template_root / "documents" / "README.md")
-        if DOCUMENTS_VOLUME not in compose:
+        # The llama GPU benchmark Compose file is pinned by the GPU ABI guard so
+        # benchmark workload changes cannot slip into naming-only commits.
+        # Other templates should expose Skydnir env names directly.
+        allowed_documents_volume = (
+            LEGACY_DOCUMENTS_VOLUME if tid == "llama-cpp-gpu" else SKYDNIR_DOCUMENTS_VOLUME
+        )
+        allowed_shared_documents_volume = (
+            LEGACY_SHARED_DOCUMENTS_VOLUME if tid == "llama-cpp-gpu" else SKYDNIR_SHARED_DOCUMENTS_VOLUME
+        )
+        if allowed_documents_volume not in compose:
             fail(f"{tid} compose missing selected Documents folder mount")
-        if SHARED_DOCUMENTS_VOLUME not in compose:
+        if allowed_shared_documents_volume not in compose:
             fail(f"{tid} compose missing cross-project shared Documents volume")
-        if "PDOCKER_EXPORT_DIR" not in compose or "PDOCKER_FAST_WORKDIR" not in compose:
+        export_env = "PDOCKER_EXPORT_DIR" if tid == "llama-cpp-gpu" else "SKYDNIR_EXPORT_DIR"
+        fast_workdir_env = "PDOCKER_FAST_WORKDIR" if tid == "llama-cpp-gpu" else "SKYDNIR_FAST_WORKDIR"
+        if export_env not in compose or fast_workdir_env not in compose:
             fail(f"{tid} compose missing Documents export / fast workspace guidance env")
-        if "PDOCKER_SHARED_DOCUMENTS_MOUNT" not in compose:
+        shared_mount_env = "PDOCKER_SHARED_DOCUMENTS_MOUNT" if tid == "llama-cpp-gpu" else "SKYDNIR_SHARED_DOCUMENTS_MOUNT"
+        if shared_mount_env not in compose:
             fail(f"{tid} compose missing shared Documents mount env")
-        if not (
-            ("PDOCKER_DOCUMENTS_HOST" in readme and "PDOCKER_DOCUMENTS_MOUNT" in readme)
-            or ("SKYDNIR_DOCUMENTS_HOST" in readme and "SKYDNIR_DOCUMENTS_MOUNT" in readme)
-        ):
+        if not ("SKYDNIR_DOCUMENTS_HOST" in readme and "SKYDNIR_DOCUMENTS_MOUNT" in readme):
             fail(f"{tid} README missing shared Documents override docs")
         if (
-            "PDOCKER_SHARED_DOCUMENTS_HOST" not in readme
-            and "PDOCKER_SHARED_DOCUMENTS_HOST" not in documents_readme
-            and "SKYDNIR_SHARED_DOCUMENTS_HOST" not in readme
+            "SKYDNIR_SHARED_DOCUMENTS_HOST" not in readme
             and "SKYDNIR_SHARED_DOCUMENTS_HOST" not in documents_readme
         ):
             fail(f"{tid} docs missing cross-project shared Documents override")
@@ -233,7 +240,7 @@ def main() -> int:
         and "image: pdocker/direct-runtime-probe:latest" not in direct_compose
         and "container_name: pdocker-direct-runtime-probe" not in direct_compose,
         "direct probe exports to Skydnir public Documents path": "/documents/skydnir-exports" in direct_compose
-        and 'export_dir="${PDOCKER_EXPORT_DIR:-/documents/skydnir-exports}/direct-runtime-probe"' in direct_start
+        and 'export_dir="${SKYDNIR_EXPORT_DIR:-${PDOCKER_EXPORT_DIR:-/documents/skydnir-exports}}/direct-runtime-probe"' in direct_start
         and "/documents/skydnir-exports/direct-runtime-probe/latest.log" in direct_readme
         and "/documents/skydnir-exports/direct-runtime-probe/latest.json" in direct_documents_readme,
         "direct probe public wording uses Skydnir": "Skydnir direct runtime probe" in direct_start
@@ -266,8 +273,8 @@ def main() -> int:
         and "container_name: pdocker-test-suite" not in suite_compose
         and "image: pdocker/test-suite:latest" not in suite_compose,
         "test suite mounts reports and Documents": "./reports:/reports" in suite_compose
-        and DOCUMENTS_VOLUME in suite_compose
-        and SHARED_DOCUMENTS_VOLUME in suite_compose,
+        and SKYDNIR_DOCUMENTS_VOLUME in suite_compose
+        and SKYDNIR_SHARED_DOCUMENTS_VOLUME in suite_compose,
         "test suite Dockerfile installs runner and probe": "COPY scripts/run-pdocker-test-suite.sh" in suite_dockerfile
         and "COPY scripts/pdocker-container-probe.sh" in suite_dockerfile
         and "HEALTHCHECK" in suite_dockerfile
@@ -386,7 +393,6 @@ def main() -> int:
         "Skydnir: compose up current project",
         "DOCKER_HOST",
         "SKYDNIR_DOCUMENTS_MOUNT",
-        "PDOCKER_DOCUMENTS_MOUNT",
         "Documents/pdocker/projects",
         "filesDir/pdocker/pdockerd.sock",
     ):

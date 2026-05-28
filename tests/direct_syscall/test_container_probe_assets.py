@@ -47,10 +47,13 @@ class ContainerProbeAssetsTest(unittest.TestCase):
         self.assertIn("container_name: skydnir-direct-runtime-probe", compose)
         self.assertNotIn("image: pdocker/direct-runtime-probe:latest", compose)
         self.assertNotIn("container_name: pdocker-direct-runtime-probe", compose)
-        self.assertIn("${PDOCKER_DOCUMENTS_HOST:-./documents}:${PDOCKER_DOCUMENTS_MOUNT:-/documents}", compose)
+        self.assertIn("${SKYDNIR_DOCUMENTS_HOST:-./documents}:${SKYDNIR_DOCUMENTS_MOUNT:-/documents}", compose)
         self.assertIn("pdocker-container-probe > \"$log\" 2>&1", start)
         self.assertIn("/documents/skydnir-exports", start)
-        self.assertIn('export_dir="${PDOCKER_EXPORT_DIR:-/documents/skydnir-exports}/direct-runtime-probe"', start)
+        self.assertIn(
+            'export_dir="${SKYDNIR_EXPORT_DIR:-${PDOCKER_EXPORT_DIR:-/documents/skydnir-exports}}/direct-runtime-probe"',
+            start,
+        )
         self.assertIn('export_latest="$export_dir/latest.log"', start)
         self.assertIn('"schema": "pdocker.direct-runtime-probe.v1"', start)
         self.assertIn('grep -q \'"status": "pass"\' /reports/latest.json', dockerfile)
@@ -67,7 +70,7 @@ class ContainerProbeAssetsTest(unittest.TestCase):
         self.assertNotIn("image: pdocker/test-suite:latest", compose)
         self.assertNotIn("container_name: pdocker-test-suite", compose)
         self.assertIn('command: ["/usr/local/bin/start-skydnir-test-suite"]', compose)
-        self.assertIn("${PDOCKER_DOCUMENTS_HOST:-./documents}:${PDOCKER_DOCUMENTS_MOUNT:-/documents}", compose)
+        self.assertIn("${SKYDNIR_DOCUMENTS_HOST:-./documents}:${SKYDNIR_DOCUMENTS_MOUNT:-/documents}", compose)
         self.assertIn("COPY scripts/pdocker-container-probe.sh", dockerfile)
         self.assertIn("docker exec skydnir-test-suite run-skydnir-test-suite", start)
         self.assertIn("--scenario all|smoke|direct|io|archive|documents", runner)

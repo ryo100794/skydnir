@@ -33,8 +33,8 @@ It includes:
   export, or exchange files on SD/Documents storage. Project definitions live
   under `pdocker/projects` in the selected Documents root.
 - A cross-project shared bind mount at `/shared`. Override
-  `PDOCKER_DOCUMENTS_HOST`, `PDOCKER_DOCUMENTS_MOUNT`,
-  `PDOCKER_SHARED_DOCUMENTS_HOST`, or `PDOCKER_SHARED_DOCUMENTS_MOUNT` when two
+  `SKYDNIR_DOCUMENTS_HOST`, `SKYDNIR_DOCUMENTS_MOUNT`,
+  `SKYDNIR_SHARED_DOCUMENTS_HOST`, or `SKYDNIR_SHARED_DOCUMENTS_MOUNT` when two
   projects intentionally need the same folder or mount path.
 
 Usage from Skydnir:

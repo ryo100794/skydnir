@@ -16,4 +16,4 @@ storage, then copy selected results to `/documents/skydnir-exports`.
 
 Project definitions are stored under `pdocker/projects` in the selected
 Android Documents folder. Cross-project shared data can use
-`PDOCKER_SHARED_DOCUMENTS_HOST` mounted at `/shared`.
+`SKYDNIR_SHARED_DOCUMENTS_HOST` mounted at `/shared`.

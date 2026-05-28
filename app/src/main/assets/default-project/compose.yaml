@@ -24,10 +24,10 @@ services:
       PDOCKER_PROJECTS_DIR: "/pdocker/projects"
       PDOCKER_HOME: "/pdocker/host"
       PDOCKER_ENGINE_SOCKET: "/pdocker/host/pdockerd.sock"
-      PDOCKER_DOCUMENTS_MOUNT: "${PDOCKER_DOCUMENTS_MOUNT:-/documents}"
-      PDOCKER_SHARED_DOCUMENTS_MOUNT: "${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}"
-      PDOCKER_EXPORT_DIR: "${PDOCKER_EXPORT_DIR:-/documents/skydnir-exports}"
-      PDOCKER_FAST_WORKDIR: "${PDOCKER_FAST_WORKDIR:-/workspace}"
+      SKYDNIR_DOCUMENTS_MOUNT: "${SKYDNIR_DOCUMENTS_MOUNT:-/documents}"
+      SKYDNIR_SHARED_DOCUMENTS_MOUNT: "${SKYDNIR_SHARED_DOCUMENTS_MOUNT:-/shared}"
+      SKYDNIR_EXPORT_DIR: "${SKYDNIR_EXPORT_DIR:-/documents/skydnir-exports}"
+      SKYDNIR_FAST_WORKDIR: "${SKYDNIR_FAST_WORKDIR:-/workspace}"
     command: ["/usr/local/bin/start-code-server"]
     ports:
       - "18080:18080"
@@ -35,8 +35,8 @@ services:
       - ${PDOCKER_FAST_WORKSPACE_HOST:-./workspace}:/workspace
       - ${PDOCKER_DEV_STATE_HOST:-./state/dev}/continue:/workspace/.continue
       - ${PDOCKER_DEV_STATE_HOST:-./state/dev}/vscode:/workspace/.vscode-server/data/User
-      - ${PDOCKER_DOCUMENTS_HOST:-./documents}:${PDOCKER_DOCUMENTS_MOUNT:-/documents}
-      - ${PDOCKER_SHARED_DOCUMENTS_HOST:-./shared-documents}:${PDOCKER_SHARED_DOCUMENTS_MOUNT:-/shared}
+      - ${SKYDNIR_DOCUMENTS_HOST:-./documents}:${SKYDNIR_DOCUMENTS_MOUNT:-/documents}
+      - ${SKYDNIR_SHARED_DOCUMENTS_HOST:-./shared-documents}:${SKYDNIR_SHARED_DOCUMENTS_MOUNT:-/shared}
       - .:/pdocker/project
       - ..:/pdocker/projects
       - ../..:/pdocker/host

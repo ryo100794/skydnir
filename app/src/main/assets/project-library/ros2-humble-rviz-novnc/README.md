@@ -8,8 +8,8 @@ connect to host port `15900`.
 
 The compose template mounts the selected Android Documents folder at
 `/documents` by default. Use it only for explicit import/export or data
-exchange. Override `PDOCKER_DOCUMENTS_HOST` or `PDOCKER_DOCUMENTS_MOUNT` to
-share a folder or move the mount path, or use `PDOCKER_SHARED_DOCUMENTS_HOST`
+exchange. Override `SKYDNIR_DOCUMENTS_HOST` or `SKYDNIR_DOCUMENTS_MOUNT` to
+share a folder or move the mount path, or use `SKYDNIR_SHARED_DOCUMENTS_HOST`
 for the cross-project `/shared` mount.
 
 Build note: the Dockerfile downloads the `novnc` Debian package from the

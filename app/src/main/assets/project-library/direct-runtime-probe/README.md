@@ -17,8 +17,8 @@ It includes:
 - The selected Android Documents folder mounted at `/documents` for exporting
   test reports when needed.
 - A cross-project shared bind mount at `/shared`. Override
-  `PDOCKER_DOCUMENTS_HOST`, `PDOCKER_DOCUMENTS_MOUNT`,
-  `PDOCKER_SHARED_DOCUMENTS_HOST`, or `PDOCKER_SHARED_DOCUMENTS_MOUNT` when
+  `SKYDNIR_DOCUMENTS_HOST`, `SKYDNIR_DOCUMENTS_MOUNT`,
+  `SKYDNIR_SHARED_DOCUMENTS_HOST`, or `SKYDNIR_SHARED_DOCUMENTS_MOUNT` when
   projects intentionally share the same folder or mount path.
 
 Use from the repository test route:
