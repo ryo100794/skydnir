@@ -81,16 +81,22 @@ export_documents_artifacts() {
 set -eu
 DOC_HOST=$(remote_quote "$DOCUMENTS_HOST")
 if test -z \"\$DOC_HOST\"; then
-  ENV_FILE='files/pdocker/projects/.pdocker-common.env'
+  ENV_FILE='files/pdocker/projects/.skydnir-common.env'
+  if ! test -f \"\$ENV_FILE\"; then
+    ENV_FILE='files/pdocker/projects/.pdocker-common.env'
+  fi
   if test -f \"\$ENV_FILE\"; then
-    DOC_HOST=\$(sed -n 's/^PDOCKER_DOCUMENTS_HOST=//p' \"\$ENV_FILE\" | tail -1)
+    DOC_HOST=\$(sed -n 's/^SKYDNIR_DOCUMENTS_HOST=//p; s/^PDOCKER_DOCUMENTS_HOST=//p' \"\$ENV_FILE\" | tail -1)
     DOC_HOST=\$(printf '%s' \"\$DOC_HOST\" | sed 's/^\"//; s/\"\$//; s/^'\''//; s/'\''\$//')
   fi
 fi
-ENV_FILE='files/pdocker/projects/.pdocker-common.env'
-SELECTED_HOST=\$(sed -n 's/^PDOCKER_DOCUMENTS_SELECTED_HOST=//p' \"\$ENV_FILE\" 2>/dev/null | tail -1)
+ENV_FILE='files/pdocker/projects/.skydnir-common.env'
+if ! test -f \"\$ENV_FILE\"; then
+  ENV_FILE='files/pdocker/projects/.pdocker-common.env'
+fi
+SELECTED_HOST=\$(sed -n 's/^SKYDNIR_DOCUMENTS_SELECTED_HOST=//p; s/^PDOCKER_DOCUMENTS_SELECTED_HOST=//p' \"\$ENV_FILE\" 2>/dev/null | tail -1)
 SELECTED_HOST=\$(printf '%s' \"\$SELECTED_HOST\" | sed 's/^\"//; s/\"\$//; s/^'\''//; s/'\''\$//')
-MEDIATOR=\$(sed -n 's/^PDOCKER_DOCUMENTS_MEDIATOR=//p' \"\$ENV_FILE\" 2>/dev/null | tail -1)
+MEDIATOR=\$(sed -n 's/^SKYDNIR_DOCUMENTS_MEDIATOR=//p; s/^PDOCKER_DOCUMENTS_MEDIATOR=//p' \"\$ENV_FILE\" 2>/dev/null | tail -1)
 MEDIATOR=\$(printf '%s' \"\$MEDIATOR\" | sed 's/^\"//; s/\"\$//; s/^'\''//; s/'\''\$//')
 if test -n \"\$DOC_HOST\"; then
   printf '__SKYDNIR_FILE_IO_MICRO_DOCUMENTS_EXPORT__:host=%s;selected=%s;mediator=%s;latest=%s\n' \"\$DOC_HOST\" \"\$SELECTED_HOST\" \"\$MEDIATOR\" \"\$DOC_HOST/$DOCUMENTS_EXPORT_SUBDIR/test-runs/latest-benchmark\"
@@ -194,9 +200,12 @@ cp '/data/local/tmp/$(basename "$BIN")' \"\$APP_WORKLOAD\" && chmod 755 \"\$APP_
 cp '/data/local/tmp/$(basename "$DIRECT")' \"\$DIRECT\" && chmod 755 \"\$DIRECT\"
 DOC_HOST=$(remote_quote "$DOCUMENTS_HOST")
 if test -z \"\$DOC_HOST\"; then
-  ENV_FILE=\$(find pdocker/projects -maxdepth 3 -name .pdocker-common.env 2>/dev/null | head -1)
+  ENV_FILE=\$(find pdocker/projects -maxdepth 3 -name .skydnir-common.env 2>/dev/null | head -1)
+  if test -z \"\$ENV_FILE\"; then
+    ENV_FILE=\$(find pdocker/projects -maxdepth 3 -name .pdocker-common.env 2>/dev/null | head -1)
+  fi
   if test -n \"\$ENV_FILE\"; then
-    DOC_HOST=\$(sed -n 's/^PDOCKER_DOCUMENTS_HOST=//p' \"\$ENV_FILE\" | tail -1)
+    DOC_HOST=\$(sed -n 's/^SKYDNIR_DOCUMENTS_HOST=//p; s/^PDOCKER_DOCUMENTS_HOST=//p' \"\$ENV_FILE\" | tail -1)
     DOC_HOST=\$(printf '%s' \"\$DOC_HOST\" | sed 's/^\"//; s/\"\$//; s/^'\''//; s/'\''\$//')
   fi
 fi
