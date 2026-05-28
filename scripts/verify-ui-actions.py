@@ -525,7 +525,7 @@ def main() -> int:
     blender_compose_src = (ROOT / "app/src/main/assets/project-library/blender-xvnc-novnc/compose.yaml").read_text()
     direct_runtime_probe_compose_src = (ROOT / "app/src/main/assets/project-library/direct-runtime-probe/compose.yaml").read_text()
     llama_compose_src = (ROOT / "app/src/main/assets/project-library/llama-cpp-gpu/compose.yaml").read_text()
-    test_suite_compose_src = (ROOT / "app/src/main/assets/project-library/pdocker-test-suite/compose.yaml").read_text()
+    test_suite_compose_src = (ROOT / "app/src/main/assets/project-library/skydnir-test-suite/compose.yaml").read_text()
     require(
         "graphics project templates use Skydnir public image and container names",
         "image: skydnir/ros2-humble-rviz-novnc:latest" in ros2_rviz_compose_src

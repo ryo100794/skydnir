@@ -59,11 +59,11 @@ class ContainerProbeAssetsTest(unittest.TestCase):
         self.assertIn('grep -q \'"status": "pass"\' /reports/latest.json', dockerfile)
 
     def test_test_suite_container_runs_scenarios_by_exec_and_exports_documents_logs(self):
-        root = ROOT / "app" / "src" / "main" / "assets" / "project-library" / "pdocker-test-suite"
+        root = ROOT / "app" / "src" / "main" / "assets" / "project-library" / "skydnir-test-suite"
         compose = (root / "compose.yaml").read_text()
         dockerfile = (root / "Dockerfile").read_text()
-        start = (root / "scripts" / "start-pdocker-test-suite.sh").read_text()
-        runner = (root / "scripts" / "run-pdocker-test-suite.sh").read_text()
+        start = (root / "scripts" / "start-skydnir-test-suite.sh").read_text()
+        runner = (root / "scripts" / "run-skydnir-test-suite.sh").read_text()
         probe = (root / "scripts" / "pdocker-container-probe.sh").read_text()
         self.assertIn("image: skydnir/test-suite:latest", compose)
         self.assertIn("container_name: skydnir-test-suite", compose)
@@ -71,7 +71,11 @@ class ContainerProbeAssetsTest(unittest.TestCase):
         self.assertNotIn("container_name: pdocker-test-suite", compose)
         self.assertIn('command: ["/usr/local/bin/start-skydnir-test-suite"]', compose)
         self.assertIn("${SKYDNIR_DOCUMENTS_HOST:-./documents}:${SKYDNIR_DOCUMENTS_MOUNT:-/documents}", compose)
+        self.assertIn("COPY scripts/run-skydnir-test-suite.sh", dockerfile)
+        self.assertIn("COPY scripts/start-skydnir-test-suite.sh", dockerfile)
         self.assertIn("COPY scripts/pdocker-container-probe.sh", dockerfile)
+        self.assertIn("/usr/local/bin/run-pdocker-test-suite", dockerfile)
+        self.assertIn("/usr/local/bin/start-pdocker-test-suite", dockerfile)
         self.assertIn("docker exec skydnir-test-suite run-skydnir-test-suite", start)
         self.assertIn("--scenario all|smoke|direct|io|archive|documents", runner)
         self.assertIn("run_selected_case direct_runtime_probe direct", runner)

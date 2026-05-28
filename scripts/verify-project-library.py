@@ -178,7 +178,7 @@ def main() -> int:
     for tid in (
         "dev-workspace",
         "direct-runtime-probe",
-        "pdocker-test-suite",
+        "skydnir-test-suite",
         "llama-cpp-gpu",
         "ros2-humble-rviz-novnc",
         "blender-xvnc-novnc",
@@ -254,12 +254,12 @@ def main() -> int:
             fail(name)
     ok("direct-runtime-probe template uses Skydnir public naming and export path")
 
-    suite = templates["pdocker-test-suite"]
+    suite = templates["skydnir-test-suite"]
     suite_root = ASSETS / suite["assetPath"]
     suite_compose = read(suite_root / suite["compose"])
     suite_dockerfile = read(suite_root / suite["dockerfile"])
-    suite_runner = read(suite_root / "scripts" / "run-pdocker-test-suite.sh")
-    suite_start = read(suite_root / "scripts" / "start-pdocker-test-suite.sh")
+    suite_runner = read(suite_root / "scripts" / "run-skydnir-test-suite.sh")
+    suite_start = read(suite_root / "scripts" / "start-skydnir-test-suite.sh")
     suite_probe = read(suite_root / "scripts" / "pdocker-container-probe.sh")
     suite_readme = read(suite_root / "README.md")
     suite_expectations = {
@@ -275,11 +275,14 @@ def main() -> int:
         "test suite mounts reports and Documents": "./reports:/reports" in suite_compose
         and SKYDNIR_DOCUMENTS_VOLUME in suite_compose
         and SKYDNIR_SHARED_DOCUMENTS_VOLUME in suite_compose,
-        "test suite Dockerfile installs runner and probe": "COPY scripts/run-pdocker-test-suite.sh" in suite_dockerfile
+        "test suite Dockerfile installs runner and probe": "COPY scripts/run-skydnir-test-suite.sh" in suite_dockerfile
+        and "COPY scripts/start-skydnir-test-suite.sh" in suite_dockerfile
         and "COPY scripts/pdocker-container-probe.sh" in suite_dockerfile
         and "HEALTHCHECK" in suite_dockerfile
         and "run-skydnir-test-suite" in suite_dockerfile
-        and "start-skydnir-test-suite" in suite_dockerfile,
+        and "start-skydnir-test-suite" in suite_dockerfile
+        and "run-pdocker-test-suite" in suite_dockerfile
+        and "start-pdocker-test-suite" in suite_dockerfile,
         "test suite start instructs exec route": "docker exec skydnir-test-suite run-skydnir-test-suite" in suite_start,
         "test suite runner supports scenario selectors": "--scenario all|smoke|direct|io|archive|documents" in suite_runner
         and "run_selected_case" in suite_runner,
@@ -302,7 +305,7 @@ def main() -> int:
     for name, passed in suite_expectations.items():
         if not passed:
             fail(name)
-    ok("pdocker-test-suite template centralizes exec-run scenarios and Documents evidence")
+    ok("skydnir-test-suite template centralizes exec-run scenarios and Documents evidence")
 
     dev = templates["dev-workspace"]
     if dev.get("assetPath") != "default-project":

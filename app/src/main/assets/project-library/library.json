@@ -26,12 +26,12 @@
       "features": ["skydnir-direct", "runtime-test", "argv-preservation", "memory-guard", "container-probe"]
     },
     {
-      "id": "pdocker-test-suite",
+      "id": "skydnir-test-suite",
       "name": "Skydnir Test Suite",
       "category": "runtime-test",
       "description": "Reusable test-suite container. Start it with Compose, run scenarios through docker exec, and mirror JSON/log evidence to the selected Android Documents folder.",
-      "assetPath": "project-library/pdocker-test-suite",
-      "projectDir": "pdocker-test-suite",
+      "assetPath": "project-library/skydnir-test-suite",
+      "projectDir": "skydnir-test-suite",
       "compose": "compose.yaml",
       "dockerfile": "Dockerfile",
       "gpu": "none",

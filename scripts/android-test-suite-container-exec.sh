@@ -8,15 +8,15 @@ ADB="${ADB:-adb}"
 PKG="${SKYDNIR_ANDROID_PACKAGE:-${SKYDNIR_PACKAGE:-${PDOCKER_ANDROID_PACKAGE:-io.github.ryo100794.pdocker.compat}}}"
 CLASS_PREFIX="io.github.ryo100794.pdocker"
 ACTION_PREFIX="io.github.ryo100794.pdocker"
-PROJECT="${SKYDNIR_TEST_SUITE_PROJECT:-${PDOCKER_TEST_SUITE_PROJECT:-pdocker/projects/pdocker-test-suite}}"
-PROJECT_NAME="${PDOCKER_TEST_SUITE_PROJECT_NAME:-${PROJECT##*/}}"
+PROJECT="${SKYDNIR_TEST_SUITE_PROJECT:-${PDOCKER_TEST_SUITE_PROJECT:-pdocker/projects/skydnir-test-suite}}"
+PROJECT_NAME="${SKYDNIR_TEST_SUITE_PROJECT_NAME:-${PDOCKER_TEST_SUITE_PROJECT_NAME:-${PROJECT##*/}}}"
 CONTAINER="${SKYDNIR_TEST_SUITE_CONTAINER:-${PDOCKER_TEST_SUITE_CONTAINER:-skydnir-test-suite}}"
 IMAGE="${SKYDNIR_TEST_SUITE_IMAGE:-${PDOCKER_TEST_SUITE_IMAGE:-skydnir/test-suite:latest}}"
-SCENARIO="${PDOCKER_TEST_SUITE_SCENARIO:-all}"
-STAGE_TEMPLATE="${PDOCKER_TEST_SUITE_STAGE_TEMPLATE:-1}"
-REFRESH_TEMPLATE="${PDOCKER_TEST_SUITE_REFRESH_TEMPLATE:-1}"
-TEMPLATE_ROOT="$ROOT/app/src/main/assets/project-library/pdocker-test-suite"
-STAGE_TAR="/tmp/pdocker-test-suite-template.tar"
+SCENARIO="${SKYDNIR_TEST_SUITE_SCENARIO:-${PDOCKER_TEST_SUITE_SCENARIO:-all}}"
+STAGE_TEMPLATE="${SKYDNIR_TEST_SUITE_STAGE_TEMPLATE:-${PDOCKER_TEST_SUITE_STAGE_TEMPLATE:-1}}"
+REFRESH_TEMPLATE="${SKYDNIR_TEST_SUITE_REFRESH_TEMPLATE:-${PDOCKER_TEST_SUITE_REFRESH_TEMPLATE:-1}}"
+TEMPLATE_ROOT="$ROOT/app/src/main/assets/project-library/skydnir-test-suite"
+STAGE_TAR="/tmp/skydnir-test-suite-template.tar"
 
 remote_quote() {
   printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
@@ -190,10 +190,10 @@ raise SystemExit(1)'
 if [[ "$STAGE_TEMPLATE" != "0" ]]; then
   if [[ "$REFRESH_TEMPLATE" == "1" ]] || ! run_as "test -f $(printf "%q" "files/$PROJECT/compose.yaml")"; then
     echo "[Skydnir test suite] stage bundled template to files/$PROJECT"
-    tar -C "$TEMPLATE_ROOT/.." -cf "$STAGE_TAR" pdocker-test-suite
-    "$ADB" push "$STAGE_TAR" /data/local/tmp/pdocker-test-suite-template.tar >/dev/null
-    "$ADB" shell "chmod 644 /data/local/tmp/pdocker-test-suite-template.tar" >/dev/null || true
-    run_as "rm -rf files/$(printf "%q" "$PROJECT") && mkdir -p files/pdocker/projects && tar -xf /data/local/tmp/pdocker-test-suite-template.tar -C files/pdocker/projects"
+    tar -C "$TEMPLATE_ROOT/.." -cf "$STAGE_TAR" skydnir-test-suite
+    "$ADB" push "$STAGE_TAR" /data/local/tmp/skydnir-test-suite-template.tar >/dev/null
+    "$ADB" shell "chmod 644 /data/local/tmp/skydnir-test-suite-template.tar" >/dev/null || true
+    run_as "rm -rf files/$(printf "%q" "$PROJECT") && mkdir -p files/pdocker/projects && tar -xf /data/local/tmp/skydnir-test-suite-template.tar -C files/pdocker/projects"
   fi
 fi
 

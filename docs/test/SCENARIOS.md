@@ -156,21 +156,21 @@ as a planned heavy scenario.
 
 ## Containerized Test Suite
 
-`pdocker-test-suite` is the canonical repeatable container route for bundled
+`skydnir-test-suite` is the canonical repeatable container route for bundled
 runtime scenarios. The container starts idle through Compose, and every suite
 run is invoked through Docker exec so the same route can be used from the UI,
 ADB, or another development host:
 
 ```sh
-docker exec pdocker-test-suite run-pdocker-test-suite --scenario all
+docker exec skydnir-test-suite run-skydnir-test-suite --scenario all
 ```
 
 The runner writes structured evidence to both `/reports` and the selected
 Documents exchange folder:
 
 ```text
-/documents/pdocker-exports/pdocker-test-suite/latest.json
-/documents/pdocker-exports/pdocker-test-suite/latest.log
+/documents/skydnir-exports/skydnir-test-suite/latest.json
+/documents/skydnir-exports/skydnir-test-suite/latest.log
 ```
 
 Scenario selectors are `all`, `smoke`, `direct`, `io`, `archive`, and
