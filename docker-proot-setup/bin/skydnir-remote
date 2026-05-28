@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Skydnir remote Docker CLI compatibility wrapper.
+# The implementation is still the historical pdocker-remote script during the
+# rename transition; keep DOCKER_HOST behavior identical.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PDOCKER_SUPPRESS_DEPRECATION_WARNING=1
+export SKYDNIR_REMOTE_NAME=skydnir-remote
+exec "$SCRIPT_DIR/pdocker-remote" "$@"

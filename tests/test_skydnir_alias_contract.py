@@ -12,11 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "docker-proot-setup" / "bin"
 PDOCKER = BIN / "pdocker"
 SKYDNIR = BIN / "skydnir"
+PDOCKER_REMOTE = BIN / "pdocker-remote"
+SKYDNIR_REMOTE = BIN / "skydnir-remote"
 PDOCKERD = BIN / "pdockerd"
 SKYDNIRD = BIN / "skydnird"
 BRIDGE = ROOT / "app" / "src" / "main" / "python" / "pdockerd_bridge.py"
 MAIN_ACTIVITY = ROOT / "app" / "src" / "main" / "kotlin" / "io" / "github" / "ryo100794" / "pdocker" / "MainActivity.kt"
 APP_GRADLE = ROOT / "app" / "build.gradle.kts"
+SETTINGS_GRADLE = ROOT / "settings.gradle.kts"
 BUILD_APK = ROOT / "scripts" / "build-apk.sh"
 BUILD_ALL = ROOT / "scripts" / "build-all.sh"
 VERIFY_FAST = ROOT / "scripts" / "verify-fast.sh"
@@ -87,6 +90,22 @@ class SkydnirAliasContractTest(unittest.TestCase):
         )
         self.assertEqual(daemon_help.returncode, 0, daemon_help.stderr)
         self.assertIn("pdockerd is deprecated. Use skydnird instead.", daemon_help.stderr)
+
+    def test_skydnir_remote_alias_keeps_legacy_remote_compatibility(self):
+        self.assertTrue(os.access(SKYDNIR_REMOTE, os.X_OK))
+        wrapper = SKYDNIR_REMOTE.read_text(encoding="utf-8")
+        self.assertIn('exec "$SCRIPT_DIR/pdocker-remote" "$@"', wrapper)
+        self.assertIn("PDOCKER_SUPPRESS_DEPRECATION_WARNING=1", wrapper)
+        self.assertIn("SKYDNIR_REMOTE_NAME=skydnir-remote", wrapper)
+
+        legacy = PDOCKER_REMOTE.read_text(encoding="utf-8")
+        self.assertIn("pdocker-remote is deprecated. Use skydnir-remote instead.", legacy)
+        self.assertIn("skydnir-remote build -t myapp .", legacy)
+
+    def test_gradle_root_project_uses_public_skydnir_name(self):
+        settings = SETTINGS_GRADLE.read_text(encoding="utf-8")
+        self.assertIn('rootProject.name = "skydnir"', settings)
+        self.assertNotIn('rootProject.name = "pdocker-android"', settings)
 
     def test_skydnird_alias_suppresses_legacy_daemon_warning(self):
         self.assertTrue(os.access(SKYDNIRD, os.X_OK))

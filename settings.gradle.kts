@@ -16,5 +16,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "pdocker-android"
+rootProject.name = "skydnir"
 include(":app")

@@ -15,7 +15,9 @@ compatibility surfaces until a later, explicitly planned migration.
 | Surface | Old | New | Current behavior |
 |---|---|---|---|
 | Public project name | `pdocker-android` | `Skydnir` | README, issue templates, and release templates use Skydnir. |
+| Gradle root project | `pdocker-android` | `skydnir` | Build metadata now uses the public repository name without changing Android package IDs. |
 | CLI command | `pdocker` | `skydnir` | `skydnir` is available; `pdocker` still works and warns. |
+| Remote Docker helper | `pdocker-remote` | `skydnir-remote` | `skydnir-remote` is available; `pdocker-remote` still works and warns. |
 | Daemon launcher | `pdockerd` | `skydnird` | `skydnird` is available; `pdockerd` still works and warns. |
 | Host runtime home | `~/.pdocker` | `~/.skydnir` | New Skydnir host invocations use `~/.skydnir` unless old data exists. |
 | Android app data | app-private `files/pdocker` | unchanged | Android keeps explicit compatibility paths in this phase. |
@@ -45,6 +47,25 @@ Warning: pdocker is deprecated. Use skydnir instead.
 Automation that cannot migrate immediately may temporarily suppress the warning
 by setting `PDOCKER_SUPPRESS_DEPRECATION_WARNING=1`, but new scripts should use
 `skydnir`.
+
+For remote Docker-daemon workflows, use the renamed helper:
+
+```sh
+export DOCKER_HOST=ssh://user@your-server
+skydnir-remote ps
+```
+
+The old helper remains as a compatibility route:
+
+```sh
+pdocker-remote ps
+```
+
+It emits:
+
+```text
+Warning: pdocker-remote is deprecated. Use skydnir-remote instead.
+```
 
 ## Daemon Migration
 

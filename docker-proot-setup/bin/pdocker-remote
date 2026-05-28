@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pdocker-remote - Wrapper for Docker CLI connecting to a remote daemon
+# Skydnir remote Docker CLI compatibility wrapper.
 # Use this when you need full Docker features (build, port mapping, etc.)
 #
 # Setup:
@@ -8,15 +8,20 @@
 #   export DOCKER_HOST=ssh://user@your-server
 #
 # Usage:
-#   pdocker-remote build -t myapp .
-#   pdocker-remote run -d -p 8080:80 nginx
-#   pdocker-remote ps
+#   skydnir-remote build -t myapp .
+#   skydnir-remote run -d -p 8080:80 nginx
+#   skydnir-remote ps
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DOCKER_BIN="$PROJECT_DIR/docker"
+INVOKED_AS="$(basename "${BASH_SOURCE[0]}")"
+
+if [[ "$INVOKED_AS" == "pdocker-remote" && "${PDOCKER_SUPPRESS_DEPRECATION_WARNING:-0}" != "1" ]]; then
+    echo "Warning: pdocker-remote is deprecated. Use skydnir-remote instead." >&2
+fi
 
 if [[ ! -x "$DOCKER_BIN" ]]; then
     echo "Error: Docker CLI not found at $DOCKER_BIN" >&2

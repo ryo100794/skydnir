@@ -193,9 +193,15 @@ Allowed changes:
 
 - Add `skydnir` CLI entrypoint. **Done on `rename/skydnir`:**
   `docker-proot-setup/bin/skydnir` is a thin wrapper over the legacy script.
+- Add `skydnir-remote` remote Docker helper alias. **Done on
+  `rename/skydnir`:** `docker-proot-setup/bin/skydnir-remote` is a thin
+  wrapper over the legacy remote helper.
 - Keep `pdocker` as a deprecated wrapper. **Done on `rename/skydnir`:**
   direct `pdocker` invocation emits a deprecation warning unless explicitly
   suppressed for internal routing.
+- Keep `pdocker-remote` as a deprecated wrapper. **Done on `rename/skydnir`:**
+  direct `pdocker-remote` invocation emits a deprecation warning unless
+  explicitly suppressed by the Skydnir alias.
 - Add `skydnird` daemon entrypoint. **Done on `rename/skydnir`:**
   `docker-proot-setup/bin/skydnird` is a thin wrapper over `pdockerd`.
 - Keep `pdockerd` as a deprecated wrapper or symlink-equivalent launcher.
@@ -365,8 +371,11 @@ wrapper. New documentation and examples use `skydnir`.
 - [x] Update README opening to Skydnir.
 - [x] Add trademark/non-affiliation notice.
 - [x] Update GitHub repository name/About/topics.
+- [x] Update Gradle root project name to `skydnir`.
 - [x] Add `skydnir` CLI alias.
+- [x] Add `skydnir-remote` helper alias.
 - [x] Add `pdocker` deprecation warning.
+- [x] Add `pdocker-remote` deprecation warning.
 - [x] Add `skydnird` daemon alias.
 - [x] Add runtime home alias migration.
 - [x] Add common env file dual-read migration.
