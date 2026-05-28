@@ -8,7 +8,7 @@ the repository.
 ## Current Result
 
 The current local audit found no high-confidence secrets in the tracked
-pdocker-android worktree, pdocker-android Git history, or the sibling
+Skydnir worktree, Skydnir Git history, or the sibling
 docker-proot-setup worktree/history.
 
 One local Git remote URL had embedded GitHub credentials in `.git/config`.
@@ -19,7 +19,7 @@ screenshots.
 
 ## Commands
 
-Run from the pdocker-android repository root.
+Run from the Skydnir repository root.
 
 ### Worktree High-Confidence Scan
 

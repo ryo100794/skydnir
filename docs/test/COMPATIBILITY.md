@@ -4,7 +4,7 @@ Snapshot date: 2026-05-04.
 
 ## Purpose
 
-This document is the repeatable compatibility record for pdocker-android and
+This document is the repeatable compatibility record for Skydnir and
 the `docker-proot-setup` backend. Compatibility here means three layers:
 
 - Surface behavior: Docker CLI commands and Engine API endpoints.
@@ -16,7 +16,7 @@ the `docker-proot-setup` backend. Compatibility here means three layers:
 For the product boundary, non-goals, and open design decisions around BuildKit,
 networking, volumes, cgroups, overlayfs, signals, TTY, and archive APIs, see
 [`../design/DOCKER_COMPAT_SCOPE.md`](../design/DOCKER_COMPAT_SCOPE.md). This file records what works
-and what is tested; the scope file records what pdocker is choosing to be.
+and what is tested; the scope file records what Skydnir is choosing to be.
 
 ## Canonical Sources
 
