@@ -6,16 +6,17 @@ cd "$ROOT"
 
 ADB="${ADB:-adb}"
 PKG="${SKYDNIR_ANDROID_PACKAGE:-${SKYDNIR_PACKAGE:-${PDOCKER_ANDROID_PACKAGE:-io.github.ryo100794.pdocker.compat}}}"
-FILES="${PDOCKER_FILE_IO_MICRO_FILES:-128}"
-BLOCKS="${PDOCKER_FILE_IO_MICRO_BLOCKS:-64}"
-BLOCK_SIZE="${PDOCKER_FILE_IO_MICRO_BLOCK_SIZE:-4096}"
-FSYNC="${PDOCKER_FILE_IO_MICRO_FSYNC:-0}"
-OPEN_CLOSE="${PDOCKER_FILE_IO_MICRO_OPEN_CLOSE:-1000}"
+FILES="${SKYDNIR_FILE_IO_MICRO_FILES:-${PDOCKER_FILE_IO_MICRO_FILES:-128}}"
+BLOCKS="${SKYDNIR_FILE_IO_MICRO_BLOCKS:-${PDOCKER_FILE_IO_MICRO_BLOCKS:-64}}"
+BLOCK_SIZE="${SKYDNIR_FILE_IO_MICRO_BLOCK_SIZE:-${PDOCKER_FILE_IO_MICRO_BLOCK_SIZE:-4096}}"
+FSYNC="${SKYDNIR_FILE_IO_MICRO_FSYNC:-${PDOCKER_FILE_IO_MICRO_FSYNC:-0}}"
+OPEN_CLOSE="${SKYDNIR_FILE_IO_MICRO_OPEN_CLOSE:-${PDOCKER_FILE_IO_MICRO_OPEN_CLOSE:-1000}}"
 TRACE_MODE="${PDOCKER_DIRECT_TRACE_MODE:-seccomp}"
-DOCUMENTS_HOST="${PDOCKER_FILE_IO_MICRO_DOCUMENTS_HOST:-}"
-EXPORT_DOCUMENTS="${PDOCKER_FILE_IO_MICRO_EXPORT_DOCUMENTS:-1}"
-OUT="${PDOCKER_FILE_IO_MICRO_OUT:-$ROOT/docs/test/file-io-microbench-latest.json}"
-MD_OUT="${PDOCKER_FILE_IO_MICRO_MD:-$ROOT/docs/test/file-io-microbench-latest.md}"
+DOCUMENTS_HOST="${SKYDNIR_FILE_IO_MICRO_DOCUMENTS_HOST:-${PDOCKER_FILE_IO_MICRO_DOCUMENTS_HOST:-}}"
+EXPORT_DOCUMENTS="${SKYDNIR_FILE_IO_MICRO_EXPORT_DOCUMENTS:-${PDOCKER_FILE_IO_MICRO_EXPORT_DOCUMENTS:-1}}"
+DOCUMENTS_EXPORT_SUBDIR="${SKYDNIR_FILE_IO_MICRO_DOCUMENTS_SUBDIR:-${PDOCKER_FILE_IO_MICRO_DOCUMENTS_SUBDIR:-skydnir}}"
+OUT="${SKYDNIR_FILE_IO_MICRO_OUT:-${PDOCKER_FILE_IO_MICRO_OUT:-$ROOT/docs/test/file-io-microbench-latest.json}}"
+MD_OUT="${SKYDNIR_FILE_IO_MICRO_MD:-${PDOCKER_FILE_IO_MICRO_MD:-$ROOT/docs/test/file-io-microbench-latest.md}}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 REMOTE_BENCH_DIR="files/pdocker/bench"
 RAW="$(mktemp "${TMPDIR:-/tmp}/pdocker-file-io-micro.XXXXXX.log")"
@@ -53,6 +54,13 @@ while (($#)); do
   shift
 done
 
+case "$DOCUMENTS_EXPORT_SUBDIR" in
+  /*|*..*)
+    echo "unsafe Documents export subdir: $DOCUMENTS_EXPORT_SUBDIR" >&2
+    exit 2
+    ;;
+esac
+
 remote_quote() {
   printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
 }
@@ -85,9 +93,9 @@ SELECTED_HOST=\$(printf '%s' \"\$SELECTED_HOST\" | sed 's/^\"//; s/\"\$//; s/^'\
 MEDIATOR=\$(sed -n 's/^PDOCKER_DOCUMENTS_MEDIATOR=//p' \"\$ENV_FILE\" 2>/dev/null | tail -1)
 MEDIATOR=\$(printf '%s' \"\$MEDIATOR\" | sed 's/^\"//; s/\"\$//; s/^'\''//; s/'\''\$//')
 if test -n \"\$DOC_HOST\"; then
-  printf '__PDIO_MICRO_DOCUMENTS_EXPORT__:host=%s;selected=%s;mediator=%s;latest=%s\n' \"\$DOC_HOST\" \"\$SELECTED_HOST\" \"\$MEDIATOR\" \"\$DOC_HOST/pdocker/test-runs/latest-benchmark\"
+  printf '__SKYDNIR_FILE_IO_MICRO_DOCUMENTS_EXPORT__:host=%s;selected=%s;mediator=%s;latest=%s\n' \"\$DOC_HOST\" \"\$SELECTED_HOST\" \"\$MEDIATOR\" \"\$DOC_HOST/$DOCUMENTS_EXPORT_SUBDIR/test-runs/latest-benchmark\"
 else
-  echo '__PDIO_MICRO_DOCUMENTS_EXPORT__:skipped=no-documents-host'
+  echo '__SKYDNIR_FILE_IO_MICRO_DOCUMENTS_EXPORT__:skipped=no-documents-host'
 fi
 ")"
   printf '%s\n' "$export_info"
@@ -95,27 +103,27 @@ fi
   mediator="$(printf '%s\n' "$export_info" | sed -n 's/.*mediator=\([^;]*\).*/\1/p' | tail -1)"
   selected="$(printf '%s\n' "$export_info" | sed -n 's/.*selected=\([^;]*\).*/\1/p' | tail -1)"
   if [[ -n "$selected" ]]; then
-    echo "[pdocker file-io microbench] writing benchmark artifacts directly through Documents provider"
+    echo "[Skydnir file-io microbench] writing benchmark artifacts directly through Documents provider"
     local write_rc=0
-    write_documents_file "$remote_json" "pdocker/test-runs/file-io-microbench-$STAMP/file-io-microbench.json" "application/json" || write_rc=1
-    write_documents_file "$remote_md" "pdocker/test-runs/file-io-microbench-$STAMP/file-io-microbench.md" "text/markdown" || write_rc=1
-    write_documents_file "$remote_json" "pdocker/test-runs/latest-benchmark/file-io-microbench.json" "application/json" || write_rc=1
-    write_documents_file "$remote_md" "pdocker/test-runs/latest-benchmark/file-io-microbench.md" "text/markdown" || write_rc=1
-    latest_rel="pdocker/test-runs/latest-benchmark/file-io-microbench.json"
+    write_documents_file "$remote_json" "$DOCUMENTS_EXPORT_SUBDIR/test-runs/file-io-microbench-$STAMP/file-io-microbench.json" "application/json" || write_rc=1
+    write_documents_file "$remote_md" "$DOCUMENTS_EXPORT_SUBDIR/test-runs/file-io-microbench-$STAMP/file-io-microbench.md" "text/markdown" || write_rc=1
+    write_documents_file "$remote_json" "$DOCUMENTS_EXPORT_SUBDIR/test-runs/latest-benchmark/file-io-microbench.json" "application/json" || write_rc=1
+    write_documents_file "$remote_md" "$DOCUMENTS_EXPORT_SUBDIR/test-runs/latest-benchmark/file-io-microbench.md" "text/markdown" || write_rc=1
+    latest_rel="$DOCUMENTS_EXPORT_SUBDIR/test-runs/latest-benchmark/file-io-microbench.json"
     local deadline=$((SECONDS + 60))
     while (( SECONDS < deadline )); do
       if "$ADB" shell "test -s $(remote_quote "$selected/$latest_rel")" >/dev/null 2>&1; then
-        echo "[pdocker file-io microbench] Documents export: $selected/$latest_rel"
+        echo "[Skydnir file-io microbench] Documents export: $selected/$latest_rel"
         return 0
       fi
       sleep 2
     done
     if (( write_rc == 0 )); then
-      echo "[pdocker file-io microbench] Documents export completed through mediator; selected path is not directly visible over adb"
+      echo "[Skydnir file-io microbench] Documents export completed through mediator; selected path is not directly visible over adb"
       adb_run_as "cat files/pdocker/diagnostics/saf-write-latest.json 2>/dev/null || true" || true
       return 0
     fi
-    echo "[pdocker file-io microbench] Documents direct export pending or unavailable: $selected/$latest_rel mediator=$mediator" >&2
+    echo "[Skydnir file-io microbench] Documents direct export pending or unavailable: $selected/$latest_rel mediator=$mediator" >&2
     return 1
   fi
 }
@@ -145,15 +153,15 @@ write_documents_file() {
     fi
     sleep 1
   done
-  echo "[pdocker file-io microbench] Documents write did not report completion: $target" >&2
+  echo "[Skydnir file-io microbench] Documents write did not report completion: $target" >&2
   return 1
 }
 
-echo "[pdocker file-io microbench] building static workload"
+echo "[Skydnir file-io microbench] building static workload"
 aarch64-linux-gnu-gcc -O2 -Wall -Wextra -static \
   -o "$BIN" tools/pdocker_fileio_microbench.c
 
-echo "[pdocker file-io microbench] building direct executor"
+echo "[Skydnir file-io microbench] building direct executor"
 bash scripts/build-native-android-ndk.sh >/dev/null
 cp app/src/main/jniLibs/arm64-v8a/libpdockerdirect.so "$DIRECT"
 
@@ -441,8 +449,8 @@ md.extend([
     "- Timing is measured inside the benchmark process around direct file syscall loops, not around shell command startup.",
 ])
 Path(md_path).write_text("\n".join(md) + "\n")
-print(f"[pdocker file-io microbench] wrote {out_path}")
-print(f"[pdocker file-io microbench] wrote {md_path}")
+print(f"[Skydnir file-io microbench] wrote {out_path}")
+print(f"[Skydnir file-io microbench] wrote {md_path}")
 PY
 
 "$ADB" push "$OUT" "/data/local/tmp/file-io-microbench-$STAMP.json" >/dev/null || true

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Canonical pdocker test driver and artifact manifest writer."""
+"""Canonical Skydnir test driver and artifact manifest writer.
+
+The file name is intentionally kept as a long-lived compatibility entrypoint
+while public output, summaries, and Documents exports use the Skydnir name.
+"""
 
 from __future__ import annotations
 
@@ -75,7 +79,7 @@ def artifact_records(patterns: list[str], producer: str) -> list[dict[str, Any]]
 
 def write_summary(run_manifest: dict[str, Any], path: Path) -> None:
     lines = [
-        f"# pdocker Test Run {run_manifest['run_id']}",
+        f"# Skydnir Test Run {run_manifest['run_id']}",
         "",
         f"- Status: `{run_manifest['status']}`",
         f"- Git: `{run_manifest['git'].get('commit', '')}`",
@@ -107,13 +111,22 @@ def write_summary(run_manifest: dict[str, Any], path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def export_to_documents(run_manifest: dict[str, Any], manifest_out: Path, summary_out: Path, documents_out: str) -> dict[str, Any] | None:
+def export_to_documents(
+    run_manifest: dict[str, Any],
+    manifest_out: Path,
+    summary_out: Path,
+    documents_out: str,
+    documents_subdir: str,
+) -> dict[str, Any] | None:
     if not documents_out:
         return None
     root = Path(documents_out).expanduser()
     if not root.is_absolute():
         root = ROOT / root
-    dest = root / "pdocker" / "test-runs" / run_manifest["run_id"]
+    safe_subdir = Path(documents_subdir)
+    if safe_subdir.is_absolute() or ".." in safe_subdir.parts:
+        raise SystemExit(f"unsafe Documents export subdir: {documents_subdir!r}")
+    dest = root / safe_subdir / "test-runs" / run_manifest["run_id"]
     artifacts_dir = dest / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(manifest_out, dest / "manifest.json")
@@ -127,12 +140,13 @@ def export_to_documents(run_manifest: dict[str, Any], manifest_out: Path, summar
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, target)
         copied.append(str(target.relative_to(root)))
-    latest = root / "pdocker" / "test-runs" / "latest"
+    latest = root / safe_subdir / "test-runs" / "latest"
     latest.mkdir(parents=True, exist_ok=True)
     shutil.copy2(manifest_out, latest / "manifest.json")
     shutil.copy2(summary_out, latest / "summary.md")
     return {
         "root": str(root),
+        "subdir": safe_subdir.as_posix(),
         "run_dir": str(dest),
         "latest_dir": str(latest),
         "copied_artifacts": copied,
@@ -201,8 +215,13 @@ def main() -> int:
     parser.add_argument("--continue-on-fail", action="store_true", help="Run remaining commands after a failure.")
     parser.add_argument(
         "--documents-out",
-        default=os.environ.get("PDOCKER_TEST_DOCUMENTS_OUT", ""),
-        help="Directory that represents the user Documents exchange folder. Copies manifest, summary, and referenced artifacts under pdocker/test-runs/.",
+        default=os.environ.get("SKYDNIR_TEST_DOCUMENTS_OUT", os.environ.get("PDOCKER_TEST_DOCUMENTS_OUT", "")),
+        help="Directory that represents the user Documents exchange folder. Copies manifest, summary, and referenced artifacts under skydnir/test-runs/ by default.",
+    )
+    parser.add_argument(
+        "--documents-subdir",
+        default=os.environ.get("SKYDNIR_TEST_DOCUMENTS_SUBDIR", os.environ.get("PDOCKER_TEST_DOCUMENTS_SUBDIR", "skydnir")),
+        help="Relative Documents subdirectory for exported test evidence. Defaults to skydnir; legacy callers can pass pdocker explicitly.",
     )
     args = parser.parse_args()
 
@@ -272,16 +291,28 @@ def main() -> int:
     manifest_out.write_text(json.dumps(run_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     summary_out = run_dir / "summary.md"
     write_summary(run_manifest, summary_out)
-    documents_export = export_to_documents(run_manifest, manifest_out, summary_out, args.documents_out)
+    documents_export = export_to_documents(
+        run_manifest,
+        manifest_out,
+        summary_out,
+        args.documents_out,
+        args.documents_subdir,
+    )
     if documents_export:
         run_manifest["documents_export"] = documents_export
         manifest_out.write_text(json.dumps(run_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         write_summary(run_manifest, summary_out)
-        export_to_documents(run_manifest, manifest_out, summary_out, args.documents_out)
+        export_to_documents(
+            run_manifest,
+            manifest_out,
+            summary_out,
+            args.documents_out,
+            args.documents_subdir,
+        )
     latest = ROOT / manifest.get("artifact_manifest", "docs/test/test-run-latest.json")
     latest.parent.mkdir(parents=True, exist_ok=True)
     latest.write_text(json.dumps(run_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"\npdocker-test-driver: {status.upper()} {run_id}")
+    print(f"\nSkydnir test driver: {status.upper()} {run_id}")
     print(f"artifact manifest: {latest.relative_to(ROOT)}")
     if documents_export:
         print(f"documents export: {documents_export['latest_dir']}")

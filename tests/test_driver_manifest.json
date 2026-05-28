@@ -778,10 +778,10 @@
             "scripts/android-file-io-microbench.sh"
           ],
           "env": {
-            "PDOCKER_FILE_IO_MICRO_FILES": "32",
-            "PDOCKER_FILE_IO_MICRO_BLOCKS": "16",
-            "PDOCKER_FILE_IO_MICRO_OPEN_CLOSE": "1000",
-            "PDOCKER_FILE_IO_MICRO_EXPORT_DOCUMENTS": "1"
+            "SKYDNIR_FILE_IO_MICRO_FILES": "32",
+            "SKYDNIR_FILE_IO_MICRO_BLOCKS": "16",
+            "SKYDNIR_FILE_IO_MICRO_OPEN_CLOSE": "1000",
+            "SKYDNIR_FILE_IO_MICRO_EXPORT_DOCUMENTS": "1"
           },
           "artifacts": [
             "docs/test/file-io-microbench-latest.json",

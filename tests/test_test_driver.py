@@ -1,4 +1,7 @@
 import json
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,6 +20,8 @@ class TestDriverManifestTest(unittest.TestCase):
         self.assertEqual(self.manifest["artifact_manifest"], "docs/test/test-run-latest.json")
         self.assertIn("def run_command", self.driver)
         self.assertIn("manifest.json", self.driver)
+        self.assertIn("# Skydnir Test Run", self.driver)
+        self.assertIn("Skydnir test driver:", self.driver)
 
     def test_every_command_has_stable_id_and_executable_form(self):
         lanes = self.manifest["lanes"]
@@ -43,12 +48,72 @@ class TestDriverManifestTest(unittest.TestCase):
         self.assertIn('"artifacts"', self.driver)
         self.assertNotIn("docs/test/*-latest.json", policy["artifact_rule"])
 
+    def test_documents_export_defaults_to_skydnir_public_path(self):
+        self.assertIn("SKYDNIR_TEST_DOCUMENTS_OUT", self.driver)
+        self.assertIn("SKYDNIR_TEST_DOCUMENTS_SUBDIR", self.driver)
+        self.assertIn('"skydnir"', self.driver)
+        self.assertIn("unsafe Documents export subdir", self.driver)
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as work_tmp, tempfile.TemporaryDirectory() as docs_tmp:
+            work = Path(work_tmp)
+            manifest_path = work / "mini-driver-manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "pdocker.test-driver.v1",
+                        "policy": {"canonical_driver": "scripts/pdocker-test-driver.py"},
+                        "run_directory": str(work / "runs"),
+                        "artifact_manifest": str(work / "latest.json"),
+                        "lanes": {
+                            "mini": {
+                                "description": "unit-sized test-driver lane",
+                                "commands": [
+                                    {
+                                        "id": "mini-print",
+                                        "argv": [sys.executable, "-c", "print('mini-ok')"],
+                                    }
+                                ],
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            run_id = "unit-skydnir-documents-export"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/pdocker-test-driver.py",
+                    "--manifest",
+                    str(manifest_path.relative_to(ROOT)),
+                    "--lane",
+                    "mini",
+                    "--run-id",
+                    run_id,
+                    "--documents-out",
+                    docs_tmp,
+                ],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr + proc.stdout)
+            latest = Path(docs_tmp) / "skydnir" / "test-runs" / "latest" / "manifest.json"
+            self.assertTrue(latest.is_file(), proc.stdout)
+            manifest = json.loads(latest.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["documents_export"]["subdir"], "skydnir")
+            self.assertIn("Skydnir test driver: PASS", proc.stdout)
+            self.assertFalse((Path(docs_tmp) / "pdocker" / "test-runs" / "latest").exists())
+
     def test_benchmark_lane_exports_documents_evidence(self):
         lane = self.manifest["lanes"]["android-file-io-microbench"]
         command = lane["commands"][0]
         self.assertEqual(command["id"], "android-file-io-microbench")
         self.assertIn("docs/test/file-io-microbench-latest.json", command["artifacts"])
-        self.assertEqual(command["env"]["PDOCKER_FILE_IO_MICRO_EXPORT_DOCUMENTS"], "1")
+        self.assertEqual(command["env"]["SKYDNIR_FILE_IO_MICRO_EXPORT_DOCUMENTS"], "1")
+        self.assertNotIn("PDOCKER_FILE_IO_MICRO_EXPORT_DOCUMENTS", command["env"])
 
     def test_device_artifact_lanes_chain_strict_verifiers(self):
         lanes = self.manifest["lanes"]
