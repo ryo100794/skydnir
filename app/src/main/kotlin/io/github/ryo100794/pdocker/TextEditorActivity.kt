@@ -18,12 +18,12 @@ class TextEditorActivity : AppCompatActivity() {
 
     private fun resolveProjectFile(requested: String): File {
         val projects = File(filesDir, "pdocker/projects").apply { mkdirs() }.canonicalFile
-        val pdockerHome = File(filesDir, "pdocker").canonicalFile
+        val skydnirHome = File(filesDir, "pdocker").canonicalFile
         val requestedRoot = intent.getStringExtra(EXTRA_ROOT_PATH)
             ?.takeIf { it.isNotBlank() }
             ?.let { File(it).canonicalFile }
         val allowedRoot = requestedRoot?.takeIf {
-            it.toPath().startsWith(pdockerHome.toPath())
+            it.toPath().startsWith(skydnirHome.toPath())
         } ?: projects
         val candidate = if (requested.isBlank()) {
             File(projects, "default/Dockerfile")

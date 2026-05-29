@@ -1361,7 +1361,7 @@ class MainActivity : AppCompatActivity() {
             val serial = ++hubSearchSerial
             val task = Runnable {
                 suggestionLabel.text = getString(R.string.message_docker_hub_searching_fmt, q, imagePlatform)
-                thread(isDaemon = true, name = "pdocker-docker-hub-search") {
+                thread(isDaemon = true, name = "skydnir-docker-hub-search") {
                     val remote = fetchDockerHubImageRefs(q)
                     ui.post {
                         if (serial != hubSearchSerial) return@post
@@ -1486,7 +1486,7 @@ class MainActivity : AppCompatActivity() {
             .ifBlank { abiDefaultImagePlatform() }
 
     private fun refreshImagePlatformForDialog(onReady: (String) -> Unit) {
-        thread(isDaemon = true, name = "pdocker-image-platform") {
+        thread(isDaemon = true, name = "skydnir-image-platform") {
             val platform = runCatching {
                 engine.getObject("/system/host")
                     .optJSONObject("Runtime")
@@ -1684,7 +1684,7 @@ class MainActivity : AppCompatActivity() {
         if (containerSnapshotRefreshing) return
         if (!force && now - lastContainerSnapshotAt < 2500L) return
         containerSnapshotRefreshing = true
-        thread(isDaemon = true, name = "pdocker-container-snapshot") {
+        thread(isDaemon = true, name = "skydnir-container-snapshot") {
             val arr = runCatching { engine.getArray("/containers/json?all=1") }.getOrNull()
             val list = if (arr == null) {
                 emptyList()
@@ -1773,7 +1773,7 @@ class MainActivity : AppCompatActivity() {
             startDaemon()
             openTerminal(
                 getString(R.string.action_docker_console),
-                "printf '[pdocker] upstream Docker CLI is not packaged in this APK.\\n[pdocker] Use UI Engine actions; test suites may stage Docker CLI separately.\\n'; sh",
+                "printf '[skydnir] upstream Docker CLI is not packaged in this APK.\\n[skydnir] Use UI Engine actions; test suites may stage Docker CLI separately.\\n'; sh",
             )
         }
         addAction(getString(R.string.action_host_shell), getString(R.string.detail_host_shell)) {
@@ -2630,7 +2630,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun runMemoryPagerSelfTest() {
         status.text = getString(R.string.action_run_memory_pager_selftest)
-        thread(isDaemon = true, name = "pdocker-memory-pager-selftest") {
+        thread(isDaemon = true, name = "skydnir-memory-pager-selftest") {
             val report = runCatching {
                 val testDir = File(pdockerHome, "docs/test").apply { mkdirs() }
                 val managed = runDirectPagerProbe("--pdocker-memory-pager-managed-poc")
@@ -2740,7 +2740,7 @@ class MainActivity : AppCompatActivity() {
         appendLine()
         appendLine("== /proc/meminfo ==")
         appendLine(readSmallProcFile(File("/proc/meminfo"), 80).ifBlank { "unavailable" })
-        appendLine("== pdocker processes ==")
+        appendLine("== Skydnir processes ==")
         debugProcesses().forEach { proc ->
             appendLine("${proc.pid} ${proc.name} rss=${proc.vmRss} threads=${proc.threads} fd=${proc.fdCount} ${proc.cmdline}")
         }
@@ -2881,7 +2881,7 @@ class MainActivity : AppCompatActivity() {
         if (storageMetricsScanning) return
         if (!force && storageMetrics != null && now - lastStorageMetricsAt < 30_000L) return
         storageMetricsScanning = true
-        thread(isDaemon = true, name = "pdocker-storage-metrics") {
+        thread(isDaemon = true, name = "skydnir-storage-metrics") {
             val metrics = collectStorageMetrics()
             Log.i(
                 LOG_TAG,
@@ -2965,7 +2965,7 @@ class MainActivity : AppCompatActivity() {
     private fun refreshDaemonOperationsAsync() {
         if (daemonOperationsRefreshing) return
         daemonOperationsRefreshing = true
-        thread(isDaemon = true, name = "pdocker-daemon-ops") {
+        thread(isDaemon = true, name = "skydnir-daemon-ops") {
             val ops = runCatching {
                 val arr = engine.getArray("/system/operations")
                 (0 until arr.length()).mapNotNull { index ->
@@ -3018,7 +3018,7 @@ class MainActivity : AppCompatActivity() {
         if (hostEnvironmentRefreshing) return
         if (!force && hostEnvironment != null && now - lastHostEnvironmentAt < 30_000L) return
         hostEnvironmentRefreshing = true
-        thread(isDaemon = true, name = "pdocker-host-environment") {
+        thread(isDaemon = true, name = "skydnir-host-environment") {
             val env = runCatching { engine.getObject("/system/host") }.getOrNull()
             ui.post {
                 hostEnvironment = env ?: hostEnvironment
@@ -5180,7 +5180,7 @@ class MainActivity : AppCompatActivity() {
             "export PDOCKER_TERMINAL_TITLE=${shellQuote(title)}",
             "export PDOCKER_TERMINAL_GROUP=${shellQuote(group)}",
             "export PS1=${shellQuote(prompt)}",
-            "printf '\\n[pdocker terminal] %s\\n[pdocker group] %s\\n\\n' ${shellQuote(title)} ${shellQuote(group)}",
+            "printf '\\n[skydnir terminal] %s\\n[skydnir group] %s\\n\\n' ${shellQuote(title)} ${shellQuote(group)}",
             command,
         ).joinToString("; ")
     }
@@ -5301,7 +5301,7 @@ class MainActivity : AppCompatActivity() {
         val marker = jobId?.let {
             "; printf '\\n__PDOCKER_JOB_EXIT:${it}:%s__\\n' \"\$status\""
         }.orEmpty()
-        return "$command; status=\$?; printf '\\n[pdocker] command exited: %s\\n' \"\$status\"$marker; exec sh"
+        return "$command; status=\$?; printf '\\n[skydnir] command exited: %s\\n' \"\$status\"$marker; exec sh"
     }
 
     private fun dockerCommand(command: String): String {
@@ -5310,8 +5310,8 @@ class MainActivity : AppCompatActivity() {
         val dockerConfig = shellQuote(File(filesDir, "pdocker-runtime/docker-bin").absolutePath)
         return listOf(
             "export DOCKER_CONFIG=$dockerConfig DOCKER_BUILDKIT=0 COMPOSE_DOCKER_CLI_BUILD=0 BUILDKIT_PROGRESS=plain COMPOSE_PROGRESS=plain COMPOSE_MENU=false",
-            "i=0; until docker version >/dev/null 2>&1; do i=\$((i+1)); if [ \"\$i\" -ge 30 ]; then echo '[pdocker] pdockerd did not become ready within 30s'; break; fi; printf '[pdocker] waiting for pdockerd... %s/30\\n' \"\$i\"; sleep 1; done",
-            "if printf '%s\\n' $quoted | grep -q 'docker compose' && ! docker compose version >/dev/null 2>&1; then echo '[pdocker] docker compose is unavailable in the bundled docker CLI'; false; else $normalized; fi",
+            "i=0; until docker version >/dev/null 2>&1; do i=\$((i+1)); if [ \"\$i\" -ge 30 ]; then echo '[skydnir] skydnird did not become ready within 30s'; break; fi; printf '[skydnir] waiting for skydnird... %s/30\\n' \"\$i\"; sleep 1; done",
+            "if printf '%s\\n' $quoted | grep -q 'docker compose' && ! docker compose version >/dev/null 2>&1; then echo '[skydnir] docker compose is unavailable in the bundled Docker CLI'; false; else $normalized; fi",
         ).joinToString("; ")
     }
 
@@ -5723,7 +5723,7 @@ class MainActivity : AppCompatActivity() {
             appendEngineJobOutput(job.id, "Documents SAF sync skipped: persisted read/write grant is missing")
             return
         }
-        thread(isDaemon = true, name = "pdocker-documents-sync") {
+        thread(isDaemon = true, name = "skydnir-documents-sync") {
             Thread.sleep(1_200)
             val report = runCatching { safDocumentsMediator().syncToTree(evictMirrorPayload = true) }
                 .getOrElse {
@@ -5769,7 +5769,7 @@ class MainActivity : AppCompatActivity() {
             openServiceUrl(url)
             return
         }
-        thread(isDaemon = true, name = "pdocker-service-open") {
+        thread(isDaemon = true, name = "skydnir-service-open") {
             repeat(45) { attempt ->
                 val proof = currentServiceProof(autoOpen.projectDir, autoOpen.endpoint.serviceName)
                 if (proof == null) {

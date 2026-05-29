@@ -131,7 +131,7 @@ class Bridge(
         if (text.isEmpty()) return
         activity.runOnUiThread {
             val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("pdocker terminal", text))
+            clipboard.setPrimaryClip(ClipData.newPlainText("Skydnir terminal", text))
             Toast.makeText(activity, activity.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
         }
     }

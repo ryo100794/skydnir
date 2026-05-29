@@ -112,7 +112,7 @@ def main() -> int:
     require("gradle rejects stale native payloads before apk packaging", "verifyPackagedPayloadFresh" in build_gradle_src and "libpdockerdirect.so" in build_gradle_src and "pdocker_direct_exec.c" in build_gradle_src and "build-native-android-ndk.sh" in build_gradle_src and "NativeLibs" in build_gradle_src)
     require("gradle rejects stale backend payloads before apk packaging", "libcrane.so" in build_gradle_src and "docker-bin/crane" in build_gradle_src and "libcow.so" in build_gradle_src and "copy-native.sh" in build_gradle_src and "requireSameBytes" in build_gradle_src)
     require("test-staged docker terminal helper remains diagnostic only", "private fun openDockerTerminal" in main_src and "startDaemon()" in main_src)
-    require("diagnostic docker helper can wait for test-staged cli", "waiting for pdockerd" in main_src and "docker version >/dev/null" in main_src)
+    require("diagnostic docker helper can wait for test-staged cli via skydnird label", "waiting for skydnird" in main_src and "docker version >/dev/null" in main_src)
     require("docker build uses legacy builder env", "DOCKER_BUILDKIT=0" in main_src and "COMPOSE_DOCKER_CLI_BUILD=0" in main_src)
     require("terminal exports legacy builder env", "DOCKER_BUILDKIT=0" in bridge_src)
     require("compose up uses engine-native path", "runComposeUp" in main_src and "engine compose up" in main_src)
