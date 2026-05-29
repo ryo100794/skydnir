@@ -2003,9 +2003,9 @@ class MainActivity : AppCompatActivity() {
                     .put("OsMemAvailable", memoryLayer.memAvailable)
                     .put("OsSwapTotal", memoryLayer.swapTotal)
                     .put("OsSwapFree", memoryLayer.swapFree)
-                    .put("PdockerProcessCount", memoryLayer.pdockerProcessCount)
-                    .put("PdockerRss", memoryLayer.pdockerRss)
-                    .put("PdockerSwap", memoryLayer.pdockerSwap)
+                    .put("PdockerProcessCount", memoryLayer.skydnirProcessCount)
+                    .put("PdockerRss", memoryLayer.skydnirRss)
+                    .put("PdockerSwap", memoryLayer.skydnirSwap)
                     .put("ManagedReserveBytes", memoryLayer.managedReserveBytes)
                     .put("ManagedResidentBytes", memoryLayer.managedResidentBytes)
                     .put("TransparentRegistered", memoryLayer.transparentRegistered)
@@ -2216,10 +2216,10 @@ class MainActivity : AppCompatActivity() {
         val memAvailable: Long,
         val swapTotal: Long,
         val swapFree: Long,
-        val pdockerProcessCount: Int,
-        val pdockerVmSize: Long,
-        val pdockerRss: Long,
-        val pdockerSwap: Long,
+        val skydnirProcessCount: Int,
+        val skydnirVmSize: Long,
+        val skydnirRss: Long,
+        val skydnirSwap: Long,
         val appVmSize: Long,
         val appVmRss: Long,
         val appVmData: Long,
@@ -2253,7 +2253,7 @@ class MainActivity : AppCompatActivity() {
         val source: String,
     )
 
-    private data class PdockerMemoryFootprint(
+    private data class SkydnirMemoryFootprint(
         val processCount: Int,
         val vmSize: Long,
         val rss: Long,
@@ -2294,7 +2294,7 @@ class MainActivity : AppCompatActivity() {
         val mem = readMeminfoBytes()
         val proc = readProcStatus(File("/proc/${android.os.Process.myPid()}")).orEmpty()
         val runtime = Runtime.getRuntime()
-        val pdockerFootprint = pdockerMemoryFootprint()
+        val skydnirFootprint = skydnirMemoryFootprint()
         val managedArtifact = readLatestPagerArtifact("apk-memory-pager-managed-latest.json", "managed")
         val transparentArtifact = readLatestPagerArtifact("apk-memory-pager-transparent-latest.json", "transparent")
         val managed = managedArtifact.metrics
@@ -2333,10 +2333,10 @@ class MainActivity : AppCompatActivity() {
             memAvailable = mem["MemAvailable"] ?: mem["MemFree"] ?: 0L,
             swapTotal = mem["SwapTotal"] ?: 0L,
             swapFree = mem["SwapFree"] ?: 0L,
-            pdockerProcessCount = pdockerFootprint.processCount,
-            pdockerVmSize = pdockerFootprint.vmSize,
-            pdockerRss = pdockerFootprint.rss,
-            pdockerSwap = pdockerFootprint.swap,
+            skydnirProcessCount = skydnirFootprint.processCount,
+            skydnirVmSize = skydnirFootprint.vmSize,
+            skydnirRss = skydnirFootprint.rss,
+            skydnirSwap = skydnirFootprint.swap,
             appVmSize = procStatusBytes(proc, "VmSize"),
             appVmRss = procStatusBytes(proc, "VmRSS"),
             appVmData = procStatusBytes(proc, "VmData"),
@@ -2430,12 +2430,12 @@ class MainActivity : AppCompatActivity() {
             ),
             getString(
                 R.string.memory_layers_skydnir_share_fmt,
-                formatBytes(snapshot.pdockerRss),
-                formatPercent(snapshot.pdockerRss, snapshot.memTotal),
-                formatPercent(snapshot.pdockerRss, (snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L)),
-                formatBytes(snapshot.pdockerSwap),
-                formatPercent(snapshot.pdockerSwap, (snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L)),
-                snapshot.pdockerProcessCount,
+                formatBytes(snapshot.skydnirRss),
+                formatPercent(snapshot.skydnirRss, snapshot.memTotal),
+                formatPercent(snapshot.skydnirRss, (snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L)),
+                formatBytes(snapshot.skydnirSwap),
+                formatPercent(snapshot.skydnirSwap, (snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L)),
+                snapshot.skydnirProcessCount,
             ),
             getString(
                 R.string.memory_layers_app_summary_fmt,
@@ -2493,13 +2493,13 @@ class MainActivity : AppCompatActivity() {
         appendLine("swap.total=${formatBytes(snapshot.swapTotal)}")
         appendLine("swap.used=${formatBytes((snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L))}")
         appendLine("swap.free=${formatBytes(snapshot.swapFree)}")
-        appendLine("skydnir.processes=${snapshot.pdockerProcessCount}")
-        appendLine("skydnir.VmSize=${formatBytes(snapshot.pdockerVmSize)}")
-        appendLine("skydnir.RSS=${formatBytes(snapshot.pdockerRss)}")
-        appendLine("skydnir.RSS.percent_of_RAM=${formatPercent(snapshot.pdockerRss, snapshot.memTotal)}")
-        appendLine("skydnir.RSS.percent_of_used_RAM=${formatPercent(snapshot.pdockerRss, (snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L))}")
-        appendLine("skydnir.VmSwap=${formatBytes(snapshot.pdockerSwap)}")
-        appendLine("skydnir.VmSwap.percent_of_used_swap=${formatPercent(snapshot.pdockerSwap, (snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L))}")
+        appendLine("skydnir.processes=${snapshot.skydnirProcessCount}")
+        appendLine("skydnir.VmSize=${formatBytes(snapshot.skydnirVmSize)}")
+        appendLine("skydnir.RSS=${formatBytes(snapshot.skydnirRss)}")
+        appendLine("skydnir.RSS.percent_of_RAM=${formatPercent(snapshot.skydnirRss, snapshot.memTotal)}")
+        appendLine("skydnir.RSS.percent_of_used_RAM=${formatPercent(snapshot.skydnirRss, (snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L))}")
+        appendLine("skydnir.VmSwap=${formatBytes(snapshot.skydnirSwap)}")
+        appendLine("skydnir.VmSwap.percent_of_used_swap=${formatPercent(snapshot.skydnirSwap, (snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L))}")
         appendLine()
         appendLine("== App process allocation view ==")
         appendLine("app.vm_metrics=${if (snapshot.appVmMetricsAvailable) "available" else "N/A"}")
@@ -2512,7 +2512,7 @@ class MainActivity : AppCompatActivity() {
         appendLine("JavaHeap.used=${formatBytes(snapshot.javaHeapUsed)}")
         appendLine("JavaHeap.max=${formatBytes(snapshot.javaHeapMax)}")
         appendLine()
-        appendLine("== pdocker managed virtual-memory skin ==")
+        appendLine("== Skydnir managed virtual-memory skin ==")
         appendLine("mode=${if (snapshot.transparentRegistered) "transparent SIGSEGV pager observed" else "capability present / no live region observed"}")
         appendLine("reserve=${formatBytes(snapshot.managedReserveBytes)}")
         appendLine("resident=${formatBytes(snapshot.managedResidentBytes)}")
@@ -2557,7 +2557,7 @@ class MainActivity : AppCompatActivity() {
             ?.times(1024L)
             ?: 0L
 
-    private fun pdockerMemoryFootprint(): PdockerMemoryFootprint {
+    private fun skydnirMemoryFootprint(): SkydnirMemoryFootprint {
         val appUid = applicationInfo.uid.toString()
         var count = 0
         var vmSize = 0L
@@ -2580,7 +2580,7 @@ class MainActivity : AppCompatActivity() {
                 rss += procStatusBytes(status, "VmRSS")
                 swap += procStatusBytes(status, "VmSwap")
             }
-        return PdockerMemoryFootprint(count, vmSize, rss, swap)
+        return SkydnirMemoryFootprint(count, vmSize, rss, swap)
     }
 
     private fun formatPercent(part: Long, total: Long): String =
@@ -6181,10 +6181,10 @@ class MainActivity : AppCompatActivity() {
             memAvailable = 0,
             swapTotal = 0,
             swapFree = 0,
-            pdockerProcessCount = 0,
-            pdockerVmSize = 0,
-            pdockerRss = 0,
-            pdockerSwap = 0,
+            skydnirProcessCount = 0,
+            skydnirVmSize = 0,
+            skydnirRss = 0,
+            skydnirSwap = 0,
             appVmSize = 0,
             appVmRss = 0,
             appVmData = 0,
@@ -6246,8 +6246,8 @@ class MainActivity : AppCompatActivity() {
                 "RAM",
                 snapshot.memTotal,
                 listOf(
-                    Segment("pdocker RSS", snapshot.pdockerRss.coerceAtMost((snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L)), 0xff58ffd2.toInt()),
-                    Segment("other used", ((snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L) - snapshot.pdockerRss).coerceAtLeast(0L), 0xffc75b5b.toInt()),
+                    Segment("Skydnir RSS", snapshot.skydnirRss.coerceAtMost((snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L)), 0xff58ffd2.toInt()),
+                    Segment("other used", ((snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L) - snapshot.skydnirRss).coerceAtLeast(0L), 0xffc75b5b.toInt()),
                     Segment("available", snapshot.memAvailable, 0xff5fbf7a.toInt()),
                 ),
                 barLeft,
@@ -6261,8 +6261,8 @@ class MainActivity : AppCompatActivity() {
                 "swap/zram",
                 snapshot.swapTotal,
                 listOf(
-                    Segment("pdocker swap", snapshot.pdockerSwap.coerceAtMost((snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L)), 0xff58ffd2.toInt()),
-                    Segment("other used", ((snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L) - snapshot.pdockerSwap).coerceAtLeast(0L), 0xffcaa24a.toInt()),
+                    Segment("Skydnir swap", snapshot.skydnirSwap.coerceAtMost((snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L)), 0xff58ffd2.toInt()),
+                    Segment("other used", ((snapshot.swapTotal - snapshot.swapFree).coerceAtLeast(0L) - snapshot.skydnirSwap).coerceAtLeast(0L), 0xffcaa24a.toInt()),
                     Segment("free", snapshot.swapFree, 0xff6aa6d9.toInt()),
                 ),
                 barLeft,
@@ -6296,7 +6296,7 @@ class MainActivity : AppCompatActivity() {
             }
             val pagerTitleY = y
             drawHierarchyConnector(canvas, barLeft + 30f * density, appAnchorY, barLeft + 30f * density, pagerTitleY - 12f * density, "pager wraps selected mappings")
-            drawTitle(canvas, "pdocker managed virtual-memory skin (separate scales)", y)
+            drawTitle(canvas, "Skydnir managed virtual-memory skin (separate scales)", y)
             y += 10f * density
             val pagerAnchorY = y + 36f * density
             y = drawLaneGroup(
@@ -6382,9 +6382,9 @@ class MainActivity : AppCompatActivity() {
             }
             val title = "Guest memory illusion — pager $state"
             val detail = if (reserve > 0L) {
-                "container sees ${compactBytes(reserve)}; Android keeps ${compactBytes(snapshot.managedResidentBytes)} hot (${String.format("%.1f×", multiplier)} headroom); pdocker RSS ${compactBytes(snapshot.pdockerRss)}"
+                "container sees ${compactBytes(reserve)}; Android keeps ${compactBytes(snapshot.managedResidentBytes)} hot (${String.format("%.1f×", multiplier)} headroom); Skydnir RSS ${compactBytes(snapshot.skydnirRss)}"
             } else {
-                "pager ready; OS share now pdocker RSS ${compactBytes(snapshot.pdockerRss)} / swap ${compactBytes(snapshot.pdockerSwap)}"
+                "pager ready; OS share now Skydnir RSS ${compactBytes(snapshot.skydnirRss)} / swap ${compactBytes(snapshot.skydnirSwap)}"
             }
             val boxTop = baseline - 20f * density
             val boxBottom = baseline + 34f * density

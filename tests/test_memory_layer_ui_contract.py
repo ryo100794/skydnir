@@ -42,13 +42,13 @@ class MemoryLayerUiContractTest(unittest.TestCase):
         )
         self.assertNotIn("renderMemoryLayerVisualization()", debug)
 
-    def test_os_pdocker_footprint_is_reported_with_percentages(self):
+    def test_os_skydnir_footprint_is_reported_with_percentages(self):
         for needle in [
-            "pdockerProcessCount",
-            "pdockerVmSize",
-            "pdockerRss",
-            "pdockerSwap",
-            "pdockerMemoryFootprint()",
+            "skydnirProcessCount",
+            "skydnirVmSize",
+            "skydnirRss",
+            "skydnirSwap",
+            "skydnirMemoryFootprint()",
             "memory_layers_skydnir_share_fmt",
             "skydnir.RSS.percent_of_RAM",
             "skydnir.VmSwap.percent_of_used_swap",
@@ -74,12 +74,12 @@ class MemoryLayerUiContractTest(unittest.TestCase):
             "segment widths must not silently normalize every row to its own total without labels",
         )
 
-    def test_pdocker_is_visually_separated_inside_ram_and_swap(self):
+    def test_skydnir_is_visually_separated_inside_ram_and_swap(self):
         view = self.main[self.main.index("private class MemoryLayerView") :]
         for needle in [
-            'Segment("pdocker RSS"',
+            'Segment("Skydnir RSS"',
             'Segment("other used"',
-            'Segment("pdocker swap"',
+            'Segment("Skydnir swap"',
             "0xff58ffd2",
             "Guest memory illusion",
             "Android keeps",

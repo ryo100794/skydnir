@@ -367,7 +367,7 @@ def main() -> int:
             "MemoryLayerView" in main_src and
             "renderMemoryLayerVisualization" in main_src and
             "OS-governed allocation" in main_src and
-            "pdocker managed virtual-memory skin" in main_src and
+            "Skydnir managed virtual-memory skin" in main_src and
             "PROT_NONE" in main_src and
             "page_ops_per_sec" in main_src and
             "drawPrism" in main_src and
