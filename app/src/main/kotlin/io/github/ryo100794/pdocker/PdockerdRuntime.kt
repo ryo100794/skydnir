@@ -40,7 +40,7 @@ import java.io.File
  * file into build and runtime rootfs state.
  */
 object PdockerdRuntime {
-    private const val TAG = "pdockerd-runtime"
+    private const val TAG = "skydnird-runtime"
 
     private const val FALLBACK_RESOLV_CONF = """nameserver 8.8.8.8
 nameserver 1.1.1.1

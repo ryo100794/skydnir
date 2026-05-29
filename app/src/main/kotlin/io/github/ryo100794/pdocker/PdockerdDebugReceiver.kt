@@ -36,7 +36,7 @@ class PdockerdDebugReceiver : BroadcastReceiver() {
             }
             ACTION_SMOKE_DIRECT_EXEC -> {
                 val pending = goAsync()
-                thread(isDaemon = true, name = "pdocker-direct-exec-broadcast") {
+                thread(isDaemon = true, name = "skydnir-direct-exec-broadcast") {
                     runCatching { runDirectExecProbe(context.applicationContext) }
                         .onFailure {
                             File(context.filesDir, "pdocker/direct-exec-probe.txt").apply {

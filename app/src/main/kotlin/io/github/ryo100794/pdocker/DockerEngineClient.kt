@@ -34,7 +34,7 @@ class DockerEngineClient(private val socket: File) {
             ls.soTimeout = timeoutMs
             val header = buildString {
                 append(method).append(' ').append(path).append(" HTTP/1.1\r\n")
-                append("Host: pdocker\r\n")
+                append("Host: skydnir\r\n")
                 append("Connection: close\r\n")
                 if (body.isNotEmpty()) {
                     append("Content-Type: ").append(contentType).append("\r\n")
@@ -116,7 +116,7 @@ class DockerEngineClient(private val socket: File) {
             ls.soTimeout = timeoutMs
             val header = buildString {
                 append(method).append(' ').append(path).append(" HTTP/1.1\r\n")
-                append("Host: pdocker\r\n")
+                append("Host: skydnir\r\n")
                 append("Connection: close\r\n")
                 if (body.isNotEmpty()) {
                     append("Content-Type: ").append(contentType).append("\r\n")

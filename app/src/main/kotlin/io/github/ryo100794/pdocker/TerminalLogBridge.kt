@@ -45,7 +45,7 @@ class TerminalLogBridge(private val activity: AppCompatActivity) {
         if (text.isEmpty()) return
         activity.runOnUiThread {
             val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("pdocker log", text))
+            clipboard.setPrimaryClip(ClipData.newPlainText("Skydnir log", text))
             Toast.makeText(activity, activity.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
         }
     }

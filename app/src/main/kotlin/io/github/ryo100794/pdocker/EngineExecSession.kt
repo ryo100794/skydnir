@@ -148,7 +148,7 @@ class EngineExecSession(
         val socket = connectEngineSocket()
         val header = buildString {
             append("POST /exec/$execId/start HTTP/1.1\r\n")
-            append("Host: pdocker\r\n")
+            append("Host: skydnir\r\n")
             append("Connection: Upgrade\r\n")
             append("Upgrade: tcp\r\n")
             append("Content-Type: application/json\r\n")
@@ -199,7 +199,7 @@ class EngineExecSession(
         connectEngineSocket().use { socket ->
             val header = buildString {
                 append(method).append(' ').append(path).append(" HTTP/1.1\r\n")
-                append("Host: pdocker\r\n")
+                append("Host: skydnir\r\n")
                 append("Connection: close\r\n")
                 if (body.isNotEmpty()) {
                     append("Content-Type: ").append(contentType).append("\r\n")

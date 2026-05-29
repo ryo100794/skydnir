@@ -23,7 +23,7 @@ import org.json.JSONObject
  * Browser for pulled image and container rootfs trees.
  *
  * This intentionally bypasses the docker CLI. The UI is inside the same app
- * sandbox as pdockerd, so files can be inspected directly without starting a
+ * sandbox as skydnird, so files can be inspected directly without starting a
  * temporary container or round-tripping through docker cp. Container writable
  * layers can also hand files to the editor.
  */

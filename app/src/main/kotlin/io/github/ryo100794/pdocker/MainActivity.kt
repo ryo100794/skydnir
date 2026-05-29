@@ -5175,7 +5175,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun terminalSessionCommand(title: String, group: String, command: String): String {
         val label = "$group / $title"
-        val prompt = "[pdocker:$label] \\w $ "
+        val prompt = "[skydnir:$label] \\w $ "
         return listOf(
             "export PDOCKER_TERMINAL_TITLE=${shellQuote(title)}",
             "export PDOCKER_TERMINAL_GROUP=${shellQuote(group)}",
@@ -5965,14 +5965,14 @@ class MainActivity : AppCompatActivity() {
             status.text = getString(R.string.status_socket_absent)
             return
         }
-        thread(isDaemon = true, name = "pdockerd-ping") {
+        thread(isDaemon = true, name = "skydnird-ping") {
             val msg = runCatching {
                 LocalSocket().use { ls ->
                     ls.connect(LocalSocketAddress(sock.absolutePath,
                         LocalSocketAddress.Namespace.FILESYSTEM))
                     ls.soTimeout = 500
                     ls.outputStream.write(
-                        "GET /_ping HTTP/1.0\r\nHost: pdocker\r\n\r\n".toByteArray()
+                        "GET /_ping HTTP/1.0\r\nHost: skydnir\r\n\r\n".toByteArray()
                     )
                     ls.outputStream.flush()
                     val resp = ls.inputStream.readBytes().toString(Charsets.US_ASCII)
@@ -7465,7 +7465,7 @@ class MainActivity : AppCompatActivity() {
         val checkedAt = serviceHealthCheckedAt[cacheKey] ?: 0L
         if (cacheKey in serviceHealth && System.currentTimeMillis() - checkedAt < 15_000L) return
         serviceHealthInFlight += cacheKey
-        thread(isDaemon = true, name = "pdocker-service-probe") {
+        thread(isDaemon = true, name = "skydnir-service-probe") {
             val result = probeServiceUrl(url)
             ui.post {
                 serviceHealth[cacheKey] = result
