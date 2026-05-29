@@ -22,9 +22,9 @@ class SkydnirAndroidUiCopyTest(unittest.TestCase):
         english = self.strings(STRING_FILES[0])
 
         self.assertEqual("Skydnir", english["app_name"])
-        self.assertEqual("skydnird", english["pdockerd_notification_channel"])
-        self.assertEqual("skydnird", english["pdockerd_notification_title"])
-        self.assertIn("Skydnir daemon", english["pdockerd_notification_text"])
+        self.assertEqual("skydnird", english["skydnird_notification_channel"])
+        self.assertEqual("skydnird", english["skydnird_notification_title"])
+        self.assertIn("Skydnir daemon", english["skydnird_notification_text"])
 
     def test_user_visible_string_values_do_not_expose_legacy_brand(self):
         # Resource names and package paths intentionally remain unchanged in

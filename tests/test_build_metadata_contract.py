@@ -13,7 +13,7 @@ class BuildMetadataContractTest(unittest.TestCase):
         gradle = APP_GRADLE.read_text(encoding="utf-8")
 
         self.assertIn('nonBlankEnv("SKYDNIR_BUILD_TIME_UTC", "PDOCKER_BUILD_TIME_UTC")', gradle)
-        self.assertIn("DateTimeFormatter.ISO_INSTANT.format(pdockerBuildInstant)", gradle)
+        self.assertIn("DateTimeFormatter.ISO_INSTANT.format(skydnirBuildInstant)", gradle)
         self.assertIn('gitOutput("git", "rev-parse", "--short=12", "HEAD")', gradle)
         self.assertIn('nonBlankEnv("SKYDNIR_BUILD_COMMIT", "PDOCKER_BUILD_COMMIT")', gradle)
         self.assertIn('nonBlankEnv("SKYDNIR_BUILD_NUMBER", "PDOCKER_BUILD_NUMBER")', gradle)
@@ -25,12 +25,12 @@ class BuildMetadataContractTest(unittest.TestCase):
         )
         self.assertIsNotNone(default_config)
         body = default_config.group("body")
-        self.assertIn('buildConfigField("String", "BUILD_TIME_UTC", buildConfigString(pdockerBuildTimeUtc))', body)
-        self.assertIn('buildConfigField("String", "BUILD_GIT_COMMIT", buildConfigString(pdockerBuildCommit))', body)
-        self.assertIn('buildConfigField("String", "BUILD_NUMBER", buildConfigString(pdockerBuildNumber))', body)
-        self.assertNotIn('buildConfigString(pdockerVersionValue("buildTimeUtc"))', body)
-        self.assertNotIn('buildConfigString(pdockerVersionValue("buildCommit"))', body)
-        self.assertNotIn('buildConfigString(pdockerVersionValue("buildNumber"))', body)
+        self.assertIn('buildConfigField("String", "BUILD_TIME_UTC", buildConfigString(skydnirBuildTimeUtc))', body)
+        self.assertIn('buildConfigField("String", "BUILD_GIT_COMMIT", buildConfigString(skydnirBuildCommit))', body)
+        self.assertIn('buildConfigField("String", "BUILD_NUMBER", buildConfigString(skydnirBuildNumber))', body)
+        self.assertNotIn('buildConfigString(skydnirVersionValue("buildTimeUtc"))', body)
+        self.assertNotIn('buildConfigString(skydnirVersionValue("buildCommit"))', body)
+        self.assertNotIn('buildConfigString(skydnirVersionValue("buildNumber"))', body)
 
     def test_ui_uses_buildconfig_metadata_not_manual_literal(self):
         activity = MAIN_ACTIVITY.read_text(encoding="utf-8")

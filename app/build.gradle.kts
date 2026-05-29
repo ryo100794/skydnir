@@ -122,12 +122,12 @@ val verifyPackagedPayloadFresh by tasks.registering {
     }
 }
 
-val pdockerVersionProps = Properties().apply {
+val skydnirVersionProps = Properties().apply {
     rootProject.file("version.properties").inputStream().use(::load)
 }
 
-fun pdockerVersionValue(name: String): String =
-    pdockerVersionProps.getProperty(name)
+fun skydnirVersionValue(name: String): String =
+    skydnirVersionProps.getProperty(name)
         ?: error("version.properties is missing required key '$name'")
 
 fun buildConfigString(value: String): String =
@@ -151,19 +151,19 @@ fun gitOutput(vararg args: String): String? {
     }
 }
 
-val pdockerBuildInstant = Instant.now()
-val pdockerBuildTimeUtc =
+val skydnirBuildInstant = Instant.now()
+val skydnirBuildTimeUtc =
     nonBlankEnv("SKYDNIR_BUILD_TIME_UTC", "PDOCKER_BUILD_TIME_UTC")
-        ?: DateTimeFormatter.ISO_INSTANT.format(pdockerBuildInstant)
-val pdockerBuildCommit =
+        ?: DateTimeFormatter.ISO_INSTANT.format(skydnirBuildInstant)
+val skydnirBuildCommit =
     nonBlankEnv("SKYDNIR_BUILD_COMMIT", "PDOCKER_BUILD_COMMIT")
         ?: gitOutput("git", "rev-parse", "--short=12", "HEAD")
-        ?: pdockerVersionValue("buildCommit")
-val pdockerBuildNumber =
+        ?: skydnirVersionValue("buildCommit")
+val skydnirBuildNumber =
     nonBlankEnv("SKYDNIR_BUILD_NUMBER", "PDOCKER_BUILD_NUMBER")
         ?: DateTimeFormatter.ofPattern("yyyyMMdd.HHmmss")
             .withZone(ZoneOffset.UTC)
-            .format(pdockerBuildInstant)
+            .format(skydnirBuildInstant)
 
 android {
     namespace = "io.github.ryo100794.pdocker"
@@ -174,11 +174,11 @@ android {
         applicationId = "io.github.ryo100794.pdocker"
         minSdk = 26
         targetSdk = 34
-        versionCode = pdockerVersionValue("versionCode").toInt()
-        versionName = pdockerVersionValue("versionName")
-        buildConfigField("String", "BUILD_TIME_UTC", buildConfigString(pdockerBuildTimeUtc))
-        buildConfigField("String", "BUILD_GIT_COMMIT", buildConfigString(pdockerBuildCommit))
-        buildConfigField("String", "BUILD_NUMBER", buildConfigString(pdockerBuildNumber))
+        versionCode = skydnirVersionValue("versionCode").toInt()
+        versionName = skydnirVersionValue("versionName")
+        buildConfigField("String", "BUILD_TIME_UTC", buildConfigString(skydnirBuildTimeUtc))
+        buildConfigField("String", "BUILD_GIT_COMMIT", buildConfigString(skydnirBuildCommit))
+        buildConfigField("String", "BUILD_NUMBER", buildConfigString(skydnirBuildNumber))
         manifestPlaceholders["pdockerDebugReceiverExported"] = "false"
 
         ndk {

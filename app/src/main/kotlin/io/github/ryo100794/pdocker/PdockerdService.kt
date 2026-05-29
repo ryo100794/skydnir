@@ -100,7 +100,7 @@ class PdockerdService : Service() {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (nm.getNotificationChannel(channelId) == null) {
                 nm.createNotificationChannel(
-                    NotificationChannel(channelId, getString(R.string.pdockerd_notification_channel),
+                    NotificationChannel(channelId, getString(R.string.skydnird_notification_channel),
                         NotificationManager.IMPORTANCE_LOW)
                 )
             }
@@ -119,8 +119,8 @@ class PdockerdService : Service() {
             pendingFlags,
         )
         val notif: Notification = Notification.Builder(this, channelId)
-            .setContentTitle(getString(R.string.pdockerd_notification_title))
-            .setContentText(getString(R.string.pdockerd_notification_text))
+            .setContentTitle(getString(R.string.skydnird_notification_title))
+            .setContentText(getString(R.string.skydnird_notification_text))
             .setSmallIcon(android.R.drawable.ic_menu_manage)
             .setContentIntent(openIntent)
             .setOngoing(true)

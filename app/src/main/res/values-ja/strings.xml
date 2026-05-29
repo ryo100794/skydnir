@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Skydnir</string>
-    <string name="pdockerd_notification_channel">skydnird</string>
-    <string name="pdockerd_notification_title">skydnird</string>
-    <string name="pdockerd_notification_text">Skydnir デーモン (port 2375)</string>
+    <string name="skydnird_notification_channel">skydnird</string>
+    <string name="skydnird_notification_title">skydnird</string>
+    <string name="skydnird_notification_text">Skydnir デーモン (port 2375)</string>
     <string name="action_stop">停止</string>
 
     <string name="tab_overview">概要</string>
