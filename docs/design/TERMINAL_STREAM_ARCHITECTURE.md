@@ -104,7 +104,7 @@ session-neutral descriptor:
 
 ```json
 {
-  "title": "pdocker-dev",
+  "title": "skydnir-dev",
   "mode": "interactive",
   "input": true,
   "resize": true,

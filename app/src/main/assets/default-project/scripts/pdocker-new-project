@@ -3,8 +3,8 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: pdocker-new-project NAME [TEMPLATE]
-       skydnir-new-project NAME [TEMPLATE]
+Usage: skydnir-new-project NAME [TEMPLATE]
+       pdocker-new-project NAME [TEMPLATE]
 
 Create a project under /pdocker/projects. TEMPLATE may be:
   blank                 create a minimal Dockerfile and compose.yaml
