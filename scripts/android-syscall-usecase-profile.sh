@@ -297,7 +297,7 @@ def fmt(value, digits=3):
     return "" if value is None else f"{value:.{digits}f}"
 
 lines = [
-    "# pdocker Syscall Use-Case Profile",
+    "# Skydnir Syscall Use-Case Profile",
     "",
     f"- Commit: `{artifact['git_commit']}`",
     f"- Dirty tree: `{artifact['git_dirty']}`",

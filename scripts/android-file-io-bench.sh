@@ -545,7 +545,7 @@ artifact = {
 Path(out_path).write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n")
 
 lines = [
-    "# pdocker File I/O Benchmark",
+    "# Skydnir File I/O Benchmark",
     "",
     f"- Commit: `{artifact['git_commit']}`",
     f"- Timestamp: `{artifact['timestamp_utc']}`",

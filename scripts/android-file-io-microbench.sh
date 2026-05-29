@@ -413,7 +413,7 @@ artifact = {
 Path(out_path).write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n")
 
 md = [
-    "# pdocker File I/O Microbenchmark",
+    "# Skydnir File I/O Microbenchmark",
     "",
     f"- Commit: `{artifact['git_commit']}`",
     f"- Dirty tree: `{artifact['git_dirty']}`",
