@@ -85,6 +85,12 @@ class EngineBaseRouteContractTest(unittest.TestCase):
         self.assertIn('path == "/version" and method == "GET"', self.pdockerd)
         self.assertIn('path == "/info" and method == "GET"', self.pdockerd)
 
+    def test_skydnir_api_prefix_alias_is_explicit_and_version_prefix_compatible(self):
+        self.assertIn('if path == "/skydnir":', self.pdockerd)
+        self.assertIn('elif path.startswith("/skydnir/"):', self.pdockerd)
+        self.assertIn('path = path[len("/skydnir"):] or "/"', self.pdockerd)
+        self.assertEqual(self.pdockerd, self.asset)
+
     def test_network_dynamic_routes_fail_closed_for_unsupported_post(self):
         self.assertIn('if sub and method != "POST":', self.pdockerd)
         self.assertIn('unsupported network route: {path}', self.pdockerd)

@@ -8003,6 +8003,15 @@ class DockerAPIHandler(BaseHTTPRequestHandler):
         if m:
             path = m.group(1)
 
+        # Skydnir extension prefix.  Docker Engine routes stay canonical, but
+        # Skydnir-specific callers can use /skydnir/... during the public rename
+        # transition.  The bare prefix resolves to /info as a small discovery
+        # endpoint; old unprefixed routes remain unchanged.
+        if path == "/skydnir":
+            path = "/info"
+        elif path.startswith("/skydnir/"):
+            path = path[len("/skydnir"):] or "/"
+
         # --- Basic ---
         if path == "/_ping" and method in ("GET", "HEAD"):
             self.send_response(200)

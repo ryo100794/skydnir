@@ -309,7 +309,9 @@ Goal: rename internals only after public aliases and migration are proven.
 Candidate changes:
 
 - internal package/namespace names
-- API prefix `/skydnir`
+- API prefix `/skydnir` — prefix alias is implemented on `rename/skydnir` by
+  stripping `/skydnir` after optional Engine API version normalization; legacy
+  unprefixed routes remain canonical for Docker-compatible clients.
 - test names and CI workflow names
 - generated artifact names
 

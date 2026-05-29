@@ -124,6 +124,7 @@ def check_static_api() -> list[Check]:
         "build dockerignore": r'apply_dockerignore',
         "events": r'path == "/events"',
         "system host diagnostics": r'path == "/system/host"',
+        "skydnir api prefix alias": r'path.startswith\("/skydnir/"\)',
     }
     checks = []
     for name, pattern in expected.items():
@@ -182,6 +183,9 @@ def check_protocol_smoke() -> list[Check]:
             ("GET", "/networks/bridge/connect", 404),
             ("POST", "/networks/bridge/unsupported", 404),
             ("GET", "/system/host", 200),
+            ("GET", "/skydnir/version", 200),
+            ("GET", "/skydnir/system/host", 200),
+            ("GET", "/v1.43/skydnir/version", 200),
             ("GET", "/events?since=0&until=0", 200),
             ("GET", "/v1.43/version", 200),
         ]
