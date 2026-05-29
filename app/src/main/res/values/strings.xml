@@ -78,10 +78,10 @@
     <string name="debug_resource_native_libs">Native libraries</string>
     <string name="debug_resource_dir_summary_fmt">%1$d top-level entries</string>
     <string name="debug_resource_file_summary_fmt">%1$s file</string>
-    <string name="action_start_pdockerd">Start skydnird</string>
-    <string name="detail_start_pdockerd">Launch foreground daemon</string>
-    <string name="action_stop_pdockerd">Stop skydnird</string>
-    <string name="detail_stop_pdockerd">Stop foreground service</string>
+    <string name="action_start_skydnird">Start skydnird</string>
+    <string name="detail_start_skydnird">Launch foreground daemon</string>
+    <string name="action_stop_skydnird">Stop skydnird</string>
+    <string name="detail_stop_skydnird">Stop foreground service</string>
     <string name="action_keep_resident">Keep resident</string>
     <string name="detail_keep_resident">Open battery optimization exemption</string>
     <string name="action_enable_notifications">Enable notifications</string>

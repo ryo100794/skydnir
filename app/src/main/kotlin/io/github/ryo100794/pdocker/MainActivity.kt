@@ -1761,8 +1761,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
         if (!diagnosticsEnabled) return
-        addAction(getString(R.string.action_start_pdockerd), getString(R.string.detail_start_pdockerd)) { startDaemon() }
-        addAction(getString(R.string.action_stop_pdockerd), getString(R.string.detail_stop_pdockerd)) {
+        addAction(getString(R.string.action_start_skydnird), getString(R.string.detail_start_skydnird)) { startDaemon() }
+        addAction(getString(R.string.action_stop_skydnird), getString(R.string.detail_stop_skydnird)) {
             startService(Intent(this, PdockerdService::class.java).setAction(PdockerdService.ACTION_STOP))
             status.text = getString(R.string.status_stopped)
         }

@@ -78,10 +78,10 @@
     <string name="debug_resource_native_libs">Native libraries</string>
     <string name="debug_resource_dir_summary_fmt">トップレベル %1$d 件</string>
     <string name="debug_resource_file_summary_fmt">%1$s file</string>
-    <string name="action_start_pdockerd">skydnird を起動</string>
-    <string name="detail_start_pdockerd">前面デーモンを起動</string>
-    <string name="action_stop_pdockerd">skydnird を停止</string>
-    <string name="detail_stop_pdockerd">前面サービスを停止</string>
+    <string name="action_start_skydnird">skydnird を起動</string>
+    <string name="detail_start_skydnird">前面デーモンを起動</string>
+    <string name="action_stop_skydnird">skydnird を停止</string>
+    <string name="detail_stop_skydnird">前面サービスを停止</string>
     <string name="action_keep_resident">常駐を維持</string>
     <string name="detail_keep_resident">電池最適化除外を開く</string>
     <string name="action_enable_notifications">通知を有効化</string>
