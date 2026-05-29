@@ -25,19 +25,19 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * ForegroundService hosting pdockerd (Python via Chaquopy).
+ * ForegroundService hosting skydnird (Python via Chaquopy).
  *
  * Lifecycle:
  *  - START_STICKY so Android restarts us after OOM.
  *  - Chaquopy platform initialised once per process.
- *  - pdockerd runs on a background thread; stop flag drives clean shutdown.
+ *  - skydnird runs on a background thread; stop flag drives clean shutdown.
  */
 class PdockerdService : Service() {
 
     inner class LocalBinder : Binder()
 
     private val binder = LocalBinder()
-    private var pdockerThread: Thread? = null
+    private var skydnirdThread: Thread? = null
     private var gpuExecutorProcess: Process? = null
     private var mediaExecutorProcess: Process? = null
     private var startWakeLock: PowerManager.WakeLock? = null
@@ -50,7 +50,7 @@ class PdockerdService : Service() {
         if (intent?.action == ACTION_STOP) {
             userStopped = true
             stopFlag = true
-            pdockerThread?.interrupt()
+            skydnirdThread?.interrupt()
             stopGpuExecutor()
             stopMediaExecutor()
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -61,10 +61,10 @@ class PdockerdService : Service() {
         userStopped = false
         holdStartWakeLock()
         startInForeground()
-        if (pdockerThread == null || !pdockerThread!!.isAlive) {
+        if (skydnirdThread == null || !skydnirdThread!!.isAlive) {
             startPdockerd()
         } else {
-            // A dev reinstall or Android process trim can leave pdockerd alive
+            // A dev reinstall or Android process trim can leave skydnird alive
             // while helper executors are gone.  Re-arm helpers on every start
             // intent so GPU/media bridge tests cannot silently run with stale or
             // missing sidecar processes.
@@ -84,7 +84,7 @@ class PdockerdService : Service() {
 
     override fun onDestroy() {
         stopFlag = true
-        pdockerThread?.interrupt()
+        skydnirdThread?.interrupt()
         stopGpuExecutor()
         stopMediaExecutor()
         releaseStartWakeLock()
@@ -95,7 +95,7 @@ class PdockerdService : Service() {
     }
 
     private fun startInForeground() {
-        val channelId = "pdockerd"
+        val channelId = "skydnird"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (nm.getNotificationChannel(channelId) == null) {
@@ -137,7 +137,7 @@ class PdockerdService : Service() {
     private fun startPdockerd() {
         stopFlag = false
 
-        pdockerThread = Thread({
+        skydnirdThread = Thread({
             try {
                 val appContext = applicationContext
                 val runtime = PdockerdRuntime.prepare(appContext)
@@ -159,15 +159,15 @@ class PdockerdService : Service() {
                     BuildConfig.PDOCKER_DIRECT_EXPERIMENTAL_PROCESS_EXEC,
                 )
             } catch (t: Throwable) {
-                Log.e(TAG, "pdockerd crashed", t)
+                Log.e(TAG, "skydnird crashed", t)
             } finally {
                 if (!stopFlag && !userStopped) {
-                    pdockerThread = null
+                    skydnirdThread = null
                     scheduleRestart()
                     stopSelf()
                 }
             }
-        }, "pdockerd").also { it.start() }
+        }, "skydnird").also { it.start() }
     }
 
     private fun killStaleSidecar(processName: String) {
@@ -384,7 +384,7 @@ class PdockerdService : Service() {
             val power = getSystemService(PowerManager::class.java) ?: return
             val lock = startWakeLock ?: power.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
-                "$packageName:pdockerd-start",
+                "$packageName:skydnird-start",
             ).also { startWakeLock = it }
             if (!lock.isHeld) {
                 lock.acquire(START_WAKELOCK_MS)
@@ -419,7 +419,7 @@ class PdockerdService : Service() {
                     alarm.set(android.app.AlarmManager.RTC_WAKEUP, at, pendingIntent)
             }
         }.onFailure {
-            Log.w(TAG, "exact pdockerd restart alarm rejected; falling back to inexact alarm", it)
+            Log.w(TAG, "exact skydnird restart alarm rejected; falling back to inexact alarm", it)
             alarm.set(android.app.AlarmManager.RTC_WAKEUP, at, pendingIntent)
         }
     }
@@ -430,6 +430,6 @@ class PdockerdService : Service() {
         private const val NOTIF_ID = 1
         private const val RESTART_DELAY_MS = 2_000L
         private const val START_WAKELOCK_MS = 30_000L
-        private const val TAG = "pdockerd"
+        private const val TAG = "skydnird"
     }
 }
