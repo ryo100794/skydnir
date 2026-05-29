@@ -1,0 +1,15 @@
+[Unit]
+Description=Skydnir userspace runtime daemon
+Documentation=https://github.com/ryo100794/skydnir
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env skydnird --socket %t/skydnir.sock
+Restart=on-failure
+RestartSec=2s
+Environment=SKYDNIR_HOME=%h/.skydnir
+Environment=DOCKER_HOST=unix://%t/skydnir.sock
+
+[Install]
+WantedBy=default.target

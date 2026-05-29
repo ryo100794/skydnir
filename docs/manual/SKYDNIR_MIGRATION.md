@@ -150,8 +150,10 @@ call `pdocker-engine-env`, which resolves the same mounted socket.
 
 ## Service Migration
 
-If you created a host-side user service manually, migrate it by adding a new
-`skydnird.service` and stopping the old `pdockerd.service`.
+If you created a host-side user service manually, migrate it by installing the
+repository-provided `docker-proot-setup/systemd/skydnird.service` template, or
+by adding an equivalent `skydnird.service`, and then stopping the old
+`pdockerd.service`.
 
 Example user service:
 
@@ -160,7 +162,7 @@ Example user service:
 Description=Skydnir userspace runtime daemon
 
 [Service]
-ExecStart=%h/bin/skydnird --socket %t/skydnir.sock
+ExecStart=/usr/bin/env skydnird --socket %t/skydnir.sock
 Restart=on-failure
 Environment=SKYDNIR_HOME=%h/.skydnir
 

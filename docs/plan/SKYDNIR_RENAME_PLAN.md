@@ -277,6 +277,8 @@ state.
 Service target:
 
 - `skydnird.service`
+- `docker-proot-setup/systemd/skydnird.service` is provided as the host-side
+  user-service template on `rename/skydnir`.
 
 Old service migration guidance:
 

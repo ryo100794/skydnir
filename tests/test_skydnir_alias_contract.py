@@ -28,6 +28,7 @@ ANDROID_SMOKE = ROOT / "scripts" / "android-device-smoke.sh"
 ANDROID_SELFDEBUG = ROOT / "scripts" / "android-selfdebug.sh"
 OPENCL_ICD = ROOT / "docker-proot-setup" / "src" / "gpu" / "pdocker_opencl_icd.c"
 MIGRATION_DOC = ROOT / "docs" / "manual" / "SKYDNIR_MIGRATION.md"
+SKYDNIRD_SERVICE = ROOT / "docker-proot-setup" / "systemd" / "skydnird.service"
 
 
 class SkydnirAliasContractTest(unittest.TestCase):
@@ -449,8 +450,18 @@ class SkydnirAliasContractTest(unittest.TestCase):
         self.assertIn("os.environ.get(alias)", pdockerd)
         self.assertIn("common_env.get(alias)", pdockerd)
 
+    def test_skydnird_user_service_template_prefers_public_name_without_storage_rename(self):
+        text = SKYDNIRD_SERVICE.read_text(encoding="utf-8")
+
+        self.assertIn("Description=Skydnir userspace runtime daemon", text)
+        self.assertIn("ExecStart=/usr/bin/env skydnird --socket %t/skydnir.sock", text)
+        self.assertIn("Environment=SKYDNIR_HOME=%h/.skydnir", text)
+        self.assertIn("Environment=DOCKER_HOST=unix://%t/skydnir.sock", text)
+        self.assertNotIn("pdockerd.service", text)
+
     def test_migration_doc_records_service_and_no_rename_boundaries(self):
         text = MIGRATION_DOC.read_text(encoding="utf-8")
+        self.assertIn("docker-proot-setup/systemd/skydnird.service", text)
         self.assertIn("skydnird.service", text)
         self.assertIn("`PDOCKER_HOME` wins for compatibility", text)
         self.assertIn("`SKYDNIR_HOME` is accepted", text)
