@@ -23,7 +23,7 @@
     <string name="status_running">実行中</string>
     <string name="status_unexpected_response">ソケットは有効、応答が想定外です</string>
     <string name="status_ping_failed">ソケットは有効、ping 失敗: %1$s</string>
-    <string name="status_pdocker_fmt">skydnird: %1$s</string>
+    <string name="status_skydnird_fmt">skydnird: %1$s</string>
     <string name="status_library_failed">ライブラリの読み込みに失敗: %1$s</string>
     <string name="status_library_installed_fmt">テンプレートを展開しました: %1$s</string>
     <string name="status_library_install_report_fmt">テンプレートを展開しました: %1$s, コピー %2$d, 既存保持 %3$d, version %4$d</string>
@@ -52,7 +52,7 @@
     <string name="action_run_memory_pager_selftest">Pager セルフテストを実行</string>
     <string name="detail_run_memory_pager_selftest">managed と transparent SIGSEGV pager の probe を実行し、この可視化を更新します</string>
     <string name="memory_layers_os_summary_fmt">OS: RAM 使用 %1$s / 空き %2$s, swap 使用 %3$s / 空き %4$s</string>
-    <string name="memory_layers_pdocker_share_fmt">OS 内で Skydnir が占める量: RSS %1$s (RAM 全体の %2$s, 使用中 RAM の %3$s), swap %4$s (使用中 swap の %5$s), processes %6$d</string>
+    <string name="memory_layers_skydnir_share_fmt">OS 内で Skydnir が占める量: RSS %1$s (RAM 全体の %2$s, 使用中 RAM の %3$s), swap %4$s (使用中 swap の %5$s), processes %6$d</string>
     <string name="memory_layers_app_summary_fmt">アプリ: VmSize %1$s, RSS %2$s, Java heap %3$s / %4$s; app Vm metrics %5$s</string>
     <string name="memory_layers_artifact_summary_fmt">Pager データソース: %1$s、経過 %2$s、status %3$s (past self-test。live /proc ではありません)</string>
     <string name="widget_virtual_memory_pager">仮想記憶 pager</string>
@@ -66,7 +66,7 @@
     <string name="memory_layers_pager_summary_fmt">Skydnir のメモリ拡張: ゲストには %2$s の reserve を見せ、Android 上の resident 窓は %3$s に抑え、追い出しページは %4$s の backing に退避します。page in/out %5$d/%6$d, bytes in/out %7$s/%8$s, dirty outs %9$d (%1$s)</string>
     <string name="memory_layers_perf_summary_fmt">Pager 性能: %1$s, %2$s, SIGSEGV stop %3$d。transparent mmap %4$s, pending %5$s, max resident pages %6$d, bytes in/out %7$s/%8$s, dirty outs %9$d</string>
     <string name="debug_resource_app_files">App files</string>
-    <string name="debug_resource_pdocker_home">Skydnir home</string>
+    <string name="debug_resource_skydnir_home">Skydnir home</string>
     <string name="debug_resource_projects">Projects</string>
     <string name="debug_resource_containers">Containers</string>
     <string name="debug_resource_images">Images</string>

@@ -1836,7 +1836,7 @@ class MainActivity : AppCompatActivity() {
     private fun debugResourceRoots(): List<DebugResourceRoot> {
         val roots = mutableListOf(
             DebugResourceRoot(getString(R.string.debug_resource_app_files), filesDir, writable = true),
-            DebugResourceRoot(getString(R.string.debug_resource_pdocker_home), pdockerHome, writable = true),
+            DebugResourceRoot(getString(R.string.debug_resource_skydnir_home), pdockerHome, writable = true),
             DebugResourceRoot(getString(R.string.debug_resource_projects), projectRoot, writable = true),
             DebugResourceRoot(getString(R.string.debug_resource_containers), containerRoot, writable = true),
             DebugResourceRoot(getString(R.string.debug_resource_images), imageRoot, writable = true),
@@ -2429,7 +2429,7 @@ class MainActivity : AppCompatActivity() {
                 formatBytes(snapshot.swapFree),
             ),
             getString(
-                R.string.memory_layers_pdocker_share_fmt,
+                R.string.memory_layers_skydnir_share_fmt,
                 formatBytes(snapshot.pdockerRss),
                 formatPercent(snapshot.pdockerRss, snapshot.memTotal),
                 formatPercent(snapshot.pdockerRss, (snapshot.memTotal - snapshot.memAvailable).coerceAtLeast(0L)),
@@ -5042,7 +5042,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val view = terminalView(launchCommand, onOutput)
-        val bridge = view.getTag(R.id.pdocker_bridge_tag) as Bridge
+        val bridge = view.getTag(R.id.skydnir_bridge_tag) as Bridge
         toolTabs += ToolTab(group, title, ToolKind.Terminal, view, bridge, key)
         switchTool(toolTabs.lastIndex)
     }
@@ -5146,7 +5146,7 @@ class MainActivity : AppCompatActivity() {
         val bridge = Bridge(this, webView, command, onOutput)
         webView.addJavascriptInterface(bridge, "PdockerBridge")
         webView.loadUrl("file:///android_asset/xterm/index.html")
-        webView.setTag(R.id.pdocker_bridge_tag, bridge)
+        webView.setTag(R.id.skydnir_bridge_tag, bridge)
         return webView
     }
 
@@ -5258,7 +5258,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun findBridge(view: View): Bridge? {
-        (view.getTag(R.id.pdocker_bridge_tag) as? Bridge)?.let { return it }
+        (view.getTag(R.id.skydnir_bridge_tag) as? Bridge)?.let { return it }
         if (view is LinearLayout) {
             for (i in 0 until view.childCount) {
                 findBridge(view.getChildAt(i))?.let { return it }
@@ -5980,7 +5980,7 @@ class MainActivity : AppCompatActivity() {
                     else getString(R.string.status_unexpected_response)
                 }
             }.getOrElse { getString(R.string.status_ping_failed, it.message.orEmpty()) }
-            ui.post { status.text = getString(R.string.status_pdocker_fmt, msg) }
+            ui.post { status.text = getString(R.string.status_skydnird_fmt, msg) }
         }
     }
 

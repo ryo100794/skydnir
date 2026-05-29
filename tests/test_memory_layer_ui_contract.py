@@ -49,7 +49,7 @@ class MemoryLayerUiContractTest(unittest.TestCase):
             "pdockerRss",
             "pdockerSwap",
             "pdockerMemoryFootprint()",
-            "memory_layers_pdocker_share_fmt",
+            "memory_layers_skydnir_share_fmt",
             "skydnir.RSS.percent_of_RAM",
             "skydnir.VmSwap.percent_of_used_swap",
         ]:

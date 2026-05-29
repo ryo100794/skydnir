@@ -23,7 +23,7 @@
     <string name="status_running">running</string>
     <string name="status_unexpected_response">socket up, unexpected response</string>
     <string name="status_ping_failed">socket up, ping failed: %1$s</string>
-    <string name="status_pdocker_fmt">skydnird: %1$s</string>
+    <string name="status_skydnird_fmt">skydnird: %1$s</string>
     <string name="status_library_failed">library load failed: %1$s</string>
     <string name="status_library_installed_fmt">installed template: %1$s</string>
     <string name="status_library_install_report_fmt">installed template: %1$s, copied %2$d, kept %3$d, version %4$d</string>
@@ -52,7 +52,7 @@
     <string name="action_run_memory_pager_selftest">Run pager self-test</string>
     <string name="detail_run_memory_pager_selftest">Run managed and transparent SIGSEGV pager probes, then refresh this visualization</string>
     <string name="memory_layers_os_summary_fmt">OS: RAM used %1$s / available %2$s, swap used %3$s / free %4$s</string>
-    <string name="memory_layers_pdocker_share_fmt">Skydnir footprint inside OS: RSS %1$s (%2$s of RAM, %3$s of used RAM), swap %4$s (%5$s of used swap), processes %6$d</string>
+    <string name="memory_layers_skydnir_share_fmt">Skydnir footprint inside OS: RSS %1$s (%2$s of RAM, %3$s of used RAM), swap %4$s (%5$s of used swap), processes %6$d</string>
     <string name="memory_layers_app_summary_fmt">App: VmSize %1$s, RSS %2$s, Java heap %3$s / %4$s; app Vm metrics %5$s</string>
     <string name="memory_layers_artifact_summary_fmt">Pager data source: %1$s, age %2$s, status %3$s (past self-test; not live /proc)</string>
     <string name="widget_virtual_memory_pager">Virtual memory pager</string>
@@ -66,7 +66,7 @@
     <string name="memory_layers_pager_summary_fmt">Skydnir memory illusion: guest-visible reserve %2$s while Android resident window is %3$s; evicted pages are parked in %4$s backing, page in/out %5$d/%6$d, bytes in/out %7$s/%8$s, dirty outs %9$d (%1$s)</string>
     <string name="memory_layers_perf_summary_fmt">Pager performance: %1$s, %2$s, SIGSEGV stops %3$d; transparent mmap %4$s, pending %5$s, max resident pages %6$d, bytes in/out %7$s/%8$s, dirty outs %9$d</string>
     <string name="debug_resource_app_files">App files</string>
-    <string name="debug_resource_pdocker_home">Skydnir home</string>
+    <string name="debug_resource_skydnir_home">Skydnir home</string>
     <string name="debug_resource_projects">Projects</string>
     <string name="debug_resource_containers">Containers</string>
     <string name="debug_resource_images">Images</string>
