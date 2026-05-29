@@ -14,6 +14,7 @@ BIN_DIR="$PROJECT_DIR/docker-bin"
 LIB_DIR="$PROJECT_DIR/lib"
 INVOKED_AS="$(basename "${BASH_SOURCE[0]}")"
 CLI_NAME="${SKYDNIR_CLI_NAME:-$INVOKED_AS}"
+ORIGINAL_PDOCKER_HOME="${PDOCKER_HOME:-}"
 
 if [[ "$INVOKED_AS" == "pdocker" && "${PDOCKER_SUPPRESS_DEPRECATION_WARNING:-0}" != "1" ]]; then
     echo "Warning: pdocker is deprecated. Use skydnir instead." >&2
@@ -120,6 +121,45 @@ resolve_skydnir_home() {
 
 PDOCKER_HOME="$(resolve_skydnir_home)"
 export PDOCKER_HOME
+
+write_skydnir_migration_report() {
+    # Record the public-name migration only when the Skydnir runtime-home
+    # surface is actually selected/requested.  Creating ~/.skydnir while a
+    # legacy ~/.pdocker home is being reused would change future precedence,
+    # so that case is deliberately left untouched.
+    [[ -n "${PDOCKER_HOME:-}" ]] || return 0
+    [[ -n "${PDOCKER_HOME_EXPLICIT_COMPAT:-}" ]] && return 0
+    [[ -n "${PDOCKER_HOME_OVERRIDE_BY_ENV:-}" ]] && return 0
+    [[ -n "${PDOCKER_HOME_FROM_LEGACY_ENV:-}" ]] && return 0
+    if [[ -n "${ORIGINAL_PDOCKER_HOME:-}" ]]; then
+        return 0
+    fi
+
+    local skydnir_home="$HOME/.skydnir"
+    local legacy_home="$HOME/.pdocker"
+    local requested=0
+    if [[ "$PDOCKER_HOME" == "$skydnir_home" ]]; then
+        requested=1
+    fi
+    if [[ -n "${SKYDNIR_HOME:-}" || -f "skydnir.yml" || -f "$skydnir_home/config.yml" ]]; then
+        requested=1
+    fi
+    [[ "$requested" == "1" ]] || return 0
+
+    local migration_dir="$skydnir_home/migration"
+    mkdir -p "$migration_dir" 2>/dev/null || return 0
+    {
+        echo "schema=skydnir.runtime-home-migration.v1"
+        echo "legacy_home=$legacy_home"
+        echo "skydnir_home=$skydnir_home"
+        echo "effective_home=$PDOCKER_HOME"
+        [[ -d "$legacy_home" ]] && echo "legacy_exists=1" || echo "legacy_exists=0"
+        [[ -d "$skydnir_home" ]] && echo "skydnir_exists=1" || echo "skydnir_exists=0"
+        echo "note=Skydnir selected the new runtime-home surface without deleting legacy pdocker data."
+    } > "$migration_dir/from-pdocker.txt" 2>/dev/null || true
+}
+
+write_skydnir_migration_report
 IMAGES_DIR="$PDOCKER_HOME/images"      # Unpacked rootfs per image (shared)
 CONTAINERS_DIR="$PDOCKER_HOME/containers"  # Per-container rootfs (copy or overlay-like)
 META_DIR="$PDOCKER_HOME/meta"           # Metadata (image tags, container info)

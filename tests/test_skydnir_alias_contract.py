@@ -159,6 +159,24 @@ class SkydnirAliasContractTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("home:    ./skydnir-home", proc.stdout)
 
+    def test_cli_records_skydnir_home_migration_report_without_reordering_legacy_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            proc = self.run_cli_without_forced_home(SKYDNIR, home, "version")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            report = home / ".skydnir" / "migration" / "from-pdocker.txt"
+            self.assertTrue(report.exists())
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("schema=skydnir.runtime-home-migration.v1", text)
+            self.assertIn(f"effective_home={home / '.skydnir'}", text)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".pdocker").mkdir()
+            proc = self.run_cli_without_forced_home(SKYDNIR, home, "version")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertFalse((home / ".skydnir" / "migration" / "from-pdocker.txt").exists())
+
     def test_pdockerd_home_selection_accepts_skydnir_home_alias(self):
         def load_home(argv0, env):
             saved_env = os.environ.copy()
@@ -205,6 +223,44 @@ class SkydnirAliasContractTest(unittest.TestCase):
                 ),
                 str(home / "explicit-legacy"),
             )
+
+    def test_pdockerd_records_skydnir_home_migration_report_without_reordering_legacy_home(self):
+        def load_module(argv0, env):
+            saved_env = os.environ.copy()
+            saved_argv = sys.argv[:]
+            try:
+                os.environ.clear()
+                os.environ.update(env)
+                sys.argv = [argv0]
+                module_name = f"pdockerd_skydnir_migration_{os.getpid()}_{len(sys.modules)}"
+                loader = importlib.machinery.SourceFileLoader(module_name, str(PDOCKERD))
+                spec = importlib.util.spec_from_loader(module_name, loader)
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                assert spec.loader is not None
+                spec.loader.exec_module(module)
+                return module
+            finally:
+                sys.argv = saved_argv
+                os.environ.clear()
+                os.environ.update(saved_env)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            module = load_module("skydnird", {"HOME": str(home)})
+            self.assertEqual(module.PDOCKER_HOME, str(home / ".skydnir"))
+            report = home / ".skydnir" / "migration" / "from-pdocker.txt"
+            self.assertTrue(report.exists())
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("schema=skydnir.runtime-home-migration.v1", text)
+            self.assertIn(f"effective_home={home / '.skydnir'}", text)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".pdocker").mkdir()
+            module = load_module("skydnird", {"HOME": str(home)})
+            self.assertEqual(module.PDOCKER_HOME, str(home / ".pdocker"))
+            self.assertFalse((home / ".skydnir" / "migration" / "from-pdocker.txt").exists())
 
     def test_pdockerd_engine_identity_prefers_skydnir_daemon_name(self):
         def load_identity(argv0, env):

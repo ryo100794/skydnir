@@ -234,14 +234,16 @@ Current implementation status on `rename/skydnir`:
   legacy file.
 - Android continues to pass an explicit app-private `PDOCKER_HOME`; package
   data and sockets are not renamed in this phase.
-
-Still pending:
-
 - Top-level `pdocker.yml` / `skydnir.yml` and home config files are dual-read
   for the rename-transition runtime-home keys only.  This is intentionally a
   small parser, not a general YAML config system.
-- A user-facing migration report under `~/.skydnir/migration/` for desktop
-  host usage.
+- New Skydnir desktop homes record `~/.skydnir/migration/from-pdocker.txt`
+  without creating `~/.skydnir` when an existing `~/.pdocker` home is being
+  reused.
+
+Still pending:
+
+- None for the first-wave config migration.
 
 Old paths:
 

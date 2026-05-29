@@ -131,6 +131,43 @@ def _select_runtime_home():
     return legacy_home
 
 
+def _write_runtime_home_migration_report(selected_home):
+    """Write a small user-facing migration report for new Skydnir homes.
+
+    The report is intentionally side-effect light: explicit PDOCKER_HOME keeps
+    full compatibility and existing ~/.pdocker reuse does not create ~/.skydnir,
+    because that directory would change future home-selection precedence.
+    """
+    if os.environ.get("PDOCKER_HOME"):
+        return
+    home = os.path.expanduser("~")
+    skydnir_home = os.path.join(home, ".skydnir")
+    legacy_home = os.path.join(home, ".pdocker")
+    requested = selected_home == skydnir_home
+    requested = requested or bool(os.environ.get("SKYDNIR_HOME"))
+    requested = requested or os.path.isfile(os.path.join(os.getcwd(), "skydnir.yml"))
+    requested = requested or os.path.isfile(os.path.join(skydnir_home, "config.yml"))
+    if not requested:
+        return
+    migration_dir = os.path.join(skydnir_home, "migration")
+    try:
+        os.makedirs(migration_dir, exist_ok=True)
+        report = os.path.join(migration_dir, "from-pdocker.txt")
+        lines = [
+            "schema=skydnir.runtime-home-migration.v1",
+            f"legacy_home={legacy_home}",
+            f"skydnir_home={skydnir_home}",
+            f"effective_home={selected_home}",
+            f"legacy_exists={1 if os.path.isdir(legacy_home) else 0}",
+            f"skydnir_exists={1 if os.path.isdir(skydnir_home) else 0}",
+            "note=Skydnir selected the new runtime-home surface without deleting legacy pdocker data.",
+        ]
+        with open(report, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError:
+        return
+
+
 def _daemon_product_name():
     explicit = os.environ.get("SKYDNIR_DAEMON_NAME", "").strip()
     if explicit:
@@ -144,6 +181,7 @@ def _daemon_product_name():
 DAEMON_PRODUCT_NAME = _daemon_product_name()
 DAEMON_SERVER_VERSION = f"{DAEMON_PRODUCT_NAME}/0.1"
 PDOCKER_HOME = _select_runtime_home()
+_write_runtime_home_migration_report(PDOCKER_HOME)
 IMAGES_DIR = os.path.join(PDOCKER_HOME, "images")
 LAYERS_DIR = os.path.join(PDOCKER_HOME, "layers")
 CONTAINERS_DIR = os.path.join(PDOCKER_HOME, "containers")
