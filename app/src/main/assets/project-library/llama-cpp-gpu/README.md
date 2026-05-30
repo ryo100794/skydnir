@@ -92,7 +92,7 @@ the ICD allocation/chunking path itself.
 The image build pins `LLAMA_CPP_REF` to `b9030` and records the resolved commit
 inside `/opt/llama.cpp/.pdocker-llama-cpp-commit`. It defaults CMake to
 `Release` and one build job. The single job is intentionally slow, but it keeps
-the build inside the generic pdocker execution path without llama.cpp source
+the build inside the generic Skydnir execution path without llama.cpp source
 patches or shader-compiler wrappers. Raise `LLAMA_CPP_BUILD_JOBS` only when the
 device has enough free memory and swap for shader or Vulkan backend
 compilation. Skydnir may apply generic Android build-executor memory telemetry
@@ -105,7 +105,7 @@ The GPU profile action writes:
 - `profiles/pdocker-gpu-diagnostics.json`, with the selected backend,
   recommendation reason, memory/thread/context choices, and CUDA/Vulkan signal
   booleans
-- pdocker GPU bridge evidence when available. The profile script probes
+- Skydnir GPU bridge evidence when available. The profile script probes
   `pdocker-gpu-shim --queue-probe` and `--vector-add-fd`; a successful FD
   shared-buffer probe is recorded as bridge readiness, not as llama.cpp GPU
   acceleration until the llama backend is wired to the bridge.
@@ -121,10 +121,10 @@ resolved GPU/backend arguments, KV offload guard state, llama-server argv, and
 Qwen3 weights are available under the Apache 2.0 license. This template
 downloads the model at runtime; it is not bundled into the APK.
 
-The compose file requests Docker-compatible `gpus: all`. pdockerd maps that to
+The compose file requests Docker-compatible `gpus: all`. skydnird maps that to
 its Vulkan passthrough / CUDA-compatible negotiation state where available.
 GPU acceleration is considered real only when the glibc llama.cpp process uses
-a container-facing pdocker GPU shim. Android/Bionic GPU libraries and services
+a container-facing Skydnir GPU shim. Android/Bionic GPU libraries and services
 may sit behind that shim, but they must not own the LLM engine or replace the
 container's llama-server process.
 The same distinction applies to reporting: `/health` proves only that

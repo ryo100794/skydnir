@@ -139,7 +139,7 @@ elif [[ "$mode" = "cuda" || "$mode" = "cuda-compat" || "${PDOCKER_CUDA_COMPAT:-}
   backend="cpu"
   ngl="0"
   if [[ "$bridge_fd_signal" = "true" ]]; then
-    reason="CUDA-compatible mode was requested and the pdocker GPU bridge validated, but llama.cpp bridge backend is not wired yet; using CPU fallback"
+    reason="CUDA-compatible mode was requested and the Skydnir GPU bridge validated, but llama.cpp bridge backend is not wired yet; using CPU fallback"
   else
     reason="CUDA-compatible mode was requested, but no validated glibc GPU bridge exists; using CPU fallback"
   fi
@@ -147,9 +147,9 @@ elif [[ "$pdocker_opencl_icd_ready_signal" = "true" ]]; then
   backend="cpu"
   ngl="0"
   if [[ "$bridge_fd_signal" = "true" ]]; then
-    reason="pdocker OpenCL ICD is ready and the shared-buffer GPU bridge validates, but llama.cpp OpenCL kernel lowering is not complete yet; using CPU fallback"
+    reason="Skydnir OpenCL ICD is ready and the shared-buffer GPU bridge validates, but llama.cpp OpenCL kernel lowering is not complete yet; using CPU fallback"
   else
-    reason="pdocker OpenCL ICD is ready, but the shared-buffer GPU bridge did not validate yet; using CPU fallback"
+    reason="Skydnir OpenCL ICD is ready, but the shared-buffer GPU bridge did not validate yet; using CPU fallback"
   fi
 elif command -v vulkaninfo >/dev/null 2>&1 && vulkaninfo --summary >/dev/null 2>&1; then
   backend="vulkan"
@@ -159,7 +159,7 @@ elif command -v vulkaninfo >/dev/null 2>&1 && vulkaninfo --summary >/dev/null 2>
 elif [[ "$bridge_fd_signal" = "true" ]]; then
   backend="cpu"
   ngl="0"
-  reason="pdocker GPU bridge validated a shared-buffer command, but llama.cpp bridge backend is not wired yet; using CPU fallback"
+  reason="Skydnir GPU bridge validated a shared-buffer command, but llama.cpp bridge backend is not wired yet; using CPU fallback"
 fi
 
 cat > "$out" <<EOF

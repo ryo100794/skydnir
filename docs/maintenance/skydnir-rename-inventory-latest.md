@@ -6,50 +6,51 @@ This generated ledger classifies tracked `pdocker`-family names before
 any public Skydnir rename work proceeds.  It is intentionally an
 inventory, not a replacement script.
 
-- Entries: `19452`
+- Entries: `20742`
 - Skipped binary files: `22`
 
 ## Counts by Token
 
 | Token | Count |
 |---|---:|
-| `PDOCKER` | 4207 |
-| `PDocker` | 10 |
-| `pDocker` | 8 |
-| `pdocker` | 13385 |
-| `pdocker-android` | 83 |
-| `pdockerd` | 1759 |
+| `PDOCKER` | 4212 |
+| `PDocker` | 12 |
+| `Pdocker` | 1263 |
+| `pDocker` | 10 |
+| `pdocker` | 13400 |
+| `pdocker-android` | 84 |
+| `pdockerd` | 1761 |
 
 ## Counts by Category
 
 | Category | Count |
 |---|---:|
-| `android_ui_or_package_surface` | 175 |
-| `artifact_schema` | 342 |
+| `android_ui_or_package_surface` | 173 |
+| `artifact_schema` | 912 |
 | `cli_command` | 29 |
 | `config_path` | 137 |
 | `daemon_binary_or_service` | 540 |
-| `documentation_reference` | 186 |
-| `environment_variable` | 2826 |
-| `historical_evidence` | 11005 |
-| `internal_reference` | 1936 |
-| `socket_or_storage_path` | 757 |
-| `test_fixture` | 1519 |
+| `documentation_reference` | 194 |
+| `environment_variable` | 2827 |
+| `historical_evidence` | 11601 |
+| `internal_reference` | 1935 |
+| `socket_or_storage_path` | 759 |
+| `test_fixture` | 1635 |
 
 ## Counts by Phase
 
 | Phase | Count |
 |---|---:|
-| `do-not-rewrite-history` | 11347 |
-| `phase-0-guard` | 1519 |
-| `phase-1-or-historical-context` | 186 |
-| `phase-1-ui-copy-or-phase-4-package` | 175 |
+| `do-not-rewrite-history` | 12513 |
+| `phase-0-guard` | 1635 |
+| `phase-1-or-historical-context` | 194 |
+| `phase-1-ui-copy-or-phase-4-package` | 173 |
 | `phase-2-cli-alias` | 29 |
 | `phase-2-daemon-alias` | 540 |
 | `phase-3-config-migration` | 137 |
-| `phase-4-or-later-migration-required` | 757 |
-| `phase-5-dual-read-required` | 2826 |
-| `phase-5-internal-namespace` | 1936 |
+| `phase-4-or-later-migration-required` | 759 |
+| `phase-5-dual-read-required` | 2827 |
+| `phase-5-internal-namespace` | 1935 |
 
 ## Next Action
 

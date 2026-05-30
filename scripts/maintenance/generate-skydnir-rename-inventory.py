@@ -23,6 +23,7 @@ TOKENS = (
     "pdocker-android",
     "pdockerd",
     "PDocker",
+    "Pdocker",
     "PDOCKER",
     "pDocker",
     "pdocker",
@@ -109,6 +110,11 @@ def classify(path: str, token: str, line: str) -> dict[str, Any]:
         phase = "phase-5-dual-read-required"
         migration_required = True
         rationale = "PDOCKER_* env names require SKYDNIR_* dual-read before rename"
+    elif token in {"Pdocker", "PDocker", "pDocker"}:
+        category = "artifact_schema"
+        phase = "do-not-rewrite-history"
+        alias_required = False
+        rationale = "Pdocker-family typed fields and classes are compatibility contracts"
     elif "schema" in lower_line and "pdocker" in lower_line:
         category = "artifact_schema"
         phase = "do-not-rewrite-history"

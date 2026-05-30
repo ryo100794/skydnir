@@ -44,6 +44,68 @@ def require(name: str, condition: bool) -> None:
     ok(name) if condition else fail(name)
 
 
+
+
+PUBLIC_LEGACY_UI_RE = re.compile(r"\b(?:pdocker|Pdocker|PDocker|pDocker)\b|pdocker-android")
+LEGACY_COMPOSE_IMAGE_RE = re.compile(r"^\s*image:\s*[\"']?pdocker/", re.MULTILINE)
+LEGACY_COMPOSE_CONTAINER_RE = re.compile(r"^\s*container_name:\s*[\"']?pdocker-", re.MULTILINE)
+
+
+def check_public_resource_strings() -> None:
+    """Reject newly introduced product-prose legacy names in Android strings."""
+
+    for path in STRINGS:
+        text = path.read_text()
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if "PDOCKER_" in line or "pdockerd.sock" in line or "io.github.ryo100794.pdocker" in line:
+                continue
+            match = PUBLIC_LEGACY_UI_RE.search(line)
+            if match:
+                fail(
+                    "public Android string uses legacy product prose: "
+                    f"{path.relative_to(ROOT)}:{line_number}: {match.group(0)}"
+                )
+    ok("public Android strings use Skydnir product naming")
+
+
+def check_public_compose_template_names() -> None:
+    """Reject new bundled Compose templates that expose pdocker image/container names."""
+
+    compose_files = [ROOT / "app/src/main/assets/default-project/compose.yaml"]
+    compose_files.extend(sorted((ROOT / "app/src/main/assets/project-library").glob("*/compose.yaml")))
+    for path in compose_files:
+        text = path.read_text()
+        if LEGACY_COMPOSE_IMAGE_RE.search(text):
+            fail(f"bundled compose template uses legacy public image name: {path.relative_to(ROOT)}")
+        if LEGACY_COMPOSE_CONTAINER_RE.search(text):
+            fail(f"bundled compose template uses legacy public container name: {path.relative_to(ROOT)}")
+    ok("bundled compose templates use Skydnir public image and container names")
+
+
+def check_bundled_template_public_branding() -> None:
+    """Keep bundled template prose branded as Skydnir, not legacy pdocker."""
+
+    forbidden_by_path = {
+        "app/src/main/assets/project-library/llama-cpp-gpu/README.md": [
+            "generic pdocker execution path",
+            "pdocker GPU bridge evidence",
+            "pdockerd maps that to",
+            "container-facing pdocker GPU shim",
+        ],
+        "app/src/main/assets/project-library/llama-cpp-gpu/scripts/pdocker-gpu-profile.sh": [
+            "the pdocker GPU bridge validated",
+            "pdocker OpenCL ICD is ready",
+            "pdocker GPU bridge validated a shared-buffer command",
+        ],
+    }
+    for rel_path, tokens in forbidden_by_path.items():
+        text = (ROOT / rel_path).read_text()
+        leftovers = [token for token in tokens if token in text]
+        if leftovers:
+            fail(f"bundled template exposes legacy public prose in {rel_path}: {leftovers}")
+    ok("bundled template public prose uses Skydnir naming")
+
+
 def read_script_with_migrated_body(path: Path) -> str:
     """Read a stable script wrapper plus its relocated implementation, if any."""
 
@@ -93,6 +155,10 @@ def main() -> int:
     metadata_index_src = (ROOT / "docs/design/PROJECT_METADATA_INDEX.md").read_text()
     default_workspace_src = (ROOT / "docs/manual/DEFAULT_DEV_WORKSPACE.md").read_text()
     string_src = "\n".join(path.read_text() for path in STRINGS)
+
+    check_public_resource_strings()
+    check_public_compose_template_names()
+    check_bundled_template_public_branding()
 
     docker_action_count = main_src.count("openDockerTerminal(") - 1
     require("upstream docker cli is not a normal apk ui path", docker_action_count <= 1)
