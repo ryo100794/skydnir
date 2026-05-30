@@ -1,7 +1,7 @@
 # Skydnir: implementation status
 
 Snapshot at v0.5.3 / build 20260505.1. This document covers fixed-build
-implementation evidence: (1) what pdockerd implemented for that build,
+implementation evidence: (1) what the Skydnir daemon implemented for that build,
 (2) what worked on the Android APK end-to-end for recorded evidence, and
 (3) the known gaps vs upstream Docker Engine. It is not a live ADB/device
 status page.
@@ -30,7 +30,7 @@ are release-process notes, with signing material kept outside Git.
 
 | layer | size | status |
 |---|---|---|
-| **pdockerd** (Python single-file daemon, docker-proot-setup/bin) | 3500 LOC | Engine API 1.43-compatible, ~30 endpoints |
+| **Skydnir daemon** (`pdockerd` compatibility binary, docker-proot-setup/bin) | 3500 LOC | Engine API 1.43-compatible, ~30 endpoints |
 | **APK** (Skydnir) | 31 MB | install, foreground service, Engine API, image pull/browse/edit flows; SDK28 compat smoke paths have historical device evidence, while modern/API29+, terminal, service truth, and teardown remain gated |
 | **Workspace UI** | native widgets + xterm.js 5.3 + JNI pty tabs + editor | Compose, Dockerfile, images, containers, and `-it`-style sessions share one console surface |
 
@@ -47,11 +47,11 @@ replacements:
 | containerd snapshotter (overlayfs) | content-addressable layer pool + per-container hardlink-clone tree |
 | overlayfs CoW | `libcow.so` LD_PRELOAD shim — break_hardlink on `open(O_WRONLY/RDWR/TRUNC)`, `truncate`, `chmod`, etc. |
 | runc (kernel ns + cgroups) | Android `pdocker-direct` userspace executor (seccomp/ptrace path mediation) |
-| dockerd | pdockerd — Python HTTP server speaking Docker Engine API 1.43 over unix socket |
-| BuildKit | legacy builder path (FROM/RUN/COPY/ADD/WORKDIR/ENV/ARG/CMD/ENTRYPOINT in pdockerd) |
+| dockerd | skydnird / `pdockerd` compatibility daemon — Python HTTP server speaking Docker Engine API 1.43 over unix socket |
+| BuildKit | legacy builder path (FROM/RUN/COPY/ADD/WORKDIR/ENV/ARG/CMD/ENTRYPOINT in the Skydnir daemon) |
 | containerd image pull | `crane export` → tarball → Python tarfile extract |
 
-### 2. Endpoint coverage in pdockerd
+### 2. Endpoint coverage in the Skydnir daemon
 
 Endpoint and protocol coverage is maintained in
 [`../test/COMPATIBILITY.md`](../test/COMPATIBILITY.md) and the generated
@@ -63,9 +63,9 @@ shape.
 
 What was confirmed on the Android 15 test device for this fixed build:
 
-- `adb install Skydnir.apk` → MainActivity launches → "Start pdockerd" → unix socket binds at `filesDir/pdocker/pdockerd.sock`
+- `adb install Skydnir.apk` → MainActivity launches → "Start skydnird" compatibility action → unix socket binds at `filesDir/pdocker/pdockerd.sock`
 - `curl --unix-socket .../pdockerd.sock http://d/_ping` → `OK`
-- `docker version` (CLI 29.4 client → pdockerd 0.1 server) → both sides report API 1.43
+- `docker version` (CLI 29.4 client → Skydnir `pdockerd` compatibility server) → both sides report API 1.43
 - `docker pull ubuntu:latest` → 132 MB image landed under `filesDir/pdocker/{images,layers}/` in 52s
 - Tiny SDK28 compat `docker build` and `docker compose up --build` execute real
   container processes through `pdocker-direct`; compose logs show service
@@ -101,7 +101,7 @@ What was confirmed on the Android 15 test device for this fixed build:
   hints or legacy fallbacks only, especially after interrupted compose runs.
   Widgets also expose direct start/stop/restart, log, file-browser,
   known-service URL, and grouped interactive console actions.
-- Main UI action wiring → product actions start pdockerd and use Engine
+- Main UI action wiring → product actions start the Skydnir daemon and use Engine
   API/native orchestration for image pull, Dockerfile build, Compose-style
   create/start, logs, and lifecycle state. Upstream Docker CLI/Compose binaries
   are not packaged in the APK; they remain host/test compatibility tools only.
@@ -138,7 +138,7 @@ What was confirmed on the Android 15 test device for this fixed build:
   `filesDir/pdocker/projects/imports/`; writable container layers can be edited
   directly, and read-only lower-layer files can be copied into the container's
   writable overlay before editing.
-- Android direct execution now advertises and uses pdockerd's `cow_bind`
+- Android direct execution now advertises and uses the Skydnir daemon `cow_bind`
   lower/upper contract for container create/start. Large images are no longer
   copied into every new container: SOG15 dev-workspace create measured about
   77.35s before this path and about 1.10s after it; fresh `pdocker-dev`
@@ -201,12 +201,12 @@ Current open-risk anchors as of 2026-05-05:
 |---|---|
 | crane (pure-Go) reads `/etc/resolv.conf` — Android app sandbox doesn't have it | in-process Python HTTP CONNECT proxy in pdockerd_bridge → `HTTPS_PROXY` env (uses bionic getaddrinfo) |
 | Go x509 default certFiles list misses Android | `SSL_CERT_DIR=/system/etc/security/cacerts` |
-| pdockerd's `/tmp` blob staging EACCES | `PDOCKER_TMP_DIR=runtime/tmp` |
+| Skydnir daemon `/tmp` blob staging EACCES | `PDOCKER_TMP_DIR=runtime/tmp` |
 | SELinux denies `link()` on app_data_file | `os.link` probe at startup → `PDOCKER_LINK_MODE=symlink` for tar extraction + clone |
 | SELinux denies `setxattr` in security.* | `_copy_no_xattr()` substitute that drops xattr/flag copy |
 | Files in app data have `exec_no_trans` SELinux deny | crane/pdocker-direct/libcow shipped via jniLibs/arm64-v8a/lib*.so so they extract to `nativeLibraryDir` (the only exec-allowed location in app sandbox); upstream Docker CLI/Compose stay test-only and are not APK payload |
 | Android 15 rejects PRoot tracee memory rewrite during exec | no-PRoot runtime is selected by default; SDK28 compat uses the scratch `pdocker-direct` executor for real process tests |
-| bionic-built libcow.so won't load inside ubuntu (libdl.so vs libdl.so.2) | ship the host-glibc libcow build instead — pdockerd just `shutil.copy`s it into the container, container's own ld.so does the loading. Fast defaults skip read-only fd tracking and xattr copy-up unless `PDOCKER_COW_TRACK_READONLY_FDS=1` or `PDOCKER_COW_COPY_XATTRS=1` is set. |
+| bionic-built libcow.so won't load inside ubuntu (libdl.so vs libdl.so.2) | ship the host-glibc libcow build instead — the Skydnir daemon just `shutil.copy`s it into the container, container's own ld.so does the loading. Fast defaults skip read-only fd tracking and xattr copy-up unless `PDOCKER_COW_TRACK_READONLY_FDS=1` or `PDOCKER_COW_COPY_XATTRS=1` is set. |
 
 ### 5. Gaps vs upstream Docker
 
@@ -269,7 +269,7 @@ skydnir/
 │                                      — llama.cpp GPU/CPU workspace template
 │       └── xterm/{index.html,xterm.js,xterm.css,xterm-addon-fit.js}
 ├── docker-proot-setup/                — integrated backend source
-│   └── bin/pdockerd                   — the actual daemon (3500 LOC)
+│   └── bin/pdockerd                   — Skydnir daemon compatibility binary (3500 LOC)
 └── scripts/
     ├── build-native-android-ndk.sh    — Android NDK helper build path
     ├── copy-native.sh                 — backend + vendor/ → jniLibs

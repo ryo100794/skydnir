@@ -61,15 +61,15 @@ issues, and deciding which planned gaps become hard gates.
 3. **[#4](https://github.com/ryo100794/skydnir/issues/4)
    llama GPU Q6_K and environment propagation** `[P0 doing]`: continue the
    Q6_K blocker without touching llama.cpp, Dockerfiles, models, or prompts.
-   The compare script, pdockerd defaults, UI/compose path, and artifact
+   The compare script, Skydnir daemon defaults, UI/compose path, and artifact
    verifier must use an audited GPU diagnostic environment so device results do
-   not diverge by launch path. As of `d5ce2e8`, pdockerd runtime defaults are
+   not diverge by launch path. As of `d5ce2e8`, Skydnir daemon runtime defaults are
    read from `scripts/llama-gpu-env-manifest.json` (packaged beside the daemon)
    and host parity tests cover the manifest, UI/compose keys, compare
    forwarding, verifier constants, and asset copy path; remaining proof is the
    real-device config-propagation artifact plus the Q6_K correctness boundary.
    Granular executable units: (a) env manifest
-   parity across compare, pdockerd, UI/compose, and verifier; (b) device
+   parity across compare, Skydnir daemon, UI/compose, and verifier; (b) device
    readiness/headroom artifact before model load; (c) NGL=1 Q6_K
    workgroup/writeback oracle run; (d) artifact classification that keeps
    memory blockers and Q6_K mismatches non-promoting; and (e) only after a
@@ -369,7 +369,7 @@ evidence proves the real behavior or the limitation remains visible.
   `q6-native-device-execution-or-final-store`, with diagnostic evidence in
   `docs/test/llama-gpu-ngl1-q6-row-provenance-20260519.json` and the active
   stage gates in `docs/plan/LLAMA_GPU_BRIDGE_NEXT_STEPS.md`. Environment
-  propagation remains first-class: compare script, pdockerd defaults,
+  propagation remains first-class: compare script, Skydnir daemon defaults,
   UI/compose launches, and artifact verification must stay synchronized before
   results can be compared. Remaining work is native llama Q6_K final-store
   versus device-execution bisection. This lane is non-promoting until native
@@ -562,7 +562,7 @@ risk, not stable checkpoint credit.
 - [doing] Image pull UI must not hard-code `ubuntu:22.04`. It now needs a
   searchable selection dialog that combines local image refs, Compose
   `image:` refs, Dockerfile `FROM` refs, common defaults, and Docker Hub public
-  search results. The selected architecture/platform must come from pdockerd
+  search results. The selected architecture/platform must come from the Skydnir daemon
   host environment (`/system/host` / `PDOCKER_PLATFORM`) with ABI fallback only
   when the daemon is unreachable. Local implementation now passes the selected
   platform through `/images/create?platform=...` into `pull_image(...,
@@ -599,7 +599,7 @@ risk, not stable checkpoint credit.
   checks pass; keep open until a device visual pass confirms the progress line
   does not fragment during a real VS Code build.
 - [done] Builder compatibility regression gate. Recent VS Code workspace
-  failure was caused by pdockerd builder logic not expanding a valid Dockerfile
+  failure was caused by Skydnir daemon builder logic not expanding a valid Dockerfile
   `COPY scripts/pdocker-*` source pattern. This is a backend compatibility
   gap, not a Dockerfile/template change. Closed with unittest coverage for
   Dockerfile COPY wildcard expansion, context-escape rejection, and the bundled
@@ -677,7 +677,7 @@ risk, not stable checkpoint credit.
   operation, not "open docker pull shell"; if the ref already exists, the UI
   now describes it as an atomic update/re-pull and the job log says the old tag
   is kept until publish succeeds. Host static coverage in
-  `python3 scripts/verify-ui-actions.py` ties that wording to pdockerd's
+  `python3 scripts/verify-ui-actions.py` ties that wording to the Skydnir daemon
   `.old-*` backup and `os.replace(stage, d)` publish path. Remaining
   acceptance: connected-device visual pass for wording/logs and an interrupted
   live-pull artifact proving the crash-safety behavior end-to-end.
@@ -782,7 +782,7 @@ implementation change plus a focused verification artifact.
   Docker CLI `docker cp` end-to-end plan. This is regression evidence only;
   device-gated COW/archive mutation safety and `docker cp` same-container-ID
   proof remain planned-gap/non-promoting until their device artifacts promote.
-  Current host coverage proves pdockerd can observe and serialize already-
+  Current host coverage proves the Skydnir daemon can observe and serialize already-
   materialized COW hardlinks, including merged lower/upper hardlink peers and
   whiteouted hardlink-source paths, but this is not evidence that the direct
   runtime can create true `linkat` hardlinks.
@@ -818,7 +818,7 @@ implementation change plus a focused verification artifact.
   `-p 16 -n 8 -r 3 -ngl 0 -t 8`: prompt processing about 2.40 tokens/s,
   generation about 0.228 tokens/s, backend `BLAS`/OpenBLAS CPU.
 - [done] Add llama healthcheck support end-to-end. The template now declares a
-  Dockerfile `HEALTHCHECK`, pdockerd carries image healthchecks into container
+  Dockerfile `HEALTHCHECK`, the Skydnir daemon carries image healthchecks into container
   state, runs a lightweight monitor, and `docker ps` reports `Up (healthy)`.
 - [done] Test Vulkan-requested llama mode. `gpus: all` now reaches
   `DeviceRequests`, `PdockerGpu.Modes`, GPU env, and the profile selects
@@ -893,7 +893,7 @@ implementation change plus a focused verification artifact.
 - [done] Expose daemon-owned active operations through
   `GET /system/operations` and render them in the Overview. Builds triggered
   from ADB, tests, or the UI are now visible from the app because the state is
-  recorded in pdockerd rather than only in UI job memory.
+  recorded in the Skydnir daemon rather than only in UI job memory.
 - [done] Add tracer process cleanup: `PTRACE_O_EXITKILL` where available,
   separate child process group, and SIGINT/SIGTERM/SIGHUP/SIGQUIT handling so
   aborted direct runs do not leave tracee process leftovers.
@@ -942,7 +942,7 @@ implementation change plus a focused verification artifact.
   path should keep using large-allocation guardrails to return `ENOMEM` before
   Android LMK kills the app, while the opt-in large-workload path should make
   oversized jobs run by combining file-backed mmap/streaming, managed anonymous
-  regions, and GPU bridge guarded memory. Required pieces are pdockerd-owned
+  regions, and GPU bridge guarded memory. Required pieces are Skydnir-daemon-owned
   memory telemetry rings, structured OOM/LMK evidence, UI/debug-pane memory
   status, synthetic guard-denial tests, controlled restart classification, and
   explicit labels/env such as `io.pdocker.large-workload=enabled` without
@@ -975,7 +975,7 @@ implementation change plus a focused verification artifact.
   verified receiver-only daemon start, socket ping, no Skydnir ANR/FATAL during
   the observation window, and no default UI process after receiver startup.
   Next check: container process reconciliation across UI process death.
-  Acceptance: a device artifact proves UI-process death does not kill pdockerd
+  Acceptance: a device artifact proves UI-process death does not kill the Skydnir daemon
   or make cards report stale running state.
 - [done] Optimize Python layer diff/snapshot by comparing against a compact
   prior-layer path index and re-hardlinking committed snapshot files. Tiny
@@ -987,7 +987,7 @@ implementation change plus a focused verification artifact.
   and copy-up uses `copy_file_range` when available. Reusable microbench:
   `docker-proot-setup/src/overlay/bench_cow.sh`.
 - [done] Enable direct `cow_bind` container create/start in packaged APKs and
-  sync the backend asset during Gradle builds so stale pdockerd code cannot be
+  sync the backend asset during Gradle builds so stale Skydnir daemon code cannot be
   shipped accidentally. On SOG15, dev-workspace container create dropped from
   about 77.35s with full rootfs materialization to about 1.10s with lower/upper
   sharing; a fresh `pdocker-dev` create/start measured about 0.382s/0.389s.
@@ -996,7 +996,7 @@ implementation change plus a focused verification artifact.
   the second process fail on an already-bound port, and overwriting state as
   `Exited` while the first service is still serving.
 - [done] Keep release builds from exposing debug-only daemon entry points.
-  The product still starts the internal pdockerd Engine API for UI-driven
+  The product still starts the internal Skydnir Engine API for UI-driven
   compose/build/container management, but release APKs do not export the smoke
   broadcast receiver and the normal UI hides host shell/manual daemon/debug
   benchmark actions.
@@ -1058,7 +1058,7 @@ implementation change plus a focused verification artifact.
   `unlink`, writes through either name are visible through the other, invalid
   flags/mediated escapes return Linux-compatible errno, and restart recovery
   does not promote partial hardlink/CoW metadata or divergent copy-fallback
-  artifacts. The May 16 host slice found reusable pdockerd/archive inode
+  artifacts. The May 16 host slice found reusable Skydnir-daemon/archive inode
   evidence for existing hardlinks, but no daemon-side sidecar/index is promoted
   as a source of truth; true creation, mediation, and recovery still require
   direct-runtime C work and device evidence. Execute as separate units:
@@ -1626,7 +1626,7 @@ Tasks:
    Surface `target_met`, speedup, current blocker, GPU layer count, and latest
    compare artifact in the project dashboard.
 10. **[done] Distinguish daemon operations from containers in the UI.**
-    Long-running compare/build cards are pdockerd operations and intentionally
+    Long-running compare/build cards are Skydnir daemon operations and intentionally
     do not appear in `docker ps`; container cards are reconciled only from
     Engine API `/containers/json?all=1`. The llama GPU compare operation must
     surface CPU/GPU tokens/s, speedup, `target_met`, GPU layer count, current
@@ -1731,7 +1731,7 @@ Next implementation slice:
   command adds measurable overhead and is the wrong shape for LLM workloads.
 - Keep container-visible paths under `/run/pdocker-gpu`; do not expose Android
   app-data absolute paths to container code.
-- Add queue lifecycle under pdockerd so container processes never call Android
+- Add queue lifecycle under the Skydnir daemon so container processes never call Android
   vendor libraries directly.
 - Add a real reusable buffer/fence protocol and then wire a minimal ggml/llama
   GPU backend path to the bridge.
