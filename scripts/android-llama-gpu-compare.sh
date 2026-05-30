@@ -4451,9 +4451,6 @@ def build_q6_native_vs_writeback_split():
             "writeback_matches_native": writeback_matches_native,
             "writeback_matches_expected": writeback_matches_expected,
             "sample_class": sample_class,
-            "trace_writeback_verified": record.get("trace_writeback_verified"),
-            "trace_writeback_mismatch": record.get("trace_writeback_mismatch"),
-            "trace_writeback_mismatch_fields": record.get("trace_writeback_mismatch_fields"),
             "source_spirv_hash": q6_native_spirv_identity.get("source_spirv_hash"),
             "effective_spirv_hash": q6_native_spirv_identity.get("effective_spirv_hash"),
         })
