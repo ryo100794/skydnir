@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "compat-audit.py"
+DOCKER_COMPAT_SCOPE = ROOT / "docs" / "design" / "DOCKER_COMPAT_SCOPE.md"
 
 spec = importlib.util.spec_from_file_location("compat_audit", SCRIPT)
 compat_audit = importlib.util.module_from_spec(spec)
@@ -75,6 +76,7 @@ class EngineBaseRouteContractTest(unittest.TestCase):
     def setUp(self):
         self.pdockerd = (ROOT / "docker-proot-setup" / "bin" / "pdockerd").read_text(encoding="utf-8")
         self.asset = (ROOT / "app" / "src" / "main" / "assets" / "pdockerd" / "pdockerd").read_text(encoding="utf-8")
+        self.compat_scope = DOCKER_COMPAT_SCOPE.read_text(encoding="utf-8")
 
     def test_staged_asset_matches_pdockerd_source(self):
         self.assertEqual(self.pdockerd, self.asset)
@@ -90,6 +92,12 @@ class EngineBaseRouteContractTest(unittest.TestCase):
         self.assertIn('elif path.startswith("/skydnir/"):', self.pdockerd)
         self.assertIn('path = path[len("/skydnir"):] or "/"', self.pdockerd)
         self.assertEqual(self.pdockerd, self.asset)
+
+    def test_skydnir_api_prefix_alias_is_documented_as_extension_surface(self):
+        self.assertIn("/skydnir/version", self.compat_scope)
+        self.assertIn("/skydnir/system/host", self.compat_scope)
+        self.assertIn("/v1.43/skydnir/version", self.compat_scope)
+        self.assertIn("unprefixed routes remain canonical", self.compat_scope)
 
     def test_network_dynamic_routes_fail_closed_for_unsupported_post(self):
         self.assertIn('if sub and method != "POST":', self.pdockerd)

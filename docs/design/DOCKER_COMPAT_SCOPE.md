@@ -46,6 +46,11 @@ Docker-compatible endpoints and Skydnir extensions are intentionally separate:
   `GET /system/df` and `POST /system/prune`, and pdocker-prefixed response
   fields such as `PdockerGpu`, `PdockerMedia`, `PdockerNetwork`,
   `PdockerStorage`, and `PdockerWarnings`.
+- Skydnir-aware clients may also use the `/skydnir/...` extension prefix. The
+  daemon normalizes this prefix after optional Engine API version prefixes, so
+  `/skydnir/version`, `/skydnir/system/host`, and
+  `/v1.43/skydnir/version` resolve to their unprefixed handlers. The
+  unprefixed routes remain canonical for standard Docker clients.
 - Extension fields must not be required for basic Docker CLI compatibility.
   They exist to make Android-specific truth visible: storage accounting,
   service ownership, GPU/media bridge status, memory pressure, Documents/SAF
