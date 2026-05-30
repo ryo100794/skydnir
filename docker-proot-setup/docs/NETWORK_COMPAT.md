@@ -1,16 +1,16 @@
-# pdocker network visibility and port truth
+# Skydnir network visibility and port truth
 
 Snapshot date: 2026-05-15.
 
-pdockerd still executes containers in Android's app/user-space networking
-context. It does not yet create a kernel network namespace or a real bridge
-interface. The current work makes container network identity visible through
+The Skydnir daemon still executes containers in Android's app/user-space
+networking context. It does not yet create a kernel network namespace or a
+real bridge interface. The current work makes container network identity visible through
 Docker-compatible API fields, records requested publish mappings, and separately
 reports whether a mapping has active listener/proxy/rewrite evidence.
 
 ## Docker-compatible surface
 
-For each created container, pdockerd now stores:
+For each created container, the daemon now stores:
 
 - `NetworkSettings.IPAddress`
 - `NetworkSettings.Networks.bridge.IPAddress`
@@ -53,7 +53,7 @@ Network IDs and endpoint IDs are stable hashes, not kernel object IDs. Compose
 project/service aliases and endpoint aliases are preserved for inspect/list
 responses and for the current `/etc/hosts` compatibility injection.
 
-## pdocker extension surface
+## Compatibility extension surface
 
 `/containers/{id}/json` also includes `PdockerNetwork`:
 
@@ -94,10 +94,10 @@ address/port to the Android-host-visible port. The entry's requested
 `PdockerNetwork.PortMappingStatus` is the truth surface for published ports:
 
 - `planned`: a stopped/created container has a requested mapping.
-- `inactive`: the container is running, but no pdocker-owned listener, proxy,
+- `inactive`: the container is running, but no Skydnir-owned listener, proxy,
   or rewrite evidence exists for the mapping.
-- `active`: pdockerd verified a live container-owned listener from `/proc/net`
-  or accepted explicit live runtime/proxy/rewrite evidence.
+- `active`: the Skydnir daemon verified a live container-owned listener from
+  `/proc/net` or accepted explicit live runtime/proxy/rewrite evidence.
 - `conflict`: another container claims the same host port, or `/proc/net` shows
   a matching host listener not owned by this container. Wildcard host binds
   (`0.0.0.0`, `::`, empty) conflict with specific addresses for the same

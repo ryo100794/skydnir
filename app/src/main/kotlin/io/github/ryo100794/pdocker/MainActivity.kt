@@ -4966,7 +4966,7 @@ class MainActivity : AppCompatActivity() {
                 """
                 |# Legacy Project Migration
                 |
-                |pdocker copied lightweight project definition files from the former
+                |Skydnir copied lightweight project definition files from the former
                 |app-private project directory into the selected Android Documents
                 |workspace root.
                 |

@@ -682,6 +682,42 @@ def check_pdocker_extension_surface(root: Path = ROOT) -> None:
         )
 
 
+def check_skydnir_compat_docs_public_branding(root: Path = ROOT) -> None:
+    """Keep public docs branded as Skydnir while preserving literal identifiers."""
+
+    gpu = read_text(root / "docker-proot-setup" / "docs" / "GPU_COMPAT.md", root)
+    network = read_text(root / "docker-proot-setup" / "docs" / "NETWORK_COMPAT.md", root)
+    forbidden = (
+        "# pdocker GPU compatibility extensions",
+        "pdockerd now accepts",
+        "pdocker treats Android GPU support",
+        "pdocker GPU negotiation",
+        "pdocker-owned glibc-facing GPU bridge",
+        "The pdocker Vulkan ICD",
+        "expected pdocker environment variables",
+        "# pdocker network visibility and port truth",
+        "pdockerd still executes containers",
+        "For each created container, pdockerd now stores",
+        "## pdocker extension surface",
+        "no pdocker-owned listener",
+        "pdockerd verified a live",
+    )
+    combined = gpu + "\n" + network
+    leftovers = [token for token in forbidden if token in combined]
+    if leftovers:
+        fail("public compatibility docs still expose legacy product prose: " + ", ".join(leftovers))
+    for token in (
+        "# Skydnir GPU compatibility extensions",
+        "The Skydnir daemon now accepts",
+        "Skydnir treats Android GPU support",
+        "# Skydnir network visibility and port truth",
+        "The Skydnir daemon still executes containers",
+        "## Compatibility extension surface",
+    ):
+        if token not in combined:
+            fail(f"public compatibility docs missing Skydnir wording: {token}")
+
+
 def check_mermaid_sequence_safe_subset(root: Path = ROOT) -> None:
     """Keep durable Mermaid sequence diagrams in the conservative subset.
 
@@ -734,6 +770,7 @@ def run(root: Path = ROOT) -> None:
     check_todo_roadmap_source_quality(root)
     check_historical_evidence_language(root)
     check_pdocker_extension_surface(root)
+    check_skydnir_compat_docs_public_branding(root)
     check_mermaid_sequence_safe_subset(root)
 
 

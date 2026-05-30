@@ -1,20 +1,20 @@
-# pdocker GPU compatibility extensions
+# Skydnir GPU compatibility extensions
 
 Snapshot date: 2026-05-01.
 
-pdockerd now accepts Docker-style GPU requests and maps them onto pdocker's
-Android user-space runtime model.
+The Skydnir daemon now accepts Docker-style GPU requests and maps them onto
+Skydnir's Android user-space runtime model.
 
 ## Design principle
 
-pdocker treats Android GPU support as a Vulkan-first compatibility stack.
+Skydnir treats Android GPU support as a Vulkan-first compatibility stack.
 Native NVIDIA CUDA is only an optional external baseline on NVIDIA Linux
 devices. On ordinary Android devices the intended path is:
 
 ```text
 Docker --gpus / HostConfig.DeviceRequests
-  -> pdocker GPU negotiation
-  -> a pdocker-owned glibc-facing GPU bridge
+  -> Skydnir GPU negotiation
+  -> a Skydnir-owned glibc-facing GPU bridge
   -> Android-side Vulkan/OpenCL execution behind that bridge
   -> cuVK, a restricted CUDA-like API lowered to the bridge runtime
 ```
@@ -40,21 +40,22 @@ docker run --gpus all ubuntu:22.04 env | grep -E 'PDOCKER|CUDA|NVIDIA|VK_'
 
 ## Vulkan/OpenCL diagnostics
 
-When Vulkan or OpenCL mode is requested, pdockerd records negotiation metadata
-and may expose diagnostic paths so tests can prove why direct loading fails.
+When Vulkan or OpenCL mode is requested, the Skydnir daemon records
+negotiation metadata and may expose diagnostic paths so tests can prove why
+direct loading fails.
 These paths are not a production GPU backend. Android vendor GPU libraries are
-Bionic/Android ABI libraries, while pdocker Linux images are glibc userlands.
+Bionic/Android ABI libraries, while Skydnir Linux images are glibc userlands.
 The production bridge must keep the container-facing side glibc-compatible and
 call Android GPU APIs from an APK-owned Bionic sidecar.
 
-When Vulkan mode is requested, pdockerd:
+When Vulkan mode is requested, the Skydnir daemon:
 
 - marks the container with `PdockerGpu.Modes=["vulkan", ...]`;
 - injects `PDOCKER_VULKAN_PASSTHROUGH=1`;
 - injects `VK_ICD_FILENAMES=/etc/vulkan/icd.d/pdocker-android.json`;
-- creates a Vulkan ICD JSON in the container rootfs pointing at pdocker's
-  glibc ICD, `/usr/local/lib/pdocker-vulkan-icd.so`;
-- bind-passes pdocker's glibc ICD and bridge paths:
+- creates a Vulkan ICD JSON in the container rootfs pointing at Skydnir's
+  compatibility glibc ICD, `/usr/local/lib/pdocker-vulkan-icd.so`;
+- bind-passes Skydnir's compatibility ICD and bridge paths:
   - `/usr/local/lib/pdocker-vulkan-icd.so`
   - `/usr/local/bin/pdocker-gpu-shim`
   - `/run/pdocker-gpu`
@@ -66,7 +67,7 @@ When Vulkan mode is requested, pdockerd:
   - `/vendor/lib64/egl`
   - `/vendor/lib64/hw`
 
-The pdocker Vulkan ICD is the production-facing direction because it presents a
+The Skydnir Vulkan ICD is the production-facing direction because it presents a
 normal Vulkan-loader surface to unmodified container applications. It is
 currently marked `PDOCKER_VULKAN_ICD_KIND=pdocker-bridge-minimal` and
 `PDOCKER_VULKAN_ICD_READY=0`: applications can discover the ICD surface, but
@@ -82,7 +83,7 @@ ABI. GPU-requesting containers receive a Linux/glibc
 `/usr/local/bin/pdocker-gpu-shim` capability probe; the APK owns the Bionic
 `pdocker-gpu-executor` and queue socket under `/run/pdocker-gpu`.
 
-When OpenCL mode is requested, pdockerd:
+When OpenCL mode is requested, the Skydnir daemon:
 
 - marks the container with `PdockerGpu.Modes=["opencl", ...]`;
 - injects `PDOCKER_OPENCL_PASSTHROUGH=1`;
@@ -96,7 +97,7 @@ This has the same diagnostic-only limitation as raw Vulkan exposure.
 ## CUDA-compatible API
 
 `cuda-compat` mode is not native NVIDIA CUDA. Android devices normally do not
-expose NVIDIA kernel drivers or `/dev/nvidia*`. pdocker treats CUDA as a
+expose NVIDIA kernel drivers or `/dev/nvidia*`. Skydnir treats CUDA as a
 project-owned compatibility API target:
 
 - injects `PDOCKER_CUDA_COMPAT=1`;
@@ -157,4 +158,4 @@ Recommended decision thresholds:
 `scripts/verify_all.sh` includes a reusable GPU request parser regression. It
 asserts that a Docker `DeviceRequests` payload with `Driver=nvidia` and
 `Capabilities=[gpu,compute,utility]` enables both `vulkan` and `cuda-compat`
-and injects the expected pdocker environment variables.
+and injects the expected compatibility environment variables.
