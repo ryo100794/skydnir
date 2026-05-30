@@ -146,7 +146,9 @@ Skydnir task asset rather than a reduced fallback.
 
 The Engine socket itself is still the compatibility socket inside the app data
 area. New scripts should call `skydnir-engine-env`; compatibility scripts may
-call `pdocker-engine-env`, which resolves the same mounted socket.
+call `pdocker-engine-env`, which resolves the same mounted socket. Both helpers
+prefer `SKYDNIR_ENGINE_SOCKET` and then fall back to legacy `PDOCKER_ENGINE_SOCKET`
+/ `PDOCKER_DOCKER_SOCK` variables and mounted default paths.
 
 ## Service Migration
 

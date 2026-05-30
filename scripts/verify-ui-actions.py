@@ -514,6 +514,11 @@ def main() -> int:
         and "container_name: pdocker-dev" not in default_compose_src,
     )
     require(
+        "default dev workspace exports Skydnir engine socket with legacy fallback",
+        'SKYDNIR_ENGINE_SOCKET: "/pdocker/host/pdockerd.sock"' in default_compose_src
+        and 'PDOCKER_ENGINE_SOCKET: "/pdocker/host/pdockerd.sock"' in default_compose_src,
+    )
+    require(
         "default dev workspace migrates legacy public image and container names",
         "migrateDefaultDevWorkspaceComposeText" in main_src
         and "image: pdocker/dev-workspace:latest" in main_src

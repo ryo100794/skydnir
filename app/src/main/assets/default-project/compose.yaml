@@ -23,6 +23,7 @@ services:
       PDOCKER_PROJECT_DIR: "/pdocker/project"
       PDOCKER_PROJECTS_DIR: "/pdocker/projects"
       PDOCKER_HOME: "/pdocker/host"
+      SKYDNIR_ENGINE_SOCKET: "/pdocker/host/pdockerd.sock"
       PDOCKER_ENGINE_SOCKET: "/pdocker/host/pdockerd.sock"
       SKYDNIR_DOCUMENTS_MOUNT: "${SKYDNIR_DOCUMENTS_MOUNT:-/documents}"
       SKYDNIR_SHARED_DOCUMENTS_MOUNT: "${SKYDNIR_SHARED_DOCUMENTS_MOUNT:-/shared}"

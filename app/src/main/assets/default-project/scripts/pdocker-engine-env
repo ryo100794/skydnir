@@ -47,6 +47,7 @@ if [[ -n "${DOCKER_HOST:-}" ]]; then
   resolved="$DOCKER_HOST"
 else
   candidates=(
+    "${SKYDNIR_ENGINE_SOCKET:-}"
     "${PDOCKER_ENGINE_SOCKET:-}"
     "${PDOCKER_DOCKER_SOCK:-}"
     "/pdocker/host/pdockerd.sock"

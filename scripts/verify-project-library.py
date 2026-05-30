@@ -411,6 +411,10 @@ def main() -> int:
         fail("dev-workspace Docker helpers must source guarded Engine environment")
     if "No mounted Skydnir/Docker Engine socket found." not in dev_helper_scripts:
         fail("dev-workspace Docker helpers must report missing mounted Engine socket")
+    if '"${SKYDNIR_ENGINE_SOCKET:-}"' not in dev_helper_scripts:
+        fail("pdocker-engine-env must prefer SKYDNIR_ENGINE_SOCKET before legacy PDOCKER sockets")
+    if '"${SKYDNIR_ENGINE_SOCKET:-}"\n    "${PDOCKER_ENGINE_SOCKET:-}"' not in dev_helper_scripts:
+        fail("pdocker-engine-env must keep legacy PDOCKER_ENGINE_SOCKET fallback after SKYDNIR_ENGINE_SOCKET")
     if "The APK does not\n  bundle an upstream Docker CLI binary" not in dev_readme:
         fail("dev-workspace README must keep Docker CLI scoped to development container")
     for readme_token in (

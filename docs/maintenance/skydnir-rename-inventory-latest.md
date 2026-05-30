@@ -6,19 +6,19 @@ This generated ledger classifies tracked `pdocker`-family names before
 any public Skydnir rename work proceeds.  It is intentionally an
 inventory, not a replacement script.
 
-- Entries: `19444`
+- Entries: `19460`
 - Skipped binary files: `22`
 
 ## Counts by Token
 
 | Token | Count |
 |---|---:|
-| `PDOCKER` | 4199 |
+| `PDOCKER` | 4207 |
 | `PDocker` | 10 |
 | `pDocker` | 8 |
-| `pdocker` | 13385 |
+| `pdocker` | 13390 |
 | `pdocker-android` | 83 |
-| `pdockerd` | 1759 |
+| `pdockerd` | 1762 |
 
 ## Counts by Category
 
@@ -29,11 +29,11 @@ inventory, not a replacement script.
 | `cli_command` | 29 |
 | `config_path` | 137 |
 | `daemon_binary_or_service` | 543 |
-| `documentation_reference` | 184 |
-| `environment_variable` | 2820 |
+| `documentation_reference` | 186 |
+| `environment_variable` | 2826 |
 | `historical_evidence` | 11005 |
-| `internal_reference` | 1938 |
-| `socket_or_storage_path` | 751 |
+| `internal_reference` | 1940 |
+| `socket_or_storage_path` | 757 |
 | `test_fixture` | 1519 |
 
 ## Counts by Phase
@@ -42,14 +42,14 @@ inventory, not a replacement script.
 |---|---:|
 | `do-not-rewrite-history` | 11347 |
 | `phase-0-guard` | 1519 |
-| `phase-1-or-historical-context` | 184 |
+| `phase-1-or-historical-context` | 186 |
 | `phase-1-ui-copy-or-phase-4-package` | 176 |
 | `phase-2-cli-alias` | 29 |
 | `phase-2-daemon-alias` | 543 |
 | `phase-3-config-migration` | 137 |
-| `phase-4-or-later-migration-required` | 751 |
-| `phase-5-dual-read-required` | 2820 |
-| `phase-5-internal-namespace` | 1938 |
+| `phase-4-or-later-migration-required` | 757 |
+| `phase-5-dual-read-required` | 2826 |
+| `phase-5-internal-namespace` | 1940 |
 
 ## Next Action
 
