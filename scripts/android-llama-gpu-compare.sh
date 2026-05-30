@@ -3718,6 +3718,14 @@ q6_latest_partial = (
     if isinstance(q6_latest_oracle.get("partial_diagnostic"), dict)
     else {}
 )
+Q6_DESCRIPTOR_INVARIANT_FIELDS = (
+    "offset_equals_memory_plus_api_offset",
+    "gpu_offset_equals_memory_plus_api_offset",
+    "descriptor_offset_equals_api_offset",
+    "descriptor_range_matches_api_range",
+)
+
+
 def compact_q6_binding_detail(detail):
     return {
         "index": detail.get("index"),
@@ -4052,16 +4060,14 @@ for detail in q6_binding_details:
     compact_detail = compact_q6_binding_detail(detail)
     if detail.get("descriptor_range_mismatch") is True:
         q6_descriptor_range_mismatches.append(compact_detail)
-    for invariant_field in (
-        "offset_equals_memory_plus_api_offset",
-        "gpu_offset_equals_memory_plus_api_offset",
-        "descriptor_offset_equals_api_offset",
-        "descriptor_range_matches_api_range",
-    ):
-        if detail.get(invariant_field) is False:
+    for invariant_field in Q6_DESCRIPTOR_INVARIANT_FIELDS:
+        invariant_value = detail.get(invariant_field)
+        if invariant_value is not True:
             q6_descriptor_invariant_mismatches.append({
                 **compact_detail,
                 "failed_invariant": invariant_field,
+                "reason": "missing-or-not-true",
+                "value": invariant_value,
             })
     if detail.get("writable"):
         dispatch_hash = detail.get("gpu_after_dispatch_hash")

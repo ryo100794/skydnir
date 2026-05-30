@@ -660,10 +660,15 @@ def _q6_descriptor_invariant_mismatches(q6: Any) -> list[dict[str, Any]]:
             if not isinstance(item, dict):
                 continue
             for field in Q6_DESCRIPTOR_INVARIANT_FIELDS:
-                if item.get(field) is False:
+                invariant_value = item.get(field)
+                if invariant_value is not True:
                     result.append(_compact_binding_identity(
                         item, f"{collection_name}[{index}]"
-                    ) | {"failed_invariant": field})
+                    ) | {
+                        "failed_invariant": field,
+                        "reason": "missing-or-not-true",
+                        "value": invariant_value,
+                    })
     return result
 
 

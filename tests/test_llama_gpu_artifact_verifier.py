@@ -126,6 +126,10 @@ def q6_verified_writeback(hash_value="0x1111111111111111"):
                 "fd_after_hash": hash_value,
                 "writeback_verified": True,
                 "writeback_mismatch": False,
+                "offset_equals_memory_plus_api_offset": True,
+                "gpu_offset_equals_memory_plus_api_offset": True,
+                "descriptor_offset_equals_api_offset": True,
+                "descriptor_range_matches_api_range": True,
             }
         ],
         "q6_writable_writeback_mismatches": [],
@@ -2060,6 +2064,47 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             "gpu_offset_equals_memory_plus_api_offset",
         )
 
+    def test_q6_missing_descriptor_invariant_fields_blocks_native_classification(self):
+        q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "local_size_resolved": [32, 1, 1],
+            "q6_shader_like_abs_delta": 0.0,
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        verifier_module = load_verifier_module()
+        for field in verifier_module.Q6_DESCRIPTOR_INVARIANT_FIELDS:
+            q6["q6_writable_bindings"][0].pop(field, None)
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": q6,
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 50, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-descriptor-invariant-mismatch")
+        self.assertEqual(report["responsibility_boundary"], "q6-descriptor-object-graph")
+        self.assertEqual(report["q6_effective_blocker_class"], "descriptor-invariant-mismatch")
+        self.assertEqual(
+            report["q6_descriptor_invariant_mismatches"][0]["failed_invariant"],
+            "offset_equals_memory_plus_api_offset",
+        )
+        self.assertEqual(
+            report["q6_descriptor_invariant_mismatches"][0]["reason"],
+            "missing-or-not-true",
+        )
+        self.assertIsNone(report["q6_descriptor_invariant_mismatches"][0]["value"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
     def test_q6_oracle_mismatch_blocks_correctness_and_benchmark_claims(self):
         payload = {
             "schema": "pdocker.llama.gpu.compare.v1",
@@ -2264,6 +2309,10 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                                 "fd_after_hash": "0x1111111111111111",
                                 "writeback_verified": True,
                                 "writeback_mismatch": False,
+                                "offset_equals_memory_plus_api_offset": True,
+                                "gpu_offset_equals_memory_plus_api_offset": True,
+                                "descriptor_offset_equals_api_offset": True,
+                                "descriptor_range_matches_api_range": True,
                                 "f32_after_dispatch": [{"index": 257, "value": 1.25}],
                                 "f32_after_writeback": [{"index": 257, "value": 1.25}],
                             }

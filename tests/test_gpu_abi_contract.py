@@ -70,7 +70,7 @@ def load_llama_gpu_compare_q6_helpers():
 def classify_q6_readonly_alias_side_effects(binding_details):
     """Run the real compare-script Q6 binding classifier on synthetic details."""
     source = LLAMA_COMPARE.read_text()
-    start = source.index("def compact_q6_binding_detail")
+    start = source.index("Q6_DESCRIPTOR_INVARIANT_FIELDS = (")
     end = source.index("\nq6_first_mismatch =", start)
     namespace = {
         "q6_latest": {"binding_details": binding_details},
@@ -2603,6 +2603,10 @@ class GpuAbiContractTest(unittest.TestCase):
                                             "fd_after_hash": "0x1111111111111111",
                                             "writeback_verified": True,
                                             "writeback_mismatch": False,
+                                            "offset_equals_memory_plus_api_offset": True,
+                                            "gpu_offset_equals_memory_plus_api_offset": True,
+                                            "descriptor_offset_equals_api_offset": True,
+                                            "descriptor_range_matches_api_range": True,
                                         }
                                     ],
                                     "q6_dispatch_groups": [1, 1, 1],
