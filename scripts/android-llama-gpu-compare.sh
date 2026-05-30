@@ -7,6 +7,10 @@ PKG="${SKYDNIR_PACKAGE:-${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker.compat}}"
 CLASS_PREFIX="io.github.ryo100794.pdocker"
 ACTION_PREFIX="io.github.ryo100794.pdocker"
 CONTAINER="${SKYDNIR_LLAMA_CONTAINER:-${PDOCKER_LLAMA_CONTAINER:-skydnir-llama-cpp}}"
+IMAGE_EXPLICIT=0
+if [[ -n "${SKYDNIR_LLAMA_IMAGE+x}" || -n "${PDOCKER_LLAMA_IMAGE+x}" ]]; then
+  IMAGE_EXPLICIT=1
+fi
 IMAGE="${SKYDNIR_LLAMA_IMAGE:-${PDOCKER_LLAMA_IMAGE:-skydnir/llama-cpp-gpu:latest}}"
 PROJECT="${PDOCKER_LLAMA_PROJECT:-files/pdocker/projects/llama-cpp-gpu}"
 LOCAL_PORT="${PDOCKER_LLAMA_LOCAL_PORT:-28081}"
@@ -594,6 +598,26 @@ stage_probe_artifact_for_container() {
   fi
   export "$env_name=$staged_container"
   echo "[pdocker llama compare] staged $env_name for container: $source_path -> $staged_container" >&2
+}
+
+resolve_default_llama_image() {
+  if [[ "$IMAGE_EXPLICIT" -eq 1 ]]; then
+    return 0
+  fi
+  local state
+  state="$(run_as "if [ -d files/pdocker/images/docker.io_skydnir_llama-cpp-gpu_latest ]; then printf skydnir; elif [ -d files/pdocker/images/docker.io_pdocker_llama-cpp-gpu_latest ]; then printf legacy; else printf none; fi" | tr -d '\r')"
+  case "$state" in
+    skydnir)
+      IMAGE="skydnir/llama-cpp-gpu:latest"
+      ;;
+    legacy)
+      IMAGE="pdocker/llama-cpp-gpu:latest"
+      echo "[pdocker llama compare] using legacy local llama image alias: $IMAGE" >&2
+      ;;
+    *)
+      IMAGE="skydnir/llama-cpp-gpu:latest"
+      ;;
+  esac
 }
 
 stage_spirv_probe_artifacts_for_container() {
@@ -2204,6 +2228,8 @@ CURRENT_STAGE="project path resolution"
 DEVICE_PROJECT="$(run_as "cd $(remote_quote "$PROJECT") && pwd" | tr -d '\r')"
 DEVICE_MODEL_HOST="$(run_as "cd $(remote_quote "$PROJECT") && . ./.env >/dev/null 2>&1 && printf '%s' \"\${PDOCKER_MODEL_HOST:-$DEVICE_PROJECT/models}\"" | tr -d '\r')"
 DEVICE_WORKSPACE_HOST="$(run_as "cd $(remote_quote "$PROJECT") && . ./.env >/dev/null 2>&1 && printf '%s' \"\${PDOCKER_FAST_WORKSPACE_HOST:-$DEVICE_PROJECT/workspace}\"" | tr -d '\r')"
+CURRENT_STAGE="llama image resolution"
+resolve_default_llama_image
 CURRENT_STAGE="SPIR-V probe staging"
 stage_spirv_probe_artifacts_for_container
 CPU_JSON="$TMP/cpu.json"
