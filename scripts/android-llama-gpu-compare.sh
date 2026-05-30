@@ -3968,6 +3968,7 @@ q6_writable_binding_details = [
     if detail.get("writable")
 ]
 q6_descriptor_range_mismatches = []
+q6_descriptor_invariant_mismatches = []
 q6_readonly_upload_hash_mismatches = []
 q6_readonly_dispatch_mutations = []
 q6_readonly_dispatch_alias_side_effects = []
@@ -4048,8 +4049,20 @@ def q6_readonly_mutation_is_alias_side_effect(readonly_detail):
 
 
 for detail in q6_binding_details:
+    compact_detail = compact_q6_binding_detail(detail)
     if detail.get("descriptor_range_mismatch") is True:
-        q6_descriptor_range_mismatches.append(compact_q6_binding_detail(detail))
+        q6_descriptor_range_mismatches.append(compact_detail)
+    for invariant_field in (
+        "offset_equals_memory_plus_api_offset",
+        "gpu_offset_equals_memory_plus_api_offset",
+        "descriptor_offset_equals_api_offset",
+        "descriptor_range_matches_api_range",
+    ):
+        if detail.get(invariant_field) is False:
+            q6_descriptor_invariant_mismatches.append({
+                **compact_detail,
+                "failed_invariant": invariant_field,
+            })
     if detail.get("writable"):
         dispatch_hash = detail.get("gpu_after_dispatch_hash")
         after_hash = detail.get("fd_after_hash")
@@ -4659,7 +4672,7 @@ q6_blocker_class = (
     else "cleared"
     if q6_latest_oracle.get("status") == "match"
     else "descriptor-effective-range-or-upload"
-    if q6_readonly_upload_hash_mismatches or q6_descriptor_range_mismatches
+    if q6_readonly_upload_hash_mismatches or q6_descriptor_range_mismatches or q6_descriptor_invariant_mismatches
     else q6_debug_u32_probe_blocker
     if q6_debug_u32_probe_blocker
     else "shader-readonly-mutation-or-barrier-scope"
@@ -4776,6 +4789,7 @@ q6_workgroup_diagnostics = {
     "q6_readonly_dispatch_alias_side_effects": q6_readonly_dispatch_alias_side_effects[:8],
     "q6_unexpected_readonly_dispatch_mutations": q6_unexpected_readonly_dispatch_mutations[:8],
     "q6_descriptor_range_mismatches": q6_descriptor_range_mismatches[:8],
+    "q6_descriptor_invariant_mismatches": q6_descriptor_invariant_mismatches[:8],
     "q6_writable_writeback_mismatches": q6_writable_writeback_mismatches[:8],
     "q6_writable_writeback_unknown": q6_writable_writeback_unknown[:8],
     "q6_writeback_verified_all": q6_writeback_verified_all,

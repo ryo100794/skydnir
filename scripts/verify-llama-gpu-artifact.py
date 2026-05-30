@@ -635,6 +635,38 @@ def _f32_samples_by_index(value: Any) -> dict[int, float] | None:
     return result
 
 
+Q6_DESCRIPTOR_INVARIANT_FIELDS = (
+    "offset_equals_memory_plus_api_offset",
+    "gpu_offset_equals_memory_plus_api_offset",
+    "descriptor_offset_equals_api_offset",
+    "descriptor_range_matches_api_range",
+)
+
+
+def _q6_descriptor_invariant_mismatches(q6: Any) -> list[dict[str, Any]]:
+    if not isinstance(q6, dict):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in q6.get("q6_descriptor_invariant_mismatches") or []:
+        if isinstance(item, dict):
+            result.append(dict(item))
+        else:
+            result.append({"path": "q6_descriptor_invariant_mismatches[]", "value": item})
+    for collection_name in ("q6_writable_bindings", "q6_readonly_upload_hash_mismatches"):
+        collection = q6.get(collection_name)
+        if not isinstance(collection, list):
+            continue
+        for index, item in enumerate(collection):
+            if not isinstance(item, dict):
+                continue
+            for field in Q6_DESCRIPTOR_INVARIANT_FIELDS:
+                if item.get(field) is False:
+                    result.append(_compact_binding_identity(
+                        item, f"{collection_name}[{index}]"
+                    ) | {"failed_invariant": field})
+    return result
+
+
 def _q6_writeback_evidence(q6: Any) -> dict[str, Any]:
     """Validate Q6_K compact writable-binding writeback hash evidence.
 
@@ -2211,6 +2243,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         }
 
     q6_writeback_evidence = _q6_writeback_evidence(q6)
+    q6_descriptor_invariant_mismatches = _q6_descriptor_invariant_mismatches(q6)
     q6_shader_like = _q6_shader_like_interpretation(q6)
     q6_output_layout = _q6_output_layout_probe(q6)
     q6_row_provenance = _q6_row_provenance_probe(q6)
@@ -2252,6 +2285,11 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             "fix Q6_K local-size propagation/materialization to the expected "
             f"{_q6_expected_local_size(q6)} workgroup shape"
         )
+    elif q6_descriptor_invariant_mismatches:
+        classification = "q6-descriptor-invariant-mismatch"
+        responsibility_boundary = "q6-descriptor-object-graph"
+        q6_blocker_class = "descriptor-invariant-mismatch"
+        next_action = "fix Vulkan descriptor/object-graph offset and range reconstruction before native Q6 shader classification"
     elif q6_writeback_evidence.get("summary") == "mismatch":
         classification = "q6-writeback-mismatch"
         responsibility_boundary = "q6-writeback"
@@ -2446,10 +2484,12 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-native-reduction-or-device-execution",
                 "q6-probe-writeback-cleared-oracle-missing",
                 "q6-safe-kernel-diagnostic-only",
+                "q6-descriptor-invariant-mismatch",
                 *Q6_DEBUG_U32_BLOCKERS,
             }
             else None
         ),
+        "q6_descriptor_invariant_mismatches": q6_descriptor_invariant_mismatches,
         "q6_writeback_evidence": q6_writeback_evidence,
         "runtime_freshness": runtime_freshness,
         "runtime_env_manifest": runtime_env_manifest,
@@ -2525,6 +2565,8 @@ def main(argv: list[str]) -> int:
         return 38
     if classification == "speedup-fields-missing":
         return 39
+    if classification == "q6-descriptor-invariant-mismatch":
+        return 50
     if classification == "q6-writeback-mismatch":
         return 40
     if classification == "q6-writeback-unverified":
