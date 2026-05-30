@@ -952,6 +952,16 @@ def _q6_final_store_boundary(q6: Any) -> dict[str, Any]:
     }
     if requires_samples and not samples:
         summary = "inconclusive"
+    requires_trace_writeback = summary in {
+        "pass",
+        "native-final-store-mismatch",
+        "executor-writeback-mismatch",
+    }
+    if requires_trace_writeback and not all(
+        isinstance(sample, dict) and sample.get("trace_writeback_verified") is True
+        for sample in samples
+    ):
+        summary = "inconclusive"
     if summary == "pass" and not all(
         isinstance(sample, dict)
         and sample.get("final_store_matches_expected") is True

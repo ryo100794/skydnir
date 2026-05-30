@@ -3839,6 +3839,7 @@ def parse_q6_final_store_trace_v2(bindings):
             unexecuted = candidate in (None, 0) and role_code in (None, 0) and value_bits in (None, 0)
             status = "not-executed" if unexecuted else "pass"
             record_failures = []
+            trace_writeback_mismatch_fields = []
             if not unexecuted and candidate != expected["candidate_id"]:
                 status = "fail"
                 record_failures.append("candidate-id")
@@ -3857,6 +3858,25 @@ def parse_q6_final_store_trace_v2(bindings):
             else:
                 trace_status = "fail"
                 record_failures.append("trace-v2-metadata")
+            if not unexecuted:
+                if not writeback:
+                    trace_writeback_mismatch_fields.append("u32_after_writeback")
+                else:
+                    scalar_checks = (
+                        ("candidate_id", candidate, writeback.get(base)),
+                        ("role_code", role_code, writeback.get(base + 1)),
+                        ("value_bits", value_bits, writeback.get(base + 2)),
+                        ("output_index", output_index, writeback.get(base + 3)),
+                        ("record_schema_version", record_schema_version, writeback.get(base + 10)),
+                    )
+                    for field_name, dispatch_value, writeback_value in scalar_checks:
+                        if dispatch_value != writeback_value:
+                            trace_writeback_mismatch_fields.append(field_name)
+                    if workgroup_id != [writeback.get(base + offset) for offset in (4, 5, 6)]:
+                        trace_writeback_mismatch_fields.append("workgroup_id")
+                    if local_invocation_id != [writeback.get(base + offset) for offset in (7, 8, 9)]:
+                        trace_writeback_mismatch_fields.append("local_invocation_id")
+
             record = {
                 **expected,
                 "observed_candidate_id": candidate,
@@ -3869,6 +3889,13 @@ def parse_q6_final_store_trace_v2(bindings):
                 "record_schema_version": record_schema_version,
                 "status": status,
                 "trace_status": trace_status,
+                "trace_writeback_verified": (
+                    None if unexecuted else not trace_writeback_mismatch_fields
+                ),
+                "trace_writeback_mismatch": (
+                    None if unexecuted else bool(trace_writeback_mismatch_fields)
+                ),
+                "trace_writeback_mismatch_fields": trace_writeback_mismatch_fields,
                 "failures": record_failures,
             }
             if writeback:
@@ -3882,6 +3909,11 @@ def parse_q6_final_store_trace_v2(bindings):
                     "writeback_local_invocation_id": [writeback.get(base + offset) for offset in (7, 8, 9)],
                     "writeback_record_schema_version": writeback.get(base + 10),
                 })
+            if trace_writeback_mismatch_fields and not unexecuted:
+                failures.append(
+                    "binding %s probe %s final-store trace writeback mismatch: %s"
+                    % (binding.get("binding"), expected["probe"], ",".join(trace_writeback_mismatch_fields))
+                )
             if record_failures and not unexecuted:
                 failures.append(
                     "binding %s probe %s final-store trace failed: %s"
@@ -4393,6 +4425,9 @@ def build_q6_native_vs_writeback_split():
             "writeback_matches_native": writeback_matches_native,
             "writeback_matches_expected": writeback_matches_expected,
             "sample_class": sample_class,
+            "trace_writeback_verified": record.get("trace_writeback_verified"),
+            "trace_writeback_mismatch": record.get("trace_writeback_mismatch"),
+            "trace_writeback_mismatch_fields": record.get("trace_writeback_mismatch_fields"),
             "source_spirv_hash": q6_native_spirv_identity.get("source_spirv_hash"),
             "effective_spirv_hash": q6_native_spirv_identity.get("effective_spirv_hash"),
         })
@@ -4445,7 +4480,11 @@ def build_q6_final_store_boundary():
         for record in binding.get("records") or []:
             if not isinstance(record, dict):
                 continue
-            if record.get("status") == "pass" and record.get("trace_status") == "pass":
+            if (
+                record.get("status") == "pass"
+                and record.get("trace_status") == "pass"
+                and record.get("trace_writeback_verified") is True
+            ):
                 records.append({
                     **record,
                     "binding": binding.get("binding"),
@@ -4529,6 +4568,9 @@ def build_q6_final_store_boundary():
             "writeback_matches_final_store": writeback_matches_final_store,
             "writeback_matches_expected": writeback_matches_expected,
             "sample_class": sample_class,
+            "trace_writeback_verified": record.get("trace_writeback_verified"),
+            "trace_writeback_mismatch": record.get("trace_writeback_mismatch"),
+            "trace_writeback_mismatch_fields": record.get("trace_writeback_mismatch_fields"),
             "source_spirv_hash": q6_native_spirv_identity.get("source_spirv_hash"),
             "effective_spirv_hash": q6_native_spirv_identity.get("effective_spirv_hash"),
         })

@@ -171,6 +171,9 @@ def q6_final_store_boundary(summary, final_value=0.5, expected=1.25, fd_after=0.
                 "final_store_matches_expected": abs(final_value - expected) < 1.0e-3,
                 "writeback_matches_final_store": abs(fd_after - final_value) < 1.0e-3,
                 "writeback_matches_expected": abs(fd_after - expected) < 1.0e-3,
+                "trace_writeback_verified": True,
+                "trace_writeback_mismatch": False,
+                "trace_writeback_mismatch_fields": [],
                 "sample_class": summary,
             }
         ],
