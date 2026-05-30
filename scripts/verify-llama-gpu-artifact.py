@@ -908,6 +908,35 @@ def _q6_final_store_boundary(q6: Any) -> dict[str, Any]:
     samples = boundary.get("samples")
     if not isinstance(samples, list):
         samples = []
+    requires_samples = summary in {
+        "pass",
+        "native-final-store-mismatch",
+        "executor-writeback-mismatch",
+    }
+    if requires_samples and not samples:
+        summary = "inconclusive"
+    if summary == "pass" and not all(
+        isinstance(sample, dict)
+        and sample.get("final_store_matches_expected") is True
+        and sample.get("writeback_matches_final_store") is True
+        and sample.get("writeback_matches_expected") is True
+        for sample in samples
+    ):
+        summary = "inconclusive"
+    if summary == "native-final-store-mismatch" and not any(
+        isinstance(sample, dict)
+        and sample.get("final_store_matches_expected") is False
+        and sample.get("writeback_matches_final_store") is True
+        for sample in samples
+    ):
+        summary = "inconclusive"
+    if summary == "executor-writeback-mismatch" and not any(
+        isinstance(sample, dict)
+        and sample.get("final_store_matches_expected") is True
+        and sample.get("writeback_matches_final_store") is False
+        for sample in samples
+    ):
+        summary = "inconclusive"
     return {
         **boundary,
         "summary": summary,
@@ -1603,6 +1632,48 @@ def _q6_output_layout_probe(q6: Any) -> dict[str, Any]:
     }
 
 
+def _q6_output_index_probe(q6: Any) -> dict[str, Any]:
+    if not isinstance(q6, dict):
+        return {"summary": "not-run", "samples": []}
+    probe = q6.get("q6_output_index_probe")
+    if not isinstance(probe, dict):
+        probe = {}
+    layout_probe = q6.get("q6_output_layout_probe")
+    nested_summary = (
+        layout_probe.get("q6_output_index_probe_summary")
+        if isinstance(layout_probe, dict)
+        else None
+    )
+    summary = (
+        probe.get("summary")
+        or q6.get("q6_output_index_probe_summary")
+        or nested_summary
+        or "not-run"
+    )
+    if not isinstance(summary, str) or not summary:
+        summary = "not-run"
+    samples = probe.get("samples")
+    if not isinstance(samples, list):
+        samples = []
+    return {
+        **probe,
+        "summary": summary,
+        "samples": samples,
+        "sample_count": probe.get("sample_count"),
+        "matched_count": probe.get("matched_count"),
+        "fixed_offset_count": probe.get("fixed_offset_count"),
+        "scatter_count": probe.get("scatter_count"),
+        "outside_store_window_count": probe.get("outside_store_window_count"),
+        "missing_count": probe.get("missing_count"),
+        "store_window_begin": probe.get("store_window_begin"),
+        "store_window_end": probe.get("store_window_end"),
+    }
+
+
+def _q6_output_index_probe_summary(q6: Any) -> str:
+    return str(_q6_output_index_probe(q6).get("summary") or "not-run")
+
+
 def _q6_output_layout_fixed_offset_rejected(probe: dict[str, Any]) -> bool:
     """Return True when a broad probe weakens the fixed-layout hypothesis.
 
@@ -2147,6 +2218,8 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_debug_u32_probe = _q6_debug_u32_probe(q6)
     q6_debug_u32_probe_blocker = _q6_debug_u32_probe_blocker(q6)
     q6_final_store_boundary = _q6_final_store_boundary(q6)
+    q6_output_index_probe = _q6_output_index_probe(q6)
+    q6_output_index_probe_summary = str(q6_output_index_probe.get("summary") or "not-run")
     q6_native_vs_writeback_split = (
         q6.get("q6_native_vs_writeback_split")
         if isinstance(q6.get("q6_native_vs_writeback_split"), dict)
@@ -2191,6 +2264,14 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             data.get("next_action")
             or "rerun with PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE=1 so Q6_K compact writable output hashes and row-indexed before/after writeback samples are present and verified"
         )
+    elif _q6_safe_kernel_enabled(q6) and q6.get("latest_status") == "match":
+        classification = "q6-safe-kernel-diagnostic-only"
+        responsibility_boundary = "q6-diagnostic-evidence"
+        q6_blocker_class = "q6-safe-kernel-diagnostic-only"
+        next_action = (
+            data.get("next_action")
+            or "rerun with the native Q6_K kernel; q6k_safe_kernel is diagnostic-only and cannot support native Q6 correctness or benchmark claims"
+        )
     elif q6.get("latest_status") == "match":
         classification = "q6-workgroup-cleared-and-oracle-match"
         responsibility_boundary = "q6-oracle-match"
@@ -2230,6 +2311,13 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 classification = "q6-native-final-store"
                 responsibility_boundary = "q6-native-final-store"
                 q6_blocker_class = "native-q6-final-store"
+            elif (
+                q6_output_index_probe_summary == "final-store-value"
+                and q6_shader_like["q6_shader_like_oracle_cleared"] is True
+            ):
+                classification = "q6-native-final-store"
+                responsibility_boundary = "q6-native-final-store"
+                q6_blocker_class = "native-q6-final-store"
             elif q6_native_vs_writeback_split.get("summary") == "executor-final-writeback":
                 classification = "q6-writeback-mismatch"
                 responsibility_boundary = "q6-writeback"
@@ -2238,6 +2326,13 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 classification = "q6-native-final-store-or-readback"
                 responsibility_boundary = "q6-native-final-store-readback"
                 q6_blocker_class = "native-q6-final-store-or-readback"
+            elif (
+                q6_output_index_probe_summary in {"fixed-offset", "scatter"}
+                and _q6_store_index_model_valid(q6, q6_output_layout)
+            ):
+                classification = "q6-native-output-layout"
+                responsibility_boundary = "q6-output-layout"
+                q6_blocker_class = "native-q6-output-layout"
             elif (
                 q6_output_layout.get("summary") == "canonical-mismatch-found-elsewhere"
                 and _q6_store_index_model_valid(q6, q6_output_layout)
@@ -2270,6 +2365,17 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 classification = "q6-native-device-execution-or-final-store"
                 responsibility_boundary = "q6-native-device-execution"
                 q6_blocker_class = "native-q6-device-execution-or-final-store"
+            elif (
+                q6_output_index_probe_summary in {
+                    "elsewhere-outside-store-window",
+                    "mixed-found-and-missing",
+                    "inconclusive",
+                }
+                and _q6_store_index_model_valid(q6, q6_output_layout)
+            ):
+                classification = "q6-native-output-layout-inconclusive"
+                responsibility_boundary = "q6-output-layout"
+                q6_blocker_class = "native-q6-output-layout-inconclusive"
             elif (
                 q6_output_layout.get("summary") == "canonical-mismatch-inconclusive"
                 and _q6_store_index_model_valid(q6, q6_output_layout)
@@ -2316,6 +2422,8 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_workgroup_diagnostics": q6,
         "q6_shader_like_interpretation": q6_shader_like,
         "q6_output_layout_probe": q6_output_layout,
+        "q6_output_index_probe": q6_output_index_probe,
+        "q6_output_index_probe_summary": q6_output_index_probe_summary,
         "q6_row_provenance_probe": q6_row_provenance,
         "q6_partial_signature_probe": q6_partial_signature,
         "q6_debug_u32_probe": q6_debug_u32_probe,
@@ -2337,6 +2445,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-native-device-execution-or-final-store",
                 "q6-native-reduction-or-device-execution",
                 "q6-probe-writeback-cleared-oracle-missing",
+                "q6-safe-kernel-diagnostic-only",
                 *Q6_DEBUG_U32_BLOCKERS,
             }
             else None

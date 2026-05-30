@@ -28,6 +28,22 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+ENV_MANIFEST = ROOT / "scripts" / "llama-gpu-env-manifest.json"
+
+
+def load_q6_required_env_overlay() -> dict[str, str]:
+    data = load_json(ENV_MANIFEST)
+    if data.get("schema") != "pdocker.llama.gpu.env-manifest.v1":
+        raise ValueError(f"unsupported llama GPU env manifest: {ENV_MANIFEST}")
+    overlay = data.get("q6_required_env_overlay")
+    if not isinstance(overlay, dict) or not overlay:
+        raise ValueError("llama GPU env manifest is missing q6_required_env_overlay")
+    result: dict[str, str] = {}
+    for key, value in overlay.items():
+        if not isinstance(key, str) or not key or not isinstance(value, str):
+            raise ValueError("invalid q6_required_env_overlay entry")
+        result[key] = value
+    return result
 
 
 def git_capture() -> dict[str, Any]:
@@ -194,6 +210,19 @@ def main(argv: list[str]) -> int:
         "next_action": "",
     }
 
+    try:
+        q6_required_env_overlay = load_q6_required_env_overlay()
+    except ValueError as exc:
+        manifest["status"] = "blocked-env-manifest"
+        manifest["next_action"] = str(exc)
+        write_manifest(manifest_out, manifest)
+        print(json.dumps(manifest, indent=2, sort_keys=True))
+        return 30
+    manifest["q6_required_env_overlay"] = q6_required_env_overlay
+    manifest["q6_compare_env"] = {
+        key: q6_required_env_overlay[key] for key in sorted(q6_required_env_overlay)
+    }
+
     if not args.skip_local_checks:
         local_step = run_step(
             "local-contract-checks",
@@ -246,11 +275,10 @@ def main(argv: list[str]) -> int:
         return 0 if args.allow_memory_blocker or args.dry_run else 20
 
     compare_env = env.copy()
+    compare_env.update(q6_required_env_overlay)
     compare_env.update(
         {
             "PDOCKER_LLAMA_WAIT_FOR_MEMORY_SEC": str(args.wait_memory_sec),
-            "PDOCKER_GPU_CPU_ORACLE": "1",
-            "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE": "1",
             "PDOCKER_LLAMA_COMPARE_OUT": rel(out),
         }
     )
