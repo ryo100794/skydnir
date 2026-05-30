@@ -473,6 +473,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("i0 < j1 && j0 < i1", source)
         self.assertIn("!binding_group_span_seen[rep] || start < binding_group_base[rep]", source)
         self.assertIn("binding_descriptor_offset[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", source)
+        self.assertIn("vulkan_binding_offset_equals_memory_plus_api_offset", source)
+        self.assertIn("vulkan_binding_gpu_offset_equals_memory_plus_api_offset", source)
+        self.assertIn("vulkan_binding_descriptor_offset_equals_api_offset", source)
+        self.assertIn("vulkan_binding_descriptor_range_matches_api_range", source)
         self.assertIn("infos[write_count].offset = (VkDeviceSize)binding_descriptor_offset[i];", source)
         self.assertIn("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", source)
         self.assertIn("has_strict_device_local_staging", source)
@@ -1833,6 +1837,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "q6_store_window_end",
             "binding_gpu_offset",
             "binding_descriptor_offset",
+            "offset_equals_memory_plus_api_offset",
+            "gpu_offset_equals_memory_plus_api_offset",
+            "descriptor_offset_equals_api_offset",
+            "descriptor_range_matches_api_range",
             "descriptor_range_mismatch",
             "api_memory_id",
             "api_buffer_id",

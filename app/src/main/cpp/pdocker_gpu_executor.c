@@ -855,6 +855,46 @@ static size_t vulkan_binding_descriptor_range(
     return binding->size;
 }
 
+static int vulkan_binding_offset_equals_memory_plus_api_offset(
+        const VulkanDispatchBinding *binding) {
+    if (!binding || binding->api_memory_offset < 0 || binding->api_offset < 0) {
+        return 0;
+    }
+    const uint64_t memory_offset = (uint64_t)binding->api_memory_offset;
+    const uint64_t api_offset = (uint64_t)binding->api_offset;
+    if (memory_offset > UINT64_MAX - api_offset) return 0;
+    return (uint64_t)binding->offset == memory_offset + api_offset;
+}
+
+static int vulkan_binding_descriptor_offset_equals_api_offset(
+        const VulkanDispatchBinding *binding,
+        size_t binding_descriptor_offset) {
+    if (!binding || binding->api_offset < 0) return 0;
+    return binding_descriptor_offset == (size_t)binding->api_offset;
+}
+
+static int vulkan_binding_gpu_offset_equals_memory_plus_api_offset(
+        const VulkanDispatchBinding *binding,
+        size_t binding_gpu_offset) {
+    if (!binding || binding->api_memory_offset < 0 || binding->api_offset < 0) {
+        return 0;
+    }
+    const uint64_t memory_offset = (uint64_t)binding->api_memory_offset;
+    const uint64_t api_offset = (uint64_t)binding->api_offset;
+    if (memory_offset > UINT64_MAX - api_offset) return 0;
+    return binding_gpu_offset == (size_t)(memory_offset + api_offset);
+}
+
+static int vulkan_binding_descriptor_range_matches_api_range(
+        const VulkanDispatchBinding *binding,
+        size_t descriptor_range,
+        int strict_passthrough) {
+    if (!binding) return 0;
+    if (!strict_passthrough) return descriptor_range == binding->size;
+    if (binding->api_range == 0) return descriptor_range == binding->size;
+    return descriptor_range == binding->api_range;
+}
+
 typedef struct {
     int valid;
     size_t raw_command_bytes;
@@ -4516,6 +4556,10 @@ static void write_vulkan_binding_report(
                 "\"api_buffer_id\":\"0x%016llx\","
                 "\"binding_gpu_offset\":%zu,"
                 "\"binding_descriptor_offset\":%zu,"
+                "\"offset_equals_memory_plus_api_offset\":%s,"
+                "\"gpu_offset_equals_memory_plus_api_offset\":%s,"
+                "\"descriptor_offset_equals_api_offset\":%s,"
+                "\"descriptor_range_matches_api_range\":%s,"
                 "\"descriptor_range_mismatch\":%s,"
                 "\"alias_rep\":%zu,\"active\":%s,\"readable\":%s,\"writable\":%s,"
                 "\"resident\":%s,\"cache_hit\":%s,"
@@ -4548,6 +4592,21 @@ static void write_vulkan_binding_report(
                 (unsigned long long)bindings[i].api_buffer_id,
                 binding_gpu_offset ? binding_gpu_offset[i] : (size_t)0,
                 binding_descriptor_offset ? binding_descriptor_offset[i] : (size_t)0,
+                vulkan_binding_offset_equals_memory_plus_api_offset(&bindings[i]) ? "true" : "false",
+                binding_gpu_offset &&
+                        vulkan_binding_gpu_offset_equals_memory_plus_api_offset(
+                            &bindings[i], binding_gpu_offset[i])
+                    ? "true" : "false",
+                binding_descriptor_offset &&
+                        vulkan_binding_descriptor_offset_equals_api_offset(
+                            &bindings[i], binding_descriptor_offset[i])
+                    ? "true" : "false",
+                binding_descriptor_offset &&
+                        vulkan_binding_descriptor_range_matches_api_range(
+                            &bindings[i],
+                            vulkan_binding_descriptor_range(&bindings[i], 1),
+                            1)
+                    ? "true" : "false",
                 bindings[i].api_range != 0 && bindings[i].api_range != bindings[i].size
                     ? "true" : "false",
                 alias_rep ? alias_rep[i] : i,
@@ -7969,6 +8028,10 @@ static void write_vulkan_binding_compact_report(
                 "\"api_buffer_id\":\"0x%016llx\","
                 "\"binding_gpu_offset\":%zu,"
                 "\"binding_descriptor_offset\":%zu,"
+                "\"offset_equals_memory_plus_api_offset\":%s,"
+                "\"gpu_offset_equals_memory_plus_api_offset\":%s,"
+                "\"descriptor_offset_equals_api_offset\":%s,"
+                "\"descriptor_range_matches_api_range\":%s,"
                 "\"descriptor_range_mismatch\":%s,"
                 "\"alias_rep\":%zu,\"active\":%s,"
                 "\"readable\":%s,\"writable\":%s,\"resident\":%s,"
@@ -7996,6 +8059,21 @@ static void write_vulkan_binding_compact_report(
                 (unsigned long long)bindings[i].api_buffer_id,
                 binding_gpu_offset ? binding_gpu_offset[i] : (size_t)0,
                 binding_descriptor_offset ? binding_descriptor_offset[i] : (size_t)0,
+                vulkan_binding_offset_equals_memory_plus_api_offset(&bindings[i]) ? "true" : "false",
+                binding_gpu_offset &&
+                        vulkan_binding_gpu_offset_equals_memory_plus_api_offset(
+                            &bindings[i], binding_gpu_offset[i])
+                    ? "true" : "false",
+                binding_descriptor_offset &&
+                        vulkan_binding_descriptor_offset_equals_api_offset(
+                            &bindings[i], binding_descriptor_offset[i])
+                    ? "true" : "false",
+                binding_descriptor_offset &&
+                        vulkan_binding_descriptor_range_matches_api_range(
+                            &bindings[i],
+                            vulkan_binding_descriptor_range(&bindings[i], 1),
+                            1)
+                    ? "true" : "false",
                 bindings[i].api_range != 0 && bindings[i].api_range != bindings[i].size
                     ? "true" : "false",
                 alias_rep ? alias_rep[i] : i,
