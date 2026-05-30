@@ -28,3 +28,9 @@ Key facts:
 - Probe submission policy: valid full-module instrumentation only; arbitrary SPIR-V fragments are not dispatchable.
 
 This is not a high-level GLSL reconstruction. It is the reproducible SPIR-V disassembly/CFG/probe-manifest baseline used to compare against dumped llama.cpp native Q6 kernels.
+
+Tracking note:
+
+- The binary `.spv` and `.spvasm` files are local ignored inputs because the repository keeps generated static evidence small and reviewable.
+- The tracked artifacts are the JSON analysis and probe manifests.  They must verify with the current `scripts/verify-spirv-probe-manifest.py` schema.
+- If the analyzer or manifest verifier schema changes, regenerate the tracked `.probe.json` files from the local SPIR-V inputs before accepting static Q6 conclusions.

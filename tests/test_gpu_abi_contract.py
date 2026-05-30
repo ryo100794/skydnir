@@ -1280,6 +1280,26 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertTrue(probe_manifest["validation_gates"]["spirv_val_required"])
         self.assertTrue(json.loads(verified.stdout)["valid"])
 
+    def test_tracked_q6_probe_manifests_verify_with_current_schema(self):
+        manifests = [
+            ROOT / "docs" / "test" / "spirv-q6k-safe-current" / "q6k-safe.probe.json",
+            ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.probe.json",
+            ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "effective-q6-local-size-patched.probe.json",
+        ]
+        for manifest in manifests:
+            result = subprocess.run(
+                ["python3", str(SPIRV_PROBE_MANIFEST_VERIFIER), str(manifest)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            payload = json.loads(result.stdout)
+            self.assertTrue(payload["valid"], manifest)
+            probe_payload = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertIsInstance(probe_payload.get("q6_probe_targets"), dict, manifest)
+
     def test_spirv_analyzer_reports_q6_native_workgroup_builtin_spec_contract(self):
         spv = ROOT / "docs" / "test" / "spirv-q6k-native-adb45055" / "native-q6-source.spv"
         self.assertTrue(spv.exists(), "native Q6 source SPIR-V evidence must be preserved")

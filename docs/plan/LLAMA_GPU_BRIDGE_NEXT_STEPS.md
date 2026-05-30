@@ -300,12 +300,15 @@ fields).  It also records pointer-origin evidence such as
 for detecting ABI/dataflow drift; it is not proof that the original native
 llama.cpp Q6 module is correct.
 
-There is no tracked native Q6 `.spv` file for source hash
-`0x1bf751845c5dce75` yet.  If no native dump file is present, do not synthesize
-or fake one.  The next ADB run should set `PDOCKER_GPU_SPIRV_DUMP_DIR`, locate
-the dumped module matching `q6_workgroup_diagnostics.latest_spirv_hash` or
-source hash `0x1bf751845c5dce75`, and then run the analyze/verify/compare loop
-above.
+The repository tracks native Q6 JSON evidence for source hash
+`0x1bf751845c5dce75`, but not the raw `.spv`/`.spvasm` binaries.  Those binary
+SPIR-V files are ignored local inputs; do not synthesize or fake them in a
+clean checkout.  The tracked `.probe.json` artifacts must verify with the
+current `scripts/verify-spirv-probe-manifest.py` schema before accepting static
+Q6 conclusions.  If a fresh runtime dump is needed, the next ADB run should set
+`PDOCKER_GPU_SPIRV_DUMP_DIR`, locate the dumped module matching
+`q6_workgroup_diagnostics.latest_spirv_hash` or source hash
+`0x1bf751845c5dce75`, and then run the analyze/verify/compare loop above.
 
 The optional probe replay path is fail-closed and uses the existing
 `VULKAN_DISPATCH_V4` command, not a new GPU ABI.  A replay run must provide all

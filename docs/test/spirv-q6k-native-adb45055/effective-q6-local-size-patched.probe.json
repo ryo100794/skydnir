@@ -12035,6 +12035,3954 @@
       }
     ]
   },
+  "q6_probe_targets": {
+    "available": true,
+    "final_output_store_count": 2,
+    "method": "structural-output-descriptor-and-workgroup-store-chain",
+    "notes": [
+      "Targets are derived from descriptor/workgroup dataflow, not from a shader hash.",
+      "Use priority targets to distinguish partial accumulation, reduction, and final output store.",
+      "Probe execution still requires full-module instrumentation plus spirv-val success."
+    ],
+    "output_descriptor_binding": 2,
+    "phases": [
+      {
+        "name": "tail",
+        "output_store": {
+          "base": {
+            "binding": 2,
+            "built_in": null,
+            "id": 284,
+            "kind": "descriptor",
+            "set": 0,
+            "storage_class": "StorageBuffer"
+          },
+          "block": {
+            "block_entry_insert_after_phi_word_index": 3752,
+            "block_exit_insert_before_word_index": 3792,
+            "block_label": 2865,
+            "block_ordinal": 64,
+            "block_word_index": 3750,
+            "function_id": 4
+          },
+          "candidate": {
+            "block_entry_insert_after_phi_word_index": 3752,
+            "block_exit_insert_before_word_index": 3792,
+            "candidate_id": 64,
+            "word_index": 3750
+          },
+          "capture": [
+            "local_invocation_id",
+            "workgroup_id",
+            "computed_output_index",
+            "stored_value_bits",
+            "candidate_id"
+          ],
+          "control_dependencies": [
+            {
+              "branch_side": "false",
+              "condition_id": 2847,
+              "predecessor_block_label": 2843,
+              "predecessor_block_ordinal": 62
+            }
+          ],
+          "index_expr": [
+            {
+              "constant_u32": 0,
+              "expr": {
+                "id": 235,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              "id": 235,
+              "name": ""
+            },
+            {
+              "constant_u32": null,
+              "expr": {
+                "id": 2873,
+                "kind": "op",
+                "op": "OpIAdd",
+                "operands": [
+                  {
+                    "id": 2871,
+                    "kind": "op",
+                    "op": "OpIAdd",
+                    "operands": [
+                      {
+                        "id": 2870,
+                        "kind": "op",
+                        "op": "OpIAdd",
+                        "operands": [
+                          {
+                            "id": 2869,
+                            "kind": "op",
+                            "op": "OpIMul",
+                            "operands": [
+                              {
+                                "id": 2926,
+                                "kind": "op",
+                                "op": "OpPhi",
+                                "operands": [
+                                  {
+                                    "id": 52,
+                                    "kind": "constant",
+                                    "value_u32": 0
+                                  },
+                                  {
+                                    "id": 2885,
+                                    "kind": "op",
+                                    "op": "OpIAdd",
+                                    "operands": [
+                                      {
+                                        "id": 2926,
+                                        "kind": "cycle"
+                                      },
+                                      {
+                                        "id": 154,
+                                        "kind": "constant",
+                                        "value_u32": 1
+                                      }
+                                    ],
+                                    "truncated_operands": 0
+                                  }
+                                ],
+                                "truncated_operands": 0
+                              },
+                              {
+                                "id": 2064,
+                                "kind": "load",
+                                "pointer": {
+                                  "access_chain_result_id": 2063,
+                                  "base": {
+                                    "id": 63,
+                                    "kind": "push_constant",
+                                    "name": "",
+                                    "struct_name": "",
+                                    "struct_type": 61
+                                  },
+                                  "indices": [
+                                    {
+                                      "constant_u32": 6,
+                                      "expr": {
+                                        "id": 118,
+                                        "kind": "constant",
+                                        "value_u32": 6
+                                      },
+                                      "id": 118,
+                                      "name": ""
+                                    }
+                                  ],
+                                  "kind": "access_chain",
+                                  "push_member": {
+                                    "index": 6,
+                                    "name": "",
+                                    "offset": 24,
+                                    "type": {
+                                      "bits": 32,
+                                      "id": 6,
+                                      "kind": "int",
+                                      "signed": 0
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "truncated_operands": 0
+                          },
+                          {
+                            "id": 2065,
+                            "kind": "op",
+                            "op": "OpIMul",
+                            "operands": [
+                              {
+                                "id": 2026,
+                                "kind": "op",
+                                "op": "OpIAdd",
+                                "operands": [
+                                  {
+                                    "id": 2023,
+                                    "kind": "load",
+                                    "pointer": {
+                                      "access_chain_result_id": 2022,
+                                      "base": {
+                                        "built_in": "WorkgroupId",
+                                        "id": 56,
+                                        "kind": "variable",
+                                        "name": "",
+                                        "result_type": 55,
+                                        "storage_class": "Input"
+                                      },
+                                      "indices": [
+                                        {
+                                          "constant_u32": 1,
+                                          "expr": {
+                                            "id": 57,
+                                            "kind": "constant",
+                                            "value_u32": 1
+                                          },
+                                          "id": 57,
+                                          "name": ""
+                                        }
+                                      ],
+                                      "kind": "access_chain"
+                                    }
+                                  },
+                                  {
+                                    "id": 2025,
+                                    "kind": "load",
+                                    "pointer": {
+                                      "access_chain_result_id": 2024,
+                                      "base": {
+                                        "id": 63,
+                                        "kind": "push_constant",
+                                        "name": "",
+                                        "struct_name": "",
+                                        "struct_type": 61
+                                      },
+                                      "indices": [
+                                        {
+                                          "constant_u32": 8,
+                                          "expr": {
+                                            "id": 65,
+                                            "kind": "constant",
+                                            "value_u32": 8
+                                          },
+                                          "id": 65,
+                                          "name": ""
+                                        }
+                                      ],
+                                      "kind": "access_chain",
+                                      "push_member": {
+                                        "index": 8,
+                                        "name": "",
+                                        "offset": 32,
+                                        "type": {
+                                          "bits": 32,
+                                          "id": 6,
+                                          "kind": "int",
+                                          "signed": 0
+                                        }
+                                      }
+                                    }
+                                  }
+                                ],
+                                "truncated_operands": 0
+                              },
+                              {
+                                "id": 2064,
+                                "kind": "load",
+                                "pointer": {
+                                  "access_chain_result_id": 2063,
+                                  "base": {
+                                    "id": 63,
+                                    "kind": "push_constant",
+                                    "name": "",
+                                    "struct_name": "",
+                                    "struct_type": 61
+                                  },
+                                  "indices": [
+                                    {
+                                      "constant_u32": 6,
+                                      "expr": {
+                                        "id": 118,
+                                        "kind": "constant",
+                                        "value_u32": 6
+                                      },
+                                      "id": 118,
+                                      "name": ""
+                                    }
+                                  ],
+                                  "kind": "access_chain",
+                                  "push_member": {
+                                    "index": 6,
+                                    "name": "",
+                                    "offset": 24,
+                                    "type": {
+                                      "bits": 32,
+                                      "id": 6,
+                                      "kind": "int",
+                                      "signed": 0
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "truncated_operands": 0
+                          }
+                        ],
+                        "truncated_operands": 0
+                      },
+                      {
+                        "id": 845,
+                        "kind": "op",
+                        "op": "OpIMul",
+                        "operands": [
+                          {
+                            "default_u32": 1,
+                            "id": 15,
+                            "kind": "spec_constant",
+                            "spec_id": 1
+                          },
+                          {
+                            "id": 844,
+                            "kind": "op",
+                            "op": "OpIAdd",
+                            "operands": [
+                              {
+                                "id": 837,
+                                "kind": "load",
+                                "pointer": {
+                                  "access_chain_result_id": 836,
+                                  "base": {
+                                    "built_in": "WorkgroupId",
+                                    "id": 56,
+                                    "kind": "variable",
+                                    "name": "",
+                                    "result_type": 55,
+                                    "storage_class": "Input"
+                                  },
+                                  "indices": [
+                                    {
+                                      "constant_u32": 0,
+                                      "expr": {
+                                        "id": 52,
+                                        "kind": "constant",
+                                        "value_u32": 0
+                                      },
+                                      "id": 52,
+                                      "name": ""
+                                    }
+                                  ],
+                                  "kind": "access_chain"
+                                }
+                              },
+                              {
+                                "id": 843,
+                                "kind": "op",
+                                "op": "OpIMul",
+                                "operands": [
+                                  {
+                                    "id": 840,
+                                    "kind": "load",
+                                    "pointer": {
+                                      "access_chain_result_id": 839,
+                                      "base": {
+                                        "built_in": "NumWorkgroups",
+                                        "id": 838,
+                                        "kind": "variable",
+                                        "name": "",
+                                        "result_type": 55,
+                                        "storage_class": "Input"
+                                      },
+                                      "indices": [
+                                        {
+                                          "constant_u32": 0,
+                                          "expr": {
+                                            "id": 52,
+                                            "kind": "constant",
+                                            "value_u32": 0
+                                          },
+                                          "id": 52,
+                                          "name": ""
+                                        }
+                                      ],
+                                      "kind": "access_chain"
+                                    }
+                                  },
+                                  {
+                                    "id": 842,
+                                    "kind": "load",
+                                    "pointer": {
+                                      "access_chain_result_id": 841,
+                                      "base": {
+                                        "built_in": "WorkgroupId",
+                                        "id": 56,
+                                        "kind": "variable",
+                                        "name": "",
+                                        "result_type": 55,
+                                        "storage_class": "Input"
+                                      },
+                                      "indices": [
+                                        {
+                                          "constant_u32": 2,
+                                          "expr": {
+                                            "id": 158,
+                                            "kind": "constant",
+                                            "value_u32": 2
+                                          },
+                                          "id": 158,
+                                          "name": ""
+                                        }
+                                      ],
+                                      "kind": "access_chain"
+                                    }
+                                  }
+                                ],
+                                "truncated_operands": 0
+                              }
+                            ],
+                            "truncated_operands": 0
+                          }
+                        ],
+                        "truncated_operands": 0
+                      }
+                    ],
+                    "truncated_operands": 0
+                  },
+                  {
+                    "id": 2927,
+                    "kind": "op",
+                    "op": "OpPhi",
+                    "operands": [
+                      {
+                        "id": 52,
+                        "kind": "constant",
+                        "value_u32": 0
+                      },
+                      {
+                        "id": 2881,
+                        "kind": "op",
+                        "op": "OpIAdd",
+                        "operands": [
+                          {
+                            "id": 2927,
+                            "kind": "cycle"
+                          },
+                          {
+                            "id": 154,
+                            "kind": "constant",
+                            "value_u32": 1
+                          }
+                        ],
+                        "truncated_operands": 0
+                      }
+                    ],
+                    "truncated_operands": 0
+                  }
+                ],
+                "truncated_operands": 0
+              },
+              "id": 2873,
+              "name": ""
+            }
+          ],
+          "object_id": 2877,
+          "phase": "tail",
+          "pointer_id": 2878,
+          "role": "final_output_store",
+          "word_index": 3789
+        },
+        "preceding_workgroup_stores": [
+          {
+            "base": {
+              "binding": null,
+              "built_in": null,
+              "id": 143,
+              "kind": "variable",
+              "set": null,
+              "storage_class": "Workgroup"
+            },
+            "block": {
+              "block_entry_insert_after_phi_word_index": 3317,
+              "block_exit_insert_before_word_index": 3342,
+              "block_label": 2751,
+              "block_ordinal": 39,
+              "block_word_index": 3315,
+              "function_id": 4
+            },
+            "candidate": {
+              "block_entry_insert_after_phi_word_index": 3317,
+              "block_exit_insert_before_word_index": 3342,
+              "candidate_id": 39,
+              "word_index": 3315
+            },
+            "capture": [
+              "local_invocation_id",
+              "workgroup_id",
+              "computed_output_index",
+              "stored_value_bits",
+              "candidate_id"
+            ],
+            "control_dependencies": [
+              {
+                "branch_side": "true",
+                "condition_id": 2750,
+                "predecessor_block_label": 2747,
+                "predecessor_block_ordinal": 38
+              }
+            ],
+            "index_expr": [
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2924,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 2765,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2924,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2924,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2939,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 2761,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2939,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2939,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 1918,
+                  "kind": "load",
+                  "pointer": {
+                    "access_chain_result_id": 1917,
+                    "base": {
+                      "built_in": "LocalInvocationId",
+                      "id": 714,
+                      "kind": "variable",
+                      "name": "",
+                      "result_type": 55,
+                      "storage_class": "Input"
+                    },
+                    "indices": [
+                      {
+                        "constant_u32": 0,
+                        "expr": {
+                          "id": 52,
+                          "kind": "constant",
+                          "value_u32": 0
+                        },
+                        "id": 52,
+                        "name": ""
+                      }
+                    ],
+                    "kind": "access_chain"
+                  }
+                },
+                "id": 1918,
+                "name": ""
+              }
+            ],
+            "object_id": 2757,
+            "phase": "tail",
+            "pointer_id": 2758,
+            "related_output_store_word_index": 3789,
+            "role": "partial_to_workgroup_candidate",
+            "word_index": 3334
+          },
+          {
+            "base": {
+              "binding": null,
+              "built_in": null,
+              "id": 143,
+              "kind": "variable",
+              "set": null,
+              "storage_class": "Workgroup"
+            },
+            "block": {
+              "block_entry_insert_after_phi_word_index": 3455,
+              "block_exit_insert_before_word_index": 3495,
+              "block_label": 2784,
+              "block_ordinal": 49,
+              "block_word_index": 3453,
+              "function_id": 4
+            },
+            "candidate": {
+              "block_entry_insert_after_phi_word_index": 3455,
+              "block_exit_insert_before_word_index": 3495,
+              "candidate_id": 49,
+              "word_index": 3453
+            },
+            "capture": [
+              "local_invocation_id",
+              "workgroup_id",
+              "computed_output_index",
+              "stored_value_bits",
+              "candidate_id"
+            ],
+            "control_dependencies": [
+              {
+                "branch_side": "true",
+                "condition_id": 2783,
+                "predecessor_block_label": 2780,
+                "predecessor_block_ordinal": 48
+              }
+            ],
+            "index_expr": [
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2933,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 2803,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2933,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2933,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2936,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 2799,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2936,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2936,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 1918,
+                  "kind": "load",
+                  "pointer": {
+                    "access_chain_result_id": 1917,
+                    "base": {
+                      "built_in": "LocalInvocationId",
+                      "id": 714,
+                      "kind": "variable",
+                      "name": "",
+                      "result_type": 55,
+                      "storage_class": "Input"
+                    },
+                    "indices": [
+                      {
+                        "constant_u32": 0,
+                        "expr": {
+                          "id": 52,
+                          "kind": "constant",
+                          "value_u32": 0
+                        },
+                        "id": 52,
+                        "name": ""
+                      }
+                    ],
+                    "kind": "access_chain"
+                  }
+                },
+                "id": 1918,
+                "name": ""
+              }
+            ],
+            "object_id": 2795,
+            "phase": "tail",
+            "pointer_id": 2793,
+            "related_output_store_word_index": 3789,
+            "role": "reduction_candidate",
+            "word_index": 3487
+          },
+          {
+            "base": {
+              "binding": null,
+              "built_in": null,
+              "id": 143,
+              "kind": "variable",
+              "set": null,
+              "storage_class": "Workgroup"
+            },
+            "block": {
+              "block_entry_insert_after_phi_word_index": 3627,
+              "block_exit_insert_before_word_index": 3676,
+              "block_label": 2826,
+              "block_ordinal": 61,
+              "block_word_index": 3625,
+              "function_id": 4
+            },
+            "candidate": {
+              "block_entry_insert_after_phi_word_index": 3627,
+              "block_exit_insert_before_word_index": 3676,
+              "candidate_id": 61,
+              "word_index": 3625
+            },
+            "capture": [
+              "local_invocation_id",
+              "workgroup_id",
+              "computed_output_index",
+              "stored_value_bits",
+              "candidate_id"
+            ],
+            "control_dependencies": [
+              {
+                "branch_side": "true",
+                "condition_id": 2825,
+                "predecessor_block_label": 2821,
+                "predecessor_block_ordinal": 60
+              }
+            ],
+            "index_expr": [
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2926,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 2885,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2926,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2926,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2927,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 2881,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2927,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2927,
+                "name": ""
+              },
+              {
+                "constant_u32": 0,
+                "expr": {
+                  "id": 235,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                "id": 235,
+                "name": ""
+              }
+            ],
+            "object_id": 2841,
+            "phase": "tail",
+            "pointer_id": 2839,
+            "related_output_store_word_index": 3789,
+            "role": "post_reduction_workgroup_candidate",
+            "word_index": 3673
+          },
+          {
+            "base": {
+              "binding": null,
+              "built_in": null,
+              "id": 143,
+              "kind": "variable",
+              "set": null,
+              "storage_class": "Workgroup"
+            },
+            "block": {
+              "block_entry_insert_after_phi_word_index": 3699,
+              "block_exit_insert_before_word_index": 3748,
+              "block_label": 2848,
+              "block_ordinal": 63,
+              "block_word_index": 3697,
+              "function_id": 4
+            },
+            "candidate": {
+              "block_entry_insert_after_phi_word_index": 3699,
+              "block_exit_insert_before_word_index": 3748,
+              "candidate_id": 63,
+              "word_index": 3697
+            },
+            "capture": [
+              "local_invocation_id",
+              "workgroup_id",
+              "computed_output_index",
+              "stored_value_bits",
+              "candidate_id"
+            ],
+            "control_dependencies": [
+              {
+                "branch_side": "true",
+                "condition_id": 2847,
+                "predecessor_block_label": 2843,
+                "predecessor_block_ordinal": 62
+              }
+            ],
+            "index_expr": [
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2926,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 2885,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2926,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2926,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2927,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 2881,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2927,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2927,
+                "name": ""
+              },
+              {
+                "constant_u32": 0,
+                "expr": {
+                  "id": 235,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                "id": 235,
+                "name": ""
+              }
+            ],
+            "object_id": 2863,
+            "phase": "tail",
+            "pointer_id": 2861,
+            "related_output_store_word_index": 3789,
+            "role": "post_reduction_workgroup_candidate",
+            "word_index": 3745
+          }
+        ],
+        "source_workgroup_base_ids": [
+          143
+        ]
+      },
+      {
+        "name": "full",
+        "output_store": {
+          "base": {
+            "binding": 2,
+            "built_in": null,
+            "id": 284,
+            "kind": "descriptor",
+            "set": 0,
+            "storage_class": "StorageBuffer"
+          },
+          "block": {
+            "block_entry_insert_after_phi_word_index": 6616,
+            "block_exit_insert_before_word_index": 6656,
+            "block_label": 1862,
+            "block_ordinal": 130,
+            "block_word_index": 6614,
+            "function_id": 4
+          },
+          "candidate": {
+            "block_entry_insert_after_phi_word_index": 6616,
+            "block_exit_insert_before_word_index": 6656,
+            "candidate_id": 130,
+            "word_index": 6614
+          },
+          "capture": [
+            "local_invocation_id",
+            "workgroup_id",
+            "computed_output_index",
+            "stored_value_bits",
+            "candidate_id"
+          ],
+          "control_dependencies": [
+            {
+              "branch_side": "false",
+              "condition_id": 1844,
+              "predecessor_block_label": 1840,
+              "predecessor_block_ordinal": 128
+            }
+          ],
+          "index_expr": [
+            {
+              "constant_u32": 0,
+              "expr": {
+                "id": 235,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              "id": 235,
+              "name": ""
+            },
+            {
+              "constant_u32": null,
+              "expr": {
+                "id": 1870,
+                "kind": "op",
+                "op": "OpIAdd",
+                "operands": [
+                  {
+                    "id": 1868,
+                    "kind": "op",
+                    "op": "OpIAdd",
+                    "operands": [
+                      {
+                        "id": 1867,
+                        "kind": "op",
+                        "op": "OpIAdd",
+                        "operands": [
+                          {
+                            "id": 1866,
+                            "kind": "op",
+                            "op": "OpIMul",
+                            "operands": [
+                              {
+                                "id": 2992,
+                                "kind": "op",
+                                "op": "OpPhi",
+                                "operands": [
+                                  {
+                                    "id": 52,
+                                    "kind": "constant",
+                                    "value_u32": 0
+                                  },
+                                  {
+                                    "id": 1882,
+                                    "kind": "op",
+                                    "op": "OpIAdd",
+                                    "operands": [
+                                      {
+                                        "id": 2992,
+                                        "kind": "cycle"
+                                      },
+                                      {
+                                        "id": 154,
+                                        "kind": "constant",
+                                        "value_u32": 1
+                                      }
+                                    ],
+                                    "truncated_operands": 0
+                                  }
+                                ],
+                                "truncated_operands": 0
+                              },
+                              {
+                                "id": 1061,
+                                "kind": "load",
+                                "pointer": {
+                                  "access_chain_result_id": 1060,
+                                  "base": {
+                                    "id": 63,
+                                    "kind": "push_constant",
+                                    "name": "",
+                                    "struct_name": "",
+                                    "struct_type": 61
+                                  },
+                                  "indices": [
+                                    {
+                                      "constant_u32": 6,
+                                      "expr": {
+                                        "id": 118,
+                                        "kind": "constant",
+                                        "value_u32": 6
+                                      },
+                                      "id": 118,
+                                      "name": ""
+                                    }
+                                  ],
+                                  "kind": "access_chain",
+                                  "push_member": {
+                                    "index": 6,
+                                    "name": "",
+                                    "offset": 24,
+                                    "type": {
+                                      "bits": 32,
+                                      "id": 6,
+                                      "kind": "int",
+                                      "signed": 0
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "truncated_operands": 0
+                          },
+                          {
+                            "id": 1062,
+                            "kind": "op",
+                            "op": "OpIMul",
+                            "operands": [
+                              {
+                                "id": 1023,
+                                "kind": "op",
+                                "op": "OpIAdd",
+                                "operands": [
+                                  {
+                                    "id": 1020,
+                                    "kind": "load",
+                                    "pointer": {
+                                      "access_chain_result_id": 1019,
+                                      "base": {
+                                        "built_in": "WorkgroupId",
+                                        "id": 56,
+                                        "kind": "variable",
+                                        "name": "",
+                                        "result_type": 55,
+                                        "storage_class": "Input"
+                                      },
+                                      "indices": [
+                                        {
+                                          "constant_u32": 1,
+                                          "expr": {
+                                            "id": 57,
+                                            "kind": "constant",
+                                            "value_u32": 1
+                                          },
+                                          "id": 57,
+                                          "name": ""
+                                        }
+                                      ],
+                                      "kind": "access_chain"
+                                    }
+                                  },
+                                  {
+                                    "id": 1022,
+                                    "kind": "load",
+                                    "pointer": {
+                                      "access_chain_result_id": 1021,
+                                      "base": {
+                                        "id": 63,
+                                        "kind": "push_constant",
+                                        "name": "",
+                                        "struct_name": "",
+                                        "struct_type": 61
+                                      },
+                                      "indices": [
+                                        {
+                                          "constant_u32": 8,
+                                          "expr": {
+                                            "id": 65,
+                                            "kind": "constant",
+                                            "value_u32": 8
+                                          },
+                                          "id": 65,
+                                          "name": ""
+                                        }
+                                      ],
+                                      "kind": "access_chain",
+                                      "push_member": {
+                                        "index": 8,
+                                        "name": "",
+                                        "offset": 32,
+                                        "type": {
+                                          "bits": 32,
+                                          "id": 6,
+                                          "kind": "int",
+                                          "signed": 0
+                                        }
+                                      }
+                                    }
+                                  }
+                                ],
+                                "truncated_operands": 0
+                              },
+                              {
+                                "id": 1061,
+                                "kind": "load",
+                                "pointer": {
+                                  "access_chain_result_id": 1060,
+                                  "base": {
+                                    "id": 63,
+                                    "kind": "push_constant",
+                                    "name": "",
+                                    "struct_name": "",
+                                    "struct_type": 61
+                                  },
+                                  "indices": [
+                                    {
+                                      "constant_u32": 6,
+                                      "expr": {
+                                        "id": 118,
+                                        "kind": "constant",
+                                        "value_u32": 6
+                                      },
+                                      "id": 118,
+                                      "name": ""
+                                    }
+                                  ],
+                                  "kind": "access_chain",
+                                  "push_member": {
+                                    "index": 6,
+                                    "name": "",
+                                    "offset": 24,
+                                    "type": {
+                                      "bits": 32,
+                                      "id": 6,
+                                      "kind": "int",
+                                      "signed": 0
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "truncated_operands": 0
+                          }
+                        ],
+                        "truncated_operands": 0
+                      },
+                      {
+                        "id": 845,
+                        "kind": "op",
+                        "op": "OpIMul",
+                        "operands": [
+                          {
+                            "default_u32": 1,
+                            "id": 15,
+                            "kind": "spec_constant",
+                            "spec_id": 1
+                          },
+                          {
+                            "id": 844,
+                            "kind": "op",
+                            "op": "OpIAdd",
+                            "operands": [
+                              {
+                                "id": 837,
+                                "kind": "load",
+                                "pointer": {
+                                  "access_chain_result_id": 836,
+                                  "base": {
+                                    "built_in": "WorkgroupId",
+                                    "id": 56,
+                                    "kind": "variable",
+                                    "name": "",
+                                    "result_type": 55,
+                                    "storage_class": "Input"
+                                  },
+                                  "indices": [
+                                    {
+                                      "constant_u32": 0,
+                                      "expr": {
+                                        "id": 52,
+                                        "kind": "constant",
+                                        "value_u32": 0
+                                      },
+                                      "id": 52,
+                                      "name": ""
+                                    }
+                                  ],
+                                  "kind": "access_chain"
+                                }
+                              },
+                              {
+                                "id": 843,
+                                "kind": "op",
+                                "op": "OpIMul",
+                                "operands": [
+                                  {
+                                    "id": 840,
+                                    "kind": "load",
+                                    "pointer": {
+                                      "access_chain_result_id": 839,
+                                      "base": {
+                                        "built_in": "NumWorkgroups",
+                                        "id": 838,
+                                        "kind": "variable",
+                                        "name": "",
+                                        "result_type": 55,
+                                        "storage_class": "Input"
+                                      },
+                                      "indices": [
+                                        {
+                                          "constant_u32": 0,
+                                          "expr": {
+                                            "id": 52,
+                                            "kind": "constant",
+                                            "value_u32": 0
+                                          },
+                                          "id": 52,
+                                          "name": ""
+                                        }
+                                      ],
+                                      "kind": "access_chain"
+                                    }
+                                  },
+                                  {
+                                    "id": 842,
+                                    "kind": "load",
+                                    "pointer": {
+                                      "access_chain_result_id": 841,
+                                      "base": {
+                                        "built_in": "WorkgroupId",
+                                        "id": 56,
+                                        "kind": "variable",
+                                        "name": "",
+                                        "result_type": 55,
+                                        "storage_class": "Input"
+                                      },
+                                      "indices": [
+                                        {
+                                          "constant_u32": 2,
+                                          "expr": {
+                                            "id": 158,
+                                            "kind": "constant",
+                                            "value_u32": 2
+                                          },
+                                          "id": 158,
+                                          "name": ""
+                                        }
+                                      ],
+                                      "kind": "access_chain"
+                                    }
+                                  }
+                                ],
+                                "truncated_operands": 0
+                              }
+                            ],
+                            "truncated_operands": 0
+                          }
+                        ],
+                        "truncated_operands": 0
+                      }
+                    ],
+                    "truncated_operands": 0
+                  },
+                  {
+                    "id": 2993,
+                    "kind": "op",
+                    "op": "OpPhi",
+                    "operands": [
+                      {
+                        "id": 52,
+                        "kind": "constant",
+                        "value_u32": 0
+                      },
+                      {
+                        "id": 1878,
+                        "kind": "op",
+                        "op": "OpIAdd",
+                        "operands": [
+                          {
+                            "id": 2993,
+                            "kind": "cycle"
+                          },
+                          {
+                            "id": 154,
+                            "kind": "constant",
+                            "value_u32": 1
+                          }
+                        ],
+                        "truncated_operands": 0
+                      }
+                    ],
+                    "truncated_operands": 0
+                  }
+                ],
+                "truncated_operands": 0
+              },
+              "id": 1870,
+              "name": ""
+            }
+          ],
+          "object_id": 1874,
+          "phase": "full",
+          "pointer_id": 1875,
+          "role": "final_output_store",
+          "word_index": 6653
+        },
+        "preceding_workgroup_stores": [
+          {
+            "base": {
+              "binding": null,
+              "built_in": null,
+              "id": 143,
+              "kind": "variable",
+              "set": null,
+              "storage_class": "Workgroup"
+            },
+            "block": {
+              "block_entry_insert_after_phi_word_index": 6181,
+              "block_exit_insert_before_word_index": 6206,
+              "block_label": 1748,
+              "block_ordinal": 105,
+              "block_word_index": 6179,
+              "function_id": 4
+            },
+            "candidate": {
+              "block_entry_insert_after_phi_word_index": 6181,
+              "block_exit_insert_before_word_index": 6206,
+              "candidate_id": 105,
+              "word_index": 6179
+            },
+            "capture": [
+              "local_invocation_id",
+              "workgroup_id",
+              "computed_output_index",
+              "stored_value_bits",
+              "candidate_id"
+            ],
+            "control_dependencies": [
+              {
+                "branch_side": "true",
+                "condition_id": 1747,
+                "predecessor_block_label": 1744,
+                "predecessor_block_ordinal": 104
+              }
+            ],
+            "index_expr": [
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2990,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 1762,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2990,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2990,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 3005,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 1758,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 3005,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 3005,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 915,
+                  "kind": "load",
+                  "pointer": {
+                    "access_chain_result_id": 914,
+                    "base": {
+                      "built_in": "LocalInvocationId",
+                      "id": 714,
+                      "kind": "variable",
+                      "name": "",
+                      "result_type": 55,
+                      "storage_class": "Input"
+                    },
+                    "indices": [
+                      {
+                        "constant_u32": 0,
+                        "expr": {
+                          "id": 52,
+                          "kind": "constant",
+                          "value_u32": 0
+                        },
+                        "id": 52,
+                        "name": ""
+                      }
+                    ],
+                    "kind": "access_chain"
+                  }
+                },
+                "id": 915,
+                "name": ""
+              }
+            ],
+            "object_id": 1754,
+            "phase": "full",
+            "pointer_id": 1755,
+            "related_output_store_word_index": 6653,
+            "role": "partial_to_workgroup_candidate",
+            "word_index": 6198
+          },
+          {
+            "base": {
+              "binding": null,
+              "built_in": null,
+              "id": 143,
+              "kind": "variable",
+              "set": null,
+              "storage_class": "Workgroup"
+            },
+            "block": {
+              "block_entry_insert_after_phi_word_index": 6319,
+              "block_exit_insert_before_word_index": 6359,
+              "block_label": 1781,
+              "block_ordinal": 115,
+              "block_word_index": 6317,
+              "function_id": 4
+            },
+            "candidate": {
+              "block_entry_insert_after_phi_word_index": 6319,
+              "block_exit_insert_before_word_index": 6359,
+              "candidate_id": 115,
+              "word_index": 6317
+            },
+            "capture": [
+              "local_invocation_id",
+              "workgroup_id",
+              "computed_output_index",
+              "stored_value_bits",
+              "candidate_id"
+            ],
+            "control_dependencies": [
+              {
+                "branch_side": "true",
+                "condition_id": 1780,
+                "predecessor_block_label": 1777,
+                "predecessor_block_ordinal": 114
+              }
+            ],
+            "index_expr": [
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2999,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 1800,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2999,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2999,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 3002,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 1796,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 3002,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 3002,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 915,
+                  "kind": "load",
+                  "pointer": {
+                    "access_chain_result_id": 914,
+                    "base": {
+                      "built_in": "LocalInvocationId",
+                      "id": 714,
+                      "kind": "variable",
+                      "name": "",
+                      "result_type": 55,
+                      "storage_class": "Input"
+                    },
+                    "indices": [
+                      {
+                        "constant_u32": 0,
+                        "expr": {
+                          "id": 52,
+                          "kind": "constant",
+                          "value_u32": 0
+                        },
+                        "id": 52,
+                        "name": ""
+                      }
+                    ],
+                    "kind": "access_chain"
+                  }
+                },
+                "id": 915,
+                "name": ""
+              }
+            ],
+            "object_id": 1792,
+            "phase": "full",
+            "pointer_id": 1790,
+            "related_output_store_word_index": 6653,
+            "role": "reduction_candidate",
+            "word_index": 6351
+          },
+          {
+            "base": {
+              "binding": null,
+              "built_in": null,
+              "id": 143,
+              "kind": "variable",
+              "set": null,
+              "storage_class": "Workgroup"
+            },
+            "block": {
+              "block_entry_insert_after_phi_word_index": 6491,
+              "block_exit_insert_before_word_index": 6540,
+              "block_label": 1823,
+              "block_ordinal": 127,
+              "block_word_index": 6489,
+              "function_id": 4
+            },
+            "candidate": {
+              "block_entry_insert_after_phi_word_index": 6491,
+              "block_exit_insert_before_word_index": 6540,
+              "candidate_id": 127,
+              "word_index": 6489
+            },
+            "capture": [
+              "local_invocation_id",
+              "workgroup_id",
+              "computed_output_index",
+              "stored_value_bits",
+              "candidate_id"
+            ],
+            "control_dependencies": [
+              {
+                "branch_side": "true",
+                "condition_id": 1822,
+                "predecessor_block_label": 1818,
+                "predecessor_block_ordinal": 126
+              }
+            ],
+            "index_expr": [
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2992,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 1882,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2992,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2992,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2993,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 1878,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2993,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2993,
+                "name": ""
+              },
+              {
+                "constant_u32": 0,
+                "expr": {
+                  "id": 235,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                "id": 235,
+                "name": ""
+              }
+            ],
+            "object_id": 1838,
+            "phase": "full",
+            "pointer_id": 1836,
+            "related_output_store_word_index": 6653,
+            "role": "post_reduction_workgroup_candidate",
+            "word_index": 6537
+          },
+          {
+            "base": {
+              "binding": null,
+              "built_in": null,
+              "id": 143,
+              "kind": "variable",
+              "set": null,
+              "storage_class": "Workgroup"
+            },
+            "block": {
+              "block_entry_insert_after_phi_word_index": 6563,
+              "block_exit_insert_before_word_index": 6612,
+              "block_label": 1845,
+              "block_ordinal": 129,
+              "block_word_index": 6561,
+              "function_id": 4
+            },
+            "candidate": {
+              "block_entry_insert_after_phi_word_index": 6563,
+              "block_exit_insert_before_word_index": 6612,
+              "candidate_id": 129,
+              "word_index": 6561
+            },
+            "capture": [
+              "local_invocation_id",
+              "workgroup_id",
+              "computed_output_index",
+              "stored_value_bits",
+              "candidate_id"
+            ],
+            "control_dependencies": [
+              {
+                "branch_side": "true",
+                "condition_id": 1844,
+                "predecessor_block_label": 1840,
+                "predecessor_block_ordinal": 128
+              }
+            ],
+            "index_expr": [
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2992,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 1882,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2992,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2992,
+                "name": ""
+              },
+              {
+                "constant_u32": null,
+                "expr": {
+                  "id": 2993,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 1878,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2993,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                "id": 2993,
+                "name": ""
+              },
+              {
+                "constant_u32": 0,
+                "expr": {
+                  "id": 235,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                "id": 235,
+                "name": ""
+              }
+            ],
+            "object_id": 1860,
+            "phase": "full",
+            "pointer_id": 1858,
+            "related_output_store_word_index": 6653,
+            "role": "post_reduction_workgroup_candidate",
+            "word_index": 6609
+          }
+        ],
+        "source_workgroup_base_ids": [
+          143
+        ]
+      }
+    ],
+    "priority_targets": [
+      {
+        "base": {
+          "binding": null,
+          "built_in": null,
+          "id": 143,
+          "kind": "variable",
+          "set": null,
+          "storage_class": "Workgroup"
+        },
+        "block": {
+          "block_entry_insert_after_phi_word_index": 3317,
+          "block_exit_insert_before_word_index": 3342,
+          "block_label": 2751,
+          "block_ordinal": 39,
+          "block_word_index": 3315,
+          "function_id": 4
+        },
+        "candidate": {
+          "block_entry_insert_after_phi_word_index": 3317,
+          "block_exit_insert_before_word_index": 3342,
+          "candidate_id": 39,
+          "word_index": 3315
+        },
+        "capture": [
+          "local_invocation_id",
+          "workgroup_id",
+          "computed_output_index",
+          "stored_value_bits",
+          "candidate_id"
+        ],
+        "control_dependencies": [
+          {
+            "branch_side": "true",
+            "condition_id": 2750,
+            "predecessor_block_label": 2747,
+            "predecessor_block_ordinal": 38
+          }
+        ],
+        "index_expr": [
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2924,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 2765,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2924,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2924,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2939,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 2761,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2939,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2939,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 1918,
+              "kind": "load",
+              "pointer": {
+                "access_chain_result_id": 1917,
+                "base": {
+                  "built_in": "LocalInvocationId",
+                  "id": 714,
+                  "kind": "variable",
+                  "name": "",
+                  "result_type": 55,
+                  "storage_class": "Input"
+                },
+                "indices": [
+                  {
+                    "constant_u32": 0,
+                    "expr": {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    "id": 52,
+                    "name": ""
+                  }
+                ],
+                "kind": "access_chain"
+              }
+            },
+            "id": 1918,
+            "name": ""
+          }
+        ],
+        "object_id": 2757,
+        "phase": "tail",
+        "pointer_id": 2758,
+        "related_output_store_word_index": 3789,
+        "role": "partial_to_workgroup_candidate",
+        "word_index": 3334
+      },
+      {
+        "base": {
+          "binding": null,
+          "built_in": null,
+          "id": 143,
+          "kind": "variable",
+          "set": null,
+          "storage_class": "Workgroup"
+        },
+        "block": {
+          "block_entry_insert_after_phi_word_index": 3455,
+          "block_exit_insert_before_word_index": 3495,
+          "block_label": 2784,
+          "block_ordinal": 49,
+          "block_word_index": 3453,
+          "function_id": 4
+        },
+        "candidate": {
+          "block_entry_insert_after_phi_word_index": 3455,
+          "block_exit_insert_before_word_index": 3495,
+          "candidate_id": 49,
+          "word_index": 3453
+        },
+        "capture": [
+          "local_invocation_id",
+          "workgroup_id",
+          "computed_output_index",
+          "stored_value_bits",
+          "candidate_id"
+        ],
+        "control_dependencies": [
+          {
+            "branch_side": "true",
+            "condition_id": 2783,
+            "predecessor_block_label": 2780,
+            "predecessor_block_ordinal": 48
+          }
+        ],
+        "index_expr": [
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2933,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 2803,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2933,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2933,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2936,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 2799,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2936,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2936,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 1918,
+              "kind": "load",
+              "pointer": {
+                "access_chain_result_id": 1917,
+                "base": {
+                  "built_in": "LocalInvocationId",
+                  "id": 714,
+                  "kind": "variable",
+                  "name": "",
+                  "result_type": 55,
+                  "storage_class": "Input"
+                },
+                "indices": [
+                  {
+                    "constant_u32": 0,
+                    "expr": {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    "id": 52,
+                    "name": ""
+                  }
+                ],
+                "kind": "access_chain"
+              }
+            },
+            "id": 1918,
+            "name": ""
+          }
+        ],
+        "object_id": 2795,
+        "phase": "tail",
+        "pointer_id": 2793,
+        "related_output_store_word_index": 3789,
+        "role": "reduction_candidate",
+        "word_index": 3487
+      },
+      {
+        "base": {
+          "binding": null,
+          "built_in": null,
+          "id": 143,
+          "kind": "variable",
+          "set": null,
+          "storage_class": "Workgroup"
+        },
+        "block": {
+          "block_entry_insert_after_phi_word_index": 3627,
+          "block_exit_insert_before_word_index": 3676,
+          "block_label": 2826,
+          "block_ordinal": 61,
+          "block_word_index": 3625,
+          "function_id": 4
+        },
+        "candidate": {
+          "block_entry_insert_after_phi_word_index": 3627,
+          "block_exit_insert_before_word_index": 3676,
+          "candidate_id": 61,
+          "word_index": 3625
+        },
+        "capture": [
+          "local_invocation_id",
+          "workgroup_id",
+          "computed_output_index",
+          "stored_value_bits",
+          "candidate_id"
+        ],
+        "control_dependencies": [
+          {
+            "branch_side": "true",
+            "condition_id": 2825,
+            "predecessor_block_label": 2821,
+            "predecessor_block_ordinal": 60
+          }
+        ],
+        "index_expr": [
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2926,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 2885,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2926,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2926,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2927,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 2881,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2927,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2927,
+            "name": ""
+          },
+          {
+            "constant_u32": 0,
+            "expr": {
+              "id": 235,
+              "kind": "constant",
+              "value_u32": 0
+            },
+            "id": 235,
+            "name": ""
+          }
+        ],
+        "object_id": 2841,
+        "phase": "tail",
+        "pointer_id": 2839,
+        "related_output_store_word_index": 3789,
+        "role": "post_reduction_workgroup_candidate",
+        "word_index": 3673
+      },
+      {
+        "base": {
+          "binding": null,
+          "built_in": null,
+          "id": 143,
+          "kind": "variable",
+          "set": null,
+          "storage_class": "Workgroup"
+        },
+        "block": {
+          "block_entry_insert_after_phi_word_index": 3699,
+          "block_exit_insert_before_word_index": 3748,
+          "block_label": 2848,
+          "block_ordinal": 63,
+          "block_word_index": 3697,
+          "function_id": 4
+        },
+        "candidate": {
+          "block_entry_insert_after_phi_word_index": 3699,
+          "block_exit_insert_before_word_index": 3748,
+          "candidate_id": 63,
+          "word_index": 3697
+        },
+        "capture": [
+          "local_invocation_id",
+          "workgroup_id",
+          "computed_output_index",
+          "stored_value_bits",
+          "candidate_id"
+        ],
+        "control_dependencies": [
+          {
+            "branch_side": "true",
+            "condition_id": 2847,
+            "predecessor_block_label": 2843,
+            "predecessor_block_ordinal": 62
+          }
+        ],
+        "index_expr": [
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2926,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 2885,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2926,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2926,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2927,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 2881,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2927,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2927,
+            "name": ""
+          },
+          {
+            "constant_u32": 0,
+            "expr": {
+              "id": 235,
+              "kind": "constant",
+              "value_u32": 0
+            },
+            "id": 235,
+            "name": ""
+          }
+        ],
+        "object_id": 2863,
+        "phase": "tail",
+        "pointer_id": 2861,
+        "related_output_store_word_index": 3789,
+        "role": "post_reduction_workgroup_candidate",
+        "word_index": 3745
+      },
+      {
+        "base": {
+          "binding": 2,
+          "built_in": null,
+          "id": 284,
+          "kind": "descriptor",
+          "set": 0,
+          "storage_class": "StorageBuffer"
+        },
+        "block": {
+          "block_entry_insert_after_phi_word_index": 3752,
+          "block_exit_insert_before_word_index": 3792,
+          "block_label": 2865,
+          "block_ordinal": 64,
+          "block_word_index": 3750,
+          "function_id": 4
+        },
+        "candidate": {
+          "block_entry_insert_after_phi_word_index": 3752,
+          "block_exit_insert_before_word_index": 3792,
+          "candidate_id": 64,
+          "word_index": 3750
+        },
+        "capture": [
+          "local_invocation_id",
+          "workgroup_id",
+          "computed_output_index",
+          "stored_value_bits",
+          "candidate_id"
+        ],
+        "control_dependencies": [
+          {
+            "branch_side": "false",
+            "condition_id": 2847,
+            "predecessor_block_label": 2843,
+            "predecessor_block_ordinal": 62
+          }
+        ],
+        "index_expr": [
+          {
+            "constant_u32": 0,
+            "expr": {
+              "id": 235,
+              "kind": "constant",
+              "value_u32": 0
+            },
+            "id": 235,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2873,
+              "kind": "op",
+              "op": "OpIAdd",
+              "operands": [
+                {
+                  "id": 2871,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2870,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2869,
+                          "kind": "op",
+                          "op": "OpIMul",
+                          "operands": [
+                            {
+                              "id": 2926,
+                              "kind": "op",
+                              "op": "OpPhi",
+                              "operands": [
+                                {
+                                  "id": 52,
+                                  "kind": "constant",
+                                  "value_u32": 0
+                                },
+                                {
+                                  "id": 2885,
+                                  "kind": "op",
+                                  "op": "OpIAdd",
+                                  "operands": [
+                                    {
+                                      "id": 2926,
+                                      "kind": "cycle"
+                                    },
+                                    {
+                                      "id": 154,
+                                      "kind": "constant",
+                                      "value_u32": 1
+                                    }
+                                  ],
+                                  "truncated_operands": 0
+                                }
+                              ],
+                              "truncated_operands": 0
+                            },
+                            {
+                              "id": 2064,
+                              "kind": "load",
+                              "pointer": {
+                                "access_chain_result_id": 2063,
+                                "base": {
+                                  "id": 63,
+                                  "kind": "push_constant",
+                                  "name": "",
+                                  "struct_name": "",
+                                  "struct_type": 61
+                                },
+                                "indices": [
+                                  {
+                                    "constant_u32": 6,
+                                    "expr": {
+                                      "id": 118,
+                                      "kind": "constant",
+                                      "value_u32": 6
+                                    },
+                                    "id": 118,
+                                    "name": ""
+                                  }
+                                ],
+                                "kind": "access_chain",
+                                "push_member": {
+                                  "index": 6,
+                                  "name": "",
+                                  "offset": 24,
+                                  "type": {
+                                    "bits": 32,
+                                    "id": 6,
+                                    "kind": "int",
+                                    "signed": 0
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          "truncated_operands": 0
+                        },
+                        {
+                          "id": 2065,
+                          "kind": "op",
+                          "op": "OpIMul",
+                          "operands": [
+                            {
+                              "id": 2026,
+                              "kind": "op",
+                              "op": "OpIAdd",
+                              "operands": [
+                                {
+                                  "id": 2023,
+                                  "kind": "load",
+                                  "pointer": {
+                                    "access_chain_result_id": 2022,
+                                    "base": {
+                                      "built_in": "WorkgroupId",
+                                      "id": 56,
+                                      "kind": "variable",
+                                      "name": "",
+                                      "result_type": 55,
+                                      "storage_class": "Input"
+                                    },
+                                    "indices": [
+                                      {
+                                        "constant_u32": 1,
+                                        "expr": {
+                                          "id": 57,
+                                          "kind": "constant",
+                                          "value_u32": 1
+                                        },
+                                        "id": 57,
+                                        "name": ""
+                                      }
+                                    ],
+                                    "kind": "access_chain"
+                                  }
+                                },
+                                {
+                                  "id": 2025,
+                                  "kind": "load",
+                                  "pointer": {
+                                    "access_chain_result_id": 2024,
+                                    "base": {
+                                      "id": 63,
+                                      "kind": "push_constant",
+                                      "name": "",
+                                      "struct_name": "",
+                                      "struct_type": 61
+                                    },
+                                    "indices": [
+                                      {
+                                        "constant_u32": 8,
+                                        "expr": {
+                                          "id": 65,
+                                          "kind": "constant",
+                                          "value_u32": 8
+                                        },
+                                        "id": 65,
+                                        "name": ""
+                                      }
+                                    ],
+                                    "kind": "access_chain",
+                                    "push_member": {
+                                      "index": 8,
+                                      "name": "",
+                                      "offset": 32,
+                                      "type": {
+                                        "bits": 32,
+                                        "id": 6,
+                                        "kind": "int",
+                                        "signed": 0
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "truncated_operands": 0
+                            },
+                            {
+                              "id": 2064,
+                              "kind": "load",
+                              "pointer": {
+                                "access_chain_result_id": 2063,
+                                "base": {
+                                  "id": 63,
+                                  "kind": "push_constant",
+                                  "name": "",
+                                  "struct_name": "",
+                                  "struct_type": 61
+                                },
+                                "indices": [
+                                  {
+                                    "constant_u32": 6,
+                                    "expr": {
+                                      "id": 118,
+                                      "kind": "constant",
+                                      "value_u32": 6
+                                    },
+                                    "id": 118,
+                                    "name": ""
+                                  }
+                                ],
+                                "kind": "access_chain",
+                                "push_member": {
+                                  "index": 6,
+                                  "name": "",
+                                  "offset": 24,
+                                  "type": {
+                                    "bits": 32,
+                                    "id": 6,
+                                    "kind": "int",
+                                    "signed": 0
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          "truncated_operands": 0
+                        }
+                      ],
+                      "truncated_operands": 0
+                    },
+                    {
+                      "id": 845,
+                      "kind": "op",
+                      "op": "OpIMul",
+                      "operands": [
+                        {
+                          "default_u32": 1,
+                          "id": 15,
+                          "kind": "spec_constant",
+                          "spec_id": 1
+                        },
+                        {
+                          "id": 844,
+                          "kind": "op",
+                          "op": "OpIAdd",
+                          "operands": [
+                            {
+                              "id": 837,
+                              "kind": "load",
+                              "pointer": {
+                                "access_chain_result_id": 836,
+                                "base": {
+                                  "built_in": "WorkgroupId",
+                                  "id": 56,
+                                  "kind": "variable",
+                                  "name": "",
+                                  "result_type": 55,
+                                  "storage_class": "Input"
+                                },
+                                "indices": [
+                                  {
+                                    "constant_u32": 0,
+                                    "expr": {
+                                      "id": 52,
+                                      "kind": "constant",
+                                      "value_u32": 0
+                                    },
+                                    "id": 52,
+                                    "name": ""
+                                  }
+                                ],
+                                "kind": "access_chain"
+                              }
+                            },
+                            {
+                              "id": 843,
+                              "kind": "op",
+                              "op": "OpIMul",
+                              "operands": [
+                                {
+                                  "id": 840,
+                                  "kind": "load",
+                                  "pointer": {
+                                    "access_chain_result_id": 839,
+                                    "base": {
+                                      "built_in": "NumWorkgroups",
+                                      "id": 838,
+                                      "kind": "variable",
+                                      "name": "",
+                                      "result_type": 55,
+                                      "storage_class": "Input"
+                                    },
+                                    "indices": [
+                                      {
+                                        "constant_u32": 0,
+                                        "expr": {
+                                          "id": 52,
+                                          "kind": "constant",
+                                          "value_u32": 0
+                                        },
+                                        "id": 52,
+                                        "name": ""
+                                      }
+                                    ],
+                                    "kind": "access_chain"
+                                  }
+                                },
+                                {
+                                  "id": 842,
+                                  "kind": "load",
+                                  "pointer": {
+                                    "access_chain_result_id": 841,
+                                    "base": {
+                                      "built_in": "WorkgroupId",
+                                      "id": 56,
+                                      "kind": "variable",
+                                      "name": "",
+                                      "result_type": 55,
+                                      "storage_class": "Input"
+                                    },
+                                    "indices": [
+                                      {
+                                        "constant_u32": 2,
+                                        "expr": {
+                                          "id": 158,
+                                          "kind": "constant",
+                                          "value_u32": 2
+                                        },
+                                        "id": 158,
+                                        "name": ""
+                                      }
+                                    ],
+                                    "kind": "access_chain"
+                                  }
+                                }
+                              ],
+                              "truncated_operands": 0
+                            }
+                          ],
+                          "truncated_operands": 0
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                {
+                  "id": 2927,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 2881,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2927,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2873,
+            "name": ""
+          }
+        ],
+        "object_id": 2877,
+        "phase": "tail",
+        "pointer_id": 2878,
+        "role": "final_output_store",
+        "word_index": 3789
+      },
+      {
+        "base": {
+          "binding": null,
+          "built_in": null,
+          "id": 143,
+          "kind": "variable",
+          "set": null,
+          "storage_class": "Workgroup"
+        },
+        "block": {
+          "block_entry_insert_after_phi_word_index": 6181,
+          "block_exit_insert_before_word_index": 6206,
+          "block_label": 1748,
+          "block_ordinal": 105,
+          "block_word_index": 6179,
+          "function_id": 4
+        },
+        "candidate": {
+          "block_entry_insert_after_phi_word_index": 6181,
+          "block_exit_insert_before_word_index": 6206,
+          "candidate_id": 105,
+          "word_index": 6179
+        },
+        "capture": [
+          "local_invocation_id",
+          "workgroup_id",
+          "computed_output_index",
+          "stored_value_bits",
+          "candidate_id"
+        ],
+        "control_dependencies": [
+          {
+            "branch_side": "true",
+            "condition_id": 1747,
+            "predecessor_block_label": 1744,
+            "predecessor_block_ordinal": 104
+          }
+        ],
+        "index_expr": [
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2990,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 1762,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2990,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2990,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 3005,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 1758,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 3005,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 3005,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 915,
+              "kind": "load",
+              "pointer": {
+                "access_chain_result_id": 914,
+                "base": {
+                  "built_in": "LocalInvocationId",
+                  "id": 714,
+                  "kind": "variable",
+                  "name": "",
+                  "result_type": 55,
+                  "storage_class": "Input"
+                },
+                "indices": [
+                  {
+                    "constant_u32": 0,
+                    "expr": {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    "id": 52,
+                    "name": ""
+                  }
+                ],
+                "kind": "access_chain"
+              }
+            },
+            "id": 915,
+            "name": ""
+          }
+        ],
+        "object_id": 1754,
+        "phase": "full",
+        "pointer_id": 1755,
+        "related_output_store_word_index": 6653,
+        "role": "partial_to_workgroup_candidate",
+        "word_index": 6198
+      },
+      {
+        "base": {
+          "binding": null,
+          "built_in": null,
+          "id": 143,
+          "kind": "variable",
+          "set": null,
+          "storage_class": "Workgroup"
+        },
+        "block": {
+          "block_entry_insert_after_phi_word_index": 6319,
+          "block_exit_insert_before_word_index": 6359,
+          "block_label": 1781,
+          "block_ordinal": 115,
+          "block_word_index": 6317,
+          "function_id": 4
+        },
+        "candidate": {
+          "block_entry_insert_after_phi_word_index": 6319,
+          "block_exit_insert_before_word_index": 6359,
+          "candidate_id": 115,
+          "word_index": 6317
+        },
+        "capture": [
+          "local_invocation_id",
+          "workgroup_id",
+          "computed_output_index",
+          "stored_value_bits",
+          "candidate_id"
+        ],
+        "control_dependencies": [
+          {
+            "branch_side": "true",
+            "condition_id": 1780,
+            "predecessor_block_label": 1777,
+            "predecessor_block_ordinal": 114
+          }
+        ],
+        "index_expr": [
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2999,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 1800,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2999,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2999,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 3002,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 1796,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 3002,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 3002,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 915,
+              "kind": "load",
+              "pointer": {
+                "access_chain_result_id": 914,
+                "base": {
+                  "built_in": "LocalInvocationId",
+                  "id": 714,
+                  "kind": "variable",
+                  "name": "",
+                  "result_type": 55,
+                  "storage_class": "Input"
+                },
+                "indices": [
+                  {
+                    "constant_u32": 0,
+                    "expr": {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    "id": 52,
+                    "name": ""
+                  }
+                ],
+                "kind": "access_chain"
+              }
+            },
+            "id": 915,
+            "name": ""
+          }
+        ],
+        "object_id": 1792,
+        "phase": "full",
+        "pointer_id": 1790,
+        "related_output_store_word_index": 6653,
+        "role": "reduction_candidate",
+        "word_index": 6351
+      },
+      {
+        "base": {
+          "binding": null,
+          "built_in": null,
+          "id": 143,
+          "kind": "variable",
+          "set": null,
+          "storage_class": "Workgroup"
+        },
+        "block": {
+          "block_entry_insert_after_phi_word_index": 6491,
+          "block_exit_insert_before_word_index": 6540,
+          "block_label": 1823,
+          "block_ordinal": 127,
+          "block_word_index": 6489,
+          "function_id": 4
+        },
+        "candidate": {
+          "block_entry_insert_after_phi_word_index": 6491,
+          "block_exit_insert_before_word_index": 6540,
+          "candidate_id": 127,
+          "word_index": 6489
+        },
+        "capture": [
+          "local_invocation_id",
+          "workgroup_id",
+          "computed_output_index",
+          "stored_value_bits",
+          "candidate_id"
+        ],
+        "control_dependencies": [
+          {
+            "branch_side": "true",
+            "condition_id": 1822,
+            "predecessor_block_label": 1818,
+            "predecessor_block_ordinal": 126
+          }
+        ],
+        "index_expr": [
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2992,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 1882,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2992,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2992,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2993,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 1878,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2993,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2993,
+            "name": ""
+          },
+          {
+            "constant_u32": 0,
+            "expr": {
+              "id": 235,
+              "kind": "constant",
+              "value_u32": 0
+            },
+            "id": 235,
+            "name": ""
+          }
+        ],
+        "object_id": 1838,
+        "phase": "full",
+        "pointer_id": 1836,
+        "related_output_store_word_index": 6653,
+        "role": "post_reduction_workgroup_candidate",
+        "word_index": 6537
+      },
+      {
+        "base": {
+          "binding": null,
+          "built_in": null,
+          "id": 143,
+          "kind": "variable",
+          "set": null,
+          "storage_class": "Workgroup"
+        },
+        "block": {
+          "block_entry_insert_after_phi_word_index": 6563,
+          "block_exit_insert_before_word_index": 6612,
+          "block_label": 1845,
+          "block_ordinal": 129,
+          "block_word_index": 6561,
+          "function_id": 4
+        },
+        "candidate": {
+          "block_entry_insert_after_phi_word_index": 6563,
+          "block_exit_insert_before_word_index": 6612,
+          "candidate_id": 129,
+          "word_index": 6561
+        },
+        "capture": [
+          "local_invocation_id",
+          "workgroup_id",
+          "computed_output_index",
+          "stored_value_bits",
+          "candidate_id"
+        ],
+        "control_dependencies": [
+          {
+            "branch_side": "true",
+            "condition_id": 1844,
+            "predecessor_block_label": 1840,
+            "predecessor_block_ordinal": 128
+          }
+        ],
+        "index_expr": [
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2992,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 1882,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2992,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2992,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 2993,
+              "kind": "op",
+              "op": "OpPhi",
+              "operands": [
+                {
+                  "id": 52,
+                  "kind": "constant",
+                  "value_u32": 0
+                },
+                {
+                  "id": 1878,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 2993,
+                      "kind": "cycle"
+                    },
+                    {
+                      "id": 154,
+                      "kind": "constant",
+                      "value_u32": 1
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 2993,
+            "name": ""
+          },
+          {
+            "constant_u32": 0,
+            "expr": {
+              "id": 235,
+              "kind": "constant",
+              "value_u32": 0
+            },
+            "id": 235,
+            "name": ""
+          }
+        ],
+        "object_id": 1860,
+        "phase": "full",
+        "pointer_id": 1858,
+        "related_output_store_word_index": 6653,
+        "role": "post_reduction_workgroup_candidate",
+        "word_index": 6609
+      },
+      {
+        "base": {
+          "binding": 2,
+          "built_in": null,
+          "id": 284,
+          "kind": "descriptor",
+          "set": 0,
+          "storage_class": "StorageBuffer"
+        },
+        "block": {
+          "block_entry_insert_after_phi_word_index": 6616,
+          "block_exit_insert_before_word_index": 6656,
+          "block_label": 1862,
+          "block_ordinal": 130,
+          "block_word_index": 6614,
+          "function_id": 4
+        },
+        "candidate": {
+          "block_entry_insert_after_phi_word_index": 6616,
+          "block_exit_insert_before_word_index": 6656,
+          "candidate_id": 130,
+          "word_index": 6614
+        },
+        "capture": [
+          "local_invocation_id",
+          "workgroup_id",
+          "computed_output_index",
+          "stored_value_bits",
+          "candidate_id"
+        ],
+        "control_dependencies": [
+          {
+            "branch_side": "false",
+            "condition_id": 1844,
+            "predecessor_block_label": 1840,
+            "predecessor_block_ordinal": 128
+          }
+        ],
+        "index_expr": [
+          {
+            "constant_u32": 0,
+            "expr": {
+              "id": 235,
+              "kind": "constant",
+              "value_u32": 0
+            },
+            "id": 235,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 1870,
+              "kind": "op",
+              "op": "OpIAdd",
+              "operands": [
+                {
+                  "id": 1868,
+                  "kind": "op",
+                  "op": "OpIAdd",
+                  "operands": [
+                    {
+                      "id": 1867,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 1866,
+                          "kind": "op",
+                          "op": "OpIMul",
+                          "operands": [
+                            {
+                              "id": 2992,
+                              "kind": "op",
+                              "op": "OpPhi",
+                              "operands": [
+                                {
+                                  "id": 52,
+                                  "kind": "constant",
+                                  "value_u32": 0
+                                },
+                                {
+                                  "id": 1882,
+                                  "kind": "op",
+                                  "op": "OpIAdd",
+                                  "operands": [
+                                    {
+                                      "id": 2992,
+                                      "kind": "cycle"
+                                    },
+                                    {
+                                      "id": 154,
+                                      "kind": "constant",
+                                      "value_u32": 1
+                                    }
+                                  ],
+                                  "truncated_operands": 0
+                                }
+                              ],
+                              "truncated_operands": 0
+                            },
+                            {
+                              "id": 1061,
+                              "kind": "load",
+                              "pointer": {
+                                "access_chain_result_id": 1060,
+                                "base": {
+                                  "id": 63,
+                                  "kind": "push_constant",
+                                  "name": "",
+                                  "struct_name": "",
+                                  "struct_type": 61
+                                },
+                                "indices": [
+                                  {
+                                    "constant_u32": 6,
+                                    "expr": {
+                                      "id": 118,
+                                      "kind": "constant",
+                                      "value_u32": 6
+                                    },
+                                    "id": 118,
+                                    "name": ""
+                                  }
+                                ],
+                                "kind": "access_chain",
+                                "push_member": {
+                                  "index": 6,
+                                  "name": "",
+                                  "offset": 24,
+                                  "type": {
+                                    "bits": 32,
+                                    "id": 6,
+                                    "kind": "int",
+                                    "signed": 0
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          "truncated_operands": 0
+                        },
+                        {
+                          "id": 1062,
+                          "kind": "op",
+                          "op": "OpIMul",
+                          "operands": [
+                            {
+                              "id": 1023,
+                              "kind": "op",
+                              "op": "OpIAdd",
+                              "operands": [
+                                {
+                                  "id": 1020,
+                                  "kind": "load",
+                                  "pointer": {
+                                    "access_chain_result_id": 1019,
+                                    "base": {
+                                      "built_in": "WorkgroupId",
+                                      "id": 56,
+                                      "kind": "variable",
+                                      "name": "",
+                                      "result_type": 55,
+                                      "storage_class": "Input"
+                                    },
+                                    "indices": [
+                                      {
+                                        "constant_u32": 1,
+                                        "expr": {
+                                          "id": 57,
+                                          "kind": "constant",
+                                          "value_u32": 1
+                                        },
+                                        "id": 57,
+                                        "name": ""
+                                      }
+                                    ],
+                                    "kind": "access_chain"
+                                  }
+                                },
+                                {
+                                  "id": 1022,
+                                  "kind": "load",
+                                  "pointer": {
+                                    "access_chain_result_id": 1021,
+                                    "base": {
+                                      "id": 63,
+                                      "kind": "push_constant",
+                                      "name": "",
+                                      "struct_name": "",
+                                      "struct_type": 61
+                                    },
+                                    "indices": [
+                                      {
+                                        "constant_u32": 8,
+                                        "expr": {
+                                          "id": 65,
+                                          "kind": "constant",
+                                          "value_u32": 8
+                                        },
+                                        "id": 65,
+                                        "name": ""
+                                      }
+                                    ],
+                                    "kind": "access_chain",
+                                    "push_member": {
+                                      "index": 8,
+                                      "name": "",
+                                      "offset": 32,
+                                      "type": {
+                                        "bits": 32,
+                                        "id": 6,
+                                        "kind": "int",
+                                        "signed": 0
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "truncated_operands": 0
+                            },
+                            {
+                              "id": 1061,
+                              "kind": "load",
+                              "pointer": {
+                                "access_chain_result_id": 1060,
+                                "base": {
+                                  "id": 63,
+                                  "kind": "push_constant",
+                                  "name": "",
+                                  "struct_name": "",
+                                  "struct_type": 61
+                                },
+                                "indices": [
+                                  {
+                                    "constant_u32": 6,
+                                    "expr": {
+                                      "id": 118,
+                                      "kind": "constant",
+                                      "value_u32": 6
+                                    },
+                                    "id": 118,
+                                    "name": ""
+                                  }
+                                ],
+                                "kind": "access_chain",
+                                "push_member": {
+                                  "index": 6,
+                                  "name": "",
+                                  "offset": 24,
+                                  "type": {
+                                    "bits": 32,
+                                    "id": 6,
+                                    "kind": "int",
+                                    "signed": 0
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          "truncated_operands": 0
+                        }
+                      ],
+                      "truncated_operands": 0
+                    },
+                    {
+                      "id": 845,
+                      "kind": "op",
+                      "op": "OpIMul",
+                      "operands": [
+                        {
+                          "default_u32": 1,
+                          "id": 15,
+                          "kind": "spec_constant",
+                          "spec_id": 1
+                        },
+                        {
+                          "id": 844,
+                          "kind": "op",
+                          "op": "OpIAdd",
+                          "operands": [
+                            {
+                              "id": 837,
+                              "kind": "load",
+                              "pointer": {
+                                "access_chain_result_id": 836,
+                                "base": {
+                                  "built_in": "WorkgroupId",
+                                  "id": 56,
+                                  "kind": "variable",
+                                  "name": "",
+                                  "result_type": 55,
+                                  "storage_class": "Input"
+                                },
+                                "indices": [
+                                  {
+                                    "constant_u32": 0,
+                                    "expr": {
+                                      "id": 52,
+                                      "kind": "constant",
+                                      "value_u32": 0
+                                    },
+                                    "id": 52,
+                                    "name": ""
+                                  }
+                                ],
+                                "kind": "access_chain"
+                              }
+                            },
+                            {
+                              "id": 843,
+                              "kind": "op",
+                              "op": "OpIMul",
+                              "operands": [
+                                {
+                                  "id": 840,
+                                  "kind": "load",
+                                  "pointer": {
+                                    "access_chain_result_id": 839,
+                                    "base": {
+                                      "built_in": "NumWorkgroups",
+                                      "id": 838,
+                                      "kind": "variable",
+                                      "name": "",
+                                      "result_type": 55,
+                                      "storage_class": "Input"
+                                    },
+                                    "indices": [
+                                      {
+                                        "constant_u32": 0,
+                                        "expr": {
+                                          "id": 52,
+                                          "kind": "constant",
+                                          "value_u32": 0
+                                        },
+                                        "id": 52,
+                                        "name": ""
+                                      }
+                                    ],
+                                    "kind": "access_chain"
+                                  }
+                                },
+                                {
+                                  "id": 842,
+                                  "kind": "load",
+                                  "pointer": {
+                                    "access_chain_result_id": 841,
+                                    "base": {
+                                      "built_in": "WorkgroupId",
+                                      "id": 56,
+                                      "kind": "variable",
+                                      "name": "",
+                                      "result_type": 55,
+                                      "storage_class": "Input"
+                                    },
+                                    "indices": [
+                                      {
+                                        "constant_u32": 2,
+                                        "expr": {
+                                          "id": 158,
+                                          "kind": "constant",
+                                          "value_u32": 2
+                                        },
+                                        "id": 158,
+                                        "name": ""
+                                      }
+                                    ],
+                                    "kind": "access_chain"
+                                  }
+                                }
+                              ],
+                              "truncated_operands": 0
+                            }
+                          ],
+                          "truncated_operands": 0
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                },
+                {
+                  "id": 2993,
+                  "kind": "op",
+                  "op": "OpPhi",
+                  "operands": [
+                    {
+                      "id": 52,
+                      "kind": "constant",
+                      "value_u32": 0
+                    },
+                    {
+                      "id": 1878,
+                      "kind": "op",
+                      "op": "OpIAdd",
+                      "operands": [
+                        {
+                          "id": 2993,
+                          "kind": "cycle"
+                        },
+                        {
+                          "id": 154,
+                          "kind": "constant",
+                          "value_u32": 1
+                        }
+                      ],
+                      "truncated_operands": 0
+                    }
+                  ],
+                  "truncated_operands": 0
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 1870,
+            "name": ""
+          }
+        ],
+        "object_id": 1874,
+        "phase": "full",
+        "pointer_id": 1875,
+        "role": "final_output_store",
+        "word_index": 6653
+      }
+    ],
+    "workgroup_store_count": 12
+  },
   "schema": "pdocker.spirv.probe-manifest.v1",
   "validation_gates": {
     "dispatch_allowed": false,
@@ -12057,6 +16005,6 @@
       "status": "required-before-instrumentation"
     },
     "spirv_val_required": true,
-    "target_env": "vulkan1.1"
+    "target_env": "vulkan1.2"
   }
 }

@@ -2589,6 +2589,213 @@
       }
     ]
   },
+  "q6_probe_targets": {
+    "available": false,
+    "final_output_store_count": 1,
+    "method": "structural-output-descriptor-and-workgroup-store-chain",
+    "notes": [
+      "Targets are derived from descriptor/workgroup dataflow, not from a shader hash.",
+      "Use priority targets to distinguish partial accumulation, reduction, and final output store.",
+      "Probe execution still requires full-module instrumentation plus spirv-val success."
+    ],
+    "output_descriptor_binding": 2,
+    "phases": [
+      {
+        "name": "single",
+        "output_store": {
+          "base": {
+            "binding": 2,
+            "built_in": null,
+            "id": 354,
+            "kind": "descriptor",
+            "set": 0,
+            "storage_class": "Uniform"
+          },
+          "block": {
+            "block_entry_insert_after_phi_word_index": 1527,
+            "block_exit_insert_before_word_index": 1553,
+            "block_label": 301,
+            "block_ordinal": 17,
+            "block_word_index": 1525,
+            "function_id": 4
+          },
+          "candidate": {
+            "block_entry_insert_after_phi_word_index": 1527,
+            "block_exit_insert_before_word_index": 1553,
+            "candidate_id": 17,
+            "word_index": 1525
+          },
+          "capture": [
+            "local_invocation_id",
+            "workgroup_id",
+            "computed_output_index",
+            "stored_value_bits",
+            "candidate_id"
+          ],
+          "control_dependencies": [
+            {
+              "branch_side": "false",
+              "condition_id": 306,
+              "predecessor_block_label": 303,
+              "predecessor_block_ordinal": 9
+            }
+          ],
+          "index_expr": [
+            {
+              "constant_u32": 0,
+              "expr": {
+                "id": 32,
+                "kind": "constant",
+                "value_u32": 0
+              },
+              "id": 32,
+              "name": ""
+            },
+            {
+              "constant_u32": null,
+              "expr": {
+                "id": 357,
+                "kind": "op",
+                "op": "OpIAdd",
+                "operands": [
+                  {
+                    "id": 355,
+                    "kind": "load",
+                    "pointer": {
+                      "built_in": null,
+                      "id": 272,
+                      "kind": "variable",
+                      "name": "d_offset",
+                      "result_type": 7,
+                      "storage_class": "Function"
+                    }
+                  },
+                  {
+                    "id": 356,
+                    "kind": "load",
+                    "pointer": {
+                      "built_in": null,
+                      "id": 286,
+                      "kind": "variable",
+                      "name": "row",
+                      "result_type": 7,
+                      "storage_class": "Function"
+                    }
+                  }
+                ],
+                "truncated_operands": 0
+              },
+              "id": 357,
+              "name": ""
+            }
+          ],
+          "object_id": 358,
+          "phase": "single",
+          "pointer_id": 359,
+          "role": "final_output_store",
+          "word_index": 1550
+        },
+        "preceding_workgroup_stores": [],
+        "source_workgroup_base_ids": []
+      }
+    ],
+    "priority_targets": [
+      {
+        "base": {
+          "binding": 2,
+          "built_in": null,
+          "id": 354,
+          "kind": "descriptor",
+          "set": 0,
+          "storage_class": "Uniform"
+        },
+        "block": {
+          "block_entry_insert_after_phi_word_index": 1527,
+          "block_exit_insert_before_word_index": 1553,
+          "block_label": 301,
+          "block_ordinal": 17,
+          "block_word_index": 1525,
+          "function_id": 4
+        },
+        "candidate": {
+          "block_entry_insert_after_phi_word_index": 1527,
+          "block_exit_insert_before_word_index": 1553,
+          "candidate_id": 17,
+          "word_index": 1525
+        },
+        "capture": [
+          "local_invocation_id",
+          "workgroup_id",
+          "computed_output_index",
+          "stored_value_bits",
+          "candidate_id"
+        ],
+        "control_dependencies": [
+          {
+            "branch_side": "false",
+            "condition_id": 306,
+            "predecessor_block_label": 303,
+            "predecessor_block_ordinal": 9
+          }
+        ],
+        "index_expr": [
+          {
+            "constant_u32": 0,
+            "expr": {
+              "id": 32,
+              "kind": "constant",
+              "value_u32": 0
+            },
+            "id": 32,
+            "name": ""
+          },
+          {
+            "constant_u32": null,
+            "expr": {
+              "id": 357,
+              "kind": "op",
+              "op": "OpIAdd",
+              "operands": [
+                {
+                  "id": 355,
+                  "kind": "load",
+                  "pointer": {
+                    "built_in": null,
+                    "id": 272,
+                    "kind": "variable",
+                    "name": "d_offset",
+                    "result_type": 7,
+                    "storage_class": "Function"
+                  }
+                },
+                {
+                  "id": 356,
+                  "kind": "load",
+                  "pointer": {
+                    "built_in": null,
+                    "id": 286,
+                    "kind": "variable",
+                    "name": "row",
+                    "result_type": 7,
+                    "storage_class": "Function"
+                  }
+                }
+              ],
+              "truncated_operands": 0
+            },
+            "id": 357,
+            "name": ""
+          }
+        ],
+        "object_id": 358,
+        "phase": "single",
+        "pointer_id": 359,
+        "role": "final_output_store",
+        "word_index": 1550
+      }
+    ],
+    "workgroup_store_count": 0
+  },
   "schema": "pdocker.spirv.probe-manifest.v1",
   "validation_gates": {
     "dispatch_allowed": false,
@@ -2611,6 +2818,6 @@
       "status": "required-before-instrumentation"
     },
     "spirv_val_required": true,
-    "target_env": "vulkan1.1"
+    "target_env": "vulkan1.0"
   }
 }
