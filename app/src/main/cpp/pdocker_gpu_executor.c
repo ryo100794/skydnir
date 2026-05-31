@@ -141,6 +141,7 @@ typedef struct {
     int64_t best_relative_offset;
     int canonical_match;
     int found_elsewhere;
+    int from_final_store_trace;
 } Q6OutputLayoutProbeSample;
 
 #define PDOCKER_GPU_Q6_OUTPUT_LAYOUT_PROBE_MAX_SAMPLES 48u
@@ -6186,6 +6187,8 @@ static void write_cpu_oracle_report(
             fprintf(out,
                     "%s{\"dst_index\":%llu,\"expected_store_index\":%llu,"
                     "\"store_formula_valid\":%s,"
+                    "\"sample_source\":\"%s\","
+                    "\"from_final_store_trace\":%s,"
                     "\"store_j\":%u,"
                     "\"store_workgroup\":[%u,%u,%u],"
                     "\"store_row_in_group\":%u,"
@@ -6201,6 +6204,8 @@ static void write_cpu_oracle_report(
                     (unsigned long long)sample->dst_index,
                     (unsigned long long)sample->expected_store_index,
                     sample->store_formula_valid ? "true" : "false",
+                    sample->from_final_store_trace ? "final-store-trace" : "fixed-oracle-window",
+                    sample->from_final_store_trace ? "true" : "false",
                     sample->store_j,
                     sample->store_workgroup_x,
                     sample->store_workgroup_y,
@@ -7190,7 +7195,8 @@ static void q6k_record_output_layout_probe_sample(
         uint32_t store_row_in_group,
         uint64_t store_row,
         float expected,
-        float gpu_at_dst) {
+        float gpu_at_dst,
+        int from_final_store_trace) {
     if (!report || !dst_base || dst_size < sizeof(float)) return;
     if (report->q6_output_layout_probe_sample_count >=
         sizeof(report->q6_output_layout_probe_samples) /
@@ -7225,6 +7231,7 @@ static void q6k_record_output_layout_probe_sample(
     sample->store_workgroup_z = store_workgroup_z;
     sample->store_row_in_group = store_row_in_group;
     sample->store_row = store_row;
+    sample->from_final_store_trace = from_final_store_trace ? 1 : 0;
     sample->expected = expected;
     sample->gpu_at_dst = gpu_at_dst;
     sample->abs_error_at_dst = fabs((double)expected - (double)gpu_at_dst);
@@ -8168,7 +8175,8 @@ static void run_cpu_oracle_q6k_matvec_sample(
             store_row_in_group,
             store_row,
             expected,
-            gpu_before_oracle_writeback);
+            gpu_before_oracle_writeback,
+            plan->from_final_store_trace);
         if (report->q6_output_layout_probe_sample_count >
             output_layout_sample_count_before) {
             if (store_j != 0) report->q6_store_index_sampled_nonzero_j = 1;
