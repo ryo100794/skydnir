@@ -29,6 +29,7 @@ SPIRV_DATAFLOW_COMPARE = ROOT / "scripts" / "compare-spirv-dataflow.py"
 SPIRV_EFFECTIVE_RECONSTRUCTOR = ROOT / "scripts" / "reconstruct-q6-effective-spirv.py"
 LLAMA_Q6_PREFLIGHT_PLANNER = ROOT / "scripts" / "plan-llama-gpu-q6-run.py"
 LLAMA_Q6_PLAN_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-q6-run-against-plan.py"
+Q6_STAGE_TRACE_SPVASM_ANALYZER = ROOT / "scripts" / "maintenance" / "analyze-q6-stage-trace-spvasm.py"
 
 
 def load_llama_gpu_artifact_verifier():
@@ -98,6 +99,25 @@ def load_q6_output_index_probe_classifier():
     namespace = {}
     exec(compile(source[start:end], str(LLAMA_COMPARE), "exec"), namespace)
     return namespace["classify_q6_output_index_probe"]
+
+
+def load_q6_stage_trace_parser():
+    source = LLAMA_COMPARE.read_text()
+    start = source.index("Q6_FINAL_STORE_TRACE_EXPECTED_RECORDS = (")
+    end = source.index("\n\ndef q6_oracle_sample_indices", start)
+    namespace = {"struct": __import__("struct")}
+    exec(compile(source[start:end], str(LLAMA_COMPARE), "exec"), namespace)
+    return namespace["parse_q6_final_store_trace_v2"]
+
+
+def load_q6_stage_trace_spvasm_analyzer():
+    spec = importlib.util.spec_from_file_location(
+        "q6_stage_trace_spvasm_analyzer", Q6_STAGE_TRACE_SPVASM_ANALYZER
+    )
+    analyzer = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(analyzer)
+    return analyzer
 
 
 def defines(path):
@@ -342,6 +362,108 @@ class GpuAbiContractTest(unittest.TestCase):
             verifier.index("elif _q6_debug_alias_evidence_missing("),
             verifier.index("elif q6_debug_u32_probe_blocker:"),
         )
+
+    def test_q6_stage_trace_parser_accepts_nonfinal_stage_records(self):
+        parser = load_q6_stage_trace_parser()
+
+        def samples_for_records():
+            values = {}
+            for record in (
+                {"slot_base": 8, "candidate_id": 39, "role_code": 1, "value_bits": 0x3f000000},
+                {"slot_base": 20, "candidate_id": 49, "role_code": 2, "value_bits": 0x3f100000},
+                {"slot_base": 32, "candidate_id": 61, "role_code": 3, "value_bits": 0x3f200000},
+                {"slot_base": 44, "candidate_id": 63, "role_code": 3, "value_bits": 0x3f300000},
+                {"slot_base": 56, "candidate_id": 64, "role_code": 4, "value_bits": 0x3f400000},
+                {"slot_base": 68, "candidate_id": 105, "role_code": 1, "value_bits": 0x3f500000},
+                {"slot_base": 80, "candidate_id": 115, "role_code": 2, "value_bits": 0x3f600000},
+                {"slot_base": 92, "candidate_id": 127, "role_code": 3, "value_bits": 0x3f700000},
+                {"slot_base": 104, "candidate_id": 129, "role_code": 3, "value_bits": 0x3f800000},
+                {"slot_base": 116, "candidate_id": 130, "role_code": 4, "value_bits": 0x3f900000},
+            ):
+                base = record["slot_base"]
+                values[base] = record["candidate_id"]
+                values[base + 1] = record["role_code"]
+                values[base + 2] = record["value_bits"]
+                if record["role_code"] == 4:
+                    values[base + 3] = 1000 + base
+                    values[base + 4] = 1
+                    values[base + 5] = 2
+                    values[base + 6] = 3
+                    values[base + 7] = 0
+                    values[base + 8] = 0
+                    values[base + 9] = 0
+                    values[base + 10] = 2
+            return [{"index": index, "value": value} for index, value in sorted(values.items())]
+
+        bindings = [{
+            "binding": 5,
+            "set": 0,
+            "size": 65536,
+            "debug_probe_binding": True,
+            "u32_after_dispatch": samples_for_records(),
+            "u32_after_writeback": samples_for_records(),
+        }]
+        report = parser(bindings)
+        self.assertEqual("pass", report["summary"])
+        self.assertEqual(10, report["bindings"][0]["executed_stage_trace_v2_count"])
+        self.assertEqual(2, report["bindings"][0]["executed_final_trace_v2_count"])
+        records = report["bindings"][0]["records"]
+        self.assertEqual(
+            ["pre-reduction-store", "reduction-store", "accumulator-a-store",
+             "accumulator-b-store", "final-store"],
+            [record["stage"] for record in records[:5]],
+        )
+        self.assertEqual([], report["failures"])
+
+    def test_q6_final_store_boundary_filters_nonfinal_stage_records(self):
+        source = LLAMA_COMPARE.read_text()
+        start = source.index("def build_q6_final_store_boundary():")
+        end = source.index("\n\nq6_final_store_boundary =", start)
+        body = source[start:end]
+        append_pos = body.index("records.append({")
+        guard_pos = body.index('record.get("role_code") == 4')
+        self.assertLess(
+            guard_pos,
+            append_pos,
+            "non-final Q6 stage trace records must not enter final-store boundary joins",
+        )
+
+    def test_q6_stage_trace_spvasm_analyzer_accepts_static_debug_slots(self):
+        analyzer = load_q6_stage_trace_spvasm_analyzer()
+        lines = [
+            "OpDecorate %debug Binding 5",
+            "%uint = OpTypeInt 32 0",
+            "%uint_0 = OpConstant %uint 0",
+            "%uint_1 = OpConstant %uint 1",
+            "%uint_2 = OpConstant %uint 2",
+            "%uint_3 = OpConstant %uint 3",
+            "%uint_4 = OpConstant %uint 4",
+        ]
+        for value in {8, 9, 18, 20, 21, 30, 32, 33, 42, 44, 45, 54,
+                      56, 57, 66, 68, 69, 78, 80, 81, 90, 92, 93, 102,
+                      104, 105, 114, 116, 117, 126, 39, 49, 61, 63, 64,
+                      105, 115, 127, 129, 130}:
+            lines.append(f"%uint_{value} = OpConstant %uint {value}")
+        ptr_id = 1000
+        for slot, value in [
+            (8, 39), (9, 1),
+            (20, 49), (21, 2),
+            (32, 61), (33, 3),
+            (44, 63), (45, 3),
+            (56, 64), (57, 4), (66, 2),
+            (68, 105), (69, 1),
+            (80, 115), (81, 2),
+            (92, 127), (93, 3),
+            (104, 129), (105, 3),
+            (116, 130), (117, 4), (126, 2),
+        ]:
+            lines.append(f"%ptr_{ptr_id} = OpAccessChain %_ptr_StorageBuffer_uint %debug %uint_0 %uint_{slot}")
+            lines.append(f"OpStore %ptr_{ptr_id} %uint_{value}")
+            ptr_id += 1
+        report = analyzer.parse_spvasm("\n".join(lines))
+        self.assertEqual("pass", report["summary"])
+        self.assertEqual(10, report["passed_record_count"])
+        self.assertEqual(["%debug"], report["debug_binding_variable_ids"])
 
     def test_executor_q6_debug_probe_alias_guard_fails_closed(self):
         source = GPU_EXECUTOR.read_text()

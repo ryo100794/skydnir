@@ -3912,6 +3912,7 @@ def parse_q6_final_store_trace_v2(bindings):
             local_invocation_id = [dispatch.get(base + offset) for offset in (7, 8, 9)]
             record_schema_version = dispatch.get(base + 10)
             unexecuted = candidate in (None, 0) and role_code in (None, 0) and value_bits in (None, 0)
+            final_store_record = expected.get("role_code") == 4
             status = "not-executed" if unexecuted else "pass"
             record_failures = []
             trace_writeback_mismatch_fields = []
@@ -3923,6 +3924,8 @@ def parse_q6_final_store_trace_v2(bindings):
                 record_failures.append("role-code")
             if unexecuted:
                 trace_status = "not-executed"
+            elif not final_store_record:
+                trace_status = "pass"
             elif (
                 record_schema_version == 2
                 and isinstance(output_index, int)
@@ -3937,20 +3940,24 @@ def parse_q6_final_store_trace_v2(bindings):
                 if not writeback:
                     trace_writeback_mismatch_fields.append("u32_after_writeback")
                 else:
-                    scalar_checks = (
+                    scalar_checks = [
                         ("candidate_id", candidate, writeback.get(base)),
                         ("role_code", role_code, writeback.get(base + 1)),
                         ("value_bits", value_bits, writeback.get(base + 2)),
-                        ("output_index", output_index, writeback.get(base + 3)),
-                        ("record_schema_version", record_schema_version, writeback.get(base + 10)),
-                    )
+                    ]
+                    if final_store_record:
+                        scalar_checks.extend([
+                            ("output_index", output_index, writeback.get(base + 3)),
+                            ("record_schema_version", record_schema_version, writeback.get(base + 10)),
+                        ])
                     for field_name, dispatch_value, writeback_value in scalar_checks:
                         if dispatch_value != writeback_value:
                             trace_writeback_mismatch_fields.append(field_name)
-                    if workgroup_id != [writeback.get(base + offset) for offset in (4, 5, 6)]:
-                        trace_writeback_mismatch_fields.append("workgroup_id")
-                    if local_invocation_id != [writeback.get(base + offset) for offset in (7, 8, 9)]:
-                        trace_writeback_mismatch_fields.append("local_invocation_id")
+                    if final_store_record:
+                        if workgroup_id != [writeback.get(base + offset) for offset in (4, 5, 6)]:
+                            trace_writeback_mismatch_fields.append("workgroup_id")
+                        if local_invocation_id != [writeback.get(base + offset) for offset in (7, 8, 9)]:
+                            trace_writeback_mismatch_fields.append("local_invocation_id")
 
             record = {
                 **expected,
@@ -4722,6 +4729,7 @@ def build_q6_final_store_boundary():
                 record.get("status") == "pass"
                 and record.get("trace_status") == "pass"
                 and record.get("trace_writeback_verified") is True
+                and record.get("role_code") == 4
             ):
                 records.append({
                     **record,

@@ -1689,3 +1689,14 @@ device divergence is present before reduction, during reduction, or only at the
 final lane-0 store.  This is still evidence collection; it is not a safe-kernel
 replacement and it does not modify llama.cpp, Dockerfile, model, prompt, or
 tensor bytes.
+
+Offline guard:
+`scripts/maintenance/analyze-q6-stage-trace-spvasm.py` statically checks the
+instrumented SPIR-V disassembly for these debug binding-5 stage slots.  The
+latest offline result
+`docs/test/q6-stage-trace-static-analysis-latest.json` passes for
+`/tmp/q6-effective-barrier.spvasm`: all ten expected stage records are present.
+Non-final stage records carry candidate/role/value fields only; final-store
+records additionally carry output index, workgroup/local invocation metadata,
+and schema version 2.  The compare parser therefore must not reject non-final
+stage records for lacking final-store metadata.
