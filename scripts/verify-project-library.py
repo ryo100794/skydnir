@@ -136,7 +136,7 @@ def main() -> int:
         "compare docs record operation ui visibility": "daemon operation/progress card" in compare_doc and "only object expected in `docker ps`" in compare_doc and "Operation cleanup" in compare_doc,
         "host native gpu baseline script is recorded": "pdocker.gpu.host_native.v1" in host_bench_script and "--bench-vulkan-matmul256-resident" in host_bench_script and "gpu-host-native-latest.json" in compare_doc,
         "compare todo records 10x task list": "llama.cpp Container GPU 10x Task List" in compare_todo,
-        "compare todo records ui expectations": "UI-visible reporting of\n  speedup, `target_met`, GPU layer count, current blocker" in compare_todo and "Long-running compare/build cards are pdockerd operations" in compare_todo,
+        "compare todo records ui expectations": "Surface `target_met`, speedup, current blocker, GPU layer count" in compare_todo and "Long-running compare/build cards are Skydnir daemon operations" in compare_todo,
         "compare todo records operation cleanup": "marks\n    failed operations on nonzero exit" in compare_todo and "CPU restore is opt-in" in compare_todo,
         "compare todo preserves no llama patch policy": "llama.cpp source must remain unmodified" in compare_todo,
     }
@@ -392,6 +392,7 @@ def main() -> int:
         "pdocker-docker",
         "pdocker-compose",
         "skydnir-engine-env",
+        "SKYDNIR_DOCKER_SOCK",
         "Skydnir: show paths",
         "Skydnir: compose up current project",
         "DOCKER_HOST",
@@ -413,8 +414,14 @@ def main() -> int:
         fail("dev-workspace Docker helpers must report missing mounted Engine socket")
     if '"${SKYDNIR_ENGINE_SOCKET:-}"' not in dev_helper_scripts:
         fail("pdocker-engine-env must prefer SKYDNIR_ENGINE_SOCKET before legacy PDOCKER sockets")
-    if '"${SKYDNIR_ENGINE_SOCKET:-}"\n    "${PDOCKER_ENGINE_SOCKET:-}"' not in dev_helper_scripts:
-        fail("pdocker-engine-env must keep legacy PDOCKER_ENGINE_SOCKET fallback after SKYDNIR_ENGINE_SOCKET")
+    socket_env_order = (
+        '"${SKYDNIR_ENGINE_SOCKET:-}"\n'
+        '    "${SKYDNIR_DOCKER_SOCK:-}"\n'
+        '    "${PDOCKER_ENGINE_SOCKET:-}"\n'
+        '    "${PDOCKER_DOCKER_SOCK:-}"'
+    )
+    if socket_env_order not in dev_helper_scripts:
+        fail("pdocker-engine-env must try Skydnir socket envs before legacy PDOCKER fallbacks")
     if "The APK does not\n  bundle an upstream Docker CLI binary" not in dev_readme:
         fail("dev-workspace README must keep Docker CLI scoped to development container")
     for readme_token in (

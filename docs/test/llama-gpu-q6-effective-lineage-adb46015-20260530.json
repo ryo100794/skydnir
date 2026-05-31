@@ -1,0 +1,66 @@
+{
+  "artifact": "docs/test/llama-gpu-ngl1-q6-workgroup-adb46015-20260530T232458Z.json",
+  "event_index": 0,
+  "expected_effective_spirv_hash": "0x2abe8e79566aa67a",
+  "matches_expected_effective_hash": true,
+  "reconstructed_effective_spirv_hash": "0x2abe8e79566aa67a",
+  "schema": "skydnir.llama.q6.effective_spirv_lineage.v1",
+  "source_spirv_hash": "0xd2d7fbedceb5a8a6",
+  "source_spv": "/tmp/q6write10-bundle/native-q6.write.spv",
+  "steps": [
+    {
+      "hash": "0xd2d7fbedceb5a8a6",
+      "phase": "source",
+      "words": 7797
+    },
+    {
+      "changed": true,
+      "hash": "0x4c00be09530ea2db",
+      "local_size": [
+        1,
+        1,
+        1
+      ],
+      "phase": "local-size-legalized",
+      "resolved": [
+        32,
+        1,
+        1
+      ],
+      "words": 7797
+    },
+    {
+      "changed": true,
+      "hash": "0xab97bf7e13302b50",
+      "phase": "specialization-materialized",
+      "pre_local_size": [
+        32,
+        1,
+        1
+      ],
+      "preserve_workgroup_size_spec_subtree": false,
+      "resolved_local_size": [
+        32,
+        1,
+        1
+      ],
+      "spec_composites_folded": 1,
+      "spec_constants_folded": 4,
+      "spec_ops_folded": 4,
+      "words": 7773
+    },
+    {
+      "aliases": [
+        {
+          "original_binding": 0,
+          "rewritten_binding": 6,
+          "target_id": 371
+        }
+      ],
+      "changed": true,
+      "hash": "0x2abe8e79566aa67a",
+      "phase": "duplicate-descriptor-rewritten",
+      "words": 7773
+    }
+  ]
+}

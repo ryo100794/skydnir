@@ -503,7 +503,7 @@ remains an explicit diagnostic override and is available under strict
 passthrough for isolating driver compilation rejection from descriptor/call-site
 ABI correctness; it is not a benchmarkable product optimization.
 Fresh APK/device evidence for this lane must show executor marker
-`gpu-executor-llama-q4k-callsite-20260520`.
+`gpu-executor-q6-descriptor-invariants-20260530`.
 
 2026-05-21 Q6 evidence-retention gate: a fresh `ngl=1` compare on
 `192.168.179.26:37303` served `/health`, `/v1/models`, and `/completion`, but
@@ -1514,3 +1514,62 @@ Next concrete actions:
 4. If staging does not change Q6 output, continue with static SPIR-V dataflow
    around the two final `OpStore` paths into binding 2 and the relevant push
    constants (`push[7]` fuse flags, output base, row/column strides).
+
+### 2026-05-30 Update: effective Q6 SPIR-V lineage is now statically reproducible
+
+Latest promoted device artifact:
+
+- `docs/test/llama-gpu-ngl1-q6-workgroup-adb46015-20260530T232458Z.json`
+
+The stale-executor marker issue has been closed for this lane.  The artifact
+now reports the expected executor marker
+`gpu-executor-q6-descriptor-invariants-20260530`, and descriptor/readback
+invariants are present and true.  Q6 is still not correct: `/completion` returns
+`" Marvel"` for the deterministic sanity prompt, so no performance claim is
+allowed.
+
+The effective native Q6 probe module is now reproducible offline with
+`scripts/reconstruct-q6-effective-spirv.py`:
+
+```bash
+scripts/reconstruct-q6-effective-spirv.py \
+  /tmp/q6write10-bundle/native-q6.write.spv \
+  --artifact docs/test/llama-gpu-ngl1-q6-workgroup-adb46015-20260530T232458Z.json \
+  --out-spv /tmp/q6-effective-0x2abe8e79566aa67a.spv \
+  --out-json docs/test/llama-gpu-q6-effective-lineage-adb46015-20260530.json
+```
+
+Static lineage:
+
+1. source/instrumented Q6 module: `0xd2d7fbedceb5a8a6`, `7797` words.
+2. literal `LocalSize 1,1,1` legalized from WorkgroupSize SpecId evidence to
+   `LocalSize 32,1,1`: `0x4c00be09530ea2db`.
+3. specialization constants materialized with `{0:32, 1:2, 2:1}`:
+   `0xab97bf7e13302b50`, `7773` words; folded 4 spec constants, 1 spec
+   composite, and 4 supported spec ops.
+4. strict duplicate descriptor normalization rewrites target id `371` from
+   binding `0` to first free binding `6`, producing the runtime effective hash
+   `0x2abe8e79566aa67a`.
+
+This means the next blocker is not "unknown effective bytes."  It is the
+native Q6 final value path in the effective module.  Current evidence says:
+
+- row-indexed output writeback is verified,
+- descriptor offset/range invariants are verified,
+- native-vs-writeback samples preserve the native GPU value,
+- output-layout remapping has no stable alternate mapping,
+- shader-like and native reduction-tree CPU oracles are internally consistent,
+- but the actual Android Vulkan final output value differs from the oracle.
+
+Next static target before another ADB run:
+
+1. Use the reconstructed effective module to trace the value feeding the final
+   binding-2 `OpStore`:
+   `%1873 -> %1874 -> %1875 -> OpStore`, including the Workgroup `%143`
+   reduction and optional fuse-add paths gated by `push[7]`.
+2. Verify that debug/probe stores to binding 5 are post-store observation only
+   and do not feed back into `%143`, `%1874`, or binding 2.
+3. If the static value path is coherent, the next implementation must be a
+   generic driver-compatibility lowering for the proven semantic boundary
+   (workgroup-memory/barrier/final-store behavior), not a hash-only safe kernel
+   and not a llama.cpp change.

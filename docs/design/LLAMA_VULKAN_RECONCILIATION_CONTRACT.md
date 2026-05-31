@@ -44,7 +44,7 @@ llama.cpp remains unmodified.  The current exact callsite map is:
 | Small f32/indexing controls | `0x7bf05c459ac87f2b`, `0x11d5243c43b23a7b`, `0x11c0523df6c795b8` | Small zero-layer/control shaders used to validate oracle and transport plumbing. | Controls only; not proof of transformer-layer offload. |
 
 Fresh Q4_K callsite evidence must show executor marker
-`gpu-executor-llama-q4k-callsite-20260520`.  Fresh feature-chain ICD evidence
+`gpu-executor-q6-descriptor-invariants-20260530`.  Fresh feature-chain ICD evidence
 must show `vulkan-icd-feature-chain-marker-20260518` unless the compare command
 explicitly changes the expected marker.
 

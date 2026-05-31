@@ -1111,7 +1111,7 @@ typedef struct {
 
 static VulkanRuntime g_vulkan_runtime;
 
-#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-llama-q4k-callsite-20260520"
+#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-q6-descriptor-invariants-20260530"
 
 static uint32_t choose_vulkan_instance_api_version(void) {
     uint32_t supported = VK_API_VERSION_1_0;

@@ -48,6 +48,7 @@ if [[ -n "${DOCKER_HOST:-}" ]]; then
 else
   candidates=(
     "${SKYDNIR_ENGINE_SOCKET:-}"
+    "${SKYDNIR_DOCKER_SOCK:-}"
     "${PDOCKER_ENGINE_SOCKET:-}"
     "${PDOCKER_DOCKER_SOCK:-}"
     "/pdocker/host/pdockerd.sock"
@@ -64,7 +65,7 @@ else
   done
   if [[ -z "$resolved" ]]; then
     echo "No mounted Skydnir/Docker Engine socket found." >&2
-    echo "Checked SKYDNIR_ENGINE_SOCKET, PDOCKER_ENGINE_SOCKET, /pdocker/host/pdockerd.sock, /var/run/pdocker.sock, and /var/run/docker.sock." >&2
+    echo "Checked SKYDNIR_ENGINE_SOCKET, SKYDNIR_DOCKER_SOCK, PDOCKER_ENGINE_SOCKET, PDOCKER_DOCKER_SOCK, /pdocker/host/pdockerd.sock, /var/run/pdocker.sock, and /var/run/docker.sock." >&2
     exit 1
   fi
 fi

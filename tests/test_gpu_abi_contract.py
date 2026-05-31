@@ -26,6 +26,7 @@ SPIRV_ANALYZER = ROOT / "scripts" / "analyze-spirv.py"
 SPIRV_PROBE_MANIFEST_VERIFIER = ROOT / "scripts" / "verify-spirv-probe-manifest.py"
 SPIRV_NOOP_INSTRUMENTER = ROOT / "scripts" / "instrument-spirv-noop-probe.py"
 SPIRV_DATAFLOW_COMPARE = ROOT / "scripts" / "compare-spirv-dataflow.py"
+SPIRV_EFFECTIVE_RECONSTRUCTOR = ROOT / "scripts" / "reconstruct-q6-effective-spirv.py"
 LLAMA_Q6_PREFLIGHT_PLANNER = ROOT / "scripts" / "plan-llama-gpu-q6-run.py"
 LLAMA_Q6_PLAN_VERIFIER = ROOT / "scripts" / "verify-llama-gpu-q6-run-against-plan.py"
 
@@ -44,6 +45,16 @@ def load_llama_q6_plan_verifier():
     assert spec.loader is not None
     spec.loader.exec_module(verifier)
     return verifier
+
+
+def load_spirv_effective_reconstructor():
+    spec = importlib.util.spec_from_file_location(
+        "spirv_effective_reconstructor", SPIRV_EFFECTIVE_RECONSTRUCTOR
+    )
+    reconstructor = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(reconstructor)
+    return reconstructor
 
 
 def q6_required_runtime_env_manifest(plan_path):
@@ -161,6 +172,97 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("const uint64_t dst_index = output_base_index + (uint64_t)row;", source)
         self.assertIn("sample->store_formula_valid", source)
         self.assertIn('\\"store_workgroup\\":[%u,%u,%u]', source)
+
+    def test_q6_effective_spirv_reconstructor_mirrors_executor_lowering_order(self):
+        reconstructor = load_spirv_effective_reconstructor()
+        # Minimal structurally valid word stream for the executor transformations:
+        # literal LocalSize 1x1x1, WorkgroupSize.x SpecId 0, one SpecConstantOp,
+        # and two descriptor variables sharing Binding 0.
+        words = [
+            0x07230203,
+            0x00010300,
+            0,
+            64,
+            0,
+            (6 << 16) | 16,
+            4,
+            17,
+            1,
+            1,
+            1,
+            (4 << 16) | 71,
+            10,
+            1,
+            0,
+            (4 << 16) | 71,
+            20,
+            11,
+            25,
+            (4 << 16) | 71,
+            30,
+            34,
+            0,
+            (4 << 16) | 71,
+            30,
+            33,
+            0,
+            (4 << 16) | 71,
+            31,
+            34,
+            0,
+            (4 << 16) | 71,
+            31,
+            33,
+            0,
+            (4 << 16) | 50,
+            1,
+            10,
+            1,
+            (4 << 16) | 43,
+            1,
+            11,
+            1,
+            (4 << 16) | 43,
+            1,
+            12,
+            1,
+            (6 << 16) | 51,
+            2,
+            20,
+            10,
+            11,
+            12,
+            (6 << 16) | 52,
+            1,
+            21,
+            134,
+            10,
+            11,
+        ]
+        event = {
+            "specialization_entries": [{"constant_id": 0, "value_u64": 32}],
+            "binding_details": [{"binding": 0}, {"binding": 1}],
+        }
+        effective_words, steps = reconstructor.reconstruct(words, event)
+        self.assertEqual([step["phase"] for step in steps], [
+            "source",
+            "local-size-legalized",
+            "specialization-materialized",
+            "duplicate-descriptor-rewritten",
+        ])
+        self.assertTrue(steps[1]["changed"])
+        self.assertEqual(steps[1]["resolved"], [32, 1, 1])
+        self.assertTrue(steps[2]["changed"])
+        self.assertEqual(steps[2]["spec_constants_folded"], 1)
+        self.assertEqual(steps[2]["spec_composites_folded"], 1)
+        self.assertEqual(steps[2]["spec_ops_folded"], 1)
+        self.assertEqual(
+            steps[3]["aliases"],
+            [{"target_id": 31, "original_binding": 0, "rewritten_binding": 2}],
+        )
+        self.assertIn((6 << 16) | 16, effective_words)
+        local_size_index = effective_words.index((6 << 16) | 16)
+        self.assertEqual(effective_words[local_size_index + 3:local_size_index + 6], [32, 1, 1])
 
     def test_vulkan_dispatch_v4_binding_schema_is_single_source_and_checked(self):
         app_fields, app_count, app_hash, computed_hash = v4_binding_schema(APP_HEADER)
@@ -770,7 +872,7 @@ class GpuAbiContractTest(unittest.TestCase):
             r'#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "([^"]+)"',
             source,
         ).group(1)
-        self.assertEqual(marker, "gpu-executor-llama-q4k-callsite-20260520")
+        self.assertEqual(marker, "gpu-executor-q6-descriptor-invariants-20260530")
         stale = "gpu-executor-" + "float16-cap-diagnostic-20260520"
         for path in [
             GPU_EXECUTOR,
@@ -815,7 +917,7 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_q4k_callsite_handoff_records_required_evidence(self):
         doc = LLAMA_GPU_NEXT_STEPS.read_text()
         for evidence in [
-            "gpu-executor-llama-q4k-callsite-20260520",
+            "gpu-executor-q6-descriptor-invariants-20260530",
             "mul_mat_vec_q4_k_f32_f32",
             "vulkan-shaders/mul_mat_vec_q4_k.comp",
             "vk_mat_vec_push_constants",
@@ -2586,8 +2688,8 @@ class GpuAbiContractTest(unittest.TestCase):
                     {
                         "schema": "pdocker.llama.gpu.compare.v1",
                         "runtime_freshness": {
-                            "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
-                            "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                            "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
+                            "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
                             "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                             "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                         },
@@ -2595,8 +2697,8 @@ class GpuAbiContractTest(unittest.TestCase):
                             "runtime_env_manifest": q6_required_runtime_env_manifest(plan),
                             "diagnostics": {
                                 "runtime_freshness": {
-                                    "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
-                                    "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                                    "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
+                                    "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
                                     "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                                     "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                                 },
@@ -2687,7 +2789,7 @@ class GpuAbiContractTest(unittest.TestCase):
                                             "changed": False,
                                             "failure_reason": "no-changes",
                                         },
-                                        "executor_build_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                                        "executor_build_marker": "gpu-executor-q6-descriptor-invariants-20260530",
                                         "source_spirv_hash": "0x1111111111111111",
                                         "effective_spirv_hash": "0x2222222222222222",
                                         "oracle_spirv_hash": "0x1111111111111111",
@@ -2857,8 +2959,8 @@ class GpuAbiContractTest(unittest.TestCase):
                     {
                         "schema": "pdocker.llama.gpu.compare.v1",
                         "runtime_freshness": {
-                            "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
-                            "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                            "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
+                            "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
                             "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                             "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                         },
@@ -3223,8 +3325,8 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
-                        "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
+                        "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
+                        "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
                     },
                     "config_propagation": {
                         "summary": "fail",
@@ -3336,7 +3438,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                        "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
                         "observed_executor_markers": [],
                     },
                 },
@@ -3378,7 +3480,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
+                        "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
                         "observed_executor_markers": [],
                     },
                 },
@@ -3401,8 +3503,8 @@ class GpuAbiContractTest(unittest.TestCase):
                     "blocker_detail": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-llama-q4k-callsite-20260520",
-                        "observed_executor_markers": ["gpu-executor-llama-q4k-callsite-20260520"],
+                        "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
+                        "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
                     },
                     "config_propagation": {"summary": "pass", "checks": []},
                 },
@@ -3447,7 +3549,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "enabled_ext_8bit_storage",
             "enabled_ext_shader_float16_int8",
             "enabled_ext_storage_buffer_storage_class",
-            "#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER \"gpu-executor-llama-q4k-callsite-20260520\"",
+            "#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER \"gpu-executor-q6-descriptor-invariants-20260530\"",
         ]:
             self.assertIn(marker, source)
         failure_body = source.split("if (ret != 0) {", 1)[1].split("if (fence) vkDestroyFence", 1)[0]
