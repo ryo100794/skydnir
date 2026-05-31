@@ -13,6 +13,7 @@ import http.client
 import json
 import os
 import shutil
+import socket
 import tempfile
 import sys
 import threading
@@ -398,6 +399,227 @@ def test_duplicate_name_resolution_contract() -> None:
             fail(f"container name was still blocked after name delete cleaned duplicates: {exc}")
         else:
             ok("duplicate container names resolve newest-first, keep log truth, and clean by name")
+
+
+def test_termport_tcp_engine_exec_contract() -> None:
+    """TermPort uses Docker-compatible HTTP over TCP and raw TTY hijack bytes."""
+    with tempfile.TemporaryDirectory(prefix="pdocker-test-") as home:
+        home_path = Path(home)
+        mod = load_pdockerd_with_env("termport_tcp", "no-proot", home_path)
+        cid = "3" * 64
+        mod.save_container_state(
+            cid,
+            {
+                "Id": cid,
+                "Name": "/termport-shell",
+                "Image": "busybox:latest",
+                "ImageId": "sha256:" + "4" * 64,
+                "Cmd": ["/bin/sh"],
+                "Created": "2026-05-31T00:00:00.000000000Z",
+                "State": {"Running": True, "Status": "running", "Pid": 1234, "ExitCode": 0},
+            },
+        )
+
+        resize_calls: list[tuple[int, int]] = []
+        stdin_reads: list[bytes] = []
+
+        class FakeTTYProcess:
+            def __init__(self) -> None:
+                self.pid = os.getpid()
+                self.returncode = None
+                self._stdin_r, stdin_w = os.pipe()
+                stdout_r, self._stdout_w = os.pipe()
+                self.stdin = os.fdopen(stdin_w, "wb", buffering=0)
+                self.stdout = os.fdopen(stdout_r, "rb", buffering=0)
+                self.stderr = None
+                self._pdocker_raw_pty = True
+                self._worker = threading.Thread(target=self._echo_once, daemon=True)
+                self._worker.start()
+
+            def _echo_once(self) -> None:
+                try:
+                    data = os.read(self._stdin_r, 4096)
+                    stdin_reads.append(data)
+                    os.write(self._stdout_w, b"termport:" + data)
+                finally:
+                    os.close(self._stdin_r)
+                    os.close(self._stdout_w)
+                    self.returncode = 0
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self):
+                self._worker.join(timeout=5)
+                if self.returncode is None:
+                    self.returncode = 0
+                return self.returncode
+
+            def resize(self, rows, cols):
+                resize_calls.append((rows, cols))
+
+        def fake_spawn(container_id, cmd, env=None, workdir=None, tty=False, **kwargs):
+            if container_id != cid:
+                fail(f"exec spawned wrong container: {container_id}")
+            if not tty:
+                fail("TermPort exec start must request Tty=true")
+            if "TERM=xterm-256color" not in (env or []):
+                fail(f"exec env did not preserve TermPort terminal env: {env!r}")
+            return FakeTTYProcess()
+
+        class RunningGuard:
+            def poll(self):
+                return None
+
+        original_spawn = mod.spawn_in_container
+        mod.spawn_in_container = fake_spawn
+        with mod.running_lock:
+            prior_running_proc = mod.running_containers.get(cid)
+            mod.running_containers[cid] = RunningGuard()
+        srv = mod.ThreadingTCPHTTPServer(("127.0.0.1", 0), mod.DockerAPIHandler)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+
+        def json_request(method: str, target: str, body: dict | None = None) -> tuple[int, bytes]:
+            conn = http.client.HTTPConnection(srv.server_address[0], srv.server_address[1], timeout=5)
+            try:
+                payload = None if body is None else json.dumps(body).encode()
+                headers = {"Content-Type": "application/json"} if payload is not None else {}
+                conn.request(method, target, body=payload, headers=headers)
+                resp = conn.getresponse()
+                return resp.status, resp.read()
+            finally:
+                conn.close()
+
+        try:
+            status, body = json_request("GET", "/_ping")
+            if status != 200 or body != b"OK":
+                fail(f"TermPort /_ping over TCP mismatch: HTTP {status}, body={body!r}")
+
+            status, body = json_request("GET", "/version")
+            if status != 200 or json.loads(body.decode()).get("ApiVersion") != "1.43":
+                fail(f"TermPort /version over TCP mismatch: HTTP {status}, body={body!r}")
+
+            status, body = json_request("GET", "/containers/json?all=0")
+            listed = json.loads(body.decode())
+            if status != 200 or listed[0]["Id"] != cid or listed[0]["State"] != "running":
+                fail(f"TermPort container list contract mismatch: HTTP {status}, body={body!r}")
+
+            status, body = json_request(
+                "POST",
+                f"/containers/{cid}/exec",
+                {
+                    "AttachStdin": True,
+                    "AttachStdout": True,
+                    "AttachStderr": True,
+                    "Tty": True,
+                    "Env": ["TERM=xterm-256color", "COLORTERM=truecolor", "ENV=", "BASH_ENV="],
+                    "Cmd": ["/bin/sh", "-lc", "exec /bin/sh -i"],
+                },
+            )
+            exec_id = json.loads(body.decode()).get("Id") if body else ""
+            if status != 201 or not exec_id:
+                fail(f"TermPort exec create mismatch: HTTP {status}, body={body!r}")
+
+            status, body = json_request("POST", f"/exec/{exec_id}/resize?h=24&w=80")
+            if status != 201:
+                fail(f"TermPort exec resize mismatch: HTTP {status}, body={body!r}")
+
+            payload = json.dumps({"Detach": False, "Tty": True}).encode()
+            with socket.create_connection(srv.server_address, timeout=5) as sock:
+                sock.sendall(
+                    (
+                        f"POST /exec/{exec_id}/start HTTP/1.1\r\n"
+                        f"Host: skydnir\r\n"
+                        f"Connection: Upgrade\r\n"
+                        f"Upgrade: tcp\r\n"
+                        f"Content-Type: application/json\r\n"
+                        f"Content-Length: {len(payload)}\r\n"
+                        f"\r\n"
+                    ).encode()
+                    + payload
+                )
+                head = b""
+                while b"\r\n\r\n" not in head:
+                    chunk = sock.recv(1)
+                    if not chunk:
+                        break
+                    head += chunk
+                if not head.startswith(b"HTTP/1.1 101") or b"Upgrade: tcp" not in head:
+                    fail(f"TermPort exec start did not HTTP 101 upgrade: {head!r}")
+                sock.sendall(b"echo termport\n")
+                sock.shutdown(socket.SHUT_WR)
+                raw = b""
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    raw += chunk
+            if raw.startswith(b"\x01\x00\x00\x00"):
+                fail(f"TermPort Tty=true stream used Docker multiplex framing: {raw!r}")
+            if b"termport:echo termport\n" not in raw:
+                fail(f"TermPort raw TTY stream did not echo stdin bytes: {raw!r}")
+            if resize_calls != [(24, 80)]:
+                fail(f"TermPort resize was not applied to PTY before start: {resize_calls!r}")
+            if stdin_reads != [b"echo termport\n"]:
+                fail(f"TermPort stdin bytes changed in transit: {stdin_reads!r}")
+        finally:
+            mod.spawn_in_container = original_spawn
+            with mod.running_lock:
+                if prior_running_proc is None:
+                    mod.running_containers.pop(cid, None)
+                else:
+                    mod.running_containers[cid] = prior_running_proc
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=5)
+        ok("TermPort Docker API TCP exec uses 101 Upgrade and raw TTY bytes")
+
+
+def test_termport_tcp_bind_failure_keeps_unix_socket() -> None:
+    """The optional TermPort TCP listener must not kill the Unix Engine API."""
+    with tempfile.TemporaryDirectory(prefix="pdocker-test-") as home:
+        home_path = Path(home)
+        mod = load_pdockerd_with_env("termport_bind_failure", "no-proot", home_path)
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        blocked_host = f"127.0.0.1:{blocker.getsockname()[1]}"
+        sock_path = home_path / "skydnird.sock"
+
+        logs: list[str] = []
+        original_argv = sys.argv[:]
+        original_log = mod.log
+        original_sleep = mod.time.sleep
+
+        def capture_log(msg, **kwargs):
+            suffix = " ".join(f"{k}={v}" for k, v in kwargs.items())
+            logs.append((str(msg) + (" " + suffix if suffix else "")).strip())
+
+        def stop_after_start(_seconds):
+            raise KeyboardInterrupt()
+
+        sys.argv = ["skydnird", "--socket", str(sock_path), "--host", blocked_host]
+        mod.log = capture_log
+        mod.time.sleep = stop_after_start
+        try:
+            mod.main()
+        except SystemExit as exc:
+            fail(f"TermPort TCP bind failure killed daemon instead of keeping Unix socket: {exc}")
+        finally:
+            sys.argv = original_argv
+            mod.log = original_log
+            mod.time.sleep = original_sleep
+            blocker.close()
+
+        if not sock_path.exists():
+            fail("Unix socket was not created when optional TermPort TCP bind failed")
+        if not any("TCP Engine API listener disabled" in line and blocked_host in line for line in logs):
+            fail(f"TCP bind failure was not recorded clearly: {logs!r}")
+        if not any(str(sock_path) in line for line in logs):
+            fail(f"Unix listener was not kept after TCP bind failure: {logs!r}")
+        ok("TermPort TCP bind failure is non-fatal for Unix Engine API")
 
 
 def seed_legacy_image(mod, image: str) -> None:
@@ -1291,6 +1513,8 @@ def main() -> int:
     test_start_container_rejects_reused_pid()
     test_default_no_proot_runtime_path()
     test_duplicate_name_resolution_contract()
+    test_termport_tcp_engine_exec_contract()
+    test_termport_tcp_bind_failure_keeps_unix_socket()
     test_network_metadata_contract()
     test_port_mapping_status_contract()
     test_dockerfile_unknown_instruction_rejected()

@@ -25,7 +25,7 @@ Every inventory entry now also carries a `migration` object with a proposed dest
 |---|---:|---|
 | `runtime-package-needed` | 1 | Needed to stage runtime/APK payloads or otherwise part of packaging flow. |
 | `build-developer` | 8 | Build, setup, fetch, or developer environment helper. |
-| `test-verification` | 87 | Test, smoke, benchmark, contract, or device verification helper. |
+| `test-verification` | 88 | Test, smoke, benchmark, contract, or device verification helper. |
 | `generated-maintenance` | 3 | Generated-doc/evidence maintenance or manifest data. |
 | `obsolete-suspect` | 1 | Unreferenced or weakly referenced candidate; not deleted without audit. |
 
@@ -158,6 +158,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/skydnir-test-driver.py` | `stable-entrypoint` | Host-side verification/test driver or static contract gate. |
 | `scripts/plan-llama-gpu-q6-run.py` | `test-helper` | Create a Q6 Vulkan bridge pre-flight run plan without touching ADB. |
 | `scripts/prepare-q6k-noop-probe.sh` | `test-helper` | Prepare deterministic Q6K no-op/probe SPIR-V bundles for the next device run. |
+| `scripts/reconstruct-q6-effective-spirv.py` | `test-helper` | Reconstruct effective Q6 SPIR-V modules from llama GPU bridge artifacts for static dataflow and workgroup diagnostics. |
 | `scripts/run-python-coverage.sh` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/run_direct_syscall_scenarios.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/smoke-opencl-bridge.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |

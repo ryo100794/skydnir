@@ -16,8 +16,9 @@ Compatibility has three tiers:
    - Compose files accepted by the upstream Docker Compose plugin.
    - Docker image references, image configs, layer tars, save/load archives,
      and container archive API payloads where practical.
-   - Docker Engine API over Unix socket, including API version negotiation and
-     Docker CLI compatibility for supported endpoints.
+   - Docker Engine API over Unix socket and Android-local TCP (`127.0.0.1:2375`
+     by default), including API version negotiation and Docker CLI compatibility
+     for supported endpoints.
 
 2. **Should behave like Docker for common developer workflows**
    - `docker pull`, `images`, `ps`, `logs`, `build`, `run`, `exec`, `cp`,
@@ -105,7 +106,7 @@ These are not product goals for the default unrooted Android app:
 | cgroups/resources | Report unsupported honestly; optionally approximate stats. | Parse common resource flags so Compose/CLI does not crash. Store requested limits in metadata. Return predictable warnings. Approximate CPU/memory stats from `/proc` where possible. | No hard enforcement for `--memory`, `--cpus`, pids limit, blkio, cpuset, cgroup namespaces, OOMScoreAdj parity, or Docker Desktop-style resource isolation. |
 | overlayfs/storage | Skydnir-owned snapshotter with overlay-like semantics. | Keep content-addressed layers and per-container writable state. Implement whiteouts, copy-up, rename/unlink/chmod/chown/xattr/link semantics in pdockerd/direct runtime. Make `docker cp` and image browsing use merged lower/upper views. | Do not promise exact overlayfs inode identity, d_type, hardlink counts, all xattrs, opaque directory behavior, or mount-level semantics until tested. Avoid patched external overlay runtimes. |
 | signals/process supervision | Docker-like lifecycle for common cases. | Track process groups, exit codes, waits, logs, stop timeout, and cleanup. Map `docker stop` to configured signal then kill after timeout. Keep `PTRACE_O_EXITKILL` and tracer signal handling. | No cgroup-wide kill guarantees, PID namespace semantics, init process reaping parity, `--pid=host`, or full `STOPSIGNAL` edge-case parity at first. |
-| TTY/attach/exec | Real PTY-backed interactive sessions are in scope. | Connect Engine attach/exec TTY to the same native PTY infrastructure used by the app terminal. Support `docker run -it`, `docker exec -it`, resize, detach keys where practical, and UI tab persistence. | Do not use Android host shell as a fallback for container console. Full Docker hijack edge cases and every detach-key combination can be staged after basic `-it` works. |
+| TTY/attach/exec | Real PTY-backed interactive sessions are in scope. | Connect Engine attach/exec TTY to the same native PTY infrastructure used by the app terminal. Support `docker run -it`, `docker exec -it`, resize, detach keys where practical, and UI tab persistence. The Android app daemon also exposes the Docker-shaped TermPort path on loopback TCP: `GET /_ping`, `GET /version`, `GET /containers/json`, `POST /containers/{id}/exec`, `POST /exec/{id}/start` with HTTP 101 `Upgrade: tcp` raw TTY bytes for `Tty=true`, and `POST /exec/{id}/resize`. The default endpoint is `127.0.0.1:2375`; `SKYDNIR_ENGINE_TCP_HOST` / `PDOCKER_ENGINE_TCP_HOST` can override or disable it for tests/custom launches. | Do not use Android host shell as a fallback for container console. Full Docker hijack edge cases and every detach-key combination can be staged after basic `-it` works. |
 | archive API / `docker cp` | Keep Docker tar/header compatibility high. | Maintain `GET/PUT/HEAD /containers/{id}/archive`, `X-Docker-Container-Path-Stat`, tar streaming, path traversal defense, lower/upper merge, writable upper copy-in, and tests. | Sparse files, all device nodes, all xattrs, exact ownership mapping, opaque dirs, and every overlayfs whiteout edge case can be partial with documented warnings. |
 
 ## BuildKit Position

@@ -725,6 +725,19 @@
       }
     },
     {
+      "path": "scripts/reconstruct-q6-effective-spirv.py",
+      "category": "test-verification",
+      "stability": "test-helper",
+      "role": "Reconstruct effective Q6 SPIR-V modules from llama GPU bridge artifacts for static dataflow and workgroup diagnostics.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/reconstruct-q6-effective-spirv.py",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "candidate-move-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
       "path": "scripts/run-python-coverage.sh",
       "category": "test-verification",
       "stability": "test-helper",

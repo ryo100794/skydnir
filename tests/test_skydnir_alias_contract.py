@@ -132,6 +132,8 @@ class SkydnirAliasContractTest(unittest.TestCase):
         self.assertIn('os.environ.setdefault("SKYDNIR_DAEMON_NAME", "skydnird")', bridge)
         self.assertIn('os.environ.setdefault("PDOCKER_SUPPRESS_DEPRECATION_WARNING", "1")', bridge)
         self.assertIn('sys.argv = ["skydnird", "--socket", sock_path]', bridge)
+        self.assertIn('engine_tcp_host = _engine_tcp_host()', bridge)
+        self.assertIn('sys.argv.extend(["--host", engine_tcp_host])', bridge)
         self.assertIn('os.environ["PDOCKER_HOME"] = home', bridge)
 
     def test_new_cli_defaults_to_skydnir_home_without_abandoning_legacy_home(self):

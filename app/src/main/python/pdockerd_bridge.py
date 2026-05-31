@@ -91,6 +91,25 @@ class _ReusingThreadingServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 
+def _engine_tcp_host() -> str | None:
+    """Return the local Docker-compatible TCP endpoint for external clients.
+
+    TermPort and other Android apps must see Skydnir as a Docker Engine API
+    endpoint, not as an Android-private service.  Keep the default loopback-only
+    and Docker-shaped (`127.0.0.1:2375`).  Users/tests can override it with
+    SKYDNIR_ENGINE_TCP_HOST or PDOCKER_ENGINE_TCP_HOST; set it to empty/none/off
+    to disable the TCP listener while keeping the Unix socket path.
+    """
+    value = (
+        os.environ.get("SKYDNIR_ENGINE_TCP_HOST")
+        or os.environ.get("PDOCKER_ENGINE_TCP_HOST")
+        or "127.0.0.1:2375"
+    ).strip()
+    if not value or value.lower() in {"0", "false", "no", "none", "off", "disabled"}:
+        return None
+    return value
+
+
 def _start_connect_proxy() -> int:
     server = _ReusingThreadingServer(("127.0.0.1", 0), _ConnectProxyHandler)
     threading.Thread(
@@ -260,6 +279,10 @@ def run_daemon(
     os.environ.setdefault("SKYDNIR_DAEMON_NAME", "skydnird")
     os.environ.setdefault("PDOCKER_SUPPRESS_DEPRECATION_WARNING", "1")
     sys.argv = ["skydnird", "--socket", sock_path]
+    engine_tcp_host = _engine_tcp_host()
+    if engine_tcp_host:
+        os.environ["SKYDNIR_ENGINE_TCP_HOST_EFFECTIVE"] = engine_tcp_host
+        sys.argv.extend(["--host", engine_tcp_host])
     runpy.run_path(pdockerd_path, run_name="__main__")
 
 

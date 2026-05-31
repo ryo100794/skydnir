@@ -10265,8 +10265,15 @@ def main():
     if args.host:
         host, _, port = args.host.rpartition(":")
         host = host or "127.0.0.1"
-        srv = ThreadingTCPHTTPServer((host, int(port)), DockerAPIHandler)
-        servers.append((f"tcp://{host}:{port}", srv))
+        try:
+            srv = ThreadingTCPHTTPServer((host, int(port)), DockerAPIHandler)
+        except OSError as exc:
+            log(f"TCP Engine API listener disabled: tcp://{host}:{port} bind failed: {exc}")
+        else:
+            servers.append((f"tcp://{host}:{port}", srv))
+
+    if not servers:
+        raise SystemExit("no Engine API listeners available")
 
     for addr, _ in servers:
         log(f"Listening on {addr}")
