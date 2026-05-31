@@ -13,6 +13,13 @@
       "observed_candidate_id": 39,
       "observed_record_schema_version": null,
       "observed_role_code": 1,
+      "output_index_flow_context": [],
+      "output_index_origin_id": null,
+      "output_index_origin_line": null,
+      "output_index_origin_opcode": null,
+      "output_index_origin_operands": null,
+      "output_index_source_id": null,
+      "output_index_source_producer": null,
       "phase": "tail",
       "probe": 0,
       "role_code": 1,
@@ -144,6 +151,13 @@
       "observed_candidate_id": 49,
       "observed_record_schema_version": null,
       "observed_role_code": 2,
+      "output_index_flow_context": [],
+      "output_index_origin_id": null,
+      "output_index_origin_line": null,
+      "output_index_origin_opcode": null,
+      "output_index_origin_operands": null,
+      "output_index_source_id": null,
+      "output_index_source_producer": null,
       "phase": "tail",
       "probe": 1,
       "role_code": 2,
@@ -261,6 +275,13 @@
       "observed_candidate_id": 61,
       "observed_record_schema_version": null,
       "observed_role_code": 3,
+      "output_index_flow_context": [],
+      "output_index_origin_id": null,
+      "output_index_origin_line": null,
+      "output_index_origin_opcode": null,
+      "output_index_origin_operands": null,
+      "output_index_source_id": null,
+      "output_index_source_producer": null,
       "phase": "tail",
       "probe": 2,
       "role_code": 3,
@@ -378,6 +399,13 @@
       "observed_candidate_id": 63,
       "observed_record_schema_version": null,
       "observed_role_code": 3,
+      "output_index_flow_context": [],
+      "output_index_origin_id": null,
+      "output_index_origin_line": null,
+      "output_index_origin_opcode": null,
+      "output_index_origin_operands": null,
+      "output_index_source_id": null,
+      "output_index_source_producer": null,
       "phase": "tail",
       "probe": 3,
       "role_code": 3,
@@ -495,6 +523,164 @@
       "observed_candidate_id": 64,
       "observed_record_schema_version": 2,
       "observed_role_code": 4,
+      "output_index_flow_context": [
+        {
+          "line": 1104,
+          "text": "%2865 = OpLabel"
+        },
+        {
+          "line": 1105,
+          "text": "%2869 = OpIMul %uint %2926 %2064"
+        },
+        {
+          "line": 1106,
+          "text": "%2870 = OpIAdd %uint %2869 %2065"
+        },
+        {
+          "line": 1107,
+          "text": "%2871 = OpIAdd %uint %2870 %845"
+        },
+        {
+          "line": 1108,
+          "text": "%2873 = OpIAdd %uint %2871 %2927"
+        },
+        {
+          "line": 1109,
+          "text": "%2876 = OpAccessChain %_ptr_Workgroup_float %143 %2926 %2927 %int_0"
+        },
+        {
+          "line": 1110,
+          "text": "%2877 = OpLoad %float %2876"
+        },
+        {
+          "line": 1111,
+          "text": "%2878 = OpAccessChain %_ptr_StorageBuffer_float %284 %int_0 %2873"
+        },
+        {
+          "line": 1112,
+          "text": "OpStore %2878 %2877"
+        },
+        {
+          "line": 1113,
+          "text": "%3587 = OpBitcast %uint %2877"
+        },
+        {
+          "line": 1114,
+          "text": "%3588 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_0_0"
+        },
+        {
+          "line": 1115,
+          "text": "%3589 = OpLoad %uint %3588"
+        },
+        {
+          "line": 1116,
+          "text": "%3590 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_1_1"
+        },
+        {
+          "line": 1117,
+          "text": "%3591 = OpLoad %uint %3590"
+        },
+        {
+          "line": 1118,
+          "text": "%3592 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_2_3"
+        },
+        {
+          "line": 1119,
+          "text": "%3593 = OpLoad %uint %3592"
+        },
+        {
+          "line": 1120,
+          "text": "%3594 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_0_0"
+        },
+        {
+          "line": 1121,
+          "text": "%3595 = OpLoad %uint %3594"
+        },
+        {
+          "line": 1122,
+          "text": "%3596 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_1_1"
+        },
+        {
+          "line": 1123,
+          "text": "%3597 = OpLoad %uint %3596"
+        },
+        {
+          "line": 1124,
+          "text": "%3598 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_2_3"
+        },
+        {
+          "line": 1125,
+          "text": "%3599 = OpLoad %uint %3598"
+        },
+        {
+          "line": 1126,
+          "text": "%3600 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_56"
+        },
+        {
+          "line": 1127,
+          "text": "OpStore %3600 %uint_64_1"
+        },
+        {
+          "line": 1128,
+          "text": "%3601 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_57"
+        },
+        {
+          "line": 1129,
+          "text": "OpStore %3601 %uint_4_0"
+        },
+        {
+          "line": 1130,
+          "text": "%3602 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_58"
+        },
+        {
+          "line": 1131,
+          "text": "OpStore %3602 %3587"
+        },
+        {
+          "line": 1132,
+          "text": "%3603 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_59"
+        },
+        {
+          "line": 1133,
+          "text": "OpStore %3603 %2873"
+        },
+        {
+          "line": 1134,
+          "text": "%3604 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_60"
+        },
+        {
+          "line": 1135,
+          "text": "OpStore %3604 %3589"
+        },
+        {
+          "line": 1136,
+          "text": "%3605 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_61_0"
+        },
+        {
+          "line": 1137,
+          "text": "OpStore %3605 %3591"
+        }
+      ],
+      "output_index_origin_id": "%2873",
+      "output_index_origin_line": 1108,
+      "output_index_origin_opcode": "OpIAdd",
+      "output_index_origin_operands": [
+        "%uint",
+        "%2871",
+        "%2927"
+      ],
+      "output_index_source_id": "%2873",
+      "output_index_source_producer": {
+        "id": "%2873",
+        "line": 1108,
+        "opcode": "OpIAdd",
+        "operands": [
+          "%uint",
+          "%2871",
+          "%2927"
+        ],
+        "text": "%2873 = OpIAdd %uint %2871 %2927"
+      },
       "phase": "tail",
       "probe": 4,
       "role_code": 4,
@@ -675,6 +861,13 @@
       "observed_candidate_id": 105,
       "observed_record_schema_version": null,
       "observed_role_code": 1,
+      "output_index_flow_context": [],
+      "output_index_origin_id": null,
+      "output_index_origin_line": null,
+      "output_index_origin_opcode": null,
+      "output_index_origin_operands": null,
+      "output_index_source_id": null,
+      "output_index_source_producer": null,
       "phase": "full",
       "probe": 5,
       "role_code": 1,
@@ -806,6 +999,13 @@
       "observed_candidate_id": 115,
       "observed_record_schema_version": null,
       "observed_role_code": 2,
+      "output_index_flow_context": [],
+      "output_index_origin_id": null,
+      "output_index_origin_line": null,
+      "output_index_origin_opcode": null,
+      "output_index_origin_operands": null,
+      "output_index_source_id": null,
+      "output_index_source_producer": null,
       "phase": "full",
       "probe": 6,
       "role_code": 2,
@@ -923,6 +1123,13 @@
       "observed_candidate_id": 127,
       "observed_record_schema_version": null,
       "observed_role_code": 3,
+      "output_index_flow_context": [],
+      "output_index_origin_id": null,
+      "output_index_origin_line": null,
+      "output_index_origin_opcode": null,
+      "output_index_origin_operands": null,
+      "output_index_source_id": null,
+      "output_index_source_producer": null,
       "phase": "full",
       "probe": 7,
       "role_code": 3,
@@ -1040,6 +1247,13 @@
       "observed_candidate_id": 129,
       "observed_record_schema_version": null,
       "observed_role_code": 3,
+      "output_index_flow_context": [],
+      "output_index_origin_id": null,
+      "output_index_origin_line": null,
+      "output_index_origin_opcode": null,
+      "output_index_origin_operands": null,
+      "output_index_source_id": null,
+      "output_index_source_producer": null,
       "phase": "full",
       "probe": 8,
       "role_code": 3,
@@ -1157,6 +1371,164 @@
       "observed_candidate_id": 130,
       "observed_record_schema_version": 2,
       "observed_role_code": 4,
+      "output_index_flow_context": [
+        {
+          "line": 1898,
+          "text": "%1862 = OpLabel"
+        },
+        {
+          "line": 1899,
+          "text": "%1866 = OpIMul %uint %2992 %1061"
+        },
+        {
+          "line": 1900,
+          "text": "%1867 = OpIAdd %uint %1866 %1062"
+        },
+        {
+          "line": 1901,
+          "text": "%1868 = OpIAdd %uint %1867 %845"
+        },
+        {
+          "line": 1902,
+          "text": "%1870 = OpIAdd %uint %1868 %2993"
+        },
+        {
+          "line": 1903,
+          "text": "%1873 = OpAccessChain %_ptr_Workgroup_float %143 %2992 %2993 %int_0"
+        },
+        {
+          "line": 1904,
+          "text": "%1874 = OpLoad %float %1873"
+        },
+        {
+          "line": 1905,
+          "text": "%1875 = OpAccessChain %_ptr_StorageBuffer_float %284 %int_0 %1870"
+        },
+        {
+          "line": 1906,
+          "text": "OpStore %1875 %1874"
+        },
+        {
+          "line": 1907,
+          "text": "%3627 = OpBitcast %uint %1874"
+        },
+        {
+          "line": 1908,
+          "text": "%3628 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_0_0"
+        },
+        {
+          "line": 1909,
+          "text": "%3629 = OpLoad %uint %3628"
+        },
+        {
+          "line": 1910,
+          "text": "%3630 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_1_1"
+        },
+        {
+          "line": 1911,
+          "text": "%3631 = OpLoad %uint %3630"
+        },
+        {
+          "line": 1912,
+          "text": "%3632 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_2_3"
+        },
+        {
+          "line": 1913,
+          "text": "%3633 = OpLoad %uint %3632"
+        },
+        {
+          "line": 1914,
+          "text": "%3634 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_0_0"
+        },
+        {
+          "line": 1915,
+          "text": "%3635 = OpLoad %uint %3634"
+        },
+        {
+          "line": 1916,
+          "text": "%3636 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_1_1"
+        },
+        {
+          "line": 1917,
+          "text": "%3637 = OpLoad %uint %3636"
+        },
+        {
+          "line": 1918,
+          "text": "%3638 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_2_3"
+        },
+        {
+          "line": 1919,
+          "text": "%3639 = OpLoad %uint %3638"
+        },
+        {
+          "line": 1920,
+          "text": "%3640 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_116"
+        },
+        {
+          "line": 1921,
+          "text": "OpStore %3640 %uint_130"
+        },
+        {
+          "line": 1922,
+          "text": "%3641 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_117"
+        },
+        {
+          "line": 1923,
+          "text": "OpStore %3641 %uint_4_0"
+        },
+        {
+          "line": 1924,
+          "text": "%3642 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_118"
+        },
+        {
+          "line": 1925,
+          "text": "OpStore %3642 %3627"
+        },
+        {
+          "line": 1926,
+          "text": "%3643 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_119"
+        },
+        {
+          "line": 1927,
+          "text": "OpStore %3643 %1870"
+        },
+        {
+          "line": 1928,
+          "text": "%3644 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_120"
+        },
+        {
+          "line": 1929,
+          "text": "OpStore %3644 %3629"
+        },
+        {
+          "line": 1930,
+          "text": "%3645 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_121"
+        },
+        {
+          "line": 1931,
+          "text": "OpStore %3645 %3631"
+        }
+      ],
+      "output_index_origin_id": "%1870",
+      "output_index_origin_line": 1902,
+      "output_index_origin_opcode": "OpIAdd",
+      "output_index_origin_operands": [
+        "%uint",
+        "%1868",
+        "%2993"
+      ],
+      "output_index_source_id": "%1870",
+      "output_index_source_producer": {
+        "id": "%1870",
+        "line": 1902,
+        "opcode": "OpIAdd",
+        "operands": [
+          "%uint",
+          "%1868",
+          "%2993"
+        ],
+        "text": "%1870 = OpIAdd %uint %1868 %2993"
+      },
       "phase": "full",
       "probe": 9,
       "role_code": 4,

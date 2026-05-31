@@ -1710,3 +1710,8 @@ For each traced value the report also includes a small `value_flow_context`
 window from the SSA origin to the debug write.  This keeps the next analysis
 anchored to SPIR-V data flow rather than hash-specific assumptions or
 trial-and-error reruns.
+For final-store records it also records the output-index SSA flow.  The current
+tail/full final output indices originate from `OpIAdd` chains and are emitted as
+`output_index_source_id` / `output_index_origin_*` in the offline report.  The
+next device artifact must use only role-4 records for final-store boundary
+joins; non-final records are stage evidence, not output-index evidence.

@@ -465,6 +465,9 @@ class GpuAbiContractTest(unittest.TestCase):
             lines.append(f"%ptr_{ptr_id} = OpAccessChain %_ptr_StorageBuffer_uint %debug %uint_0 %uint_{base + 2}")
             lines.append(f"OpStore %ptr_{ptr_id} %val_{base}")
             ptr_id += 1
+        lines.append("%out_56 = OpIAdd %uint %row %stride")
+        lines.append(f"%ptr_{ptr_id} = OpAccessChain %_ptr_StorageBuffer_uint %debug %uint_0 %uint_59")
+        lines.append(f"OpStore %ptr_{ptr_id} %out_56")
         report = analyzer.parse_spvasm("\n".join(lines))
         self.assertEqual("pass", report["summary"])
         self.assertEqual(10, report["passed_record_count"])
@@ -473,6 +476,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual("%val_8", report["records"][0]["value_source_id"])
         self.assertEqual("OpBitcast", report["records"][0]["value_origin_opcode"])
         self.assertTrue(report["records"][0]["value_flow_context"])
+        final_record = next(record for record in report["records"] if record["candidate_id"] == 64)
+        self.assertEqual("%out_56", final_record["output_index_source_id"])
+        self.assertEqual("OpIAdd", final_record["output_index_origin_opcode"])
 
     def test_executor_q6_debug_probe_alias_guard_fails_closed(self):
         source = GPU_EXECUTOR.read_text()

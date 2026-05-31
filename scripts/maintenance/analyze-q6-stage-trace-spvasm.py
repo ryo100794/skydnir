@@ -148,6 +148,9 @@ def parse_spvasm(text: str) -> dict[str, Any]:
         value_store = stores.get(base + 2)
         value_producer = value_store.get("value_producer") if value_store else None
         origin = value_origin(value_producer)
+        output_index_store = stores.get(base + 3)
+        output_index_producer = output_index_store.get("value_producer") if output_index_store else None
+        output_index_origin = value_origin(output_index_producer)
         schema = stores.get(base + 10)
         schema_required = int(expected["role_code"]) == 4
         status = "pass"
@@ -187,6 +190,16 @@ def parse_spvasm(text: str) -> dict[str, Any]:
             "value_flow_context": context_lines(
                 origin.get("line") if origin else None,
                 value_store.get("store_line") if value_store else None,
+            ),
+            "output_index_source_id": output_index_store.get("value_id") if output_index_store else None,
+            "output_index_source_producer": output_index_producer,
+            "output_index_origin_id": output_index_origin.get("id") if output_index_origin else None,
+            "output_index_origin_opcode": output_index_origin.get("opcode") if output_index_origin else None,
+            "output_index_origin_line": output_index_origin.get("line") if output_index_origin else None,
+            "output_index_origin_operands": output_index_origin.get("operands") if output_index_origin else None,
+            "output_index_flow_context": context_lines(
+                output_index_origin.get("line") if output_index_origin else None,
+                output_index_store.get("store_line") if output_index_store else None,
             ),
             "schema_store_line": schema.get("store_line") if schema else None,
             "status": status,
