@@ -249,6 +249,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "local-size-legalized",
             "specialization-materialized",
             "q6-storage16-loads-lowered",
+            "q6-final-store-pre-barrier",
             "duplicate-descriptor-rewritten",
         ])
         self.assertTrue(steps[1]["changed"])
@@ -258,8 +259,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(steps[2]["spec_composites_folded"], 1)
         self.assertEqual(steps[2]["spec_ops_folded"], 1)
         self.assertFalse(steps[3]["changed"])
+        self.assertFalse(steps[4]["changed"])
         self.assertEqual(
-            steps[4]["aliases"],
+            steps[5]["aliases"],
             [{"target_id": 31, "original_binding": 0, "rewritten_binding": 2}],
         )
         self.assertIn((6 << 16) | 16, effective_words)
@@ -289,6 +291,23 @@ class GpuAbiContractTest(unittest.TestCase):
                 self.assertNotEqual(inst[3], 371)
         self.assertIn((5 << 16) | 197, lowered)
         self.assertIn((4 << 16) | 113, lowered)
+
+    def test_q6_effective_reconstructor_inserts_final_store_pre_barrier(self):
+        reconstructor = load_spirv_effective_reconstructor()
+        words = [
+            0x07230203, 0x00010300, 0, 2000, 0,
+            (2 << 16) | 20, 28,
+            (4 << 16) | 21, 6, 32, 0,
+            (4 << 16) | 43, 6, 52, 0,
+            (4 << 16) | 43, 6, 31, 2,
+            (4 << 16) | 43, 6, 36, 264,
+            (2 << 16) | 248, 1806,
+            (5 << 16) | 170, 28, 1807, 915, 52,
+        ]
+        out, step = reconstructor.insert_q6k_final_store_pre_barrier(words)
+        self.assertTrue(step["changed"])
+        label_index = out.index((2 << 16) | 248)
+        self.assertEqual(out[label_index + 2:label_index + 6], [(4 << 16) | 224, 31, 31, 36])
 
     def test_q6_debug_probe_alias_guard_blocks_before_final_store_diagnosis(self):
         compare = LLAMA_COMPARE.read_text()

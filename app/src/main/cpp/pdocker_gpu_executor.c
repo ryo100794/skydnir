@@ -3825,6 +3825,108 @@ static int add_spirv_capability(
     return 1;
 }
 
+static int insert_q6k_final_store_pre_barrier(
+        uint32_t **code,
+        size_t *bytes,
+        uint64_t source_spirv_hash) {
+    /*
+     * Android Vulkan compatibility lowering for the native llama.cpp Q6_K
+     * final-store path.  Device evidence has split the current failure to the
+     * native shader value before executor writeback.  Insert one additional
+     * Workgroup-memory barrier after the reduction loop converges and before
+     * lane 0 reads Workgroup %143 for the final store.  This does not alter
+     * descriptors, buffers, push constants, specialization data, dispatch
+     * dimensions, or llama.cpp code.  It is exact-pattern and hash gated.
+     */
+    enum {
+        OP_TYPE_BOOL = 20,
+        OP_TYPE_INT = 21,
+        OP_CONSTANT = 43,
+        OP_LABEL = 248,
+        OP_I_EQUAL = 170,
+        OP_CONTROL_BARRIER = 224,
+        Q6_FINAL_REDUCTION_EXIT_LABEL_ID = 1806,
+        Q6_FINAL_LANE0_COMPARE_ID = 1807,
+        Q6_LOCAL_INVOCATION_X_ID = 915,
+    };
+    if (!code || !*code || !bytes || *bytes < 20 ||
+        (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u ||
+        !is_q6k_matvec_hash(source_spirv_hash)) {
+        return 0;
+    }
+    const uint32_t *in = *code;
+    const size_t words = *bytes / sizeof(uint32_t);
+    uint32_t bool_type = 0, uint_type = 0;
+    uint32_t uint_0 = 0, uint_2 = 0, uint_264 = 0;
+    size_t insert_after = 0;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == OP_TYPE_BOOL && word_count >= 2) {
+            bool_type = in[i + 1];
+        } else if (op == OP_TYPE_INT && word_count >= 4 && in[i + 2] == 32 && in[i + 3] == 0) {
+            uint_type = in[i + 1];
+        } else if (op == OP_CONSTANT && word_count >= 4 && uint_type && in[i + 1] == uint_type) {
+            if (in[i + 3] == 0 && !uint_0) uint_0 = in[i + 2];
+            else if (in[i + 3] == 2 && !uint_2) uint_2 = in[i + 2];
+            else if (in[i + 3] == 264 && !uint_264) uint_264 = in[i + 2];
+        }
+        i += word_count;
+    }
+    if (!bool_type || !uint_0 || !uint_2 || !uint_264) return 0;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == OP_LABEL && word_count == 2 &&
+            in[i + 1] == Q6_FINAL_REDUCTION_EXIT_LABEL_ID &&
+            i + word_count < words) {
+            const size_t next = i + word_count;
+            const uint32_t next_inst = in[next];
+            const uint16_t next_wc = (uint16_t)(next_inst >> 16);
+            const uint16_t next_op = (uint16_t)(next_inst & 0xffffu);
+            if (next_wc == 5 && next + next_wc <= words && next_op == OP_I_EQUAL &&
+                in[next + 1] == bool_type &&
+                in[next + 2] == Q6_FINAL_LANE0_COMPARE_ID &&
+                in[next + 3] == Q6_LOCAL_INVOCATION_X_ID &&
+                in[next + 4] == uint_0) {
+                insert_after = next;
+                break;
+            }
+        }
+        i += word_count;
+    }
+    if (!insert_after) return 0;
+    if (insert_after >= 4) {
+        const uint32_t prev = in[insert_after - 4];
+        if (((prev & 0xffffu) == OP_CONTROL_BARRIER) &&
+            ((prev >> 16) == 4u) &&
+            in[insert_after - 3] == uint_2 &&
+            in[insert_after - 2] == uint_2 &&
+            in[insert_after - 1] == uint_264) {
+            return 0;
+        }
+    }
+    uint32_t *rewritten = (uint32_t *)malloc((words + 4u) * sizeof(uint32_t));
+    if (!rewritten) return 0;
+    memcpy(rewritten, in, insert_after * sizeof(uint32_t));
+    rewritten[insert_after] = (4u << 16) | OP_CONTROL_BARRIER;
+    rewritten[insert_after + 1] = uint_2;
+    rewritten[insert_after + 2] = uint_2;
+    rewritten[insert_after + 3] = uint_264;
+    memcpy(rewritten + insert_after + 4u,
+           in + insert_after,
+           (words - insert_after) * sizeof(uint32_t));
+    free(*code);
+    *code = rewritten;
+    *bytes = (words + 4u) * sizeof(uint32_t);
+    return 1;
+}
+
+
 static int lower_q6k_storage16_loads_to_storage8(
         uint32_t **code,
         size_t *bytes,
@@ -10167,6 +10269,7 @@ static int run_vulkan_dispatch_fd(
     int float16_capability_added = 0;
     int q6_storage16_loads_lowered = 0;
     size_t q6_storage16_loads_lowered_count = 0;
+    int q6_final_store_pre_barrier_inserted = 0;
     const int strict_passthrough = strict_vulkan_passthrough_requested(options);
     const int strict_reconciliation = strict_vulkan_reconciliation_requested(options);
     const int strict_device_local_staging =
@@ -10496,6 +10599,10 @@ static int run_vulkan_dispatch_fd(
             &shader_size,
             q6_storage16_lowering_identity_hash,
             &q6_storage16_loads_lowered_count);
+        q6_final_store_pre_barrier_inserted = insert_q6k_final_store_pre_barrier(
+            &shader_code,
+            &shader_size,
+            q6_storage16_lowering_identity_hash);
     }
     /*
      * Duplicate descriptor Binding decorations are legal SPIR-V.  The legacy
@@ -11919,6 +12026,7 @@ static int run_vulkan_dispatch_fd(
                 "\"q6k_safe_kernel\":%s,"
                 "\"q6_storage16_loads_lowered\":%s,"
                 "\"q6_storage16_loads_lowered_count\":%zu,"
+                "\"q6_final_store_pre_barrier_inserted\":%s,"
                 "\"spirv_local_size\":[%u,%u,%u],"
                 "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
                 "\"spirv_local_size_consistent\":%s,"
@@ -11942,6 +12050,7 @@ static int run_vulkan_dispatch_fd(
                 q6k_safe_kernel_used ? "true" : "false",
                 q6_storage16_loads_lowered ? "true" : "false",
                 q6_storage16_loads_lowered_count,
+                q6_final_store_pre_barrier_inserted ? "true" : "false",
                 spirv_summary.local_size[0],
                 spirv_summary.local_size[1],
                 spirv_summary.local_size[2],
@@ -12170,6 +12279,7 @@ static int run_vulkan_dispatch_fd(
                 "\"float16_capability_added\":%s,"
                 "\"q6_storage16_loads_lowered\":%s,"
                 "\"q6_storage16_loads_lowered_count\":%zu,"
+                "\"q6_final_store_pre_barrier_inserted\":%s,"
                 "\"spirv_local_size\":[%u,%u,%u],"
                 "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
                 "\"spirv_local_size_consistent\":%s,"
@@ -12231,6 +12341,7 @@ static int run_vulkan_dispatch_fd(
                 float16_capability_added ? "true" : "false",
                 q6_storage16_loads_lowered ? "true" : "false",
                 q6_storage16_loads_lowered_count,
+                q6_final_store_pre_barrier_inserted ? "true" : "false",
                 spirv_summary.local_size[0],
                 spirv_summary.local_size[1],
                 spirv_summary.local_size[2],
@@ -12368,6 +12479,7 @@ static int run_vulkan_dispatch_fd(
             "\"float16_capability_added\":%s,"
             "\"q6_storage16_loads_lowered\":%s,"
             "\"q6_storage16_loads_lowered_count\":%zu,"
+            "\"q6_final_store_pre_barrier_inserted\":%s,"
             "\"spirv_local_size\":[%u,%u,%u],"
             "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
             "\"spirv_local_size_consistent\":%s,"
@@ -12440,6 +12552,7 @@ static int run_vulkan_dispatch_fd(
             float16_capability_added ? "true" : "false",
             q6_storage16_loads_lowered ? "true" : "false",
             q6_storage16_loads_lowered_count,
+            q6_final_store_pre_barrier_inserted ? "true" : "false",
             spirv_summary.local_size[0],
             spirv_summary.local_size[1],
             spirv_summary.local_size[2],
@@ -12622,6 +12735,7 @@ cleanup:
                 "\"float16_capability_added\":%s,"
                 "\"q6_storage16_loads_lowered\":%s,"
                 "\"q6_storage16_loads_lowered_count\":%zu,"
+                "\"q6_final_store_pre_barrier_inserted\":%s,"
                 "\"q4k_safe_kernel\":%s,"
                 "\"oracle_fail_closed\":%s,"
                 "\"strict_passthrough\":%s,"
@@ -12661,6 +12775,7 @@ cleanup:
                 float16_capability_added ? "true" : "false",
                 q6_storage16_loads_lowered ? "true" : "false",
                 q6_storage16_loads_lowered_count,
+                q6_final_store_pre_barrier_inserted ? "true" : "false",
                 q4k_safe_kernel_used ? "true" : "false",
                 oracle_fail_closed ? "true" : "false",
                 strict_passthrough ? "true" : "false",

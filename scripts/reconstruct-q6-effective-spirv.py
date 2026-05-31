@@ -6,7 +6,8 @@ This mirrors the Skydnir Android executor's narrow Q6 compatibility sequence:
 1. patch literal LocalSize from the WorkgroupSize specialization,
 2. materialize supported specialization constants,
 3. lower exact Q6 duplicate-view storage16 ushort loads to storage8 byte loads,
-4. apply strict duplicate descriptor binding normalization.
+4. insert the Q6 final-store pre-barrier compatibility guard,
+5. apply strict duplicate descriptor binding normalization.
 
 It is a static/offline evidence tool.  It does not run ADB, llama.cpp, or a
 Vulkan driver, and it does not change shader semantics beyond the executor's
@@ -419,6 +420,61 @@ def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], 
     }
 
 
+def insert_q6k_final_store_pre_barrier(words: list[int]) -> tuple[list[int], dict[str, Any]]:
+    OP_TYPE_BOOL = 20
+    OP_TYPE_INT = 21
+    OP_CONSTANT = 43
+    OP_LABEL = 248
+    OP_I_EQUAL = 170
+    OP_CONTROL_BARRIER = 224
+    Q6_FINAL_REDUCTION_EXIT_LABEL_ID = 1806
+    Q6_FINAL_LANE0_COMPARE_ID = 1807
+    Q6_LOCAL_INVOCATION_X_ID = 915
+    bool_type = uint_type = 0
+    uint_0 = uint_2 = uint_264 = 0
+    for _, opcode, word_count, inst in iter_instructions(words):
+        if opcode == OP_TYPE_BOOL and word_count >= 2:
+            bool_type = inst[1]
+        elif opcode == OP_TYPE_INT and word_count >= 4 and inst[2] == 32 and inst[3] == 0:
+            uint_type = inst[1]
+        elif opcode == OP_CONSTANT and word_count >= 4 and uint_type and inst[1] == uint_type:
+            if inst[3] == 0 and not uint_0:
+                uint_0 = inst[2]
+            elif inst[3] == 2 and not uint_2:
+                uint_2 = inst[2]
+            elif inst[3] == 264 and not uint_264:
+                uint_264 = inst[2]
+    if not all([bool_type, uint_0, uint_2, uint_264]):
+        return list(words), {"phase": "q6-final-store-pre-barrier", "changed": False, "reason": "missing-ids"}
+    insert_after: int | None = None
+    instructions = list(iter_instructions(words))
+    for pos, (index, opcode, word_count, inst) in enumerate(instructions):
+        if opcode != OP_LABEL or word_count != 2 or inst[1] != Q6_FINAL_REDUCTION_EXIT_LABEL_ID:
+            continue
+        if pos + 1 >= len(instructions):
+            continue
+        next_index, next_opcode, next_wc, next_inst = instructions[pos + 1]
+        if (
+            next_opcode == OP_I_EQUAL
+            and next_wc == 5
+            and next_inst[1] == bool_type
+            and next_inst[2] == Q6_FINAL_LANE0_COMPARE_ID
+            and next_inst[3] == Q6_LOCAL_INVOCATION_X_ID
+            and next_inst[4] == uint_0
+        ):
+            insert_after = next_index
+            break
+    if insert_after is None:
+        return list(words), {"phase": "q6-final-store-pre-barrier", "changed": False, "reason": "pattern-not-found"}
+    barrier = [(4 << 16) | OP_CONTROL_BARRIER, uint_2, uint_2, uint_264]
+    if insert_after >= 4 and words[insert_after - 4:insert_after] == barrier:
+        return list(words), {"phase": "q6-final-store-pre-barrier", "changed": False, "reason": "already-present"}
+    out = list(words[:insert_after])
+    out += barrier
+    out += words[insert_after:]
+    return out, {"phase": "q6-final-store-pre-barrier", "changed": True}
+
+
 def rewrite_duplicate_descriptor_bindings(
     words: list[int],
     binding_details: list[dict[str, Any]],
@@ -492,10 +548,13 @@ def reconstruct(source_words: list[int], event: dict[str, Any]) -> tuple[list[in
     words3, step = lower_q6k_storage16_loads_to_storage8(words2)
     step.update({"hash": hash_words(words3), "words": len(words3)})
     steps.append(step)
-    words4, step = rewrite_duplicate_descriptor_bindings(words3, binding_details)
+    words4, step = insert_q6k_final_store_pre_barrier(words3)
     step.update({"hash": hash_words(words4), "words": len(words4)})
     steps.append(step)
-    return words4, steps
+    words5, step = rewrite_duplicate_descriptor_bindings(words4, binding_details)
+    step.update({"hash": hash_words(words5), "words": len(words5)})
+    steps.append(step)
+    return words5, steps
 
 
 def main() -> int:
