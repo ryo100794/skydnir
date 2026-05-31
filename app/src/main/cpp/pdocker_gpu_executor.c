@@ -4860,9 +4860,13 @@ static int validate_spirv_probe_debug_binding_alias_guard(
     const uint32_t debug_binding = (uint32_t)options->spirv_probe_debug_binding;
     const int debug_index = binding_index_for_number(bindings, binding_count, debug_binding);
     if (debug_index < 0) {
-        if (reason) *reason = "missing debug/probe binding";
-        if (failed_binding) *failed_binding = debug_binding;
-        return -ENOENT;
+        /*
+         * The probe environment is process-wide, but only the target replay
+         * shader has the injected debug/probe SSBO.  Non-target shaders must
+         * pass through untouched; otherwise a diagnostic probe setting becomes
+         * a global Vulkan failure mode.
+         */
+        return 0;
     }
     uint64_t debug_start = 0, debug_end = 0;
     if (!vulkan_binding_api_absolute_descriptor_range(
