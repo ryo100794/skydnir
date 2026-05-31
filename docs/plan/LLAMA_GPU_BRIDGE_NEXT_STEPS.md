@@ -1700,3 +1700,13 @@ Non-final stage records carry candidate/role/value fields only; final-store
 records additionally carry output index, workgroup/local invocation metadata,
 and schema version 2.  The compare parser therefore must not reject non-final
 stage records for lacking final-store metadata.
+The same offline report now records the SSA producer for each traced value.  In
+the current module the reduction and accumulator stage values are `OpFAdd`
+results, while the pre-reduction and final-store values are loaded values that
+are bitcast into the debug SSBO.  The next device run should compare these
+stage values in order; the first divergent stage is the native Q6 value-path
+boundary to inspect next.
+For each traced value the report also includes a small `value_flow_context`
+window from the SSA origin to the debug write.  This keeps the next analysis
+anchored to SPIR-V data flow rather than hash-specific assumptions or
+trial-and-error reruns.

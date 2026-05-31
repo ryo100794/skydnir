@@ -31,6 +31,7 @@ CONST_RE = re.compile(r"^\s*(%\S+)\s*=\s*OpConstant\s+%uint\s+(\d+)\b")
 BINDING_RE = re.compile(r"^\s*OpDecorate\s+(%\S+)\s+Binding\s+(\d+)\b")
 ACCESS_RE = re.compile(r"^\s*(%\S+)\s*=\s*OpAccessChain\s+%\S+\s+(%\S+)\s+(.*)$")
 STORE_RE = re.compile(r"^\s*OpStore\s+(%\S+)\s+(%\S+)\b")
+RESULT_RE = re.compile(r"^\s*(%\S+)\s*=\s*(Op\S+)\s*(.*)$")
 
 
 def parse_constant_token(token: str, constants: dict[str, int]) -> int | None:
@@ -56,6 +57,7 @@ def parse_spvasm(text: str) -> dict[str, Any]:
     bindings: dict[str, int] = {}
     access_slots: dict[str, dict[str, Any]] = {}
     stores: dict[int, dict[str, Any]] = {}
+    producers: dict[str, dict[str, Any]] = {}
 
     lines = text.splitlines()
     for lineno, line in enumerate(lines, 1):
@@ -63,6 +65,52 @@ def parse_spvasm(text: str) -> dict[str, Any]:
             constants[m.group(1)] = int(m.group(2))
         if m := BINDING_RE.match(line):
             bindings[m.group(1)] = int(m.group(2))
+        if m := RESULT_RE.match(line):
+            result_id, opcode, rest = m.groups()
+            producers[result_id] = {
+                "id": result_id,
+                "line": lineno,
+                "opcode": opcode,
+                "operands": rest.split(),
+                "text": line.strip(),
+            }
+
+    def producer_snapshot(value_id: str | None, depth: int = 0) -> dict[str, Any] | None:
+        if not value_id or depth > 2:
+            return None
+        producer = producers.get(value_id)
+        if not producer:
+            return None
+        snapshot: dict[str, Any] = {
+            "id": producer["id"],
+            "line": producer["line"],
+            "opcode": producer["opcode"],
+            "operands": producer["operands"],
+            "text": producer["text"],
+        }
+        if producer["opcode"] == "OpBitcast" and producer["operands"]:
+            snapshot["source"] = producer_snapshot(producer["operands"][-1], depth + 1)
+        elif producer["opcode"] == "OpLoad" and producer["operands"]:
+            snapshot["pointer"] = producer_snapshot(producer["operands"][-1], depth + 1)
+        return snapshot
+
+    def value_origin(producer: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not producer:
+            return None
+        source = producer.get("source")
+        if isinstance(source, dict):
+            return source
+        return producer
+
+    def context_lines(start: int | None, end: int | None, radius: int = 4) -> list[dict[str, Any]]:
+        if not start or not end:
+            return []
+        lo = max(1, min(start, end) - radius)
+        hi = min(len(lines), max(start, end) + radius)
+        return [
+            {"line": lineno, "text": lines[lineno - 1].strip()}
+            for lineno in range(lo, hi + 1)
+        ]
 
     for lineno, line in enumerate(lines, 1):
         if m := ACCESS_RE.match(line):
@@ -83,15 +131,13 @@ def parse_spvasm(text: str) -> dict[str, Any]:
             if not access:
                 continue
             value = parse_constant_token(value_id, constants)
-            if value is None:
-                # Dynamic value stores are still useful but not a record header.
-                continue
             stores[int(access["slot"])] = {
                 "slot": int(access["slot"]),
                 "value": value,
                 "access_line": access["line"],
                 "store_line": lineno,
                 "value_id": value_id,
+                "value_producer": producer_snapshot(value_id),
             }
 
     records = []
@@ -99,6 +145,9 @@ def parse_spvasm(text: str) -> dict[str, Any]:
         base = int(expected["slot_base"])
         candidate = stores.get(base)
         role = stores.get(base + 1)
+        value_store = stores.get(base + 2)
+        value_producer = value_store.get("value_producer") if value_store else None
+        origin = value_origin(value_producer)
         schema = stores.get(base + 10)
         schema_required = int(expected["role_code"]) == 4
         status = "pass"
@@ -128,6 +177,17 @@ def parse_spvasm(text: str) -> dict[str, Any]:
             "observed_record_schema_version": schema.get("value") if schema else None,
             "candidate_store_line": candidate.get("store_line") if candidate else None,
             "role_store_line": role.get("store_line") if role else None,
+            "value_store_line": value_store.get("store_line") if value_store else None,
+            "value_source_id": value_store.get("value_id") if value_store else None,
+            "value_source_producer": value_producer,
+            "value_origin_id": origin.get("id") if origin else None,
+            "value_origin_opcode": origin.get("opcode") if origin else None,
+            "value_origin_line": origin.get("line") if origin else None,
+            "value_origin_operands": origin.get("operands") if origin else None,
+            "value_flow_context": context_lines(
+                origin.get("line") if origin else None,
+                value_store.get("store_line") if value_store else None,
+            ),
             "schema_store_line": schema.get("store_line") if schema else None,
             "status": status,
             "failures": failures,

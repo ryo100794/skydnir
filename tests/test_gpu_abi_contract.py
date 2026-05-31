@@ -460,10 +460,19 @@ class GpuAbiContractTest(unittest.TestCase):
             lines.append(f"%ptr_{ptr_id} = OpAccessChain %_ptr_StorageBuffer_uint %debug %uint_0 %uint_{slot}")
             lines.append(f"OpStore %ptr_{ptr_id} %uint_{value}")
             ptr_id += 1
+        for base in (8, 20, 32, 44, 56, 68, 80, 92, 104, 116):
+            lines.append(f"%val_{base} = OpBitcast %uint %float_{base}")
+            lines.append(f"%ptr_{ptr_id} = OpAccessChain %_ptr_StorageBuffer_uint %debug %uint_0 %uint_{base + 2}")
+            lines.append(f"OpStore %ptr_{ptr_id} %val_{base}")
+            ptr_id += 1
         report = analyzer.parse_spvasm("\n".join(lines))
         self.assertEqual("pass", report["summary"])
         self.assertEqual(10, report["passed_record_count"])
         self.assertEqual(["%debug"], report["debug_binding_variable_ids"])
+        self.assertEqual("OpBitcast", report["records"][0]["value_source_producer"]["opcode"])
+        self.assertEqual("%val_8", report["records"][0]["value_source_id"])
+        self.assertEqual("OpBitcast", report["records"][0]["value_origin_opcode"])
+        self.assertTrue(report["records"][0]["value_flow_context"])
 
     def test_executor_q6_debug_probe_alias_guard_fails_closed(self):
         source = GPU_EXECUTOR.read_text()

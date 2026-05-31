@@ -2,7 +2,7 @@
   "debug_binding_variable_ids": [
     "%3444"
   ],
-  "debug_store_count": 22,
+  "debug_store_count": 46,
   "passed_record_count": 10,
   "record_count": 10,
   "records": [
@@ -20,7 +20,122 @@
       "schema_store_line": null,
       "slot_base": 8,
       "stage": "pre-reduction-store",
-      "status": "pass"
+      "status": "pass",
+      "value_flow_context": [
+        {
+          "line": 959,
+          "text": "OpLoopMerge %2762 %2751 Unroll"
+        },
+        {
+          "line": 960,
+          "text": "OpBranchConditional %2750 %2751 %2762"
+        },
+        {
+          "line": 961,
+          "text": "%2751 = OpLabel"
+        },
+        {
+          "line": 962,
+          "text": "%2756 = OpAccessChain %_ptr_Function_float %1908 %2924 %2939"
+        },
+        {
+          "line": 963,
+          "text": "%2757 = OpLoad %float %2756"
+        },
+        {
+          "line": 964,
+          "text": "%2758 = OpAccessChain %_ptr_Workgroup_float %143 %2924 %2939 %1918"
+        },
+        {
+          "line": 965,
+          "text": "OpStore %2758 %2757"
+        },
+        {
+          "line": 966,
+          "text": "%3571 = OpBitcast %uint %2757"
+        },
+        {
+          "line": 967,
+          "text": "%3572 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_8_0"
+        },
+        {
+          "line": 968,
+          "text": "OpStore %3572 %uint_39"
+        },
+        {
+          "line": 969,
+          "text": "%3573 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_9"
+        },
+        {
+          "line": 970,
+          "text": "OpStore %3573 %uint_1_1"
+        },
+        {
+          "line": 971,
+          "text": "%3574 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_10"
+        },
+        {
+          "line": 972,
+          "text": "OpStore %3574 %3571"
+        },
+        {
+          "line": 973,
+          "text": "%2761 = OpIAdd %uint %2939 %int_1"
+        },
+        {
+          "line": 974,
+          "text": "OpBranch %2747"
+        },
+        {
+          "line": 975,
+          "text": "%2762 = OpLabel"
+        },
+        {
+          "line": 976,
+          "text": "OpBranch %2763"
+        }
+      ],
+      "value_origin_id": "%2757",
+      "value_origin_line": 963,
+      "value_origin_opcode": "OpLoad",
+      "value_origin_operands": [
+        "%float",
+        "%2756"
+      ],
+      "value_source_id": "%3571",
+      "value_source_producer": {
+        "id": "%3571",
+        "line": 966,
+        "opcode": "OpBitcast",
+        "operands": [
+          "%uint",
+          "%2757"
+        ],
+        "source": {
+          "id": "%2757",
+          "line": 963,
+          "opcode": "OpLoad",
+          "operands": [
+            "%float",
+            "%2756"
+          ],
+          "pointer": {
+            "id": "%2756",
+            "line": 962,
+            "opcode": "OpAccessChain",
+            "operands": [
+              "%_ptr_Function_float",
+              "%1908",
+              "%2924",
+              "%2939"
+            ],
+            "text": "%2756 = OpAccessChain %_ptr_Function_float %1908 %2924 %2939"
+          },
+          "text": "%2757 = OpLoad %float %2756"
+        },
+        "text": "%3571 = OpBitcast %uint %2757"
+      },
+      "value_store_line": 972
     },
     {
       "candidate_id": 49,
@@ -36,7 +151,108 @@
       "schema_store_line": null,
       "slot_base": 20,
       "stage": "reduction-store",
-      "status": "pass"
+      "status": "pass",
+      "value_flow_context": [
+        {
+          "line": 1008,
+          "text": "%2791 = OpAccessChain %_ptr_Workgroup_float %143 %2933 %2936 %2790"
+        },
+        {
+          "line": 1009,
+          "text": "%2792 = OpLoad %float %2791"
+        },
+        {
+          "line": 1010,
+          "text": "%2793 = OpAccessChain %_ptr_Workgroup_float %143 %2933 %2936 %1918"
+        },
+        {
+          "line": 1011,
+          "text": "%2794 = OpLoad %float %2793"
+        },
+        {
+          "line": 1012,
+          "text": "%2795 = OpFAdd %float %2794 %2792"
+        },
+        {
+          "line": 1013,
+          "text": "OpStore %2793 %2795"
+        },
+        {
+          "line": 1014,
+          "text": "%3575 = OpBitcast %uint %2795"
+        },
+        {
+          "line": 1015,
+          "text": "%3576 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_20"
+        },
+        {
+          "line": 1016,
+          "text": "OpStore %3576 %uint_49"
+        },
+        {
+          "line": 1017,
+          "text": "%3577 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_21"
+        },
+        {
+          "line": 1018,
+          "text": "OpStore %3577 %uint_2_3"
+        },
+        {
+          "line": 1019,
+          "text": "%3578 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_22"
+        },
+        {
+          "line": 1020,
+          "text": "OpStore %3578 %3575"
+        },
+        {
+          "line": 1021,
+          "text": "%2799 = OpIAdd %uint %2936 %int_1"
+        },
+        {
+          "line": 1022,
+          "text": "OpBranch %2780"
+        },
+        {
+          "line": 1023,
+          "text": "%2800 = OpLabel"
+        },
+        {
+          "line": 1024,
+          "text": "OpBranch %2801"
+        }
+      ],
+      "value_origin_id": "%2795",
+      "value_origin_line": 1012,
+      "value_origin_opcode": "OpFAdd",
+      "value_origin_operands": [
+        "%float",
+        "%2794",
+        "%2792"
+      ],
+      "value_source_id": "%3575",
+      "value_source_producer": {
+        "id": "%3575",
+        "line": 1014,
+        "opcode": "OpBitcast",
+        "operands": [
+          "%uint",
+          "%2795"
+        ],
+        "source": {
+          "id": "%2795",
+          "line": 1012,
+          "opcode": "OpFAdd",
+          "operands": [
+            "%float",
+            "%2794",
+            "%2792"
+          ],
+          "text": "%2795 = OpFAdd %float %2794 %2792"
+        },
+        "text": "%3575 = OpBitcast %uint %2795"
+      },
+      "value_store_line": 1020
     },
     {
       "candidate_id": 61,
@@ -52,7 +268,108 @@
       "schema_store_line": null,
       "slot_base": 32,
       "stage": "accumulator-a-store",
-      "status": "pass"
+      "status": "pass",
+      "value_flow_context": [
+        {
+          "line": 1066,
+          "text": "%2837 = OpAccessChain %_ptr_StorageBuffer_float %239 %int_0 %2836"
+        },
+        {
+          "line": 1067,
+          "text": "%2838 = OpLoad %float %2837"
+        },
+        {
+          "line": 1068,
+          "text": "%2839 = OpAccessChain %_ptr_Workgroup_float %143 %2926 %2927 %int_0"
+        },
+        {
+          "line": 1069,
+          "text": "%2840 = OpLoad %float %2839"
+        },
+        {
+          "line": 1070,
+          "text": "%2841 = OpFAdd %float %2840 %2838"
+        },
+        {
+          "line": 1071,
+          "text": "OpStore %2839 %2841"
+        },
+        {
+          "line": 1072,
+          "text": "%3579 = OpBitcast %uint %2841"
+        },
+        {
+          "line": 1073,
+          "text": "%3580 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_32_3"
+        },
+        {
+          "line": 1074,
+          "text": "OpStore %3580 %uint_61"
+        },
+        {
+          "line": 1075,
+          "text": "%3581 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_33"
+        },
+        {
+          "line": 1076,
+          "text": "OpStore %3581 %uint_3"
+        },
+        {
+          "line": 1077,
+          "text": "%3582 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_34"
+        },
+        {
+          "line": 1078,
+          "text": "OpStore %3582 %3579"
+        },
+        {
+          "line": 1079,
+          "text": "OpBranch %2843"
+        },
+        {
+          "line": 1080,
+          "text": "%2843 = OpLabel"
+        },
+        {
+          "line": 1081,
+          "text": "%2846 = OpBitwiseAnd %uint %2823 %uint_2_0"
+        },
+        {
+          "line": 1082,
+          "text": "%2847 = OpINotEqual %bool %2846 %uint_0"
+        }
+      ],
+      "value_origin_id": "%2841",
+      "value_origin_line": 1070,
+      "value_origin_opcode": "OpFAdd",
+      "value_origin_operands": [
+        "%float",
+        "%2840",
+        "%2838"
+      ],
+      "value_source_id": "%3579",
+      "value_source_producer": {
+        "id": "%3579",
+        "line": 1072,
+        "opcode": "OpBitcast",
+        "operands": [
+          "%uint",
+          "%2841"
+        ],
+        "source": {
+          "id": "%2841",
+          "line": 1070,
+          "opcode": "OpFAdd",
+          "operands": [
+            "%float",
+            "%2840",
+            "%2838"
+          ],
+          "text": "%2841 = OpFAdd %float %2840 %2838"
+        },
+        "text": "%3579 = OpBitcast %uint %2841"
+      },
+      "value_store_line": 1078
     },
     {
       "candidate_id": 63,
@@ -68,7 +385,108 @@
       "schema_store_line": null,
       "slot_base": 44,
       "stage": "accumulator-b-store",
-      "status": "pass"
+      "status": "pass",
+      "value_flow_context": [
+        {
+          "line": 1090,
+          "text": "%2859 = OpAccessChain %_ptr_StorageBuffer_float %266 %int_0 %2858"
+        },
+        {
+          "line": 1091,
+          "text": "%2860 = OpLoad %float %2859"
+        },
+        {
+          "line": 1092,
+          "text": "%2861 = OpAccessChain %_ptr_Workgroup_float %143 %2926 %2927 %int_0"
+        },
+        {
+          "line": 1093,
+          "text": "%2862 = OpLoad %float %2861"
+        },
+        {
+          "line": 1094,
+          "text": "%2863 = OpFAdd %float %2862 %2860"
+        },
+        {
+          "line": 1095,
+          "text": "OpStore %2861 %2863"
+        },
+        {
+          "line": 1096,
+          "text": "%3583 = OpBitcast %uint %2863"
+        },
+        {
+          "line": 1097,
+          "text": "%3584 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_44"
+        },
+        {
+          "line": 1098,
+          "text": "OpStore %3584 %uint_63"
+        },
+        {
+          "line": 1099,
+          "text": "%3585 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_45"
+        },
+        {
+          "line": 1100,
+          "text": "OpStore %3585 %uint_3"
+        },
+        {
+          "line": 1101,
+          "text": "%3586 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_46"
+        },
+        {
+          "line": 1102,
+          "text": "OpStore %3586 %3583"
+        },
+        {
+          "line": 1103,
+          "text": "OpBranch %2865"
+        },
+        {
+          "line": 1104,
+          "text": "%2865 = OpLabel"
+        },
+        {
+          "line": 1105,
+          "text": "%2869 = OpIMul %uint %2926 %2064"
+        },
+        {
+          "line": 1106,
+          "text": "%2870 = OpIAdd %uint %2869 %2065"
+        }
+      ],
+      "value_origin_id": "%2863",
+      "value_origin_line": 1094,
+      "value_origin_opcode": "OpFAdd",
+      "value_origin_operands": [
+        "%float",
+        "%2862",
+        "%2860"
+      ],
+      "value_source_id": "%3583",
+      "value_source_producer": {
+        "id": "%3583",
+        "line": 1096,
+        "opcode": "OpBitcast",
+        "operands": [
+          "%uint",
+          "%2863"
+        ],
+        "source": {
+          "id": "%2863",
+          "line": 1094,
+          "opcode": "OpFAdd",
+          "operands": [
+            "%float",
+            "%2862",
+            "%2860"
+          ],
+          "text": "%2863 = OpFAdd %float %2862 %2860"
+        },
+        "text": "%3583 = OpBitcast %uint %2863"
+      },
+      "value_store_line": 1102
     },
     {
       "candidate_id": 64,
@@ -84,7 +502,171 @@
       "schema_store_line": 1147,
       "slot_base": 56,
       "stage": "final-store",
-      "status": "pass"
+      "status": "pass",
+      "value_flow_context": [
+        {
+          "line": 1106,
+          "text": "%2870 = OpIAdd %uint %2869 %2065"
+        },
+        {
+          "line": 1107,
+          "text": "%2871 = OpIAdd %uint %2870 %845"
+        },
+        {
+          "line": 1108,
+          "text": "%2873 = OpIAdd %uint %2871 %2927"
+        },
+        {
+          "line": 1109,
+          "text": "%2876 = OpAccessChain %_ptr_Workgroup_float %143 %2926 %2927 %int_0"
+        },
+        {
+          "line": 1110,
+          "text": "%2877 = OpLoad %float %2876"
+        },
+        {
+          "line": 1111,
+          "text": "%2878 = OpAccessChain %_ptr_StorageBuffer_float %284 %int_0 %2873"
+        },
+        {
+          "line": 1112,
+          "text": "OpStore %2878 %2877"
+        },
+        {
+          "line": 1113,
+          "text": "%3587 = OpBitcast %uint %2877"
+        },
+        {
+          "line": 1114,
+          "text": "%3588 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_0_0"
+        },
+        {
+          "line": 1115,
+          "text": "%3589 = OpLoad %uint %3588"
+        },
+        {
+          "line": 1116,
+          "text": "%3590 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_1_1"
+        },
+        {
+          "line": 1117,
+          "text": "%3591 = OpLoad %uint %3590"
+        },
+        {
+          "line": 1118,
+          "text": "%3592 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_2_3"
+        },
+        {
+          "line": 1119,
+          "text": "%3593 = OpLoad %uint %3592"
+        },
+        {
+          "line": 1120,
+          "text": "%3594 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_0_0"
+        },
+        {
+          "line": 1121,
+          "text": "%3595 = OpLoad %uint %3594"
+        },
+        {
+          "line": 1122,
+          "text": "%3596 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_1_1"
+        },
+        {
+          "line": 1123,
+          "text": "%3597 = OpLoad %uint %3596"
+        },
+        {
+          "line": 1124,
+          "text": "%3598 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_2_3"
+        },
+        {
+          "line": 1125,
+          "text": "%3599 = OpLoad %uint %3598"
+        },
+        {
+          "line": 1126,
+          "text": "%3600 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_56"
+        },
+        {
+          "line": 1127,
+          "text": "OpStore %3600 %uint_64_1"
+        },
+        {
+          "line": 1128,
+          "text": "%3601 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_57"
+        },
+        {
+          "line": 1129,
+          "text": "OpStore %3601 %uint_4_0"
+        },
+        {
+          "line": 1130,
+          "text": "%3602 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_58"
+        },
+        {
+          "line": 1131,
+          "text": "OpStore %3602 %3587"
+        },
+        {
+          "line": 1132,
+          "text": "%3603 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_59"
+        },
+        {
+          "line": 1133,
+          "text": "OpStore %3603 %2873"
+        },
+        {
+          "line": 1134,
+          "text": "%3604 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_60"
+        },
+        {
+          "line": 1135,
+          "text": "OpStore %3604 %3589"
+        }
+      ],
+      "value_origin_id": "%2877",
+      "value_origin_line": 1110,
+      "value_origin_opcode": "OpLoad",
+      "value_origin_operands": [
+        "%float",
+        "%2876"
+      ],
+      "value_source_id": "%3587",
+      "value_source_producer": {
+        "id": "%3587",
+        "line": 1113,
+        "opcode": "OpBitcast",
+        "operands": [
+          "%uint",
+          "%2877"
+        ],
+        "source": {
+          "id": "%2877",
+          "line": 1110,
+          "opcode": "OpLoad",
+          "operands": [
+            "%float",
+            "%2876"
+          ],
+          "pointer": {
+            "id": "%2876",
+            "line": 1109,
+            "opcode": "OpAccessChain",
+            "operands": [
+              "%_ptr_Workgroup_float",
+              "%143",
+              "%2926",
+              "%2927",
+              "%int_0"
+            ],
+            "text": "%2876 = OpAccessChain %_ptr_Workgroup_float %143 %2926 %2927 %int_0"
+          },
+          "text": "%2877 = OpLoad %float %2876"
+        },
+        "text": "%3587 = OpBitcast %uint %2877"
+      },
+      "value_store_line": 1131
     },
     {
       "candidate_id": 105,
@@ -100,7 +682,122 @@
       "schema_store_line": null,
       "slot_base": 68,
       "stage": "pre-reduction-store",
-      "status": "pass"
+      "status": "pass",
+      "value_flow_context": [
+        {
+          "line": 1752,
+          "text": "OpLoopMerge %1759 %1748 Unroll"
+        },
+        {
+          "line": 1753,
+          "text": "OpBranchConditional %1747 %1748 %1759"
+        },
+        {
+          "line": 1754,
+          "text": "%1748 = OpLabel"
+        },
+        {
+          "line": 1755,
+          "text": "%1753 = OpAccessChain %_ptr_Function_float %905 %2990 %3005"
+        },
+        {
+          "line": 1756,
+          "text": "%1754 = OpLoad %float %1753"
+        },
+        {
+          "line": 1757,
+          "text": "%1755 = OpAccessChain %_ptr_Workgroup_float %143 %2990 %3005 %915"
+        },
+        {
+          "line": 1758,
+          "text": "OpStore %1755 %1754"
+        },
+        {
+          "line": 1759,
+          "text": "%3611 = OpBitcast %uint %1754"
+        },
+        {
+          "line": 1760,
+          "text": "%3612 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_68"
+        },
+        {
+          "line": 1761,
+          "text": "OpStore %3612 %uint_105"
+        },
+        {
+          "line": 1762,
+          "text": "%3613 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_69"
+        },
+        {
+          "line": 1763,
+          "text": "OpStore %3613 %uint_1_1"
+        },
+        {
+          "line": 1764,
+          "text": "%3614 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_70"
+        },
+        {
+          "line": 1765,
+          "text": "OpStore %3614 %3611"
+        },
+        {
+          "line": 1766,
+          "text": "%1758 = OpIAdd %uint %3005 %int_1"
+        },
+        {
+          "line": 1767,
+          "text": "OpBranch %1744"
+        },
+        {
+          "line": 1768,
+          "text": "%1759 = OpLabel"
+        },
+        {
+          "line": 1769,
+          "text": "OpBranch %1760"
+        }
+      ],
+      "value_origin_id": "%1754",
+      "value_origin_line": 1756,
+      "value_origin_opcode": "OpLoad",
+      "value_origin_operands": [
+        "%float",
+        "%1753"
+      ],
+      "value_source_id": "%3611",
+      "value_source_producer": {
+        "id": "%3611",
+        "line": 1759,
+        "opcode": "OpBitcast",
+        "operands": [
+          "%uint",
+          "%1754"
+        ],
+        "source": {
+          "id": "%1754",
+          "line": 1756,
+          "opcode": "OpLoad",
+          "operands": [
+            "%float",
+            "%1753"
+          ],
+          "pointer": {
+            "id": "%1753",
+            "line": 1755,
+            "opcode": "OpAccessChain",
+            "operands": [
+              "%_ptr_Function_float",
+              "%905",
+              "%2990",
+              "%3005"
+            ],
+            "text": "%1753 = OpAccessChain %_ptr_Function_float %905 %2990 %3005"
+          },
+          "text": "%1754 = OpLoad %float %1753"
+        },
+        "text": "%3611 = OpBitcast %uint %1754"
+      },
+      "value_store_line": 1765
     },
     {
       "candidate_id": 115,
@@ -116,7 +813,108 @@
       "schema_store_line": null,
       "slot_base": 80,
       "stage": "reduction-store",
-      "status": "pass"
+      "status": "pass",
+      "value_flow_context": [
+        {
+          "line": 1801,
+          "text": "%1788 = OpAccessChain %_ptr_Workgroup_float %143 %2999 %3002 %1787"
+        },
+        {
+          "line": 1802,
+          "text": "%1789 = OpLoad %float %1788"
+        },
+        {
+          "line": 1803,
+          "text": "%1790 = OpAccessChain %_ptr_Workgroup_float %143 %2999 %3002 %915"
+        },
+        {
+          "line": 1804,
+          "text": "%1791 = OpLoad %float %1790"
+        },
+        {
+          "line": 1805,
+          "text": "%1792 = OpFAdd %float %1791 %1789"
+        },
+        {
+          "line": 1806,
+          "text": "OpStore %1790 %1792"
+        },
+        {
+          "line": 1807,
+          "text": "%3615 = OpBitcast %uint %1792"
+        },
+        {
+          "line": 1808,
+          "text": "%3616 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_80"
+        },
+        {
+          "line": 1809,
+          "text": "OpStore %3616 %uint_115"
+        },
+        {
+          "line": 1810,
+          "text": "%3617 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_81"
+        },
+        {
+          "line": 1811,
+          "text": "OpStore %3617 %uint_2_3"
+        },
+        {
+          "line": 1812,
+          "text": "%3618 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_82"
+        },
+        {
+          "line": 1813,
+          "text": "OpStore %3618 %3615"
+        },
+        {
+          "line": 1814,
+          "text": "%1796 = OpIAdd %uint %3002 %int_1"
+        },
+        {
+          "line": 1815,
+          "text": "OpBranch %1777"
+        },
+        {
+          "line": 1816,
+          "text": "%1797 = OpLabel"
+        },
+        {
+          "line": 1817,
+          "text": "OpBranch %1798"
+        }
+      ],
+      "value_origin_id": "%1792",
+      "value_origin_line": 1805,
+      "value_origin_opcode": "OpFAdd",
+      "value_origin_operands": [
+        "%float",
+        "%1791",
+        "%1789"
+      ],
+      "value_source_id": "%3615",
+      "value_source_producer": {
+        "id": "%3615",
+        "line": 1807,
+        "opcode": "OpBitcast",
+        "operands": [
+          "%uint",
+          "%1792"
+        ],
+        "source": {
+          "id": "%1792",
+          "line": 1805,
+          "opcode": "OpFAdd",
+          "operands": [
+            "%float",
+            "%1791",
+            "%1789"
+          ],
+          "text": "%1792 = OpFAdd %float %1791 %1789"
+        },
+        "text": "%3615 = OpBitcast %uint %1792"
+      },
+      "value_store_line": 1813
     },
     {
       "candidate_id": 127,
@@ -132,7 +930,108 @@
       "schema_store_line": null,
       "slot_base": 92,
       "stage": "accumulator-a-store",
-      "status": "pass"
+      "status": "pass",
+      "value_flow_context": [
+        {
+          "line": 1860,
+          "text": "%1834 = OpAccessChain %_ptr_StorageBuffer_float %239 %int_0 %1833"
+        },
+        {
+          "line": 1861,
+          "text": "%1835 = OpLoad %float %1834"
+        },
+        {
+          "line": 1862,
+          "text": "%1836 = OpAccessChain %_ptr_Workgroup_float %143 %2992 %2993 %int_0"
+        },
+        {
+          "line": 1863,
+          "text": "%1837 = OpLoad %float %1836"
+        },
+        {
+          "line": 1864,
+          "text": "%1838 = OpFAdd %float %1837 %1835"
+        },
+        {
+          "line": 1865,
+          "text": "OpStore %1836 %1838"
+        },
+        {
+          "line": 1866,
+          "text": "%3619 = OpBitcast %uint %1838"
+        },
+        {
+          "line": 1867,
+          "text": "%3620 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_92"
+        },
+        {
+          "line": 1868,
+          "text": "OpStore %3620 %uint_127"
+        },
+        {
+          "line": 1869,
+          "text": "%3621 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_93"
+        },
+        {
+          "line": 1870,
+          "text": "OpStore %3621 %uint_3"
+        },
+        {
+          "line": 1871,
+          "text": "%3622 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_94"
+        },
+        {
+          "line": 1872,
+          "text": "OpStore %3622 %3619"
+        },
+        {
+          "line": 1873,
+          "text": "OpBranch %1840"
+        },
+        {
+          "line": 1874,
+          "text": "%1840 = OpLabel"
+        },
+        {
+          "line": 1875,
+          "text": "%1843 = OpBitwiseAnd %uint %1820 %uint_2_0"
+        },
+        {
+          "line": 1876,
+          "text": "%1844 = OpINotEqual %bool %1843 %uint_0"
+        }
+      ],
+      "value_origin_id": "%1838",
+      "value_origin_line": 1864,
+      "value_origin_opcode": "OpFAdd",
+      "value_origin_operands": [
+        "%float",
+        "%1837",
+        "%1835"
+      ],
+      "value_source_id": "%3619",
+      "value_source_producer": {
+        "id": "%3619",
+        "line": 1866,
+        "opcode": "OpBitcast",
+        "operands": [
+          "%uint",
+          "%1838"
+        ],
+        "source": {
+          "id": "%1838",
+          "line": 1864,
+          "opcode": "OpFAdd",
+          "operands": [
+            "%float",
+            "%1837",
+            "%1835"
+          ],
+          "text": "%1838 = OpFAdd %float %1837 %1835"
+        },
+        "text": "%3619 = OpBitcast %uint %1838"
+      },
+      "value_store_line": 1872
     },
     {
       "candidate_id": 129,
@@ -148,7 +1047,108 @@
       "schema_store_line": null,
       "slot_base": 104,
       "stage": "accumulator-b-store",
-      "status": "pass"
+      "status": "pass",
+      "value_flow_context": [
+        {
+          "line": 1884,
+          "text": "%1856 = OpAccessChain %_ptr_StorageBuffer_float %266 %int_0 %1855"
+        },
+        {
+          "line": 1885,
+          "text": "%1857 = OpLoad %float %1856"
+        },
+        {
+          "line": 1886,
+          "text": "%1858 = OpAccessChain %_ptr_Workgroup_float %143 %2992 %2993 %int_0"
+        },
+        {
+          "line": 1887,
+          "text": "%1859 = OpLoad %float %1858"
+        },
+        {
+          "line": 1888,
+          "text": "%1860 = OpFAdd %float %1859 %1857"
+        },
+        {
+          "line": 1889,
+          "text": "OpStore %1858 %1860"
+        },
+        {
+          "line": 1890,
+          "text": "%3623 = OpBitcast %uint %1860"
+        },
+        {
+          "line": 1891,
+          "text": "%3624 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_104"
+        },
+        {
+          "line": 1892,
+          "text": "OpStore %3624 %uint_129"
+        },
+        {
+          "line": 1893,
+          "text": "%3625 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_105_0"
+        },
+        {
+          "line": 1894,
+          "text": "OpStore %3625 %uint_3"
+        },
+        {
+          "line": 1895,
+          "text": "%3626 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_106"
+        },
+        {
+          "line": 1896,
+          "text": "OpStore %3626 %3623"
+        },
+        {
+          "line": 1897,
+          "text": "OpBranch %1862"
+        },
+        {
+          "line": 1898,
+          "text": "%1862 = OpLabel"
+        },
+        {
+          "line": 1899,
+          "text": "%1866 = OpIMul %uint %2992 %1061"
+        },
+        {
+          "line": 1900,
+          "text": "%1867 = OpIAdd %uint %1866 %1062"
+        }
+      ],
+      "value_origin_id": "%1860",
+      "value_origin_line": 1888,
+      "value_origin_opcode": "OpFAdd",
+      "value_origin_operands": [
+        "%float",
+        "%1859",
+        "%1857"
+      ],
+      "value_source_id": "%3623",
+      "value_source_producer": {
+        "id": "%3623",
+        "line": 1890,
+        "opcode": "OpBitcast",
+        "operands": [
+          "%uint",
+          "%1860"
+        ],
+        "source": {
+          "id": "%1860",
+          "line": 1888,
+          "opcode": "OpFAdd",
+          "operands": [
+            "%float",
+            "%1859",
+            "%1857"
+          ],
+          "text": "%1860 = OpFAdd %float %1859 %1857"
+        },
+        "text": "%3623 = OpBitcast %uint %1860"
+      },
+      "value_store_line": 1896
     },
     {
       "candidate_id": 130,
@@ -164,7 +1164,171 @@
       "schema_store_line": 1941,
       "slot_base": 116,
       "stage": "final-store",
-      "status": "pass"
+      "status": "pass",
+      "value_flow_context": [
+        {
+          "line": 1900,
+          "text": "%1867 = OpIAdd %uint %1866 %1062"
+        },
+        {
+          "line": 1901,
+          "text": "%1868 = OpIAdd %uint %1867 %845"
+        },
+        {
+          "line": 1902,
+          "text": "%1870 = OpIAdd %uint %1868 %2993"
+        },
+        {
+          "line": 1903,
+          "text": "%1873 = OpAccessChain %_ptr_Workgroup_float %143 %2992 %2993 %int_0"
+        },
+        {
+          "line": 1904,
+          "text": "%1874 = OpLoad %float %1873"
+        },
+        {
+          "line": 1905,
+          "text": "%1875 = OpAccessChain %_ptr_StorageBuffer_float %284 %int_0 %1870"
+        },
+        {
+          "line": 1906,
+          "text": "OpStore %1875 %1874"
+        },
+        {
+          "line": 1907,
+          "text": "%3627 = OpBitcast %uint %1874"
+        },
+        {
+          "line": 1908,
+          "text": "%3628 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_0_0"
+        },
+        {
+          "line": 1909,
+          "text": "%3629 = OpLoad %uint %3628"
+        },
+        {
+          "line": 1910,
+          "text": "%3630 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_1_1"
+        },
+        {
+          "line": 1911,
+          "text": "%3631 = OpLoad %uint %3630"
+        },
+        {
+          "line": 1912,
+          "text": "%3632 = OpAccessChain %_ptr_Input_uint %gl_WorkGroupID %uint_2_3"
+        },
+        {
+          "line": 1913,
+          "text": "%3633 = OpLoad %uint %3632"
+        },
+        {
+          "line": 1914,
+          "text": "%3634 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_0_0"
+        },
+        {
+          "line": 1915,
+          "text": "%3635 = OpLoad %uint %3634"
+        },
+        {
+          "line": 1916,
+          "text": "%3636 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_1_1"
+        },
+        {
+          "line": 1917,
+          "text": "%3637 = OpLoad %uint %3636"
+        },
+        {
+          "line": 1918,
+          "text": "%3638 = OpAccessChain %_ptr_Input_uint %gl_LocalInvocationID %uint_2_3"
+        },
+        {
+          "line": 1919,
+          "text": "%3639 = OpLoad %uint %3638"
+        },
+        {
+          "line": 1920,
+          "text": "%3640 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_116"
+        },
+        {
+          "line": 1921,
+          "text": "OpStore %3640 %uint_130"
+        },
+        {
+          "line": 1922,
+          "text": "%3641 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_117"
+        },
+        {
+          "line": 1923,
+          "text": "OpStore %3641 %uint_4_0"
+        },
+        {
+          "line": 1924,
+          "text": "%3642 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_118"
+        },
+        {
+          "line": 1925,
+          "text": "OpStore %3642 %3627"
+        },
+        {
+          "line": 1926,
+          "text": "%3643 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_119"
+        },
+        {
+          "line": 1927,
+          "text": "OpStore %3643 %1870"
+        },
+        {
+          "line": 1928,
+          "text": "%3644 = OpAccessChain %_ptr_StorageBuffer_uint %3444 %uint_0 %uint_120"
+        },
+        {
+          "line": 1929,
+          "text": "OpStore %3644 %3629"
+        }
+      ],
+      "value_origin_id": "%1874",
+      "value_origin_line": 1904,
+      "value_origin_opcode": "OpLoad",
+      "value_origin_operands": [
+        "%float",
+        "%1873"
+      ],
+      "value_source_id": "%3627",
+      "value_source_producer": {
+        "id": "%3627",
+        "line": 1907,
+        "opcode": "OpBitcast",
+        "operands": [
+          "%uint",
+          "%1874"
+        ],
+        "source": {
+          "id": "%1874",
+          "line": 1904,
+          "opcode": "OpLoad",
+          "operands": [
+            "%float",
+            "%1873"
+          ],
+          "pointer": {
+            "id": "%1873",
+            "line": 1903,
+            "opcode": "OpAccessChain",
+            "operands": [
+              "%_ptr_Workgroup_float",
+              "%143",
+              "%2992",
+              "%2993",
+              "%int_0"
+            ],
+            "text": "%1873 = OpAccessChain %_ptr_Workgroup_float %143 %2992 %2993 %int_0"
+          },
+          "text": "%1874 = OpLoad %float %1873"
+        },
+        "text": "%3627 = OpBitcast %uint %1874"
+      },
+      "value_store_line": 1925
     }
   ],
   "schema": "skydnir.q6.stage-trace-spvasm.v1",
