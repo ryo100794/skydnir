@@ -1386,6 +1386,18 @@ forward_env_keys = string_list("compare_forward_env_keys")
 mode_profiles = manifest.get("compare_mode_env_profiles")
 if not isinstance(mode_profiles, dict):
     raise SystemExit(f"invalid compare_mode_env_profiles in llama GPU env manifest: {manifest_path}")
+q6_required_env_overlay = manifest.get("q6_required_env_overlay")
+if not isinstance(q6_required_env_overlay, dict) or not all(
+    isinstance(key, str) and key and isinstance(value, str)
+    for key, value in q6_required_env_overlay.items()
+):
+    raise SystemExit(f"invalid q6_required_env_overlay in llama GPU env manifest: {manifest_path}")
+missing_q6_forward = [key for key in q6_required_env_overlay if key not in forward_env_keys]
+if missing_q6_forward:
+    raise SystemExit(
+        "llama GPU env manifest does not forward all Q6 required env keys: "
+        + ",".join(missing_q6_forward)
+    )
 probe_env_keys = string_list("compare_probe_env_keys")
 missing_probe_forward = [key for key in probe_env_keys if key not in forward_env_keys]
 if missing_probe_forward:
@@ -1450,6 +1462,25 @@ def apply_manifest_mode_env(env, mode, trace_alloc):
         for item in trace_entries:
             set_env(env, manifest_env_item(item))
 
+def apply_q6_required_env_overlay(env, mode, gpu_layers):
+    if mode != "vulkan-raw":
+        return
+    try:
+        layers = int(gpu_layers)
+    except ValueError:
+        layers = 0
+    if layers <= 0:
+        return
+    # Q6_K is part of llama.cpp's first offloaded transformer layer.  The
+    # bridge must not depend on the caller remembering every diagnostic env
+    # knob; otherwise a run can reach Q6 with literal LocalSize [1,1,1] while
+    # the specialization-resolved WorkgroupSize is [32,1,1].  Apply the
+    # manifest-owned Q6 overlay before forwarding host env so explicit caller
+    # values still win and every requested default is visible in the Engine
+    # create payload.
+    for key, value in sorted(q6_required_env_overlay.items()):
+        set_env(env, f"{key}={value}")
+
 env = [
     "PDOCKER_GPU=auto",
     "PDOCKER_GPU_AUTO=1",
@@ -1464,6 +1495,7 @@ env = [
 if model_url:
     set_env(env, f"LLAMA_MODEL_URL={model_url}")
 apply_manifest_mode_env(env, mode, trace_alloc)
+apply_q6_required_env_overlay(env, mode, gpu_layers)
 for key in forward_env_keys:
     value = os.environ.get(key)
     if value is not None:
