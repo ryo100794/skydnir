@@ -4227,6 +4227,111 @@ def collect_q6_debug_probe_bindings(events):
     return bindings
 
 
+def q6_parse_int(value):
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        return int(value, 0)
+    return int(value)
+
+
+def q6_binding_memory_window(detail):
+    if not isinstance(detail, dict):
+        return None
+    try:
+        start = q6_parse_int(detail.get("binding_descriptor_offset"))
+        if start is None:
+            start = q6_parse_int(detail.get("offset"))
+        size = q6_parse_int(detail.get("size"))
+        if start is None or size is None or size < 0:
+            return None
+        end = start + size
+        if end < start:
+            return None
+        return {
+            "binding": detail.get("binding"),
+            "index": detail.get("index"),
+            "alias_rep": detail.get("alias_rep"),
+            "api_memory_id": detail.get("api_memory_id"),
+            "api_buffer_id": detail.get("api_buffer_id"),
+            "start": start,
+            "end": end,
+            "size": size,
+        }
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def q6_windows_overlap(left, right):
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    left_alias = left.get("alias_rep")
+    right_alias = right.get("alias_rep")
+    if left_alias is not None and right_alias is not None and left_alias == right_alias:
+        return True
+    same_memory = (
+        left.get("api_memory_id") is not None
+        and right.get("api_memory_id") is not None
+        and left.get("api_memory_id") == right.get("api_memory_id")
+    )
+    same_buffer = (
+        left.get("api_buffer_id") is not None
+        and right.get("api_buffer_id") is not None
+        and left.get("api_buffer_id") == right.get("api_buffer_id")
+    )
+    if not (same_memory or same_buffer):
+        return False
+    return max(left.get("start", 0), right.get("start", 0)) < min(
+        left.get("end", 0), right.get("end", 0)
+    )
+
+
+def build_q6_debug_binding_alias_safety(binding_details):
+    debug_windows = []
+    compute_windows = []
+    for detail in binding_details:
+        if not isinstance(detail, dict):
+            continue
+        window = q6_binding_memory_window(detail)
+        if not window:
+            continue
+        if detail.get("debug_probe_binding") is True:
+            debug_windows.append(window)
+        if detail.get("binding") in {2, 3, 4}:
+            compute_windows.append(window)
+    overlaps = []
+    for debug in debug_windows:
+        for compute in compute_windows:
+            if q6_windows_overlap(debug, compute):
+                overlaps.append({
+                    "debug_binding": debug,
+                    "compute_binding": compute,
+                    "reason": "same-alias-or-overlapping-buffer-window",
+                })
+    return {
+        "schema": "pdocker.q6k.debug-binding-alias-safety.v1",
+        "summary": (
+            "not-run"
+            if not debug_windows
+            else "fail"
+            if overlaps
+            else "pass"
+        ),
+        "debug_binding_count": len(debug_windows),
+        "checked_compute_binding_count": len(compute_windows),
+        "overlap_count": len(overlaps),
+        "debug_bindings": debug_windows[:8],
+        "compute_bindings": compute_windows[:8],
+        "overlaps": overlaps[:8],
+    }
+
+
+q6_debug_binding_alias_safety = build_q6_debug_binding_alias_safety(q6_binding_details)
 q6_debug_u32_probe = parse_q6_final_store_trace_v2(
     collect_q6_debug_probe_bindings(q6_valid_spirv_events)
 )
@@ -4744,6 +4849,8 @@ q6_blocker_class = (
     if q6_latest_oracle.get("status") == "match"
     else "descriptor-effective-range-or-upload"
     if q6_readonly_upload_hash_mismatches or q6_descriptor_range_mismatches or q6_descriptor_invariant_mismatches
+    else "q6-debug-binding-alias"
+    if q6_debug_binding_alias_safety.get("summary") == "fail"
     else q6_debug_u32_probe_blocker
     if q6_debug_u32_probe_blocker
     else "shader-readonly-mutation-or-barrier-scope"
@@ -4836,6 +4943,7 @@ q6_workgroup_diagnostics = {
     "q6_native_spirv_identity": q6_native_spirv_identity,
     "q6_native_vs_writeback_split": q6_native_vs_writeback_split,
     "q6_final_store_boundary": q6_final_store_boundary,
+    "q6_debug_binding_alias_safety": q6_debug_binding_alias_safety,
     "q6_debug_u32_probe": q6_debug_u32_probe,
     "q6_debug_u32_probe_blocker": q6_debug_u32_probe_blocker,
     "q6_output_layout_probe": q6_output_layout_probe,

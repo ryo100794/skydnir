@@ -264,6 +264,27 @@ class GpuAbiContractTest(unittest.TestCase):
         local_size_index = effective_words.index((6 << 16) | 16)
         self.assertEqual(effective_words[local_size_index + 3:local_size_index + 6], [32, 1, 1])
 
+    def test_q6_debug_probe_alias_guard_blocks_before_final_store_diagnosis(self):
+        compare = LLAMA_COMPARE.read_text()
+        verifier = LLAMA_GPU_ARTIFACT_VERIFIER.read_text()
+        self.assertIn("def build_q6_debug_binding_alias_safety", compare)
+        self.assertIn('"q6_debug_binding_alias_safety": q6_debug_binding_alias_safety', compare)
+        self.assertIn('"q6-debug-binding-alias"', compare)
+        self.assertLess(
+            compare.index('if q6_debug_binding_alias_safety.get("summary") == "fail"'),
+            compare.index("if q6_debug_u32_probe_blocker"),
+        )
+        self.assertLess(
+            compare.index('if q6_debug_binding_alias_safety.get("summary") == "fail"'),
+            compare.index('if q6_native_vs_writeback_split.get("summary") == "executor-final-writeback"'),
+        )
+        self.assertIn("def _q6_debug_binding_alias_safety", verifier)
+        self.assertIn('"q6_debug_binding_alias_safety": q6_debug_binding_alias_safety', verifier)
+        self.assertLess(
+            verifier.index('if q6_debug_binding_alias_safety.get("summary") == "fail"'),
+            verifier.index("elif q6_debug_u32_probe_blocker:"),
+        )
+
     def test_vulkan_dispatch_v4_binding_schema_is_single_source_and_checked(self):
         app_fields, app_count, app_hash, computed_hash = v4_binding_schema(APP_HEADER)
         container_fields, container_count, container_hash, container_computed_hash = v4_binding_schema(CONTAINER_HEADER)

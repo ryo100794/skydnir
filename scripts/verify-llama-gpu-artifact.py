@@ -39,6 +39,7 @@ ENV_MANIFEST_PATH = Path(__file__).resolve().with_name("llama-gpu-env-manifest.j
 COMPACT_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{16}$")
 ZERO_COMPACT_HASH = "0x0000000000000000"
 Q6_DEBUG_U32_BLOCKERS = {
+    "q6-debug-binding-alias",
     "q6-debug-u32-probe-metadata-mismatch",
     "q6-debug-u32-writeback-mismatch",
     "q6-debug-u32-final-store-trace-missing",
@@ -925,6 +926,18 @@ def _q6_debug_u32_probe(q6: Any) -> dict[str, Any]:
         return {}
     probe = q6.get("q6_debug_u32_probe")
     return probe if isinstance(probe, dict) else {}
+
+
+def _q6_debug_binding_alias_safety(q6: Any) -> dict[str, Any]:
+    if not isinstance(q6, dict):
+        return {}
+    guard = q6.get("q6_debug_binding_alias_safety")
+    if not isinstance(guard, dict):
+        return {}
+    summary = guard.get("summary")
+    if summary not in {"pass", "fail", "not-run", "missing-evidence"}:
+        summary = "missing-evidence"
+    return {**guard, "summary": summary}
 
 
 def _q6_final_store_boundary(q6: Any) -> dict[str, Any]:
@@ -2263,6 +2276,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_output_layout = _q6_output_layout_probe(q6)
     q6_row_provenance = _q6_row_provenance_probe(q6)
     q6_partial_signature = _q6_partial_signature_probe(q6)
+    q6_debug_binding_alias_safety = _q6_debug_binding_alias_safety(q6)
     q6_debug_u32_probe = _q6_debug_u32_probe(q6)
     q6_debug_u32_probe_blocker = _q6_debug_u32_probe_blocker(q6)
     q6_final_store_boundary = _q6_final_store_boundary(q6)
@@ -2334,7 +2348,11 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         responsibility_boundary = "q6-oracle"
         q6_blocker_class = str(q6.get("blocker_class") or "descriptor-memory-synchronization-or-q6-arithmetic")
         if q6_writeback_evidence.get("summary") == "pass":
-            if q6_debug_u32_probe_blocker:
+            if q6_debug_binding_alias_safety.get("summary") == "fail":
+                classification = "q6-debug-binding-alias"
+                responsibility_boundary = "q6-debug-binding-alias"
+                q6_blocker_class = "q6-debug-binding-alias"
+            elif q6_debug_u32_probe_blocker:
                 classification = q6_debug_u32_probe_blocker
                 responsibility_boundary = "q6-debug-u32-probe"
                 q6_blocker_class = q6_debug_u32_probe_blocker
@@ -2479,6 +2497,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_output_index_probe_summary": q6_output_index_probe_summary,
         "q6_row_provenance_probe": q6_row_provenance,
         "q6_partial_signature_probe": q6_partial_signature,
+        "q6_debug_binding_alias_safety": q6_debug_binding_alias_safety,
         "q6_debug_u32_probe": q6_debug_u32_probe,
         "q6_debug_u32_probe_blocker": q6_debug_u32_probe_blocker,
         "q6_final_store_boundary": q6_final_store_boundary,
