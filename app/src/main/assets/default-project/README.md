@@ -78,9 +78,9 @@ existing tasks and shell history.
 
 If skydnird is not running or its socket is not mounted, the Docker/Compose
 helpers fail with a path-focused message instead of guessing a daemon. The
-helper prefers `SKYDNIR_ENGINE_SOCKET` and then falls back to the legacy
-`PDOCKER_ENGINE_SOCKET` / `PDOCKER_DOCKER_SOCK` variables and mounted default
-paths.
+helper prefers `SKYDNIR_ENGINE_SOCKET` / `SKYDNIR_DOCKER_SOCK` and then
+falls back to the legacy `PDOCKER_ENGINE_SOCKET` / `PDOCKER_DOCKER_SOCK`
+variables and mounted default paths.
 
 Run from the Skydnir UI:
 

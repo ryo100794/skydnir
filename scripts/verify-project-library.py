@@ -402,6 +402,14 @@ def main() -> int:
     ):
         if token not in dev_management_contract:
             fail(f"dev-workspace management helper contract missing {token}")
+    for env_line in (
+        'SKYDNIR_ENGINE_SOCKET: "/pdocker/host/pdockerd.sock"',
+        'SKYDNIR_DOCKER_SOCK: "/pdocker/host/pdockerd.sock"',
+        'PDOCKER_ENGINE_SOCKET: "/pdocker/host/pdockerd.sock"',
+        'PDOCKER_DOCKER_SOCK: "/pdocker/host/pdockerd.sock"',
+    ):
+        if env_line not in dev_compose:
+            fail(f"dev-workspace compose must expose socket env {env_line}")
     if SKYDNIR_DOCUMENTS_VOLUME not in dev_helper_scripts:
         fail("pdocker-new-project blank template must include selected Documents folder mount")
     if SKYDNIR_SHARED_DOCUMENTS_VOLUME not in dev_helper_scripts:
