@@ -556,7 +556,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("write_u32_sample_array_prefix", source)
         self.assertIn("write_u32_fd_sample_array_prefix", source)
         self.assertIn('\\"q6_sample_indices\\":[', source)
+        self.assertIn('\\"q6_final_store_output_indices\\":[', source)
         self.assertIn("collect_q6_row_indexed_sample_indices", source)
+        self.assertIn("append_q6_final_store_output_indices_from_debug_probe", source)
         self.assertIn("write_q6_row_indexed_f32_evidence", source)
         self.assertIn("q6_first_mismatch", source)
         self.assertIn("row_window", source)
@@ -2025,6 +2027,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "trace_writeback_mismatch",
             "trace_writeback_mismatch_fields",
             "final-store trace writeback mismatch",
+            "q6_final_store_output_indices",
+            "missing-final-store-layout-samples",
+            "missing-final-store-writeback-samples",
             "q6_readonly_mutation_is_alias_side_effect",
             "same_q6_storage_window",
             "classify_q6_output_index_probe",

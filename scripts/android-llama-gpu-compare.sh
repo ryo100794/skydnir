@@ -3827,6 +3827,7 @@ def compact_q6_binding_detail(detail):
         "writeback_mismatch": detail.get("writeback_mismatch"),
         "q6_row_indexed": detail.get("q6_row_indexed"),
         "q6_sample_indices": detail.get("q6_sample_indices"),
+        "q6_final_store_output_indices": detail.get("q6_final_store_output_indices"),
         "f32_after_dispatch": detail.get("f32_after_dispatch"),
         "f32_after_writeback": detail.get("f32_after_writeback"),
     }
@@ -4714,6 +4715,9 @@ def build_q6_final_store_boundary():
         fd_after_by_index.update(samples_by_index(evidence.get("f32_after_writeback")))
 
     joined = []
+    executed_output_indices = []
+    missing_layout_output_indices = []
+    missing_writeback_output_indices = []
     class_counts = {
         "native-final-store-mismatch": 0,
         "executor-writeback-mismatch": 0,
@@ -4724,12 +4728,20 @@ def build_q6_final_store_boundary():
         output_index = record.get("output_index")
         if not isinstance(output_index, int):
             continue
+        if output_index not in executed_output_indices:
+            executed_output_indices.append(output_index)
         layout = layout_by_dst.get(output_index) or layout_by_expected_store.get(output_index)
         if not isinstance(layout, dict):
+            if output_index not in missing_layout_output_indices:
+                missing_layout_output_indices.append(output_index)
             continue
         expected = layout.get("expected")
         final_value = record.get("value_f32")
         fd_after = fd_after_by_index.get(output_index)
+        if output_index not in fd_after_by_index:
+            if output_index not in missing_writeback_output_indices:
+                missing_writeback_output_indices.append(output_index)
+            continue
         expected_store_index = layout.get("expected_store_index")
         dst_index = layout.get("dst_index")
         final_matches_expected = values_close(final_value, expected)
@@ -4773,7 +4785,14 @@ def build_q6_final_store_boundary():
 
     if not joined:
         summary = "inconclusive"
-        reason = "no-joined-final-store-layout-and-writeback-samples"
+        if missing_layout_output_indices and missing_writeback_output_indices:
+            reason = "missing-final-store-layout-and-writeback-samples"
+        elif missing_layout_output_indices:
+            reason = "missing-final-store-layout-samples"
+        elif missing_writeback_output_indices:
+            reason = "missing-final-store-writeback-samples"
+        else:
+            reason = "no-joined-final-store-layout-and-writeback-samples"
     elif class_counts["native-final-store-mismatch"] == len(joined):
         summary = "native-final-store-mismatch"
         reason = None
@@ -4790,6 +4809,9 @@ def build_q6_final_store_boundary():
         "schema": "pdocker.q6k.final-store-boundary.v1",
         "summary": summary,
         "joined_sample_count": len(joined),
+        "executed_output_indices": executed_output_indices[:16],
+        "missing_layout_output_indices": missing_layout_output_indices[:16],
+        "missing_writeback_output_indices": missing_writeback_output_indices[:16],
         "class_counts": class_counts,
         "samples": joined[:32],
         "store_index_model_valid": q6_store_index_model_valid,

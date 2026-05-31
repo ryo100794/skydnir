@@ -4500,6 +4500,20 @@ static size_t collect_q6_row_indexed_sample_indices(
         uint64_t *indices,
         size_t capacity);
 
+static size_t append_q6_final_store_output_indices_from_debug_probe(
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        VulkanVectorBuffer * const *vk_buffers,
+        const size_t *binding_gpu_offset,
+        const uint8_t *active,
+        const uint8_t *writable,
+        int debug_probe_binding,
+        uint64_t *indices,
+        size_t *index_count,
+        size_t capacity,
+        uint64_t *final_store_indices,
+        size_t final_store_capacity);
+
 static void write_q6_row_indexed_f32_evidence(
         FILE *out,
         const char *field_name,
@@ -4544,10 +4558,19 @@ static void write_vulkan_binding_report(
         int debug_probe_binding,
         const CpuOracleReport *cpu_oracle_report) {
     fprintf(out, "\"binding_details\":[");
-    uint64_t q6_sample_indices[48];
-    const size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
+    uint64_t q6_sample_indices[64];
+    size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
         cpu_oracle_report, q6_sample_indices,
         sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]));
+    uint64_t q6_final_store_indices[8];
+    const size_t q6_final_store_index_count =
+        append_q6_final_store_output_indices_from_debug_probe(
+            bindings, binding_count, vk_buffers, binding_gpu_offset,
+            active, writable, debug_probe_binding,
+            q6_sample_indices, &q6_sample_count,
+            sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]),
+            q6_final_store_indices,
+            sizeof(q6_final_store_indices) / sizeof(q6_final_store_indices[0]));
     for (size_t i = 0; i < binding_count; ++i) {
         fprintf(out,
                 "%s{\"index\":%zu,\"set\":%u,\"binding\":%u,\"offset\":%lld,"
@@ -4662,6 +4685,14 @@ static void write_vulkan_binding_report(
                         (unsigned long long)q6_sample_indices[qi]);
             }
             fprintf(out, "]");
+            if (q6_final_store_index_count > 0) {
+                fprintf(out, ",\"q6_final_store_output_indices\":[");
+                for (size_t qi = 0; qi < q6_final_store_index_count; ++qi) {
+                    fprintf(out, "%s%llu", qi ? "," : "",
+                            (unsigned long long)q6_final_store_indices[qi]);
+                }
+                fprintf(out, "]");
+            }
             write_q6_row_indexed_f32_evidence(
                 out, "f32_after_dispatch",
                 (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
@@ -5374,6 +5405,86 @@ static size_t collect_q6_row_indexed_sample_indices(
                                       report->samples[i].dst_index);
     }
     return index_count;
+}
+
+static size_t append_q6_final_store_output_indices_from_debug_probe(
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        VulkanVectorBuffer * const *vk_buffers,
+        const size_t *binding_gpu_offset,
+        const uint8_t *active,
+        const uint8_t *writable,
+        int debug_probe_binding,
+        uint64_t *indices,
+        size_t *index_count,
+        size_t capacity,
+        uint64_t *final_store_indices,
+        size_t final_store_capacity) {
+    if (!bindings || !vk_buffers || !binding_gpu_offset || debug_probe_binding < 0 ||
+        !indices || !index_count || !final_store_indices ||
+        final_store_capacity == 0 || *index_count > capacity) {
+        return 0;
+    }
+    size_t debug_index = SIZE_MAX;
+    size_t output_index = SIZE_MAX;
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (bindings[i].binding == (uint32_t)debug_probe_binding) {
+            debug_index = i;
+        }
+        if (bindings[i].binding == 2u) {
+            output_index = i;
+        }
+    }
+    if (debug_index == SIZE_MAX || output_index == SIZE_MAX ||
+        !vk_buffers[debug_index] || !vk_buffers[debug_index]->map ||
+        !vk_buffers[output_index] ||
+        (active && !active[debug_index]) ||
+        (writable && !writable[debug_index]) ||
+        binding_gpu_offset[debug_index] >= vk_buffers[debug_index]->size) {
+        return 0;
+    }
+    size_t debug_size = vk_buffers[debug_index]->size - binding_gpu_offset[debug_index];
+    if (debug_size > bindings[debug_index].size) debug_size = bindings[debug_index].size;
+    const unsigned char *debug_base =
+        (const unsigned char *)vk_buffers[debug_index]->map + binding_gpu_offset[debug_index];
+    const uint64_t output_float_count = bindings[output_index].size / sizeof(float);
+    const struct {
+        size_t slot_base;
+        uint32_t candidate_id;
+        uint32_t role_code;
+    } records[] = {
+        {56u, 64u, 4u},
+        {116u, 130u, 4u},
+    };
+    size_t final_count = 0;
+    for (size_t ri = 0; ri < sizeof(records) / sizeof(records[0]); ++ri) {
+        int ok_candidate = 0;
+        int ok_role = 0;
+        int ok_output = 0;
+        int ok_schema = 0;
+        const size_t base = records[ri].slot_base;
+        const uint32_t candidate =
+            sample_u32_at(debug_base, debug_size, base, &ok_candidate);
+        const uint32_t role =
+            sample_u32_at(debug_base, debug_size, base + 1u, &ok_role);
+        const uint32_t out_index =
+            sample_u32_at(debug_base, debug_size, base + 3u, &ok_output);
+        const uint32_t schema =
+            sample_u32_at(debug_base, debug_size, base + 10u, &ok_schema);
+        if (!ok_candidate || !ok_role || !ok_output || !ok_schema ||
+            candidate != records[ri].candidate_id ||
+            role != records[ri].role_code ||
+            schema != 2u ||
+            (uint64_t)out_index >= output_float_count) {
+            continue;
+        }
+        append_unique_q6_sample_index(
+            indices, index_count, capacity, (uint64_t)out_index);
+        append_unique_q6_sample_index(
+            final_store_indices, &final_count, final_store_capacity,
+            (uint64_t)out_index);
+    }
+    return final_count;
 }
 
 static void write_q6_row_indexed_f32_evidence(
@@ -8209,10 +8320,19 @@ static void write_vulkan_binding_compact_report(
         int debug_probe_binding,
         const CpuOracleReport *cpu_oracle_report) {
     fprintf(out, "\"binding_details\":[");
-    uint64_t q6_sample_indices[48];
-    const size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
+    uint64_t q6_sample_indices[64];
+    size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
         cpu_oracle_report, q6_sample_indices,
         sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]));
+    uint64_t q6_final_store_indices[8];
+    const size_t q6_final_store_index_count =
+        append_q6_final_store_output_indices_from_debug_probe(
+            bindings, binding_count, vk_buffers, binding_gpu_offset,
+            active, writable, debug_probe_binding,
+            q6_sample_indices, &q6_sample_count,
+            sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]),
+            q6_final_store_indices,
+            sizeof(q6_final_store_indices) / sizeof(q6_final_store_indices[0]));
     for (size_t i = 0; i < binding_count; ++i) {
         fprintf(out,
                 "%s{\"index\":%zu,\"set\":%u,\"binding\":%u,\"offset\":%lld,"
@@ -8313,6 +8433,14 @@ static void write_vulkan_binding_compact_report(
                             (unsigned long long)q6_sample_indices[qi]);
                 }
                 fprintf(out, "]");
+                if (q6_final_store_index_count > 0) {
+                    fprintf(out, ",\"q6_final_store_output_indices\":[");
+                    for (size_t qi = 0; qi < q6_final_store_index_count; ++qi) {
+                        fprintf(out, "%s%llu", qi ? "," : "",
+                                (unsigned long long)q6_final_store_indices[qi]);
+                    }
+                    fprintf(out, "]");
+                }
                 write_q6_row_indexed_f32_evidence(
                     out, "f32_after_dispatch",
                     (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
