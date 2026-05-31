@@ -5,7 +5,8 @@ This mirrors the Skydnir Android executor's narrow Q6 compatibility sequence:
 
 1. patch literal LocalSize from the WorkgroupSize specialization,
 2. materialize supported specialization constants,
-3. apply strict duplicate descriptor binding normalization.
+3. lower exact Q6 duplicate-view storage16 ushort loads to storage8 byte loads,
+4. apply strict duplicate descriptor binding normalization.
 
 It is a static/offline evidence tool.  It does not run ADB, llama.cpp, or a
 Vulkan driver, and it does not change shader semantics beyond the executor's
@@ -272,6 +273,152 @@ def materialize_specialization_constants(
     return out, {"phase": "specialization-materialized", "changed": True, **counts}
 
 
+def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], dict[str, Any]]:
+    """Mirror the executor's Q6 storage16 duplicate-view lowering.
+
+    The executor applies this before duplicate descriptor normalization.  It
+    rewrites exact ushort loads from the Q6 duplicate storage16 block view
+    (variable id 371) into two uchar loads from the byte-identical storage8
+    view (variable id 346), reconstructing the same little-endian ushort.
+    No descriptors, push constants, specialization values, dispatch dimensions,
+    or llama.cpp code are changed.
+    """
+    OP_TYPE_INT = 21
+    OP_TYPE_POINTER = 32
+    OP_CONSTANT = 43
+    OP_ACCESS_CHAIN = 65
+    OP_LOAD = 61
+    OP_U_CONVERT = 113
+    OP_I_ADD = 128
+    OP_I_MUL = 132
+    OP_SHIFT_LEFT_LOGICAL = 196
+    OP_BITWISE_OR = 197
+    STORAGE_CLASS_STORAGE_BUFFER = 12
+    Q6_STORAGE8_VAR_ID = 346
+    Q6_STORAGE16_VAR_ID = 371
+
+    if len(words) < 5 or words[0] != SPIRV_MAGIC:
+        return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "reason": "invalid-spv"}
+    bound = words[3]
+    if bound <= Q6_STORAGE16_VAR_ID or bound > 65536:
+        return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "reason": "id-bound-out-of-range"}
+
+    uint_type = uchar_type = ushort_type = 0
+    ptr_ushort_type = ptr_uchar_type = 0
+    uint_1 = uint_2 = uint_8 = 0
+    uchar_type_end: int | None = None
+
+    for index, opcode, word_count, inst in iter_instructions(words):
+        if opcode == 54:  # OpFunction
+            break
+        if opcode == OP_TYPE_INT and word_count >= 4:
+            if inst[2] == 32 and inst[3] == 0:
+                uint_type = inst[1]
+            elif inst[2] == 8 and inst[3] == 0:
+                uchar_type = inst[1]
+                uchar_type_end = index + word_count
+            elif inst[2] == 16 and inst[3] == 0:
+                ushort_type = inst[1]
+        elif opcode == OP_TYPE_POINTER and word_count >= 4 and inst[2] == STORAGE_CLASS_STORAGE_BUFFER:
+            if ushort_type and inst[3] == ushort_type:
+                ptr_ushort_type = inst[1]
+            if uchar_type and inst[3] == uchar_type:
+                ptr_uchar_type = inst[1]
+        elif opcode == OP_CONSTANT and word_count >= 4 and uint_type and inst[1] == uint_type:
+            if inst[3] == 1:
+                uint_1 = inst[2]
+            elif inst[3] == 2:
+                uint_2 = inst[2]
+            elif inst[3] == 8:
+                uint_8 = inst[2]
+
+    if not all([uint_type, uchar_type, ushort_type, ptr_ushort_type, uint_1, uint_2, uint_8]) or uchar_type_end is None:
+        return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "reason": "missing-required-types-or-constants"}
+
+    instructions = list(iter_instructions(words))
+    pattern_count = 0
+    for pos, (index, opcode, word_count, inst) in enumerate(instructions):
+        if opcode != OP_ACCESS_CHAIN or word_count != 8:
+            continue
+        if inst[1] != ptr_ushort_type or inst[3] != Q6_STORAGE16_VAR_ID:
+            continue
+        if pos + 1 >= len(instructions):
+            continue
+        _, load_opcode, load_wc, load_inst = instructions[pos + 1]
+        if load_opcode == OP_LOAD and load_wc == 4 and load_inst[1] == ushort_type and load_inst[3] == inst[2]:
+            pattern_count += 1
+    if pattern_count == 0 or pattern_count > 256:
+        return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "pattern_count": pattern_count}
+
+    add_ptr_uchar_type = ptr_uchar_type == 0
+    new_ptr_uchar_type = bound if add_ptr_uchar_type else ptr_uchar_type
+    next_id = bound + (1 if add_ptr_uchar_type else 0)
+    new_bound = next_id + pattern_count * 10
+    if new_bound <= bound or new_bound > 65536:
+        return list(words), {"phase": "q6-storage16-loads-lowered", "changed": False, "reason": "new-bound-out-of-range", "pattern_count": pattern_count}
+
+    out = words[:5]
+    lowered = 0
+    i = 5
+    while i < len(words):
+        inst_word = words[i]
+        word_count = inst_word >> 16
+        opcode = inst_word & 0xFFFF
+        if word_count == 0 or i + word_count > len(words):
+            raise ValueError(f"truncated SPIR-V instruction at word {i}")
+        inst = words[i:i + word_count]
+        if add_ptr_uchar_type and i == uchar_type_end:
+            out += [(4 << 16) | OP_TYPE_POINTER, new_ptr_uchar_type, STORAGE_CLASS_STORAGE_BUFFER, uchar_type]
+        if opcode == OP_ACCESS_CHAIN and word_count == 8 and inst[1] == ptr_ushort_type and inst[3] == Q6_STORAGE16_VAR_ID and i + word_count < len(words):
+            load_i = i + word_count
+            load_inst_word = words[load_i]
+            load_wc = load_inst_word >> 16
+            load_opcode = load_inst_word & 0xFFFF
+            load_inst = words[load_i:load_i + load_wc]
+            if load_wc == 4 and load_i + load_wc <= len(words) and load_opcode == OP_LOAD and load_inst[1] == ushort_type and load_inst[3] == inst[2]:
+                index0, block, member, ushort_index = inst[4], inst[5], inst[6], inst[7]
+                load_result = load_inst[2]
+                b0_idx = next_id; next_id += 1
+                b0_ptr = next_id; next_id += 1
+                b0_u8 = next_id; next_id += 1
+                b0_u32 = next_id; next_id += 1
+                b1_idx = next_id; next_id += 1
+                b1_ptr = next_id; next_id += 1
+                b1_u8 = next_id; next_id += 1
+                b1_u32 = next_id; next_id += 1
+                hi32 = next_id; next_id += 1
+                combined32 = next_id; next_id += 1
+                out += [
+                    (5 << 16) | OP_I_MUL, uint_type, b0_idx, ushort_index, uint_2,
+                    (8 << 16) | OP_ACCESS_CHAIN, new_ptr_uchar_type, b0_ptr, Q6_STORAGE8_VAR_ID, index0, block, member, b0_idx,
+                    (4 << 16) | OP_LOAD, uchar_type, b0_u8, b0_ptr,
+                    (4 << 16) | OP_U_CONVERT, uint_type, b0_u32, b0_u8,
+                    (5 << 16) | OP_I_ADD, uint_type, b1_idx, b0_idx, uint_1,
+                    (8 << 16) | OP_ACCESS_CHAIN, new_ptr_uchar_type, b1_ptr, Q6_STORAGE8_VAR_ID, index0, block, member, b1_idx,
+                    (4 << 16) | OP_LOAD, uchar_type, b1_u8, b1_ptr,
+                    (4 << 16) | OP_U_CONVERT, uint_type, b1_u32, b1_u8,
+                    (5 << 16) | OP_SHIFT_LEFT_LOGICAL, uint_type, hi32, b1_u32, uint_8,
+                    (5 << 16) | OP_BITWISE_OR, uint_type, combined32, b0_u32, hi32,
+                    (4 << 16) | OP_U_CONVERT, ushort_type, load_result, combined32,
+                ]
+                lowered += 1
+                i = load_i + load_wc
+                continue
+        out += inst
+        i += word_count
+
+    if lowered != pattern_count or next_id != new_bound:
+        raise ValueError("internal Q6 storage16 lowering accounting mismatch")
+    out[3] = new_bound
+    return out, {
+        "phase": "q6-storage16-loads-lowered",
+        "changed": True,
+        "lowered_count": lowered,
+        "pattern_count": pattern_count,
+        "added_ptr_uchar_type": add_ptr_uchar_type,
+    }
+
+
 def rewrite_duplicate_descriptor_bindings(
     words: list[int],
     binding_details: list[dict[str, Any]],
@@ -342,10 +489,13 @@ def reconstruct(source_words: list[int], event: dict[str, Any]) -> tuple[list[in
     words2, step = materialize_specialization_constants(words1, entries)
     step.update({"hash": hash_words(words2), "words": len(words2)})
     steps.append(step)
-    words3, step = rewrite_duplicate_descriptor_bindings(words2, binding_details)
+    words3, step = lower_q6k_storage16_loads_to_storage8(words2)
     step.update({"hash": hash_words(words3), "words": len(words3)})
     steps.append(step)
-    return words3, steps
+    words4, step = rewrite_duplicate_descriptor_bindings(words3, binding_details)
+    step.update({"hash": hash_words(words4), "words": len(words4)})
+    steps.append(step)
+    return words4, steps
 
 
 def main() -> int:

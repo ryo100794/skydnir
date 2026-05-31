@@ -248,6 +248,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "source",
             "local-size-legalized",
             "specialization-materialized",
+            "q6-storage16-loads-lowered",
             "duplicate-descriptor-rewritten",
         ])
         self.assertTrue(steps[1]["changed"])
@@ -256,13 +257,38 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(steps[2]["spec_constants_folded"], 1)
         self.assertEqual(steps[2]["spec_composites_folded"], 1)
         self.assertEqual(steps[2]["spec_ops_folded"], 1)
+        self.assertFalse(steps[3]["changed"])
         self.assertEqual(
-            steps[3]["aliases"],
+            steps[4]["aliases"],
             [{"target_id": 31, "original_binding": 0, "rewritten_binding": 2}],
         )
         self.assertIn((6 << 16) | 16, effective_words)
         local_size_index = effective_words.index((6 << 16) | 16)
         self.assertEqual(effective_words[local_size_index + 3:local_size_index + 6], [32, 1, 1])
+
+    def test_q6_effective_reconstructor_lowers_storage16_duplicate_view_loads(self):
+        reconstructor = load_spirv_effective_reconstructor()
+        words = [
+            0x07230203, 0x00010300, 0, 400, 0,
+            (4 << 16) | 21, 1, 32, 0,      # uint
+            (4 << 16) | 21, 2, 8, 0,       # uchar
+            (4 << 16) | 21, 3, 16, 0,      # ushort
+            (4 << 16) | 32, 4, 12, 3,      # ptr storage ushort
+            (4 << 16) | 43, 1, 10, 1,
+            (4 << 16) | 43, 1, 11, 2,
+            (4 << 16) | 43, 1, 12, 8,
+            (8 << 16) | 65, 4, 100, 371, 10, 20, 30, 40,
+            (4 << 16) | 61, 3, 101, 100,
+        ]
+        lowered, step = reconstructor.lower_q6k_storage16_loads_to_storage8(words)
+        self.assertTrue(step["changed"])
+        self.assertEqual(step["lowered_count"], 1)
+        self.assertEqual(lowered[3], 411)
+        for index, opcode, word_count, inst in reconstructor.iter_instructions(lowered):
+            if opcode == 65 and word_count >= 4:
+                self.assertNotEqual(inst[3], 371)
+        self.assertIn((5 << 16) | 197, lowered)
+        self.assertIn((4 << 16) | 113, lowered)
 
     def test_q6_debug_probe_alias_guard_blocks_before_final_store_diagnosis(self):
         compare = LLAMA_COMPARE.read_text()
