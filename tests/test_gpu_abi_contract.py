@@ -2033,6 +2033,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "latest-q6-event",
             "q6_event_dispatch_id",
             "q6_event_effective_spirv_hash",
+            "\"q6_event_source_spirv_hash\": binding.get(\"q6_event_source_spirv_hash\")",
             "debug_report = q6_latest_debug_u32_probe",
             "missing-final-store-layout-samples",
             "missing-final-store-writeback-samples",
@@ -2067,6 +2068,9 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, compare_and_manifest)
         source = GPU_EXECUTOR.read_text()
+        self.assertIn("Q6FinalStoreDebugIndex", source)
+        self.assertIn("q6k_sample_plan_from_output_index", source)
+        self.assertIn("final_store_index_count", source)
         self.assertIn('\\"disable_pipeline_optimization\\":%s', source)
         self.assertIn('\\"skip_unused_descriptor_transfers\\":%s', source)
         self.assertIn('\\"spirv_descriptor_access\\":%s', source)

@@ -3991,6 +3991,11 @@ def parse_q6_final_store_trace_v2(bindings):
             "binding": binding.get("binding"),
             "set": binding.get("set"),
             "size": binding.get("size"),
+            "q6_event_dispatch_id": binding.get("q6_event_dispatch_id"),
+            "q6_event_source_spirv_hash": binding.get("q6_event_source_spirv_hash"),
+            "q6_event_effective_spirv_hash": binding.get("q6_event_effective_spirv_hash"),
+            "q6_event_oracle_spirv_hash": binding.get("q6_event_oracle_spirv_hash"),
+            "q6_event_pipeline_spirv_hash": binding.get("q6_event_pipeline_spirv_hash"),
             "records": records,
             "executed_final_trace_v2_count": sum(
                 1 for record in records

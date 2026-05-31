@@ -4758,6 +4758,18 @@ static void write_f32_fd_sample_array_at_indices(
     fprintf(out, "]");
 }
 
+typedef struct {
+    uint64_t output_index;
+    uint32_t workgroup_x;
+    uint32_t workgroup_y;
+    uint32_t workgroup_z;
+    uint32_t local_x;
+    uint32_t local_y;
+    uint32_t local_z;
+    int has_workgroup;
+    int has_local;
+} Q6FinalStoreDebugIndex;
+
 static size_t collect_q6_row_indexed_sample_indices(
         const CpuOracleReport *report,
         uint64_t *indices,
@@ -4774,7 +4786,7 @@ static size_t append_q6_final_store_output_indices_from_debug_probe(
         uint64_t *indices,
         size_t *index_count,
         size_t capacity,
-        uint64_t *final_store_indices,
+        Q6FinalStoreDebugIndex *final_store_records,
         size_t final_store_capacity);
 
 static void write_q6_row_indexed_f32_evidence(
@@ -4825,7 +4837,7 @@ static void write_vulkan_binding_report(
     size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
         cpu_oracle_report, q6_sample_indices,
         sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]));
-    uint64_t q6_final_store_indices[8];
+    Q6FinalStoreDebugIndex q6_final_store_indices[8];
     const size_t q6_final_store_index_count =
         append_q6_final_store_output_indices_from_debug_probe(
             bindings, binding_count, vk_buffers, binding_gpu_offset,
@@ -4952,7 +4964,7 @@ static void write_vulkan_binding_report(
                 fprintf(out, ",\"q6_final_store_output_indices\":[");
                 for (size_t qi = 0; qi < q6_final_store_index_count; ++qi) {
                     fprintf(out, "%s%llu", qi ? "," : "",
-                            (unsigned long long)q6_final_store_indices[qi]);
+                            (unsigned long long)q6_final_store_indices[qi].output_index);
                 }
                 fprintf(out, "]");
             }
@@ -5681,10 +5693,10 @@ static size_t append_q6_final_store_output_indices_from_debug_probe(
         uint64_t *indices,
         size_t *index_count,
         size_t capacity,
-        uint64_t *final_store_indices,
+        Q6FinalStoreDebugIndex *final_store_records,
         size_t final_store_capacity) {
     if (!bindings || !vk_buffers || !binding_gpu_offset || debug_probe_binding < 0 ||
-        !indices || !index_count || !final_store_indices ||
+        !indices || !index_count || !final_store_records ||
         final_store_capacity == 0 || *index_count > capacity) {
         return 0;
     }
@@ -5743,9 +5755,34 @@ static size_t append_q6_final_store_output_indices_from_debug_probe(
         }
         append_unique_q6_sample_index(
             indices, index_count, capacity, (uint64_t)out_index);
-        append_unique_q6_sample_index(
-            final_store_indices, &final_count, final_store_capacity,
-            (uint64_t)out_index);
+        int ok_wgx = 0, ok_wgy = 0, ok_wgz = 0;
+        int ok_lx = 0, ok_ly = 0, ok_lz = 0;
+        const uint32_t wgx = sample_u32_at(debug_base, debug_size, base + 4u, &ok_wgx);
+        const uint32_t wgy = sample_u32_at(debug_base, debug_size, base + 5u, &ok_wgy);
+        const uint32_t wgz = sample_u32_at(debug_base, debug_size, base + 6u, &ok_wgz);
+        const uint32_t lx = sample_u32_at(debug_base, debug_size, base + 7u, &ok_lx);
+        const uint32_t ly = sample_u32_at(debug_base, debug_size, base + 8u, &ok_ly);
+        const uint32_t lz = sample_u32_at(debug_base, debug_size, base + 9u, &ok_lz);
+        int duplicate = 0;
+        for (size_t di = 0; di < final_count; ++di) {
+            if (final_store_records[di].output_index == (uint64_t)out_index) {
+                duplicate = 1;
+                break;
+            }
+        }
+        if (!duplicate && final_count < final_store_capacity) {
+            Q6FinalStoreDebugIndex *record = &final_store_records[final_count++];
+            memset(record, 0, sizeof(*record));
+            record->output_index = (uint64_t)out_index;
+            record->workgroup_x = wgx;
+            record->workgroup_y = wgy;
+            record->workgroup_z = wgz;
+            record->local_x = lx;
+            record->local_y = ly;
+            record->local_z = lz;
+            record->has_workgroup = ok_wgx && ok_wgy && ok_wgz;
+            record->has_local = ok_lx && ok_ly && ok_lz;
+        }
     }
     return final_count;
 }
@@ -7624,6 +7661,84 @@ static int q6k_matvec_store_window_end_from_dispatch(
     return 1;
 }
 
+typedef struct {
+    uint32_t row;
+    uint32_t store_j;
+    uint32_t store_workgroup_x;
+    uint32_t store_workgroup_y;
+    uint32_t store_workgroup_z;
+    uint32_t store_row_in_group;
+    uint64_t store_row;
+    uint64_t dst_index;
+    int from_final_store_trace;
+} Q6MatvecSamplePlan;
+
+static int q6k_sample_plan_from_output_index(
+        uint64_t output_index,
+        const Q6FinalStoreDebugIndex *trace,
+        uint32_t dispatch_x,
+        uint32_t dispatch_y,
+        uint32_t dispatch_z,
+        uint32_t num_rows,
+        uint32_t num_cols,
+        uint32_t base_work_group_y,
+        uint32_t batch_stride_d,
+        uint32_t stride_d,
+        uint64_t output_base_index,
+        Q6MatvecSamplePlan *out) {
+    if (!out || !trace || !trace->has_workgroup ||
+        output_index < output_base_index || dispatch_x == 0 || dispatch_y == 0 ||
+        dispatch_z == 0 || num_rows == 0 || num_cols == 0 || batch_stride_d == 0 ||
+        trace->workgroup_x >= dispatch_x || trace->workgroup_y >= dispatch_y ||
+        trace->workgroup_z >= dispatch_z) {
+        return 0;
+    }
+    const uint64_t rel = output_index - output_base_index;
+    for (uint32_t store_j = 0; store_j < num_cols; ++store_j) {
+        uint64_t plane = 0;
+        uint64_t prefix = 0;
+        if (!checked_add_u64((uint64_t)store_j, (uint64_t)trace->workgroup_y, &plane) ||
+            !checked_mul_u64(plane, (uint64_t)batch_stride_d, &prefix) ||
+            rel < prefix) {
+            continue;
+        }
+        const uint64_t store_row = rel - prefix;
+        if (store_row >= (uint64_t)stride_d || store_row > UINT32_MAX) continue;
+        uint32_t wgx = 0, wgz = 0, row_in_group = 0;
+        if (!q6k_row_to_dispatch_coordinates(store_row, dispatch_x, dispatch_z,
+                                             num_rows, &wgx, &wgz, &row_in_group)) {
+            continue;
+        }
+        if (wgx != trace->workgroup_x || wgz != trace->workgroup_z) continue;
+        uint64_t check_index = 0, check_row = 0;
+        if (!q6k_matvec_store_index_from_dispatch(store_j,
+                                                  trace->workgroup_x,
+                                                  trace->workgroup_y,
+                                                  trace->workgroup_z,
+                                                  row_in_group,
+                                                  dispatch_x, dispatch_y, dispatch_z,
+                                                  num_rows, num_cols,
+                                                  base_work_group_y,
+                                                  batch_stride_d, stride_d,
+                                                  &check_index, &check_row) ||
+            check_index != output_index || check_row != store_row) {
+            continue;
+        }
+        memset(out, 0, sizeof(*out));
+        out->row = (uint32_t)store_row;
+        out->store_j = store_j;
+        out->store_workgroup_x = trace->workgroup_x;
+        out->store_workgroup_y = trace->workgroup_y;
+        out->store_workgroup_z = trace->workgroup_z;
+        out->store_row_in_group = row_in_group;
+        out->store_row = store_row;
+        out->dst_index = output_index;
+        out->from_final_store_trace = 1;
+        return 1;
+    }
+    return 0;
+}
+
 static int q6k_read_accumulator_value(
         const int *buffer_fds,
         const VulkanDispatchBinding *bindings,
@@ -7667,7 +7782,9 @@ static void run_cpu_oracle_q6k_matvec_sample(
         uint32_t dispatch_x,
         uint32_t dispatch_y,
         uint32_t dispatch_z,
-        int q6k_oracle_writeback) {
+        int q6k_oracle_writeback,
+        const Q6FinalStoreDebugIndex *final_store_indices,
+        size_t final_store_index_count) {
     if (!report || !report->requested) return;
     init_cpu_oracle_report(report, report->requested, spirv_hash);
     int idx0 = binding_index_for_number(bindings, binding_count, 0);
@@ -7801,51 +7918,73 @@ static void run_cpu_oracle_q6k_matvec_sample(
                                     (uint64_t)stride_d - i);
         }
     }
-    report->expected_hash = 1469598103934665603ull;
-    report->gpu_hash = 1469598103934665603ull;
-    for (size_t si = 0; si < sample_row_count; ++si) {
+    Q6MatvecSamplePlan sample_plans[64];
+    size_t sample_plan_count = 0;
+    for (size_t si = 0; si < sample_row_count && sample_plan_count <
+         sizeof(sample_plans) / sizeof(sample_plans[0]); ++si) {
         if (sample_rows[si] > UINT32_MAX) continue;
-        const uint32_t row = (uint32_t)sample_rows[si];
-        uint32_t store_workgroup_x = 0;
-        uint32_t store_workgroup_y = 0;
-        uint32_t store_workgroup_z = 0;
-        uint32_t store_row_in_group = 0;
-        uint64_t store_row = 0;
-        uint64_t dst_index = 0;
-        const uint32_t store_j =
-            q6_num_cols > 1u && (si % 4u == 1u || si % 4u == 3u)
-                ? q6_num_cols - 1u
-                : 0u;
-        store_workgroup_y =
-            dispatch_y > 1u && (si % 4u == 2u || si % 4u == 3u)
-                ? dispatch_y - 1u
-                : 0u;
-        const int store_formula_valid =
-            q6k_row_to_dispatch_coordinates((uint64_t)row,
-                                             dispatch_x,
-                                             dispatch_z,
-                                             q6_num_rows,
-                                             &store_workgroup_x,
-                                             &store_workgroup_z,
-                                             &store_row_in_group) &&
-            q6k_matvec_store_index_from_dispatch(store_j,
-                                                 store_workgroup_x,
-                                                 store_workgroup_y,
-                                                 store_workgroup_z,
-                                                 store_row_in_group,
-                                                 dispatch_x,
-                                                 dispatch_y,
-                                                 dispatch_z,
-                                                 q6_num_rows,
-                                                 q6_num_cols,
+        Q6MatvecSamplePlan plan;
+        memset(&plan, 0, sizeof(plan));
+        plan.row = (uint32_t)sample_rows[si];
+        plan.store_j = q6_num_cols > 1u && (si % 4u == 1u || si % 4u == 3u)
+                           ? q6_num_cols - 1u
+                           : 0u;
+        plan.store_workgroup_y = dispatch_y > 1u && (si % 4u == 2u || si % 4u == 3u)
+                                     ? dispatch_y - 1u
+                                     : 0u;
+        if (!q6k_row_to_dispatch_coordinates((uint64_t)plan.row,
+                                             dispatch_x, dispatch_z, q6_num_rows,
+                                             &plan.store_workgroup_x,
+                                             &plan.store_workgroup_z,
+                                             &plan.store_row_in_group) ||
+            !q6k_matvec_store_index_from_dispatch(plan.store_j,
+                                                 plan.store_workgroup_x,
+                                                 plan.store_workgroup_y,
+                                                 plan.store_workgroup_z,
+                                                 plan.store_row_in_group,
+                                                 dispatch_x, dispatch_y, dispatch_z,
+                                                 q6_num_rows, q6_num_cols,
                                                  base_work_group_y,
-                                                 batch_stride_d,
-                                                 stride_d,
-                                                 &dst_index,
-                                                 &store_row);
-        if (!store_formula_valid) {
+                                                 batch_stride_d, stride_d,
+                                                 &plan.dst_index,
+                                                 &plan.store_row)) {
             continue;
         }
+        sample_plans[sample_plan_count++] = plan;
+    }
+    for (size_t fi = 0; fi < final_store_index_count && sample_plan_count <
+         sizeof(sample_plans) / sizeof(sample_plans[0]); ++fi) {
+        Q6MatvecSamplePlan plan;
+        if (!q6k_sample_plan_from_output_index(final_store_indices[fi].output_index,
+                                               &final_store_indices[fi],
+                                               dispatch_x, dispatch_y, dispatch_z,
+                                               q6_num_rows, q6_num_cols,
+                                               base_work_group_y, batch_stride_d,
+                                               stride_d, output_base_index, &plan)) {
+            continue;
+        }
+        int duplicate = 0;
+        for (size_t pi = 0; pi < sample_plan_count; ++pi) {
+            if (sample_plans[pi].dst_index == plan.dst_index) {
+                duplicate = 1;
+                break;
+            }
+        }
+        if (!duplicate) sample_plans[sample_plan_count++] = plan;
+    }
+    report->expected_hash = 1469598103934665603ull;
+    report->gpu_hash = 1469598103934665603ull;
+    for (size_t si = 0; si < sample_plan_count; ++si) {
+        const Q6MatvecSamplePlan *plan = &sample_plans[si];
+        const uint32_t row = plan->row;
+        const uint32_t store_workgroup_x = plan->store_workgroup_x;
+        const uint32_t store_workgroup_y = plan->store_workgroup_y;
+        const uint32_t store_workgroup_z = plan->store_workgroup_z;
+        const uint32_t store_row_in_group = plan->store_row_in_group;
+        const uint64_t store_row = plan->store_row;
+        const uint64_t dst_index = plan->dst_index;
+        const uint32_t store_j = plan->store_j;
+        const int store_formula_valid = 1;
         if (row >= stride_d ||
             dst_index < report->q6_store_window_begin ||
             dst_index >= report->q6_store_window_end ||
@@ -8587,7 +8726,7 @@ static void write_vulkan_binding_compact_report(
     size_t q6_sample_count = collect_q6_row_indexed_sample_indices(
         cpu_oracle_report, q6_sample_indices,
         sizeof(q6_sample_indices) / sizeof(q6_sample_indices[0]));
-    uint64_t q6_final_store_indices[8];
+    Q6FinalStoreDebugIndex q6_final_store_indices[8];
     const size_t q6_final_store_index_count =
         append_q6_final_store_output_indices_from_debug_probe(
             bindings, binding_count, vk_buffers, binding_gpu_offset,
@@ -8700,7 +8839,7 @@ static void write_vulkan_binding_compact_report(
                     fprintf(out, ",\"q6_final_store_output_indices\":[");
                     for (size_t qi = 0; qi < q6_final_store_index_count; ++qi) {
                         fprintf(out, "%s%llu", qi ? "," : "",
-                                (unsigned long long)q6_final_store_indices[qi]);
+                                (unsigned long long)q6_final_store_indices[qi].output_index);
                     }
                     fprintf(out, "]");
                 }
@@ -11668,6 +11807,19 @@ static int run_vulkan_dispatch_fd(
                                  specialization_data,
                                  specialization_data_size,
                                  q6_resolved_local_size);
+        uint64_t q6_oracle_debug_sample_indices[8];
+        size_t q6_oracle_debug_sample_count = 0;
+        Q6FinalStoreDebugIndex q6_final_store_records[8];
+        const size_t q6_final_store_record_count =
+            append_q6_final_store_output_indices_from_debug_probe(
+                bindings, binding_count, vk_buffers, binding_gpu_offset,
+                active_bindings, binding_write_needed,
+                probe_debug_binding_from_options(options),
+                q6_oracle_debug_sample_indices, &q6_oracle_debug_sample_count,
+                sizeof(q6_oracle_debug_sample_indices) /
+                    sizeof(q6_oracle_debug_sample_indices[0]),
+                q6_final_store_records,
+                sizeof(q6_final_store_records) / sizeof(q6_final_store_records[0]));
         run_cpu_oracle_q6k_matvec_sample(&cpu_oracle_report,
                                          cpu_oracle_spirv_hash,
                                          buffer_fds,
@@ -11687,7 +11839,9 @@ static int run_vulkan_dispatch_fd(
                                          gx,
                                          gy,
                                          gz,
-                                         q6k_oracle_writeback);
+                                         q6k_oracle_writeback,
+                                         q6_final_store_records,
+                                         q6_final_store_record_count);
     } else {
         run_cpu_oracle_small_f32_indexing(&cpu_oracle_report,
                                           cpu_oracle_spirv_hash,
