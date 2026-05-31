@@ -55,6 +55,46 @@ class TermPortDockerApiContractTest(unittest.TestCase):
         self.assertIn("tty_output(rest)", source)
         self.assertIn("bytes([st, 0, 0, 0]) + len(rest).to_bytes(4, \"big\")", source)
 
+
+    def test_pdockerd_tcp_listener_accepts_host_argument_without_requiring_unix_socket(self):
+        source = PDOCKERD.read_text(encoding="utf-8")
+        for marker in [
+            'parser.add_argument("--host"',
+            'parser.add_argument("--no-socket"',
+            'ThreadingTCPHTTPServer((host, int(port)), DockerAPIHandler)',
+            'servers.append((f"tcp://{host}:{port}", srv))',
+            'if not args.no_socket:',
+        ]:
+            self.assertIn(marker, source)
+
+    def test_exec_start_tty_hijack_uses_raw_tty_stream_contract(self):
+        source = PDOCKERD.read_text(encoding="utf-8")
+        for marker in [
+            'm = re.match(r"^/exec/(.+?)/start$", path)',
+            'HTTP/1.1 101 UPGRADED',
+            'Connection: Upgrade',
+            'Upgrade: tcp',
+            'if tty:',
+            'tty_output(rest)',
+            'bytes([st, 0, 0, 0]) + len(rest).to_bytes(4, "big")',
+        ]:
+            self.assertIn(marker, source)
+
+    def test_exec_resize_validates_and_applies_rows_cols_contract(self):
+        source = PDOCKERD.read_text(encoding="utf-8")
+        for marker in [
+            'm = re.match(r"^/exec/(.+?)/resize$", path)',
+            'rows = int(query.get("h", ["0"])[0])',
+            'cols = int(query.get("w", ["0"])[0])',
+            'if rows <= 0 or cols <= 0:',
+            'self._send_json(400, {"message": "invalid terminal size"})',
+            'ses["rows"] = rows',
+            'ses["cols"] = cols',
+            'proc.resize(rows, cols)',
+            'self.send_response(201)',
+        ]:
+            self.assertIn(marker, source)
+
     def test_existing_android_terminal_client_uses_same_docker_exec_contract(self):
         source = ENGINE_EXEC_SESSION.read_text(encoding="utf-8")
         for marker in [
