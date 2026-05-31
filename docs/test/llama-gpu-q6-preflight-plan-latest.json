@@ -1,7 +1,7 @@
 {
   "adb_policy": "do not connect until the user says the Android device is prepared",
-  "artifact_path": "docs/test/llama-gpu-q6-workgroup-dryrun-latest.json",
-  "created_utc": "2026-05-26T23:38:58Z",
+  "artifact_path": "docs/test/llama-gpu-ngl1-q6-debug-alias-guard-adb46015-20260531T041611Z.json",
+  "created_utc": "2026-05-31T04:16:12Z",
   "fail_branches": [
     {
       "action": "extend the SPIR-V materializer only for the reported specialization expression",
@@ -12,6 +12,11 @@
       "action": "inspect skip counts and WorkgroupSize subtree evidence before another device run",
       "condition": "specialization_materialize_report.failure_reason == no-changes",
       "owner": "materialize_spirv_specialization_constants"
+    },
+    {
+      "action": "fix debug/probe SSBO alias and descriptor range evidence before interpreting Q6 final-store mismatch",
+      "condition": "q6_debug_binding_alias_safety.summary in {missing-evidence,not-run} while final-store/probe evidence exists",
+      "owner": "Q6 descriptor/debug evidence gate"
     },
     {
       "action": "fix fd/writeback integrity before judging shader arithmetic",
@@ -56,7 +61,7 @@
     "predict": 4,
     "prompt_may_change": false,
     "repeat": 1,
-    "serial": "<prepared-device>"
+    "serial": "192.168.179.21:46015"
   },
   "must_not_report_complete_until": [
     "artifact exists",
@@ -93,6 +98,11 @@
     "strict_object_graph",
     "reconciliation",
     "binding_details",
+    "q6_debug_binding_alias_safety",
+    "debug_probe_binding",
+    "descriptor_alias_map",
+    "binding_descriptor_offset",
+    "api_range",
     "descriptor_usage",
     "cpu_oracle",
     "q6_row_indexed",
@@ -107,7 +117,7 @@
     "writeback_matches_final_store"
   ],
   "runner": "scripts/android-llama-gpu-q6-workgroup-run.sh",
-  "runner_command": "ANDROID_SERIAL=<prepared-device> scripts/android-llama-gpu-q6-workgroup-run.sh --out docs/test/llama-gpu-q6-workgroup-dryrun-latest.json --cpu-tps 0.04702448956650603 --cpu-ctx 512 --gpu-ctx 512 --gpu-layers 1 --predict 4 --repeat 1",
+  "runner_command": "ANDROID_SERIAL=192.168.179.21:46015 scripts/android-llama-gpu-q6-workgroup-run.sh --out docs/test/llama-gpu-ngl1-q6-debug-alias-guard-adb46015-20260531T041611Z.json --cpu-tps 0.04702448956650603 --cpu-ctx 512 --gpu-ctx 512 --gpu-layers 1 --predict 4 --repeat 1",
   "runner_step_contract": [
     {
       "command": "scripts/plan-llama-gpu-q6-run.py",

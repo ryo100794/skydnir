@@ -1111,7 +1111,7 @@ typedef struct {
 
 static VulkanRuntime g_vulkan_runtime;
 
-#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-readonly-overlap-snapshot-20260531"
+#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-debug-alias-guard-20260531"
 
 static uint32_t choose_vulkan_instance_api_version(void) {
     uint32_t supported = VK_API_VERSION_1_0;

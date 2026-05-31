@@ -503,7 +503,7 @@ remains an explicit diagnostic override and is available under strict
 passthrough for isolating driver compilation rejection from descriptor/call-site
 ABI correctness; it is not a benchmarkable product optimization.
 Fresh APK/device evidence for this lane must show executor marker
-`gpu-executor-readonly-overlap-snapshot-20260531`.
+`gpu-executor-debug-alias-guard-20260531`.
 
 2026-05-21 Q6 evidence-retention gate: a fresh `ngl=1` compare on
 `192.168.179.26:37303` served `/health`, `/v1/models`, and `/completion`, but
@@ -1526,7 +1526,7 @@ artifact with marker `gpu-executor-q6-descriptor-invariants-20260530`.
 Descriptor/readback invariants are present and true.  Q6 is still not correct:
 `/completion` returns `" Marvel"` for the deterministic sanity prompt, so no
 performance claim is allowed.  The next executor build marker is
-`gpu-executor-readonly-overlap-snapshot-20260531`; a fresh device artifact must
+`gpu-executor-debug-alias-guard-20260531`; a fresh device artifact must
 show that marker before interpreting the new overlap-snapshot evidence.
 
 The effective native Q6 probe module is now reproducible offline with
@@ -1598,7 +1598,7 @@ existing `PDOCKER_GPU_DISABLE_OVERLAP_ALIASING` switch:
 
 Fresh artifacts must expose:
 
-- `executor_build_marker == gpu-executor-readonly-overlap-snapshot-20260531`;
+- `executor_build_marker == gpu-executor-debug-alias-guard-20260531`;
 - `strict_object_graph.readonly_overlap_snapshots`;
 - `strict_object_graph.readonly_overlap_snapshot_bytes`;
 - per-binding `readonly_overlap_snapshot`,
