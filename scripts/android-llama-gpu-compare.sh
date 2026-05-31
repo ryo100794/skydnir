@@ -1489,7 +1489,7 @@ env = [
     f"LLAMA_ARG_CTX={ctx}",
     f"LLAMA_ARG_PORT={port}",
     "LLAMA_LOG_FILE=/workspace/logs/llama-server.log",
-    f"PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER={os.environ.get('PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER', 'gpu-executor-debug-alias-guard-20260531')}",
+    f"PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER={os.environ.get('PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER', 'gpu-executor-q6-readonly-snapshot-20260531')}",
     f"PDOCKER_VULKAN_ICD_EXPECTED_MARKER={os.environ.get('PDOCKER_VULKAN_ICD_EXPECTED_MARKER', 'vulkan-icd-feature-chain-marker-20260518')}",
 ]
 if model_url:
@@ -2873,7 +2873,7 @@ config_propagation = {
     "summary": "fail" if any(item["status"] in {"missing-evidence", "mismatch"} for item in config_checks) else "pass",
     "checks": config_checks,
 }
-expected_executor_marker = os.environ.get("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", "gpu-executor-debug-alias-guard-20260531")
+expected_executor_marker = os.environ.get("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", "gpu-executor-q6-readonly-snapshot-20260531")
 expected_icd_marker = os.environ.get("PDOCKER_VULKAN_ICD_EXPECTED_MARKER", "vulkan-icd-feature-chain-marker-20260518")
 observed_executor_markers = sorted({
     str(e.get("executor_build_marker"))
@@ -3856,7 +3856,15 @@ def f32_sample_values(samples):
 
 
 Q6_FINAL_STORE_TRACE_EXPECTED_RECORDS = (
+    {"probe": 0, "slot_base": 8, "phase": "tail", "stage": "pre-reduction-store", "candidate_id": 39, "role_code": 1},
+    {"probe": 1, "slot_base": 20, "phase": "tail", "stage": "reduction-store", "candidate_id": 49, "role_code": 2},
+    {"probe": 2, "slot_base": 32, "phase": "tail", "stage": "accumulator-a-store", "candidate_id": 61, "role_code": 3},
+    {"probe": 3, "slot_base": 44, "phase": "tail", "stage": "accumulator-b-store", "candidate_id": 63, "role_code": 3},
     {"probe": 4, "slot_base": 56, "phase": "tail", "candidate_id": 64, "role_code": 4},
+    {"probe": 5, "slot_base": 68, "phase": "full", "stage": "pre-reduction-store", "candidate_id": 105, "role_code": 1},
+    {"probe": 6, "slot_base": 80, "phase": "full", "stage": "reduction-store", "candidate_id": 115, "role_code": 2},
+    {"probe": 7, "slot_base": 92, "phase": "full", "stage": "accumulator-a-store", "candidate_id": 127, "role_code": 3},
+    {"probe": 8, "slot_base": 104, "phase": "full", "stage": "accumulator-b-store", "candidate_id": 129, "role_code": 3},
     {"probe": 9, "slot_base": 116, "phase": "full", "candidate_id": 130, "role_code": 4},
 )
 
@@ -3946,6 +3954,10 @@ def parse_q6_final_store_trace_v2(bindings):
 
             record = {
                 **expected,
+                "stage": expected.get(
+                    "stage",
+                    "final-store" if expected.get("role_code") == 4 else "unknown",
+                ),
                 "observed_candidate_id": candidate,
                 "observed_role_code": role_code,
                 "value_bits": value_bits,
@@ -3987,6 +3999,16 @@ def parse_q6_final_store_trace_v2(bindings):
                     % (binding.get("binding"), expected["probe"], ",".join(record_failures))
                 )
             records.append(record)
+        executed_stage_count = sum(
+            1 for record in records
+            if record.get("status") == "pass" and record.get("trace_status") == "pass"
+        )
+        executed_final_count = sum(
+            1 for record in records
+            if record.get("role_code") == 4
+            and record.get("status") == "pass"
+            and record.get("trace_status") == "pass"
+        )
         parsed_bindings.append({
             "binding": binding.get("binding"),
             "set": binding.get("set"),
@@ -3997,16 +4019,11 @@ def parse_q6_final_store_trace_v2(bindings):
             "q6_event_oracle_spirv_hash": binding.get("q6_event_oracle_spirv_hash"),
             "q6_event_pipeline_spirv_hash": binding.get("q6_event_pipeline_spirv_hash"),
             "records": records,
-            "executed_final_trace_v2_count": sum(
-                1 for record in records
-                if record.get("status") == "pass" and record.get("trace_status") == "pass"
-            ),
+            "executed_stage_trace_v2_count": executed_stage_count,
+            "executed_final_trace_v2_count": executed_final_count,
             "summary": (
                 "pass"
-                if any(
-                    record.get("status") == "pass" and record.get("trace_status") == "pass"
-                    for record in records
-                )
+                if executed_final_count > 0
                 else "fail"
             ),
         })
@@ -5153,6 +5170,42 @@ q6_workgroup_diagnostics = {
         else "q6-inconclusive"
     ),
 }
+q6_readonly_snapshot_policy = (
+    q6_latest.get("readonly_overlap_snapshot_policy")
+    if isinstance(q6_latest.get("readonly_overlap_snapshot_policy"), dict)
+    else {}
+)
+q6_strict_object_graph = (
+    q6_latest.get("strict_object_graph")
+    if isinstance(q6_latest.get("strict_object_graph"), dict)
+    else {}
+)
+q6_readonly_snapshot_details = [
+    compact_q6_binding_detail(detail)
+    for detail in q6_binding_details
+    if detail.get("readonly_overlap_snapshot") is True
+]
+q6_readonly_snapshot_count = int(q6_strict_object_graph.get("readonly_overlap_snapshots") or 0)
+q6_readonly_snapshot_bytes = int(q6_strict_object_graph.get("readonly_overlap_snapshot_bytes") or 0)
+q6_readonly_snapshot_effective = (
+    q6_readonly_snapshot_policy.get("effective") is True
+    and q6_readonly_snapshot_count > 0
+    and bool(q6_readonly_snapshot_details)
+)
+q6_workgroup_diagnostics.update({
+    "q6_readonly_overlap_snapshot_policy": q6_readonly_snapshot_policy,
+    "q6_readonly_overlap_snapshot_count": q6_readonly_snapshot_count,
+    "q6_readonly_overlap_snapshot_bytes": q6_readonly_snapshot_bytes,
+    "q6_readonly_overlap_snapshot_bindings": q6_readonly_snapshot_details[:8],
+    "q6_readonly_overlap_snapshot_effective": q6_readonly_snapshot_effective,
+})
+evidence.update({
+    "q6_readonly_overlap_snapshot": q6_readonly_snapshot_effective,
+    "q6_readonly_overlap_snapshot_policy": q6_readonly_snapshot_policy,
+    "q6_readonly_overlap_snapshot_count": q6_readonly_snapshot_count,
+    "q6_readonly_overlap_snapshot_bytes": q6_readonly_snapshot_bytes,
+    "q6_readonly_overlap_snapshot_bindings": q6_readonly_snapshot_details[:8],
+})
 generic_spirv_dispatch["pre_q6_failure"] = compact_pre_q6_failure(
     generic_spirv_dispatch,
     q6_workgroup_diagnostics,

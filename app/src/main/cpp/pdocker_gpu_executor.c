@@ -1114,7 +1114,7 @@ typedef struct {
 
 static VulkanRuntime g_vulkan_runtime;
 
-#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-debug-alias-guard-20260531"
+#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-q6-readonly-snapshot-20260531"
 
 static uint32_t choose_vulkan_instance_api_version(void) {
     uint32_t supported = VK_API_VERSION_1_0;
@@ -10593,7 +10593,10 @@ static int run_vulkan_dispatch_fd(
          is_q6k_matvec_hash(options->source_spirv_hash))
             ? options->source_spirv_hash
             : original_spirv_hash;
-    if (!q6k_safe_kernel_requested) {
+    const int q6_native_callsite_detected =
+        !q6k_safe_kernel_requested &&
+        is_q6k_matvec_hash(q6_storage16_lowering_identity_hash);
+    if (q6_native_callsite_detected) {
         q6_storage16_loads_lowered = lower_q6k_storage16_loads_to_storage8(
             &shader_code,
             &shader_size,
@@ -10604,6 +10607,11 @@ static int run_vulkan_dispatch_fd(
             &shader_size,
             q6_storage16_lowering_identity_hash);
     }
+    const int q6_readonly_overlap_snapshot_auto =
+        strict_passthrough && q6_native_callsite_detected;
+    const int materialize_readonly_overlap_snapshots =
+        strict_passthrough &&
+        (disable_overlap_aliasing || q6_readonly_overlap_snapshot_auto);
     /*
      * Duplicate descriptor Binding decorations are legal SPIR-V.  The legacy
      * non-strict path keeps the historical default-on rewrite.  Strict mode is
@@ -11100,14 +11108,15 @@ static int run_vulkan_dispatch_fd(
             goto cleanup;
         }
         strict_object_graph_used = 1;
-        if (strict_passthrough && disable_overlap_aliasing) {
+        if (materialize_readonly_overlap_snapshots) {
             /*
              * Strict passthrough preserves the guest VkBuffer/VkDeviceMemory
              * object graph.  Some ggml shaders bind optional read-only fuse
              * inputs to the same storage window as a writable output.  Vulkan
              * permits descriptor aliasing, but read/write storage-buffer
              * overlap within one dispatch is a weak driver/compiler contract
-             * on Android.  When explicitly requested, materialize only the
+             * on Android.  When explicitly requested, or for the reviewed
+             * native llama.cpp Q6_K matvec call-site, materialize only the
              * read-only side as a pre-dispatch snapshot.  The writable binding
              * remains on the strict object graph and is still the only side
              * written back; no llama.cpp bytes, shader code, prompt, or model
@@ -12262,6 +12271,8 @@ static int run_vulkan_dispatch_fd(
                 "\"effective_skip_unused_descriptor_transfers\":%s,"
                 "\"effective_spirv_descriptor_access\":%s,"
                 "\"disable_overlap_aliasing\":%s,"
+                "\"readonly_overlap_snapshot_policy\":{"
+                "\"requested\":%s,\"q6_auto\":%s,\"effective\":%s},"
                 "\"cpu_oracle_requested\":%s,"
                 "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
                 "\"strict_duplicate_descriptor_normalization\":%s,"
@@ -12323,6 +12334,9 @@ static int run_vulkan_dispatch_fd(
                 transfer_skip_unused_descriptor_transfers ? "true" : "false",
                 transfer_use_spirv_descriptor_access ? "true" : "false",
                 disable_overlap_aliasing ? "true" : "false",
+                disable_overlap_aliasing ? "true" : "false",
+                q6_readonly_overlap_snapshot_auto ? "true" : "false",
+                materialize_readonly_overlap_snapshots ? "true" : "false",
                 cpu_oracle_requested ? "true" : "false",
                 binding_alias_count,
                 rewrite_duplicate_descriptors ? "true" : "false",
@@ -12462,6 +12476,8 @@ static int run_vulkan_dispatch_fd(
             "\"effective_skip_unused_descriptor_transfers\":%s,"
             "\"effective_spirv_descriptor_access\":%s,"
             "\"disable_overlap_aliasing\":%s,"
+            "\"readonly_overlap_snapshot_policy\":{"
+            "\"requested\":%s,\"q6_auto\":%s,\"effective\":%s},"
             "\"cpu_oracle_requested\":%s,"
             "\"descriptor_aliases\":%zu,\"duplicate_descriptor_rewrite\":%s,"
             "\"strict_duplicate_descriptor_normalization\":%s,"
@@ -12534,6 +12550,9 @@ static int run_vulkan_dispatch_fd(
             transfer_skip_unused_descriptor_transfers ? "true" : "false",
             transfer_use_spirv_descriptor_access ? "true" : "false",
             disable_overlap_aliasing ? "true" : "false",
+            disable_overlap_aliasing ? "true" : "false",
+            q6_readonly_overlap_snapshot_auto ? "true" : "false",
+            materialize_readonly_overlap_snapshots ? "true" : "false",
             cpu_oracle_requested ? "true" : "false",
             binding_alias_count,
             rewrite_duplicate_descriptors ? "true" : "false",

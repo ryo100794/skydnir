@@ -529,7 +529,7 @@ remains an explicit diagnostic override and is available under strict
 passthrough for isolating driver compilation rejection from descriptor/call-site
 ABI correctness; it is not a benchmarkable product optimization.
 Fresh APK/device evidence for this lane must show executor marker
-`gpu-executor-debug-alias-guard-20260531`.
+`gpu-executor-q6-readonly-snapshot-20260531`.
 
 2026-05-21 Q6 evidence-retention gate: a fresh `ngl=1` compare on
 `192.168.179.26:37303` served `/health`, `/v1/models`, and `/completion`, but
@@ -1552,7 +1552,7 @@ artifact with marker `gpu-executor-q6-descriptor-invariants-20260530`.
 Descriptor/readback invariants are present and true.  Q6 is still not correct:
 `/completion` returns `" Marvel"` for the deterministic sanity prompt, so no
 performance claim is allowed.  The next executor build marker is
-`gpu-executor-debug-alias-guard-20260531`; a fresh device artifact must
+`gpu-executor-q6-readonly-snapshot-20260531`; a fresh device artifact must
 show that marker before interpreting the new overlap-snapshot evidence.
 
 The effective native Q6 probe module is now reproducible offline with
@@ -1624,7 +1624,7 @@ existing `PDOCKER_GPU_DISABLE_OVERLAP_ALIASING` switch:
 
 Fresh artifacts must expose:
 
-- `executor_build_marker == gpu-executor-debug-alias-guard-20260531`;
+- `executor_build_marker == gpu-executor-q6-readonly-snapshot-20260531`;
 - `strict_object_graph.readonly_overlap_snapshots`;
 - `strict_object_graph.readonly_overlap_snapshot_bytes`;
 - per-binding `readonly_overlap_snapshot`,
@@ -1641,3 +1641,51 @@ Interpretation rules:
    effective Q6 module.
 3. This is not a benchmark success condition by itself.  Prompt correctness and
    verifier gates still decide whether any speed result is reportable.
+
+Fresh device result:
+`docs/test/llama-gpu-ngl1-q6-readonly-snapshot-192_168_43_47_34827-20260531T145546Z.json`
+observed the required executor marker
+`gpu-executor-q6-readonly-snapshot-20260531` and did materialize two
+read-only overlap snapshots:
+
+- `readonly_overlap_snapshot_policy.effective == true`;
+- `strict_object_graph.readonly_overlap_snapshots == 2`;
+- `strict_object_graph.readonly_overlap_snapshot_bytes == 1248256`;
+- bindings 3 and 4 were snapshotted from the writable binding-2 storage
+  window;
+- `q6_readonly_dispatch_alias_side_effects == []`;
+- `q6_unexpected_readonly_dispatch_mutations == []`.
+
+The deterministic prompt still returned `" Marvel"` and the joined final-store
+sample remained `native-final-store-mismatch`:
+
+- `final_store_value_f32 == fd_after_writeback == 3.2279610633850098`;
+- expected oracle value was `6.38452625`;
+- executor writeback still matches the native GPU final store.
+
+Therefore read-only descriptor overlap is rejected as the sufficient root cause
+for this Q6 lane.  The next target remains the native Q6 value path before the
+binding-2 final store.  Static SPIR-V review also shows that `SpecId 1` is the
+Q6 row-count dimension (`2`) and `SpecId 2` is the outer count dimension (`1`),
+not `WorkgroupSize.y/z`; the final lane-0 store loops over both Q6 row slots.
+Do not patch `SpecId 1` into LocalSize.y.
+
+The compare parser now treats the existing Q6 debug binding as a staged trace,
+not only as a final-store trace.  The known instrumented slots are:
+
+- candidate 39 / role 1: tail pre-reduction store;
+- candidate 49 / role 2: tail reduction store;
+- candidate 61 / role 3: tail accumulator-A add store;
+- candidate 63 / role 3: tail accumulator-B add store;
+- candidate 64 / role 4: tail final store;
+- candidate 105 / role 1: full pre-reduction store;
+- candidate 115 / role 2: full reduction store;
+- candidate 127 / role 3: full accumulator-A add store;
+- candidate 129 / role 3: full accumulator-B add store;
+- candidate 130 / role 4: full final store.
+
+The next fresh run should use this staged trace to decide whether the first
+device divergence is present before reduction, during reduction, or only at the
+final lane-0 store.  This is still evidence collection; it is not a safe-kernel
+replacement and it does not modify llama.cpp, Dockerfile, model, prompt, or
+tensor bytes.
