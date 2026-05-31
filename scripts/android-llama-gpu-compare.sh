@@ -4875,6 +4875,15 @@ q6_shader_like_64_interpretation = (
     if not q6_shader_like_64_required
     else "required-for-non-32x1x1-local-size"
 )
+q6_workgroup_specialization_interpretation = {
+    "local_size_target": [32, 1, 1],
+    "spec_id_0": "WorkgroupSize.x / Q6 lane count",
+    "spec_id_1": "Q6 row-count/data-loop dimension; not WorkgroupSize.y",
+    "spec_id_2": "Q6 column/count dimension; not WorkgroupSize.z",
+    "do_not_patch_local_size_y_from_spec_id_1": True,
+    "do_not_patch_local_size_z_from_spec_id_2": True,
+    "next_static_target": "storage8-storage16-typed-load-compatibility",
+}
 q6_shader_like_oracle_cleared = (
     q6_latest_oracle.get("status") == "mismatch"
     and numeric_close_to_zero(q6_latest_partial.get("q6_shader_like_abs_delta"))
@@ -5067,6 +5076,7 @@ q6_workgroup_diagnostics = {
     "q6_shader_like_64_required": q6_shader_like_64_required,
     "q6_shader_like_clear_basis": q6_shader_like_clear_basis,
     "q6_shader_like_64_interpretation": q6_shader_like_64_interpretation,
+    "q6_workgroup_specialization_interpretation": q6_workgroup_specialization_interpretation,
     "q6_first_mismatch": q6_first_mismatch,
     "q6_row_indexed_sample_indices": q6_oracle_row_indexed_sample_indices[:48],
     "q6_row_indexed_writeback_evidence": q6_row_indexed_writeback_evidence[:8],
