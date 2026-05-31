@@ -10338,11 +10338,16 @@ static int run_vulkan_dispatch_fd(
         options && options->has_q6k_safe_kernel
             ? options->q6k_safe_kernel
             : env_truthy("PDOCKER_GPU_Q6K_SAFE_KERNEL", 0);
+    const uint64_t q6_storage16_lowering_identity_hash =
+        (options && options->has_source_spirv_hash &&
+         is_q6k_matvec_hash(options->source_spirv_hash))
+            ? options->source_spirv_hash
+            : original_spirv_hash;
     if (!q6k_safe_kernel_requested) {
         q6_storage16_loads_lowered = lower_q6k_storage16_loads_to_storage8(
             &shader_code,
             &shader_size,
-            original_spirv_hash,
+            q6_storage16_lowering_identity_hash,
             &q6_storage16_loads_lowered_count);
     }
     /*

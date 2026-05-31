@@ -112,6 +112,16 @@ evidence must report `q6_storage16_loads_lowered` and
 `q6_storage16_loads_lowered_count` before any device result from this lane can
 be promoted.
 
+2026-05-31 device result: the scoped storage16-to-storage8 lowering is now
+active for the instrumented Q6 probe path (`q6_storage16_loads_lowered=true`,
+`q6_storage16_loads_lowered_count=24`, effective hash
+`0x72f4a362b00221fd`).  It did not fix the prompt result: `/completion`
+still returns `" Marvel"`, Q6 writeback remains verified, and the current
+Q6 diagnostic boundary remains native Q6 final-store/output-layout semantics
+rather than executor writeback.  The next target is not another storage16
+view rewrite; inspect the output-index/layout path and final-store value
+selection using the lowered effective module as the new baseline.
+
 ## Non-Negotiable Rules
 
 - Do not modify llama.cpp.
