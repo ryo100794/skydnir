@@ -4922,7 +4922,7 @@ q6_workgroup_specialization_interpretation = {
     "spec_id_2": "Q6 column/count dimension; not WorkgroupSize.z",
     "do_not_patch_local_size_y_from_spec_id_1": True,
     "do_not_patch_local_size_z_from_spec_id_2": True,
-    "next_static_target": "storage8-storage16-typed-load-compatibility",
+    "next_static_target": "q6-final-store-workgroup-barrier-visibility",
 }
 q6_shader_like_oracle_cleared = (
     q6_latest_oracle.get("status") == "mismatch"
@@ -5070,6 +5070,9 @@ q6_workgroup_diagnostics = {
     "latest_status": q6_latest_oracle.get("status"),
     "latest_mismatch_count": q6_latest_oracle.get("mismatch_count"),
     "q6k_safe_kernel": q6_safe_kernel_used,
+    "q6_storage16_loads_lowered": q6_latest.get("q6_storage16_loads_lowered"),
+    "q6_storage16_loads_lowered_count": q6_latest.get("q6_storage16_loads_lowered_count"),
+    "q6_final_store_pre_barrier_inserted": q6_latest.get("q6_final_store_pre_barrier_inserted"),
     "expected_local_size": q6_expected_local_size,
     "local_size": q6_latest.get("spirv_local_size"),
     "local_size_resolved": q6_latest.get("spirv_local_size_resolved"),
