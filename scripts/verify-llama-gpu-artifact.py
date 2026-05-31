@@ -1570,6 +1570,37 @@ def _q6_workgroup_shape_blocked(q6: Any) -> bool:
     return not _q6_required_local_size_clear(q6)
 
 
+def _q6_workgroup_env_gap(
+    runtime_env_manifest: dict[str, Any],
+    config_propagation: dict[str, Any],
+) -> dict[str, Any]:
+    required = [
+        "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
+        "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
+    ]
+    host_requested = runtime_env_manifest.get("host_requested_env")
+    if not isinstance(host_requested, dict):
+        host_requested = {}
+    missing_requested = [
+        name for name in required if str(host_requested.get(name, "")).strip() != "1"
+    ]
+    checks = config_propagation.get("checks")
+    if not isinstance(checks, list):
+        checks = []
+    statuses = {
+        str(check.get("env")): str(check.get("status"))
+        for check in checks
+        if isinstance(check, dict) and check.get("env")
+    }
+    not_requested = [name for name in required if statuses.get(name) == "not-requested"]
+    return {
+        "required_envs": required,
+        "missing_requested_envs": missing_requested,
+        "not_requested_checks": not_requested,
+        "summary": "fail" if missing_requested or not_requested else "pass",
+    }
+
+
 def _q6_dispatch_seen_without_oracle(q6: Any) -> bool:
     if not isinstance(q6, dict):
         return False
@@ -2282,6 +2313,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_final_store_boundary = _q6_final_store_boundary(q6)
     q6_output_index_probe = _q6_output_index_probe(q6)
     q6_output_index_probe_summary = str(q6_output_index_probe.get("summary") or "not-run")
+    q6_workgroup_env_gap = _q6_workgroup_env_gap(runtime_env_manifest, config_propagation)
     q6_native_vs_writeback_split = (
         q6.get("q6_native_vs_writeback_split")
         if isinstance(q6.get("q6_native_vs_writeback_split"), dict)
@@ -2310,10 +2342,18 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     elif _q6_workgroup_shape_blocked(q6):
         classification = "q6-workgroup-shape-blocker"
         responsibility_boundary = "q6-local-size"
-        next_action = (
-            "fix Q6_K local-size propagation/materialization to the expected "
-            f"{_q6_expected_local_size(q6)} workgroup shape"
-        )
+        if q6_workgroup_env_gap.get("summary") == "fail":
+            q6_blocker_class = "q6-workgroup-env-not-requested"
+            next_action = (
+                "rerun via scripts/android-llama-gpu-q6-workgroup-run.sh or the "
+                "Q6 compare overlay; current artifact did not request "
+                + "/".join(q6_workgroup_env_gap["missing_requested_envs"])
+            )
+        else:
+            next_action = (
+                "fix Q6_K local-size propagation/materialization to the expected "
+                f"{_q6_expected_local_size(q6)} workgroup shape"
+            )
     elif q6_descriptor_invariant_mismatches:
         classification = "q6-descriptor-invariant-mismatch"
         responsibility_boundary = "q6-descriptor-object-graph"
@@ -2495,6 +2535,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         "q6_output_layout_probe": q6_output_layout,
         "q6_output_index_probe": q6_output_index_probe,
         "q6_output_index_probe_summary": q6_output_index_probe_summary,
+        "q6_workgroup_env_gap": q6_workgroup_env_gap,
         "q6_row_provenance_probe": q6_row_provenance,
         "q6_partial_signature_probe": q6_partial_signature,
         "q6_debug_binding_alias_safety": q6_debug_binding_alias_safety,
@@ -2517,6 +2558,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-native-device-execution-or-final-store",
                 "q6-native-reduction-or-device-execution",
                 "q6-probe-writeback-cleared-oracle-missing",
+                "q6-workgroup-shape-blocker",
                 "q6-safe-kernel-diagnostic-only",
                 "q6-descriptor-invariant-mismatch",
                 *Q6_DEBUG_U32_BLOCKERS,

@@ -46,6 +46,20 @@ def passing_config_propagation():
     }
 
 
+def q6_env_gap_config_propagation():
+    cfg = passing_config_propagation()
+    cfg["summary"] = "pass"
+    for check in cfg["checks"]:
+        if check["env"] in {
+            "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
+            "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
+        }:
+            check["expected"] = None
+            check["observed_values"] = [False]
+            check["status"] = "not-requested"
+    return cfg
+
+
 def gpu_correctness_report(correctness="pass", required_failures=0, passed=True, content="5"):
     return {
         "schema": "pdocker.llama.correctness.v1.compare",
@@ -958,6 +972,49 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         interpretation = report["q6_shader_like_interpretation"]
         self.assertFalse(interpretation["q6_shader_like_64_required"])
         self.assertIn("q6k_safe_kernel=true", interpretation["q6_shader_like_clear_basis"])
+
+    def test_q6_workgroup_blocker_reports_missing_required_env_overlay(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "served": False,
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": q6_env_gap_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 1,
+                        "latest_status": "match",
+                        "local_size": [1, 1, 1],
+                        "local_size_resolved": [32, 1, 1],
+                        "local_size_consistent": False,
+                        "q6_local_size": [32, 1, 1],
+                        "local_size_patched": False,
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report("pass"),
+            },
+            "runtime_env_manifest": {
+                "host_requested_env": {
+                    "PDOCKER_GPU_CPU_ORACLE": "1",
+                    "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK": "1",
+                },
+            },
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 31, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-workgroup-shape-blocker")
+        self.assertEqual(report["q6_effective_blocker_class"], "q6-workgroup-env-not-requested")
+        self.assertIn("android-llama-gpu-q6-workgroup-run.sh", report["next_action"])
+        self.assertEqual(
+            {
+                "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC",
+                "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS",
+            },
+            set(report["q6_workgroup_env_gap"]["missing_requested_envs"]),
+        )
 
     def test_q6_native_output_layout_probe_gets_specific_classification(self):
         payload = {
