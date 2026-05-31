@@ -298,6 +298,35 @@ class GpuAbiContractTest(unittest.TestCase):
             verifier.index("elif q6_debug_u32_probe_blocker:"),
         )
 
+    def test_executor_q6_debug_probe_alias_guard_fails_closed(self):
+        source = GPU_EXECUTOR.read_text()
+        for marker in [
+            "validate_spirv_probe_debug_binding_alias_guard",
+            "options && options->has_spirv_probe_debug_binding",
+            "static const uint32_t kQ6ComputeBindings[] = {2u, 3u, 4u};",
+            "vulkan_binding_api_absolute_descriptor_range",
+            "binding->api_memory_id == 0",
+            "binding->api_buffer_id == 0",
+            "binding->api_range == 0",
+            "bindings[debug_index].api_memory_id == bindings[q6_index].api_memory_id",
+            "bindings[debug_index].api_buffer_id == bindings[q6_index].api_buffer_id",
+            "same_api_object && debug_start < q6_end && q6_start < debug_end",
+            "missing debug/probe binding",
+            "missing q6 compute binding",
+            "missing debug/probe api alias metadata",
+            "missing q6 api alias metadata",
+            "debug/probe binding overlaps q6 compute binding",
+            "spirv probe debug alias guard failed",
+            "probe_alias_reason ? probe_alias_reason",
+            '"vulkan-dispatch",\n                      probe_alias_reason ? probe_alias_reason',
+        ]:
+            self.assertIn(marker, source)
+        self.assertLess(
+            source.index("if (validate_spirv_probe_debug_binding_alias_guard("),
+            source.index("const int skip_unused_descriptor_transfers"),
+        )
+
+
     def test_vulkan_dispatch_v4_binding_schema_is_single_source_and_checked(self):
         app_fields, app_count, app_hash, computed_hash = v4_binding_schema(APP_HEADER)
         container_fields, container_count, container_hash, container_computed_hash = v4_binding_schema(CONTAINER_HEADER)

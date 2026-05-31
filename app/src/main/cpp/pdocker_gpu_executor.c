@@ -4808,6 +4808,101 @@ static int vulkan_bindings_api_ranges_overlap(
     return 1;
 }
 
+static int vulkan_binding_api_absolute_descriptor_range(
+        const VulkanDispatchBinding *binding,
+        uint64_t *start,
+        uint64_t *end) {
+    if (!binding || binding->api_memory_id == 0 || binding->api_buffer_id == 0 ||
+        binding->api_memory_offset < 0 || binding->api_offset < 0 ||
+        binding->api_memory_size == 0 || binding->api_buffer_size == 0 ||
+        binding->api_range == 0) {
+        return 0;
+    }
+    const uint64_t memory_offset = (uint64_t)binding->api_memory_offset;
+    const uint64_t descriptor_offset = (uint64_t)binding->api_offset;
+    const uint64_t memory_size = (uint64_t)binding->api_memory_size;
+    const uint64_t buffer_size = (uint64_t)binding->api_buffer_size;
+    const uint64_t descriptor_range = (uint64_t)binding->api_range;
+    if (memory_offset > memory_size ||
+        buffer_size > memory_size - memory_offset ||
+        descriptor_offset > buffer_size ||
+        descriptor_range > buffer_size - descriptor_offset ||
+        memory_offset > UINT64_MAX - descriptor_offset) {
+        return 0;
+    }
+    const uint64_t s = memory_offset + descriptor_offset;
+    if (descriptor_range > UINT64_MAX - s) return 0;
+    const uint64_t e = s + descriptor_range;
+    if (e <= s || e > memory_size) return 0;
+    if (start) *start = s;
+    if (end) *end = e;
+    return 1;
+}
+
+static int validate_spirv_probe_debug_binding_alias_guard(
+        const VulkanDispatchOptions *options,
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        const char **reason,
+        uint32_t *failed_binding,
+        uint64_t *overlap_start,
+        uint64_t *overlap_end) {
+    if (reason) *reason = NULL;
+    if (failed_binding) *failed_binding = UINT32_MAX;
+    if (overlap_start) *overlap_start = 0;
+    if (overlap_end) *overlap_end = 0;
+    if (!options || !options->has_spirv_probe_debug_binding) return 0;
+    if (options->spirv_probe_debug_binding > UINT32_MAX) {
+        if (reason) *reason = "invalid debug/probe binding";
+        return -EINVAL;
+    }
+
+    const uint32_t debug_binding = (uint32_t)options->spirv_probe_debug_binding;
+    const int debug_index = binding_index_for_number(bindings, binding_count, debug_binding);
+    if (debug_index < 0) {
+        if (reason) *reason = "missing debug/probe binding";
+        if (failed_binding) *failed_binding = debug_binding;
+        return -ENOENT;
+    }
+    uint64_t debug_start = 0, debug_end = 0;
+    if (!vulkan_binding_api_absolute_descriptor_range(
+            &bindings[debug_index], &debug_start, &debug_end)) {
+        if (reason) *reason = "missing debug/probe api alias metadata";
+        if (failed_binding) *failed_binding = debug_binding;
+        return -EINVAL;
+    }
+
+    static const uint32_t kQ6ComputeBindings[] = {2u, 3u, 4u};
+    for (size_t q = 0; q < sizeof(kQ6ComputeBindings) / sizeof(kQ6ComputeBindings[0]); ++q) {
+        const uint32_t q6_binding = kQ6ComputeBindings[q];
+        const int q6_index = binding_index_for_number(bindings, binding_count, q6_binding);
+        if (q6_index < 0) {
+            if (reason) *reason = "missing q6 compute binding";
+            if (failed_binding) *failed_binding = q6_binding;
+            return -ENOENT;
+        }
+        uint64_t q6_start = 0, q6_end = 0;
+        if (!vulkan_binding_api_absolute_descriptor_range(
+                &bindings[q6_index], &q6_start, &q6_end)) {
+            if (reason) *reason = "missing q6 api alias metadata";
+            if (failed_binding) *failed_binding = q6_binding;
+            return -EINVAL;
+        }
+
+        const int same_api_object =
+            bindings[debug_index].api_memory_id == bindings[q6_index].api_memory_id ||
+            bindings[debug_index].api_buffer_id == bindings[q6_index].api_buffer_id;
+        if (same_api_object && debug_start < q6_end && q6_start < debug_end) {
+            if (reason) *reason = "debug/probe binding overlaps q6 compute binding";
+            if (failed_binding) *failed_binding = q6_binding;
+            if (overlap_start) *overlap_start = debug_start > q6_start ? debug_start : q6_start;
+            if (overlap_end) *overlap_end = debug_end < q6_end ? debug_end : q6_end;
+            return -EALREADY;
+        }
+    }
+    return 0;
+}
+
 static int materialize_strict_readonly_overlap_snapshot(
         VkPhysicalDevice physical_device,
         VkDevice device,
@@ -9549,6 +9644,32 @@ static int run_vulkan_dispatch_fd(
                     strict_binding_index,
                     strict_binding_field ? strict_binding_field : "unknown");
             json_fail("vulkan-dispatch", "strict binding contract mismatch");
+            return 64;
+        }
+    }
+    if (options && options->has_spirv_probe_debug_binding) {
+        const char *probe_alias_reason = NULL;
+        uint32_t probe_alias_failed_binding = UINT32_MAX;
+        uint64_t probe_alias_overlap_start = 0;
+        uint64_t probe_alias_overlap_end = 0;
+        if (validate_spirv_probe_debug_binding_alias_guard(
+                options,
+                bindings,
+                binding_count,
+                &probe_alias_reason,
+                &probe_alias_failed_binding,
+                &probe_alias_overlap_start,
+                &probe_alias_overlap_end) != 0) {
+            fprintf(stderr,
+                    "pdocker-gpu-executor: spirv probe debug alias guard failed "
+                    "reason=%s binding=%u overlap=[0x%016llx,0x%016llx)\n",
+                    probe_alias_reason ? probe_alias_reason : "unknown",
+                    probe_alias_failed_binding,
+                    (unsigned long long)probe_alias_overlap_start,
+                    (unsigned long long)probe_alias_overlap_end);
+            json_fail("vulkan-dispatch",
+                      probe_alias_reason ? probe_alias_reason :
+                          "spirv probe debug alias guard failed");
             return 64;
         }
     }
