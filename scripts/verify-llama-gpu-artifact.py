@@ -997,6 +997,18 @@ def _q6_final_store_boundary(q6: Any) -> dict[str, Any]:
         for sample in samples
     ):
         summary = "inconclusive"
+    if (
+        summary in {"pass", "native-final-store-mismatch", "executor-writeback-mismatch"}
+        and boundary.get("correlation_scope") == "latest-q6-event"
+        and not all(
+            isinstance(sample, dict)
+            and sample.get("layout_from_final_store_trace") is True
+            and sample.get("layout_sample_source") == "final-store-trace"
+            and sample.get("q6_event_dispatch_id") not in {None, ""}
+            for sample in samples
+        )
+    ):
+        summary = "inconclusive"
     if summary == "pass" and not all(
         isinstance(sample, dict)
         and sample.get("final_store_matches_expected") is True

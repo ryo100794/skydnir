@@ -4800,6 +4800,8 @@ def build_q6_final_store_boundary():
             "output_index": output_index,
             "expected_store_index": expected_store_index,
             "dst_index": dst_index,
+            "layout_sample_source": layout.get("sample_source"),
+            "layout_from_final_store_trace": layout.get("from_final_store_trace"),
             "final_store_value_f32": final_value,
             "expected": expected,
             "fd_after_writeback": fd_after,

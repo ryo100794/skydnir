@@ -170,6 +170,7 @@ def q6_final_store_boundary(summary, final_value=0.5, expected=1.25, fd_after=0.
     return {
         "schema": "pdocker.q6k.final-store-boundary.v1",
         "summary": summary,
+        "correlation_scope": "latest-q6-event",
         "joined_sample_count": 1,
         "store_index_model_valid": True,
         "samples": [
@@ -189,6 +190,10 @@ def q6_final_store_boundary(summary, final_value=0.5, expected=1.25, fd_after=0.
                 "trace_writeback_mismatch": False,
                 "trace_writeback_mismatch_fields": [],
                 "sample_class": summary,
+                "correlation_scope": "latest-q6-event",
+                "q6_event_dispatch_id": "297",
+                "layout_sample_source": "final-store-trace",
+                "layout_from_final_store_trace": True,
             }
         ],
     }
@@ -1814,6 +1819,46 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             report["q6_effective_blocker_class"],
             "q6-debug-binding-alias-evidence-missing",
         )
+
+    def test_q6_final_store_boundary_requires_latest_event_layout_provenance(self):
+        boundary = q6_final_store_boundary(
+            "native-final-store-mismatch",
+            final_value=0.5,
+            expected=1.25,
+            fd_after=0.5,
+        )
+        boundary["samples"][0].pop("layout_sample_source", None)
+        boundary["samples"][0].pop("layout_from_final_store_trace", None)
+        q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "local_size_resolved": [32, 1, 1],
+            "q6_output_layout_probe": {
+                "summary": "canonical-mismatch-inconclusive",
+                "samples": [
+                    q6_layout_sample_with_store_model(257, expected=1.25, gpu_at_dst=0.5)
+                ],
+            },
+            "q6_final_store_boundary": boundary,
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": q6,
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-native-output-layout-inconclusive")
+        self.assertEqual(report["q6_final_store_boundary"]["summary"], "inconclusive")
 
     def test_q6_final_store_boundary_summary_without_samples_is_inconclusive(self):
         q6 = {

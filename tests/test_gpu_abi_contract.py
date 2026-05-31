@@ -2035,6 +2035,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "q6_event_effective_spirv_hash",
             "\"q6_event_source_spirv_hash\": binding.get(\"q6_event_source_spirv_hash\")",
             "debug_report = q6_latest_debug_u32_probe",
+            "layout_sample_source",
+            "layout_from_final_store_trace",
             "missing-final-store-layout-samples",
             "missing-final-store-writeback-samples",
             "q6_readonly_mutation_is_alias_side_effect",
