@@ -270,8 +270,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("def build_q6_debug_binding_alias_safety", compare)
         self.assertIn('"q6_debug_binding_alias_safety": q6_debug_binding_alias_safety', compare)
         self.assertIn('"q6-debug-binding-alias"', compare)
+        self.assertIn('"q6-debug-binding-alias-evidence-missing"', compare)
+        self.assertIn('"debug_probe_binding": detail.get("debug_probe_binding")', compare)
+        self.assertIn('"binding_descriptor_offset": detail.get("binding_descriptor_offset")', compare)
+        self.assertIn('"api_range": detail.get("api_range")', compare)
         self.assertLess(
             compare.index('if q6_debug_binding_alias_safety.get("summary") == "fail"'),
+            compare.index("if q6_debug_u32_probe_blocker"),
+        )
+        self.assertLess(
+            compare.index('if q6_debug_binding_alias_safety.get("summary") == "missing-evidence"'),
             compare.index("if q6_debug_u32_probe_blocker"),
         )
         self.assertLess(
@@ -279,9 +287,14 @@ class GpuAbiContractTest(unittest.TestCase):
             compare.index('if q6_native_vs_writeback_split.get("summary") == "executor-final-writeback"'),
         )
         self.assertIn("def _q6_debug_binding_alias_safety", verifier)
+        self.assertIn("def _q6_debug_alias_evidence_missing", verifier)
         self.assertIn('"q6_debug_binding_alias_safety": q6_debug_binding_alias_safety', verifier)
         self.assertLess(
             verifier.index('if q6_debug_binding_alias_safety.get("summary") == "fail"'),
+            verifier.index("elif q6_debug_u32_probe_blocker:"),
+        )
+        self.assertLess(
+            verifier.index("elif _q6_debug_alias_evidence_missing("),
             verifier.index("elif q6_debug_u32_probe_blocker:"),
         )
 
@@ -2680,9 +2693,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("specialization_materialize_report", plan["required_evidence_fields"])
         self.assertIn("reconciliation", plan["required_evidence_fields"])
         self.assertIn("q6_final_store_boundary", plan["required_evidence_fields"])
+        self.assertIn("q6_debug_binding_alias_safety", plan["required_evidence_fields"])
+        self.assertIn("debug_probe_binding", plan["required_evidence_fields"])
+        self.assertIn("descriptor_alias_map", plan["required_evidence_fields"])
+        self.assertIn("binding_descriptor_offset", plan["required_evidence_fields"])
+        self.assertIn("api_range", plan["required_evidence_fields"])
         self.assertIn("final_store_value_f32", plan["required_evidence_fields"])
         self.assertIn("writeback", " ".join(branch["condition"] for branch in plan["fail_branches"]))
         self.assertIn("q6_final_store_boundary.summary", json.dumps(plan["fail_branches"]))
+        self.assertIn("q6_debug_binding_alias_safety.summary", json.dumps(plan["fail_branches"]))
         self.assertIn("unsupported-spec-expression", json.dumps(plan["fail_branches"]))
         self.assertFalse(plan["inputs"]["llama_cpp_may_change"])
         self.assertFalse(plan["inputs"]["dockerfile_may_change"])
@@ -2803,6 +2822,13 @@ class GpuAbiContractTest(unittest.TestCase):
                                             }
                                         ],
                                     },
+                                    "q6_debug_binding_alias_safety": {
+                                        "schema": "pdocker.q6k.debug-binding-alias-safety.v1",
+                                        "summary": "pass",
+                                        "debug_binding_count": 1,
+                                        "checked_compute_binding_count": 1,
+                                        "overlap_count": 0,
+                                    },
                                     "q6_final_store_boundary": {
                                         "schema": "pdocker.q6k.final-store-boundary.v1",
                                         "summary": "pass",
@@ -2839,7 +2865,22 @@ class GpuAbiContractTest(unittest.TestCase):
                                         "spirv_local_size_consistent": True,
                                         "strict_object_graph": {"used": True},
                                         "reconciliation": {"summary": "pass"},
-                                        "binding_details": [],
+                                        "descriptor_alias_map": [
+                                            {
+                                                "target_id": 31,
+                                                "original_binding": 0,
+                                                "rewritten_binding": 6,
+                                            }
+                                        ],
+                                        "q6_debug_binding_alias_safety": {"summary": "pass"},
+                                        "binding_details": [
+                                            {
+                                                "binding": 5,
+                                                "debug_probe_binding": True,
+                                                "binding_descriptor_offset": 0,
+                                                "api_range": 65536,
+                                            }
+                                        ],
                                         "descriptor_usage": {},
                                         "cpu_oracle": {"candidate": True, "executed": True, "status": "match"},
                                         "q6_row_indexed": True,
@@ -3079,6 +3120,22 @@ class GpuAbiContractTest(unittest.TestCase):
             inconclusive["condition"],
         )
         self.assertEqual("Q6 final-store boundary instrumentation", inconclusive["owner"])
+
+        missing_debug_alias = verifier.select_branch(
+            {
+                "classification": "q6-debug-binding-alias-evidence-missing",
+                "q6_workgroup_diagnostics": {
+                    "q6_debug_binding_alias_safety": {"summary": "missing-evidence"}
+                },
+            },
+            {},
+            plan,
+        )
+        self.assertEqual(
+            "q6_debug_binding_alias_safety.summary in {fail,missing-evidence,not-run}",
+            missing_debug_alias["condition"],
+        )
+        self.assertEqual("Q6 descriptor/debug evidence gate", missing_debug_alias["owner"])
 
     def test_q6_plan_verifier_selects_terminal_and_pre_q6_branches(self):
         verifier = load_llama_q6_plan_verifier()

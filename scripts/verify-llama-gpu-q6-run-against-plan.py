@@ -164,6 +164,12 @@ def select_branch(report: dict[str, Any], artifact: dict[str, Any], plan: dict[s
             "action": "inspect skip counts and WorkgroupSize subtree evidence before another device run",
             "owner": "materialize_spirv_specialization_constants",
         }
+    if classification in {"q6-debug-binding-alias", "q6-debug-binding-alias-evidence-missing"}:
+        return {
+            "condition": "q6_debug_binding_alias_safety.summary in {fail,missing-evidence,not-run}",
+            "action": "fix debug/probe SSBO alias and descriptor range evidence before interpreting Q6 final-store mismatch",
+            "owner": "Q6 descriptor/debug evidence gate",
+        }
     if classification in {"q6-writeback-mismatch", "q6-writeback-unverified"}:
         boundary = q6.get("q6_final_store_boundary")
         if isinstance(boundary, dict) and boundary.get("summary") == "executor-writeback-mismatch":

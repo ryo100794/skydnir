@@ -30,6 +30,11 @@ REQUIRED_EVIDENCE_FIELDS = [
     "strict_object_graph",
     "reconciliation",
     "binding_details",
+    "q6_debug_binding_alias_safety",
+    "debug_probe_binding",
+    "descriptor_alias_map",
+    "binding_descriptor_offset",
+    "api_range",
     "descriptor_usage",
     "cpu_oracle",
     "q6_row_indexed",
@@ -133,6 +138,11 @@ FAIL_BRANCHES = [
         "condition": "specialization_materialize_report.failure_reason == no-changes",
         "action": "inspect skip counts and WorkgroupSize subtree evidence before another device run",
         "owner": "materialize_spirv_specialization_constants",
+    },
+    {
+        "condition": "q6_debug_binding_alias_safety.summary in {missing-evidence,not-run} while final-store/probe evidence exists",
+        "action": "fix debug/probe SSBO alias and descriptor range evidence before interpreting Q6 final-store mismatch",
+        "owner": "Q6 descriptor/debug evidence gate",
     },
     {
         "condition": "writeback verification is false or missing",

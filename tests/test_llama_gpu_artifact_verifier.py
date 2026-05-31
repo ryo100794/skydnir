@@ -1769,6 +1769,52 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(report["responsibility_boundary"], "q6-debug-binding-alias")
         self.assertEqual(report["q6_effective_blocker_class"], "q6-debug-binding-alias")
 
+    def test_q6_debug_binding_alias_evidence_required_before_final_store_boundary(self):
+        q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "local_size_resolved": [32, 1, 1],
+            "q6_debug_binding_alias_safety": {
+                "schema": "pdocker.q6k.debug-binding-alias-safety.v1",
+                "summary": "not-run",
+                "debug_binding_count": 0,
+                "checked_compute_binding_count": 3,
+            },
+            "q6_final_store_boundary": q6_final_store_boundary(
+                "native-final-store-mismatch"
+            ),
+            "q6_output_layout_probe": {
+                "summary": "canonical-mismatch-inconclusive",
+                "samples": [
+                    q6_layout_sample_with_store_model(
+                        257, expected=1.25, gpu_at_dst=0.5
+                    )
+                ],
+            },
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": q6,
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 49, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-debug-binding-alias-evidence-missing")
+        self.assertEqual(report["responsibility_boundary"], "q6-debug-binding-alias")
+        self.assertEqual(
+            report["q6_effective_blocker_class"],
+            "q6-debug-binding-alias-evidence-missing",
+        )
+
     def test_q6_final_store_boundary_summary_without_samples_is_inconclusive(self):
         q6 = {
             "event_count": 1,

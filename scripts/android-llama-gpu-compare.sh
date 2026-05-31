@@ -3787,7 +3787,10 @@ Q6_DESCRIPTOR_INVARIANT_FIELDS = (
 def compact_q6_binding_detail(detail):
     return {
         "index": detail.get("index"),
+        "set": detail.get("set"),
+        "descriptor_set": detail.get("descriptor_set", detail.get("set")),
         "binding": detail.get("binding"),
+        "debug_probe_binding": detail.get("debug_probe_binding"),
         "alias_rep": detail.get("alias_rep"),
         "offset": detail.get("offset"),
         "size": detail.get("size"),
@@ -3795,6 +3798,8 @@ def compact_q6_binding_detail(detail):
         "api_range": detail.get("api_range"),
         "api_memory_offset": detail.get("api_memory_offset"),
         "api_buffer_size": detail.get("api_buffer_size"),
+        "api_descriptor_type": detail.get("api_descriptor_type"),
+        "api_dynamic": detail.get("api_dynamic"),
         "api_memory_id": detail.get("api_memory_id"),
         "api_buffer_id": detail.get("api_buffer_id"),
         "binding_gpu_offset": detail.get("binding_gpu_offset"),
@@ -4279,21 +4284,34 @@ def q6_binding_memory_window(detail):
     if not isinstance(detail, dict):
         return None
     try:
-        start = q6_parse_int(detail.get("binding_descriptor_offset"))
-        if start is None:
-            start = q6_parse_int(detail.get("offset"))
-        size = q6_parse_int(detail.get("size"))
-        if start is None or size is None or size < 0:
+        descriptor_start = q6_parse_int(detail.get("binding_descriptor_offset"))
+        if descriptor_start is None:
+            descriptor_start = q6_parse_int(detail.get("api_offset"))
+        if descriptor_start is None:
+            descriptor_start = q6_parse_int(detail.get("offset"))
+        memory_base = q6_parse_int(detail.get("api_memory_offset"))
+        if memory_base is None:
+            memory_base = 0
+        size = q6_parse_int(detail.get("api_range"))
+        if size is None or size <= 0:
+            size = q6_parse_int(detail.get("size"))
+        if descriptor_start is None or size is None or size < 0:
             return None
+        start = memory_base + descriptor_start
         end = start + size
         if end < start:
             return None
         return {
             "binding": detail.get("binding"),
             "index": detail.get("index"),
+            "set": detail.get("set"),
+            "descriptor_set": detail.get("descriptor_set", detail.get("set")),
             "alias_rep": detail.get("alias_rep"),
             "api_memory_id": detail.get("api_memory_id"),
             "api_buffer_id": detail.get("api_buffer_id"),
+            "api_descriptor_type": detail.get("api_descriptor_type"),
+            "api_memory_offset": memory_base,
+            "descriptor_offset": descriptor_start,
             "start": start,
             "end": end,
             "size": size,
@@ -4305,10 +4323,6 @@ def q6_binding_memory_window(detail):
 def q6_windows_overlap(left, right):
     if not isinstance(left, dict) or not isinstance(right, dict):
         return False
-    left_alias = left.get("alias_rep")
-    right_alias = right.get("alias_rep")
-    if left_alias is not None and right_alias is not None and left_alias == right_alias:
-        return True
     same_memory = (
         left.get("api_memory_id") is not None
         and right.get("api_memory_id") is not None
@@ -4319,7 +4333,10 @@ def q6_windows_overlap(left, right):
         and right.get("api_buffer_id") is not None
         and left.get("api_buffer_id") == right.get("api_buffer_id")
     )
-    if not (same_memory or same_buffer):
+    left_alias = left.get("alias_rep")
+    right_alias = right.get("alias_rep")
+    same_alias = left_alias is not None and right_alias is not None and left_alias == right_alias
+    if not (same_memory or same_buffer or same_alias):
         return False
     return max(left.get("start", 0), right.get("start", 0)) < min(
         left.get("end", 0), right.get("end", 0)
@@ -4329,16 +4346,26 @@ def q6_windows_overlap(left, right):
 def build_q6_debug_binding_alias_safety(binding_details):
     debug_windows = []
     compute_windows = []
+    debug_binding_count = 0
+    compute_binding_count = 0
+    missing_debug_window_count = 0
+    missing_compute_window_count = 0
     for detail in binding_details:
         if not isinstance(detail, dict):
             continue
         window = q6_binding_memory_window(detail)
-        if not window:
-            continue
         if detail.get("debug_probe_binding") is True:
-            debug_windows.append(window)
+            debug_binding_count += 1
+            if window:
+                debug_windows.append(window)
+            else:
+                missing_debug_window_count += 1
         if detail.get("binding") in {2, 3, 4}:
-            compute_windows.append(window)
+            compute_binding_count += 1
+            if window:
+                compute_windows.append(window)
+            else:
+                missing_compute_window_count += 1
     overlaps = []
     for debug in debug_windows:
         for compute in compute_windows:
@@ -4352,13 +4379,19 @@ def build_q6_debug_binding_alias_safety(binding_details):
         "schema": "pdocker.q6k.debug-binding-alias-safety.v1",
         "summary": (
             "not-run"
-            if not debug_windows
+            if not debug_binding_count
+            else "missing-evidence"
+            if missing_debug_window_count or missing_compute_window_count or not debug_windows
             else "fail"
             if overlaps
             else "pass"
         ),
-        "debug_binding_count": len(debug_windows),
-        "checked_compute_binding_count": len(compute_windows),
+        "debug_binding_count": debug_binding_count,
+        "checked_debug_window_count": len(debug_windows),
+        "checked_compute_binding_count": compute_binding_count,
+        "checked_compute_window_count": len(compute_windows),
+        "missing_debug_window_count": missing_debug_window_count,
+        "missing_compute_window_count": missing_compute_window_count,
         "overlap_count": len(overlaps),
         "debug_bindings": debug_windows[:8],
         "compute_bindings": compute_windows[:8],
@@ -4767,6 +4800,23 @@ def build_q6_final_store_boundary():
 
 
 q6_final_store_boundary = build_q6_final_store_boundary()
+q6_debug_alias_evidence_required = (
+    q6_debug_u32_probe.get("summary") not in {None, "", "not-run"}
+    or q6_final_store_boundary.get("summary") in {
+        "pass",
+        "executor-writeback-mismatch",
+        "native-final-store-mismatch",
+    }
+)
+if (
+    q6_debug_alias_evidence_required
+    and q6_debug_binding_alias_safety.get("summary") in {"not-run", "missing-evidence"}
+):
+    q6_debug_binding_alias_safety = {
+        **q6_debug_binding_alias_safety,
+        "summary": "missing-evidence",
+        "reason": "final-store-or-debug-probe-evidence-requires-debug-binding-alias-range-proof",
+    }
 q6_store_index_model_required = (
     q6_output_layout_probe_summary.startswith("canonical-mismatch")
     or q6_row_provenance_probe_summary == "other-row-match"
@@ -4886,6 +4936,8 @@ q6_blocker_class = (
     if q6_readonly_upload_hash_mismatches or q6_descriptor_range_mismatches or q6_descriptor_invariant_mismatches
     else "q6-debug-binding-alias"
     if q6_debug_binding_alias_safety.get("summary") == "fail"
+    else "q6-debug-binding-alias-evidence-missing"
+    if q6_debug_binding_alias_safety.get("summary") == "missing-evidence"
     else q6_debug_u32_probe_blocker
     if q6_debug_u32_probe_blocker
     else "shader-readonly-mutation-or-barrier-scope"

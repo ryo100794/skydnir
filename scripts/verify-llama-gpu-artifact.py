@@ -40,6 +40,7 @@ COMPACT_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{16}$")
 ZERO_COMPACT_HASH = "0x0000000000000000"
 Q6_DEBUG_U32_BLOCKERS = {
     "q6-debug-binding-alias",
+    "q6-debug-binding-alias-evidence-missing",
     "q6-debug-u32-probe-metadata-mismatch",
     "q6-debug-u32-writeback-mismatch",
     "q6-debug-u32-final-store-trace-missing",
@@ -938,6 +939,27 @@ def _q6_debug_binding_alias_safety(q6: Any) -> dict[str, Any]:
     if summary not in {"pass", "fail", "not-run", "missing-evidence"}:
         summary = "missing-evidence"
     return {**guard, "summary": summary}
+
+
+def _q6_debug_alias_evidence_missing(
+    safety: dict[str, Any],
+    debug_probe: dict[str, Any],
+    debug_probe_blocker: str,
+    final_store_boundary: dict[str, Any],
+) -> bool:
+    if safety.get("summary") not in {"not-run", "missing-evidence"}:
+        return False
+    probe_summary = debug_probe.get("summary")
+    boundary_summary = final_store_boundary.get("summary")
+    return (
+        bool(debug_probe_blocker)
+        or probe_summary not in {None, "", "not-run"}
+        or boundary_summary in {
+            "pass",
+            "executor-writeback-mismatch",
+            "native-final-store-mismatch",
+        }
+    )
 
 
 def _q6_final_store_boundary(q6: Any) -> dict[str, Any]:
@@ -2392,6 +2414,15 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 classification = "q6-debug-binding-alias"
                 responsibility_boundary = "q6-debug-binding-alias"
                 q6_blocker_class = "q6-debug-binding-alias"
+            elif _q6_debug_alias_evidence_missing(
+                q6_debug_binding_alias_safety,
+                q6_debug_u32_probe,
+                q6_debug_u32_probe_blocker,
+                q6_final_store_boundary,
+            ):
+                classification = "q6-debug-binding-alias-evidence-missing"
+                responsibility_boundary = "q6-debug-binding-alias"
+                q6_blocker_class = "q6-debug-binding-alias-evidence-missing"
             elif q6_debug_u32_probe_blocker:
                 classification = q6_debug_u32_probe_blocker
                 responsibility_boundary = "q6-debug-u32-probe"
@@ -2561,6 +2592,7 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
                 "q6-workgroup-shape-blocker",
                 "q6-safe-kernel-diagnostic-only",
                 "q6-descriptor-invariant-mismatch",
+                "q6-debug-binding-alias-evidence-missing",
                 *Q6_DEBUG_U32_BLOCKERS,
             }
             else None
