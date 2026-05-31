@@ -2362,6 +2362,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("storage8-storage16-typed-load-compatibility", compare)
         self.assertIn("local_size_resolved=[32,1,1]", compare)
         self.assertIn("fix Q6_K local-size/NUM_ROWS separation", compare)
+        self.assertIn("lower_q6k_storage16_loads_to_storage8", executor)
+        self.assertIn("q6_storage16_loads_lowered", executor)
+        self.assertIn("q6_storage16_loads_lowered_count", executor)
+        self.assertIn("Q6_STORAGE8_VAR_ID = 346", executor)
+        self.assertIn("Q6_STORAGE16_VAR_ID = 371", executor)
+        self.assertIn("OP_U_CONVERT", executor)
+        self.assertIn("OP_SHIFT_LEFT_LOGICAL", executor)
+        self.assertLess(
+            executor.index("lower_q6k_storage16_loads_to_storage8"),
+            executor.index("rewrite_duplicate_descriptor_bindings"),
+        )
+        self.assertLess(
+            executor.index("q6_storage16_loads_lowered = lower_q6k_storage16_loads_to_storage8"),
+            executor.index("if (strict_duplicate_descriptor_normalization)"),
+        )
+        self.assertIn("if (!q6k_safe_kernel_requested)", executor)
+        self.assertIn("load + load_wc <= words", executor)
         self.assertIn("q6_accum_mask", compare)
         self.assertIn("q6_base_work_group_y", compare)
         self.assertIn("q6_output_base_index", compare)

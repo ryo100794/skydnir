@@ -99,6 +99,19 @@ only while literal `LocalSize` and specialization-resolved WorkgroupSize are
 inconsistent; after LocalSize is legalized, that subtree must materialize too
 or the driver may keep using the stale default `gl_WorkGroupSize` value.
 
+2026-05-31 update: final-store sampling cleared executor writeback for the
+joined Q6 sample, leaving native Q6 SPIR-V execution/final-store semantics as
+the active boundary.  The next compatibility pass is a scoped
+storage16-to-storage8 lowering for the Q6_K duplicate binding-0 views.  It
+rewrites only exact `OpAccessChain` + `OpLoad %ushort` patterns from the
+storage16 alias into two byte loads from the byte-identical storage8 alias and
+reconstructs the same little-endian `ushort` in SPIR-V.  It does not change
+descriptors, buffers, offsets, ranges, push constants, specialization values,
+dispatch dimensions, llama.cpp, Dockerfiles, prompts, or model bytes.  Runtime
+evidence must report `q6_storage16_loads_lowered` and
+`q6_storage16_loads_lowered_count` before any device result from this lane can
+be promoted.
+
 ## Non-Negotiable Rules
 
 - Do not modify llama.cpp.

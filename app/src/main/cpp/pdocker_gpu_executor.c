@@ -1023,6 +1023,8 @@ static int specialization_value_for_id(
         uint32_t constant_id,
         uint64_t *out_value);
 
+static int is_q6k_matvec_hash(uint64_t spirv_hash);
+
 typedef struct {
     uint32_t descriptor_set;
     uint32_t target_id;
@@ -3822,6 +3824,265 @@ static int add_spirv_capability(
     return 1;
 }
 
+static int lower_q6k_storage16_loads_to_storage8(
+        uint32_t **code,
+        size_t *bytes,
+        uint64_t source_spirv_hash,
+        size_t *lowered_count) {
+    /*
+     * Android Vulkan compatibility lowering for the llama.cpp Q6_K mat-vec
+     * module.  The module exposes byte-identical duplicate binding-0 block
+     * views: one storage8 view and one storage16 view.  Some Android drivers
+     * have shown incorrect native execution when the Q6 path loads ql/qh
+     * fields through the storage16 view.  This pass keeps descriptors,
+     * buffers, offsets, push constants, specialization values, and dispatch
+     * dimensions unchanged, but lowers only the exact ushort loads from the
+     * duplicate storage16 view into two uchar loads from the storage8 view and
+     * reconstructs the same little-endian ushort in SPIR-V.
+     *
+     * It is intentionally fail-closed: no exact Q6_K source hash, no exact
+     * duplicate-view IDs, no exact AccessChain+Load pattern, or missing scalar
+     * constants means no rewrite.
+     */
+    enum {
+        OP_TYPE_INT = 21,
+        OP_TYPE_POINTER = 32,
+        OP_CONSTANT = 43,
+        OP_ACCESS_CHAIN = 65,
+        OP_LOAD = 61,
+        OP_U_CONVERT = 113,
+        OP_I_ADD = 128,
+        OP_I_MUL = 132,
+        OP_SHIFT_LEFT_LOGICAL = 196,
+        OP_BITWISE_OR = 197,
+        STORAGE_CLASS_STORAGE_BUFFER = 12,
+        Q6_STORAGE8_VAR_ID = 346,
+        Q6_STORAGE16_VAR_ID = 371,
+    };
+    if (lowered_count) *lowered_count = 0;
+    if (!code || !*code || !bytes || *bytes < 20 ||
+        (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u ||
+        !is_q6k_matvec_hash(source_spirv_hash)) {
+        return 0;
+    }
+    const uint32_t *in = *code;
+    const size_t words = *bytes / sizeof(uint32_t);
+    uint32_t bound = in[3];
+    if (bound <= Q6_STORAGE16_VAR_ID || bound > 65536) return 0;
+
+    uint32_t uint_type = 0;
+    uint32_t uchar_type = 0;
+    uint32_t ushort_type = 0;
+    uint32_t ptr_ushort_type = 0;
+    uint32_t ptr_uchar_type = 0;
+    uint32_t uint_1 = 0;
+    uint32_t uint_2 = 0;
+    uint32_t uint_8 = 0;
+    size_t uchar_type_end = 0;
+    size_t first_function = 0;
+
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == 54) {
+            first_function = i;
+            break;
+        }
+        if (op == OP_TYPE_INT && word_count >= 4) {
+            if (in[i + 2] == 32 && in[i + 3] == 0) uint_type = in[i + 1];
+            if (in[i + 2] == 8 && in[i + 3] == 0) {
+                uchar_type = in[i + 1];
+                uchar_type_end = i + word_count;
+            }
+            if (in[i + 2] == 16 && in[i + 3] == 0) ushort_type = in[i + 1];
+        } else if (op == OP_TYPE_POINTER && word_count >= 4 &&
+                   in[i + 2] == STORAGE_CLASS_STORAGE_BUFFER) {
+            if (ushort_type && in[i + 3] == ushort_type) ptr_ushort_type = in[i + 1];
+            if (uchar_type && in[i + 3] == uchar_type) ptr_uchar_type = in[i + 1];
+        } else if (op == OP_CONSTANT && word_count >= 4 && uint_type && in[i + 1] == uint_type) {
+            if (in[i + 3] == 1) uint_1 = in[i + 2];
+            if (in[i + 3] == 2) uint_2 = in[i + 2];
+            if (in[i + 3] == 8) uint_8 = in[i + 2];
+        }
+        i += word_count;
+    }
+    if (!first_function || !uint_type || !uchar_type || !ushort_type ||
+        !ptr_ushort_type || !uint_1 || !uint_2 || !uint_8 || !uchar_type_end) {
+        return 0;
+    }
+
+    size_t pattern_count = 0;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == OP_ACCESS_CHAIN && word_count == 8 &&
+            in[i + 1] == ptr_ushort_type &&
+            in[i + 3] == Q6_STORAGE16_VAR_ID &&
+            i + word_count < words) {
+            const size_t load = i + word_count;
+            const uint32_t load_inst = in[load];
+            const uint16_t load_wc = (uint16_t)(load_inst >> 16);
+            const uint16_t load_op = (uint16_t)(load_inst & 0xffffu);
+            if (load_wc == 4 && load + load_wc <= words && load_op == OP_LOAD &&
+                in[load + 1] == ushort_type &&
+                in[load + 3] == in[i + 2]) {
+                pattern_count++;
+                i = load + load_wc;
+                continue;
+            }
+        }
+        i += word_count;
+    }
+    if (pattern_count == 0 || pattern_count > 256) return 0;
+
+    const int add_ptr_uchar_type = ptr_uchar_type == 0;
+    const uint32_t new_ptr_uchar_type = add_ptr_uchar_type ? bound++ : ptr_uchar_type;
+    const size_t extra_words =
+        (add_ptr_uchar_type ? 4 : 0) +
+        pattern_count * (56 - 12);
+    uint32_t new_bound = bound + (uint32_t)(pattern_count * 10);
+    if (new_bound <= bound || new_bound > 65536) return 0;
+    size_t out_words = 5;
+    uint32_t next_id = bound;
+    size_t lowered = 0;
+
+    uint32_t *rewritten = (uint32_t *)malloc((words + extra_words) * sizeof(uint32_t));
+    if (!rewritten) return 0;
+    memcpy(rewritten, in, 5 * sizeof(uint32_t));
+    rewritten[3] = new_bound;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) {
+            free(rewritten);
+            return 0;
+        }
+        if (add_ptr_uchar_type && i == uchar_type_end) {
+            rewritten[out_words++] = (4u << 16) | OP_TYPE_POINTER;
+            rewritten[out_words++] = new_ptr_uchar_type;
+            rewritten[out_words++] = STORAGE_CLASS_STORAGE_BUFFER;
+            rewritten[out_words++] = uchar_type;
+        }
+        if (op == OP_ACCESS_CHAIN && word_count == 8 &&
+            in[i + 1] == ptr_ushort_type &&
+            in[i + 3] == Q6_STORAGE16_VAR_ID &&
+            i + word_count < words) {
+            const size_t load = i + word_count;
+            const uint32_t load_inst = in[load];
+            const uint16_t load_wc = (uint16_t)(load_inst >> 16);
+            const uint16_t load_op = (uint16_t)(load_inst & 0xffffu);
+            if (load_wc == 4 && load + load_wc <= words && load_op == OP_LOAD &&
+                in[load + 1] == ushort_type &&
+                in[load + 3] == in[i + 2]) {
+                const uint32_t index0 = in[i + 4];
+                const uint32_t block = in[i + 5];
+                const uint32_t member = in[i + 6];
+                const uint32_t ushort_index = in[i + 7];
+                const uint32_t load_result = in[load + 2];
+                const uint32_t b0_idx = next_id++;
+                const uint32_t b0_ptr = next_id++;
+                const uint32_t b0_u8 = next_id++;
+                const uint32_t b0_u32 = next_id++;
+                const uint32_t b1_idx = next_id++;
+                const uint32_t b1_ptr = next_id++;
+                const uint32_t b1_u8 = next_id++;
+                const uint32_t b1_u32 = next_id++;
+                const uint32_t hi32 = next_id++;
+                const uint32_t combined32 = next_id++;
+
+                rewritten[out_words++] = (5u << 16) | OP_I_MUL;
+                rewritten[out_words++] = uint_type;
+                rewritten[out_words++] = b0_idx;
+                rewritten[out_words++] = ushort_index;
+                rewritten[out_words++] = uint_2;
+
+                rewritten[out_words++] = (8u << 16) | OP_ACCESS_CHAIN;
+                rewritten[out_words++] = new_ptr_uchar_type;
+                rewritten[out_words++] = b0_ptr;
+                rewritten[out_words++] = Q6_STORAGE8_VAR_ID;
+                rewritten[out_words++] = index0;
+                rewritten[out_words++] = block;
+                rewritten[out_words++] = member;
+                rewritten[out_words++] = b0_idx;
+
+                rewritten[out_words++] = (4u << 16) | OP_LOAD;
+                rewritten[out_words++] = uchar_type;
+                rewritten[out_words++] = b0_u8;
+                rewritten[out_words++] = b0_ptr;
+
+                rewritten[out_words++] = (4u << 16) | OP_U_CONVERT;
+                rewritten[out_words++] = uint_type;
+                rewritten[out_words++] = b0_u32;
+                rewritten[out_words++] = b0_u8;
+
+                rewritten[out_words++] = (5u << 16) | OP_I_ADD;
+                rewritten[out_words++] = uint_type;
+                rewritten[out_words++] = b1_idx;
+                rewritten[out_words++] = b0_idx;
+                rewritten[out_words++] = uint_1;
+
+                rewritten[out_words++] = (8u << 16) | OP_ACCESS_CHAIN;
+                rewritten[out_words++] = new_ptr_uchar_type;
+                rewritten[out_words++] = b1_ptr;
+                rewritten[out_words++] = Q6_STORAGE8_VAR_ID;
+                rewritten[out_words++] = index0;
+                rewritten[out_words++] = block;
+                rewritten[out_words++] = member;
+                rewritten[out_words++] = b1_idx;
+
+                rewritten[out_words++] = (4u << 16) | OP_LOAD;
+                rewritten[out_words++] = uchar_type;
+                rewritten[out_words++] = b1_u8;
+                rewritten[out_words++] = b1_ptr;
+
+                rewritten[out_words++] = (4u << 16) | OP_U_CONVERT;
+                rewritten[out_words++] = uint_type;
+                rewritten[out_words++] = b1_u32;
+                rewritten[out_words++] = b1_u8;
+
+                rewritten[out_words++] = (5u << 16) | OP_SHIFT_LEFT_LOGICAL;
+                rewritten[out_words++] = uint_type;
+                rewritten[out_words++] = hi32;
+                rewritten[out_words++] = b1_u32;
+                rewritten[out_words++] = uint_8;
+
+                rewritten[out_words++] = (5u << 16) | OP_BITWISE_OR;
+                rewritten[out_words++] = uint_type;
+                rewritten[out_words++] = combined32;
+                rewritten[out_words++] = b0_u32;
+                rewritten[out_words++] = hi32;
+
+                rewritten[out_words++] = (4u << 16) | OP_U_CONVERT;
+                rewritten[out_words++] = ushort_type;
+                rewritten[out_words++] = load_result;
+                rewritten[out_words++] = combined32;
+
+                lowered++;
+                i = load + load_wc;
+                continue;
+            }
+        }
+        memcpy(rewritten + out_words, in + i, word_count * sizeof(uint32_t));
+        out_words += word_count;
+        i += word_count;
+    }
+    if (lowered != pattern_count || next_id != new_bound ||
+        out_words != words + extra_words) {
+        free(rewritten);
+        return 0;
+    }
+    free(*code);
+    *code = rewritten;
+    *bytes = out_words * sizeof(uint32_t);
+    if (lowered_count) *lowered_count = lowered;
+    return lowered > 0 ? 1 : 0;
+}
+
 static int rewrite_duplicate_descriptor_bindings(
         uint32_t *code,
         size_t bytes,
@@ -4113,6 +4374,7 @@ static uint64_t vulkan_pipeline_policy_hash(
         int materialize_specialization_constants,
         int specialization_materialized,
         int float16_capability_added,
+        int q6_storage16_loads_lowered,
         int legalize_workgroup_size_from_spec,
         int disable_pipeline_optimization,
         int skip_unused_descriptor_transfers,
@@ -4134,6 +4396,7 @@ static uint64_t vulkan_pipeline_policy_hash(
         (unsigned char)(materialize_specialization_constants ? 1 : 0),
         (unsigned char)(specialization_materialized ? 1 : 0),
         (unsigned char)(float16_capability_added ? 1 : 0),
+        (unsigned char)(q6_storage16_loads_lowered ? 1 : 0),
         (unsigned char)(legalize_workgroup_size_from_spec ? 1 : 0),
         (unsigned char)(disable_pipeline_optimization ? 1 : 0),
         (unsigned char)(skip_unused_descriptor_transfers ? 1 : 0),
@@ -9755,6 +10018,8 @@ static int run_vulkan_dispatch_fd(
     int specialization_materialized = 0;
     int local_size_patched = 0;
     int float16_capability_added = 0;
+    int q6_storage16_loads_lowered = 0;
+    size_t q6_storage16_loads_lowered_count = 0;
     const int strict_passthrough = strict_vulkan_passthrough_requested(options);
     const int strict_reconciliation = strict_vulkan_reconciliation_requested(options);
     const int strict_device_local_staging =
@@ -10073,6 +10338,13 @@ static int run_vulkan_dispatch_fd(
         options && options->has_q6k_safe_kernel
             ? options->q6k_safe_kernel
             : env_truthy("PDOCKER_GPU_Q6K_SAFE_KERNEL", 0);
+    if (!q6k_safe_kernel_requested) {
+        q6_storage16_loads_lowered = lower_q6k_storage16_loads_to_storage8(
+            &shader_code,
+            &shader_size,
+            original_spirv_hash,
+            &q6_storage16_loads_lowered_count);
+    }
     /*
      * Duplicate descriptor Binding decorations are legal SPIR-V.  The legacy
      * non-strict path keeps the historical default-on rewrite.  Strict mode is
@@ -10255,6 +10527,7 @@ static int run_vulkan_dispatch_fd(
         materialize_specialization_constants,
         specialization_materialized,
         float16_capability_added,
+        q6_storage16_loads_lowered,
         legalize_workgroup_size_from_spec,
         disable_pipeline_optimization,
         skip_unused_descriptor_transfers,
@@ -11477,6 +11750,8 @@ static int run_vulkan_dispatch_fd(
                 "\"descriptor_sets\":%u,\"push_bytes\":%zu},"
                 "\"cpu_oracle_requested\":%s,"
                 "\"q6k_safe_kernel\":%s,"
+                "\"q6_storage16_loads_lowered\":%s,"
+                "\"q6_storage16_loads_lowered_count\":%zu,"
                 "\"spirv_local_size\":[%u,%u,%u],"
                 "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
                 "\"spirv_local_size_consistent\":%s,"
@@ -11498,6 +11773,8 @@ static int run_vulkan_dispatch_fd(
                 push_size,
                 cpu_oracle_requested ? "true" : "false",
                 q6k_safe_kernel_used ? "true" : "false",
+                q6_storage16_loads_lowered ? "true" : "false",
+                q6_storage16_loads_lowered_count,
                 spirv_summary.local_size[0],
                 spirv_summary.local_size[1],
                 spirv_summary.local_size[2],
@@ -11724,6 +12001,8 @@ static int run_vulkan_dispatch_fd(
                 "\"q4k_pipeline_retry_attempted\":%s,"
                 "\"local_size_patched\":%s,"
                 "\"float16_capability_added\":%s,"
+                "\"q6_storage16_loads_lowered\":%s,"
+                "\"q6_storage16_loads_lowered_count\":%zu,"
                 "\"spirv_local_size\":[%u,%u,%u],"
                 "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
                 "\"spirv_local_size_consistent\":%s,"
@@ -11783,6 +12062,8 @@ static int run_vulkan_dispatch_fd(
                 q4k_pipeline_retry_attempted ? "true" : "false",
                 local_size_patched ? "true" : "false",
                 float16_capability_added ? "true" : "false",
+                q6_storage16_loads_lowered ? "true" : "false",
+                q6_storage16_loads_lowered_count,
                 spirv_summary.local_size[0],
                 spirv_summary.local_size[1],
                 spirv_summary.local_size[2],
@@ -11918,6 +12199,8 @@ static int run_vulkan_dispatch_fd(
             "\"q4k_pipeline_retry_attempted\":%s,"
             "\"local_size_patched\":%s,"
             "\"float16_capability_added\":%s,"
+            "\"q6_storage16_loads_lowered\":%s,"
+            "\"q6_storage16_loads_lowered_count\":%zu,"
             "\"spirv_local_size\":[%u,%u,%u],"
             "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
             "\"spirv_local_size_consistent\":%s,"
@@ -11988,6 +12271,8 @@ static int run_vulkan_dispatch_fd(
             q4k_pipeline_retry_attempted ? "true" : "false",
             local_size_patched ? "true" : "false",
             float16_capability_added ? "true" : "false",
+            q6_storage16_loads_lowered ? "true" : "false",
+            q6_storage16_loads_lowered_count,
             spirv_summary.local_size[0],
             spirv_summary.local_size[1],
             spirv_summary.local_size[2],
@@ -12168,6 +12453,8 @@ cleanup:
                 "\"q4k_pipeline_retry_attempted\":%s,"
                 "\"local_size_patched\":%s,"
                 "\"float16_capability_added\":%s,"
+                "\"q6_storage16_loads_lowered\":%s,"
+                "\"q6_storage16_loads_lowered_count\":%zu,"
                 "\"q4k_safe_kernel\":%s,"
                 "\"oracle_fail_closed\":%s,"
                 "\"strict_passthrough\":%s,"
@@ -12205,6 +12492,8 @@ cleanup:
                 q4k_pipeline_retry_attempted ? "true" : "false",
                 local_size_patched ? "true" : "false",
                 float16_capability_added ? "true" : "false",
+                q6_storage16_loads_lowered ? "true" : "false",
+                q6_storage16_loads_lowered_count,
                 q4k_safe_kernel_used ? "true" : "false",
                 oracle_fail_closed ? "true" : "false",
                 strict_passthrough ? "true" : "false",
