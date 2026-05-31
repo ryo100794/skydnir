@@ -13,8 +13,8 @@ VERIFIER = ROOT / "scripts" / "verify-llama-gpu-artifact.py"
 def runtime_marker():
     return {
         "summary": "pass",
-        "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
-        "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
+        "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
+        "observed_executor_markers": ["gpu-executor-readonly-overlap-snapshot-20260531"],
         "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
         "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
         "executor_event_count": 1,
@@ -349,7 +349,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             },
             "runtime_freshness": {
                 "summary": "fail",
-                "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
+                "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
                 "observed_executor_markers": [],
                 "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                 "observed_icd_markers": [],
@@ -537,7 +537,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         payload = wrong_completion_payload(api_executor_reconciliation())
         payload["gpu"]["diagnostics"]["runtime_freshness"] = {
             "summary": "fail",
-            "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
+            "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
             "observed_executor_markers": [],
             "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
             "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
@@ -711,7 +711,7 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
+                        "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
                         "observed_executor_markers": [],
                         "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                     },

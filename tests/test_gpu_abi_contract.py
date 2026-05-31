@@ -893,7 +893,7 @@ class GpuAbiContractTest(unittest.TestCase):
             r'#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "([^"]+)"',
             source,
         ).group(1)
-        self.assertEqual(marker, "gpu-executor-q6-descriptor-invariants-20260530")
+        self.assertEqual(marker, "gpu-executor-readonly-overlap-snapshot-20260531")
         stale = "gpu-executor-" + "float16-cap-diagnostic-20260520"
         for path in [
             GPU_EXECUTOR,
@@ -938,7 +938,7 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_q4k_callsite_handoff_records_required_evidence(self):
         doc = LLAMA_GPU_NEXT_STEPS.read_text()
         for evidence in [
-            "gpu-executor-q6-descriptor-invariants-20260530",
+            "gpu-executor-readonly-overlap-snapshot-20260531",
             "mul_mat_vec_q4_k_f32_f32",
             "vulkan-shaders/mul_mat_vec_q4_k.comp",
             "vk_mat_vec_push_constants",
@@ -1965,6 +1965,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "q6_readonly_upload_hash_mismatches",
             "q6_readonly_dispatch_mutations",
             "q6_readonly_dispatch_alias_side_effects",
+            "readonly_overlap_snapshot",
+            "readonly_overlap_source_index",
+            "readonly_overlap_snapshot_bytes",
             "q6_unexpected_readonly_dispatch_mutations",
             "q6_descriptor_range_mismatches",
             "q6_debug_u32_probe",
@@ -2024,6 +2027,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cpu_oracle_known_llama_hash", source)
         self.assertIn("write_vulkan_rw_alias_hazard_report", source)
         self.assertIn('\\"rw_alias_hazards\\":{\\"count\\":%zu', source)
+        self.assertIn("materialize_strict_readonly_overlap_snapshot", source)
+        self.assertIn("strict_passthrough && disable_overlap_aliasing", source)
+        self.assertIn("binding_read_needed[i] || binding_write_needed[i]", source)
+        self.assertIn("!binding_read_needed[i] ||", source)
+        self.assertIn("!binding_write_needed[i]", source)
+        self.assertIn("bindings[i].api_memory_id != bindings[j].api_memory_id", source)
+        self.assertIn("bindings[i].api_buffer_id != bindings[j].api_buffer_id", source)
+        self.assertIn("vulkan_bindings_api_ranges_overlap", source)
+        self.assertIn('\\"readonly_overlap_snapshot\\":%s', source)
+        self.assertIn('\\"readonly_overlap_snapshots\\":%zu', source)
         self.assertIn('\\"push_u32\\":[', source)
         self.assertIn("run_cpu_oracle_q6k_matvec_sample", source)
         self.assertIn("mul-mat-vec-q6-k-large", source)
@@ -2709,8 +2722,8 @@ class GpuAbiContractTest(unittest.TestCase):
                     {
                         "schema": "pdocker.llama.gpu.compare.v1",
                         "runtime_freshness": {
-                            "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
-                            "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
+                            "observed_executor_markers": ["gpu-executor-readonly-overlap-snapshot-20260531"],
+                            "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
                             "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                             "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                         },
@@ -2718,8 +2731,8 @@ class GpuAbiContractTest(unittest.TestCase):
                             "runtime_env_manifest": q6_required_runtime_env_manifest(plan),
                             "diagnostics": {
                                 "runtime_freshness": {
-                                    "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
-                                    "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
+                                    "observed_executor_markers": ["gpu-executor-readonly-overlap-snapshot-20260531"],
+                                    "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
                                     "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                                     "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                                 },
@@ -2810,7 +2823,7 @@ class GpuAbiContractTest(unittest.TestCase):
                                             "changed": False,
                                             "failure_reason": "no-changes",
                                         },
-                                        "executor_build_marker": "gpu-executor-q6-descriptor-invariants-20260530",
+                                        "executor_build_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
                                         "source_spirv_hash": "0x1111111111111111",
                                         "effective_spirv_hash": "0x2222222222222222",
                                         "oracle_spirv_hash": "0x1111111111111111",
@@ -2980,8 +2993,8 @@ class GpuAbiContractTest(unittest.TestCase):
                     {
                         "schema": "pdocker.llama.gpu.compare.v1",
                         "runtime_freshness": {
-                            "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
-                            "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
+                            "observed_executor_markers": ["gpu-executor-readonly-overlap-snapshot-20260531"],
+                            "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
                             "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                             "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                         },
@@ -3346,8 +3359,8 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
-                        "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
+                        "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
+                        "observed_executor_markers": ["gpu-executor-readonly-overlap-snapshot-20260531"],
                     },
                     "config_propagation": {
                         "summary": "fail",
@@ -3459,7 +3472,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
+                        "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
                         "observed_executor_markers": [],
                     },
                 },
@@ -3501,7 +3514,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "diagnostics": {
                     "runtime_freshness": {
                         "summary": "fail",
-                        "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
+                        "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
                         "observed_executor_markers": [],
                     },
                 },
@@ -3524,8 +3537,8 @@ class GpuAbiContractTest(unittest.TestCase):
                     "blocker_detail": "Android Vulkan rejected a ggml generic SPIR-V compute pipeline with VK_ERROR_FEATURE_NOT_PRESENT",
                     "runtime_freshness": {
                         "summary": "pass",
-                        "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
-                        "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
+                        "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
+                        "observed_executor_markers": ["gpu-executor-readonly-overlap-snapshot-20260531"],
                     },
                     "config_propagation": {"summary": "pass", "checks": []},
                 },
@@ -3570,7 +3583,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "enabled_ext_8bit_storage",
             "enabled_ext_shader_float16_int8",
             "enabled_ext_storage_buffer_storage_class",
-            "#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER \"gpu-executor-q6-descriptor-invariants-20260530\"",
+            "#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER \"gpu-executor-readonly-overlap-snapshot-20260531\"",
         ]:
             self.assertIn(marker, source)
         failure_body = source.split("if (ret != 0) {", 1)[1].split("if (fence) vkDestroyFence", 1)[0]

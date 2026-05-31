@@ -503,7 +503,7 @@ remains an explicit diagnostic override and is available under strict
 passthrough for isolating driver compilation rejection from descriptor/call-site
 ABI correctness; it is not a benchmarkable product optimization.
 Fresh APK/device evidence for this lane must show executor marker
-`gpu-executor-q6-descriptor-invariants-20260530`.
+`gpu-executor-readonly-overlap-snapshot-20260531`.
 
 2026-05-21 Q6 evidence-retention gate: a fresh `ngl=1` compare on
 `192.168.179.26:37303` served `/health`, `/v1/models`, and `/completion`, but
@@ -1521,12 +1521,13 @@ Latest promoted device artifact:
 
 - `docs/test/llama-gpu-ngl1-q6-workgroup-adb46015-20260530T232458Z.json`
 
-The stale-executor marker issue has been closed for this lane.  The artifact
-now reports the expected executor marker
-`gpu-executor-q6-descriptor-invariants-20260530`, and descriptor/readback
-invariants are present and true.  Q6 is still not correct: `/completion` returns
-`" Marvel"` for the deterministic sanity prompt, so no performance claim is
-allowed.
+The stale-executor marker issue was closed for this lane in the promoted
+artifact with marker `gpu-executor-q6-descriptor-invariants-20260530`.
+Descriptor/readback invariants are present and true.  Q6 is still not correct:
+`/completion` returns `" Marvel"` for the deterministic sanity prompt, so no
+performance claim is allowed.  The next executor build marker is
+`gpu-executor-readonly-overlap-snapshot-20260531`; a fresh device artifact must
+show that marker before interpreting the new overlap-snapshot evidence.
 
 The effective native Q6 probe module is now reproducible offline with
 `scripts/reconstruct-q6-effective-spirv.py`:
@@ -1573,3 +1574,44 @@ Next static target before another ADB run:
    generic driver-compatibility lowering for the proven semantic boundary
    (workgroup-memory/barrier/final-store behavior), not a hash-only safe kernel
    and not a llama.cpp change.
+
+### 2026-05-31 Update: strict read-only overlap snapshot is implemented
+
+Static review of the promoted Q6 artifact found that binding 2 is the writable
+final output while bindings 3 and 4 are read-only optional fuse inputs over the
+same `api_memory_id`, `api_buffer_id`, offset, and range.  The shader gates the
+optional fuse reads with `push[7] == 0`, but the Android driver still sees a
+single dispatch with read/write storage-buffer aliasing over the same window.
+
+The executor now implements a narrowly gated compatibility lowering under the
+existing `PDOCKER_GPU_DISABLE_OVERLAP_ALIASING` switch:
+
+- only strict passthrough dispatches are eligible;
+- only active read-only bindings that overlap an active writable binding with
+  the same API memory and buffer identity are snapshotted;
+- the writable binding stays on the strict object graph and remains the only
+  writeback source;
+- the read-only snapshot preserves descriptor offset and range by allocating a
+  temporary Vulkan buffer large enough for `api_offset + api_range`;
+- llama.cpp, Dockerfile, model, prompt, SPIR-V source bytes, and tensor bytes
+  are not changed.
+
+Fresh artifacts must expose:
+
+- `executor_build_marker == gpu-executor-readonly-overlap-snapshot-20260531`;
+- `strict_object_graph.readonly_overlap_snapshots`;
+- `strict_object_graph.readonly_overlap_snapshot_bytes`;
+- per-binding `readonly_overlap_snapshot`,
+  `readonly_overlap_source_index`, and `readonly_overlap_snapshot_bytes`.
+
+Interpretation rules:
+
+1. If Q6 prompt correctness passes with snapshots enabled, the previous native
+   Q6 failure depends on read/write descriptor aliasing in the Android Vulkan
+   execution path.  Then measure the snapshot overhead and decide whether a
+   better alias-preserving lowering is needed.
+2. If Q6 still fails, the alias hypothesis is rejected for this lane and the
+   next target remains the workgroup-memory/barrier/final-store path in the
+   effective Q6 module.
+3. This is not a benchmark success condition by itself.  Prompt correctness and
+   verifier gates still decide whether any speed result is reportable.

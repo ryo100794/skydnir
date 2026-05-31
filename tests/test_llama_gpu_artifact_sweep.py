@@ -63,6 +63,10 @@ def q6_verified_writeback(hash_value="0x1111111111111111"):
                 "writable": True,
                 "gpu_after_dispatch_hash": hash_value,
                 "fd_after_hash": hash_value,
+                "offset_equals_memory_plus_api_offset": True,
+                "gpu_offset_equals_memory_plus_api_offset": True,
+                "descriptor_offset_equals_api_offset": True,
+                "descriptor_range_matches_api_range": True,
                 "writeback_verified": True,
                 "writeback_mismatch": False,
             }
@@ -154,8 +158,8 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                             "diagnostics": {
                                 "runtime_freshness": {
                                     "summary": "pass",
-                                    "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
-                                    "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
+                                    "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
+                                    "observed_executor_markers": ["gpu-executor-readonly-overlap-snapshot-20260531"],
                                     "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                                     "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                                     "executor_event_count": 1,
@@ -193,6 +197,10 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                                             "writable": True,
                                             "gpu_after_dispatch_hash": "0x1111111111111111",
                                             "fd_after_hash": "0x1111111111111111",
+                                            "offset_equals_memory_plus_api_offset": True,
+                                            "gpu_offset_equals_memory_plus_api_offset": True,
+                                            "descriptor_offset_equals_api_offset": True,
+                                            "descriptor_range_matches_api_range": True,
                                             "writeback_verified": True,
                                             "writeback_mismatch": False,
                                         }
@@ -231,8 +239,8 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             entry = json.loads(result.stdout)["artifacts"][0]
-            self.assertEqual(entry["classification"], "q6-workgroup-cleared-and-oracle-match")
-            self.assertEqual(entry["q6_blocker_class"], "cleared")
+            self.assertEqual(entry["classification"], "q6-safe-kernel-diagnostic-only")
+            self.assertEqual(entry["q6_blocker_class"], "q6-safe-kernel-diagnostic-only")
             self.assertEqual(entry["q6_raw_blocker_class"], "stale-workgroup-shape")
 
     def test_sweep_retains_q6_probe_writeback_cleared_oracle_missing_from_synthetic_artifact(self):
@@ -276,8 +284,8 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                             "diagnostics": {
                                 "runtime_freshness": {
                                     "summary": "pass",
-                                    "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
-                                    "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
+                                    "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
+                                    "observed_executor_markers": ["gpu-executor-readonly-overlap-snapshot-20260531"],
                                     "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                                     "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                                     "executor_event_count": 1,
@@ -331,8 +339,8 @@ class LlamaGpuArtifactSweepTest(unittest.TestCase):
                             "diagnostics": {
                                 "runtime_freshness": {
                                     "summary": "pass",
-                                    "expected_executor_marker": "gpu-executor-q6-descriptor-invariants-20260530",
-                                    "observed_executor_markers": ["gpu-executor-q6-descriptor-invariants-20260530"],
+                                    "expected_executor_marker": "gpu-executor-readonly-overlap-snapshot-20260531",
+                                    "observed_executor_markers": ["gpu-executor-readonly-overlap-snapshot-20260531"],
                                     "expected_icd_marker": "vulkan-icd-feature-chain-marker-20260518",
                                     "observed_icd_markers": ["vulkan-icd-feature-chain-marker-20260518"],
                                     "executor_event_count": 1,

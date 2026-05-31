@@ -1111,7 +1111,7 @@ typedef struct {
 
 static VulkanRuntime g_vulkan_runtime;
 
-#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-q6-descriptor-invariants-20260530"
+#define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-readonly-overlap-snapshot-20260531"
 
 static uint32_t choose_vulkan_instance_api_version(void) {
     uint32_t supported = VK_API_VERSION_1_0;
@@ -4534,6 +4534,9 @@ static void write_vulkan_binding_report(
         const uint64_t *gpu_after_dispatch_hash,
         const uint64_t *fd_after_hash,
         const size_t *alias_rep,
+        const uint8_t *readonly_overlap_snapshot,
+        const size_t *readonly_overlap_source_index,
+        const size_t *readonly_overlap_snapshot_bytes,
         VulkanVectorBuffer * const *vk_buffers,
         const size_t *binding_gpu_offset,
         const size_t *binding_descriptor_offset,
@@ -4562,6 +4565,9 @@ static void write_vulkan_binding_report(
                 "\"descriptor_range_matches_api_range\":%s,"
                 "\"descriptor_range_mismatch\":%s,"
                 "\"alias_rep\":%zu,\"active\":%s,\"readable\":%s,\"writable\":%s,"
+                "\"readonly_overlap_snapshot\":%s,"
+                "\"readonly_overlap_source_index\":%lld,"
+                "\"readonly_overlap_snapshot_bytes\":%zu,"
                 "\"resident\":%s,\"cache_hit\":%s,"
                 "\"mutable_reused\":%s,\"mutable_cache_hit\":%s,"
                 "\"upload_ms\":%.4f,\"download_ms\":%.4f,"
@@ -4613,6 +4619,11 @@ static void write_vulkan_binding_report(
                 active && active[i] ? "true" : "false",
                 readable && readable[i] ? "true" : "false",
                 writable && writable[i] ? "true" : "false",
+                readonly_overlap_snapshot && readonly_overlap_snapshot[i] ? "true" : "false",
+                readonly_overlap_snapshot && readonly_overlap_snapshot[i] && readonly_overlap_source_index
+                    ? (long long)readonly_overlap_source_index[i]
+                    : -1ll,
+                readonly_overlap_snapshot_bytes ? readonly_overlap_snapshot_bytes[i] : (size_t)0,
                 cache_resident && cache_resident[i] ? "true" : "false",
                 cache_hits && cache_hits[i] ? "true" : "false",
                 mutable_cache_reused && mutable_cache_reused[i] ? "true" : "false",
@@ -4758,6 +4769,89 @@ static int ranges_overlap_off_size(
     if (overlap_offset) *overlap_offset = (off_t)start;
     if (overlap_size) *overlap_size = (size_t)(end - start);
     return 1;
+}
+
+static int vulkan_binding_api_absolute_range(
+        const VulkanDispatchBinding *binding,
+        uint64_t *start,
+        uint64_t *end) {
+    if (!binding || binding->api_memory_offset < 0 || binding->api_offset < 0) {
+        return 0;
+    }
+    const uint64_t memory_offset = (uint64_t)binding->api_memory_offset;
+    const uint64_t api_offset = (uint64_t)binding->api_offset;
+    if (memory_offset > UINT64_MAX - api_offset) return 0;
+    const uint64_t s = memory_offset + api_offset;
+    if ((uint64_t)binding->size > UINT64_MAX - s) return 0;
+    const uint64_t e = s + (uint64_t)binding->size;
+    if (start) *start = s;
+    if (end) *end = e;
+    return e > s;
+}
+
+static int vulkan_bindings_api_ranges_overlap(
+        const VulkanDispatchBinding *a,
+        const VulkanDispatchBinding *b,
+        uint64_t *overlap_start,
+        uint64_t *overlap_end) {
+    uint64_t a_start = 0, a_end = 0, b_start = 0, b_end = 0;
+    if (!vulkan_binding_api_absolute_range(a, &a_start, &a_end) ||
+        !vulkan_binding_api_absolute_range(b, &b_start, &b_end)) {
+        return 0;
+    }
+    if (a_end <= b_start || b_end <= a_start) return 0;
+    const uint64_t s = a_start > b_start ? a_start : b_start;
+    const uint64_t e = a_end < b_end ? a_end : b_end;
+    if (e <= s) return 0;
+    if (overlap_start) *overlap_start = s;
+    if (overlap_end) *overlap_end = e;
+    return 1;
+}
+
+static int materialize_strict_readonly_overlap_snapshot(
+        VkPhysicalDevice physical_device,
+        VkDevice device,
+        int fd,
+        const VulkanDispatchBinding *binding,
+        VulkanVectorBuffer *temporary,
+        VulkanVectorBuffer **vk_buffer,
+        size_t *binding_gpu_offset,
+        size_t *binding_descriptor_offset) {
+    if (!binding || !temporary || !vk_buffer ||
+        !binding_gpu_offset || !binding_descriptor_offset ||
+        fd < 0 || binding->api_offset < 0) {
+        return -EINVAL;
+    }
+    const size_t descriptor_offset = (size_t)binding->api_offset;
+    const size_t descriptor_range = vulkan_binding_descriptor_range(binding, 1);
+    size_t snapshot_size = descriptor_offset;
+    if (descriptor_range > SIZE_MAX - snapshot_size) return -EOVERFLOW;
+    snapshot_size += descriptor_range;
+    size_t transfer_end = descriptor_offset;
+    if (binding->size > SIZE_MAX - transfer_end) return -EOVERFLOW;
+    transfer_end += binding->size;
+    if (snapshot_size < transfer_end) snapshot_size = transfer_end;
+    if (snapshot_size == 0) return -EINVAL;
+    unsigned char *initial = (unsigned char *)calloc(1, snapshot_size);
+    if (!initial) return -ENOMEM;
+    int rc = read_fd_exact(fd,
+                           initial + descriptor_offset,
+                           binding->size,
+                           binding->offset);
+    if (rc == 0) {
+        rc = create_vulkan_vector_buffer(
+            physical_device,
+            device,
+            snapshot_size,
+            initial,
+            temporary);
+    }
+    free(initial);
+    if (rc != 0) return rc;
+    *vk_buffer = temporary;
+    *binding_gpu_offset = descriptor_offset;
+    *binding_descriptor_offset = descriptor_offset;
+    return 0;
 }
 
 static void write_vulkan_rw_alias_hazard_report(
@@ -8010,6 +8104,9 @@ static void write_vulkan_binding_compact_report(
         const uint64_t *gpu_after_dispatch_hash,
         const uint64_t *fd_after_hash,
         const size_t *alias_rep,
+        const uint8_t *readonly_overlap_snapshot,
+        const size_t *readonly_overlap_source_index,
+        const size_t *readonly_overlap_snapshot_bytes,
         int debug_probe_binding,
         const CpuOracleReport *cpu_oracle_report) {
     fprintf(out, "\"binding_details\":[");
@@ -8034,6 +8131,9 @@ static void write_vulkan_binding_compact_report(
                 "\"descriptor_range_matches_api_range\":%s,"
                 "\"descriptor_range_mismatch\":%s,"
                 "\"alias_rep\":%zu,\"active\":%s,"
+                "\"readonly_overlap_snapshot\":%s,"
+                "\"readonly_overlap_source_index\":%lld,"
+                "\"readonly_overlap_snapshot_bytes\":%zu,"
                 "\"readable\":%s,\"writable\":%s,\"resident\":%s,"
                 "\"cache_hit\":%s,\"fd_before_hash\":\"0x%016llx\","
                 "\"gpu_after_upload_hash\":\"0x%016llx\","
@@ -8078,6 +8178,11 @@ static void write_vulkan_binding_compact_report(
                     ? "true" : "false",
                 alias_rep ? alias_rep[i] : i,
                 active && active[i] ? "true" : "false",
+                readonly_overlap_snapshot && readonly_overlap_snapshot[i] ? "true" : "false",
+                readonly_overlap_snapshot && readonly_overlap_snapshot[i] && readonly_overlap_source_index
+                    ? (long long)readonly_overlap_source_index[i]
+                    : -1ll,
+                readonly_overlap_snapshot_bytes ? readonly_overlap_snapshot_bytes[i] : (size_t)0,
                 readable && readable[i] ? "true" : "false",
                 writable && writable[i] ? "true" : "false",
                 cache_resident && cache_resident[i] ? "true" : "false",
@@ -9380,6 +9485,8 @@ static int run_vulkan_dispatch_fd(
     size_t strict_memory_count = 0;
     size_t strict_buffer_count = 0;
     int strict_object_graph_used = 0;
+    size_t strict_readonly_overlap_snapshot_count = 0;
+    size_t strict_readonly_overlap_snapshot_bytes = 0;
     int cache_hits[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     int cache_resident[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     int mutable_cache_hits[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -9387,6 +9494,9 @@ static int run_vulkan_dispatch_fd(
     double binding_upload_ms[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     double binding_download_ms[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     double binding_dirty_probe_ms[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint8_t binding_readonly_overlap_snapshot[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    size_t binding_readonly_overlap_source_index[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    size_t binding_readonly_overlap_snapshot_bytes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint64_t binding_fd_before_hash[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint64_t binding_gpu_after_upload_hash[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint64_t binding_gpu_after_dispatch_hash[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -9543,6 +9653,9 @@ static int run_vulkan_dispatch_fd(
     memset(binding_upload_ms, 0, sizeof(binding_upload_ms));
     memset(binding_download_ms, 0, sizeof(binding_download_ms));
     memset(binding_dirty_probe_ms, 0, sizeof(binding_dirty_probe_ms));
+    memset(binding_readonly_overlap_snapshot, 0, sizeof(binding_readonly_overlap_snapshot));
+    memset(binding_readonly_overlap_source_index, 0, sizeof(binding_readonly_overlap_source_index));
+    memset(binding_readonly_overlap_snapshot_bytes, 0, sizeof(binding_readonly_overlap_snapshot_bytes));
     memset(binding_fd_before_hash, 0, sizeof(binding_fd_before_hash));
     memset(binding_gpu_after_upload_hash, 0, sizeof(binding_gpu_after_upload_hash));
     memset(binding_gpu_after_dispatch_hash, 0, sizeof(binding_gpu_after_dispatch_hash));
@@ -10202,6 +10315,64 @@ static int run_vulkan_dispatch_fd(
             goto cleanup;
         }
         strict_object_graph_used = 1;
+        if (strict_passthrough && disable_overlap_aliasing) {
+            /*
+             * Strict passthrough preserves the guest VkBuffer/VkDeviceMemory
+             * object graph.  Some ggml shaders bind optional read-only fuse
+             * inputs to the same storage window as a writable output.  Vulkan
+             * permits descriptor aliasing, but read/write storage-buffer
+             * overlap within one dispatch is a weak driver/compiler contract
+             * on Android.  When explicitly requested, materialize only the
+             * read-only side as a pre-dispatch snapshot.  The writable binding
+             * remains on the strict object graph and is still the only side
+             * written back; no llama.cpp bytes, shader code, prompt, or model
+             * are changed.
+             */
+            for (size_t i = 0; i < binding_count; ++i) {
+                if (!active_bindings[i] ||
+                    !binding_read_needed[i] ||
+                    binding_write_needed[i]) {
+                    continue;
+                }
+                size_t writable_source = SIZE_MAX;
+                for (size_t j = 0; j < binding_count; ++j) {
+                    if (i == j || !active_bindings[j] || !binding_write_needed[j]) {
+                        continue;
+                    }
+                    if (bindings[i].api_memory_id != bindings[j].api_memory_id ||
+                        bindings[i].api_buffer_id != bindings[j].api_buffer_id) {
+                        continue;
+                    }
+                    if (vulkan_bindings_api_ranges_overlap(&bindings[i], &bindings[j],
+                                                           NULL, NULL)) {
+                        writable_source = j;
+                        break;
+                    }
+                }
+                if (writable_source == SIZE_MAX) continue;
+                fail_binding = (int)i;
+                fail_stage = "materialize-readonly-overlap-snapshot";
+                int snapshot_rc = materialize_strict_readonly_overlap_snapshot(
+                    rt->physical_device,
+                    rt->device,
+                    buffer_fds[i],
+                    &bindings[i],
+                    &temp_buffers[i],
+                    &vk_buffers[i],
+                    &binding_gpu_offset[i],
+                    &binding_descriptor_offset[i]);
+                if (snapshot_rc != 0) {
+                    io_rc = snapshot_rc;
+                    goto cleanup;
+                }
+                binding_readonly_overlap_snapshot[i] = 1;
+                binding_readonly_overlap_source_index[i] = writable_source;
+                binding_readonly_overlap_snapshot_bytes[i] = temp_buffers[i].size;
+                strict_readonly_overlap_snapshot_count++;
+                strict_readonly_overlap_snapshot_bytes += temp_buffers[i].size;
+            }
+            fail_binding = -1;
+        }
         for (size_t i = 0; i < binding_count; ++i) {
             if (!active_bindings[i]) continue;
             if ((binding_read_needed[i] || binding_write_needed[i]) &&
@@ -11095,6 +11266,9 @@ static int run_vulkan_dispatch_fd(
                                             binding_gpu_after_dispatch_hash,
                                             binding_fd_after_hash,
                                             binding_alias_rep,
+                                            binding_readonly_overlap_snapshot,
+                                            binding_readonly_overlap_source_index,
+                                            binding_readonly_overlap_snapshot_bytes,
                                             probe_debug_binding_from_options(options),
                                             &cpu_oracle_report);
         fprintf(stderr, ",");
@@ -11263,7 +11437,9 @@ static int run_vulkan_dispatch_fd(
                 "\"strict_object_graph\":{\"used\":%s,\"memories\":%zu,\"buffers\":%zu,"
                 "\"device_local_staging_requested\":%s,\"device_local_staged_memories\":%zu,"
                 "\"staging_upload_copies\":%zu,\"staging_upload_bytes\":%zu,"
-                "\"staging_download_copies\":%zu,\"staging_download_bytes\":%zu},"
+                "\"staging_download_copies\":%zu,\"staging_download_bytes\":%zu,"
+                "\"readonly_overlap_snapshots\":%zu,"
+                "\"readonly_overlap_snapshot_bytes\":%zu},"
                 "\"shader_bytes\":%zu,"
                 "\"source_spirv_hash\":\"0x%016llx\","
                 "\"effective_spirv_hash\":\"0x%016llx\","
@@ -11319,6 +11495,8 @@ static int run_vulkan_dispatch_fd(
                 strict_staging_upload_bytes,
                 strict_staging_download_copies,
                 strict_staging_download_bytes,
+                strict_readonly_overlap_snapshot_count,
+                strict_readonly_overlap_snapshot_bytes,
                 shader_size,
                 (unsigned long long)original_spirv_hash,
                 (unsigned long long)spirv_summary.hash,
@@ -11396,6 +11574,9 @@ static int run_vulkan_dispatch_fd(
                                             binding_gpu_after_dispatch_hash,
                                             binding_fd_after_hash,
                                             binding_alias_rep,
+                                            binding_readonly_overlap_snapshot,
+                                            binding_readonly_overlap_source_index,
+                                            binding_readonly_overlap_snapshot_bytes,
                                             probe_debug_binding_from_options(options),
                                             &cpu_oracle_report);
         fprintf(json_out(), ",");
@@ -11449,7 +11630,9 @@ static int run_vulkan_dispatch_fd(
             "\"strict_object_graph\":{\"used\":%s,\"memories\":%zu,\"buffers\":%zu,"
             "\"device_local_staging_requested\":%s,\"device_local_staged_memories\":%zu,"
             "\"staging_upload_copies\":%zu,\"staging_upload_bytes\":%zu,"
-            "\"staging_download_copies\":%zu,\"staging_download_bytes\":%zu},"
+            "\"staging_download_copies\":%zu,\"staging_download_bytes\":%zu,"
+            "\"readonly_overlap_snapshots\":%zu,"
+            "\"readonly_overlap_snapshot_bytes\":%zu},"
             "\"shader_bytes\":%zu,"
             "\"source_spirv_hash\":\"0x%016llx\","
             "\"effective_spirv_hash\":\"0x%016llx\","
@@ -11514,6 +11697,8 @@ static int run_vulkan_dispatch_fd(
             strict_staging_upload_bytes,
             strict_staging_download_copies,
             strict_staging_download_bytes,
+            strict_readonly_overlap_snapshot_count,
+            strict_readonly_overlap_snapshot_bytes,
             shader_size,
             (unsigned long long)original_spirv_hash,
             (unsigned long long)spirv_summary.hash,
@@ -11625,6 +11810,9 @@ static int run_vulkan_dispatch_fd(
                                     binding_gpu_after_dispatch_hash,
                                     binding_fd_after_hash,
                                     binding_alias_rep,
+                                    binding_readonly_overlap_snapshot,
+                                    binding_readonly_overlap_source_index,
+                                    binding_readonly_overlap_snapshot_bytes,
                                     vk_buffers,
                                     binding_gpu_offset,
                                     binding_descriptor_offset,
@@ -11849,6 +12037,9 @@ cleanup:
                                     binding_gpu_after_dispatch_hash,
                                     binding_fd_after_hash,
                                     binding_alias_rep,
+                                    binding_readonly_overlap_snapshot,
+                                    binding_readonly_overlap_source_index,
+                                    binding_readonly_overlap_snapshot_bytes,
                                     vk_buffers,
                                     binding_gpu_offset,
                                     binding_descriptor_offset,

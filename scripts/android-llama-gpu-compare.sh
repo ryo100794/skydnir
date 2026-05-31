@@ -1458,7 +1458,7 @@ env = [
     f"LLAMA_ARG_CTX={ctx}",
     f"LLAMA_ARG_PORT={port}",
     "LLAMA_LOG_FILE=/workspace/logs/llama-server.log",
-    f"PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER={os.environ.get('PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER', 'gpu-executor-q6-descriptor-invariants-20260530')}",
+    f"PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER={os.environ.get('PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER', 'gpu-executor-readonly-overlap-snapshot-20260531')}",
     f"PDOCKER_VULKAN_ICD_EXPECTED_MARKER={os.environ.get('PDOCKER_VULKAN_ICD_EXPECTED_MARKER', 'vulkan-icd-feature-chain-marker-20260518')}",
 ]
 if model_url:
@@ -2841,7 +2841,7 @@ config_propagation = {
     "summary": "fail" if any(item["status"] in {"missing-evidence", "mismatch"} for item in config_checks) else "pass",
     "checks": config_checks,
 }
-expected_executor_marker = os.environ.get("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", "gpu-executor-q6-descriptor-invariants-20260530")
+expected_executor_marker = os.environ.get("PDOCKER_GPU_EXECUTOR_EXPECTED_MARKER", "gpu-executor-readonly-overlap-snapshot-20260531")
 expected_icd_marker = os.environ.get("PDOCKER_VULKAN_ICD_EXPECTED_MARKER", "vulkan-icd-feature-chain-marker-20260518")
 observed_executor_markers = sorted({
     str(e.get("executor_build_marker"))
@@ -3772,6 +3772,9 @@ def compact_q6_binding_detail(detail):
         "descriptor_offset_equals_api_offset": detail.get("descriptor_offset_equals_api_offset"),
         "descriptor_range_matches_api_range": detail.get("descriptor_range_matches_api_range"),
         "descriptor_range_mismatch": detail.get("descriptor_range_mismatch"),
+        "readonly_overlap_snapshot": detail.get("readonly_overlap_snapshot"),
+        "readonly_overlap_source_index": detail.get("readonly_overlap_source_index"),
+        "readonly_overlap_snapshot_bytes": detail.get("readonly_overlap_snapshot_bytes"),
         "readable": detail.get("readable"),
         "writable": detail.get("writable"),
         "resident": detail.get("resident"),
