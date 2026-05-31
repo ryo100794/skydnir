@@ -192,6 +192,10 @@ def q6_final_store_boundary(summary, final_value=0.5, expected=1.25, fd_after=0.
                 "sample_class": summary,
                 "correlation_scope": "latest-q6-event",
                 "q6_event_dispatch_id": "297",
+                "q6_event_source_spirv_hash": "0xd2d7fbedceb5a8a6",
+                "q6_event_effective_spirv_hash": "0x72f4a362b00221fd",
+                "source_spirv_hash": "0xd2d7fbedceb5a8a6",
+                "effective_spirv_hash": "0x72f4a362b00221fd",
                 "layout_sample_source": "final-store-trace",
                 "layout_from_final_store_trace": True,
             }
@@ -1819,6 +1823,81 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
             report["q6_effective_blocker_class"],
             "q6-debug-binding-alias-evidence-missing",
         )
+
+    def test_q6_final_store_boundary_accepts_hash_identity_when_dispatch_id_absent(self):
+        boundary = q6_final_store_boundary(
+            "native-final-store-mismatch",
+            final_value=0.5,
+            expected=1.25,
+            fd_after=0.5,
+        )
+        boundary["samples"][0]["q6_event_dispatch_id"] = None
+        q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "local_size_resolved": [32, 1, 1],
+            "q6_output_layout_probe": {
+                "summary": "canonical-mismatch-inconclusive",
+                "samples": [q6_layout_sample_with_store_model(257, expected=1.25, gpu_at_dst=0.5)],
+            },
+            "q6_final_store_boundary": boundary,
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": q6,
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-native-final-store")
+        self.assertEqual(report["q6_final_store_boundary"]["summary"], "native-final-store-mismatch")
+
+    def test_q6_final_store_boundary_rejects_mismatched_event_hash_identity(self):
+        boundary = q6_final_store_boundary(
+            "native-final-store-mismatch",
+            final_value=0.5,
+            expected=1.25,
+            fd_after=0.5,
+        )
+        boundary["samples"][0]["q6_event_dispatch_id"] = None
+        boundary["samples"][0]["q6_event_effective_spirv_hash"] = "0x1111111111111111"
+        q6 = {
+            "event_count": 1,
+            "workgroup_shape_blocker": False,
+            "latest_status": "mismatch",
+            "local_size_resolved": [32, 1, 1],
+            "q6_output_layout_probe": {
+                "summary": "canonical-mismatch-inconclusive",
+                "samples": [q6_layout_sample_with_store_model(257, expected=1.25, gpu_at_dst=0.5)],
+            },
+            "q6_final_store_boundary": boundary,
+            **q6_store_index_model_reflection(),
+            **q6_verified_writeback(),
+        }
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": q6,
+                },
+            },
+        }
+        result = self.run_verifier(payload, "--require-q6-workgroup-clear")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "q6-native-output-layout-inconclusive")
+        self.assertEqual(report["q6_final_store_boundary"]["summary"], "inconclusive")
 
     def test_q6_final_store_boundary_requires_latest_event_layout_provenance(self):
         boundary = q6_final_store_boundary(

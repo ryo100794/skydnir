@@ -962,6 +962,31 @@ def _q6_debug_alias_evidence_missing(
     )
 
 
+def _q6_final_store_sample_has_latest_event_identity(sample: dict[str, Any]) -> bool:
+    """Return true when a final-store sample is tied to the latest Q6 event.
+
+    Some executor events do not carry a stable dispatch_id in the compare
+    artifact, so dispatch_id alone is not a safe required field.  The fail-
+    closed identity is either an explicit dispatch id or matching source and
+    effective SPIR-V compact hashes between the sample event annotation and the
+    boundary sample identity.
+    """
+    if sample.get("q6_event_dispatch_id") not in {None, ""}:
+        return True
+    source = sample.get("source_spirv_hash")
+    event_source = sample.get("q6_event_source_spirv_hash")
+    effective = sample.get("effective_spirv_hash")
+    event_effective = sample.get("q6_event_effective_spirv_hash")
+    return (
+        _valid_compact_hash(source)
+        and _valid_compact_hash(event_source)
+        and str(source).lower() == str(event_source).lower()
+        and _valid_compact_hash(effective)
+        and _valid_compact_hash(event_effective)
+        and str(effective).lower() == str(event_effective).lower()
+    )
+
+
 def _q6_final_store_boundary(q6: Any) -> dict[str, Any]:
     if not isinstance(q6, dict):
         return {"summary": "not-run", "samples": []}
@@ -1004,7 +1029,7 @@ def _q6_final_store_boundary(q6: Any) -> dict[str, Any]:
             isinstance(sample, dict)
             and sample.get("layout_from_final_store_trace") is True
             and sample.get("layout_sample_source") == "final-store-trace"
-            and sample.get("q6_event_dispatch_id") not in {None, ""}
+            and _q6_final_store_sample_has_latest_event_identity(sample)
             for sample in samples
         )
     ):
