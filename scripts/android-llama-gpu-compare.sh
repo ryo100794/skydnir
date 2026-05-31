@@ -4264,7 +4264,22 @@ def collect_q6_debug_probe_bindings(events):
             if key in seen:
                 continue
             seen.add(key)
-            bindings.append(detail)
+            annotated = dict(detail)
+            annotated["q6_event_dispatch_id"] = event.get("dispatch_id")
+            annotated["q6_event_source_spirv_hash"] = event.get("source_spirv_hash")
+            annotated["q6_event_effective_spirv_hash"] = event.get("effective_spirv_hash")
+            annotated["q6_event_oracle_spirv_hash"] = (
+                event.get("oracle_spirv_hash")
+                or (event.get("cpu_oracle") or {}).get("spirv_hash")
+                if isinstance(event.get("cpu_oracle"), dict)
+                else event.get("oracle_spirv_hash")
+            )
+            annotated["q6_event_pipeline_spirv_hash"] = (
+                (event.get("pipeline_key") or {}).get("spirv_hash")
+                if isinstance(event.get("pipeline_key"), dict)
+                else None
+            )
+            bindings.append(annotated)
     return bindings
 
 
@@ -4403,6 +4418,9 @@ def build_q6_debug_binding_alias_safety(binding_details):
 q6_debug_binding_alias_safety = build_q6_debug_binding_alias_safety(q6_binding_details)
 q6_debug_u32_probe = parse_q6_final_store_trace_v2(
     collect_q6_debug_probe_bindings(q6_valid_spirv_events)
+)
+q6_latest_debug_u32_probe = parse_q6_final_store_trace_v2(
+    collect_q6_debug_probe_bindings([q6_latest] if q6_latest else [])
 )
 
 
@@ -4671,7 +4689,8 @@ def build_q6_final_store_boundary():
     model files.
     """
     records = []
-    for binding in q6_debug_u32_probe.get("bindings") or []:
+    debug_report = q6_latest_debug_u32_probe
+    for binding in debug_report.get("bindings") or []:
         if not isinstance(binding, dict):
             continue
         for record in binding.get("records") or []:
@@ -4686,12 +4705,19 @@ def build_q6_final_store_boundary():
                     **record,
                     "binding": binding.get("binding"),
                     "set": binding.get("set"),
+                    "q6_event_dispatch_id": binding.get("q6_event_dispatch_id"),
+                    "q6_event_source_spirv_hash": binding.get("q6_event_source_spirv_hash"),
+                    "q6_event_effective_spirv_hash": binding.get("q6_event_effective_spirv_hash"),
+                    "q6_event_oracle_spirv_hash": binding.get("q6_event_oracle_spirv_hash"),
+                    "q6_event_pipeline_spirv_hash": binding.get("q6_event_pipeline_spirv_hash"),
                 })
     if not records:
         return {
             "schema": "pdocker.q6k.final-store-boundary.v1",
             "summary": "not-run",
             "reason": "missing-executed-final-store-trace",
+            "correlation_scope": "latest-q6-event",
+            "debug_report_summary": debug_report.get("summary"),
             "joined_sample_count": 0,
             "class_counts": {},
             "samples": [],
@@ -4779,6 +4805,11 @@ def build_q6_final_store_boundary():
             "trace_writeback_verified": record.get("trace_writeback_verified"),
             "trace_writeback_mismatch": record.get("trace_writeback_mismatch"),
             "trace_writeback_mismatch_fields": record.get("trace_writeback_mismatch_fields"),
+            "q6_event_dispatch_id": record.get("q6_event_dispatch_id"),
+            "q6_event_source_spirv_hash": record.get("q6_event_source_spirv_hash"),
+            "q6_event_effective_spirv_hash": record.get("q6_event_effective_spirv_hash"),
+            "q6_event_oracle_spirv_hash": record.get("q6_event_oracle_spirv_hash"),
+            "q6_event_pipeline_spirv_hash": record.get("q6_event_pipeline_spirv_hash"),
             "source_spirv_hash": q6_native_spirv_identity.get("source_spirv_hash"),
             "effective_spirv_hash": q6_native_spirv_identity.get("effective_spirv_hash"),
         })
@@ -4808,6 +4839,8 @@ def build_q6_final_store_boundary():
     result = {
         "schema": "pdocker.q6k.final-store-boundary.v1",
         "summary": summary,
+        "correlation_scope": "latest-q6-event",
+        "debug_report_summary": debug_report.get("summary"),
         "joined_sample_count": len(joined),
         "executed_output_indices": executed_output_indices[:16],
         "missing_layout_output_indices": missing_layout_output_indices[:16],

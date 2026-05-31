@@ -1,7 +1,7 @@
 {
   "adb_policy": "do not connect until the user says the Android device is prepared",
-  "artifact_path": "docs/test/llama-gpu-ngl1-q6-storage16-lowered2-adb46015-20260531T063825Z.json",
-  "created_utc": "2026-05-31T06:38:28Z",
+  "artifact_path": "docs/test/llama-gpu-ngl1-q6-latest-event-join-adb46015-20260531T073827Z.json",
+  "created_utc": "2026-05-31T07:38:28Z",
   "fail_branches": [
     {
       "action": "extend the SPIR-V materializer only for the reported specialization expression",
@@ -117,7 +117,7 @@
     "writeback_matches_final_store"
   ],
   "runner": "scripts/android-llama-gpu-q6-workgroup-run.sh",
-  "runner_command": "ANDROID_SERIAL=192.168.179.21:46015 scripts/android-llama-gpu-q6-workgroup-run.sh --out docs/test/llama-gpu-ngl1-q6-storage16-lowered2-adb46015-20260531T063825Z.json --cpu-tps 0.04702448956650603 --cpu-ctx 512 --gpu-ctx 512 --gpu-layers 1 --predict 4 --repeat 1",
+  "runner_command": "ANDROID_SERIAL=192.168.179.21:46015 scripts/android-llama-gpu-q6-workgroup-run.sh --out docs/test/llama-gpu-ngl1-q6-latest-event-join-adb46015-20260531T073827Z.json --cpu-tps 0.04702448956650603 --cpu-ctx 512 --gpu-ctx 512 --gpu-layers 1 --predict 4 --repeat 1",
   "runner_step_contract": [
     {
       "command": "scripts/plan-llama-gpu-q6-run.py",
