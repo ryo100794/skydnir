@@ -4115,6 +4115,19 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, body)
         self.assertIn("write_json_string_literal(out, rt ? rt->physical_properties.deviceName : \"offline\")", body)
 
+    def test_vulkan_icd_can_shadow_query_executor_advertisement_caps(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("query_executor_advertisement_caps_line", icd)
+        self.assertIn('const char command[] = "VULKAN_ADVERTISEMENT_CAPS\\n";', icd)
+        self.assertIn('\\"schema\\":\\"skydnir-vulkan-advertisement-caps-v1\\"', icd)
+        self.assertIn("trace_executor_advertisement_caps_once", icd)
+        self.assertIn("executor advertisement caps shadow", icd)
+        fill_props = icd.split("static void fill_physical_device_properties", 1)[1].split(
+            "pProperties->apiVersion", 1
+        )[0]
+        self.assertIn("trace_executor_advertisement_caps_once();", fill_props)
+        self.assertIn("PDOCKER_VULKAN_ICD_DEBUG", icd)
+
     def test_llama_gpu_dispatch_lifecycle_logs_are_recorded(self):
         compare = LLAMA_COMPARE.read_text()
         icd = VULKAN_ICD.read_text()

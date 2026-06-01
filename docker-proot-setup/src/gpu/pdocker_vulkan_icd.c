@@ -2063,8 +2063,55 @@ static void copy_extension_properties(
     *pPropertyCount = count;
 }
 
+static int query_executor_advertisement_caps_line(char *line, size_t line_cap) {
+    if (!line || line_cap == 0) return -EINVAL;
+    line[0] = '\0';
+    int socket_fd = connect_queue();
+    if (socket_fd < 0) return socket_fd;
+    const char command[] = "VULKAN_ADVERTISEMENT_CAPS\n";
+    ssize_t sent = write(socket_fd, command, sizeof(command) - 1);
+    int rc = 0;
+    if (sent < 0 || (size_t)sent != sizeof(command) - 1) {
+        rc = sent < 0 ? -errno : -EIO;
+    } else {
+        size_t off = 0;
+        while (off + 1 < line_cap) {
+            char ch;
+            ssize_t r = read(socket_fd, &ch, 1);
+            if (r <= 0) break;
+            line[off++] = ch;
+            if (ch == '\n') break;
+        }
+        line[off] = '\0';
+        if (off == 0) rc = -EIO;
+        if (rc == 0 && strstr(line, "\"schema\":\"skydnir-vulkan-advertisement-caps-v1\"") == NULL) {
+            rc = -EPROTO;
+        }
+    }
+    close(socket_fd);
+    return rc;
+}
+
+static void trace_executor_advertisement_caps_once(void) {
+    static int traced = 0;
+    if (traced || !getenv("PDOCKER_VULKAN_ICD_DEBUG")) return;
+    traced = 1;
+    char line[8192];
+    int rc = query_executor_advertisement_caps_line(line, sizeof(line));
+    if (rc == 0) {
+        fprintf(stderr, "pdocker-vulkan-icd: executor advertisement caps shadow: %s",
+                line);
+        if (line[0] && line[strlen(line) - 1] != '\n') fprintf(stderr, "\n");
+    } else {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: executor advertisement caps shadow unavailable rc=%d\n",
+                rc);
+    }
+}
+
 static void fill_physical_device_properties(VkPhysicalDeviceProperties *pProperties) {
     if (!pProperties) return;
+    trace_executor_advertisement_caps_once();
     memset(pProperties, 0, sizeof(*pProperties));
     pProperties->apiVersion = pdocker_api_version();
     pProperties->driverVersion = VK_MAKE_API_VERSION(0, 0, 1, 0);
