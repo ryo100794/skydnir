@@ -131,3 +131,26 @@ Interpretation:
 - The Q6_K native pass-through path now reaches a deterministic `match` for the sampled Q6 oracle evidence while using the generic SPIR-V bridge, not the Q6 safe-kernel fallback.
 - The implemented lowering is therefore a correctness fix for the Android driver-sensitive packed-byte decode form.
 - Remaining blocker has moved from Q6 arithmetic correctness to performance: upload/copy overhead keeps the GPU path below CPU throughput for this short benchmark.
+
+## Strict read-only resident cache follow-up
+
+Artifact: `docs/test/llama-gpu-ngl1-strict-resident2-20260601T151917Z.json` (ignored large artifact).
+
+Result summary:
+
+| Item | Value |
+|---|---:|
+| GPU served | `true` |
+| Q6 latest status | `match` |
+| Q6 mismatch count | `0` |
+| Q6 binding 0 resident | `true` |
+| Q6 binding 0 cache hit | `true` |
+| Q6 binding 0 bytes | `510504960` |
+| GPU measured | `0.04785254410802271 tok/s` |
+| CPU-relative speed | `0.13255465759458993x` |
+
+Interpretation:
+
+- The strict read-only resident cache now avoids re-reading the large Q6 model/weight binding for repeated dispatches while preserving descriptor offset semantics.
+- This did not improve the short `n_predict=4` end-to-end benchmark.  The remaining bottleneck is therefore not only the large binding upload; it is dominated by per-dispatch fixed overhead in the generic SPIR-V bridge path.
+- Next target: reduce command/descriptor/object-graph lifecycle overhead and add timing evidence precise enough to separate fixed dispatch overhead from model-buffer transfer overhead.

@@ -2467,7 +2467,6 @@ static int resident_cache_candidate(
         const VulkanDispatchOptions *options,
         uint32_t binding,
         size_t size) {
-    if (strict_vulkan_passthrough_requested(options)) return 0;
     if (options && options->has_resident_cache && !options->resident_cache) return 0;
     if (!options || !options->has_resident_cache) {
         if (!env_truthy("PDOCKER_GPU_RESIDENT_CACHE", 1)) return 0;
@@ -2480,6 +2479,43 @@ static int resident_cache_candidate(
      */
     if (binding != 0) return 0;
     return size >= resident_cache_threshold(options);
+}
+
+static int strict_readonly_resident_cache_candidate(
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        const uint8_t *active_bindings,
+        const uint8_t *binding_read_needed,
+        const uint8_t *binding_write_needed,
+        const VulkanDispatchOptions *options,
+        size_t index) {
+    if (!bindings || !active_bindings || !binding_read_needed || !binding_write_needed ||
+        index >= binding_count || !active_bindings[index] ||
+        !binding_read_needed[index] || binding_write_needed[index]) {
+        return 0;
+    }
+    const VulkanDispatchBinding *b = &bindings[index];
+    if (!resident_cache_candidate(options, b->binding, b->size)) return 0;
+    if (b->api_offset < 0 || b->api_memory_offset < 0 ||
+        (uint64_t)b->api_memory_offset + (uint64_t)b->api_offset !=
+            (uint64_t)b->offset ||
+        (uint64_t)b->api_offset + (uint64_t)b->size > SIZE_MAX) {
+        return 0;
+    }
+    /*
+     * This cache intentionally handles only isolated read-only descriptor
+     * windows.  If another active binding shares the same strict API object,
+     * keep the full object graph path so descriptor aliasing and writable
+     * side effects remain API-faithful.
+     */
+    for (size_t j = 0; j < binding_count; ++j) {
+        if (j == index || !active_bindings[j]) continue;
+        if (bindings[j].api_memory_id == b->api_memory_id ||
+            bindings[j].api_buffer_id == b->api_buffer_id) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static size_t mutable_buffer_cache_max_bytes(void) {
@@ -10580,6 +10616,8 @@ static int run_vulkan_dispatch_fd(
     uint8_t shader_used_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     SpirvDescriptorAccess shader_binding_access[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t active_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint8_t strict_graph_active_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint8_t strict_resident_cached_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t binding_read_needed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t binding_write_needed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t binding_group_read_needed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -10644,6 +10682,8 @@ static int run_vulkan_dispatch_fd(
     memset(shader_used_bindings, 0, sizeof(shader_used_bindings));
     memset(shader_binding_access, 0, sizeof(shader_binding_access));
     memset(active_bindings, 0, sizeof(active_bindings));
+    memset(strict_graph_active_bindings, 0, sizeof(strict_graph_active_bindings));
+    memset(strict_resident_cached_bindings, 0, sizeof(strict_resident_cached_bindings));
     memset(binding_read_needed, 0, sizeof(binding_read_needed));
     memset(binding_write_needed, 0, sizeof(binding_write_needed));
     memset(binding_group_read_needed, 0, sizeof(binding_group_read_needed));
@@ -11293,6 +11333,57 @@ static int run_vulkan_dispatch_fd(
         specialization_data_size);
 
     double upload_start = now_ms();
+    memcpy(strict_graph_active_bindings, active_bindings, sizeof(strict_graph_active_bindings));
+    if (strict_passthrough && !strict_device_local_staging) {
+        for (size_t i = 0; i < binding_count; ++i) {
+            if (!strict_readonly_resident_cache_candidate(
+                    bindings, binding_count, active_bindings,
+                    binding_read_needed, binding_write_needed, options, i)) {
+                continue;
+            }
+            fail_binding = (int)i;
+            fail_stage = "strict-readonly-resident-cache";
+            double binding_start = now_ms();
+            VulkanDispatchBinding cache_binding = bindings[i];
+            cache_binding.offset = bindings[i].api_memory_offset;
+            cache_binding.size = (size_t)((uint64_t)bindings[i].api_offset +
+                                          (uint64_t)bindings[i].size);
+            vk_buffers[i] = acquire_dispatch_buffer(
+                rt->physical_device,
+                rt->device,
+                buffer_fds[i],
+                &cache_binding,
+                options,
+                &temp_buffers[i],
+                1,
+                &cache_hits[i],
+                &cache_resident[i],
+                &mutable_cache_hits[i],
+                &mutable_cache_reused[i],
+                0,
+                0,
+                0);
+            binding_upload_ms[i] = now_ms() - binding_start;
+            if (vk_buffers[i] && cache_resident[i]) {
+                strict_resident_cached_bindings[i] = 1;
+                strict_graph_active_bindings[i] = 0;
+                binding_gpu_offset[i] = (size_t)bindings[i].api_offset;
+                binding_descriptor_offset[i] = (size_t)bindings[i].api_offset;
+                continue;
+            }
+            if (vk_buffers[i] == &temp_buffers[i]) {
+                destroy_vulkan_vector_buffer(rt->device, &temp_buffers[i]);
+            }
+            vk_buffers[i] = NULL;
+            cache_hits[i] = 0;
+            cache_resident[i] = 0;
+            mutable_cache_hits[i] = 0;
+            mutable_cache_reused[i] = 0;
+            binding_upload_ms[i] = 0.0;
+        }
+        fail_binding = -1;
+    }
+
     if (strict_passthrough) {
         fail_stage = "create-strict-vulkan-object-graph";
         int graph_rc = create_strict_vulkan_object_graph(
@@ -11301,7 +11392,7 @@ static int run_vulkan_dispatch_fd(
             buffer_fds,
             bindings,
             binding_count,
-            active_bindings,
+            strict_graph_active_bindings,
             binding_read_needed,
             binding_write_needed,
             strict_memories,
@@ -11331,6 +11422,7 @@ static int run_vulkan_dispatch_fd(
              */
             for (size_t i = 0; i < binding_count; ++i) {
                 if (!active_bindings[i] ||
+                    strict_resident_cached_bindings[i] ||
                     !binding_read_needed[i] ||
                     binding_write_needed[i]) {
                     continue;
@@ -12805,7 +12897,7 @@ static int run_vulkan_dispatch_fd(
             pre_barrier_count,
             post_barrier_count,
             upload_ms, dispatch_ms, download_ms,
-            (!strict_passthrough && (!options || !options->has_resident_cache || options->resident_cache) &&
+            ((!options || !options->has_resident_cache || options->resident_cache) &&
                 env_truthy("PDOCKER_GPU_RESIDENT_CACHE", 1)) ? "true" : "false",
             resident_count, hit_count, resident_bytes,
             mutable_cache_enabled ? "true" : "false",
