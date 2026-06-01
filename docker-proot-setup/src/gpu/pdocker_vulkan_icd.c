@@ -2063,6 +2063,132 @@ static void copy_extension_properties(
     *pPropertyCount = count;
 }
 
+typedef struct {
+    bool loaded;
+    bool executor_valid;
+    uint32_t api_version;
+    uint32_t vendor_id;
+    uint32_t device_id;
+    VkPhysicalDeviceType device_type;
+    char device_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
+    VkPhysicalDeviceLimits limits;
+    VkPhysicalDeviceFeatures features;
+    VkPhysicalDevice16BitStorageFeatures storage16;
+    VkPhysicalDevice8BitStorageFeatures storage8;
+    VkPhysicalDeviceShaderFloat16Int8Features float16_int8;
+    VkPhysicalDeviceSubgroupProperties subgroup;
+    bool ext_16bit_storage;
+    bool ext_8bit_storage;
+    bool ext_shader_float16_int8;
+    bool ext_storage_buffer_storage_class;
+} PdockerVkAdvertisedCaps;
+
+static const char *json_find_value(const char *json, const char *key) {
+    if (!json || !key || !key[0]) return NULL;
+    char pattern[128];
+    int n = snprintf(pattern, sizeof(pattern), "\"%s\":", key);
+    if (n <= 0 || (size_t)n >= sizeof(pattern)) return NULL;
+    const char *p = strstr(json, pattern);
+    return p ? p + n : NULL;
+}
+
+static bool json_read_u32(const char *json, const char *key, uint32_t *out) {
+    const char *p = json_find_value(json, key);
+    if (!p || !out) return false;
+    char *end = NULL;
+    unsigned long value = strtoul(p, &end, 10);
+    if (end == p || value > UINT32_MAX) return false;
+    *out = (uint32_t)value;
+    return true;
+}
+
+static bool json_read_u32_array3(const char *json, const char *key, uint32_t out[3]) {
+    const char *p = json_find_value(json, key);
+    if (!p || !out || *p != '[') return false;
+    ++p;
+    for (size_t i = 0; i < 3; ++i) {
+        char *end = NULL;
+        unsigned long value = strtoul(p, &end, 10);
+        if (end == p || value > UINT32_MAX) return false;
+        out[i] = (uint32_t)value;
+        p = end;
+        if (i < 2) {
+            if (*p != ',') return false;
+            ++p;
+        }
+    }
+    return *p == ']';
+}
+
+static bool json_read_string(const char *json, const char *key, char *out, size_t out_cap) {
+    const char *p = json_find_value(json, key);
+    if (!p || !out || out_cap == 0 || *p != '"') return false;
+    ++p;
+    size_t off = 0;
+    while (*p && *p != '"') {
+        unsigned char ch = (unsigned char)*p++;
+        if (ch == '\\' && *p) {
+            ch = (unsigned char)*p++;
+        }
+        if (off + 1 < out_cap && ch >= 0x20 && ch < 0x7f) {
+            out[off++] = (char)ch;
+        }
+    }
+    if (*p != '"') return false;
+    out[off] = '\0';
+    return true;
+}
+
+static bool parse_executor_advertisement_caps_json(
+        const char *json,
+        PdockerVkAdvertisedCaps *caps) {
+    if (!json || !caps ||
+        strstr(json, "\"schema\":\"skydnir-vulkan-advertisement-caps-v1\"") == NULL) {
+        return false;
+    }
+    memset(caps, 0, sizeof(*caps));
+    caps->loaded = true;
+    caps->executor_valid = true;
+    uint32_t value = 0;
+    if (json_read_u32(json, "apiVersion", &value)) caps->api_version = value;
+    if (json_read_u32(json, "vendorID", &value)) caps->vendor_id = value;
+    if (json_read_u32(json, "deviceID", &value)) caps->device_id = value;
+    if (json_read_u32(json, "deviceType", &value)) caps->device_type = (VkPhysicalDeviceType)value;
+    if (!json_read_string(json, "deviceName", caps->device_name, sizeof(caps->device_name))) {
+        snprintf(caps->device_name, sizeof(caps->device_name), "executor Vulkan device");
+    }
+
+    json_read_u32(json, "maxPushConstantsSize", &caps->limits.maxPushConstantsSize);
+    json_read_u32(json, "maxComputeSharedMemorySize", &caps->limits.maxComputeSharedMemorySize);
+    json_read_u32(json, "maxPerStageDescriptorStorageBuffers", &caps->limits.maxPerStageDescriptorStorageBuffers);
+    json_read_u32(json, "maxDescriptorSetStorageBuffers", &caps->limits.maxDescriptorSetStorageBuffers);
+    json_read_u32(json, "maxBoundDescriptorSets", &caps->limits.maxBoundDescriptorSets);
+    json_read_u32(json, "maxComputeWorkGroupInvocations", &caps->limits.maxComputeWorkGroupInvocations);
+    json_read_u32(json, "maxStorageBufferRange", &caps->limits.maxStorageBufferRange);
+    json_read_u32_array3(json, "maxComputeWorkGroupSize", caps->limits.maxComputeWorkGroupSize);
+    json_read_u32_array3(json, "maxComputeWorkGroupCount", caps->limits.maxComputeWorkGroupCount);
+
+    json_read_u32(json, "shaderInt64", &caps->features.shaderInt64);
+    json_read_u32(json, "storageBuffer16BitAccess", &caps->storage16.storageBuffer16BitAccess);
+    json_read_u32(json, "uniformAndStorageBuffer16BitAccess", &caps->storage16.uniformAndStorageBuffer16BitAccess);
+    json_read_u32(json, "storagePushConstant16", &caps->storage16.storagePushConstant16);
+    json_read_u32(json, "storageInputOutput16", &caps->storage16.storageInputOutput16);
+    json_read_u32(json, "storageBuffer8BitAccess", &caps->storage8.storageBuffer8BitAccess);
+    json_read_u32(json, "uniformAndStorageBuffer8BitAccess", &caps->storage8.uniformAndStorageBuffer8BitAccess);
+    json_read_u32(json, "storagePushConstant8", &caps->storage8.storagePushConstant8);
+    json_read_u32(json, "shaderFloat16", &caps->float16_int8.shaderFloat16);
+    json_read_u32(json, "shaderInt8", &caps->float16_int8.shaderInt8);
+    json_read_u32(json, "subgroupSize", &caps->subgroup.subgroupSize);
+    json_read_u32(json, "supportedStages", &caps->subgroup.supportedStages);
+    json_read_u32(json, "supportedOperations", &caps->subgroup.supportedOperations);
+
+    if (json_read_u32(json, "VK_KHR_16bit_storage", &value)) caps->ext_16bit_storage = value != 0;
+    if (json_read_u32(json, "VK_KHR_8bit_storage", &value)) caps->ext_8bit_storage = value != 0;
+    if (json_read_u32(json, "VK_KHR_shader_float16_int8", &value)) caps->ext_shader_float16_int8 = value != 0;
+    if (json_read_u32(json, "VK_KHR_storage_buffer_storage_class", &value)) caps->ext_storage_buffer_storage_class = value != 0;
+    return caps->api_version != 0;
+}
+
 static int query_executor_advertisement_caps_line(char *line, size_t line_cap) {
     if (!line || line_cap == 0) return -EINVAL;
     line[0] = '\0';
@@ -2092,20 +2218,47 @@ static int query_executor_advertisement_caps_line(char *line, size_t line_cap) {
     return rc;
 }
 
+static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps(void) {
+    static PdockerVkAdvertisedCaps caps;
+    static bool queried = false;
+    if (queried) return &caps;
+    queried = true;
+    char line[8192];
+    int rc = query_executor_advertisement_caps_line(line, sizeof(line));
+    if (rc == 0 && parse_executor_advertisement_caps_json(line, &caps)) {
+        caps.loaded = true;
+        caps.executor_valid = true;
+    } else {
+        memset(&caps, 0, sizeof(caps));
+        caps.loaded = true;
+        caps.executor_valid = false;
+    }
+    return &caps;
+}
+
 static void trace_executor_advertisement_caps_once(void) {
     static int traced = 0;
     if (traced || !getenv("PDOCKER_VULKAN_ICD_DEBUG")) return;
     traced = 1;
-    char line[8192];
-    int rc = query_executor_advertisement_caps_line(line, sizeof(line));
-    if (rc == 0) {
-        fprintf(stderr, "pdocker-vulkan-icd: executor advertisement caps shadow: %s",
-                line);
-        if (line[0] && line[strlen(line) - 1] != '\n') fprintf(stderr, "\n");
+    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+    if (caps && caps->executor_valid) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: executor advertisement caps shadow: "
+                "api=0x%08x device=\"%s\" vendor=0x%04x device_id=0x%04x "
+                "type=%u storage16=%u storage8=%u int8=%u subgroup={size:%u,ops:0x%x}\n",
+                caps->api_version,
+                caps->device_name,
+                caps->vendor_id,
+                caps->device_id,
+                caps->device_type,
+                caps->storage16.storageBuffer16BitAccess,
+                caps->storage8.storageBuffer8BitAccess,
+                caps->float16_int8.shaderInt8,
+                caps->subgroup.subgroupSize,
+                caps->subgroup.supportedOperations);
     } else {
         fprintf(stderr,
-                "pdocker-vulkan-icd: executor advertisement caps shadow unavailable rc=%d\n",
-                rc);
+                "pdocker-vulkan-icd: executor advertisement caps shadow unavailable\n");
     }
 }
 

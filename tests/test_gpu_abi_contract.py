@@ -4117,6 +4117,21 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_icd_can_shadow_query_executor_advertisement_caps(self):
         icd = VULKAN_ICD.read_text()
+        for marker in [
+            "typedef struct {",
+            "PdockerVkAdvertisedCaps",
+            "parse_executor_advertisement_caps_json",
+            "json_read_u32",
+            "json_read_u32_array3",
+            "json_read_string",
+            "pdocker_vk_advertised_caps",
+            "executor_valid",
+            "storage16.storageBuffer16BitAccess",
+            "storage8.storageBuffer8BitAccess",
+            "float16_int8.shaderInt8",
+            "subgroup.supportedOperations",
+        ]:
+            self.assertIn(marker, icd)
         self.assertIn("query_executor_advertisement_caps_line", icd)
         self.assertIn('const char command[] = "VULKAN_ADVERTISEMENT_CAPS\\n";', icd)
         self.assertIn('\\"schema\\":\\"skydnir-vulkan-advertisement-caps-v1\\"', icd)
