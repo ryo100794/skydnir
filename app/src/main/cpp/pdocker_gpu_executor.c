@@ -1952,6 +1952,21 @@ static void write_vulkan_limits_report(FILE *out, const VulkanRuntime *rt) {
             limits->maxComputeWorkGroupCount[2]);
 }
 
+static void write_json_string_literal(FILE *out, const char *value) {
+    if (!out) return;
+    fputc('"', out);
+    for (size_t i = 0; value && value[i]; ++i) {
+        unsigned char ch = (unsigned char)value[i];
+        if (ch == '"' || ch == '\\') {
+            fputc('\\', out);
+            fputc((int)ch, out);
+        } else if (ch >= 0x20 && ch < 0x7f) {
+            fputc((int)ch, out);
+        }
+    }
+    fputc('"', out);
+}
+
 static int create_vulkan_vector_buffer(VkPhysicalDevice physical_device, VkDevice device, size_t bytes, const void *initial, VulkanVectorBuffer *out) {
     memset(out, 0, sizeof(*out));
     VkBufferCreateInfo bci = {
@@ -13949,6 +13964,103 @@ static void print_capabilities(const char *transport) {
     fflush(json_out());
 }
 
+static void print_vulkan_advertisement_caps(const char *transport) {
+    int vulkan_ready = init_vulkan_runtime(&g_vulkan_runtime) == 0;
+    VulkanRuntime *rt = vulkan_ready ? &g_vulkan_runtime : NULL;
+    const VkPhysicalDeviceLimits *limits = rt ? &rt->physical_properties.limits : NULL;
+    FILE *out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\","
+            "\"api\":\"%s\","
+            "\"abi_version\":\"%s\","
+            "\"command\":\"VULKAN_ADVERTISEMENT_CAPS\","
+            "\"schema\":\"skydnir-vulkan-advertisement-caps-v1\","
+            "\"transport\":\"%s\","
+            "\"vulkan_ready\":%s,"
+            "\"executor_build_marker\":\"%s\",",
+            PDOCKER_GPU_COMMAND_API,
+            PDOCKER_GPU_ABI_VERSION,
+            transport ? transport : "unix-socket-command-queue",
+            vulkan_ready ? "true" : "false",
+            PDOCKER_GPU_EXECUTOR_BUILD_MARKER);
+    fprintf(out,
+            "\"device\":{"
+            "\"apiVersion\":%u,"
+            "\"api_major\":%u,"
+            "\"api_minor\":%u,"
+            "\"vendorID\":%u,"
+            "\"deviceID\":%u,"
+            "\"deviceType\":%u,"
+            "\"deviceName\":",
+            rt ? rt->api_version : 0,
+            rt ? VK_API_VERSION_MAJOR(rt->api_version) : 0,
+            rt ? VK_API_VERSION_MINOR(rt->api_version) : 0,
+            rt ? rt->physical_properties.vendorID : 0,
+            rt ? rt->physical_properties.deviceID : 0,
+            rt ? rt->physical_properties.deviceType : VK_PHYSICAL_DEVICE_TYPE_OTHER);
+    write_json_string_literal(out, rt ? rt->physical_properties.deviceName : "offline");
+    fprintf(out,
+            "},\"limits\":{"
+            "\"maxPushConstantsSize\":%u,"
+            "\"maxComputeSharedMemorySize\":%u,"
+            "\"maxPerStageDescriptorStorageBuffers\":%u,"
+            "\"maxDescriptorSetStorageBuffers\":%u,"
+            "\"maxBoundDescriptorSets\":%u,"
+            "\"maxComputeWorkGroupInvocations\":%u,"
+            "\"maxComputeWorkGroupSize\":[%u,%u,%u],"
+            "\"maxComputeWorkGroupCount\":[%u,%u,%u],"
+            "\"maxStorageBufferRange\":%u},",
+            limits ? limits->maxPushConstantsSize : 0,
+            limits ? limits->maxComputeSharedMemorySize : 0,
+            limits ? limits->maxPerStageDescriptorStorageBuffers : 0,
+            limits ? limits->maxDescriptorSetStorageBuffers : 0,
+            limits ? limits->maxBoundDescriptorSets : 0,
+            limits ? limits->maxComputeWorkGroupInvocations : 0,
+            limits ? limits->maxComputeWorkGroupSize[0] : 0,
+            limits ? limits->maxComputeWorkGroupSize[1] : 0,
+            limits ? limits->maxComputeWorkGroupSize[2] : 0,
+            limits ? limits->maxComputeWorkGroupCount[0] : 0,
+            limits ? limits->maxComputeWorkGroupCount[1] : 0,
+            limits ? limits->maxComputeWorkGroupCount[2] : 0,
+            limits ? limits->maxStorageBufferRange : 0);
+    fprintf(out,
+            "\"physical_features\":{"
+            "\"shaderInt64\":%u,"
+            "\"storage16\":{"
+            "\"storageBuffer16BitAccess\":%u,"
+            "\"uniformAndStorageBuffer16BitAccess\":%u,"
+            "\"storagePushConstant16\":%u,"
+            "\"storageInputOutput16\":%u},"
+            "\"storage8\":{"
+            "\"storageBuffer8BitAccess\":%u,"
+            "\"uniformAndStorageBuffer8BitAccess\":%u,"
+            "\"storagePushConstant8\":%u},"
+            "\"float16_int8\":{"
+            "\"shaderFloat16\":%u,"
+            "\"shaderInt8\":%u}},",
+            rt ? rt->physical_features.shaderInt64 : 0,
+            rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
+            rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
+            rt ? rt->physical_storage16.storagePushConstant16 : 0,
+            rt ? rt->physical_storage16.storageInputOutput16 : 0,
+            rt ? rt->physical_storage8.storageBuffer8BitAccess : 0,
+            rt ? rt->physical_storage8.uniformAndStorageBuffer8BitAccess : 0,
+            rt ? rt->physical_storage8.storagePushConstant8 : 0,
+            rt ? rt->physical_float16_int8.shaderFloat16 : 0,
+            rt ? rt->physical_float16_int8.shaderInt8 : 0);
+    fprintf(out,
+            "\"subgroup\":{"
+            "\"subgroupSize\":%u,"
+            "\"supportedStages\":%u,"
+            "\"supportedOperations\":%u},",
+            rt ? rt->subgroup_properties.subgroupSize : 0,
+            rt ? rt->subgroup_properties.supportedStages : 0,
+            rt ? rt->subgroup_properties.supportedOperations : 0);
+    write_android_vulkan_enabled_features_report(out, rt);
+    fprintf(out, "}\n");
+    fflush(out);
+}
+
 static void print_noop(void) {
     fprintf(json_out(),
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
@@ -14723,6 +14835,8 @@ static int serve_socket(const char *path) {
             g_json_out = out;
             if (strcmp(cmd, "CAPABILITIES") == 0) {
                 print_capabilities("unix-socket-command-queue");
+            } else if (strcmp(cmd, "VULKAN_ADVERTISEMENT_CAPS") == 0) {
+                print_vulkan_advertisement_caps("unix-socket-command-queue");
             } else if (strcmp(cmd, "NOOP") == 0) {
                 print_noop();
             } else if (strcmp(cmd, "VECTOR_ADD") == 0) {

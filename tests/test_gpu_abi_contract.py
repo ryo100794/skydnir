@@ -4088,6 +4088,33 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(capabilities_features, capabilities_enabled)
         self.assertLess(capabilities_enabled, capabilities_close)
 
+    def test_gpu_executor_exposes_vulkan_advertisement_caps_command(self):
+        source = GPU_EXECUTOR.read_text()
+        self.assertIn('strcmp(cmd, "VULKAN_ADVERTISEMENT_CAPS") == 0', source)
+        self.assertIn("print_vulkan_advertisement_caps(\"unix-socket-command-queue\")", source)
+        body = source.split("static void print_vulkan_advertisement_caps", 1)[1].split(
+            "static void print_noop", 1
+        )[0]
+        for marker in [
+            '\\"command\\":\\"VULKAN_ADVERTISEMENT_CAPS\\"',
+            '\\"schema\\":\\"skydnir-vulkan-advertisement-caps-v1\\"',
+            '\\"executor_build_marker\\":\\"%s\\"',
+            '\\"device\\":{',
+            '\\"apiVersion\\":%u',
+            '\\"deviceType\\":%u',
+            '\\"deviceName\\":',
+            '\\"limits\\":{',
+            '\\"maxStorageBufferRange\\":%u',
+            '\\"physical_features\\":{',
+            '\\"storage16\\":{',
+            '\\"storage8\\":{',
+            '\\"float16_int8\\":{',
+            '\\"subgroup\\":{',
+            "write_android_vulkan_enabled_features_report(out, rt);",
+        ]:
+            self.assertIn(marker, body)
+        self.assertIn("write_json_string_literal(out, rt ? rt->physical_properties.deviceName : \"offline\")", body)
+
     def test_llama_gpu_dispatch_lifecycle_logs_are_recorded(self):
         compare = LLAMA_COMPARE.read_text()
         icd = VULKAN_ICD.read_text()
