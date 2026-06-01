@@ -10608,6 +10608,18 @@ static int run_vulkan_dispatch_fd(
         ? options->profile_response
         : env_truthy("PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE", 0);
     const size_t profile_full_hash_max_bytes = writeback_full_hash_max_bytes();
+    double timing_strict_graph_ms = 0.0;
+    double timing_pipeline_lookup_ms = 0.0;
+    double timing_pipeline_create_ms = 0.0;
+    double timing_descriptor_pool_ms = 0.0;
+    double timing_descriptor_allocate_ms = 0.0;
+    double timing_descriptor_update_ms = 0.0;
+    double timing_command_allocate_ms = 0.0;
+    double timing_command_record_ms = 0.0;
+    double timing_fence_create_ms = 0.0;
+    double timing_queue_submit_ms = 0.0;
+    double timing_fence_wait_ms = 0.0;
+    double timing_cpu_oracle_ms = 0.0;
     const int materialize_descriptor_aliases =
         strict_passthrough ? 0 :
         options && options->has_materialize_descriptor_aliases
@@ -11386,6 +11398,7 @@ static int run_vulkan_dispatch_fd(
 
     if (strict_passthrough) {
         fail_stage = "create-strict-vulkan-object-graph";
+        double graph_start = now_ms();
         int graph_rc = create_strict_vulkan_object_graph(
             rt->physical_device,
             rt->device,
@@ -11401,6 +11414,7 @@ static int run_vulkan_dispatch_fd(
             &strict_buffer_count,
             vk_buffers,
             strict_device_local_staging);
+        timing_strict_graph_ms = now_ms() - graph_start;
         if (graph_rc != 0) {
             io_rc = graph_rc;
             goto cleanup;
@@ -11630,6 +11644,7 @@ static int run_vulkan_dispatch_fd(
         }
     }
     if (!multi_descriptor_set) {
+        double pipeline_lookup_start = now_ms();
         pipeline_cache_entry = find_pipeline_cache_entry(
             spirv_summary.hash,
             spec_hash,
@@ -11640,6 +11655,7 @@ static int run_vulkan_dispatch_fd(
             layout_count,
             (uint32_t)push_size,
             entry_name);
+        timing_pipeline_lookup_ms = now_ms() - pipeline_lookup_start;
     }
     if (pipeline_cache_entry) {
         pipeline_cache_hit = 1;
@@ -11651,6 +11667,7 @@ static int run_vulkan_dispatch_fd(
         shader = pipeline_cache_entry->shader;
         pipeline = pipeline_cache_entry->pipeline;
     } else {
+        double pipeline_create_start = now_ms();
         VkDescriptorSetLayoutBinding layout_bindings
             [PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS];
         memset(layout_bindings, 0, sizeof(layout_bindings));
@@ -11761,6 +11778,7 @@ static int run_vulkan_dispatch_fd(
             }
         }
         if (rc != VK_SUCCESS) goto cleanup;
+        timing_pipeline_create_ms = now_ms() - pipeline_create_start;
         if (!multi_descriptor_set) {
             pipeline_cache_entry = select_pipeline_cache_slot(rt->device);
             pipeline_cache_entry->valid = 1;
@@ -11797,7 +11815,9 @@ static int run_vulkan_dispatch_fd(
         .pPoolSizes = &pool_size,
     };
     fail_stage = "create-generic-descriptor-pool";
+    double descriptor_pool_start = now_ms();
     rc = vkCreateDescriptorPool(rt->device, &dpci, NULL, &descriptor_pool);
+    timing_descriptor_pool_ms = now_ms() - descriptor_pool_start;
     if (rc != VK_SUCCESS) goto cleanup;
     VkDescriptorSetAllocateInfo dsai = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -11806,7 +11826,9 @@ static int run_vulkan_dispatch_fd(
         .pSetLayouts = set_layouts,
     };
     fail_stage = "allocate-generic-descriptor-set";
+    double descriptor_allocate_start = now_ms();
     rc = vkAllocateDescriptorSets(rt->device, &dsai, descriptor_sets);
+    timing_descriptor_allocate_ms = now_ms() - descriptor_allocate_start;
     if (rc != VK_SUCCESS) goto cleanup;
     VkDescriptorBufferInfo infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     VkWriteDescriptorSet writes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -11913,12 +11935,17 @@ static int run_vulkan_dispatch_fd(
         descriptor_write_alias_flags[write_count] = 1;
         ++write_count;
     }
+    double descriptor_update_start = now_ms();
     vkUpdateDescriptorSets(rt->device, (uint32_t)write_count, writes, 0, NULL);
+    timing_descriptor_update_ms = now_ms() - descriptor_update_start;
     VkCommandBufferAllocateInfo cbai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = rt->command_pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1};
     fail_stage = "allocate-generic-command-buffer";
+    double command_allocate_start = now_ms();
     rc = vkAllocateCommandBuffers(rt->device, &cbai, &command_buffer);
+    timing_command_allocate_ms = now_ms() - command_allocate_start;
     if (rc != VK_SUCCESS) goto cleanup;
     double dispatch_start = now_ms();
+    double command_record_start = now_ms();
     VkCommandBufferBeginInfo cbi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     rc = vkBeginCommandBuffer(command_buffer, &cbi);
     if (rc != VK_SUCCESS) { fail_stage = "begin-generic-command-buffer"; goto cleanup; }
@@ -12102,9 +12129,12 @@ static int run_vulkan_dispatch_fd(
         }
     }
     rc = vkEndCommandBuffer(command_buffer);
+    timing_command_record_ms = now_ms() - command_record_start;
     if (rc != VK_SUCCESS) { fail_stage = "end-generic-command-buffer"; goto cleanup; }
     VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    double fence_create_start = now_ms();
     rc = vkCreateFence(rt->device, &fci, NULL, &fence);
+    timing_fence_create_ms = now_ms() - fence_create_start;
     if (rc != VK_SUCCESS) { fail_stage = "create-generic-fence"; goto cleanup; }
     VkSubmitInfo submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &command_buffer};
     fail_stage = "submit-generic-dispatch";
@@ -12117,12 +12147,16 @@ static int run_vulkan_dispatch_fd(
                 (unsigned long long)dispatch_lifecycle_spirv_hash);
         fflush(stderr);
     }
+    double queue_submit_start = now_ms();
     rc = vkQueueSubmit(rt->queue, 1, &submit, fence);
+    timing_queue_submit_ms = now_ms() - queue_submit_start;
     if (rc != VK_SUCCESS) goto cleanup;
     fail_stage = "wait-generic-fence";
     const uint64_t dispatch_timeout_ns =
         env_timeout_ns("PDOCKER_GPU_DISPATCH_TIMEOUT_MS", 30000, 1000, 600000);
+    double fence_wait_start = now_ms();
     rc = vkWaitForFences(rt->device, 1, &fence, VK_TRUE, dispatch_timeout_ns);
+    timing_fence_wait_ms = now_ms() - fence_wait_start;
     if (rc == VK_TIMEOUT) {
         json_fail("vulkan-dispatch-timeout",
                   "vkWaitForFences timed out; GPU command did not complete");
@@ -12153,6 +12187,7 @@ static int run_vulkan_dispatch_fd(
                     profile_full_hash_max_bytes);
         }
     }
+    double cpu_oracle_start = now_ms();
     if (cpu_oracle_spirv_hash == 0xac41e8033a67af4aull) {
         run_cpu_oracle_rope_yarn(&cpu_oracle_report,
                                  buffer_fds,
@@ -12282,6 +12317,7 @@ static int run_vulkan_dispatch_fd(
                                           gy,
                                           gz);
     }
+    timing_cpu_oracle_ms = now_ms() - cpu_oracle_start;
     if (cpu_oracle_required_fail_closed(&cpu_oracle_report)) {
         oracle_fail_closed = 1;
         fail_stage = "cpu-oracle-required";
@@ -12340,6 +12376,13 @@ static int run_vulkan_dispatch_fd(
                 "\"spirv_local_size\":[%u,%u,%u],"
                 "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
                 "\"spirv_local_size_consistent\":%s,"
+                "\"upload_ms\":%.4f,\"dispatch_ms\":%.4f,\"download_ms\":0.0000,"
+                "\"phase_timing_ms\":{\"strict_graph\":%.4f,\"pipeline_lookup\":%.4f,"
+                "\"pipeline_create\":%.4f,\"descriptor_pool\":%.4f,"
+                "\"descriptor_allocate\":%.4f,\"descriptor_update\":%.4f,"
+                "\"command_allocate\":%.4f,\"command_record\":%.4f,"
+                "\"fence_create\":%.4f,\"queue_submit\":%.4f,"
+                "\"fence_wait\":%.4f,\"cpu_oracle\":%.4f},"
                 "\"valid\":true,",
                 PDOCKER_GPU_COMMAND_API,
                 PDOCKER_GPU_ABI_VERSION,
@@ -12369,7 +12412,14 @@ static int run_vulkan_dispatch_fd(
                 (unsigned long long)q6_compact_resolved_local_size[0],
                 (unsigned long long)q6_compact_resolved_local_size[1],
                 (unsigned long long)q6_compact_resolved_local_size[2],
-                q6_compact_local_size_consistent ? "true" : "false");
+                q6_compact_local_size_consistent ? "true" : "false",
+                upload_ms, dispatch_ms,
+                timing_strict_graph_ms, timing_pipeline_lookup_ms,
+                timing_pipeline_create_ms, timing_descriptor_pool_ms,
+                timing_descriptor_allocate_ms, timing_descriptor_update_ms,
+                timing_command_allocate_ms, timing_command_record_ms,
+                timing_fence_create_ms, timing_queue_submit_ms,
+                timing_fence_wait_ms, timing_cpu_oracle_ms);
         write_vulkan_binding_compact_report(stderr, bindings, binding_count,
                                             buffer_fds,
                                             vk_buffers,
@@ -12605,6 +12655,13 @@ static int run_vulkan_dispatch_fd(
                 "\"pipeline_policy_hash\":\"0x%016llx\","
                 "\"resident_bytes\":%zu,\"mutable_bytes\":%zu,"
                 "\"pre_barriers\":%u,\"post_barriers\":%u,"
+                "\"upload_ms\":%.4f,\"dispatch_ms\":%.4f,\"download_ms\":%.4f,"
+                "\"phase_timing_ms\":{\"strict_graph\":%.4f,\"pipeline_lookup\":%.4f,"
+                "\"pipeline_create\":%.4f,\"descriptor_pool\":%.4f,"
+                "\"descriptor_allocate\":%.4f,\"descriptor_update\":%.4f,"
+                "\"command_allocate\":%.4f,\"command_record\":%.4f,"
+                "\"fence_create\":%.4f,\"queue_submit\":%.4f,"
+                "\"fence_wait\":%.4f,\"cpu_oracle\":%.4f},"
                 "\"valid\":true,",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
                 PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
@@ -12678,7 +12735,14 @@ static int run_vulkan_dispatch_fd(
                 resident_bytes,
                 mutable_bytes,
                 pre_barrier_count,
-                post_barrier_count);
+                post_barrier_count,
+                upload_ms, dispatch_ms, download_ms,
+                timing_strict_graph_ms, timing_pipeline_lookup_ms,
+                timing_pipeline_create_ms, timing_descriptor_pool_ms,
+                timing_descriptor_allocate_ms, timing_descriptor_update_ms,
+                timing_command_allocate_ms, timing_command_record_ms,
+                timing_fence_create_ms, timing_queue_submit_ms,
+                timing_fence_wait_ms, timing_cpu_oracle_ms);
         write_spirv_specialization_materialize_report(
             json_out(), &specialization_materialize_report);
         fprintf(json_out(), ",");
@@ -12814,6 +12878,12 @@ static int run_vulkan_dispatch_fd(
             "\"profile_response\":%s,"
             "\"pre_barriers\":%u,\"post_barriers\":%u,"
             "\"upload_ms\":%.4f,\"dispatch_ms\":%.4f,\"download_ms\":%.4f,"
+            "\"phase_timing_ms\":{\"strict_graph\":%.4f,\"pipeline_lookup\":%.4f,"
+            "\"pipeline_create\":%.4f,\"descriptor_pool\":%.4f,"
+            "\"descriptor_allocate\":%.4f,\"descriptor_update\":%.4f,"
+            "\"command_allocate\":%.4f,\"command_record\":%.4f,"
+            "\"fence_create\":%.4f,\"queue_submit\":%.4f,"
+            "\"fence_wait\":%.4f,\"cpu_oracle\":%.4f},"
             "\"resident_cache\":{\"enabled\":%s,\"resident_bindings\":%zu,"
             "\"hits\":%zu,\"bytes\":%zu},"
             "\"mutable_buffer_cache\":{\"enabled\":%s,\"entries\":%u,"
@@ -12897,6 +12967,12 @@ static int run_vulkan_dispatch_fd(
             pre_barrier_count,
             post_barrier_count,
             upload_ms, dispatch_ms, download_ms,
+            timing_strict_graph_ms, timing_pipeline_lookup_ms,
+            timing_pipeline_create_ms, timing_descriptor_pool_ms,
+            timing_descriptor_allocate_ms, timing_descriptor_update_ms,
+            timing_command_allocate_ms, timing_command_record_ms,
+            timing_fence_create_ms, timing_queue_submit_ms,
+            timing_fence_wait_ms, timing_cpu_oracle_ms,
             ((!options || !options->has_resident_cache || options->resident_cache) &&
                 env_truthy("PDOCKER_GPU_RESIDENT_CACHE", 1)) ? "true" : "false",
             resident_count, hit_count, resident_bytes,

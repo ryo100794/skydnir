@@ -5513,6 +5513,22 @@ failure_axes = {
 dispatch_upload_ms = [float(m.group(1)) for m in re.finditer(r'"upload_ms":([0-9.]+)', log)]
 dispatch_ms = [float(m.group(1)) for m in re.finditer(r'"dispatch_ms":([0-9.]+)', log)]
 dispatch_download_ms = [float(m.group(1)) for m in re.finditer(r'"download_ms":([0-9.]+)', log)]
+phase_timing_samples = []
+for event in executor_events:
+    timing = event.get("phase_timing_ms")
+    if isinstance(timing, dict):
+        phase_timing_samples.append({
+            str(k): float(v)
+            for k, v in timing.items()
+            if isinstance(v, (int, float))
+        })
+phase_timing_max = {}
+phase_timing_mean = {}
+for key in sorted({k for item in phase_timing_samples for k in item}):
+    vals = [item[key] for item in phase_timing_samples if key in item]
+    if vals:
+        phase_timing_max[key] = max(vals)
+        phase_timing_mean[key] = sum(vals) / len(vals)
 copy_buffer_bytes = [
     int(m.group(1))
     for m in re.finditer(r"pdocker-vulkan-icd: copy-buffer .* bytes=([0-9]+) ok=1", log)
@@ -5590,6 +5606,9 @@ bridge_dispatch_profile = {
     "upload_ms_mean": (sum(dispatch_upload_ms) / len(dispatch_upload_ms)) if dispatch_upload_ms else 0.0,
     "dispatch_ms_mean": (sum(dispatch_ms) / len(dispatch_ms)) if dispatch_ms else 0.0,
     "download_ms_mean": (sum(dispatch_download_ms) / len(dispatch_download_ms)) if dispatch_download_ms else 0.0,
+    "phase_timing_samples": len(phase_timing_samples),
+    "phase_timing_ms_max": phase_timing_max,
+    "phase_timing_ms_mean": phase_timing_mean,
     "copy_buffer_ops_in_log": len(copy_buffer_bytes),
     "copy_buffer_bytes_in_log": sum(copy_buffer_bytes),
     "copy_submit_count": len(copy_submit_summaries),

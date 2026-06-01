@@ -154,3 +154,34 @@ Interpretation:
 - The strict read-only resident cache now avoids re-reading the large Q6 model/weight binding for repeated dispatches while preserving descriptor offset semantics.
 - This did not improve the short `n_predict=4` end-to-end benchmark.  The remaining bottleneck is therefore not only the large binding upload; it is dominated by per-dispatch fixed overhead in the generic SPIR-V bridge path.
 - Next target: reduce command/descriptor/object-graph lifecycle overhead and add timing evidence precise enough to separate fixed dispatch overhead from model-buffer transfer overhead.
+
+### Phase timing profiler follow-up (2026-06-01T16:37Z)
+
+Artifact: `docs/test/llama-gpu-ngl1-phase-timing5-20260601T163714Z.json`.
+
+The generic SPIR-V compact response now includes `phase_timing_ms` in both the profile response and the normal response. This closes the previous blind spot where `upload_ms`, `dispatch_ms`, and `download_ms` were visible but the fixed setup cost was hidden.
+
+Observed NGL=1 result:
+
+- Correctness required probes: passed (`addition`, `multiplication_prefix`).
+- Optional `identity_text`: still failed with an empty/unsuitable completion, not a benchmark blocker.
+- GPU TPS: `0.04815133389426574`.
+- CPU baseline TPS: `0.36100235915041706`.
+- Speedup: `0.1334323053466443x`.
+- Target: not met.
+
+Phase timing summary from the artifact:
+
+| phase | mean ms | max ms | interpretation |
+|---|---:|---:|---|
+| strict_graph | 151.8354 | 941.3154 | Dominant fixed bridge cost. Per-dispatch strict object graph materialization remains the first optimization target. |
+| fence_wait | 6.0104 | 32.8595 | Actual GPU queue wait is small compared with strict graph creation. |
+| cpu_oracle | 2.0739 | 230.6380 | Diagnostic correctness oracle cost exists but is not the dominant mean cost. Disable for final benchmark once enough evidence is retained. |
+| pipeline_create | 0.5535 | 452.3575 | Cache misses are expensive but mean is low; keep pipeline cache but do not prioritize before strict graph reuse. |
+| queue_submit | 0.1336 | 2.9014 | Not the primary blocker. |
+| command_record | 0.0750 | 26.3431 | Secondary after strict graph. |
+| descriptor_pool | 0.0574 | 5.2413 | Secondary after strict graph. |
+
+Conclusion: Q6 correctness is still intact, and the resident read-only cache alone is not enough. The current first performance blocker is repeated strict object-graph materialization, not shader arithmetic and not queue wait.
+
+Next optimization target: strict object graph reuse/pooling for immutable/read-only memory and stable VkBuffer/VkDeviceMemory skeletons, with descriptor offsets preserved exactly.
