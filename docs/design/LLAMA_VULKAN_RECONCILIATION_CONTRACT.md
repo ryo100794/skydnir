@@ -87,7 +87,15 @@ The executor parses the V4 command into:
   `api_descriptor_type`, `api_dynamic`, `api_memory_offset`,
   `api_memory_size`, `api_memory_id`, and `api_buffer_id`;
 - option booleans/limits mirroring the ICD tokens plus executor-only env state
-  such as `PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER`.
+  such as `PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER`.  Diagnostic retry ladders
+  are opt-in and must remain disabled in the normal product path unless a
+  targeted investigation explicitly enables them.
+
+Q6/Q4 compatibility rewrites, replacement kernels, CPU oracles, and
+read-only-overlap snapshots are diagnostic mechanisms.  They may be enabled by
+the llama GPU investigation scripts, but their ABI defaults must be `0` and
+the normal Vulkan product path must not trigger them merely because a known
+ggml/llama SPIR-V hash is observed.
 
 Executor evidence must report these values back in JSON through fields such as
 `executor_build_marker`, `source_spirv_hash`, `effective_spirv_hash`, `entry`,

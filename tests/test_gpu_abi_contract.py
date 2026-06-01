@@ -627,6 +627,8 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS": "1",
                 "PDOCKER_GPU_DISPATCH_PROFILE_LOG": "1",
                 "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE": "1",
+                "PDOCKER_GPU_Q6K_COMPAT_REWRITES": "1",
+                "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT": "1",
             },
             q6_overlay,
         )
@@ -919,6 +921,8 @@ class GpuAbiContractTest(unittest.TestCase):
             ("PDOCKER_GPU_STRICT_PASSTHROUGH", "strict_passthrough"),
             ("PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING", "strict_object_graph.device_local_staging_requested"),
             ("PDOCKER_GPU_Q6K_SAFE_KERNEL", "q6k_safe_kernel"),
+            ("PDOCKER_GPU_Q6K_COMPAT_REWRITES", "q6_compat_rewrites"),
+            ("PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT", "readonly_overlap_snapshot_policy.q6_auto"),
             ("PDOCKER_GPU_Q6K_ORACLE_WRITEBACK", "cpu_oracle.oracle_writeback"),
             ("PDOCKER_GPU_Q4K_SAFE_KERNEL", "q4k_safe_kernel"),
             ("PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION", "q4k_targeted_specialization_materialized"),
@@ -1016,7 +1020,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("strict_passthrough", q4_safe_block)
         self.assertIn('env_truthy("PDOCKER_GPU_Q4K_SAFE_KERNEL", 0)', q4_safe_block)
         self.assertIn("q4k_pipeline_retry_enabled = q4k_callsite_detected &&", source)
-        self.assertIn('env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 1)', source)
+        self.assertIn('env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 0)', source)
         self.assertGreaterEqual(source.count('\\"q4k_pipeline_retry_ladder\\":%s'), 3)
         self.assertGreaterEqual(source.count('\\"q4k_pipeline_retry_attempted\\":%s'), 3)
         q4_retry_block = re.search(
@@ -1040,6 +1044,38 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('gpu_runtime_env_defaults("vulkan")', pdockerd)
         self.assertIn('"env": "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION"', LLAMA_GPU_ENV_MANIFEST.read_text())
         self.assertNotIn('"PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION": os.environ.get("PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION", "0")', pdockerd)
+
+    def test_llama_diagnostic_vulkan_options_default_off(self):
+        diagnostics = [
+            "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
+            "PDOCKER_GPU_Q6K_SAFE_KERNEL",
+            "PDOCKER_GPU_Q6K_COMPAT_REWRITES",
+            "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT",
+            "PDOCKER_GPU_Q4K_SAFE_KERNEL",
+            "PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION",
+            "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER",
+        ]
+        for header_path in [
+            APP_HEADER,
+            ROOT / "docker-proot-setup/src/gpu/pdocker_gpu_abi.h",
+        ]:
+            with self.subTest(header=str(header_path)):
+                header = header_path.read_text()
+                for env_name in diagnostics:
+                    with self.subTest(env=env_name):
+                        self.assertRegex(
+                            header,
+                            rf"X\({env_name}, [^\n]+, 0\)",
+                        )
+        source = GPU_EXECUTOR.read_text()
+        self.assertIn(
+            'env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 0)',
+            source,
+        )
+        self.assertNotIn(
+            'env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 1)',
+            source,
+        )
 
     def test_llama_gpu_compare_q6_identity_survives_spirv_legalization_hash_changes(self):
         helpers = load_llama_gpu_compare_q6_helpers()
@@ -2630,6 +2666,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("lower_q6k_u32_to_u8vec4_bitcasts", executor)
         self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered", executor)
         self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered_count", executor)
+        self.assertIn("q6k_compat_rewrites_requested", executor)
+        self.assertIn("q6_compat_rewrites_enabled", executor)
+        self.assertIn('env_truthy("PDOCKER_GPU_Q6K_COMPAT_REWRITES", 0)', executor)
+        self.assertIn('env_truthy("PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT", 0)', executor)
         self.assertIn("insert_q6k_final_store_pre_barrier", executor)
         self.assertIn("q6_final_store_pre_barrier_inserted", executor)
         self.assertIn("q6_final_store_pre_barrier_inserted", compare)
@@ -2660,8 +2700,16 @@ class GpuAbiContractTest(unittest.TestCase):
             executor.index("q6_u32_to_u8vec4_bitcasts_lowered = lower_q6k_u32_to_u8vec4_bitcasts"),
             executor.index("if (strict_duplicate_descriptor_normalization)"),
         )
+        q6_rewrite_block = re.search(
+            r"if \(q6_compat_rewrites_enabled\) \{(?P<body>.*?)\n    \}",
+            executor,
+            re.S,
+        ).group("body")
+        self.assertIn("lower_q6k_storage16_loads_to_storage8", q6_rewrite_block)
+        self.assertIn("lower_q6k_u32_to_u8vec4_bitcasts", q6_rewrite_block)
+        self.assertIn("insert_q6k_final_store_pre_barrier", q6_rewrite_block)
         self.assertIn("q6_native_callsite_detected", executor)
-        self.assertIn("if (q6_native_callsite_detected)", executor)
+        self.assertNotIn("if (q6_native_callsite_detected) {", executor)
         self.assertIn("load + load_wc <= words", executor)
         self.assertIn("q6_accum_mask", compare)
         self.assertIn("q6_base_work_group_y", compare)
@@ -2768,6 +2816,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "X(PDOCKER_GPU_MUTABLE_BUFFER_CACHE, mutable_cache, has_mutable_buffer_cache, mutable_buffer_cache, 1)",
             "X(PDOCKER_GPU_Q4K_SAFE_KERNEL, q4k_safe_kernel, has_q4k_safe_kernel, q4k_safe_kernel, 0)",
             "X(PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION, q4k_targeted_specialization, has_q4k_targeted_specialization, q4k_targeted_specialization, 0)",
+            "X(PDOCKER_GPU_Q6K_COMPAT_REWRITES, q6k_compat_rewrites, has_q6k_compat_rewrites, q6k_compat_rewrites, 0)",
+            "X(PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT, q6k_readonly_overlap_snapshot, has_q6k_readonly_overlap_snapshot, q6k_readonly_overlap_snapshot, 0)",
             "X(PDOCKER_GPU_STRICT_PASSTHROUGH, strict_passthrough, has_strict_passthrough, strict_passthrough, 0)",
             "X(PDOCKER_GPU_STRICT_RECONCILIATION, strict_reconciliation, has_strict_reconciliation, strict_reconciliation, 0)",
             "X(PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING, strict_device_local_staging, has_strict_device_local_staging, strict_device_local_staging, 0)",

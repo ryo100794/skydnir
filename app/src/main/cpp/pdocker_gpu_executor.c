@@ -994,6 +994,10 @@ typedef struct {
     int q6k_oracle_writeback;
     int has_q6k_safe_kernel;
     int q6k_safe_kernel;
+    int has_q6k_compat_rewrites;
+    int q6k_compat_rewrites;
+    int has_q6k_readonly_overlap_snapshot;
+    int q6k_readonly_overlap_snapshot;
     int has_q4k_safe_kernel;
     int q4k_safe_kernel;
     int has_q4k_targeted_specialization;
@@ -11132,6 +11136,14 @@ static int run_vulkan_dispatch_fd(
         options && options->has_q6k_safe_kernel
             ? options->q6k_safe_kernel
             : env_truthy("PDOCKER_GPU_Q6K_SAFE_KERNEL", 0);
+    const int q6k_compat_rewrites_requested =
+        options && options->has_q6k_compat_rewrites
+            ? options->q6k_compat_rewrites
+            : env_truthy("PDOCKER_GPU_Q6K_COMPAT_REWRITES", 0);
+    const int q6k_readonly_overlap_snapshot_requested =
+        options && options->has_q6k_readonly_overlap_snapshot
+            ? options->q6k_readonly_overlap_snapshot
+            : env_truthy("PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT", 0);
     const uint64_t q6_storage16_lowering_identity_hash =
         (options && options->has_source_spirv_hash &&
          is_q6k_matvec_hash(options->source_spirv_hash))
@@ -11140,7 +11152,9 @@ static int run_vulkan_dispatch_fd(
     const int q6_native_callsite_detected =
         !q6k_safe_kernel_requested &&
         is_q6k_matvec_hash(q6_storage16_lowering_identity_hash);
-    if (q6_native_callsite_detected) {
+    const int q6_compat_rewrites_enabled =
+        q6_native_callsite_detected && q6k_compat_rewrites_requested;
+    if (q6_compat_rewrites_enabled) {
         q6_storage16_loads_lowered = lower_q6k_storage16_loads_to_storage8(
             &shader_code,
             &shader_size,
@@ -11157,7 +11171,8 @@ static int run_vulkan_dispatch_fd(
             q6_storage16_lowering_identity_hash);
     }
     const int q6_readonly_overlap_snapshot_auto =
-        strict_passthrough && q6_native_callsite_detected;
+        strict_passthrough && q6_native_callsite_detected &&
+        q6k_readonly_overlap_snapshot_requested;
     const int materialize_readonly_overlap_snapshots =
         strict_passthrough &&
         (disable_overlap_aliasing || q6_readonly_overlap_snapshot_auto);
@@ -11243,7 +11258,7 @@ static int run_vulkan_dispatch_fd(
     q4k_pipeline_retry_enabled = q4k_callsite_detected &&
         (options && options->has_q4k_pipeline_retry_ladder
             ? options->q4k_pipeline_retry_ladder
-            : env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 1));
+            : env_truthy("PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER", 0));
     dispatch_lifecycle_spirv_hash = original_spirv_hash;
     const char *strict_reconciliation_field = NULL;
     if (strict_reconciliation && strict_reconciliation_has_mismatch(

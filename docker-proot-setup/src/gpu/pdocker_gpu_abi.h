@@ -45,9 +45,11 @@
     X(PDOCKER_GPU_CPU_ORACLE, cpu_oracle, has_cpu_oracle, cpu_oracle, 0) \
     X(PDOCKER_GPU_Q6K_ORACLE_WRITEBACK, q6k_oracle_writeback, has_q6k_oracle_writeback, q6k_oracle_writeback, 0) \
     X(PDOCKER_GPU_Q6K_SAFE_KERNEL, q6k_safe_kernel, has_q6k_safe_kernel, q6k_safe_kernel, 0) \
+    X(PDOCKER_GPU_Q6K_COMPAT_REWRITES, q6k_compat_rewrites, has_q6k_compat_rewrites, q6k_compat_rewrites, 0) \
+    X(PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT, q6k_readonly_overlap_snapshot, has_q6k_readonly_overlap_snapshot, q6k_readonly_overlap_snapshot, 0) \
     X(PDOCKER_GPU_Q4K_SAFE_KERNEL, q4k_safe_kernel, has_q4k_safe_kernel, q4k_safe_kernel, 0) \
     X(PDOCKER_GPU_Q4K_TARGETED_SPECIALIZATION, q4k_targeted_specialization, has_q4k_targeted_specialization, q4k_targeted_specialization, 0) \
-    X(PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER, q4k_pipeline_retry_ladder, has_q4k_pipeline_retry_ladder, q4k_pipeline_retry_ladder, 1) \
+    X(PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER, q4k_pipeline_retry_ladder, has_q4k_pipeline_retry_ladder, q4k_pipeline_retry_ladder, 0) \
     X(PDOCKER_GPU_ADD_FLOAT16_CAPABILITY_FOR_STORAGE16, add_float16_capability_for_storage16, has_add_float16_capability_for_storage16, add_float16_capability_for_storage16, 0)
 
 #define PDOCKER_GPU_VULKAN_BOOL_DISPATCH_OPTIONS_NO_HAS(X) \
