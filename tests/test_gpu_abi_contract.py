@@ -1115,6 +1115,27 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("set->unsupported_descriptor_array", bind_body)
         self.assertIn("cmd->unsupported_descriptor_set_layout = true;", bind_body)
 
+
+    def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("descriptor_type_supported_by_v4_transport", icd)
+        self.assertIn("unsupported_descriptor_type", icd)
+        self.assertIn("descriptor type binding=%u type=%u is unsupported by V4 transport", icd)
+        self.assertIn("descriptor write binding=%u type=%u is unsupported by V4 transport", icd)
+        self.assertIn("descriptor binding=%u exceeds V4 transport limit=%u", icd)
+        self.assertIn("layout->unsupported_descriptor_type = true;", icd)
+        self.assertIn("set->unsupported_descriptor_type = true;", icd)
+        update_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1
+        )[0]
+        self.assertNotIn("w->descriptorType != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER &&", update_body)
+        self.assertIn("!descriptor_type_supported_by_v4_transport(w->descriptorType)", update_body)
+        bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1
+        )[0]
+        self.assertIn("set->unsupported_descriptor_type", bind_body)
+        self.assertIn("set->layout->unsupported_descriptor_type", bind_body)
+
     def test_llama_gpu_compare_q6_identity_survives_spirv_legalization_hash_changes(self):
         helpers = load_llama_gpu_compare_q6_helpers()
         q6_hash = sorted(helpers["Q6_K_MATVEC_SPIRV_HASHES"])[0]

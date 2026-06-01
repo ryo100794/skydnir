@@ -152,12 +152,14 @@ struct PdockerVkDescriptorSetLayout {
     VkDescriptorType storage_binding_types[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t storage_binding_counts[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     bool unsupported_descriptor_array;
+    bool unsupported_descriptor_type;
 };
 
 struct PdockerVkDescriptorSet {
     PdockerVkDescriptorSetLayout *layout;
     PdockerVkDescriptorBinding storage_buffers[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     bool unsupported_descriptor_array;
+    bool unsupported_descriptor_type;
 };
 
 struct PdockerVkShaderModule {
@@ -3438,6 +3440,11 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
     vkGetDeviceQueue(device, 0, 0, pQueue);
 }
 
+static bool descriptor_type_supported_by_v4_transport(VkDescriptorType type) {
+    return type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
+           type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
         VkDevice device,
         const VkDescriptorSetLayoutCreateInfo *pCreateInfo,
@@ -3451,14 +3458,28 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
     for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->bindingCount; ++i) {
         const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[i];
-        if ((binding->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
-             binding->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC) &&
+        if (!descriptor_type_supported_by_v4_transport(binding->descriptorType)) {
+            layout->unsupported_descriptor_type = true;
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: descriptor type binding=%u type=%u is unsupported by V4 transport; rejecting instead of ignoring\n",
+                    binding->binding,
+                    binding->descriptorType);
+            continue;
+        }
+        if (binding->binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+            layout->unsupported_descriptor_type = true;
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: descriptor binding=%u exceeds V4 transport limit=%u; rejecting instead of truncating\n",
+                    binding->binding,
+                    PDOCKER_VK_MAX_STORAGE_BUFFERS);
+            continue;
+        }
+        if (descriptor_type_supported_by_v4_transport(binding->descriptorType) &&
             binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS &&
             binding->binding + 1 > layout->storage_binding_count) {
             layout->storage_binding_count = binding->binding + 1;
         }
-        if ((binding->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
-             binding->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC) &&
+        if (descriptor_type_supported_by_v4_transport(binding->descriptorType) &&
             binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
             layout->storage_binding_types[binding->binding] = binding->descriptorType;
             layout->storage_binding_counts[binding->binding] = binding->descriptorCount;
@@ -3589,10 +3610,16 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
     for (uint32_t i = 0; i < descriptorWriteCount; ++i) {
         const VkWriteDescriptorSet *w = &pDescriptorWrites[i];
         PdockerVkDescriptorSet *set = (PdockerVkDescriptorSet *)w->dstSet;
-        if (!set ||
-            (w->descriptorType != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER &&
-             w->descriptorType != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC) ||
-            !w->pBufferInfo) continue;
+        if (!set) continue;
+        if (!descriptor_type_supported_by_v4_transport(w->descriptorType)) {
+            set->unsupported_descriptor_type = true;
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: descriptor write binding=%u type=%u is unsupported by V4 transport; rejecting instead of ignoring\n",
+                    w->dstBinding,
+                    w->descriptorType);
+            continue;
+        }
+        if (!w->pBufferInfo) continue;
         if (w->descriptorCount > 1 || w->dstArrayElement != 0 ||
             (set->layout && set->layout->unsupported_descriptor_array)) {
             set->unsupported_descriptor_array = true;
@@ -3635,8 +3662,11 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
         if (!src || !dst) continue;
         if (c->descriptorCount > 1 || c->srcArrayElement != 0 || c->dstArrayElement != 0 ||
             src->unsupported_descriptor_array || dst->unsupported_descriptor_array ||
+            src->unsupported_descriptor_type || dst->unsupported_descriptor_type ||
             (src->layout && src->layout->unsupported_descriptor_array) ||
-            (dst->layout && dst->layout->unsupported_descriptor_array)) {
+            (dst->layout && dst->layout->unsupported_descriptor_array) ||
+            (src->layout && src->layout->unsupported_descriptor_type) ||
+            (dst->layout && dst->layout->unsupported_descriptor_type)) {
             dst->unsupported_descriptor_array = true;
             fprintf(stderr,
                     "pdocker-vulkan-icd: descriptor array copy src_binding=%u src_array=%u dst_binding=%u dst_array=%u count=%u is unsupported by V4 transport; rejecting instead of flattening\n",
@@ -3903,8 +3933,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             PdockerVkDescriptorSet *set = (PdockerVkDescriptorSet *)pDescriptorSets[set_i];
             if (!set) continue;
             uint32_t target_set = firstSet + set_i;
-            if (set->unsupported_descriptor_array ||
-                (set->layout && set->layout->unsupported_descriptor_array)) {
+            if (set->unsupported_descriptor_array || set->unsupported_descriptor_type ||
+                (set->layout &&
+                 (set->layout->unsupported_descriptor_array ||
+                  set->layout->unsupported_descriptor_type))) {
                 cmd->unsupported_descriptor_set_layout = true;
             }
             cmd->bound_set_snapshots[target_set] = *set;
