@@ -54,6 +54,7 @@
 #define PDOCKER_GPU_MUTABLE_BUFFER_CACHE_SLOTS 32
 #define PDOCKER_GPU_PIPELINE_CACHE_SLOTS 256
 #define PDOCKER_GPU_DIRTY_MASK_CACHE_SLOTS 64
+#define PDOCKER_GPU_STRICT_GRAPH_CACHE_SLOTS 8
 #define PDOCKER_GPU_RESIDENT_CACHE_DEFAULT_THRESHOLD (64u * 1024u * 1024u)
 #define PDOCKER_GPU_MUTABLE_BUFFER_CACHE_DEFAULT_MAX_BYTES (32u * 1024u * 1024u)
 #define PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_DEFAULT_MIN_BYTES (16u * 1024u * 1024u)
@@ -959,6 +960,8 @@ typedef struct {
     int resident_cache;
     int has_resident_cache_min_bytes;
     size_t resident_cache_min_bytes;
+    int has_strict_graph_cache;
+    int strict_graph_cache;
     int has_profile_response;
     int profile_response;
     int has_strict_passthrough;
@@ -1993,6 +1996,7 @@ typedef struct {
     int fd;
     size_t size;
     uint32_t memory_type_bits;
+    uint32_t memory_type_index;
     VkDeviceMemory memory;
     VkBuffer staging_buffer;
     VkDeviceMemory staging_memory;
@@ -2015,6 +2019,27 @@ typedef struct {
     size_t staging_end;
     VulkanVectorBuffer view;
 } VulkanStrictBufferObject;
+
+
+typedef struct {
+    int valid;
+    int in_use;
+    VkDevice device;
+    uint64_t key;
+    size_t binding_count;
+    uint64_t active_mask;
+    int device_local_staged;
+    size_t memory_count;
+    size_t buffer_count;
+    size_t bytes;
+    unsigned long hits;
+    uint64_t last_used;
+    VulkanStrictMemoryObject memories[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VulkanStrictBufferObject buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+} VulkanStrictGraphCacheEntry;
+
+static VulkanStrictGraphCacheEntry g_vulkan_strict_graph_cache[PDOCKER_GPU_STRICT_GRAPH_CACHE_SLOTS];
+static uint64_t g_vulkan_strict_graph_cache_clock = 1;
 
 static int vulkan_vector_staging_offset(
         const VulkanVectorBuffer *buffer,
@@ -2198,6 +2223,7 @@ static int create_strict_vulkan_object_graph(
             memories[m].device_local_staged = device_local_staged ? 1 : 0;
         }
         if (memory_type == UINT32_MAX) return -ENOTSUP;
+        memories[m].memory_type_index = memory_type;
         VkMemoryAllocateInfo mai = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             .allocationSize = (VkDeviceSize)memories[m].size,
@@ -2868,6 +2894,185 @@ static uint64_t fnv1a64_update(uint64_t hash, const void *data, size_t size) {
         hash *= 1099511628211ull;
     }
     return hash;
+}
+
+
+static int strict_graph_cache_enabled(const VulkanDispatchOptions *options) {
+    if (options && options->has_strict_graph_cache) {
+        return options->strict_graph_cache ? 1 : 0;
+    }
+    return env_truthy("PDOCKER_GPU_STRICT_GRAPH_CACHE", 1);
+}
+
+static uint64_t strict_graph_cache_key(
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        const uint8_t *active_bindings,
+        const uint8_t *binding_read_needed,
+        const uint8_t *binding_write_needed,
+        int device_local_staging,
+        uint64_t *active_mask,
+        size_t *graph_bytes,
+        const char **disabled_reason) {
+    uint64_t hash = 1469598103934665603ull;
+    uint64_t mask = 0;
+    size_t bytes = 0;
+    if (!bindings || !active_bindings || !binding_read_needed || !binding_write_needed) {
+        if (disabled_reason) *disabled_reason = "invalid-arguments";
+        return 0;
+    }
+    hash = fnv1a64_update(hash, &binding_count, sizeof(binding_count));
+    hash = fnv1a64_update(hash, &device_local_staging, sizeof(device_local_staging));
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (!active_bindings[i]) continue;
+        if (i < 64) mask |= (1ull << i);
+        const VulkanDispatchBinding *b = &bindings[i];
+        const size_t descriptor_range = b->api_range ? b->api_range : b->size;
+        if (descriptor_range != b->size) {
+            if (disabled_reason) *disabled_reason = "api-range-differs-from-transfer-size";
+            return 0;
+        }
+        uint32_t u32;
+        uint64_t u64;
+        u32 = b->descriptor_set; hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = b->binding; hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u64 = (uint64_t)b->offset; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = (uint64_t)b->size; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = (uint64_t)b->api_offset; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = (uint64_t)b->api_range; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = (uint64_t)b->api_buffer_size; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u32 = b->api_descriptor_type; hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = (uint32_t)b->api_dynamic; hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u64 = (uint64_t)b->api_memory_offset; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = (uint64_t)b->api_memory_size; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = b->api_memory_id; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u64 = b->api_buffer_id; hash = fnv1a64_update(hash, &u64, sizeof(u64));
+        u32 = binding_read_needed[i]; hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = binding_write_needed[i]; hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        bytes += b->api_memory_size;
+    }
+    if (active_mask) *active_mask = mask;
+    if (graph_bytes) *graph_bytes = bytes;
+    if (disabled_reason) *disabled_reason = NULL;
+    return hash;
+}
+
+static void destroy_strict_graph_cache_entry(VkDevice device, VulkanStrictGraphCacheEntry *entry) {
+    if (!entry || !entry->valid) return;
+    if (entry->in_use) return;
+    destroy_strict_vulkan_object_graph(device,
+                                       entry->memories,
+                                       entry->memory_count,
+                                       entry->buffers,
+                                       entry->buffer_count);
+    memset(entry, 0, sizeof(*entry));
+}
+
+static VulkanStrictGraphCacheEntry *find_strict_graph_cache_entry(
+        VkDevice device,
+        uint64_t key,
+        size_t binding_count,
+        uint64_t active_mask,
+        int device_local_staged) {
+    if (!key) return NULL;
+    for (size_t i = 0; i < PDOCKER_GPU_STRICT_GRAPH_CACHE_SLOTS; ++i) {
+        VulkanStrictGraphCacheEntry *entry = &g_vulkan_strict_graph_cache[i];
+        if (!entry->valid || entry->in_use) continue;
+        if (entry->device == device && entry->key == key &&
+            entry->binding_count == binding_count &&
+            entry->active_mask == active_mask &&
+            entry->device_local_staged == device_local_staged) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static VulkanStrictGraphCacheEntry *select_strict_graph_cache_slot(VkDevice device) {
+    size_t victim = 0;
+    for (size_t i = 0; i < PDOCKER_GPU_STRICT_GRAPH_CACHE_SLOTS; ++i) {
+        if (!g_vulkan_strict_graph_cache[i].valid) return &g_vulkan_strict_graph_cache[i];
+        if (g_vulkan_strict_graph_cache[i].in_use) continue;
+        if (g_vulkan_strict_graph_cache[victim].in_use ||
+            g_vulkan_strict_graph_cache[i].last_used < g_vulkan_strict_graph_cache[victim].last_used) {
+            victim = i;
+        }
+    }
+    if (g_vulkan_strict_graph_cache[victim].in_use) return NULL;
+    destroy_strict_graph_cache_entry(g_vulkan_strict_graph_cache[victim].device, &g_vulkan_strict_graph_cache[victim]);
+    return &g_vulkan_strict_graph_cache[victim];
+}
+
+static void attach_strict_graph_views(
+        VulkanStrictMemoryObject *memories,
+        VulkanStrictBufferObject *buffers,
+        size_t buffer_count) {
+    for (size_t b = 0; b < buffer_count; ++b) {
+        VulkanStrictMemoryObject *memory = &memories[buffers[b].memory_index];
+        buffers[b].view.buffer = buffers[b].buffer;
+        buffers[b].view.memory = memory->memory;
+        buffers[b].view.staging_buffer = buffers[b].staging_buffer;
+        buffers[b].view.map = memory->device_local_staged ? buffers[b].staging_map : memory->map;
+        buffers[b].view.size = memory->device_local_staged ? buffers[b].staging_size : memory->size;
+        buffers[b].view.staging_base =
+            memory->device_local_staged && buffers[b].staging_base != SIZE_MAX
+                ? buffers[b].staging_base
+                : 0;
+        buffers[b].view.device_local_staged = memory->device_local_staged;
+    }
+}
+
+static int bind_strict_graph_views_to_bindings(
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        const uint8_t *active_bindings,
+        VulkanStrictBufferObject *buffers,
+        size_t buffer_count,
+        VulkanVectorBuffer **vk_buffers) {
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (!active_bindings[i]) continue;
+        int buffer_index = find_strict_buffer_object(buffers, buffer_count, bindings[i].api_buffer_id);
+        if (buffer_index < 0) return -EINVAL;
+        vk_buffers[i] = &buffers[buffer_index].view;
+    }
+    return 0;
+}
+
+static int upload_strict_graph_bindings(
+        const int *buffer_fds,
+        const VulkanDispatchBinding *bindings,
+        size_t binding_count,
+        const uint8_t *active_bindings,
+        const uint8_t *binding_read_needed,
+        VulkanStrictMemoryObject *memories,
+        VulkanStrictBufferObject *buffers,
+        size_t buffer_count,
+        VulkanVectorBuffer **vk_buffers) {
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (!active_bindings[i] || !binding_read_needed[i]) continue;
+        int buffer_index = find_strict_buffer_object(buffers, buffer_count, bindings[i].api_buffer_id);
+        if (buffer_index < 0) return -EINVAL;
+        VulkanStrictMemoryObject *memory = &memories[buffers[buffer_index].memory_index];
+        uint64_t descriptor_absolute =
+            (uint64_t)bindings[i].api_memory_offset + (uint64_t)bindings[i].api_offset;
+        size_t upload_offset = (size_t)descriptor_absolute;
+        if (memory->device_local_staged) {
+            if (vulkan_vector_staging_offset(&buffers[buffer_index].view,
+                                             (size_t)bindings[i].api_offset,
+                                             bindings[i].size,
+                                             &upload_offset) != 0) return -EINVAL;
+        } else if (descriptor_absolute + (uint64_t)bindings[i].size > (uint64_t)memory->size) {
+            return -EINVAL;
+        }
+        vk_buffers[i] = &buffers[buffer_index].view;
+        if (read_fd_exact(buffer_fds[i],
+                          (unsigned char *)vk_buffers[i]->map + upload_offset,
+                          bindings[i].size,
+                          bindings[i].offset) != 0) {
+            return -EIO;
+        }
+    }
+    return 0;
 }
 
 static uint64_t pipeline_specialization_hash(
@@ -10459,6 +10664,14 @@ static int run_vulkan_dispatch_fd(
     size_t strict_memory_count = 0;
     size_t strict_buffer_count = 0;
     int strict_object_graph_used = 0;
+    int strict_object_graph_cache_enabled = 0;
+    int strict_object_graph_cache_hit = 0;
+    int strict_object_graph_cache_adopted = 0;
+    const char *strict_object_graph_cache_disabled_reason = NULL;
+    uint64_t strict_object_graph_cache_key = 0;
+    uint64_t strict_object_graph_cache_active_mask = 0;
+    size_t strict_object_graph_cache_bytes = 0;
+    VulkanStrictGraphCacheEntry *strict_object_graph_cache_entry = NULL;
     size_t strict_readonly_overlap_snapshot_count = 0;
     size_t strict_readonly_overlap_snapshot_bytes = 0;
     int cache_hits[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -11398,27 +11611,79 @@ static int run_vulkan_dispatch_fd(
 
     if (strict_passthrough) {
         fail_stage = "create-strict-vulkan-object-graph";
-        double graph_start = now_ms();
-        int graph_rc = create_strict_vulkan_object_graph(
-            rt->physical_device,
-            rt->device,
-            buffer_fds,
-            bindings,
-            binding_count,
-            strict_graph_active_bindings,
-            binding_read_needed,
-            binding_write_needed,
-            strict_memories,
-            &strict_memory_count,
-            strict_buffers,
-            &strict_buffer_count,
-            vk_buffers,
-            strict_device_local_staging);
-        timing_strict_graph_ms = now_ms() - graph_start;
-        if (graph_rc != 0) {
-            io_rc = graph_rc;
-            goto cleanup;
+        strict_object_graph_cache_enabled = strict_graph_cache_enabled(options);
+        if (strict_object_graph_cache_enabled) {
+            strict_object_graph_cache_key = strict_graph_cache_key(
+                bindings,
+                binding_count,
+                strict_graph_active_bindings,
+                binding_read_needed,
+                binding_write_needed,
+                strict_device_local_staging,
+                &strict_object_graph_cache_active_mask,
+                &strict_object_graph_cache_bytes,
+                &strict_object_graph_cache_disabled_reason);
         }
+        double graph_start = now_ms();
+        if (strict_object_graph_cache_enabled && strict_object_graph_cache_key != 0) {
+            strict_object_graph_cache_entry = find_strict_graph_cache_entry(
+                rt->device,
+                strict_object_graph_cache_key,
+                binding_count,
+                strict_object_graph_cache_active_mask,
+                strict_device_local_staging);
+            if (strict_object_graph_cache_entry) {
+                strict_object_graph_cache_entry->in_use = 1;
+                strict_object_graph_cache_entry->hits++;
+                strict_object_graph_cache_entry->last_used = g_vulkan_strict_graph_cache_clock++;
+                strict_memory_count = strict_object_graph_cache_entry->memory_count;
+                strict_buffer_count = strict_object_graph_cache_entry->buffer_count;
+                memcpy(strict_memories, strict_object_graph_cache_entry->memories, sizeof(strict_memories));
+                memcpy(strict_buffers, strict_object_graph_cache_entry->buffers, sizeof(strict_buffers));
+                attach_strict_graph_views(strict_memories, strict_buffers, strict_buffer_count);
+                int bind_rc = bind_strict_graph_views_to_bindings(
+                    bindings, binding_count, strict_graph_active_bindings,
+                    strict_buffers, strict_buffer_count, vk_buffers);
+                if (bind_rc == 0) {
+                    bind_rc = upload_strict_graph_bindings(
+                        buffer_fds, bindings, binding_count, strict_graph_active_bindings,
+                        binding_read_needed, strict_memories, strict_buffers,
+                        strict_buffer_count, vk_buffers);
+                }
+                if (bind_rc == 0) {
+                    strict_object_graph_cache_hit = 1;
+                } else {
+                    strict_object_graph_cache_entry->in_use = 0;
+                    destroy_strict_graph_cache_entry(rt->device, strict_object_graph_cache_entry);
+                    strict_object_graph_cache_entry = NULL;
+                    io_rc = bind_rc;
+                    goto cleanup;
+                }
+            }
+        }
+        if (!strict_object_graph_cache_hit) {
+            int graph_rc = create_strict_vulkan_object_graph(
+                rt->physical_device,
+                rt->device,
+                buffer_fds,
+                bindings,
+                binding_count,
+                strict_graph_active_bindings,
+                binding_read_needed,
+                binding_write_needed,
+                strict_memories,
+                &strict_memory_count,
+                strict_buffers,
+                &strict_buffer_count,
+                vk_buffers,
+                strict_device_local_staging);
+            if (graph_rc != 0) {
+                io_rc = graph_rc;
+                timing_strict_graph_ms = now_ms() - graph_start;
+                goto cleanup;
+            }
+        }
+        timing_strict_graph_ms = now_ms() - graph_start;
         strict_object_graph_used = 1;
         if (materialize_readonly_overlap_snapshots) {
             /*
@@ -12593,6 +12858,29 @@ static int run_vulkan_dispatch_fd(
                                     specialization_count,
                                     specialization_data,
                                     specialization_data_size);
+    if (strict_object_graph_used && !strict_object_graph_cache_hit &&
+        strict_object_graph_cache_enabled && strict_object_graph_cache_key != 0 &&
+        strict_memory_count > 0 && strict_buffer_count > 0) {
+        VulkanStrictGraphCacheEntry *slot = select_strict_graph_cache_slot(rt->device);
+        if (slot) {
+            memset(slot, 0, sizeof(*slot));
+            slot->valid = 1;
+            slot->device = rt->device;
+            slot->key = strict_object_graph_cache_key;
+            slot->binding_count = binding_count;
+            slot->active_mask = strict_object_graph_cache_active_mask;
+            slot->device_local_staged = strict_device_local_staging;
+            slot->memory_count = strict_memory_count;
+            slot->buffer_count = strict_buffer_count;
+            slot->bytes = strict_object_graph_cache_bytes;
+            slot->hits = 1;
+            slot->last_used = g_vulkan_strict_graph_cache_clock++;
+            memcpy(slot->memories, strict_memories, sizeof(strict_memories));
+            memcpy(slot->buffers, strict_buffers, sizeof(strict_buffers));
+            attach_strict_graph_views(slot->memories, slot->buffers, slot->buffer_count);
+            strict_object_graph_cache_adopted = 1;
+        }
+    }
     if (profile_response) {
         fprintf(json_out(),
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
@@ -12607,7 +12895,10 @@ static int run_vulkan_dispatch_fd(
                 "\"staging_upload_copies\":%zu,\"staging_upload_bytes\":%zu,"
                 "\"staging_download_copies\":%zu,\"staging_download_bytes\":%zu,"
                 "\"readonly_overlap_snapshots\":%zu,"
-                "\"readonly_overlap_snapshot_bytes\":%zu},"
+                "\"readonly_overlap_snapshot_bytes\":%zu,"
+                "\"cache_enabled\":%s,\"cache_hit\":%s,"
+                "\"cache_adopted\":%s,\"cache_key\":\"0x%016llx\","
+                "\"cache_bytes\":%zu,\"cache_disabled_reason\":\"%s\"},"
                 "\"shader_bytes\":%zu,"
                 "\"source_spirv_hash\":\"0x%016llx\","
                 "\"effective_spirv_hash\":\"0x%016llx\","
@@ -12679,6 +12970,12 @@ static int run_vulkan_dispatch_fd(
                 strict_staging_download_bytes,
                 strict_readonly_overlap_snapshot_count,
                 strict_readonly_overlap_snapshot_bytes,
+                strict_object_graph_cache_enabled ? "true" : "false",
+                strict_object_graph_cache_hit ? "true" : "false",
+                strict_object_graph_cache_adopted ? "true" : "false",
+                (unsigned long long)strict_object_graph_cache_key,
+                strict_object_graph_cache_bytes,
+                strict_object_graph_cache_disabled_reason ? strict_object_graph_cache_disabled_reason : "",
                 shader_size,
                 (unsigned long long)original_spirv_hash,
                 (unsigned long long)spirv_summary.hash,
@@ -12829,7 +13126,10 @@ static int run_vulkan_dispatch_fd(
             "\"staging_upload_copies\":%zu,\"staging_upload_bytes\":%zu,"
             "\"staging_download_copies\":%zu,\"staging_download_bytes\":%zu,"
             "\"readonly_overlap_snapshots\":%zu,"
-            "\"readonly_overlap_snapshot_bytes\":%zu},"
+            "\"readonly_overlap_snapshot_bytes\":%zu,"
+            "\"cache_enabled\":%s,\"cache_hit\":%s,"
+            "\"cache_adopted\":%s,\"cache_key\":\"0x%016llx\","
+            "\"cache_bytes\":%zu,\"cache_disabled_reason\":\"%s\"},"
             "\"shader_bytes\":%zu,"
             "\"source_spirv_hash\":\"0x%016llx\","
             "\"effective_spirv_hash\":\"0x%016llx\","
@@ -12909,6 +13209,12 @@ static int run_vulkan_dispatch_fd(
             strict_staging_download_bytes,
             strict_readonly_overlap_snapshot_count,
             strict_readonly_overlap_snapshot_bytes,
+            strict_object_graph_cache_enabled ? "true" : "false",
+            strict_object_graph_cache_hit ? "true" : "false",
+            strict_object_graph_cache_adopted ? "true" : "false",
+            (unsigned long long)strict_object_graph_cache_key,
+            strict_object_graph_cache_bytes,
+            strict_object_graph_cache_disabled_reason ? strict_object_graph_cache_disabled_reason : "",
             shader_size,
             (unsigned long long)original_spirv_hash,
             (unsigned long long)spirv_summary.hash,
@@ -13340,12 +13646,45 @@ cleanup:
     for (size_t i = 0; i < binding_alias_count; ++i) {
         destroy_vulkan_vector_buffer(rt->device, &alias_temp_buffers[i]);
     }
-    if (strict_object_graph_used) {
-        destroy_strict_vulkan_object_graph(rt->device,
-                                           strict_memories,
-                                           strict_memory_count,
-                                           strict_buffers,
-                                           strict_buffer_count);
+    if (strict_object_graph_cache_entry) {
+        if (ret != 0 && strict_object_graph_cache_hit) {
+            strict_object_graph_cache_entry->in_use = 0;
+            destroy_strict_graph_cache_entry(rt->device, strict_object_graph_cache_entry);
+        } else {
+            strict_object_graph_cache_entry->in_use = 0;
+        }
+    }
+    if (strict_object_graph_used && !strict_object_graph_cache_hit) {
+        if (ret == 0 && !strict_object_graph_cache_adopted &&
+            strict_object_graph_cache_enabled && strict_object_graph_cache_key != 0 &&
+            strict_memory_count > 0 && strict_buffer_count > 0) {
+            VulkanStrictGraphCacheEntry *slot = select_strict_graph_cache_slot(rt->device);
+            if (slot) {
+                memset(slot, 0, sizeof(*slot));
+                slot->valid = 1;
+                slot->device = rt->device;
+                slot->key = strict_object_graph_cache_key;
+                slot->binding_count = binding_count;
+                slot->active_mask = strict_object_graph_cache_active_mask;
+                slot->device_local_staged = strict_device_local_staging;
+                slot->memory_count = strict_memory_count;
+                slot->buffer_count = strict_buffer_count;
+                slot->bytes = strict_object_graph_cache_bytes;
+                slot->hits = 1;
+                slot->last_used = g_vulkan_strict_graph_cache_clock++;
+                memcpy(slot->memories, strict_memories, sizeof(strict_memories));
+                memcpy(slot->buffers, strict_buffers, sizeof(strict_buffers));
+                attach_strict_graph_views(slot->memories, slot->buffers, slot->buffer_count);
+                strict_object_graph_cache_adopted = 1;
+            }
+        }
+        if (!strict_object_graph_cache_adopted) {
+            destroy_strict_vulkan_object_graph(rt->device,
+                                               strict_memories,
+                                               strict_memory_count,
+                                               strict_buffers,
+                                               strict_buffer_count);
+        }
     }
     free(shader_code);
     return ret;

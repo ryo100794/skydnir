@@ -185,3 +185,51 @@ Phase timing summary from the artifact:
 Conclusion: Q6 correctness is still intact, and the resident read-only cache alone is not enough. The current first performance blocker is repeated strict object-graph materialization, not shader arithmetic and not queue wait.
 
 Next optimization target: strict object graph reuse/pooling for immutable/read-only memory and stable VkBuffer/VkDeviceMemory skeletons, with descriptor offsets preserved exactly.
+
+### Strict object-graph cache follow-up (2026-06-01T21:31Z)
+
+Artifact: `docs/test/llama-gpu-ngl1-strict-graph-cache-20260601T213127Z.json`.
+
+Implementation summary:
+
+- Added `PDOCKER_GPU_STRICT_GRAPH_CACHE` as a manifest-backed UI/compose runtime default and an ICD-to-executor dispatch option.
+- The executor now can adopt a successfully materialized strict Vulkan object graph and reuse it on later dispatches with the same descriptor/API memory identity, offsets, ranges, and access intent.
+- Cache hit evidence is emitted under `strict_object_graph.cache_enabled`, `cache_hit`, `cache_adopted`, `cache_key`, `cache_bytes`, and `cache_disabled_reason`.
+
+Observed cache evidence from the run:
+
+| Item | Value |
+|---|---:|
+| strict object-graph events | `21` |
+| cache enabled events | `21` |
+| cache hits | `12` |
+| cache adopted/miss events | `9` |
+| cache disabled reasons | none |
+| hit strict-graph mean | `0.023 ms` |
+| miss/adopt strict-graph mean | `885.205 ms` |
+| hit pipeline-create mean | `0.000 ms` |
+| miss/adopt pipeline-create mean | `329.269 ms` |
+
+Hash-level cache behavior:
+
+| source SPIR-V hash | events | hits | adopted |
+|---|---:|---:|---:|
+| `0xac41e8033a67af4a` | `14` | `12` | `2` |
+| `0x1bf751845c5dce75` | `4` | `0` | `4` |
+| `0xf2f988b94bd3e0dc` | `2` | `0` | `2` |
+| `0x11d5243c43b23a7b` | `1` | `0` | `1` |
+
+Verifier result:
+
+- `runtime_freshness`: pass.
+- `config_propagation`: pass, including `PDOCKER_GPU_STRICT_GRAPH_CACHE -> strict_object_graph.cache_enabled`.
+- `classification`: `q6-workgroup-cleared-and-oracle-match`.
+- Q6 native-vs-writeback joined samples: pass.
+- API prompt sanity: not run, because the server did not finish readiness before the target container exited.
+- Benchmark claim: not allowed for this artifact.
+
+Interpretation:
+
+- The strict graph cache materially removes the dominant strict graph setup cost on cache hits (`~0.02 ms` hit path versus `~885 ms` miss/adopt path in this diagnostic run).
+- This run is not an end-to-end performance result because the llama server exited before readiness and API prompt validation.
+- The next performance step is to reduce first-use miss/adopt cost and then rerun a served API benchmark with CPU oracle/profile overhead minimized after correctness evidence is retained.

@@ -15,6 +15,7 @@
     "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
     "PDOCKER_GPU_RESIDENT_CACHE",
     "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
+    "PDOCKER_GPU_STRICT_GRAPH_CACHE",
     "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
     "PDOCKER_GPU_Q6K_SAFE_KERNEL",
     "PDOCKER_GPU_DISABLE_PIPELINE_OPTIMIZATION",
@@ -56,6 +57,13 @@
     {
       "env": "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
       "default": "1048576",
+      "modes": [
+        "vulkan"
+      ]
+    },
+    {
+      "env": "PDOCKER_GPU_STRICT_GRAPH_CACHE",
+      "default": "1",
       "modes": [
         "vulkan"
       ]
@@ -158,6 +166,7 @@
     "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER",
     "PDOCKER_GPU_RESIDENT_CACHE",
     "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
+    "PDOCKER_GPU_STRICT_GRAPH_CACHE",
     "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
     "PDOCKER_GPU_USE_SPIRV_DESCRIPTOR_ACCESS",
     "PDOCKER_GPU_WRITEONLY_BUFFER_CACHE",
@@ -291,6 +300,10 @@
     {
       "env": "PDOCKER_GPU_MUTABLE_BUFFER_CACHE",
       "executor_field": "mutable_buffer_cache.enabled"
+    },
+    {
+      "env": "PDOCKER_GPU_STRICT_GRAPH_CACHE",
+      "executor_field": "strict_object_graph.cache_enabled"
     }
   ],
   "abi_dispatch_option_env_fields": [
@@ -331,10 +344,6 @@
       "type": "bool"
     },
     {
-      "env": "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
-      "type": "size"
-    },
-    {
       "env": "PDOCKER_GPU_Q4K_PIPELINE_RETRY_LADDER",
       "type": "bool"
     },
@@ -359,10 +368,6 @@
       "type": "bool"
     },
     {
-      "env": "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
-      "type": "size"
-    },
-    {
       "env": "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
       "type": "bool"
     },
@@ -371,15 +376,15 @@
       "type": "bool"
     },
     {
-      "env": "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
-      "type": "size"
-    },
-    {
       "env": "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",
       "type": "bool"
     },
     {
       "env": "PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION",
+      "type": "bool"
+    },
+    {
+      "env": "PDOCKER_GPU_STRICT_GRAPH_CACHE",
       "type": "bool"
     },
     {
@@ -403,10 +408,6 @@
       "type": "bool"
     },
     {
-      "env": "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
-      "type": "size"
-    },
-    {
       "env": "PDOCKER_GPU_WRITEONLY_DIRTY_WRITEBACK",
       "type": "bool"
     },
@@ -421,6 +422,22 @@
     {
       "env": "PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC",
       "type": "bool"
+    },
+    {
+      "env": "PDOCKER_GPU_MUTABLE_BUFFER_CACHE_MAX_BYTES",
+      "type": "size"
+    },
+    {
+      "env": "PDOCKER_GPU_RESIDENT_CACHE_MIN_BYTES",
+      "type": "size"
+    },
+    {
+      "env": "PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING",
+      "type": "size"
+    },
+    {
+      "env": "PDOCKER_GPU_WRITEONLY_DIRTY_PROBE_MIN_BYTES",
+      "type": "size"
     }
   ],
   "env_bridge_classifications": {
@@ -460,6 +477,7 @@
       "PDOCKER_GPU_Q6K_ORACLE_WRITEBACK",
       "PDOCKER_GPU_Q6K_SAFE_KERNEL",
       "PDOCKER_GPU_RESIDENT_CACHE",
+      "PDOCKER_GPU_STRICT_GRAPH_CACHE",
       "PDOCKER_GPU_REWRITE_DUPLICATE_DESCRIPTOR_BINDINGS",
       "PDOCKER_GPU_SKIP_UNUSED_DESCRIPTOR_TRANSFERS",
       "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING",

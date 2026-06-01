@@ -29,6 +29,7 @@
     X(PDOCKER_GPU_WRITEONLY_BUFFER_CACHE, writeonly_cache, has_writeonly_buffer_cache, writeonly_buffer_cache, 0) \
     X(PDOCKER_GPU_MUTABLE_BUFFER_CACHE, mutable_cache, has_mutable_buffer_cache, mutable_buffer_cache, 1) \
     X(PDOCKER_GPU_RESIDENT_CACHE, resident_cache, has_resident_cache, resident_cache, 1) \
+    X(PDOCKER_GPU_STRICT_GRAPH_CACHE, strict_graph_cache, has_strict_graph_cache, strict_graph_cache, 1) \
     X(PDOCKER_GPU_STRICT_PASSTHROUGH, strict_passthrough, has_strict_passthrough, strict_passthrough, 0) \
     X(PDOCKER_GPU_STRICT_RECONCILIATION, strict_reconciliation, has_strict_reconciliation, strict_reconciliation, 0) \
     X(PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING, strict_device_local_staging, has_strict_device_local_staging, strict_device_local_staging, 0) \
