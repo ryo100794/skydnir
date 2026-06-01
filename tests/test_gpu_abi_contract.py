@@ -4130,6 +4130,13 @@ class GpuAbiContractTest(unittest.TestCase):
             "storage8.storageBuffer8BitAccess",
             "float16_int8.shaderInt8",
             "subgroup.supportedOperations",
+            "executor_advertisement_source_enabled",
+            "PDOCKER_VULKAN_ADVERTISEMENT_SOURCE",
+            'strcmp(source, "executor") == 0',
+            "executor_advertisement_caps_if_enabled",
+            "executor_advertised_shader_int64_or",
+            "executor_advertised_storage16_or",
+            "executor_advertised_storage8_or",
         ]:
             self.assertIn(marker, icd)
         self.assertIn("query_executor_advertisement_caps_line", icd)
@@ -4141,6 +4148,29 @@ class GpuAbiContractTest(unittest.TestCase):
             "pProperties->apiVersion", 1
         )[0]
         self.assertIn("trace_executor_advertisement_caps_once();", fill_props)
+        properties_body = icd.split("static void fill_physical_device_properties", 1)[1].split(
+            "static VkSubgroupFeatureFlags advertised_subgroup_operations", 1
+        )[0]
+        self.assertIn("const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();", properties_body)
+        self.assertIn("caps && caps->api_version ? caps->api_version : pdocker_api_version()", properties_body)
+        self.assertIn("caps->device_type", properties_body)
+        self.assertIn("caps->limits.maxComputeSharedMemorySize", properties_body)
+        self.assertIn("caps->limits.maxStorageBufferRange < transport_max_storage_range", properties_body)
+        self.assertIn("caps->limits.maxBoundDescriptorSets < PDOCKER_VK_MAX_DESCRIPTOR_SETS", properties_body)
+        pnext_body = icd.split("static void fill_pnext_features", 1)[1].split(
+            "static uint64_t feature_mask_from_base_features", 1
+        )[0]
+        self.assertIn("const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();", pnext_body)
+        self.assertIn("caps->storage16.uniformAndStorageBuffer16BitAccess", pnext_body)
+        self.assertIn("caps->storage8.uniformAndStorageBuffer8BitAccess", pnext_body)
+        self.assertIn("caps->float16_int8.shaderFloat16", pnext_body)
+        extension_body = icd.split("vkEnumerateDeviceExtensionProperties", 1)[1].split(
+            "#undef ADD_DEVICE_EXTENSION", 1
+        )[0]
+        self.assertIn("caps ? caps->ext_16bit_storage : advertised_storage16()", extension_body)
+        self.assertIn("caps ? caps->ext_8bit_storage : advertised_storage8()", extension_body)
+        self.assertIn("caps ? caps->ext_shader_float16_int8 : advertised_storage8()", extension_body)
+        self.assertIn("!caps || caps->ext_storage_buffer_storage_class", extension_body)
         self.assertIn("PDOCKER_VULKAN_ICD_DEBUG", icd)
 
     def test_llama_gpu_dispatch_lifecycle_logs_are_recorded(self):

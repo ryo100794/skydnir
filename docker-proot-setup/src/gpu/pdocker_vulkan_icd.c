@@ -319,13 +319,18 @@ static void maybe_dump_spirv(const VkShaderModuleCreateInfo *info) {
     }
 }
 
+static VkBool32 executor_advertised_shader_int64_or(VkBool32 legacy);
+static VkBool32 executor_advertised_storage16_or(VkBool32 legacy);
+static VkBool32 executor_advertised_storage8_or(VkBool32 legacy);
+
 static VkBool32 advertised_shader_int64(void) {
     /*
      * llama.cpp/ggml can select different shader variants from advertised
      * features. Until the executor proves the Android device supports the same
      * SPIR-V path, keep expensive/fragile features opt-in instead of optimistic.
      */
-    return env_truthy_default("PDOCKER_VULKAN_ENABLE_INT64", false) ? VK_TRUE : VK_FALSE;
+    VkBool32 legacy = env_truthy_default("PDOCKER_VULKAN_ENABLE_INT64", false) ? VK_TRUE : VK_FALSE;
+    return executor_advertised_shader_int64_or(legacy);
 }
 
 static VkBool32 advertised_storage16(void) {
@@ -335,7 +340,8 @@ static VkBool32 advertised_storage16(void) {
      * off when investigating Android executor capability mismatches.
      */
     if (env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE")) return VK_FALSE;
-    return env_truthy_default("PDOCKER_VULKAN_ENABLE_16BIT_STORAGE", true) ? VK_TRUE : VK_FALSE;
+    VkBool32 legacy = env_truthy_default("PDOCKER_VULKAN_ENABLE_16BIT_STORAGE", true) ? VK_TRUE : VK_FALSE;
+    return executor_advertised_storage16_or(legacy);
 }
 
 static VkBool32 advertised_storage8(void) {
@@ -347,7 +353,8 @@ static VkBool32 advertised_storage8(void) {
      * the executor device was created without those requested features.
      */
     if (env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) return VK_FALSE;
-    return env_truthy_default("PDOCKER_VULKAN_ENABLE_8BIT_STORAGE", true) ? VK_TRUE : VK_FALSE;
+    VkBool32 legacy = env_truthy_default("PDOCKER_VULKAN_ENABLE_8BIT_STORAGE", true) ? VK_TRUE : VK_FALSE;
+    return executor_advertised_storage8_or(legacy);
 }
 
 static VkDeviceSize pdocker_vulkan_heap_size(void) {
@@ -2236,6 +2243,39 @@ static const PdockerVkAdvertisedCaps *pdocker_vk_advertised_caps(void) {
     return &caps;
 }
 
+static bool executor_advertisement_source_enabled(void) {
+    const char *source = getenv("PDOCKER_VULKAN_ADVERTISEMENT_SOURCE");
+    return source && strcmp(source, "executor") == 0;
+}
+
+static const PdockerVkAdvertisedCaps *executor_advertisement_caps_if_enabled(void) {
+    if (!executor_advertisement_source_enabled()) return NULL;
+    const PdockerVkAdvertisedCaps *caps = pdocker_vk_advertised_caps();
+    return caps && caps->executor_valid ? caps : NULL;
+}
+
+static VkBool32 executor_advertised_shader_int64_or(VkBool32 legacy) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps) return legacy;
+    return caps->features.shaderInt64 ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 executor_advertised_storage16_or(VkBool32 legacy) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps) return legacy;
+    if (env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE")) return VK_FALSE;
+    return caps->storage16.storageBuffer16BitAccess ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 executor_advertised_storage8_or(VkBool32 legacy) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (!caps) return legacy;
+    if (env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE")) return VK_FALSE;
+    return (caps->storage8.storageBuffer8BitAccess && caps->float16_int8.shaderInt8)
+        ? VK_TRUE
+        : VK_FALSE;
+}
+
 static void trace_executor_advertisement_caps_once(void) {
     static int traced = 0;
     if (traced || !getenv("PDOCKER_VULKAN_ICD_DEBUG")) return;
@@ -2265,36 +2305,90 @@ static void trace_executor_advertisement_caps_once(void) {
 static void fill_physical_device_properties(VkPhysicalDeviceProperties *pProperties) {
     if (!pProperties) return;
     trace_executor_advertisement_caps_once();
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     memset(pProperties, 0, sizeof(*pProperties));
-    pProperties->apiVersion = pdocker_api_version();
+    pProperties->apiVersion = caps && caps->api_version ? caps->api_version : pdocker_api_version();
     pProperties->driverVersion = VK_MAKE_API_VERSION(0, 0, 1, 0);
-    pProperties->vendorID = 0x5044; /* PD */
-    pProperties->deviceID = 0x0001;
+    pProperties->vendorID = caps && caps->vendor_id ? caps->vendor_id : 0x5044; /* PD */
+    pProperties->deviceID = caps && caps->device_id ? caps->device_id : 0x0001;
     /*
      * The Android GPU is usually physically integrated, but this glibc-facing
      * ICD does not expose true UMA pointers into vendor memory. Work is
      * lowered through the APK-owned executor, so advertise a discrete-like
      * device to keep ggml/llama.cpp out of UMA host-pointer fast paths.
      */
-    pProperties->deviceType = bridge_available() ? VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
-                                                 : VK_PHYSICAL_DEVICE_TYPE_CPU;
-    snprintf(pProperties->deviceName, sizeof(pProperties->deviceName),
-             "pdocker Vulkan bridge (%s)", bridge_available() ? "queue" : "offline");
-    pProperties->limits.maxComputeSharedMemorySize = 32768;
-    pProperties->limits.maxComputeWorkGroupCount[0] = 65535;
-    pProperties->limits.maxComputeWorkGroupCount[1] = 65535;
-    pProperties->limits.maxComputeWorkGroupCount[2] = 65535;
-    pProperties->limits.maxComputeWorkGroupInvocations = 256;
-    pProperties->limits.maxComputeWorkGroupSize[0] = 256;
-    pProperties->limits.maxComputeWorkGroupSize[1] = 256;
-    pProperties->limits.maxComputeWorkGroupSize[2] = 64;
-    pProperties->limits.maxPushConstantsSize = 256;
+    pProperties->deviceType = caps
+        ? caps->device_type
+        : (bridge_available() ? VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+                              : VK_PHYSICAL_DEVICE_TYPE_CPU);
+    if (caps) {
+        snprintf(pProperties->deviceName, sizeof(pProperties->deviceName),
+                 "skydnir Vulkan bridge (%s)", caps->device_name);
+    } else {
+        snprintf(pProperties->deviceName, sizeof(pProperties->deviceName),
+                 "pdocker Vulkan bridge (%s)", bridge_available() ? "queue" : "offline");
+    }
+    pProperties->limits.maxComputeSharedMemorySize =
+        caps && caps->limits.maxComputeSharedMemorySize
+            ? caps->limits.maxComputeSharedMemorySize
+            : 32768;
+    pProperties->limits.maxComputeWorkGroupCount[0] =
+        caps && caps->limits.maxComputeWorkGroupCount[0]
+            ? caps->limits.maxComputeWorkGroupCount[0]
+            : 65535;
+    pProperties->limits.maxComputeWorkGroupCount[1] =
+        caps && caps->limits.maxComputeWorkGroupCount[1]
+            ? caps->limits.maxComputeWorkGroupCount[1]
+            : 65535;
+    pProperties->limits.maxComputeWorkGroupCount[2] =
+        caps && caps->limits.maxComputeWorkGroupCount[2]
+            ? caps->limits.maxComputeWorkGroupCount[2]
+            : 65535;
+    pProperties->limits.maxComputeWorkGroupInvocations =
+        caps && caps->limits.maxComputeWorkGroupInvocations
+            ? caps->limits.maxComputeWorkGroupInvocations
+            : 256;
+    pProperties->limits.maxComputeWorkGroupSize[0] =
+        caps && caps->limits.maxComputeWorkGroupSize[0]
+            ? caps->limits.maxComputeWorkGroupSize[0]
+            : 256;
+    pProperties->limits.maxComputeWorkGroupSize[1] =
+        caps && caps->limits.maxComputeWorkGroupSize[1]
+            ? caps->limits.maxComputeWorkGroupSize[1]
+            : 256;
+    pProperties->limits.maxComputeWorkGroupSize[2] =
+        caps && caps->limits.maxComputeWorkGroupSize[2]
+            ? caps->limits.maxComputeWorkGroupSize[2]
+            : 64;
+    pProperties->limits.maxPushConstantsSize =
+        caps && caps->limits.maxPushConstantsSize
+            ? caps->limits.maxPushConstantsSize
+            : 256;
     VkDeviceSize max_buffer = pdocker_vulkan_max_buffer_size();
-    pProperties->limits.maxStorageBufferRange = max_buffer > UINT32_MAX ? UINT32_MAX : (uint32_t)max_buffer;
+    uint32_t transport_max_storage_range =
+        max_buffer > UINT32_MAX ? UINT32_MAX : (uint32_t)max_buffer;
+    pProperties->limits.maxStorageBufferRange =
+        caps && caps->limits.maxStorageBufferRange
+            ? (caps->limits.maxStorageBufferRange < transport_max_storage_range
+                ? caps->limits.maxStorageBufferRange
+                : transport_max_storage_range)
+            : transport_max_storage_range;
     pProperties->limits.maxMemoryAllocationCount = 4096;
-    pProperties->limits.maxBoundDescriptorSets = 8;
-    pProperties->limits.maxPerStageDescriptorStorageBuffers = PDOCKER_VK_MAX_STORAGE_BUFFERS;
-    pProperties->limits.maxDescriptorSetStorageBuffers = PDOCKER_VK_MAX_STORAGE_BUFFERS;
+    pProperties->limits.maxBoundDescriptorSets =
+        caps && caps->limits.maxBoundDescriptorSets &&
+        caps->limits.maxBoundDescriptorSets < PDOCKER_VK_MAX_DESCRIPTOR_SETS
+            ? caps->limits.maxBoundDescriptorSets
+            : PDOCKER_VK_MAX_DESCRIPTOR_SETS;
+    pProperties->limits.maxPerStageDescriptorStorageBuffers =
+        caps && caps->limits.maxPerStageDescriptorStorageBuffers &&
+        caps->limits.maxPerStageDescriptorStorageBuffers < PDOCKER_VK_MAX_STORAGE_BUFFERS
+            ? caps->limits.maxPerStageDescriptorStorageBuffers
+            : PDOCKER_VK_MAX_STORAGE_BUFFERS;
+    pProperties->limits.maxDescriptorSetStorageBuffers =
+        caps && caps->limits.maxDescriptorSetStorageBuffers &&
+        caps->limits.maxDescriptorSetStorageBuffers < PDOCKER_VK_MAX_STORAGE_BUFFERS
+            ? caps->limits.maxDescriptorSetStorageBuffers
+            : PDOCKER_VK_MAX_STORAGE_BUFFERS;
     pProperties->limits.minStorageBufferOffsetAlignment = 16;
     pProperties->limits.minUniformBufferOffsetAlignment = 16;
     pProperties->limits.minMemoryMapAlignment = 64;
@@ -2314,6 +2408,17 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
 }
 
 static VkSubgroupFeatureFlags advertised_subgroup_operations(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (caps) {
+        VkSubgroupFeatureFlags ops = caps->subgroup.supportedOperations
+            ? caps->subgroup.supportedOperations
+            : VK_SUBGROUP_FEATURE_BASIC_BIT;
+        if (env_disabled("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC")) {
+            ops &= ~VK_SUBGROUP_FEATURE_ARITHMETIC_BIT;
+            if (!ops) ops = VK_SUBGROUP_FEATURE_BASIC_BIT;
+        }
+        return ops;
+    }
     if (env_disabled("PDOCKER_VULKAN_DISABLE_SUBGROUP_ARITHMETIC")) {
         return VK_SUBGROUP_FEATURE_BASIC_BIT;
     }
@@ -2328,6 +2433,10 @@ static VkSubgroupFeatureFlags advertised_subgroup_operations(void) {
 }
 
 static uint32_t advertised_subgroup_size(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (caps && caps->subgroup.subgroupSize) {
+        return caps->subgroup.subgroupSize;
+    }
     const char *value = getenv("PDOCKER_VULKAN_SUBGROUP_SIZE");
     if (value && value[0]) {
         char *end = NULL;
@@ -2412,50 +2521,89 @@ static void fill_physical_device_features(VkPhysicalDeviceFeatures *pFeatures) {
 }
 
 static void fill_pnext_features(void *pNext) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     for (void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES: {
                 VkPhysicalDeviceVulkan11Features *p = (VkPhysicalDeviceVulkan11Features *)node;
-                VkBool32 storage16 = advertised_storage16();
-                p->storageBuffer16BitAccess = storage16;
-                p->uniformAndStorageBuffer16BitAccess = VK_FALSE;
-                p->storagePushConstant16 = VK_FALSE;
-                p->storageInputOutput16 = VK_FALSE;
+                if (caps) {
+                    bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE");
+                    p->storageBuffer16BitAccess = disabled ? VK_FALSE : caps->storage16.storageBuffer16BitAccess;
+                    p->uniformAndStorageBuffer16BitAccess = disabled ? VK_FALSE : caps->storage16.uniformAndStorageBuffer16BitAccess;
+                    p->storagePushConstant16 = disabled ? VK_FALSE : caps->storage16.storagePushConstant16;
+                    p->storageInputOutput16 = disabled ? VK_FALSE : caps->storage16.storageInputOutput16;
+                } else {
+                    VkBool32 storage16 = advertised_storage16();
+                    p->storageBuffer16BitAccess = storage16;
+                    p->uniformAndStorageBuffer16BitAccess = VK_FALSE;
+                    p->storagePushConstant16 = VK_FALSE;
+                    p->storageInputOutput16 = VK_FALSE;
+                }
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES: {
                 VkPhysicalDevice16BitStorageFeatures *p = (VkPhysicalDevice16BitStorageFeatures *)node;
-                VkBool32 storage16 = advertised_storage16();
-                p->storageBuffer16BitAccess = storage16;
-                p->uniformAndStorageBuffer16BitAccess = VK_FALSE;
-                p->storagePushConstant16 = VK_FALSE;
-                p->storageInputOutput16 = VK_FALSE;
+                if (caps) {
+                    bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE");
+                    p->storageBuffer16BitAccess = disabled ? VK_FALSE : caps->storage16.storageBuffer16BitAccess;
+                    p->uniformAndStorageBuffer16BitAccess = disabled ? VK_FALSE : caps->storage16.uniformAndStorageBuffer16BitAccess;
+                    p->storagePushConstant16 = disabled ? VK_FALSE : caps->storage16.storagePushConstant16;
+                    p->storageInputOutput16 = disabled ? VK_FALSE : caps->storage16.storageInputOutput16;
+                } else {
+                    VkBool32 storage16 = advertised_storage16();
+                    p->storageBuffer16BitAccess = storage16;
+                    p->uniformAndStorageBuffer16BitAccess = VK_FALSE;
+                    p->storagePushConstant16 = VK_FALSE;
+                    p->storageInputOutput16 = VK_FALSE;
+                }
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES: {
                 VkPhysicalDeviceVulkan12Features *p = (VkPhysicalDeviceVulkan12Features *)node;
-                VkBool32 storage8 = advertised_storage8();
-                p->storageBuffer8BitAccess = storage8;
-                p->uniformAndStorageBuffer8BitAccess = VK_FALSE;
-                p->storagePushConstant8 = VK_FALSE;
-                p->shaderFloat16 = VK_FALSE;
-                p->shaderInt8 = storage8;
+                if (caps) {
+                    bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
+                    p->storageBuffer8BitAccess = disabled ? VK_FALSE : caps->storage8.storageBuffer8BitAccess;
+                    p->uniformAndStorageBuffer8BitAccess = disabled ? VK_FALSE : caps->storage8.uniformAndStorageBuffer8BitAccess;
+                    p->storagePushConstant8 = disabled ? VK_FALSE : caps->storage8.storagePushConstant8;
+                    p->shaderFloat16 = caps->float16_int8.shaderFloat16;
+                    p->shaderInt8 = disabled ? VK_FALSE : caps->float16_int8.shaderInt8;
+                } else {
+                    VkBool32 storage8 = advertised_storage8();
+                    p->storageBuffer8BitAccess = storage8;
+                    p->uniformAndStorageBuffer8BitAccess = VK_FALSE;
+                    p->storagePushConstant8 = VK_FALSE;
+                    p->shaderFloat16 = VK_FALSE;
+                    p->shaderInt8 = storage8;
+                }
                 p->bufferDeviceAddress = VK_FALSE;
                 p->vulkanMemoryModel = VK_FALSE;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
                 VkPhysicalDevice8BitStorageFeatures *p = (VkPhysicalDevice8BitStorageFeatures *)node;
-                p->storageBuffer8BitAccess = advertised_storage8();
-                p->uniformAndStorageBuffer8BitAccess = VK_FALSE;
-                p->storagePushConstant8 = VK_FALSE;
+                if (caps) {
+                    bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
+                    p->storageBuffer8BitAccess = disabled ? VK_FALSE : caps->storage8.storageBuffer8BitAccess;
+                    p->uniformAndStorageBuffer8BitAccess = disabled ? VK_FALSE : caps->storage8.uniformAndStorageBuffer8BitAccess;
+                    p->storagePushConstant8 = disabled ? VK_FALSE : caps->storage8.storagePushConstant8;
+                } else {
+                    p->storageBuffer8BitAccess = advertised_storage8();
+                    p->uniformAndStorageBuffer8BitAccess = VK_FALSE;
+                    p->storagePushConstant8 = VK_FALSE;
+                }
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES: {
                 VkPhysicalDeviceShaderFloat16Int8Features *p = (VkPhysicalDeviceShaderFloat16Int8Features *)node;
-                p->shaderFloat16 = VK_FALSE;
-                p->shaderInt8 = advertised_storage8();
+                if (caps) {
+                    bool storage8_disabled = env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
+                    p->shaderFloat16 = caps->float16_int8.shaderFloat16;
+                    p->shaderInt8 = storage8_disabled ? VK_FALSE : caps->float16_int8.shaderInt8;
+                } else {
+                    p->shaderFloat16 = VK_FALSE;
+                    p->shaderInt8 = advertised_storage8();
+                }
                 break;
             }
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
@@ -3203,15 +3351,20 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
             available_count++; \
         } \
     } while (0)
-    if (advertised_storage16()) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (caps ? caps->ext_16bit_storage : advertised_storage16()) {
         ADD_DEVICE_EXTENSION(VK_KHR_16BIT_STORAGE_EXTENSION_NAME, VK_KHR_16BIT_STORAGE_SPEC_VERSION);
     }
-    if (advertised_storage8()) {
+    if (caps ? caps->ext_8bit_storage : advertised_storage8()) {
         ADD_DEVICE_EXTENSION(VK_KHR_8BIT_STORAGE_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_SPEC_VERSION);
+    }
+    if (caps ? caps->ext_shader_float16_int8 : advertised_storage8()) {
         ADD_DEVICE_EXTENSION(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_KHR_SHADER_FLOAT16_INT8_SPEC_VERSION);
     }
-    ADD_DEVICE_EXTENSION(VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
-                         VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION);
+    if (!caps || caps->ext_storage_buffer_storage_class) {
+        ADD_DEVICE_EXTENSION(VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
+                             VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION);
+    }
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_4_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_SPEC_VERSION);
 #endif
