@@ -2445,6 +2445,66 @@ def parse_container_state(raw):
         return {}
     return parsed if isinstance(parsed, dict) else {}
 
+def container_exit_snapshot(state_obj, served):
+    state_info = state_obj.get("State") if isinstance(state_obj.get("State"), dict) else {}
+    running = state_info.get("Running") if isinstance(state_info.get("Running"), bool) else None
+    status = state_info.get("Status")
+    exit_code = state_info.get("ExitCode") if isinstance(state_info.get("ExitCode"), int) else None
+    exited = (
+        running is False
+        or str(status or "").lower() in {"exited", "dead", "removing"}
+        or exit_code is not None
+    )
+    return {
+        "schema": "pdocker.llama.container-exit.v1",
+        "container_id": state_obj.get("Id") or state_obj.get("ID"),
+        "name": str(state_obj.get("Name") or "").lstrip("/") or None,
+        "running": running,
+        "status": status,
+        "exit_code": exit_code,
+        "error": state_info.get("Error"),
+        "oom_killed": state_info.get("OOMKilled") if isinstance(state_info.get("OOMKilled"), bool) else None,
+        "started_at": state_info.get("StartedAt"),
+        "finished_at": state_info.get("FinishedAt"),
+        "inspect_fallback": state_obj.get("PdockerInspectFallback") is True,
+        "inspect_fallback_reason": state_obj.get("PdockerInspectFallbackReason"),
+        "served_before_exit": bool(served),
+        "exited_before_readiness": bool(not served and exited),
+    }
+
+def synthesize_service_readiness_for_unserved(existing, container_exit):
+    if isinstance(existing, dict) and existing:
+        return existing
+    if bool(int(gpu_served_s)):
+        return existing if isinstance(existing, dict) else {}
+    reason = (
+        "container-exited-before-readiness"
+        if container_exit.get("exited_before_readiness") is True
+        else "server-not-reachable-before-readiness"
+    )
+    status = "exited" if container_exit.get("exited_before_readiness") is True else "not-run"
+    return {
+        "schema": "pdocker.llama.service-readiness.v1",
+        "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "endpoint": "",
+        "mode": f"vulkan-forced-ngl-{gpu_layers}",
+        "gpu_layers": int(gpu_layers),
+        "model_path": model_path,
+        "health": {"ok": False, "status": status, "error": reason},
+        "models": {"ok": False, "status": "not-run", "error": reason},
+        "completion": {"ok": False, "status": "not-run", "error": reason, "passed": False},
+        "summary": {
+            "health": "fail",
+            "models": "not-run",
+            "liveness": "fail",
+            "completion": "not-run",
+            "prompt_sanity": "fail",
+            "server_alive_after_completion": "not-checked",
+            "ready": False,
+            "reason": reason,
+        },
+    }
+
 def container_env_snapshot(state_obj):
     env_values = []
     config = state_obj.get("Config") if isinstance(state_obj.get("Config"), dict) else {}
@@ -2474,6 +2534,8 @@ def container_env_snapshot(state_obj):
     return dict(sorted(snapshot.items()))
 
 state_obj = parse_container_state(state)
+container_exit = container_exit_snapshot(state_obj, bool(int(gpu_served_s)))
+service_readiness = synthesize_service_readiness_for_unserved(service_readiness, container_exit)
 runtime_env = container_env_snapshot(state_obj)
 startup_env = startup_diagnostics.get("env") if isinstance(startup_diagnostics.get("env"), dict) else {}
 planned_env = runtime_env_record.get("planned_container_env") if isinstance(runtime_env_record, dict) else {}
@@ -5719,6 +5781,7 @@ result = {
         "planned_container_env": planned_env,
         "startup_diagnostics": startup_diagnostics,
         "service_readiness": service_readiness,
+        "container_exit": container_exit,
         "post_readiness_memory": post_readiness_memory,
         "evidence": evidence,
         "runtime_abort": runtime_abort,

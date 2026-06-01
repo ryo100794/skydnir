@@ -1118,6 +1118,18 @@ def _q6_debug_u32_probe_blocker(q6: Any) -> str:
 def _api_prompt_sanity(data: dict[str, Any]) -> dict[str, Any]:
     if not _is_compare_artifact(data):
         return {"required": False, "summary": "not-required", "missing": []}
+    readiness = nested(data, "gpu", "service_readiness")
+    if nested(data, "gpu", "served") is False and isinstance(readiness, dict) and readiness:
+        summary = readiness.get("summary") if isinstance(readiness.get("summary"), dict) else {}
+        if summary.get("ready") is not True:
+            return {
+                "required": True,
+                "summary": "fail",
+                "missing": ["gpu.service_readiness.summary.ready"],
+                "required_probe_count": 0,
+                "service_not_ready": True,
+                "service_readiness": _service_readiness_summary(data),
+            }
     missing: list[str] = []
     correctness = nested(data, "gpu", "correctness")
     if not isinstance(correctness, dict) or not correctness:
@@ -1248,6 +1260,87 @@ def _service_completion_timeout(data: dict[str, Any]) -> dict[str, Any]:
         "post_completion_health_error": post_completion_health.get("error"),
         "runtime_freshness": _runtime_freshness(data),
     }
+
+
+def _service_readiness_summary(data: dict[str, Any]) -> dict[str, Any]:
+    readiness = nested(data, "gpu", "service_readiness")
+    if not isinstance(readiness, dict) or not readiness:
+        return {"summary": "not-recorded", "ready": None}
+    summary = readiness.get("summary") if isinstance(readiness.get("summary"), dict) else {}
+    health = readiness.get("health") if isinstance(readiness.get("health"), dict) else {}
+    models = readiness.get("models") if isinstance(readiness.get("models"), dict) else {}
+    completion = readiness.get("completion") if isinstance(readiness.get("completion"), dict) else {}
+    return {
+        "summary": str(summary.get("reason") or "recorded"),
+        "ready": summary.get("ready") if isinstance(summary.get("ready"), bool) else None,
+        "health": summary.get("health") or health.get("status"),
+        "models": summary.get("models") or models.get("status"),
+        "completion": summary.get("completion") or completion.get("status"),
+        "liveness": summary.get("liveness"),
+        "reason": summary.get("reason"),
+        "completion_error": completion.get("error"),
+        "completion_passed": completion.get("passed") if isinstance(completion.get("passed"), bool) else None,
+    }
+
+
+def _state_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes"}:
+            return True
+        if lowered in {"false", "0", "no"}:
+            return False
+    return None
+
+
+def _container_exit_evidence(data: dict[str, Any]) -> dict[str, Any]:
+    raw = nested(data, "gpu", "container_exit")
+    if isinstance(raw, dict) and raw:
+        evidence = dict(raw)
+    else:
+        state = nested(data, "gpu", "state")
+        if not isinstance(state, dict):
+            state_excerpt = nested(data, "gpu", "state_excerpt")
+            if isinstance(state_excerpt, str) and state_excerpt.strip().startswith("{"):
+                try:
+                    parsed = json.loads(state_excerpt)
+                    state = parsed if isinstance(parsed, dict) else {}
+                except Exception:
+                    state = {}
+            else:
+                state = {}
+        state_info = state.get("State") if isinstance(state.get("State"), dict) else {}
+        evidence = {
+            "schema": "pdocker.llama.container-exit.v1",
+            "container_id": state.get("Id") or state.get("ID"),
+            "name": str(state.get("Name") or "").lstrip("/") or None,
+            "running": state_info.get("Running") if isinstance(state_info.get("Running"), bool) else None,
+            "status": state_info.get("Status"),
+            "exit_code": state_info.get("ExitCode") if isinstance(state_info.get("ExitCode"), int) else None,
+            "error": state_info.get("Error"),
+            "oom_killed": state_info.get("OOMKilled") if isinstance(state_info.get("OOMKilled"), bool) else None,
+            "started_at": state_info.get("StartedAt"),
+            "finished_at": state_info.get("FinishedAt"),
+        }
+    running = _state_bool(evidence.get("running"))
+    status = str(evidence.get("status") or "").lower()
+    exit_code = evidence.get("exit_code")
+    exited = (
+        evidence.get("exited_before_readiness") is True
+        or running is False
+        or status in {"exited", "dead", "removing"}
+        or isinstance(exit_code, int)
+    )
+    served = nested(data, "gpu", "served")
+    readiness = nested(data, "gpu", "service_readiness")
+    readiness_ready = None
+    if isinstance(readiness, dict):
+        summary = readiness.get("summary") if isinstance(readiness.get("summary"), dict) else {}
+        readiness_ready = summary.get("ready") if isinstance(summary.get("ready"), bool) else None
+    evidence["exited_before_readiness"] = bool(served is False and exited and readiness_ready is not True)
+    return evidence
 
 
 def _api_executor_reconciliation(data: dict[str, Any]) -> dict[str, Any]:
@@ -2196,6 +2289,26 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
             "runtime_env": nested(data, "gpu", "runtime_env") or {},
         }
 
+    container_exit = _container_exit_evidence(data)
+    if container_exit.get("exited_before_readiness") is True:
+        api_prompt_sanity = _api_prompt_sanity(data)
+        return _claim_base(
+            "container-exited-before-readiness",
+            next_action=(
+                data.get("next_action")
+                or "inspect container exit status, llama startup log, and GPU executor diagnostics before accepting Q6 or benchmark claims"
+            ),
+            runtime_freshness=runtime_freshness,
+            runtime_env_manifest=runtime_env_manifest,
+            responsibility_boundary="service-readiness",
+        ) | {
+            "container_exit": container_exit,
+            "service_readiness": _service_readiness_summary(data),
+            "api_prompt_sanity": api_prompt_sanity,
+            "q6_workgroup_diagnostics": q6,
+            "runtime_env": nested(data, "gpu", "runtime_env") or {},
+        }
+
     if not _observed_executor_marker_ok(runtime_freshness):
         return _claim_base(
             "executor-marker-not-observed",
@@ -2328,7 +2441,8 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
     q6_oracle_evidence = q6_evidence_reached and q6.get("latest_status") in {"match", "mismatch"}
 
     api_prompt_sanity = _api_prompt_sanity(data)
-    if api_prompt_sanity.get("summary") == "fail" and not q6_oracle_evidence:
+    api_prompt_blocks_q6 = api_prompt_sanity.get("service_not_ready") is True
+    if api_prompt_sanity.get("summary") == "fail" and (not q6_oracle_evidence or api_prompt_blocks_q6):
         return _claim_base(
             "api-prompt-sanity-missing",
             next_action=(
@@ -2341,6 +2455,8 @@ def classify(data: dict[str, Any]) -> dict[str, Any]:
         ) | {
             "api_prompt_sanity": api_prompt_sanity,
             "config_propagation": config_propagation,
+            "service_readiness": _service_readiness_summary(data),
+            "q6_workgroup_diagnostics": q6,
         }
 
     speedup_fields = _speedup_field_status(data)
@@ -2676,6 +2792,7 @@ def main(argv: list[str]) -> int:
     if classification == "readiness-blocked":
         return 21
     if classification in {
+        "container-exited-before-readiness",
         "llama-completion-timeout",
         "llama-completion-disconnected",
         "llama-completion-failed",

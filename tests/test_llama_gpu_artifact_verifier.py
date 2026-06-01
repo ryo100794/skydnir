@@ -151,6 +151,40 @@ def q6_verified_writeback(hash_value="0x1111111111111111"):
     }
 
 
+def unready_service_readiness(reason="container-exited-before-readiness"):
+    return {
+        "schema": "pdocker.llama.service-readiness.v1",
+        "summary": {
+            "health": "fail",
+            "models": "not-run",
+            "liveness": "fail",
+            "completion": "not-run",
+            "prompt_sanity": "fail",
+            "server_alive_after_completion": "not-checked",
+            "ready": False,
+            "reason": reason,
+        },
+        "health": {"ok": False, "status": "exited", "error": reason},
+        "models": {"ok": False, "status": "not-run", "error": reason},
+        "completion": {"ok": False, "status": "not-run", "error": reason, "passed": False},
+    }
+
+
+def exited_before_readiness(exit_code=1):
+    return {
+        "schema": "pdocker.llama.container-exit.v1",
+        "container_id": "deadbeef",
+        "name": "skydnir-llama-cpp",
+        "running": False,
+        "status": "exited",
+        "exit_code": exit_code,
+        "error": "",
+        "oom_killed": False,
+        "served_before_exit": False,
+        "exited_before_readiness": True,
+    }
+
+
 def q6_store_index_model_reflection():
     return {
         "q6_dispatch_groups": [1187, 1, 64],
@@ -3187,6 +3221,72 @@ class LlamaGpuArtifactVerifierTest(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["classification"], "api-prompt-sanity-missing")
         self.assertIn("gpu.correctness.schema", report["api_prompt_sanity"]["missing"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+
+    def test_container_exit_before_readiness_preempts_stale_q6_match(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "served": False,
+                "service_readiness": unready_service_readiness(),
+                "container_exit": exited_before_readiness(exit_code=137),
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 3,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report("pass"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload, "--require-q6-match")
+        self.assertEqual(result.returncode, 22, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "container-exited-before-readiness")
+        self.assertEqual(report["responsibility_boundary"], "service-readiness")
+        self.assertFalse(report["terminal"])
+        self.assertFalse(report["correctness_claim_allowed"])
+        self.assertFalse(report["benchmark_claim_allowed"])
+        self.assertTrue(report["container_exit"]["exited_before_readiness"])
+        self.assertFalse(report["service_readiness"]["ready"])
+        self.assertEqual(report["q6_workgroup_diagnostics"]["latest_status"], "match")
+
+    def test_unready_service_readiness_preempts_stale_q6_match_as_api_missing(self):
+        payload = {
+            "schema": "pdocker.llama.gpu.compare.v1",
+            "gpu": {
+                "served": False,
+                "service_readiness": unready_service_readiness("server-not-reachable-before-readiness"),
+                "diagnostics": {
+                    "runtime_freshness": runtime_marker(),
+                    "config_propagation": passing_config_propagation(),
+                    "q6_workgroup_diagnostics": {
+                        "event_count": 2,
+                        "workgroup_shape_blocker": False,
+                        "latest_status": "match",
+                        **q6_verified_writeback(),
+                    },
+                },
+                "correctness": gpu_correctness_report("pass"),
+            },
+            "cpu": {"tokens_per_second": 0.1},
+            **speedup_sections(),
+        }
+        result = self.run_verifier(payload, "--require-q6-match")
+        self.assertEqual(result.returncode, 38, result.stdout)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["classification"], "api-prompt-sanity-missing")
+        self.assertEqual(report["api_prompt_sanity"]["missing"], ["gpu.service_readiness.summary.ready"])
+        self.assertTrue(report["api_prompt_sanity"]["service_not_ready"])
+        self.assertEqual(report["q6_workgroup_diagnostics"]["latest_status"], "match")
+        self.assertFalse(report["terminal"])
         self.assertFalse(report["correctness_claim_allowed"])
         self.assertFalse(report["benchmark_claim_allowed"])
 
