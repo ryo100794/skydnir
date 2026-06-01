@@ -1095,6 +1095,26 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("resident_cache_candidate(options, 1, b->size)", source)
         self.assertIn("resident_cache_candidate(options, 0, binding->size)", source)
 
+    def test_vulkan_descriptor_arrays_fail_closed_until_v5_transport(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("unsupported_descriptor_array", icd)
+        self.assertIn("descriptor array layout binding=%u count=%u type=%u is unsupported by V4 transport", icd)
+        self.assertIn("descriptor array write binding=%u array=%u count=%u is unsupported by V4 transport", icd)
+        self.assertIn("descriptor array copy src_binding=%u src_array=%u dst_binding=%u dst_array=%u count=%u is unsupported by V4 transport", icd)
+        update_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1
+        )[0]
+        self.assertIn("w->descriptorCount > 1 || w->dstArrayElement != 0", update_body)
+        self.assertIn("set->unsupported_descriptor_array = true;", update_body)
+        self.assertIn("c->descriptorCount > 1 || c->srcArrayElement != 0 || c->dstArrayElement != 0", update_body)
+        self.assertNotIn("w->dstBinding + w->dstArrayElement + j", update_body)
+        self.assertNotIn("c->srcBinding + c->srcArrayElement + j", update_body)
+        bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1
+        )[0]
+        self.assertIn("set->unsupported_descriptor_array", bind_body)
+        self.assertIn("cmd->unsupported_descriptor_set_layout = true;", bind_body)
+
     def test_llama_gpu_compare_q6_identity_survives_spirv_legalization_hash_changes(self):
         helpers = load_llama_gpu_compare_q6_helpers()
         q6_hash = sorted(helpers["Q6_K_MATVEC_SPIRV_HASHES"])[0]
