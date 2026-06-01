@@ -196,28 +196,29 @@ Implementation summary:
 - The executor now can adopt a successfully materialized strict Vulkan object graph and reuse it on later dispatches with the same descriptor/API memory identity, offsets, ranges, and access intent.
 - Cache hit evidence is emitted under `strict_object_graph.cache_enabled`, `cache_hit`, `cache_adopted`, `cache_key`, `cache_bytes`, and `cache_disabled_reason`.
 
-Observed cache evidence from the run:
+Observed cache evidence from the full device container log (`77` generic dispatch responses), not from duplicated artifact summary lists:
 
 | Item | Value |
 |---|---:|
-| strict object-graph events | `21` |
-| cache enabled events | `21` |
-| cache hits | `12` |
-| cache adopted/miss events | `9` |
+| strict object-graph events | `77` |
+| cache enabled events | `77` |
+| cache hits | `71` |
+| cache adopted/miss events | `6` |
 | cache disabled reasons | none |
-| hit strict-graph mean | `0.023 ms` |
-| miss/adopt strict-graph mean | `885.205 ms` |
+| hit strict-graph mean | `0.021 ms` |
+| miss/adopt strict-graph mean | `783.161 ms` |
 | hit pipeline-create mean | `0.000 ms` |
-| miss/adopt pipeline-create mean | `329.269 ms` |
+| miss/adopt pipeline-create mean | `241.909 ms` |
 
 Hash-level cache behavior:
 
 | source SPIR-V hash | events | hits | adopted |
 |---|---:|---:|---:|
-| `0xac41e8033a67af4a` | `14` | `12` | `2` |
-| `0x1bf751845c5dce75` | `4` | `0` | `4` |
-| `0xf2f988b94bd3e0dc` | `2` | `0` | `2` |
-| `0x11d5243c43b23a7b` | `1` | `0` | `1` |
+| `0xac41e8033a67af4a` | `37` | `36` | `1` |
+| `0x1bf751845c5dce75` | `1` | `0` | `1` |
+| `0xf2f988b94bd3e0dc` | `1` | `0` | `1` |
+| `0x11c0523df6c795b8` | `1` | `0` | `1` |
+| `0x11d5243c43b23a7b` | `37` | `35` | `2` |
 
 Verifier result:
 
@@ -230,6 +231,6 @@ Verifier result:
 
 Interpretation:
 
-- The strict graph cache materially removes the dominant strict graph setup cost on cache hits (`~0.02 ms` hit path versus `~885 ms` miss/adopt path in this diagnostic run).
+- The strict graph cache materially removes the dominant strict graph setup cost on cache hits (`~0.02 ms` hit path versus `~783 ms` miss/adopt path in this diagnostic run).
 - This run is not an end-to-end performance result because the llama server exited before readiness and API prompt validation.
 - The next performance step is to reduce first-use miss/adopt cost and then rerun a served API benchmark with CPU oracle/profile overhead minimized after correctness evidence is retained.
