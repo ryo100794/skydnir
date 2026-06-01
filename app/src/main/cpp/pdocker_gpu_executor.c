@@ -4190,6 +4190,183 @@ static int lower_q6k_storage16_loads_to_storage8(
     return lowered > 0 ? 1 : 0;
 }
 
+static int lower_q6k_u32_to_u8vec4_bitcasts(
+        uint32_t **code,
+        size_t *bytes,
+        uint64_t source_spirv_hash,
+        size_t *lowered_count) {
+    /*
+     * Android Vulkan compatibility lowering for the native llama.cpp Q6_K
+     * quant decode path.  The shader uses OpBitcast from a packed uint32 to
+     * u8vec4, then converts the four lanes to float.  Some Android drivers
+     * are fragile around that scalar-to-small-vector bitcast pattern.  This
+     * pass rewrites only the exact SPIR-V operation into explicit logical
+     * shifts plus uint32->uint8 truncating converts, then reconstructs the
+     * same u8vec4 with OpCompositeConstruct.
+     *
+     * This is a semantic-preserving driver-compatibility lowering: descriptors,
+     * buffer bytes, offsets, push constants, specialization values, dispatch
+     * dimensions, and llama.cpp code are unchanged.
+     */
+    enum {
+        OP_TYPE_INT = 21,
+        OP_TYPE_VECTOR = 23,
+        OP_CONSTANT = 43,
+        OP_BITCAST = 124,
+        OP_U_CONVERT = 113,
+        OP_SHIFT_RIGHT_LOGICAL = 194,
+        OP_COMPOSITE_CONSTRUCT = 80,
+    };
+    if (lowered_count) *lowered_count = 0;
+    if (!code || !*code || !bytes || *bytes < 20 ||
+        (*bytes % sizeof(uint32_t)) != 0 || (*code)[0] != 0x07230203u ||
+        !is_q6k_matvec_hash(source_spirv_hash)) {
+        return 0;
+    }
+    const uint32_t *in = *code;
+    const size_t words = *bytes / sizeof(uint32_t);
+    uint32_t bound = in[3];
+    if (bound == 0 || bound > 65536) return 0;
+
+    uint32_t uint_type = 0;
+    uint32_t uchar_type = 0;
+    uint32_t uchar4_type = 0;
+    uint32_t uint_8 = 0;
+    uint32_t uint_16 = 0;
+    uint32_t uint_24 = 0;
+
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == OP_TYPE_INT && word_count >= 4) {
+            if (in[i + 2] == 32 && in[i + 3] == 0) uint_type = in[i + 1];
+            if (in[i + 2] == 8 && in[i + 3] == 0) uchar_type = in[i + 1];
+        } else if (op == OP_TYPE_VECTOR && word_count >= 4 && uchar_type &&
+                   in[i + 2] == uchar_type && in[i + 3] == 4) {
+            uchar4_type = in[i + 1];
+        } else if (op == OP_CONSTANT && word_count >= 4 && uint_type &&
+                   in[i + 1] == uint_type) {
+            if (in[i + 3] == 8) uint_8 = in[i + 2];
+            else if (in[i + 3] == 16) uint_16 = in[i + 2];
+            else if (in[i + 3] == 24) uint_24 = in[i + 2];
+        }
+        i += word_count;
+    }
+    if (!uint_type || !uchar_type || !uchar4_type || !uint_8 || !uint_16 || !uint_24) {
+        return 0;
+    }
+
+    size_t pattern_count = 0;
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) return 0;
+        if (op == OP_BITCAST && word_count == 4 && in[i + 1] == uchar4_type) {
+            pattern_count++;
+        }
+        i += word_count;
+    }
+    if (pattern_count == 0 || pattern_count > 256) return 0;
+
+    const size_t extra_words = pattern_count * (38u - 4u);
+    uint32_t new_bound = bound + (uint32_t)(pattern_count * 7u);
+    if (new_bound <= bound || new_bound > 65536) return 0;
+    uint32_t next_id = bound;
+    uint32_t *rewritten = (uint32_t *)malloc((words + extra_words) * sizeof(uint32_t));
+    if (!rewritten) return 0;
+    memcpy(rewritten, in, 5 * sizeof(uint32_t));
+    rewritten[3] = new_bound;
+    size_t out_words = 5;
+    size_t lowered = 0;
+
+    for (size_t i = 5; i < words;) {
+        const uint32_t inst = in[i];
+        const uint16_t word_count = (uint16_t)(inst >> 16);
+        const uint16_t op = (uint16_t)(inst & 0xffffu);
+        if (word_count == 0 || i + word_count > words) {
+            free(rewritten);
+            return 0;
+        }
+        if (op == OP_BITCAST && word_count == 4 && in[i + 1] == uchar4_type) {
+            const uint32_t result = in[i + 2];
+            const uint32_t source = in[i + 3];
+            const uint32_t b0 = next_id++;
+            const uint32_t s1 = next_id++;
+            const uint32_t b1 = next_id++;
+            const uint32_t s2 = next_id++;
+            const uint32_t b2 = next_id++;
+            const uint32_t s3 = next_id++;
+            const uint32_t b3 = next_id++;
+
+            rewritten[out_words++] = (4u << 16) | OP_U_CONVERT;
+            rewritten[out_words++] = uchar_type;
+            rewritten[out_words++] = b0;
+            rewritten[out_words++] = source;
+
+            rewritten[out_words++] = (5u << 16) | OP_SHIFT_RIGHT_LOGICAL;
+            rewritten[out_words++] = uint_type;
+            rewritten[out_words++] = s1;
+            rewritten[out_words++] = source;
+            rewritten[out_words++] = uint_8;
+
+            rewritten[out_words++] = (4u << 16) | OP_U_CONVERT;
+            rewritten[out_words++] = uchar_type;
+            rewritten[out_words++] = b1;
+            rewritten[out_words++] = s1;
+
+            rewritten[out_words++] = (5u << 16) | OP_SHIFT_RIGHT_LOGICAL;
+            rewritten[out_words++] = uint_type;
+            rewritten[out_words++] = s2;
+            rewritten[out_words++] = source;
+            rewritten[out_words++] = uint_16;
+
+            rewritten[out_words++] = (4u << 16) | OP_U_CONVERT;
+            rewritten[out_words++] = uchar_type;
+            rewritten[out_words++] = b2;
+            rewritten[out_words++] = s2;
+
+            rewritten[out_words++] = (5u << 16) | OP_SHIFT_RIGHT_LOGICAL;
+            rewritten[out_words++] = uint_type;
+            rewritten[out_words++] = s3;
+            rewritten[out_words++] = source;
+            rewritten[out_words++] = uint_24;
+
+            rewritten[out_words++] = (4u << 16) | OP_U_CONVERT;
+            rewritten[out_words++] = uchar_type;
+            rewritten[out_words++] = b3;
+            rewritten[out_words++] = s3;
+
+            rewritten[out_words++] = (7u << 16) | OP_COMPOSITE_CONSTRUCT;
+            rewritten[out_words++] = uchar4_type;
+            rewritten[out_words++] = result;
+            rewritten[out_words++] = b0;
+            rewritten[out_words++] = b1;
+            rewritten[out_words++] = b2;
+            rewritten[out_words++] = b3;
+
+            lowered++;
+            i += word_count;
+            continue;
+        }
+        memcpy(rewritten + out_words, in + i, word_count * sizeof(uint32_t));
+        out_words += word_count;
+        i += word_count;
+    }
+    if (lowered != pattern_count || next_id != new_bound ||
+        out_words != words + extra_words) {
+        free(rewritten);
+        return 0;
+    }
+    free(*code);
+    *code = rewritten;
+    *bytes = out_words * sizeof(uint32_t);
+    if (lowered_count) *lowered_count = lowered;
+    return 1;
+}
+
 static int rewrite_duplicate_descriptor_bindings(
         uint32_t *code,
         size_t bytes,
@@ -4482,6 +4659,7 @@ static uint64_t vulkan_pipeline_policy_hash(
         int specialization_materialized,
         int float16_capability_added,
         int q6_storage16_loads_lowered,
+        int q6_u32_to_u8vec4_bitcasts_lowered,
         int legalize_workgroup_size_from_spec,
         int disable_pipeline_optimization,
         int skip_unused_descriptor_transfers,
@@ -4504,6 +4682,7 @@ static uint64_t vulkan_pipeline_policy_hash(
         (unsigned char)(specialization_materialized ? 1 : 0),
         (unsigned char)(float16_capability_added ? 1 : 0),
         (unsigned char)(q6_storage16_loads_lowered ? 1 : 0),
+        (unsigned char)(q6_u32_to_u8vec4_bitcasts_lowered ? 1 : 0),
         (unsigned char)(legalize_workgroup_size_from_spec ? 1 : 0),
         (unsigned char)(disable_pipeline_optimization ? 1 : 0),
         (unsigned char)(skip_unused_descriptor_transfers ? 1 : 0),
@@ -10289,6 +10468,8 @@ static int run_vulkan_dispatch_fd(
     int float16_capability_added = 0;
     int q6_storage16_loads_lowered = 0;
     size_t q6_storage16_loads_lowered_count = 0;
+    int q6_u32_to_u8vec4_bitcasts_lowered = 0;
+    size_t q6_u32_to_u8vec4_bitcasts_lowered_count = 0;
     int q6_final_store_pre_barrier_inserted = 0;
     const int strict_passthrough = strict_vulkan_passthrough_requested(options);
     const int strict_reconciliation = strict_vulkan_reconciliation_requested(options);
@@ -10622,6 +10803,11 @@ static int run_vulkan_dispatch_fd(
             &shader_size,
             q6_storage16_lowering_identity_hash,
             &q6_storage16_loads_lowered_count);
+        q6_u32_to_u8vec4_bitcasts_lowered = lower_q6k_u32_to_u8vec4_bitcasts(
+            &shader_code,
+            &shader_size,
+            q6_storage16_lowering_identity_hash,
+            &q6_u32_to_u8vec4_bitcasts_lowered_count);
         q6_final_store_pre_barrier_inserted = insert_q6k_final_store_pre_barrier(
             &shader_code,
             &shader_size,
@@ -10815,6 +11001,7 @@ static int run_vulkan_dispatch_fd(
         specialization_materialized,
         float16_capability_added,
         q6_storage16_loads_lowered,
+        q6_u32_to_u8vec4_bitcasts_lowered,
         legalize_workgroup_size_from_spec,
         disable_pipeline_optimization,
         skip_unused_descriptor_transfers,
@@ -12055,6 +12242,8 @@ static int run_vulkan_dispatch_fd(
                 "\"q6k_safe_kernel\":%s,"
                 "\"q6_storage16_loads_lowered\":%s,"
                 "\"q6_storage16_loads_lowered_count\":%zu,"
+                "\"q6_u32_to_u8vec4_bitcasts_lowered\":%s,"
+                "\"q6_u32_to_u8vec4_bitcasts_lowered_count\":%zu,"
                 "\"q6_final_store_pre_barrier_inserted\":%s,"
                 "\"spirv_local_size\":[%u,%u,%u],"
                 "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
@@ -12079,6 +12268,8 @@ static int run_vulkan_dispatch_fd(
                 q6k_safe_kernel_used ? "true" : "false",
                 q6_storage16_loads_lowered ? "true" : "false",
                 q6_storage16_loads_lowered_count,
+                q6_u32_to_u8vec4_bitcasts_lowered ? "true" : "false",
+                q6_u32_to_u8vec4_bitcasts_lowered_count,
                 q6_final_store_pre_barrier_inserted ? "true" : "false",
                 spirv_summary.local_size[0],
                 spirv_summary.local_size[1],
@@ -12310,6 +12501,8 @@ static int run_vulkan_dispatch_fd(
                 "\"float16_capability_added\":%s,"
                 "\"q6_storage16_loads_lowered\":%s,"
                 "\"q6_storage16_loads_lowered_count\":%zu,"
+                "\"q6_u32_to_u8vec4_bitcasts_lowered\":%s,"
+                "\"q6_u32_to_u8vec4_bitcasts_lowered_count\":%zu,"
                 "\"q6_final_store_pre_barrier_inserted\":%s,"
                 "\"spirv_local_size\":[%u,%u,%u],"
                 "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
@@ -12375,6 +12568,8 @@ static int run_vulkan_dispatch_fd(
                 float16_capability_added ? "true" : "false",
                 q6_storage16_loads_lowered ? "true" : "false",
                 q6_storage16_loads_lowered_count,
+                q6_u32_to_u8vec4_bitcasts_lowered ? "true" : "false",
+                q6_u32_to_u8vec4_bitcasts_lowered_count,
                 q6_final_store_pre_barrier_inserted ? "true" : "false",
                 spirv_summary.local_size[0],
                 spirv_summary.local_size[1],
@@ -12515,6 +12710,8 @@ static int run_vulkan_dispatch_fd(
             "\"float16_capability_added\":%s,"
             "\"q6_storage16_loads_lowered\":%s,"
             "\"q6_storage16_loads_lowered_count\":%zu,"
+            "\"q6_u32_to_u8vec4_bitcasts_lowered\":%s,"
+            "\"q6_u32_to_u8vec4_bitcasts_lowered_count\":%zu,"
             "\"q6_final_store_pre_barrier_inserted\":%s,"
             "\"spirv_local_size\":[%u,%u,%u],"
             "\"spirv_local_size_resolved\":[%llu,%llu,%llu],"
@@ -12591,6 +12788,8 @@ static int run_vulkan_dispatch_fd(
             float16_capability_added ? "true" : "false",
             q6_storage16_loads_lowered ? "true" : "false",
             q6_storage16_loads_lowered_count,
+            q6_u32_to_u8vec4_bitcasts_lowered ? "true" : "false",
+            q6_u32_to_u8vec4_bitcasts_lowered_count,
             q6_final_store_pre_barrier_inserted ? "true" : "false",
             spirv_summary.local_size[0],
             spirv_summary.local_size[1],
@@ -12774,6 +12973,8 @@ cleanup:
                 "\"float16_capability_added\":%s,"
                 "\"q6_storage16_loads_lowered\":%s,"
                 "\"q6_storage16_loads_lowered_count\":%zu,"
+                "\"q6_u32_to_u8vec4_bitcasts_lowered\":%s,"
+                "\"q6_u32_to_u8vec4_bitcasts_lowered_count\":%zu,"
                 "\"q6_final_store_pre_barrier_inserted\":%s,"
                 "\"q4k_safe_kernel\":%s,"
                 "\"oracle_fail_closed\":%s,"
@@ -12814,6 +13015,8 @@ cleanup:
                 float16_capability_added ? "true" : "false",
                 q6_storage16_loads_lowered ? "true" : "false",
                 q6_storage16_loads_lowered_count,
+                q6_u32_to_u8vec4_bitcasts_lowered ? "true" : "false",
+                q6_u32_to_u8vec4_bitcasts_lowered_count,
                 q6_final_store_pre_barrier_inserted ? "true" : "false",
                 q4k_safe_kernel_used ? "true" : "false",
                 oracle_fail_closed ? "true" : "false",

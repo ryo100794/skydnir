@@ -3936,11 +3936,13 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
     )
     phases = []
     failures = []
+    header_present = any(value not in (None, 0) for value in header.values())
     for name, slot_base, expected_candidate in [
         ("pre-reduction-lanes", Q6_LANE_TRACE_PRE_REDUCTION_BASE, 105),
         ("reduction-lanes", Q6_LANE_TRACE_REDUCTION_BASE, 115),
     ]:
         records = []
+        observed_lane_count = 0
         for lane in range(Q6_LANE_TRACE_LANE_COUNT):
             base = slot_base + lane * Q6_LANE_TRACE_WORDS_PER_LANE
             local_x = dispatch.get(base)
@@ -3952,6 +3954,8 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
                 and candidate_id in (None, 0)
             )
             status = "not-executed" if unexecuted else "pass"
+            if not unexecuted:
+                observed_lane_count += 1
             record_failures = []
             if not unexecuted and local_x != lane:
                 status = "fail"
@@ -3989,10 +3993,11 @@ def parse_q6_lane_trace_v1(dispatch, writeback):
             "name": name,
             "slot_base": slot_base,
             "expected_candidate_id": expected_candidate,
+            "observed_lane_count": observed_lane_count,
             "executed_lane_count": sum(1 for record in records if record["status"] == "pass"),
             "records": records,
         })
-    if not header_valid and not any(phase["executed_lane_count"] for phase in phases):
+    if not header_valid and not header_present and not any(phase["observed_lane_count"] for phase in phases):
         return {
             "schema": "pdocker.q6k.lane-trace.v1",
             "summary": "not-run",
@@ -4137,6 +4142,13 @@ def parse_q6_final_store_trace_v2(bindings):
             and record.get("status") == "pass"
             and record.get("trace_status") == "pass"
         )
+        lane_trace = parse_q6_lane_trace_v1(dispatch, writeback)
+        if lane_trace.get("summary") == "fail":
+            lane_failures = lane_trace.get("failures") or ["lane trace failed"]
+            failures.extend(
+                "binding %s lane_trace_v1: %s" % (binding.get("binding"), failure)
+                for failure in lane_failures
+            )
         parsed_bindings.append({
             "binding": binding.get("binding"),
             "set": binding.get("set"),
@@ -4147,12 +4159,12 @@ def parse_q6_final_store_trace_v2(bindings):
             "q6_event_oracle_spirv_hash": binding.get("q6_event_oracle_spirv_hash"),
             "q6_event_pipeline_spirv_hash": binding.get("q6_event_pipeline_spirv_hash"),
             "records": records,
-            "lane_trace_v1": parse_q6_lane_trace_v1(dispatch, writeback),
+            "lane_trace_v1": lane_trace,
             "executed_stage_trace_v2_count": executed_stage_count,
             "executed_final_trace_v2_count": executed_final_count,
             "summary": (
                 "pass"
-                if executed_final_count > 0
+                if executed_final_count > 0 and lane_trace.get("summary") != "fail"
                 else "fail"
             ),
         })
@@ -5219,6 +5231,8 @@ q6_workgroup_diagnostics = {
     "q6k_safe_kernel": q6_safe_kernel_used,
     "q6_storage16_loads_lowered": q6_latest.get("q6_storage16_loads_lowered"),
     "q6_storage16_loads_lowered_count": q6_latest.get("q6_storage16_loads_lowered_count"),
+    "q6_u32_to_u8vec4_bitcasts_lowered": q6_latest.get("q6_u32_to_u8vec4_bitcasts_lowered"),
+    "q6_u32_to_u8vec4_bitcasts_lowered_count": q6_latest.get("q6_u32_to_u8vec4_bitcasts_lowered_count"),
     "q6_final_store_pre_barrier_inserted": q6_latest.get("q6_final_store_pre_barrier_inserted"),
     "expected_local_size": q6_expected_local_size,
     "local_size": q6_latest.get("spirv_local_size"),

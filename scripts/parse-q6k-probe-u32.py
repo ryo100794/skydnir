@@ -188,11 +188,13 @@ def parse_lane_trace(dispatch: dict[int, int | None], writeback: dict[int, int |
     )
     phases: list[dict[str, Any]] = []
     failures: list[str] = []
+    header_present = any(value not in (None, 0) for value in header.values())
     for name, slot_base, expected_candidate in [
         ("pre-reduction-lanes", LANE_TRACE_PRE_REDUCTION_BASE, 105),
         ("reduction-lanes", LANE_TRACE_REDUCTION_BASE, 115),
     ]:
         records: list[dict[str, Any]] = []
+        observed_lane_count = 0
         for lane in range(LANE_TRACE_LANE_COUNT):
             base = slot_base + lane * LANE_TRACE_WORDS_PER_LANE
             local_x = dispatch.get(base)
@@ -204,6 +206,8 @@ def parse_lane_trace(dispatch: dict[int, int | None], writeback: dict[int, int |
                 and candidate_id in (None, 0)
             )
             status = "not-executed" if unexecuted else "pass"
+            if not unexecuted:
+                observed_lane_count += 1
             record_failures: list[str] = []
             if not unexecuted and local_x != lane:
                 status = "fail"
@@ -244,11 +248,12 @@ def parse_lane_trace(dispatch: dict[int, int | None], writeback: dict[int, int |
                 "name": name,
                 "slot_base": slot_base,
                 "expected_candidate_id": expected_candidate,
+                "observed_lane_count": observed_lane_count,
                 "executed_lane_count": sum(1 for record in records if record["status"] == "pass"),
                 "records": records,
             }
         )
-    if not header_valid and not any(phase["executed_lane_count"] for phase in phases):
+    if not header_valid and not header_present and not any(phase["observed_lane_count"] for phase in phases):
         return {
             "schema": "pdocker.q6k.lane-trace.v1",
             "summary": "not-run",
@@ -376,12 +381,16 @@ def parse_binding(binding: dict[str, Any]) -> dict[str, Any]:
         for index, value in sorted(dispatch.items())
         if index not in expected_slots and isinstance(value, int) and value != 0
     ]
+    lane_trace = parse_lane_trace(dispatch, writeback)
+    if lane_trace["summary"] == "fail":
+        lane_failures = lane_trace.get("failures") or ["lane trace failed"]
+        failures.extend(f"lane_trace_v1: {failure}" for failure in lane_failures)
     return {
         "binding": binding.get("binding"),
         "set": binding.get("set"),
         "size": binding.get("size"),
         "records": records,
-        "lane_trace_v1": parse_lane_trace(dispatch, writeback),
+        "lane_trace_v1": lane_trace,
         "executed_record_count": sum(1 for record in records if record["status"] == "pass"),
         "executed_final_record_count": sum(
             1

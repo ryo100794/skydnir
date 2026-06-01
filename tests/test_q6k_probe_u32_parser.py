@@ -292,6 +292,81 @@ class Q6KProbeU32ParserTest(unittest.TestCase):
         self.assertEqual(report["summary"], "fail")
         self.assertIn("final-output trace metadata", "\n".join(report["failures"]))
 
+    def test_parser_propagates_lane_trace_header_failure(self):
+        values = {index: 0 for index in range(704)}
+        # Valid fixed final-output record: failure must come from lane_trace_v1.
+        values[116] = 130
+        values[117] = 4
+        values[118] = f32_bits(2.5)
+        values[119] = 151935
+        values[120] = 1186
+        values[121] = 0
+        values[122] = 63
+        values[123] = 0
+        values[124] = 0
+        values[125] = 0
+        values[126] = 2
+        values[128] = 1
+        values[129] = 31  # invalid lane count, should fail closed rather than not-run.
+        values[130] = 8
+        values[131] = 144
+        values[132] = 400
+        payload = {
+            "binding_details": [
+                {
+                    "binding": 5,
+                    "debug_probe_binding": True,
+                    "u32_after_dispatch": [sample(index, values.get(index, 0)) for index in range(704)],
+                }
+            ]
+        }
+        result, report = self.run_parser(payload)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(report["summary"], "fail")
+        self.assertEqual(report["bindings"][0]["summary"], "fail")
+        self.assertEqual(report["bindings"][0]["lane_trace_v1"]["summary"], "fail")
+        self.assertIn("lane_trace_v1: lane trace header missing or invalid", "\n".join(report["failures"]))
+
+    def test_parser_propagates_lane_trace_candidate_mismatch(self):
+        values = {index: 0 for index in range(704)}
+        values[128] = 1
+        values[129] = 32
+        values[130] = 8
+        values[131] = 144
+        values[132] = 400
+        pre_base = 144 + 3 * 8
+        values[pre_base] = 3
+        values[pre_base + 1] = f32_bits(1.25)
+        values[pre_base + 5] = 999  # wrong candidate, should not be classified as not-run.
+        # Valid fixed final-output record: failure must come from lane_trace_v1.
+        values[116] = 130
+        values[117] = 4
+        values[118] = f32_bits(2.5)
+        values[119] = 151935
+        values[120] = 1186
+        values[121] = 0
+        values[122] = 63
+        values[123] = 0
+        values[124] = 0
+        values[125] = 0
+        values[126] = 2
+        payload = {
+            "binding_details": [
+                {
+                    "binding": 5,
+                    "debug_probe_binding": True,
+                    "u32_after_dispatch": [sample(index, values.get(index, 0)) for index in range(704)],
+                }
+            ]
+        }
+        result, report = self.run_parser(payload)
+        self.assertNotEqual(result.returncode, 0)
+        lane_trace = report["bindings"][0]["lane_trace_v1"]
+        self.assertEqual(lane_trace["summary"], "fail")
+        self.assertEqual(lane_trace["phases"][0]["observed_lane_count"], 1)
+        self.assertEqual(lane_trace["phases"][0]["records"][3]["status"], "fail")
+        self.assertIn("lane_trace_v1: pre-reduction-lanes lane 3: candidate-id", "\n".join(report["failures"]))
+
 
 if __name__ == "__main__":
     unittest.main()

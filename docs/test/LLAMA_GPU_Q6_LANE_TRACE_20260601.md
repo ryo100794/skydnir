@@ -13,6 +13,29 @@ It does not modify llama.cpp, the Dockerfile, the model, or the prompt.
 - Instrumented probe hash: `0x48243d12c80567dd`
 - Effective executor hash: `0xc513b2a26aa63ec5`
 
+## Evidence contract for lane-trace runs
+
+Lane-trace evidence is only comparable when the debug SSBO and the targeted
+SPIR-V probe are pinned explicitly.  The lane trace writes slots `128..655`, so
+the minimum required debug SSBO allocation is `2624` bytes (`656 * 4`).  For
+actual device runs keep using `65536` bytes to leave headroom for additional
+probe fields and to avoid silent truncation when the trace format grows.
+
+Required environment evidence:
+
+| Variable | Required evidence value / meaning |
+|---|---|
+| `PDOCKER_GPU_SPIRV_PROBE_DEBUG_BYTES` | Must be at least `2624`; use `65536` in operational runs. |
+| `PDOCKER_GPU_SPIRV_PROBE_DEBUG_SET` | Descriptor set for the debug SSBO; current lane-colrow run used `0`. |
+| `PDOCKER_GPU_SPIRV_PROBE_DEBUG_BINDING` | Descriptor binding for the debug SSBO; current lane-colrow run used `5`. |
+| `PDOCKER_GPU_SPIRV_PROBE_TARGET_ONLY` | Must be enabled (`1`) so non-target shaders are not instrumented. |
+| `PDOCKER_GPU_SPIRV_PROBE_EXPECTED_HASH` | Must identify the source shader being targeted; current source hash was `0x1bf751845c5dce75`. |
+| `PDOCKER_GPU_SPIRV_PROBE_EFFECTIVE_HASH` | Must identify the instrumented/effective probe accepted by the executor; current instrumented probe hash was `0x48243d12c80567dd`. |
+
+Do not treat a lane trace as valid root-cause evidence if any of these values
+are missing from the run JSON/runtime environment, if `DEBUG_BYTES < 2624`, or
+if the expected/effective hash pair does not match the intended Q6_K probe.
+
 ## Result
 
 The latest run still fails the deterministic `/completion` prompt check, so the GPU path is not correct yet.
@@ -48,7 +71,23 @@ First lanes:
 | 6 | `0.42900425` | `-0.66613674` | `1.09514099` |
 | 7 | `-0.24013494` | `-1.42141908` | `1.18128414` |
 
-## Next implementation target
+## Current conclusion and next implementation target
+
+The current conclusion is that the remaining Q6_K fault is on the
+pre-reduction/lane-partial side.  It is not currently attributed to
+final-store, reduction, or writeback behavior.
+
+The next compatibility lowering to implement is the scalar `uint32` to
+`u8vec4` lowering used by the Q6_K decode path.  Replace the scalar
+`uint32 -> u8vec4` `OpBitcast` pattern with an explicit byte extraction
+sequence: shift the 32-bit word, truncate each shifted byte to 8 bits, then
+construct the `u8vec4` composite.  This keeps the decode byte layout explicit
+for drivers that mishandle the scalar-to-vector bitcast form.
+
+After that lowering, rerun the lane trace under the evidence contract above and
+compare the same pre-reduction lane partials against the CPU oracle.
+
+## Further diagnostic target
 
 Add a static/dataflow-driven probe around the Q6_K partial arithmetic inputs for selected lanes:
 
@@ -58,3 +97,37 @@ Add a static/dataflow-driven probe around the Q6_K partial arithmetic inputs for
 - enough loop coordinates to map the term back to `block_index` and element lane.
 
 The goal is to classify whether the mismatch comes from Q6_K quantized-weight decode, vector input addressing, or accumulation arithmetic.
+
+## Follow-up run after `uint32 -> u8vec4` lowering
+
+Artifact: `docs/test/llama-gpu-ngl1-u8vec4-lowered-20260601T143613Z.json` (ignored large artifact).
+
+Result summary:
+
+| Item | Value |
+|---|---:|
+| GPU served | `true` |
+| Container health | `healthy` |
+| GPU layers | `1` |
+| CPU baseline | `0.36100235915041706 tok/s` |
+| GPU measured | `0.05301367782045291 tok/s` |
+| CPU-relative speed | `0.1468513334517129x` |
+| Q6 latest status | `match` |
+| Q6 mismatch count | `0` |
+| Q6 storage16 loads lowered | `true` / `24` |
+| Q6 `uint32 -> u8vec4` bitcasts lowered | `true` / `16` |
+| Q6 safe kernel | `false` |
+
+Correctness probes:
+
+| Probe | Required | Result | Note |
+|---|---:|---|---|
+| `2+3=` | yes | pass | returned `5` |
+| `12*7=` | no | pass | returned prefix `8` |
+| `Repeat exactly: pdocker-ok` | no | fail | empty completion; not a required arithmetic correctness failure |
+
+Interpretation:
+
+- The Q6_K native pass-through path now reaches a deterministic `match` for the sampled Q6 oracle evidence while using the generic SPIR-V bridge, not the Q6 safe-kernel fallback.
+- The implemented lowering is therefore a correctness fix for the Android driver-sensitive packed-byte decode form.
+- Remaining blocker has moved from Q6 arithmetic correctness to performance: upload/copy overhead keeps the GPU path below CPU throughput for this short benchmark.

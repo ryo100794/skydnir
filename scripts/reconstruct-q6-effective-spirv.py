@@ -420,6 +420,90 @@ def lower_q6k_storage16_loads_to_storage8(words: list[int]) -> tuple[list[int], 
     }
 
 
+def lower_q6k_u32_to_u8vec4_bitcasts(words: list[int]) -> tuple[list[int], dict[str, Any]]:
+    """Mirror executor Q6 scalar-u32 to u8vec4 bitcast legalization."""
+    OP_TYPE_INT = 21
+    OP_TYPE_VECTOR = 23
+    OP_CONSTANT = 43
+    OP_BITCAST = 124
+    OP_U_CONVERT = 113
+    OP_SHIFT_RIGHT_LOGICAL = 194
+    OP_COMPOSITE_CONSTRUCT = 80
+    if len(words) < 5 or words[0] != SPIRV_MAGIC:
+        return list(words), {"phase": "q6-u32-to-u8vec4-bitcasts-lowered", "changed": False, "reason": "invalid-spv"}
+    bound = words[3]
+    uint_type = uchar_type = uchar4_type = 0
+    uint_8 = uint_16 = uint_24 = 0
+    for _, opcode, word_count, inst in iter_instructions(words):
+        if opcode == OP_TYPE_INT and word_count >= 4:
+            if inst[2] == 32 and inst[3] == 0:
+                uint_type = inst[1]
+            elif inst[2] == 8 and inst[3] == 0:
+                uchar_type = inst[1]
+        elif opcode == OP_TYPE_VECTOR and word_count >= 4 and uchar_type and inst[2] == uchar_type and inst[3] == 4:
+            uchar4_type = inst[1]
+        elif opcode == OP_CONSTANT and word_count >= 4 and uint_type and inst[1] == uint_type:
+            if inst[3] == 8:
+                uint_8 = inst[2]
+            elif inst[3] == 16:
+                uint_16 = inst[2]
+            elif inst[3] == 24:
+                uint_24 = inst[2]
+    if not all([uint_type, uchar_type, uchar4_type, uint_8, uint_16, uint_24]):
+        return list(words), {"phase": "q6-u32-to-u8vec4-bitcasts-lowered", "changed": False, "reason": "missing-required-types-or-constants"}
+    pattern_count = sum(
+        1 for _, opcode, word_count, inst in iter_instructions(words)
+        if opcode == OP_BITCAST and word_count == 4 and inst[1] == uchar4_type
+    )
+    if pattern_count == 0 or pattern_count > 256:
+        return list(words), {"phase": "q6-u32-to-u8vec4-bitcasts-lowered", "changed": False, "pattern_count": pattern_count}
+    next_id = bound
+    new_bound = bound + pattern_count * 7
+    out = words[:5]
+    lowered = 0
+    i = 5
+    while i < len(words):
+        inst_word = words[i]
+        word_count = inst_word >> 16
+        opcode = inst_word & 0xFFFF
+        if word_count == 0 or i + word_count > len(words):
+            raise ValueError(f"truncated SPIR-V instruction at word {i}")
+        inst = words[i:i + word_count]
+        if opcode == OP_BITCAST and word_count == 4 and inst[1] == uchar4_type:
+            result, source = inst[2], inst[3]
+            b0 = next_id; next_id += 1
+            s1 = next_id; next_id += 1
+            b1 = next_id; next_id += 1
+            s2 = next_id; next_id += 1
+            b2 = next_id; next_id += 1
+            s3 = next_id; next_id += 1
+            b3 = next_id; next_id += 1
+            out += [
+                (4 << 16) | OP_U_CONVERT, uchar_type, b0, source,
+                (5 << 16) | OP_SHIFT_RIGHT_LOGICAL, uint_type, s1, source, uint_8,
+                (4 << 16) | OP_U_CONVERT, uchar_type, b1, s1,
+                (5 << 16) | OP_SHIFT_RIGHT_LOGICAL, uint_type, s2, source, uint_16,
+                (4 << 16) | OP_U_CONVERT, uchar_type, b2, s2,
+                (5 << 16) | OP_SHIFT_RIGHT_LOGICAL, uint_type, s3, source, uint_24,
+                (4 << 16) | OP_U_CONVERT, uchar_type, b3, s3,
+                (7 << 16) | OP_COMPOSITE_CONSTRUCT, uchar4_type, result, b0, b1, b2, b3,
+            ]
+            lowered += 1
+            i += word_count
+            continue
+        out += inst
+        i += word_count
+    if lowered != pattern_count or next_id != new_bound:
+        raise ValueError("internal Q6 u8vec4 bitcast lowering accounting mismatch")
+    out[3] = new_bound
+    return out, {
+        "phase": "q6-u32-to-u8vec4-bitcasts-lowered",
+        "changed": True,
+        "lowered_count": lowered,
+        "pattern_count": pattern_count,
+    }
+
+
 def insert_q6k_final_store_pre_barrier(words: list[int]) -> tuple[list[int], dict[str, Any]]:
     OP_TYPE_BOOL = 20
     OP_TYPE_INT = 21
@@ -548,13 +632,16 @@ def reconstruct(source_words: list[int], event: dict[str, Any]) -> tuple[list[in
     words3, step = lower_q6k_storage16_loads_to_storage8(words2)
     step.update({"hash": hash_words(words3), "words": len(words3)})
     steps.append(step)
-    words4, step = insert_q6k_final_store_pre_barrier(words3)
+    words4, step = lower_q6k_u32_to_u8vec4_bitcasts(words3)
     step.update({"hash": hash_words(words4), "words": len(words4)})
     steps.append(step)
-    words5, step = rewrite_duplicate_descriptor_bindings(words4, binding_details)
+    words5, step = insert_q6k_final_store_pre_barrier(words4)
     step.update({"hash": hash_words(words5), "words": len(words5)})
     steps.append(step)
-    return words5, steps
+    words6, step = rewrite_duplicate_descriptor_bindings(words5, binding_details)
+    step.update({"hash": hash_words(words6), "words": len(words6)})
+    steps.append(step)
+    return words6, steps
 
 
 def main() -> int:

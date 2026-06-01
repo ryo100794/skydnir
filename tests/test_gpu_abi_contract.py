@@ -269,6 +269,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "local-size-legalized",
             "specialization-materialized",
             "q6-storage16-loads-lowered",
+            "q6-u32-to-u8vec4-bitcasts-lowered",
             "q6-final-store-pre-barrier",
             "duplicate-descriptor-rewritten",
         ])
@@ -280,8 +281,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(steps[2]["spec_ops_folded"], 1)
         self.assertFalse(steps[3]["changed"])
         self.assertFalse(steps[4]["changed"])
+        self.assertFalse(steps[5]["changed"])
         self.assertEqual(
-            steps[5]["aliases"],
+            steps[6]["aliases"],
             [{"target_id": 31, "original_binding": 0, "rewritten_binding": 2}],
         )
         self.assertIn((6 << 16) | 16, effective_words)
@@ -311,6 +313,28 @@ class GpuAbiContractTest(unittest.TestCase):
                 self.assertNotEqual(inst[3], 371)
         self.assertIn((5 << 16) | 197, lowered)
         self.assertIn((4 << 16) | 113, lowered)
+
+    def test_q6_effective_reconstructor_lowers_u32_to_u8vec4_bitcasts(self):
+        reconstructor = load_spirv_effective_reconstructor()
+        words = [
+            0x07230203, 0x00010300, 0, 500, 0,
+            (4 << 16) | 21, 1, 32, 0,      # uint
+            (4 << 16) | 21, 2, 8, 0,       # uchar
+            (4 << 16) | 23, 3, 2, 4,       # u8vec4
+            (4 << 16) | 43, 1, 10, 8,
+            (4 << 16) | 43, 1, 11, 16,
+            (4 << 16) | 43, 1, 12, 24,
+            (4 << 16) | 124, 3, 100, 99,
+        ]
+        lowered, step = reconstructor.lower_q6k_u32_to_u8vec4_bitcasts(words)
+        self.assertTrue(step["changed"])
+        self.assertEqual(step["lowered_count"], 1)
+        self.assertEqual(lowered[3], 507)
+        self.assertNotIn((4 << 16) | 124, lowered)
+        self.assertIn((5 << 16) | 194, lowered)
+        self.assertIn((7 << 16) | 80, lowered)
+        composite_index = lowered.index((7 << 16) | 80)
+        self.assertEqual(lowered[composite_index + 1:composite_index + 3], [3, 100])
 
     def test_q6_effective_reconstructor_inserts_final_store_pre_barrier(self):
         reconstructor = load_spirv_effective_reconstructor()
@@ -2603,10 +2627,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("lower_q6k_storage16_loads_to_storage8", executor)
         self.assertIn("q6_storage16_loads_lowered", executor)
         self.assertIn("q6_storage16_loads_lowered_count", executor)
+        self.assertIn("lower_q6k_u32_to_u8vec4_bitcasts", executor)
+        self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered", executor)
+        self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered_count", executor)
         self.assertIn("insert_q6k_final_store_pre_barrier", executor)
         self.assertIn("q6_final_store_pre_barrier_inserted", executor)
         self.assertIn("q6_final_store_pre_barrier_inserted", compare)
         self.assertIn("q6_storage16_loads_lowered", compare)
+        self.assertIn("q6_u32_to_u8vec4_bitcasts_lowered", compare)
         self.assertIn("q6_storage16_lowering_identity_hash", executor)
         self.assertIn("options->has_source_spirv_hash", executor)
         self.assertIn("options->source_spirv_hash", executor)
@@ -2614,12 +2642,22 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("Q6_STORAGE16_VAR_ID = 371", executor)
         self.assertIn("OP_U_CONVERT", executor)
         self.assertIn("OP_SHIFT_LEFT_LOGICAL", executor)
+        self.assertIn("OP_SHIFT_RIGHT_LOGICAL", executor)
+        self.assertIn("OP_COMPOSITE_CONSTRUCT", executor)
         self.assertLess(
             executor.index("lower_q6k_storage16_loads_to_storage8"),
+            executor.index("lower_q6k_u32_to_u8vec4_bitcasts"),
+        )
+        self.assertLess(
+            executor.index("lower_q6k_u32_to_u8vec4_bitcasts"),
             executor.index("rewrite_duplicate_descriptor_bindings"),
         )
         self.assertLess(
             executor.index("q6_storage16_loads_lowered = lower_q6k_storage16_loads_to_storage8"),
+            executor.index("q6_u32_to_u8vec4_bitcasts_lowered = lower_q6k_u32_to_u8vec4_bitcasts"),
+        )
+        self.assertLess(
+            executor.index("q6_u32_to_u8vec4_bitcasts_lowered = lower_q6k_u32_to_u8vec4_bitcasts"),
             executor.index("if (strict_duplicate_descriptor_normalization)"),
         )
         self.assertIn("q6_native_callsite_detected", executor)
