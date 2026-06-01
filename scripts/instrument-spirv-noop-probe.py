@@ -131,6 +131,36 @@ PHASE_CODES = {
     "full": 2,
 }
 
+Q6_LANE_TRACE_SCHEMA_VERSION = 1
+Q6_LANE_TRACE_HEADER_BASE = 128
+Q6_LANE_TRACE_LANE_COUNT = 32
+Q6_LANE_TRACE_WORDS_PER_LANE = 8
+Q6_LANE_TRACE_PRE_REDUCTION_BASE = 144
+Q6_LANE_TRACE_REDUCTION_BASE = (
+    Q6_LANE_TRACE_PRE_REDUCTION_BASE
+    + Q6_LANE_TRACE_LANE_COUNT * Q6_LANE_TRACE_WORDS_PER_LANE
+)
+
+
+def q6_lane_trace_base_for_target(target: dict[str, Any]) -> int | None:
+    """Return the dynamic lane-trace region for the Q6 full-path store.
+
+    Fixed records prove that a store site executed, but they collapse all
+    invocations into one slot.  The lane trace keeps per-LocalInvocationID.x
+    values for the two sites that can explain the current Q6_K mismatch:
+    partial write to workgroup scratch and reduction writeback to the same
+    scratch.  This is diagnostic-only SPIR-V and keeps the Vulkan dispatch ABI
+    unchanged.
+    """
+    if target.get("phase") != "full":
+        return None
+    role = target.get("role")
+    if role == "partial_to_workgroup_candidate":
+        return Q6_LANE_TRACE_PRE_REDUCTION_BASE
+    if role == "reduction_candidate":
+        return Q6_LANE_TRACE_REDUCTION_BASE
+    return None
+
 
 def collect_probe_targets(manifest_path: Path | None, enabled: bool) -> list[dict[str, Any]]:
     if not enabled:
@@ -256,6 +286,16 @@ def insert_probe_writes(
     const_id(0)
     const_id(1)
     const_id(2)
+    const_id(Q6_LANE_TRACE_SCHEMA_VERSION)
+    const_id(Q6_LANE_TRACE_LANE_COUNT)
+    const_id(Q6_LANE_TRACE_WORDS_PER_LANE)
+    const_id(Q6_LANE_TRACE_HEADER_BASE)
+    const_id(Q6_LANE_TRACE_PRE_REDUCTION_BASE)
+    const_id(Q6_LANE_TRACE_REDUCTION_BASE)
+    for value in range(Q6_LANE_TRACE_WORDS_PER_LANE):
+        const_id(value)
+    for offset in range(5):
+        slot_id(Q6_LANE_TRACE_HEADER_BASE + offset)
 
     insert_at = find_first_function_index(lines)
     lines[insert_at:insert_at] = constants
@@ -294,8 +334,20 @@ def insert_probe_writes(
             (2, value_id),
         ]
         computed_index_id: int | None = None
+
+        def load_builtin_component(variable: str, component: int) -> int:
+            nonlocal next_id
+            if not ptr_input_u32_id:
+                raise SystemExit("Q6 probe builtin component load requires an Input u32 pointer type")
+            ptr = next_id
+            value = next_id + 1
+            next_id += 2
+            out.append(f"{indent}%{ptr} = OpAccessChain {ptr_input_u32_id} {variable} %{const_id(component)}\n")
+            out.append(f"{indent}%{value} = OpLoad {uint32_type} %{ptr}\n")
+            return value
+
         if target.get("role") == "final_output_store":
-            if not ptr_input_u32_id or not workgroup_id_var or not local_invocation_id_var:
+            if not workgroup_id_var or not local_invocation_id_var:
                 raise SystemExit("final-output Q6 probe requires WorkgroupId and LocalInvocationId builtins")
             pointer_operands = access_chains.get(pointer)
             if not pointer_operands:
@@ -310,15 +362,6 @@ def insert_probe_writes(
                     f"final-output Q6 computed output index %{computed_index_id} has unsupported type "
                     f"{types.get(computed_index_id)}"
                 )
-
-            def load_builtin_component(variable: str, component: int) -> int:
-                nonlocal next_id
-                ptr = next_id
-                value = next_id + 1
-                next_id += 2
-                out.append(f"{indent}%{ptr} = OpAccessChain {ptr_input_u32_id} {variable} %{const_id(component)}\n")
-                out.append(f"{indent}%{value} = OpLoad {uint32_type} %{ptr}\n")
-                return value
 
             workgroup_values = [
                 load_builtin_component(workgroup_id_var, component) for component in range(3)
@@ -338,13 +381,95 @@ def insert_probe_writes(
                     (10, const_id(2)),
                 ]
             )
-        for slot_offset, source_id in fields:
+        def emit_debug_word(slot_source_id: int, value_source_id: int) -> None:
+            nonlocal next_id
             ptr_id = next_id
             next_id += 1
             out.append(
-                f"{indent}%{ptr_id} = OpAccessChain %{ptr_u32_id} %{var_id} %52 %{slot_id(base + slot_offset)}\n"
+                f"{indent}%{ptr_id} = OpAccessChain %{ptr_u32_id} %{var_id} %52 %{slot_source_id}\n"
             )
-            out.append(f"{indent}OpStore %{ptr_id} %{source_id}\n")
+            out.append(f"{indent}OpStore %{ptr_id} %{value_source_id}\n")
+
+        for slot_offset, source_id in fields:
+            emit_debug_word(slot_id(base + slot_offset), source_id)
+
+        lane_trace_base = q6_lane_trace_base_for_target(target)
+        lane_trace_layout = None
+        if lane_trace_base is not None:
+            if not workgroup_id_var or not local_invocation_id_var:
+                raise SystemExit("Q6 lane trace requires WorkgroupId and LocalInvocationId builtins")
+            local_x = load_builtin_component(local_invocation_id_var, 0)
+            workgroup_values = [
+                load_builtin_component(workgroup_id_var, component) for component in range(3)
+            ]
+            lane_scaled = next_id
+            lane_slot_base = next_id + 1
+            next_id += 2
+            out.append(
+                f"{indent}%{lane_scaled} = OpIMul {uint32_type} %{local_x} "
+                f"%{const_id(Q6_LANE_TRACE_WORDS_PER_LANE)}\n"
+            )
+            out.append(
+                f"{indent}%{lane_slot_base} = OpIAdd {uint32_type} %{lane_scaled} "
+                f"%{const_id(lane_trace_base)}\n"
+            )
+
+            def emit_lane_word(offset: int, source_id: int) -> None:
+                nonlocal next_id
+                dynamic_slot = next_id
+                next_id += 1
+                out.append(
+                    f"{indent}%{dynamic_slot} = OpIAdd {uint32_type} %{lane_slot_base} "
+                    f"%{const_id(offset)}\n"
+                )
+                emit_debug_word(dynamic_slot, source_id)
+
+            for header_slot, header_value in [
+                (Q6_LANE_TRACE_HEADER_BASE + 0, Q6_LANE_TRACE_SCHEMA_VERSION),
+                (Q6_LANE_TRACE_HEADER_BASE + 1, Q6_LANE_TRACE_LANE_COUNT),
+                (Q6_LANE_TRACE_HEADER_BASE + 2, Q6_LANE_TRACE_WORDS_PER_LANE),
+                (Q6_LANE_TRACE_HEADER_BASE + 3, Q6_LANE_TRACE_PRE_REDUCTION_BASE),
+                (Q6_LANE_TRACE_HEADER_BASE + 4, Q6_LANE_TRACE_REDUCTION_BASE),
+            ]:
+                emit_debug_word(slot_id(header_slot), const_id(header_value))
+            emit_lane_word(0, local_x)
+            emit_lane_word(1, value_id)
+            emit_lane_word(2, workgroup_values[0])
+            emit_lane_word(3, workgroup_values[1])
+            emit_lane_word(4, workgroup_values[2])
+            pointer_operands = access_chains.get(pointer) or []
+            if len(pointer_operands) < 4:
+                raise SystemExit(f"Q6 lane trace pointer %{pointer} has no workgroup col/row/lane operands")
+            try:
+                col_id = int(pointer_operands[1].lstrip("%"))
+                row_id = int(pointer_operands[2].lstrip("%"))
+            except ValueError as exc:
+                raise SystemExit(f"Q6 lane trace pointer %{pointer} has non-id col/row operands") from exc
+            if types.get(col_id) != uint32_type or types.get(row_id) != uint32_type:
+                raise SystemExit(
+                    f"Q6 lane trace pointer %{pointer} col/row have unsupported types "
+                    f"{types.get(col_id)}/{types.get(row_id)}"
+                )
+            emit_lane_word(5, const_id(int(target["candidate_id"])))
+            emit_lane_word(6, col_id)
+            emit_lane_word(7, row_id)
+            lane_trace_layout = {
+                "schema_version": Q6_LANE_TRACE_SCHEMA_VERSION,
+                "header_base": Q6_LANE_TRACE_HEADER_BASE,
+                "lane_count": Q6_LANE_TRACE_LANE_COUNT,
+                "words_per_lane": Q6_LANE_TRACE_WORDS_PER_LANE,
+                "slot_base": lane_trace_base,
+                "record_layout": {
+                    "local_x": 0,
+                    "stored_value_bits": 1,
+                    "workgroup_x": 2,
+                    "workgroup_y": 3,
+                    "workgroup_z": 4,
+                    "candidate_id": 5,
+                    "col": 6,
+                    "row": 7,
+                },
+            }
         emitted.append({
             "schema_version": 2,
             "candidate_id": int(target["candidate_id"]),
@@ -369,6 +494,7 @@ def insert_probe_writes(
                 "local_z": base + 9,
                 "schema_version": base + 10,
             },
+            "lane_trace_layout": lane_trace_layout,
         })
     missing = [
         f"{t['role']}:{t['candidate_id']} %{t['pointer_id']} %{t['object_id']}"

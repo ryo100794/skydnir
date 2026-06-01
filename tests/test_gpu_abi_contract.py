@@ -758,11 +758,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"q6_row_provenance_probe\\":', source)
         self.assertIn("row-provenance-inconsistent", source)
         self.assertIn("Q6PartialSignatureProbeSample", source)
-        self.assertIn("PDOCKER_GPU_Q6_PARTIAL_SIGNATURE_PROBE_MAX_SAMPLES 32u", source)
+        self.assertIn("PDOCKER_GPU_Q6_PARTIAL_SIGNATURE_PROBE_MAX_SAMPLES 64u", source)
         self.assertIn("q6k_record_partial_signature_probe_sample", source)
         self.assertIn("q6k_finalize_partial_signature_probe", source)
         self.assertIn("write_q6_partial_signature_probe", source)
         self.assertIn('\\"q6_partial_signature_probe\\":', source)
+        self.assertIn('\\"partial_lanes\\":[', source)
+        self.assertIn('\\"shader_like_lanes\\":[', source)
         self.assertIn("write_json_double_or_null", source)
         self.assertIn('\\"native_reduction_tree_with_accumulator\\":', source)
         self.assertIn("write_json_double_or_null(out, sample->native_reduction_tree_with_accumulator)", source)
@@ -2024,6 +2026,20 @@ class GpuAbiContractTest(unittest.TestCase):
                 if item.get("role") == "final_output_store"
             )
         )
+        lane_probe_writes = [
+            item for item in instrumentation["probe_writes"]
+            if item.get("lane_trace_layout") is not None
+        ]
+        self.assertEqual(
+            [(item["role"], item["phase"]) for item in lane_probe_writes],
+            [
+                ("partial_to_workgroup_candidate", "full"),
+                ("reduction_candidate", "full"),
+            ],
+        )
+        self.assertTrue(
+            all(item["lane_trace_layout"]["lane_count"] == 32 for item in lane_probe_writes)
+        )
         self.assertEqual(
             [item["role"] for item in instrumentation["probe_writes"]],
             [
@@ -2211,6 +2227,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "pre-reduction-store",
             "reduction-store",
             "executed_stage_trace_v2_count",
+            "lane_trace_v1",
+            "parse_q6_lane_trace_v1",
+            "pre-reduction-lanes",
+            "reduction-lanes",
             "q6-debug-u32-final-store-trace-missing",
             "trace_writeback_verified",
             "trace_writeback_mismatch",

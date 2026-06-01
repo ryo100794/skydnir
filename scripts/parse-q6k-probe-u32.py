@@ -111,6 +111,16 @@ EXPECTED_RECORDS = (
     },
 )
 
+LANE_TRACE_SCHEMA_VERSION = 1
+LANE_TRACE_HEADER_BASE = 128
+LANE_TRACE_LANE_COUNT = 32
+LANE_TRACE_WORDS_PER_LANE = 8
+LANE_TRACE_PRE_REDUCTION_BASE = 144
+LANE_TRACE_REDUCTION_BASE = (
+    LANE_TRACE_PRE_REDUCTION_BASE
+    + LANE_TRACE_LANE_COUNT * LANE_TRACE_WORDS_PER_LANE
+)
+
 
 def load_json(path: Path) -> Any:
     try:
@@ -159,6 +169,101 @@ def find_debug_bindings(data: Any) -> list[dict[str, Any]]:
         if obj.get("debug_probe_binding") is True and "u32_after_dispatch" in obj:
             bindings.append(obj)
     return bindings
+
+
+def parse_lane_trace(dispatch: dict[int, int | None], writeback: dict[int, int | None]) -> dict[str, Any]:
+    header = {
+        "schema_version": dispatch.get(LANE_TRACE_HEADER_BASE),
+        "lane_count": dispatch.get(LANE_TRACE_HEADER_BASE + 1),
+        "words_per_lane": dispatch.get(LANE_TRACE_HEADER_BASE + 2),
+        "pre_reduction_base": dispatch.get(LANE_TRACE_HEADER_BASE + 3),
+        "reduction_base": dispatch.get(LANE_TRACE_HEADER_BASE + 4),
+    }
+    header_valid = (
+        header["schema_version"] == LANE_TRACE_SCHEMA_VERSION
+        and header["lane_count"] == LANE_TRACE_LANE_COUNT
+        and header["words_per_lane"] == LANE_TRACE_WORDS_PER_LANE
+        and header["pre_reduction_base"] == LANE_TRACE_PRE_REDUCTION_BASE
+        and header["reduction_base"] == LANE_TRACE_REDUCTION_BASE
+    )
+    phases: list[dict[str, Any]] = []
+    failures: list[str] = []
+    for name, slot_base, expected_candidate in [
+        ("pre-reduction-lanes", LANE_TRACE_PRE_REDUCTION_BASE, 105),
+        ("reduction-lanes", LANE_TRACE_REDUCTION_BASE, 115),
+    ]:
+        records: list[dict[str, Any]] = []
+        for lane in range(LANE_TRACE_LANE_COUNT):
+            base = slot_base + lane * LANE_TRACE_WORDS_PER_LANE
+            local_x = dispatch.get(base)
+            value_bits = dispatch.get(base + 1)
+            candidate_id = dispatch.get(base + 5)
+            unexecuted = (
+                local_x in (None, 0)
+                and value_bits in (None, 0)
+                and candidate_id in (None, 0)
+            )
+            status = "not-executed" if unexecuted else "pass"
+            record_failures: list[str] = []
+            if not unexecuted and local_x != lane:
+                status = "fail"
+                record_failures.append("local-x")
+            if not unexecuted and candidate_id != expected_candidate:
+                status = "fail"
+                record_failures.append("candidate-id")
+            record: dict[str, Any] = {
+                "lane": lane,
+                "slot_base": base,
+                "local_x": local_x,
+                "value_bits": value_bits,
+                "value_f32": bits_to_f32(value_bits),
+                "workgroup_id": [dispatch.get(base + offset) for offset in (2, 3, 4)],
+                "candidate_id": candidate_id,
+                "col": dispatch.get(base + 6),
+                "row": dispatch.get(base + 7),
+                "status": status,
+                "failures": record_failures,
+            }
+            if writeback:
+                record.update(
+                    {
+                        "writeback_local_x": writeback.get(base),
+                        "writeback_value_bits": writeback.get(base + 1),
+                        "writeback_value_f32": bits_to_f32(writeback.get(base + 1)),
+                        "writeback_workgroup_id": [writeback.get(base + offset) for offset in (2, 3, 4)],
+                        "writeback_candidate_id": writeback.get(base + 5),
+                    "writeback_col": writeback.get(base + 6),
+                    "writeback_row": writeback.get(base + 7),
+                    }
+                )
+            if record_failures:
+                failures.append(f"{name} lane {lane}: {','.join(record_failures)}")
+            records.append(record)
+        phases.append(
+            {
+                "name": name,
+                "slot_base": slot_base,
+                "expected_candidate_id": expected_candidate,
+                "executed_lane_count": sum(1 for record in records if record["status"] == "pass"),
+                "records": records,
+            }
+        )
+    if not header_valid and not any(phase["executed_lane_count"] for phase in phases):
+        return {
+            "schema": "pdocker.q6k.lane-trace.v1",
+            "summary": "not-run",
+            "header": header,
+            "phases": phases,
+        }
+    if not header_valid:
+        failures.append("lane trace header missing or invalid")
+    return {
+        "schema": "pdocker.q6k.lane-trace.v1",
+        "summary": "pass" if not failures else "fail",
+        "header": header,
+        "phases": phases,
+        "failures": failures,
+    }
 
 
 def parse_binding(binding: dict[str, Any]) -> dict[str, Any]:
@@ -259,6 +364,13 @@ def parse_binding(binding: dict[str, Any]) -> dict[str, Any]:
     for expected in EXPECTED_RECORDS:
         base = int(expected["slot_base"])
         expected_slots.update(range(base, base + 11))
+    expected_slots.update(range(LANE_TRACE_HEADER_BASE, LANE_TRACE_HEADER_BASE + 5))
+    expected_slots.update(
+        range(
+            LANE_TRACE_PRE_REDUCTION_BASE,
+            LANE_TRACE_REDUCTION_BASE + LANE_TRACE_LANE_COUNT * LANE_TRACE_WORDS_PER_LANE,
+        )
+    )
     unexpected_nonzero = [
         {"index": index, "value": value}
         for index, value in sorted(dispatch.items())
@@ -269,6 +381,7 @@ def parse_binding(binding: dict[str, Any]) -> dict[str, Any]:
         "set": binding.get("set"),
         "size": binding.get("size"),
         "records": records,
+        "lane_trace_v1": parse_lane_trace(dispatch, writeback),
         "executed_record_count": sum(1 for record in records if record["status"] == "pass"),
         "executed_final_record_count": sum(
             1

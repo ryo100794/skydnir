@@ -27,7 +27,14 @@ EXPECTED_RECORDS = [
     {"probe": 9, "slot_base": 116, "phase": "full", "stage": "final-store", "candidate_id": 130, "role_code": 4},
 ]
 
-CONST_RE = re.compile(r"^\s*(%\S+)\s*=\s*OpConstant\s+%uint\s+(\d+)\b")
+LANE_TRACE_SCHEMA_VERSION = 1
+LANE_TRACE_HEADER_BASE = 128
+LANE_TRACE_LANE_COUNT = 32
+LANE_TRACE_WORDS_PER_LANE = 8
+LANE_TRACE_PRE_REDUCTION_BASE = 144
+LANE_TRACE_REDUCTION_BASE = LANE_TRACE_PRE_REDUCTION_BASE + LANE_TRACE_LANE_COUNT * LANE_TRACE_WORDS_PER_LANE
+
+CONST_RE = re.compile(r"^\s*(%\S+)\s*=\s*OpConstant\s+%\S+\s+(\d+)\b")
 BINDING_RE = re.compile(r"^\s*OpDecorate\s+(%\S+)\s+Binding\s+(\d+)\b")
 ACCESS_RE = re.compile(r"^\s*(%\S+)\s*=\s*OpAccessChain\s+%\S+\s+(%\S+)\s+(.*)$")
 STORE_RE = re.compile(r"^\s*OpStore\s+(%\S+)\s+(%\S+)\b")
@@ -56,7 +63,9 @@ def parse_spvasm(text: str) -> dict[str, Any]:
     constants: dict[str, int] = {}
     bindings: dict[str, int] = {}
     access_slots: dict[str, dict[str, Any]] = {}
+    dynamic_access_slots: dict[str, dict[str, Any]] = {}
     stores: dict[int, dict[str, Any]] = {}
+    dynamic_stores: list[dict[str, Any]] = []
     producers: dict[str, dict[str, Any]] = {}
 
     lines = text.splitlines()
@@ -122,6 +131,11 @@ def parse_spvasm(text: str) -> dict[str, Any]:
                 continue
             slot = parse_constant_token(tokens[-1], constants)
             if slot is None:
+                dynamic_access_slots[result_id] = {
+                    "line": lineno,
+                    "var_id": var_id,
+                    "slot_id": tokens[-1],
+                }
                 continue
             access_slots[result_id] = {"slot": slot, "line": lineno, "var_id": var_id}
             continue
@@ -129,6 +143,15 @@ def parse_spvasm(text: str) -> dict[str, Any]:
             ptr_id, value_id = m.groups()
             access = access_slots.get(ptr_id)
             if not access:
+                dynamic_access = dynamic_access_slots.get(ptr_id)
+                if dynamic_access:
+                    dynamic_stores.append({
+                        "access_line": dynamic_access["line"],
+                        "store_line": lineno,
+                        "slot_id": dynamic_access["slot_id"],
+                        "value_id": value_id,
+                        "value_producer": producer_snapshot(value_id),
+                    })
                 continue
             value = parse_constant_token(value_id, constants)
             stores[int(access["slot"])] = {
@@ -206,10 +229,35 @@ def parse_spvasm(text: str) -> dict[str, Any]:
             "failures": failures,
         })
 
+    lane_header = {
+        "schema_version": stores.get(LANE_TRACE_HEADER_BASE, {}).get("value"),
+        "lane_count": stores.get(LANE_TRACE_HEADER_BASE + 1, {}).get("value"),
+        "words_per_lane": stores.get(LANE_TRACE_HEADER_BASE + 2, {}).get("value"),
+        "pre_reduction_base": stores.get(LANE_TRACE_HEADER_BASE + 3, {}).get("value"),
+        "reduction_base": stores.get(LANE_TRACE_HEADER_BASE + 4, {}).get("value"),
+    }
+    lane_header_valid = (
+        lane_header["schema_version"] == LANE_TRACE_SCHEMA_VERSION
+        and lane_header["lane_count"] == LANE_TRACE_LANE_COUNT
+        and lane_header["words_per_lane"] == LANE_TRACE_WORDS_PER_LANE
+        and lane_header["pre_reduction_base"] == LANE_TRACE_PRE_REDUCTION_BASE
+        and lane_header["reduction_base"] == LANE_TRACE_REDUCTION_BASE
+    )
+    lane_trace_static = {
+        "schema": "skydnir.q6.lane-trace-spvasm.v1",
+        "header": lane_header,
+        "header_valid": lane_header_valid,
+        "dynamic_store_count": len(dynamic_stores),
+        "dynamic_store_samples": dynamic_stores[:16],
+        "summary": "pass" if lane_header_valid and len(dynamic_stores) >= 12 else "not-run",
+    }
+
     return {
         "schema": "skydnir.q6.stage-trace-spvasm.v1",
         "debug_binding_variable_ids": sorted(k for k, v in bindings.items() if v == 5),
         "debug_store_count": len(stores),
+        "dynamic_debug_store_count": len(dynamic_stores),
+        "lane_trace_static": lane_trace_static,
         "record_count": len(records),
         "passed_record_count": sum(1 for r in records if r["status"] == "pass"),
         "summary": "pass" if all(r["status"] == "pass" for r in records) else "fail",

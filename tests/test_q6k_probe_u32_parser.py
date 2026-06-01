@@ -210,6 +210,68 @@ class Q6KProbeU32ParserTest(unittest.TestCase):
         self.assertEqual(record["local_invocation_id"], [0, 1, 2])
         self.assertEqual(record["output_index"], 151936)
 
+    def test_parser_decodes_lane_trace_v1_fields(self):
+        values = {index: 0 for index in range(704)}
+        values[128] = 1
+        values[129] = 32
+        values[130] = 8
+        values[131] = 144
+        values[132] = 400
+        pre_base = 144 + 3 * 8
+        red_base = 400 + 3 * 8
+        values[pre_base] = 3
+        values[pre_base + 1] = f32_bits(1.25)
+        values[pre_base + 2] = 1186
+        values[pre_base + 3] = 0
+        values[pre_base + 4] = 63
+        values[pre_base + 5] = 105
+        values[pre_base + 6] = 0
+        values[pre_base + 7] = 1
+        values[red_base] = 3
+        values[red_base + 1] = f32_bits(2.5)
+        values[red_base + 2] = 1186
+        values[red_base + 3] = 0
+        values[red_base + 4] = 63
+        values[red_base + 5] = 115
+        values[red_base + 6] = 0
+        values[red_base + 7] = 1
+        # Keep the fixed final record valid so the whole parser succeeds.
+        values[116] = 130
+        values[117] = 4
+        values[118] = f32_bits(2.5)
+        values[119] = 151935
+        values[120] = 1186
+        values[121] = 0
+        values[122] = 63
+        values[123] = 0
+        values[124] = 0
+        values[125] = 0
+        values[126] = 2
+        payload = {
+            "binding_details": [
+                {
+                    "binding": 5,
+                    "debug_probe_binding": True,
+                    "u32_after_dispatch": [sample(index, values.get(index, 0)) for index in range(704)],
+                    "u32_after_writeback": [sample(index, values.get(index, 0)) for index in range(704)],
+                }
+            ]
+        }
+        result, report = self.run_parser(payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lane_trace = report["bindings"][0]["lane_trace_v1"]
+        self.assertEqual(lane_trace["summary"], "pass")
+        self.assertEqual(lane_trace["header"]["lane_count"], 32)
+        self.assertEqual(lane_trace["header"]["words_per_lane"], 8)
+        pre_phase = lane_trace["phases"][0]
+        red_phase = lane_trace["phases"][1]
+        self.assertEqual(pre_phase["records"][3]["local_x"], 3)
+        self.assertAlmostEqual(pre_phase["records"][3]["value_f32"], 1.25)
+        self.assertEqual(pre_phase["records"][3]["workgroup_id"], [1186, 0, 63])
+        self.assertEqual(pre_phase["records"][3]["col"], 0)
+        self.assertEqual(pre_phase["records"][3]["row"], 1)
+        self.assertAlmostEqual(red_phase["records"][3]["writeback_value_f32"], 2.5)
+
     def test_parser_fails_closed_when_final_trace_metadata_is_missing(self):
         values = {index: 0 for index in range(144)}
         base = 56

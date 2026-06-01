@@ -3906,6 +3906,110 @@ def q6_bits_to_f32(bits):
     return struct.unpack("<f", struct.pack("<I", bits & 0xFFFFFFFF))[0]
 
 
+Q6_LANE_TRACE_SCHEMA_VERSION = 1
+Q6_LANE_TRACE_HEADER_BASE = 128
+Q6_LANE_TRACE_LANE_COUNT = 32
+Q6_LANE_TRACE_WORDS_PER_LANE = 8
+Q6_LANE_TRACE_PRE_REDUCTION_BASE = 144
+Q6_LANE_TRACE_REDUCTION_BASE = (
+    Q6_LANE_TRACE_PRE_REDUCTION_BASE
+    + Q6_LANE_TRACE_LANE_COUNT * Q6_LANE_TRACE_WORDS_PER_LANE
+)
+
+
+def parse_q6_lane_trace_v1(dispatch, writeback):
+    if not isinstance(dispatch, dict) or not dispatch:
+        return {"schema": "pdocker.q6k.lane-trace.v1", "summary": "not-run"}
+    header = {
+        "schema_version": dispatch.get(Q6_LANE_TRACE_HEADER_BASE),
+        "lane_count": dispatch.get(Q6_LANE_TRACE_HEADER_BASE + 1),
+        "words_per_lane": dispatch.get(Q6_LANE_TRACE_HEADER_BASE + 2),
+        "pre_reduction_base": dispatch.get(Q6_LANE_TRACE_HEADER_BASE + 3),
+        "reduction_base": dispatch.get(Q6_LANE_TRACE_HEADER_BASE + 4),
+    }
+    header_valid = (
+        header["schema_version"] == Q6_LANE_TRACE_SCHEMA_VERSION
+        and header["lane_count"] == Q6_LANE_TRACE_LANE_COUNT
+        and header["words_per_lane"] == Q6_LANE_TRACE_WORDS_PER_LANE
+        and header["pre_reduction_base"] == Q6_LANE_TRACE_PRE_REDUCTION_BASE
+        and header["reduction_base"] == Q6_LANE_TRACE_REDUCTION_BASE
+    )
+    phases = []
+    failures = []
+    for name, slot_base, expected_candidate in [
+        ("pre-reduction-lanes", Q6_LANE_TRACE_PRE_REDUCTION_BASE, 105),
+        ("reduction-lanes", Q6_LANE_TRACE_REDUCTION_BASE, 115),
+    ]:
+        records = []
+        for lane in range(Q6_LANE_TRACE_LANE_COUNT):
+            base = slot_base + lane * Q6_LANE_TRACE_WORDS_PER_LANE
+            local_x = dispatch.get(base)
+            value_bits = dispatch.get(base + 1)
+            candidate_id = dispatch.get(base + 5)
+            unexecuted = (
+                local_x in (None, 0)
+                and value_bits in (None, 0)
+                and candidate_id in (None, 0)
+            )
+            status = "not-executed" if unexecuted else "pass"
+            record_failures = []
+            if not unexecuted and local_x != lane:
+                status = "fail"
+                record_failures.append("local-x")
+            if not unexecuted and candidate_id != expected_candidate:
+                status = "fail"
+                record_failures.append("candidate-id")
+            record = {
+                "lane": lane,
+                "slot_base": base,
+                "local_x": local_x,
+                "value_bits": value_bits,
+                "value_f32": q6_bits_to_f32(value_bits),
+                "workgroup_id": [dispatch.get(base + offset) for offset in (2, 3, 4)],
+                "candidate_id": candidate_id,
+                "col": dispatch.get(base + 6),
+                "row": dispatch.get(base + 7),
+                "status": status,
+                "failures": record_failures,
+            }
+            if writeback:
+                record.update({
+                    "writeback_local_x": writeback.get(base),
+                    "writeback_value_bits": writeback.get(base + 1),
+                    "writeback_value_f32": q6_bits_to_f32(writeback.get(base + 1)),
+                    "writeback_workgroup_id": [writeback.get(base + offset) for offset in (2, 3, 4)],
+                    "writeback_candidate_id": writeback.get(base + 5),
+                    "writeback_col": writeback.get(base + 6),
+                    "writeback_row": writeback.get(base + 7),
+                })
+            if record_failures:
+                failures.append("%s lane %s: %s" % (name, lane, ",".join(record_failures)))
+            records.append(record)
+        phases.append({
+            "name": name,
+            "slot_base": slot_base,
+            "expected_candidate_id": expected_candidate,
+            "executed_lane_count": sum(1 for record in records if record["status"] == "pass"),
+            "records": records,
+        })
+    if not header_valid and not any(phase["executed_lane_count"] for phase in phases):
+        return {
+            "schema": "pdocker.q6k.lane-trace.v1",
+            "summary": "not-run",
+            "header": header,
+            "phases": phases,
+        }
+    if not header_valid:
+        failures.append("lane trace header missing or invalid")
+    return {
+        "schema": "pdocker.q6k.lane-trace.v1",
+        "summary": "pass" if not failures else "fail",
+        "header": header,
+        "phases": phases,
+        "failures": failures[:16],
+    }
+
+
 def parse_q6_final_store_trace_v2(bindings):
     parsed_bindings = []
     failures = []
@@ -4043,6 +4147,7 @@ def parse_q6_final_store_trace_v2(bindings):
             "q6_event_oracle_spirv_hash": binding.get("q6_event_oracle_spirv_hash"),
             "q6_event_pipeline_spirv_hash": binding.get("q6_event_pipeline_spirv_hash"),
             "records": records,
+            "lane_trace_v1": parse_q6_lane_trace_v1(dispatch, writeback),
             "executed_stage_trace_v2_count": executed_stage_count,
             "executed_final_trace_v2_count": executed_final_count,
             "summary": (

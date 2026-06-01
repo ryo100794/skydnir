@@ -166,10 +166,14 @@ typedef struct {
     int best_lane;
     double best_lane_value;
     double best_lane_abs_error;
+    double partial_lanes[32];
+    size_t partial_lane_count;
+    double shader_like_lanes[64];
+    size_t shader_like_lane_count;
     char klass[32];
 } Q6PartialSignatureProbeSample;
 
-#define PDOCKER_GPU_Q6_PARTIAL_SIGNATURE_PROBE_MAX_SAMPLES 32u
+#define PDOCKER_GPU_Q6_PARTIAL_SIGNATURE_PROBE_MAX_SAMPLES 64u
 
 typedef struct CpuOracleReport CpuOracleReport;
 
@@ -5096,10 +5100,10 @@ static void write_vulkan_binding_report(
                 out,
                 (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
                 local_size,
-                144);
+                704);
             if (buffer_fds && buffer_fds[i] >= 0 && fd_after_hash && fd_after_hash[i] != 0) {
                 fprintf(out, ",\"u32_after_writeback\":");
-                write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 144);
+                write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 704);
             }
         }
         fprintf(out, "}");
@@ -6099,6 +6103,17 @@ static void write_q6_partial_signature_probe(FILE *out, const CpuOracleReport *r
         write_json_double_or_null(out, sample->best_lane_value);
         fprintf(out, ",\"best_lane_abs_error\":");
         write_json_double_or_null(out, sample->best_lane_abs_error);
+        fprintf(out, ",\"partial_lanes\":[");
+        for (size_t lane = 0; lane < sample->partial_lane_count; ++lane) {
+            fprintf(out, "%s", lane ? "," : "");
+            write_json_double_or_null(out, sample->partial_lanes[lane]);
+        }
+        fprintf(out, "],\"shader_like_lanes\":[");
+        for (size_t lane = 0; lane < sample->shader_like_lane_count; ++lane) {
+            fprintf(out, "%s", lane ? "," : "");
+            write_json_double_or_null(out, sample->shader_like_lanes[lane]);
+        }
+        fprintf(out, "]");
         fprintf(out, ",\"class\":\"%s\"}", sample->klass);
     }
     fprintf(out, "]}");
@@ -7474,7 +7489,9 @@ static void q6k_record_partial_signature_probe_sample(
     snprintf(sample->klass, sizeof(sample->klass), "%s", "not-partial");
 
     if (partial_count >= 32 && partials) {
+        sample->partial_lane_count = 32;
         for (size_t lane = 0; lane < 32; ++lane) {
+            sample->partial_lanes[lane] = partials[lane];
             const double value = partials[lane] + accumulator_sum;
             const double err = fabs(value - (double)gpu_at_dst);
             if (err < sample->best_lane_abs_error) {
@@ -7493,7 +7510,10 @@ static void q6k_record_partial_signature_probe_sample(
     }
 
     if (shader_like_count >= 64 && shader_like_partials64) {
+        sample->shader_like_lane_count = 64;
         for (size_t lane = 0; lane < 32; ++lane) {
+            sample->shader_like_lanes[lane] = shader_like_partials64[lane];
+            sample->shader_like_lanes[lane + 32] = shader_like_partials64[lane + 32];
             sample->local_y0_sum += shader_like_partials64[lane];
             sample->local_y1_sum += shader_like_partials64[lane + 32];
         }
@@ -8973,10 +8993,10 @@ static void write_vulkan_binding_compact_report(
                     out,
                     (const unsigned char *)vk_buffers[i]->map + binding_gpu_offset[i],
                     local_size,
-                    144);
+                    704);
                 if (buffer_fds && buffer_fds[i] >= 0 && fd_after_hash && fd_after_hash[i] != 0) {
                     fprintf(out, ",\"u32_after_writeback\":");
-                    write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 144);
+                    write_u32_fd_sample_array_prefix(out, buffer_fds[i], bindings[i].offset, local_size, 704);
                 }
             } else {
                 fprintf(out, ",\"f32_after_dispatch\":");
