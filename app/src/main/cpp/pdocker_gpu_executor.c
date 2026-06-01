@@ -2551,19 +2551,19 @@ static int resident_cache_key(int fd, dev_t *dev, ino_t *ino) {
 
 static int resident_cache_candidate(
         const VulkanDispatchOptions *options,
-        uint32_t binding,
+        int read_only,
         size_t size) {
     if (options && options->has_resident_cache && !options->resident_cache) return 0;
     if (!options || !options->has_resident_cache) {
         if (!env_truthy("PDOCKER_GPU_RESIDENT_CACHE", 1)) return 0;
     }
     /*
-     * Keep the first large storage binding resident by default. In llama.cpp's
-     * Vulkan graphs this is the read-mostly model/weight side of the dispatch;
-     * small activation/output buffers continue through the fully coherent
-     * upload/download path for correctness.
+     * Product caching must not infer application semantics from fixed binding
+     * numbers.  Only use the resident path after the caller has already proven
+     * the descriptor is read-only for this dispatch; writable or unknown
+     * bindings continue through the coherent upload/download path.
      */
-    if (binding != 0) return 0;
+    if (!read_only) return 0;
     return size >= resident_cache_threshold(options);
 }
 
@@ -2581,7 +2581,7 @@ static int strict_readonly_resident_cache_candidate(
         return 0;
     }
     const VulkanDispatchBinding *b = &bindings[index];
-    if (!resident_cache_candidate(options, b->binding, b->size)) return 0;
+    if (!resident_cache_candidate(options, 1, b->size)) return 0;
     if (b->api_offset < 0 || b->api_memory_offset < 0 ||
         (uint64_t)b->api_memory_offset + (uint64_t)b->api_offset !=
             (uint64_t)b->offset ||
@@ -9574,7 +9574,7 @@ static VulkanVectorBuffer *acquire_dispatch_buffer(
         }
         return temporary;
     }
-    if (resident_cache_candidate(options, binding->binding, binding->size)) {
+    if (resident_cache_candidate(options, 0, binding->size)) {
         if (have_key) {
             VulkanResidentCacheEntry *entry = find_resident_cache_entry(
                 dev, ino, binding->offset, binding->size, binding->binding);

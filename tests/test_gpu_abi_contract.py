@@ -1077,6 +1077,24 @@ class GpuAbiContractTest(unittest.TestCase):
             source,
         )
 
+    def test_vulkan_product_cache_policy_does_not_assume_binding_numbers(self):
+        source = GPU_EXECUTOR.read_text()
+        candidate = re.search(
+            r"static int resident_cache_candidate\((?P<body>.*?)\n}\n\nstatic int strict_readonly_resident_cache_candidate",
+            source,
+            re.S,
+        ).group("body")
+        self.assertIn("int read_only", candidate)
+        self.assertIn("if (!read_only) return 0;", candidate)
+        self.assertNotIn("binding != 0", candidate)
+        self.assertNotIn("binding == 0", candidate)
+        self.assertIn(
+            "Only use the resident path after the caller has already proven",
+            candidate,
+        )
+        self.assertIn("resident_cache_candidate(options, 1, b->size)", source)
+        self.assertIn("resident_cache_candidate(options, 0, binding->size)", source)
+
     def test_llama_gpu_compare_q6_identity_survives_spirv_legalization_hash_changes(self):
         helpers = load_llama_gpu_compare_q6_helpers()
         q6_hash = sorted(helpers["Q6_K_MATVEC_SPIRV_HASHES"])[0]
