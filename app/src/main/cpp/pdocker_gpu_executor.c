@@ -2020,6 +2020,24 @@ typedef struct {
     VulkanVectorBuffer view;
 } VulkanStrictBufferObject;
 
+typedef struct {
+    double create_buffer_ms;
+    double get_requirements_ms;
+    double allocate_memory_ms;
+    double map_memory_ms;
+    double bind_buffer_ms;
+    double staging_create_buffer_ms;
+    double staging_get_requirements_ms;
+    double staging_allocate_memory_ms;
+    double staging_bind_buffer_ms;
+    double staging_map_memory_ms;
+    double upload_read_ms;
+    size_t created_buffer_bytes;
+    size_t allocated_memory_bytes;
+    size_t mapped_memory_bytes;
+    size_t staging_buffer_bytes;
+    size_t upload_read_bytes;
+} VulkanStrictGraphTiming;
 
 typedef struct {
     int valid;
@@ -2116,7 +2134,8 @@ static int create_strict_vulkan_object_graph(
         VulkanStrictBufferObject *buffers,
         size_t *buffer_count,
         VulkanVectorBuffer **vk_buffers,
-        int device_local_staged) {
+        int device_local_staged,
+        VulkanStrictGraphTiming *timing) {
     if (!buffer_fds || !bindings || !active_bindings || !binding_read_needed ||
         !binding_write_needed || !memories || !memory_count || !buffers ||
         !buffer_count || !vk_buffers) {
@@ -2167,11 +2186,18 @@ static int create_strict_vulkan_object_graph(
                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             };
+            double op_start = now_ms();
             VkResult rc = vkCreateBuffer(device, &bci, NULL, &buffers[buffer_index].buffer);
+            if (timing) {
+                timing->create_buffer_ms += now_ms() - op_start;
+                timing->created_buffer_bytes += bindings[i].api_buffer_size;
+            }
             if (rc != VK_SUCCESS) return -EIO;
+            op_start = now_ms();
             vkGetBufferMemoryRequirements(device,
                                           buffers[buffer_index].buffer,
                                           &buffers[buffer_index].requirements);
+            if (timing) timing->get_requirements_ms += now_ms() - op_start;
             memories[mem_index].memory_type_bits &= buffers[buffer_index].requirements.memoryTypeBits;
             if ((buffers[buffer_index].memory_offset % buffers[buffer_index].requirements.alignment) != 0) {
                 return -EINVAL;
@@ -2229,17 +2255,29 @@ static int create_strict_vulkan_object_graph(
             .allocationSize = (VkDeviceSize)memories[m].size,
             .memoryTypeIndex = memory_type,
         };
+        double op_start = now_ms();
         VkResult rc = vkAllocateMemory(device, &mai, NULL, &memories[m].memory);
+        if (timing) {
+            timing->allocate_memory_ms += now_ms() - op_start;
+            timing->allocated_memory_bytes += memories[m].size;
+        }
         if (rc != VK_SUCCESS) return -ENOMEM;
         if (!memories[m].device_local_staged) {
+            op_start = now_ms();
             rc = vkMapMemory(device, memories[m].memory, 0, (VkDeviceSize)memories[m].size, 0, &memories[m].map);
+            if (timing) {
+                timing->map_memory_ms += now_ms() - op_start;
+                timing->mapped_memory_bytes += memories[m].size;
+            }
             if (rc != VK_SUCCESS || !memories[m].map) return -EIO;
         }
     }
 
     for (size_t b = 0; b < *buffer_count; ++b) {
         VulkanStrictMemoryObject *memory = &memories[buffers[b].memory_index];
+        double op_start = now_ms();
         VkResult rc = vkBindBufferMemory(device, buffers[b].buffer, memory->memory, buffers[b].memory_offset);
+        if (timing) timing->bind_buffer_ms += now_ms() - op_start;
         if (rc != VK_SUCCESS) return -EINVAL;
         if (memory->device_local_staged) {
             /*
@@ -2261,10 +2299,17 @@ static int create_strict_vulkan_object_graph(
                     .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                     .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
                 };
+                op_start = now_ms();
                 rc = vkCreateBuffer(device, &sbci, NULL, &buffers[b].staging_buffer);
+                if (timing) {
+                    timing->staging_create_buffer_ms += now_ms() - op_start;
+                    timing->staging_buffer_bytes += (size_t)buffer_size;
+                }
                 if (rc != VK_SUCCESS) return -EIO;
                 VkMemoryRequirements staging_req;
+                op_start = now_ms();
                 vkGetBufferMemoryRequirements(device, buffers[b].staging_buffer, &staging_req);
+                if (timing) timing->staging_get_requirements_ms += now_ms() - op_start;
                 uint32_t staging_type = find_vulkan_memory_type(
                     physical_device,
                     staging_req.memoryTypeBits,
@@ -2275,11 +2320,17 @@ static int create_strict_vulkan_object_graph(
                     .allocationSize = staging_req.size,
                     .memoryTypeIndex = staging_type,
                 };
+                op_start = now_ms();
                 rc = vkAllocateMemory(device, &smai, NULL, &buffers[b].staging_memory);
+                if (timing) timing->staging_allocate_memory_ms += now_ms() - op_start;
                 if (rc != VK_SUCCESS) return -ENOMEM;
+                op_start = now_ms();
                 rc = vkBindBufferMemory(device, buffers[b].staging_buffer, buffers[b].staging_memory, 0);
+                if (timing) timing->staging_bind_buffer_ms += now_ms() - op_start;
                 if (rc != VK_SUCCESS) return -EINVAL;
+                op_start = now_ms();
                 rc = vkMapMemory(device, buffers[b].staging_memory, 0, staging_req.size, 0, &buffers[b].staging_map);
+                if (timing) timing->staging_map_memory_ms += now_ms() - op_start;
                 if (rc != VK_SUCCESS || !buffers[b].staging_map) return -EIO;
                 buffers[b].staging_size = (size_t)buffer_size;
             }
@@ -2316,11 +2367,16 @@ static int create_strict_vulkan_object_graph(
             return -EINVAL;
         }
         vk_buffers[i] = &buffers[buffer_index].view;
+        double op_start = now_ms();
         if (read_fd_exact(buffer_fds[i],
                           (unsigned char *)vk_buffers[i]->map + upload_offset,
                           bindings[i].size,
                           bindings[i].offset) != 0) {
             return -EIO;
+        }
+        if (timing) {
+            timing->upload_read_ms += now_ms() - op_start;
+            timing->upload_read_bytes += bindings[i].size;
         }
     }
     return 0;
@@ -2917,6 +2973,9 @@ static uint64_t strict_graph_cache_key(
     uint64_t hash = 1469598103934665603ull;
     uint64_t mask = 0;
     size_t bytes = 0;
+    uint64_t byte_memory_ids[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    size_t byte_memory_sizes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    size_t byte_memory_count = 0;
     if (!bindings || !active_bindings || !binding_read_needed || !binding_write_needed) {
         if (disabled_reason) *disabled_reason = "invalid-arguments";
         return 0;
@@ -2949,7 +3008,24 @@ static uint64_t strict_graph_cache_key(
         u64 = b->api_buffer_id; hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u32 = binding_read_needed[i]; hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u32 = binding_write_needed[i]; hash = fnv1a64_update(hash, &u32, sizeof(u32));
-        bytes += b->api_memory_size;
+        int seen_memory = 0;
+        for (size_t m = 0; m < byte_memory_count; ++m) {
+            if (byte_memory_ids[m] == b->api_memory_id) {
+                seen_memory = 1;
+                if (byte_memory_sizes[m] < b->api_memory_size) {
+                    bytes -= byte_memory_sizes[m];
+                    byte_memory_sizes[m] = b->api_memory_size;
+                    bytes += byte_memory_sizes[m];
+                }
+                break;
+            }
+        }
+        if (!seen_memory && byte_memory_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+            byte_memory_ids[byte_memory_count] = b->api_memory_id;
+            byte_memory_sizes[byte_memory_count] = b->api_memory_size;
+            byte_memory_count++;
+            bytes += b->api_memory_size;
+        }
     }
     if (active_mask) *active_mask = mask;
     if (graph_bytes) *graph_bytes = bytes;
@@ -10664,6 +10740,7 @@ static int run_vulkan_dispatch_fd(
     size_t strict_memory_count = 0;
     size_t strict_buffer_count = 0;
     int strict_object_graph_used = 0;
+    VulkanStrictGraphTiming strict_object_graph_timing;
     int strict_object_graph_cache_enabled = 0;
     int strict_object_graph_cache_hit = 0;
     int strict_object_graph_cache_adopted = 0;
@@ -10842,6 +10919,7 @@ static int run_vulkan_dispatch_fd(
     SpirvDescriptorAccess shader_binding_access[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t active_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t strict_graph_active_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    memset(&strict_object_graph_timing, 0, sizeof(strict_object_graph_timing));
     uint8_t strict_resident_cached_bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t binding_read_needed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint8_t binding_write_needed[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -11676,7 +11754,8 @@ static int run_vulkan_dispatch_fd(
                 strict_buffers,
                 &strict_buffer_count,
                 vk_buffers,
-                strict_device_local_staging);
+                strict_device_local_staging,
+                &strict_object_graph_timing);
             if (graph_rc != 0) {
                 io_rc = graph_rc;
                 timing_strict_graph_ms = now_ms() - graph_start;
@@ -12898,7 +12977,19 @@ static int run_vulkan_dispatch_fd(
                 "\"readonly_overlap_snapshot_bytes\":%zu,"
                 "\"cache_enabled\":%s,\"cache_hit\":%s,"
                 "\"cache_adopted\":%s,\"cache_key\":\"0x%016llx\","
-                "\"cache_bytes\":%zu,\"cache_disabled_reason\":\"%s\"},"
+                "\"cache_bytes\":%zu,\"cache_disabled_reason\":\"%s\","
+                "\"cold_phase_timing_ms\":{\"create_buffer\":%.4f,"
+                "\"get_requirements\":%.4f,\"allocate_memory\":%.4f,"
+                "\"map_memory\":%.4f,\"bind_buffer\":%.4f,"
+                "\"staging_create_buffer\":%.4f,"
+                "\"staging_get_requirements\":%.4f,"
+                "\"staging_allocate_memory\":%.4f,"
+                "\"staging_bind_buffer\":%.4f,"
+                "\"staging_map_memory\":%.4f,"
+                "\"upload_read\":%.4f},"
+                "\"cold_bytes\":{\"created_buffer\":%zu,"
+                "\"allocated_memory\":%zu,\"mapped_memory\":%zu,"
+                "\"staging_buffer\":%zu,\"upload_read\":%zu}},"
                 "\"shader_bytes\":%zu,"
                 "\"source_spirv_hash\":\"0x%016llx\","
                 "\"effective_spirv_hash\":\"0x%016llx\","
@@ -12976,6 +13067,22 @@ static int run_vulkan_dispatch_fd(
                 (unsigned long long)strict_object_graph_cache_key,
                 strict_object_graph_cache_bytes,
                 strict_object_graph_cache_disabled_reason ? strict_object_graph_cache_disabled_reason : "",
+                strict_object_graph_timing.create_buffer_ms,
+                strict_object_graph_timing.get_requirements_ms,
+                strict_object_graph_timing.allocate_memory_ms,
+                strict_object_graph_timing.map_memory_ms,
+                strict_object_graph_timing.bind_buffer_ms,
+                strict_object_graph_timing.staging_create_buffer_ms,
+                strict_object_graph_timing.staging_get_requirements_ms,
+                strict_object_graph_timing.staging_allocate_memory_ms,
+                strict_object_graph_timing.staging_bind_buffer_ms,
+                strict_object_graph_timing.staging_map_memory_ms,
+                strict_object_graph_timing.upload_read_ms,
+                strict_object_graph_timing.created_buffer_bytes,
+                strict_object_graph_timing.allocated_memory_bytes,
+                strict_object_graph_timing.mapped_memory_bytes,
+                strict_object_graph_timing.staging_buffer_bytes,
+                strict_object_graph_timing.upload_read_bytes,
                 shader_size,
                 (unsigned long long)original_spirv_hash,
                 (unsigned long long)spirv_summary.hash,
@@ -13129,7 +13236,19 @@ static int run_vulkan_dispatch_fd(
             "\"readonly_overlap_snapshot_bytes\":%zu,"
             "\"cache_enabled\":%s,\"cache_hit\":%s,"
             "\"cache_adopted\":%s,\"cache_key\":\"0x%016llx\","
-            "\"cache_bytes\":%zu,\"cache_disabled_reason\":\"%s\"},"
+            "\"cache_bytes\":%zu,\"cache_disabled_reason\":\"%s\","
+            "\"cold_phase_timing_ms\":{\"create_buffer\":%.4f,"
+            "\"get_requirements\":%.4f,\"allocate_memory\":%.4f,"
+            "\"map_memory\":%.4f,\"bind_buffer\":%.4f,"
+            "\"staging_create_buffer\":%.4f,"
+            "\"staging_get_requirements\":%.4f,"
+            "\"staging_allocate_memory\":%.4f,"
+            "\"staging_bind_buffer\":%.4f,"
+            "\"staging_map_memory\":%.4f,"
+            "\"upload_read\":%.4f},"
+            "\"cold_bytes\":{\"created_buffer\":%zu,"
+            "\"allocated_memory\":%zu,\"mapped_memory\":%zu,"
+            "\"staging_buffer\":%zu,\"upload_read\":%zu}},"
             "\"shader_bytes\":%zu,"
             "\"source_spirv_hash\":\"0x%016llx\","
             "\"effective_spirv_hash\":\"0x%016llx\","
@@ -13215,6 +13334,22 @@ static int run_vulkan_dispatch_fd(
             (unsigned long long)strict_object_graph_cache_key,
             strict_object_graph_cache_bytes,
             strict_object_graph_cache_disabled_reason ? strict_object_graph_cache_disabled_reason : "",
+            strict_object_graph_timing.create_buffer_ms,
+            strict_object_graph_timing.get_requirements_ms,
+            strict_object_graph_timing.allocate_memory_ms,
+            strict_object_graph_timing.map_memory_ms,
+            strict_object_graph_timing.bind_buffer_ms,
+            strict_object_graph_timing.staging_create_buffer_ms,
+            strict_object_graph_timing.staging_get_requirements_ms,
+            strict_object_graph_timing.staging_allocate_memory_ms,
+            strict_object_graph_timing.staging_bind_buffer_ms,
+            strict_object_graph_timing.staging_map_memory_ms,
+            strict_object_graph_timing.upload_read_ms,
+            strict_object_graph_timing.created_buffer_bytes,
+            strict_object_graph_timing.allocated_memory_bytes,
+            strict_object_graph_timing.mapped_memory_bytes,
+            strict_object_graph_timing.staging_buffer_bytes,
+            strict_object_graph_timing.upload_read_bytes,
             shader_size,
             (unsigned long long)original_spirv_hash,
             (unsigned long long)spirv_summary.hash,
