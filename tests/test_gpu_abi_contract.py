@@ -2511,6 +2511,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("connection-refused", compare)
         self.assertIn("http-503", compare)
         self.assertIn("container-not-running", compare)
+        self.assertIn("stale-same-device-http-target-not-running", compare)
+        self.assertIn("refusing stale server evidence", compare)
+        self.assertLess(
+            compare.index("stale-same-device-http-target-not-running"),
+            compare.index("server is reachable: elapsed="),
+        )
         self.assertIn("toybox nc -U -W $OPERATION_NOTIFY_TIMEOUT_SEC", compare)
         executor = (ROOT / "app/src/main/cpp/pdocker_gpu_executor.c").read_text()
         self.assertIn('strstr(cmd, " dispatch_id=")', executor)

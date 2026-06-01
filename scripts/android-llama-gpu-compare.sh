@@ -1613,12 +1613,20 @@ wait_server() {
     if [[ "$http_probe" == "ok" ]]; then
       http_status="ok"
       if same_device_http_enabled; then
-        container_status="http-ready-direct"
         ref="$(container_ref)"
+        if container_running; then
+          container_status="running"
+          echo "[pdocker llama compare] $phase server is reachable via same-device HTTP: elapsed=${elapsed}/${seconds}s id=${ref:0:12}" >&2
+          operation_notify "running" "$phase: llama HTTP server reachable after ${elapsed}s"
+          record_wait_server_event "$phase" "$elapsed" "$seconds" "$http_status" "$container_status" "$ref" "$curl_exit" "$curl_http_code" "$http_probe" "$port_forward_state" "ready"
+          return 0
+        fi
+        container_status="not-running"
+        wait_failure_class="stale-same-device-http-target-not-running"
         echo "[pdocker llama compare] $phase server is reachable via same-device HTTP: elapsed=${elapsed}/${seconds}s id=${ref:0:12}" >&2
-        operation_notify "running" "$phase: llama HTTP server reachable after ${elapsed}s"
-        record_wait_server_event "$phase" "$elapsed" "$seconds" "$http_status" "$container_status" "$ref" "$curl_exit" "$curl_http_code" "$http_probe" "$port_forward_state" "ready"
-        return 0
+        echo "[pdocker llama compare] rejecting same-device HTTP response because target container is not running; refusing stale server evidence" >&2
+        record_wait_server_event "$phase" "$elapsed" "$seconds" "$http_status" "$container_status" "$ref" "$curl_exit" "$curl_http_code" "$http_probe" "$port_forward_state" "$wait_failure_class"
+        return 1
       fi
       if container_running; then
         container_status="running"
