@@ -1715,3 +1715,20 @@ tail/full final output indices originate from `OpIAdd` chains and are emitted as
 `output_index_source_id` / `output_index_origin_*` in the offline report.  The
 next device artifact must use only role-4 records for final-store boundary
 joins; non-final records are stage evidence, not output-index evidence.
+
+### 2026-06-01 Update: stale same-device HTTP evidence is rejected
+
+An ADB run on `10.75.202.179:35875` confirmed that Q6 probe environment
+propagation works when using `scripts/android-llama-gpu-q6-workgroup-run.sh`:
+all `PDOCKER_GPU_SPIRV_PROBE_*` keys reached the runtime.  The run did not
+produce valid GPU executor evidence because the newly created target container
+stopped before readiness while a same-device HTTP request still reached an older
+llama server on the same port.  That artifact was correctly non-terminal, but
+the wait loop had accepted the stale HTTP response as readiness.
+
+The compare script now fails closed in same-device HTTP mode: an HTTP 2xx
+readiness response is accepted only while the selected target container is still
+running.  If the target is not running, the wait event records
+`stale-same-device-http-target-not-running` and refuses to use stale server
+output as Q6 evidence.  The next device run must therefore either keep the
+target container running or fail before prompt/evidence collection.
