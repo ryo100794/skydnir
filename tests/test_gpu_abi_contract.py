@@ -2529,6 +2529,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('engine_request_with_host_timeout "$ENGINE_CLEANUP_TIMEOUT_SEC" DELETE', compare)
         self.assertIn('engine_request_with_host_timeout "$ENGINE_CREATE_TIMEOUT_SEC" POST "/containers/create', compare)
         self.assertIn("create request did not return", compare)
+        self.assertIn("create response did not include a JSON Id", compare)
+        self.assertIn("container create returned no JSON Id", compare)
+        self.assertLess(
+            compare.index("create response did not include a JSON Id"),
+            compare.index('cid="$(printf "%s" "$create_body" | parse_engine_id)'),
+        )
         self.assertIn('inspect_container_body "$CONTAINER"', compare)
         self.assertIn("poll_container_after_create_timeout", compare)
         self.assertIn("delayed create became inspectable", compare)

@@ -1928,6 +1928,15 @@ start_container_mode() {
       return 124
     fi
   fi
+  if ! printf "%s" "$create_body" | engine_body_has_id; then
+    echo "[pdocker llama compare] $mode: create response did not include a JSON Id; probing named container" >&2
+    operation_notify "running" "$mode: container create returned no JSON Id; probing named container"
+    create_body="$(poll_container_after_create_timeout "$mode" || true)"
+    if [[ -z "$create_body" ]] || ! printf "%s" "$create_body" | engine_body_has_id; then
+      echo "[pdocker llama compare] $mode: create response left no inspectable named container" >&2
+      return 124
+    fi
+  fi
   cid="$(printf "%s" "$create_body" | parse_engine_id)"
   CURRENT_CONTAINER_ID="$cid"
   echo "[pdocker llama compare] $mode: starting container ${cid:0:12}" >&2
