@@ -1737,6 +1737,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("case PDOCKER_VK_COMMAND_RESOLVE_IMAGE:", icd)
         self.assertIn("MAP_PROC(vkCmdResolveImage);", icd)
 
+    def test_vulkan_icd_records_blit_image_commands(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("PdockerVkImageBlitOp image_blit_ops[PDOCKER_VK_MAX_COPY_OPS];", icd)
+        self.assertIn("PDOCKER_VK_COMMAND_BLIT_IMAGE", icd)
+        self.assertIn("vkCmdBlitImage", icd)
+        self.assertIn("record_blit_image_op", icd)
+        self.assertIn("execute_recorded_blit_image_op", icd)
+        self.assertIn("blit_axis_sample", icd)
+        self.assertIn("case PDOCKER_VK_COMMAND_BLIT_IMAGE:", icd)
+        self.assertIn("MAP_PROC(vkCmdBlitImage);", icd)
+
     def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("descriptor_type_supported_by_v4_transport", icd)

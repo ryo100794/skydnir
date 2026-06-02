@@ -286,6 +286,13 @@ typedef struct {
 } PdockerVkImageResolveOp;
 
 typedef struct {
+    PdockerVkImage *src;
+    PdockerVkImage *dst;
+    VkImageBlit region;
+    VkFilter filter;
+} PdockerVkImageBlitOp;
+
+typedef struct {
     PdockerVkPipeline *pipeline;
     PdockerVkDescriptorSet set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
     bool set_snapshot_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
@@ -306,6 +313,7 @@ typedef enum {
     PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY = 7,
     PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE = 8,
     PDOCKER_VK_COMMAND_RESOLVE_IMAGE = 9,
+    PDOCKER_VK_COMMAND_BLIT_IMAGE = 10,
 } PdockerVkCommandOpType;
 
 typedef struct {
@@ -333,6 +341,8 @@ typedef struct {
     uint32_t image_clear_op_count;
     PdockerVkImageResolveOp image_resolve_ops[PDOCKER_VK_MAX_COPY_OPS];
     uint32_t image_resolve_op_count;
+    PdockerVkImageBlitOp image_blit_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t image_blit_op_count;
     PdockerVkDispatchOp dispatch_ops[PDOCKER_VK_MAX_DISPATCH_OPS];
     uint32_t dispatch_op_count;
     PdockerVkCommandOp command_ops[PDOCKER_VK_MAX_COMMAND_OPS];
@@ -402,6 +412,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
     cmd->image_to_image_copy_op_count = 0;
     cmd->image_clear_op_count = 0;
     cmd->image_resolve_op_count = 0;
+    cmd->image_blit_op_count = 0;
     cmd->dispatch_op_count = 0;
 }
 
@@ -3461,6 +3472,112 @@ static void execute_recorded_resolve_image_op(
     }
 }
 
+static uint32_t blit_axis_extent(int32_t a, int32_t b) {
+    int64_t delta = (int64_t)b - (int64_t)a;
+    return (uint32_t)(delta < 0 ? -delta : delta);
+}
+
+static int32_t blit_axis_sample(int32_t src0,
+                                int32_t src1,
+                                uint32_t dst_index,
+                                uint32_t dst_extent) {
+    if (dst_extent == 0) return src0;
+    int64_t span = (int64_t)src1 - (int64_t)src0;
+    int64_t sampled = span >= 0
+        ? (int64_t)src0 + ((int64_t)dst_index * span) / (int64_t)dst_extent
+        : (int64_t)src0 - 1 - ((int64_t)dst_index * -span) / (int64_t)dst_extent;
+    return (int32_t)sampled;
+}
+
+static void execute_recorded_blit_image_op(
+        PdockerVkImageBlitOp *op,
+        PdockerVkCopyStats *stats) {
+    if (!op || !op->src || !op->dst || !op->src->memory || !op->dst->memory ||
+        op->region.srcSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        op->region.dstSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        op->region.srcSubresource.layerCount == 0 ||
+        op->region.srcSubresource.layerCount != op->region.dstSubresource.layerCount) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    const uint64_t src_bpp = conservative_format_bytes_per_pixel(op->src->format);
+    const uint64_t dst_bpp = conservative_format_bytes_per_pixel(op->dst->format);
+    if (src_bpp == 0 || src_bpp != dst_bpp || src_bpp > 16) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    VkExtent3D src_extent;
+    VkExtent3D dst_extent;
+    if (!image_mip_extent(op->src, op->region.srcSubresource.mipLevel, &src_extent) ||
+        !image_mip_extent(op->dst, op->region.dstSubresource.mipLevel, &dst_extent)) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    const uint32_t out_w = blit_axis_extent(op->region.dstOffsets[0].x, op->region.dstOffsets[1].x);
+    const uint32_t out_h = blit_axis_extent(op->region.dstOffsets[0].y, op->region.dstOffsets[1].y);
+    const uint32_t out_d = blit_axis_extent(op->region.dstOffsets[0].z, op->region.dstOffsets[1].z);
+    const uint32_t in_w = blit_axis_extent(op->region.srcOffsets[0].x, op->region.srcOffsets[1].x);
+    const uint32_t in_h = blit_axis_extent(op->region.srcOffsets[0].y, op->region.srcOffsets[1].y);
+    const uint32_t in_d = blit_axis_extent(op->region.srcOffsets[0].z, op->region.srcOffsets[1].z);
+    if (out_w == 0 || out_h == 0 || out_d == 0 || in_w == 0 || in_h == 0 || in_d == 0) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    uint8_t pixel[16];
+    for (uint32_t layer = 0; layer < op->region.srcSubresource.layerCount; ++layer) {
+        uint32_t src_layer = op->region.srcSubresource.baseArrayLayer + layer;
+        uint32_t dst_layer = op->region.dstSubresource.baseArrayLayer + layer;
+        for (uint32_t z = 0; z < out_d; ++z) {
+            for (uint32_t y = 0; y < out_h; ++y) {
+                for (uint32_t x = 0; x < out_w; ++x) {
+                    VkOffset3D src_offset = {
+                        .x = blit_axis_sample(op->region.srcOffsets[0].x, op->region.srcOffsets[1].x, x, out_w),
+                        .y = blit_axis_sample(op->region.srcOffsets[0].y, op->region.srcOffsets[1].y, y, out_h),
+                        .z = blit_axis_sample(op->region.srcOffsets[0].z, op->region.srcOffsets[1].z, z, out_d),
+                    };
+                    VkOffset3D dst_offset = {
+                        .x = blit_axis_sample(op->region.dstOffsets[0].x, op->region.dstOffsets[1].x, x, out_w),
+                        .y = blit_axis_sample(op->region.dstOffsets[0].y, op->region.dstOffsets[1].y, y, out_h),
+                        .z = blit_axis_sample(op->region.dstOffsets[0].z, op->region.dstOffsets[1].z, z, out_d),
+                    };
+                    if (src_offset.x < 0 || src_offset.y < 0 || src_offset.z < 0 ||
+                        dst_offset.x < 0 || dst_offset.y < 0 || dst_offset.z < 0 ||
+                        (uint32_t)src_offset.x >= src_extent.width ||
+                        (uint32_t)src_offset.y >= src_extent.height ||
+                        (uint32_t)src_offset.z >= src_extent.depth ||
+                        (uint32_t)dst_offset.x >= dst_extent.width ||
+                        (uint32_t)dst_offset.y >= dst_extent.height ||
+                        (uint32_t)dst_offset.z >= dst_extent.depth) {
+                        if (stats) stats->skipped_ops++;
+                        return;
+                    }
+                    void *src_pixel = image_ptr(op->src,
+                                                op->region.srcSubresource.mipLevel,
+                                                src_layer,
+                                                src_offset,
+                                                (VkDeviceSize)src_bpp);
+                    void *dst_pixel = image_ptr(op->dst,
+                                                op->region.dstSubresource.mipLevel,
+                                                dst_layer,
+                                                dst_offset,
+                                                (VkDeviceSize)dst_bpp);
+                    if (!src_pixel || !dst_pixel) {
+                        if (stats) stats->skipped_ops++;
+                        return;
+                    }
+                    memcpy(pixel, src_pixel, (size_t)src_bpp);
+                    memcpy(dst_pixel, pixel, (size_t)dst_bpp);
+                    if (stats) {
+                        stats->op_count++;
+                        stats->memmove_ops++;
+                        stats->memmove_bytes += (VkDeviceSize)dst_bpp;
+                    }
+                }
+            }
+        }
+    }
+}
+
 static void execute_recorded_fill_op(const PdockerVkCommandOp *op) {
     if (!op || !op->buffer || !op->buffer->memory || op->size == 0) return;
     uint32_t *p = (uint32_t *)buffer_ptr(op->buffer, op->offset, op->size);
@@ -6296,6 +6413,76 @@ VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage(
     }
 }
 
+static void record_blit_image_op(PdockerVkCommandBuffer *cmd,
+                                 PdockerVkImage *src,
+                                 PdockerVkImage *dst,
+                                 const VkImageBlit *region,
+                                 VkFilter filter) {
+    if (!cmd || !src || !dst || !region) return;
+    if (cmd->image_blit_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: blit-image command buffer full max=%u\n",
+                    PDOCKER_VK_MAX_COPY_OPS);
+        }
+        return;
+    }
+    uint32_t op_index = cmd->image_blit_op_count++;
+    PdockerVkImageBlitOp *op = &cmd->image_blit_ops[op_index];
+    memset(op, 0, sizeof(*op));
+    op->src = src;
+    op->dst = dst;
+    op->region = *region;
+    op->filter = filter;
+    PdockerVkCommandOp command_op;
+    memset(&command_op, 0, sizeof(command_op));
+    command_op.type = PDOCKER_VK_COMMAND_BLIT_IMAGE;
+    command_op.index = op_index;
+    (void)append_command_op(cmd, &command_op);
+    if (trace_allocations()) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: record-blit-image src_req=%llu dst_req=%llu src_mip=%u dst_mip=%u layers=%u src=(%d,%d,%d)->(%d,%d,%d) dst=(%d,%d,%d)->(%d,%d,%d) filter=%u\n",
+                (unsigned long long)src->requirements_size,
+                (unsigned long long)dst->requirements_size,
+                region->srcSubresource.mipLevel,
+                region->dstSubresource.mipLevel,
+                region->srcSubresource.layerCount,
+                region->srcOffsets[0].x,
+                region->srcOffsets[0].y,
+                region->srcOffsets[0].z,
+                region->srcOffsets[1].x,
+                region->srcOffsets[1].y,
+                region->srcOffsets[1].z,
+                region->dstOffsets[0].x,
+                region->dstOffsets[0].y,
+                region->dstOffsets[0].z,
+                region->dstOffsets[1].x,
+                region->dstOffsets[1].y,
+                region->dstOffsets[1].z,
+                (unsigned)filter);
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage(
+        VkCommandBuffer commandBuffer,
+        VkImage srcImage,
+        VkImageLayout srcImageLayout,
+        VkImage dstImage,
+        VkImageLayout dstImageLayout,
+        uint32_t regionCount,
+        const VkImageBlit *pRegions,
+        VkFilter filter) {
+    (void)srcImageLayout;
+    (void)dstImageLayout;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkImage *src = (PdockerVkImage *)srcImage;
+    PdockerVkImage *dst = (PdockerVkImage *)dstImage;
+    if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
+    for (uint32_t i = 0; i < regionCount; ++i) {
+        record_blit_image_op(cmd, src, dst, &pRegions[i], filter);
+    }
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(
         VkCommandBuffer commandBuffer,
         VkBuffer dstBuffer,
@@ -6448,6 +6635,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                             if (op->index < cmd->image_resolve_op_count) {
                                 execute_recorded_resolve_image_op(
                                     &cmd->image_resolve_ops[op->index], &stats);
+                            }
+                            break;
+                        case PDOCKER_VK_COMMAND_BLIT_IMAGE:
+                            if (op->index < cmd->image_blit_op_count) {
+                                execute_recorded_blit_image_op(
+                                    &cmd->image_blit_ops[op->index], &stats);
                             }
                             break;
                         case PDOCKER_VK_COMMAND_FILL:
@@ -6857,6 +7050,7 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdCopyImage);
     MAP_PROC(vkCmdClearColorImage);
     MAP_PROC(vkCmdResolveImage);
+    MAP_PROC(vkCmdBlitImage);
     MAP_PROC(vkCmdFillBuffer);
     MAP_PROC(vkCmdUpdateBuffer);
     MAP_PROC(vkCmdDispatch);
