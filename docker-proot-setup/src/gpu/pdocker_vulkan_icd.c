@@ -2049,6 +2049,23 @@ static bool descriptor_type_requires_sampler(VkDescriptorType type) {
            type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 }
 
+static bool descriptor_set_has_image_descriptor(const PdockerVkDescriptorSet *set) {
+    if (!set) return false;
+    for (uint32_t i = 0; i < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++i) {
+        const PdockerVkDescriptorBinding *binding = &set->storage_buffers[i];
+        if (binding->image_view || binding->sampler) return true;
+        VkDescriptorType descriptor_type = binding->descriptor_type;
+        if (descriptor_type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
+            descriptor_type == VK_DESCRIPTOR_TYPE_SAMPLER ||
+            descriptor_type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
+            descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
+            descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static int send_generic_vulkan_dispatch_v5_1_op(
         int socket_fd,
         uint64_t dispatch_id,
@@ -6169,7 +6186,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                 set->storage_buffers[binding].range = 0;
                 set->storage_buffers[binding].descriptor_type = w->descriptorType;
                 set->storage_buffers[binding].dynamic = false;
-                set->has_image_descriptor = true;
+                set->has_image_descriptor = descriptor_set_has_image_descriptor(set);
                 if (set->storage_buffers[binding].image_view &&
                     set->storage_buffers[binding].image_view->image) {
                     trace_image_layout_mismatch(
@@ -6203,6 +6220,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                 set->storage_buffers[binding].range = w->pBufferInfo[j].range;
                 set->storage_buffers[binding].descriptor_type = w->descriptorType;
                 set->storage_buffers[binding].dynamic = descriptor_type_is_dynamic(w->descriptorType);
+                set->has_image_descriptor = descriptor_set_has_image_descriptor(set);
                 if (trace_allocations()) {
                     PdockerVkBuffer *buffer = set->storage_buffers[binding].buffer;
                     fprintf(stderr,
@@ -6249,10 +6267,10 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                 continue;
             }
             dst->storage_buffers[dst_binding] = src->storage_buffers[src_binding];
-            if (src->storage_buffers[src_binding].image_view ||
-                src->storage_buffers[src_binding].sampler) {
-                dst->has_image_descriptor = true;
-            }
+            dst->storage_buffers[dst_binding].dynamic_offset = 0;
+            dst->storage_buffers[dst_binding].offset =
+                dst->storage_buffers[dst_binding].base_offset;
+            dst->has_image_descriptor = descriptor_set_has_image_descriptor(dst);
             if (trace_allocations()) {
                 fprintf(stderr,
                         "pdocker-vulkan-icd: descriptor copy src=%u dst=%u count=%u\n",
