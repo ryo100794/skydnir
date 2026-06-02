@@ -265,10 +265,12 @@ typedef struct {
     VkShaderStageFlags stage_flags;
     uint32_t offset;
     uint32_t size;
+    uint64_t layout_id;
     uint64_t value_hash;
 } PdockerVkPushConstantOpSnapshot;
 
 struct PdockerVkPipelineLayout {
+    uint64_t layout_id;
     uint32_t push_constant_size;
     PdockerVkPushConstantRangeSnapshot push_constant_ranges[PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES];
     uint32_t push_constant_range_count;
@@ -304,6 +306,13 @@ struct PdockerVkPipeline {
     VkSampleCountFlagBits rasterization_samples;
     uint32_t subpass;
     uint32_t color_attachment_count;
+    bool dynamic_rendering_pipeline;
+    bool dynamic_rendering_format_overflow;
+    uint32_t dynamic_rendering_view_mask;
+    uint32_t dynamic_rendering_color_attachment_count;
+    VkFormat dynamic_rendering_color_formats[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkFormat dynamic_rendering_depth_format;
+    VkFormat dynamic_rendering_stencil_format;
     uint32_t vertex_binding_count;
     VkVertexInputBindingDescription vertex_bindings[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
     uint32_t vertex_attribute_count;
@@ -559,6 +568,9 @@ typedef struct {
     PdockerVkRenderPass *active_render_pass;
     PdockerVkFramebuffer *active_framebuffer;
     VkRect2D active_render_area;
+    VkRenderingFlags active_rendering_flags;
+    uint32_t active_rendering_layer_count;
+    uint32_t active_rendering_view_mask;
     VkSubpassContents active_subpass_contents;
     uint32_t active_subpass;
     uint32_t active_color_attachment_count;
@@ -614,6 +626,9 @@ typedef struct {
     PdockerVkRenderPass *active_render_pass;
     PdockerVkFramebuffer *active_framebuffer;
     VkRect2D active_render_area;
+    VkRenderingFlags active_rendering_flags;
+    uint32_t active_rendering_layer_count;
+    uint32_t active_rendering_view_mask;
     VkSubpassContents active_subpass_contents;
     uint32_t active_subpass;
     uint32_t active_color_attachment_count;
@@ -6121,6 +6136,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     if (!pPipelineLayout) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkPipelineLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    layout->layout_id = next_vulkan_object_generation();
     if (pCreateInfo) {
         layout->set_layout_count = pCreateInfo->setLayoutCount;
         if (layout->set_layout_count > PDOCKER_VK_MAX_DESCRIPTOR_SETS) {
@@ -6523,6 +6539,30 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         pipeline->color_attachment_count = ci->pColorBlendState
             ? ci->pColorBlendState->attachmentCount
             : 0;
+        for (const VkBaseInStructure *chain = (const VkBaseInStructure *)ci->pNext;
+             chain;
+             chain = (const VkBaseInStructure *)chain->pNext) {
+            if (chain->sType == VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO) {
+                const VkPipelineRenderingCreateInfo *rendering =
+                    (const VkPipelineRenderingCreateInfo *)chain;
+                pipeline->dynamic_rendering_pipeline = true;
+                pipeline->dynamic_rendering_view_mask = rendering->viewMask;
+                pipeline->dynamic_rendering_color_attachment_count =
+                    clamp_u32(rendering->colorAttachmentCount, PDOCKER_VK_MAX_STORAGE_BUFFERS);
+                if (rendering->colorAttachmentCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+                    pipeline->dynamic_rendering_format_overflow = true;
+                    pipeline->graphics_unsupported = true;
+                }
+                for (uint32_t c = 0; c < pipeline->dynamic_rendering_color_attachment_count; ++c) {
+                    pipeline->dynamic_rendering_color_formats[c] =
+                        rendering->pColorAttachmentFormats
+                            ? rendering->pColorAttachmentFormats[c]
+                            : VK_FORMAT_UNDEFINED;
+                }
+                pipeline->dynamic_rendering_depth_format = rendering->depthAttachmentFormat;
+                pipeline->dynamic_rendering_stencil_format = rendering->stencilAttachmentFormat;
+            }
+        }
         if (ci->pVertexInputState) {
             pipeline->vertex_binding_count = clamp_u32(
                 ci->pVertexInputState->vertexBindingDescriptionCount,
@@ -6914,6 +6954,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     cmd->active_render_pass = NULL;
     cmd->active_framebuffer = NULL;
     memset(&cmd->active_render_area, 0, sizeof(cmd->active_render_area));
+    cmd->active_rendering_flags = 0;
+    cmd->active_rendering_layer_count = 0;
+    cmd->active_rendering_view_mask = 0;
     cmd->active_subpass_contents = VK_SUBPASS_CONTENTS_INLINE;
     cmd->active_subpass = 0;
     cmd->active_color_attachment_count = 0;
@@ -6979,6 +7022,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         : 0;
     if (pRenderingInfo) {
         cmd->active_render_area = pRenderingInfo->renderArea;
+        cmd->active_rendering_flags = pRenderingInfo->flags;
+        cmd->active_rendering_layer_count = pRenderingInfo->layerCount;
+        cmd->active_rendering_view_mask = pRenderingInfo->viewMask;
         if (cmd->active_color_attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
             cmd->graphics_unsupported = true;
             cmd->active_color_attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
@@ -6995,6 +7041,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
                                         pRenderingInfo->pStencilAttachment);
     } else {
         memset(&cmd->active_render_area, 0, sizeof(cmd->active_render_area));
+        cmd->active_rendering_flags = 0;
+        cmd->active_rendering_layer_count = 0;
+        cmd->active_rendering_view_mask = 0;
     }
 }
 
@@ -7002,6 +7051,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRendering(VkCommandBuffer commandBuffer) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
     cmd->dynamic_rendering_active = false;
+    cmd->active_rendering_flags = 0;
+    cmd->active_rendering_layer_count = 0;
+    cmd->active_rendering_view_mask = 0;
     cmd->active_color_attachment_count = 0;
     memset(cmd->active_color_attachments, 0, sizeof(cmd->active_color_attachments));
     memset(&cmd->active_depth_attachment, 0, sizeof(cmd->active_depth_attachment));
@@ -7025,6 +7077,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
     cmd->active_subpass = 0;
     cmd->active_subpass_contents = contents;
     cmd->active_render_area = pRenderPassBegin ? pRenderPassBegin->renderArea : (VkRect2D){{0, 0}, {0, 0}};
+    cmd->active_rendering_flags = 0;
+    cmd->active_rendering_layer_count = 0;
+    cmd->active_rendering_view_mask = 0;
     cmd->active_clear_value_count = pRenderPassBegin ? pRenderPassBegin->clearValueCount : 0;
     if (cmd->active_clear_value_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         cmd->graphics_unsupported = true;
@@ -7196,6 +7251,9 @@ static void record_graphics_draw_command(
     snapshot->active_render_pass = cmd->active_render_pass;
     snapshot->active_framebuffer = cmd->active_framebuffer;
     snapshot->active_render_area = cmd->active_render_area;
+    snapshot->active_rendering_flags = cmd->active_rendering_flags;
+    snapshot->active_rendering_layer_count = cmd->active_rendering_layer_count;
+    snapshot->active_rendering_view_mask = cmd->active_rendering_view_mask;
     snapshot->active_subpass_contents = cmd->active_subpass_contents;
     snapshot->active_subpass = cmd->active_subpass;
     snapshot->active_color_attachment_count = cmd->active_color_attachment_count;
@@ -7779,6 +7837,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         op->stage_flags = stageFlags;
         op->offset = offset;
         op->size = size;
+        PdockerVkPipelineLayout *captured_layout = (PdockerVkPipelineLayout *)layout;
+        op->layout_id = captured_layout ? captured_layout->layout_id : 0;
         op->value_hash = fnv1a64_bytes(pValues, size);
     } else {
         cmd->graphics_unsupported = true;
