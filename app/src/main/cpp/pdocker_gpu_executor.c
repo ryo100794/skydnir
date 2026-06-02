@@ -15013,6 +15013,151 @@ static int recv_vulkan_dispatch_v5_header_with_fds(
     return validate_vulkan_dispatch_v5_header(header, *fd_count);
 }
 
+
+
+static int recv_vulkan_dispatch_v5_frame(
+        int cfd,
+        unsigned char **frame_out,
+        PdockerGpuVulkanDispatchV5FrameHeader *header_out,
+        int *passed_fds,
+        size_t max_fds,
+        size_t *fd_count) {
+    if (!frame_out || !header_out || !passed_fds || !fd_count) return -EINVAL;
+    *frame_out = NULL;
+    int rc = recv_vulkan_dispatch_v5_header_with_fds(
+        cfd, header_out, passed_fds, max_fds, fd_count);
+    if (rc != 0) return rc;
+    unsigned char *frame = (unsigned char *)calloc(1, (size_t)header_out->frame_size);
+    if (!frame) return -ENOMEM;
+    memcpy(frame, header_out, sizeof(*header_out));
+    size_t remaining = (size_t)(header_out->frame_size - header_out->header_size);
+    rc = read_exact_bytes(cfd, frame + header_out->header_size, remaining);
+    if (rc != 0) {
+        free(frame);
+        return rc;
+    }
+    *frame_out = frame;
+    return 0;
+}
+
+static int connection_starts_with_v5_magic(int cfd) {
+    char first = 0;
+    for (;;) {
+        ssize_t n = recv(cfd, &first, 1, MSG_PEEK);
+        if (n == 0) return 0;
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -errno;
+        }
+        break;
+    }
+    if (first != PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC[0]) return 0;
+    char magic[8];
+    ssize_t n = recv(cfd, magic, sizeof(magic), MSG_PEEK | MSG_WAITALL);
+    if (n == 0) return 0;
+    if (n < 0) {
+        if (errno == EINTR) return 0;
+        return -errno;
+    }
+    if ((size_t)n != sizeof(magic)) return 0;
+    return memcmp(magic, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC, sizeof(magic)) == 0;
+}
+
+static int handle_vulkan_dispatch_v5_frame(int cfd) {
+    int passed_fds[PDOCKER_GPU_MAX_PASSED_FDS];
+    size_t passed_fd_count = 0;
+    PdockerGpuVulkanDispatchV5FrameHeader header;
+    unsigned char *frame = NULL;
+    int rc = recv_vulkan_dispatch_v5_frame(
+        cfd, &frame, &header, passed_fds, PDOCKER_GPU_MAX_PASSED_FDS, &passed_fd_count);
+    if (rc != 0) {
+        json_fail("vulkan-dispatch-v5", strerror(-rc));
+        goto cleanup;
+    }
+    VulkanDispatchBinding bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    int binding_fds[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    size_t binding_count = 0;
+    memset(bindings, 0, sizeof(bindings));
+    for (size_t i = 0; i < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) binding_fds[i] = -1;
+    rc = convert_vulkan_dispatch_v5_to_v4_bindings(
+        frame, &header, passed_fds, passed_fd_count,
+        bindings, binding_fds, PDOCKER_GPU_MAX_VULKAN_BINDINGS, &binding_count);
+    if (rc != 0) {
+        json_fail("vulkan-dispatch-v5", strerror(-rc));
+        goto cleanup;
+    }
+    const void *entry_ptr = v5_frame_range(frame, &header, header.entry_name_offset, header.entry_name_size);
+    if (!entry_ptr || header.entry_name_size >= PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME) {
+        json_fail("vulkan-dispatch-v5", "invalid entry name");
+        goto cleanup;
+    }
+    char entry_name[PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME];
+    memset(entry_name, 0, sizeof(entry_name));
+    memcpy(entry_name, entry_ptr, (size_t)header.entry_name_size);
+    entry_name[header.entry_name_size] = '\0';
+    const uint8_t *push = (const uint8_t *)v5_frame_range(frame, &header, header.push_offset, header.push_size);
+    if (header.push_size > PDOCKER_GPU_MAX_PUSH_BYTES || (header.push_size > 0 && !push)) {
+        json_fail("vulkan-dispatch-v5", "invalid push constants");
+        goto cleanup;
+    }
+    const PdockerGpuVulkanDispatchV5SpecializationEntry *v5_specs =
+        (const PdockerGpuVulkanDispatchV5SpecializationEntry *)v5_frame_range(
+            frame, &header, header.specialization_table_offset, header.specialization_table_size);
+    const uint8_t *specialization_data =
+        (const uint8_t *)v5_frame_range(frame, &header, header.specialization_data_offset,
+                                        header.specialization_data_size);
+    VulkanDispatchSpecialization specs[PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES];
+    memset(specs, 0, sizeof(specs));
+    if (header.specialization_count > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES ||
+        header.specialization_data_size > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_BYTES ||
+        (header.specialization_count > 0 && !v5_specs) ||
+        (header.specialization_data_size > 0 && !specialization_data)) {
+        json_fail("vulkan-dispatch-v5", "invalid specialization payload");
+        goto cleanup;
+    }
+    for (uint32_t i = 0; i < header.specialization_count; ++i) {
+        specs[i].constant_id = v5_specs[i].constant_id;
+        specs[i].offset = v5_specs[i].offset;
+        specs[i].size = (size_t)v5_specs[i].size;
+    }
+    VulkanDispatchOptions options;
+    memset(&options, 0, sizeof(options));
+    if (header.option_text_size > 0) {
+        const char *option_text = (const char *)v5_frame_range(
+            frame, &header, header.option_text_offset, header.option_text_size);
+        if (!option_text || header.option_text_size >= PDOCKER_GPU_MAX_COMMAND_BYTES) {
+            json_fail("vulkan-dispatch-v5", "invalid option text");
+            goto cleanup;
+        }
+        char option_copy[PDOCKER_GPU_MAX_COMMAND_BYTES];
+        memset(option_copy, 0, sizeof(option_copy));
+        memcpy(option_copy, option_text, (size_t)header.option_text_size);
+        char *save = NULL;
+        for (char *tok = strtok_r(option_copy, " ", &save);
+             tok;
+             tok = strtok_r(NULL, " ", &save)) {
+            if (parse_vulkan_dispatch_option(&options, tok) != 0) {
+                json_fail("vulkan-dispatch-v5", "invalid option token");
+                goto cleanup;
+            }
+        }
+    }
+    (void)run_vulkan_dispatch_fd(
+        passed_fds[header.shader_fd_index], binding_fds, bindings, binding_count,
+        (size_t)header.shader_size, entry_name,
+        specs, header.specialization_count,
+        specialization_data, (size_t)header.specialization_data_size,
+        &options,
+        push, (size_t)header.push_size,
+        header.gx, header.gy, header.gz);
+cleanup:
+    free(frame);
+    for (size_t i = 0; i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS; ++i) {
+        if (passed_fds[i] >= 0) close(passed_fds[i]);
+    }
+    return 0;
+}
+
 static int recv_command_with_fds(
         int cfd,
         char *cmd,
@@ -15172,6 +15317,19 @@ static int serve_socket(const char *path) {
         RegisteredVectorBuffer registered;
         memset(&registered, 0, sizeof(registered));
         for (;;) {
+            int v5_prefix = connection_starts_with_v5_magic(cfd);
+            if (v5_prefix < 0) {
+                g_json_out = out;
+                json_fail("recvmsg", strerror(-v5_prefix));
+                g_json_out = NULL;
+                break;
+            }
+            if (v5_prefix > 0) {
+                g_json_out = out;
+                (void)handle_vulkan_dispatch_v5_frame(cfd);
+                g_json_out = NULL;
+                continue;
+            }
             int passed_fds[PDOCKER_GPU_MAX_PASSED_FDS];
             size_t passed_fd_count = 0;
             PdockerReceiveEvidence receive_evidence;

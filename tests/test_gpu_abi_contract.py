@@ -589,6 +589,26 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+
+
+    def test_vulkan_dispatch_v5_socket_path_is_magic_framed_not_line_framed(self):
+        executor = GPU_EXECUTOR.read_text()
+        self.assertIn("connection_starts_with_v5_magic", executor)
+        self.assertIn("recv(cfd, &first, 1, MSG_PEEK)", executor)
+        self.assertIn("first != PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC[0]", executor)
+        self.assertIn("MSG_PEEK | MSG_WAITALL", executor)
+        self.assertIn("handle_vulkan_dispatch_v5_frame", executor)
+        self.assertIn("recv_vulkan_dispatch_v5_frame", executor)
+        self.assertIn("read_exact_bytes(cfd, frame + header_out->header_size", executor)
+        self.assertIn("run_vulkan_dispatch_fd(\n        passed_fds[header.shader_fd_index], binding_fds", executor)
+        serve_loop = executor.split("for (;;) {\n            int v5_prefix = connection_starts_with_v5_magic", 1)[1].split(
+            "if (nread == -EMSGSIZE)", 1
+        )[0]
+        self.assertIn("handle_vulkan_dispatch_v5_frame(cfd)", serve_loop)
+        self.assertIn("recv_command_with_fds(cfd, cmd", serve_loop)
+        self.assertLess(serve_loop.index("handle_vulkan_dispatch_v5_frame(cfd)"), serve_loop.index("recv_command_with_fds(cfd, cmd"))
+        self.assertNotIn("VULKAN_DISPATCH_V5 ", executor)
+
     def test_vulkan_dispatch_v5_tables_convert_to_existing_v4_semantics(self):
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("convert_vulkan_dispatch_v5_to_v4_bindings", executor)
