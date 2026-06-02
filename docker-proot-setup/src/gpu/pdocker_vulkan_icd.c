@@ -6884,6 +6884,84 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilReference(
     (void)reference;
 }
 
+VKAPI_ATTR void VKAPI_CALL vkCmdSetViewportWithCount(
+        VkCommandBuffer commandBuffer,
+        uint32_t viewportCount,
+        const VkViewport *pViewports) {
+    vkCmdSetViewport(commandBuffer, 0, viewportCount, pViewports);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetScissorWithCount(
+        VkCommandBuffer commandBuffer,
+        uint32_t scissorCount,
+        const VkRect2D *pScissors) {
+    vkCmdSetScissor(commandBuffer, 0, scissorCount, pScissors);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetCullMode(
+        VkCommandBuffer commandBuffer,
+        VkCullModeFlags cullMode) {
+    (void)commandBuffer;
+    (void)cullMode;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetFrontFace(
+        VkCommandBuffer commandBuffer,
+        VkFrontFace frontFace) {
+    (void)commandBuffer;
+    (void)frontFace;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetPrimitiveTopology(
+        VkCommandBuffer commandBuffer,
+        VkPrimitiveTopology primitiveTopology) {
+    (void)commandBuffer;
+    (void)primitiveTopology;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthTestEnable(
+        VkCommandBuffer commandBuffer,
+        VkBool32 depthTestEnable) {
+    (void)commandBuffer;
+    (void)depthTestEnable;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthWriteEnable(
+        VkCommandBuffer commandBuffer,
+        VkBool32 depthWriteEnable) {
+    (void)commandBuffer;
+    (void)depthWriteEnable;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthCompareOp(
+        VkCommandBuffer commandBuffer,
+        VkCompareOp depthCompareOp) {
+    (void)commandBuffer;
+    (void)depthCompareOp;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilTestEnable(
+        VkCommandBuffer commandBuffer,
+        VkBool32 stencilTestEnable) {
+    (void)commandBuffer;
+    (void)stencilTestEnable;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilOp(
+        VkCommandBuffer commandBuffer,
+        VkStencilFaceFlags faceMask,
+        VkStencilOp failOp,
+        VkStencilOp passOp,
+        VkStencilOp depthFailOp,
+        VkCompareOp compareOp) {
+    (void)commandBuffer;
+    (void)faceMask;
+    (void)failOp;
+    (void)passOp;
+    (void)depthFailOp;
+    (void)compareOp;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments(
         VkCommandBuffer commandBuffer,
         uint32_t attachmentCount,
@@ -9035,6 +9113,26 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdSetStencilCompareMask);
     MAP_PROC(vkCmdSetStencilWriteMask);
     MAP_PROC(vkCmdSetStencilReference);
+    MAP_PROC(vkCmdSetViewportWithCount);
+    MAP_ALIAS("vkCmdSetViewportWithCountEXT", vkCmdSetViewportWithCount);
+    MAP_PROC(vkCmdSetScissorWithCount);
+    MAP_ALIAS("vkCmdSetScissorWithCountEXT", vkCmdSetScissorWithCount);
+    MAP_PROC(vkCmdSetCullMode);
+    MAP_ALIAS("vkCmdSetCullModeEXT", vkCmdSetCullMode);
+    MAP_PROC(vkCmdSetFrontFace);
+    MAP_ALIAS("vkCmdSetFrontFaceEXT", vkCmdSetFrontFace);
+    MAP_PROC(vkCmdSetPrimitiveTopology);
+    MAP_ALIAS("vkCmdSetPrimitiveTopologyEXT", vkCmdSetPrimitiveTopology);
+    MAP_PROC(vkCmdSetDepthTestEnable);
+    MAP_ALIAS("vkCmdSetDepthTestEnableEXT", vkCmdSetDepthTestEnable);
+    MAP_PROC(vkCmdSetDepthWriteEnable);
+    MAP_ALIAS("vkCmdSetDepthWriteEnableEXT", vkCmdSetDepthWriteEnable);
+    MAP_PROC(vkCmdSetDepthCompareOp);
+    MAP_ALIAS("vkCmdSetDepthCompareOpEXT", vkCmdSetDepthCompareOp);
+    MAP_PROC(vkCmdSetStencilTestEnable);
+    MAP_ALIAS("vkCmdSetStencilTestEnableEXT", vkCmdSetStencilTestEnable);
+    MAP_PROC(vkCmdSetStencilOp);
+    MAP_ALIAS("vkCmdSetStencilOpEXT", vkCmdSetStencilOp);
     MAP_PROC(vkCmdClearAttachments);
     MAP_PROC(vkCmdExecuteCommands);
     MAP_PROC(vkCmdBindDescriptorSets);
