@@ -629,6 +629,62 @@ class GpuAbiContractTest(unittest.TestCase):
             executor,
         )
 
+    def test_vulkan_icd_exposes_dynamic_rendering_and_graphics_fail_closed_scaffold(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME", icd)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME", icd)
+        self.assertIn("VkPhysicalDeviceDynamicRenderingFeatures", icd)
+        self.assertIn("p->dynamicRendering = VK_TRUE;", icd)
+        for name in [
+            "vkCreateGraphicsPipelines",
+            "vkCreateRenderPass",
+            "vkCreateRenderPass2",
+            "vkDestroyRenderPass",
+            "vkCreateFramebuffer",
+            "vkDestroyFramebuffer",
+            "vkGetRenderAreaGranularity",
+            "vkCmdBeginRendering",
+            "vkCmdEndRendering",
+            "vkCmdBeginRenderPass",
+            "vkCmdNextSubpass",
+            "vkCmdEndRenderPass",
+            "vkCmdBeginRenderPass2",
+            "vkCmdNextSubpass2",
+            "vkCmdEndRenderPass2",
+            "vkCmdBindVertexBuffers",
+            "vkCmdBindVertexBuffers2",
+            "vkCmdBindIndexBuffer",
+            "vkCmdDraw",
+            "vkCmdDrawIndexed",
+            "vkCmdDrawIndirect",
+            "vkCmdDrawIndexedIndirect",
+        ]:
+            self.assertRegex(icd, rf"VKAPI_ATTR\s+[\w\s\*]+VKAPI_CALL\s+{name}\s*\(")
+            self.assertIn(f"MAP_PROC({name});", icd)
+        for alias in [
+            'MAP_ALIAS("vkCreateRenderPass2KHR", vkCreateRenderPass2);',
+            'MAP_ALIAS("vkCmdBeginRenderingKHR", vkCmdBeginRendering);',
+            'MAP_ALIAS("vkCmdEndRenderingKHR", vkCmdEndRendering);',
+            'MAP_ALIAS("vkCmdBeginRenderPass2KHR", vkCmdBeginRenderPass2);',
+            'MAP_ALIAS("vkCmdNextSubpass2KHR", vkCmdNextSubpass2);',
+            'MAP_ALIAS("vkCmdEndRenderPass2KHR", vkCmdEndRenderPass2);',
+            'MAP_ALIAS("vkCmdBindVertexBuffers2EXT", vkCmdBindVertexBuffers2);',
+        ]:
+            self.assertIn(alias, icd)
+        for marker in [
+            "struct PdockerVkRenderPass",
+            "struct PdockerVkFramebuffer",
+            "pipeline->graphics = true;",
+            "pipeline->graphics_unsupported = true;",
+            "PDOCKER_VK_COMMAND_GRAPHICS_DRAW",
+            "record_graphics_draw_command",
+            "graphics-draw-unimplemented",
+            "cmd->dynamic_rendering_active",
+            "cmd->render_pass_active",
+            "cmd->vertex_buffer_bound",
+            "cmd->index_buffer_bound",
+        ]:
+            self.assertIn(marker, icd)
 
 
 

@@ -56,6 +56,11 @@
 #define VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION 1
 #endif
 
+#ifndef VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME
+#define VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME "VK_KHR_dynamic_rendering"
+#define VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION 1
+#endif
+
 typedef struct {
     VK_LOADER_DATA loader;
 } PdockerVkInstance;
@@ -87,6 +92,8 @@ typedef struct PdockerVkImageView PdockerVkImageView;
 typedef struct PdockerVkSampler PdockerVkSampler;
 typedef struct PdockerVkEvent PdockerVkEvent;
 typedef struct PdockerVkQueryPool PdockerVkQueryPool;
+typedef struct PdockerVkRenderPass PdockerVkRenderPass;
+typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
 
 #define PDOCKER_VK_MAX_STORAGE_BUFFERS 16
 #define PDOCKER_VK_MAX_DESCRIPTOR_SETS 8
@@ -258,6 +265,11 @@ struct PdockerVkPipeline {
     uint8_t specialization_data[PDOCKER_VK_MAX_SPECIALIZATION_BYTES];
     size_t specialization_data_size;
     bool specialization_too_large;
+    bool graphics;
+    bool graphics_unsupported;
+    PdockerVkRenderPass *render_pass;
+    uint32_t shader_stage_count;
+    VkShaderStageFlags shader_stage_flags;
 };
 
 struct PdockerVkFence {
@@ -278,6 +290,22 @@ struct PdockerVkQueryPool {
     uint64_t *values;
     uint8_t *available;
     uint8_t *active;
+};
+
+struct PdockerVkRenderPass {
+    uint32_t attachment_count;
+    uint32_t subpass_count;
+    uint64_t generation;
+};
+
+struct PdockerVkFramebuffer {
+    PdockerVkRenderPass *render_pass;
+    uint32_t attachment_count;
+    PdockerVkImageView *attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t width;
+    uint32_t height;
+    uint32_t layers;
+    uint64_t generation;
 };
 
 typedef struct {
@@ -380,6 +408,7 @@ typedef enum {
     PDOCKER_VK_COMMAND_QUERY_RESET = 15,
     PDOCKER_VK_COMMAND_QUERY_TIMESTAMP = 16,
     PDOCKER_VK_COMMAND_IMAGE_BARRIER = 17,
+    PDOCKER_VK_COMMAND_GRAPHICS_DRAW = 18,
 } PdockerVkCommandOpType;
 
 typedef struct {
@@ -396,6 +425,10 @@ typedef struct {
     uint32_t query_index;
     uint32_t query_count;
     VkPipelineStageFlags2 query_stage_mask;
+    uint32_t draw_vertex_count;
+    uint32_t draw_instance_count;
+    bool draw_indexed;
+    bool draw_indirect;
 } PdockerVkCommandOp;
 
 typedef struct {
@@ -430,6 +463,14 @@ typedef struct {
     uint32_t push_constant_size;
     bool has_dispatch;
     bool unsupported_descriptor_set_layout;
+    bool dynamic_rendering_active;
+    bool render_pass_active;
+    PdockerVkRenderPass *active_render_pass;
+    PdockerVkFramebuffer *active_framebuffer;
+    uint32_t active_color_attachment_count;
+    bool graphics_unsupported;
+    bool vertex_buffer_bound;
+    bool index_buffer_bound;
 } PdockerVkCommandBuffer;
 
 typedef struct {
@@ -4505,6 +4546,13 @@ static void fill_pnext_features(void *pNext) {
                 break;
             }
 #endif
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES: {
+                VkPhysicalDeviceDynamicRenderingFeatures *p = (VkPhysicalDeviceDynamicRenderingFeatures *)node;
+                p->dynamicRendering = VK_TRUE;
+                break;
+            }
+#endif
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 VkPhysicalDeviceMaintenance4Features *p = (VkPhysicalDeviceMaintenance4Features *)node;
@@ -5544,7 +5592,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkExtensionProperties *pProperties) {
     (void)physicalDevice;
     (void)pLayerName;
-    VkExtensionProperties available[10];
+    VkExtensionProperties available[11];
     uint32_t available_count = 0;
 #define ADD_DEVICE_EXTENSION(name, version) do { \
         if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
@@ -5574,6 +5622,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME, VK_KHR_COPY_COMMANDS_2_SPEC_VERSION);
     ADD_DEVICE_EXTENSION(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION);
+    ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION);
 #undef ADD_DEVICE_EXTENSION
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
     return VK_SUCCESS;
@@ -5599,6 +5648,7 @@ static bool device_extension_advertised_name(const char *name) {
 #endif
     if (strcmp(name, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME) == 0) return true;
     if (strcmp(name, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) == 0) return true;
+    if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) return true;
     return false;
 }
 
@@ -6140,6 +6190,37 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
     return VK_SUCCESS;
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
+        VkDevice device,
+        VkPipelineCache pipelineCache,
+        uint32_t createInfoCount,
+        const VkGraphicsPipelineCreateInfo *pCreateInfos,
+        const VkAllocationCallbacks *pAllocator,
+        VkPipeline *pPipelines) {
+    (void)device;
+    (void)pipelineCache;
+    (void)pAllocator;
+    if (!pPipelines || (createInfoCount > 0 && !pCreateInfos)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    for (uint32_t i = 0; i < createInfoCount; ++i) {
+        PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
+        if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        pipeline->graphics = true;
+        pipeline->graphics_unsupported = true;
+        pipeline->layout = (PdockerVkPipelineLayout *)pCreateInfos[i].layout;
+        pipeline->render_pass = (PdockerVkRenderPass *)pCreateInfos[i].renderPass;
+        pipeline->shader_stage_count = pCreateInfos[i].stageCount;
+        for (uint32_t stage_i = 0; stage_i < pCreateInfos[i].stageCount; ++stage_i) {
+            pipeline->shader_stage_flags |= pCreateInfos[i].pStages
+                ? pCreateInfos[i].pStages[stage_i].stage
+                : 0;
+        }
+        pPipelines[i] = (VkPipeline)pipeline;
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline(
         VkDevice device,
         VkPipeline pipeline,
@@ -6147,6 +6228,98 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline(
     (void)device;
     (void)pAllocator;
     free((void *)pipeline);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
+        VkDevice device,
+        const VkRenderPassCreateInfo *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkRenderPass *pRenderPass) {
+    (void)device;
+    (void)pAllocator;
+    if (!pRenderPass) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkRenderPass *rp = pdocker_alloc_handle(sizeof(*rp));
+    if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
+    rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
+    rp->generation = next_vulkan_object_generation();
+    *pRenderPass = (VkRenderPass)rp;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
+        VkDevice device,
+        const VkRenderPassCreateInfo2 *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkRenderPass *pRenderPass) {
+    (void)device;
+    (void)pAllocator;
+    if (!pRenderPass) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkRenderPass *rp = pdocker_alloc_handle(sizeof(*rp));
+    if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
+    rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
+    rp->generation = next_vulkan_object_generation();
+    *pRenderPass = (VkRenderPass)rp;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyRenderPass(
+        VkDevice device,
+        VkRenderPass renderPass,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)pAllocator;
+    free((void *)renderPass);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateFramebuffer(
+        VkDevice device,
+        const VkFramebufferCreateInfo *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkFramebuffer *pFramebuffer) {
+    (void)device;
+    (void)pAllocator;
+    if (!pCreateInfo || !pFramebuffer) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkFramebuffer *fb = pdocker_alloc_handle(sizeof(*fb));
+    if (!fb) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    fb->render_pass = (PdockerVkRenderPass *)pCreateInfo->renderPass;
+    fb->attachment_count = pCreateInfo->attachmentCount;
+    if (fb->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        fb->attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
+    }
+    for (uint32_t i = 0; i < fb->attachment_count; ++i) {
+        fb->attachments[i] = pCreateInfo->pAttachments
+            ? (PdockerVkImageView *)pCreateInfo->pAttachments[i]
+            : NULL;
+    }
+    fb->width = pCreateInfo->width;
+    fb->height = pCreateInfo->height;
+    fb->layers = pCreateInfo->layers;
+    fb->generation = next_vulkan_object_generation();
+    *pFramebuffer = (VkFramebuffer)fb;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyFramebuffer(
+        VkDevice device,
+        VkFramebuffer framebuffer,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)pAllocator;
+    free((void *)framebuffer);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetRenderAreaGranularity(
+        VkDevice device,
+        VkRenderPass renderPass,
+        VkExtent2D *pGranularity) {
+    (void)device;
+    (void)renderPass;
+    if (pGranularity) {
+        pGranularity->width = 1;
+        pGranularity->height = 1;
+    }
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
@@ -6227,6 +6400,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     cmd->push_constant_size = 0;
     cmd->has_dispatch = false;
     cmd->unsupported_descriptor_set_layout = false;
+    cmd->dynamic_rendering_active = false;
+    cmd->render_pass_active = false;
+    cmd->active_render_pass = NULL;
+    cmd->active_framebuffer = NULL;
+    cmd->active_color_attachment_count = 0;
+    cmd->graphics_unsupported = false;
+    cmd->vertex_buffer_bound = false;
+    cmd->index_buffer_bound = false;
     return VK_SUCCESS;
 }
 
@@ -6248,6 +6429,191 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindPipeline(
     (void)pipelineBindPoint;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (cmd) cmd->pipeline = (PdockerVkPipeline *)pipeline;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
+        VkCommandBuffer commandBuffer,
+        const VkRenderingInfo *pRenderingInfo) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!cmd) return;
+    cmd->dynamic_rendering_active = true;
+    cmd->render_pass_active = false;
+    cmd->active_render_pass = NULL;
+    cmd->active_framebuffer = NULL;
+    cmd->active_color_attachment_count = pRenderingInfo
+        ? pRenderingInfo->colorAttachmentCount
+        : 0;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdEndRendering(VkCommandBuffer commandBuffer) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!cmd) return;
+    cmd->dynamic_rendering_active = false;
+    cmd->active_color_attachment_count = 0;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
+        VkCommandBuffer commandBuffer,
+        const VkRenderPassBeginInfo *pRenderPassBegin,
+        VkSubpassContents contents) {
+    (void)contents;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!cmd) return;
+    cmd->render_pass_active = true;
+    cmd->dynamic_rendering_active = false;
+    cmd->active_render_pass = pRenderPassBegin
+        ? (PdockerVkRenderPass *)pRenderPassBegin->renderPass
+        : NULL;
+    cmd->active_framebuffer = pRenderPassBegin
+        ? (PdockerVkFramebuffer *)pRenderPassBegin->framebuffer
+        : NULL;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(
+        VkCommandBuffer commandBuffer,
+        VkSubpassContents contents) {
+    (void)commandBuffer;
+    (void)contents;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer commandBuffer) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!cmd) return;
+    cmd->render_pass_active = false;
+    cmd->active_render_pass = NULL;
+    cmd->active_framebuffer = NULL;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2(
+        VkCommandBuffer commandBuffer,
+        const VkRenderPassBeginInfo *pRenderPassBegin,
+        const VkSubpassBeginInfo *pSubpassBeginInfo) {
+    vkCmdBeginRenderPass(commandBuffer,
+                         pRenderPassBegin,
+                         pSubpassBeginInfo ? pSubpassBeginInfo->contents
+                                           : VK_SUBPASS_CONTENTS_INLINE);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass2(
+        VkCommandBuffer commandBuffer,
+        const VkSubpassBeginInfo *pSubpassBeginInfo,
+        const VkSubpassEndInfo *pSubpassEndInfo) {
+    (void)pSubpassBeginInfo;
+    (void)pSubpassEndInfo;
+    vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass2(
+        VkCommandBuffer commandBuffer,
+        const VkSubpassEndInfo *pSubpassEndInfo) {
+    (void)pSubpassEndInfo;
+    vkCmdEndRenderPass(commandBuffer);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBindVertexBuffers(
+        VkCommandBuffer commandBuffer,
+        uint32_t firstBinding,
+        uint32_t bindingCount,
+        const VkBuffer *pBuffers,
+        const VkDeviceSize *pOffsets) {
+    (void)firstBinding;
+    (void)bindingCount;
+    (void)pBuffers;
+    (void)pOffsets;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (cmd) cmd->vertex_buffer_bound = true;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBindVertexBuffers2(
+        VkCommandBuffer commandBuffer,
+        uint32_t firstBinding,
+        uint32_t bindingCount,
+        const VkBuffer *pBuffers,
+        const VkDeviceSize *pOffsets,
+        const VkDeviceSize *pSizes,
+        const VkDeviceSize *pStrides) {
+    (void)pSizes;
+    (void)pStrides;
+    vkCmdBindVertexBuffers(commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBindIndexBuffer(
+        VkCommandBuffer commandBuffer,
+        VkBuffer buffer,
+        VkDeviceSize offset,
+        VkIndexType indexType) {
+    (void)buffer;
+    (void)offset;
+    (void)indexType;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (cmd) cmd->index_buffer_bound = true;
+}
+
+static void record_graphics_draw_command(
+        VkCommandBuffer commandBuffer,
+        uint32_t vertexCount,
+        uint32_t instanceCount,
+        bool indexed,
+        bool indirect) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!cmd) return;
+    cmd->graphics_unsupported = true;
+    PdockerVkCommandOp op;
+    memset(&op, 0, sizeof(op));
+    op.type = PDOCKER_VK_COMMAND_GRAPHICS_DRAW;
+    op.draw_vertex_count = vertexCount;
+    op.draw_instance_count = instanceCount;
+    op.draw_indexed = indexed;
+    op.draw_indirect = indirect;
+    (void)append_command_op(cmd, &op);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdDraw(
+        VkCommandBuffer commandBuffer,
+        uint32_t vertexCount,
+        uint32_t instanceCount,
+        uint32_t firstVertex,
+        uint32_t firstInstance) {
+    (void)firstVertex;
+    (void)firstInstance;
+    record_graphics_draw_command(commandBuffer, vertexCount, instanceCount, false, false);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndexed(
+        VkCommandBuffer commandBuffer,
+        uint32_t indexCount,
+        uint32_t instanceCount,
+        uint32_t firstIndex,
+        int32_t vertexOffset,
+        uint32_t firstInstance) {
+    (void)firstIndex;
+    (void)vertexOffset;
+    (void)firstInstance;
+    record_graphics_draw_command(commandBuffer, indexCount, instanceCount, true, false);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndirect(
+        VkCommandBuffer commandBuffer,
+        VkBuffer buffer,
+        VkDeviceSize offset,
+        uint32_t drawCount,
+        uint32_t stride) {
+    (void)buffer;
+    (void)offset;
+    (void)stride;
+    record_graphics_draw_command(commandBuffer, drawCount, 1, false, true);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndexedIndirect(
+        VkCommandBuffer commandBuffer,
+        VkBuffer buffer,
+        VkDeviceSize offset,
+        uint32_t drawCount,
+        uint32_t stride) {
+    (void)buffer;
+    (void)offset;
+    (void)stride;
+    record_graphics_draw_command(commandBuffer, drawCount, 1, true, true);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
@@ -7392,6 +7758,22 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                         case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:
                             execute_recorded_query_op(op);
                             break;
+                        case PDOCKER_VK_COMMAND_GRAPHICS_DRAW:
+                            trace_icd_runtime_failure("graphics-draw-unimplemented",
+                                                      VK_ERROR_FEATURE_NOT_PRESENT);
+                            if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                                fprintf(stderr,
+                                        "pdocker-vulkan-icd: graphics draw unsupported indexed=%u indirect=%u vertices=%u instances=%u rendering=%u renderpass=%u vertex_bound=%u index_bound=%u\n",
+                                        op->draw_indexed ? 1u : 0u,
+                                        op->draw_indirect ? 1u : 0u,
+                                        op->draw_vertex_count,
+                                        op->draw_instance_count,
+                                        cmd->dynamic_rendering_active ? 1u : 0u,
+                                        cmd->render_pass_active ? 1u : 0u,
+                                        cmd->vertex_buffer_bound ? 1u : 0u,
+                                        cmd->index_buffer_bound ? 1u : 0u);
+                            }
+                            return VK_ERROR_FEATURE_NOT_PRESENT;
                         case PDOCKER_VK_COMMAND_FILL:
                             execute_recorded_fill_op(op);
                             break;
@@ -8282,7 +8664,15 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkGetPipelineCacheData);
     MAP_PROC(vkMergePipelineCaches);
     MAP_PROC(vkCreateComputePipelines);
+    MAP_PROC(vkCreateGraphicsPipelines);
     MAP_PROC(vkDestroyPipeline);
+    MAP_PROC(vkCreateRenderPass);
+    MAP_PROC(vkCreateRenderPass2);
+    MAP_ALIAS("vkCreateRenderPass2KHR", vkCreateRenderPass2);
+    MAP_PROC(vkDestroyRenderPass);
+    MAP_PROC(vkCreateFramebuffer);
+    MAP_PROC(vkDestroyFramebuffer);
+    MAP_PROC(vkGetRenderAreaGranularity);
     MAP_PROC(vkCreateCommandPool);
     MAP_PROC(vkDestroyCommandPool);
     MAP_PROC(vkResetCommandPool);
@@ -8292,6 +8682,27 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkEndCommandBuffer);
     MAP_PROC(vkResetCommandBuffer);
     MAP_PROC(vkCmdBindPipeline);
+    MAP_PROC(vkCmdBeginRendering);
+    MAP_ALIAS("vkCmdBeginRenderingKHR", vkCmdBeginRendering);
+    MAP_PROC(vkCmdEndRendering);
+    MAP_ALIAS("vkCmdEndRenderingKHR", vkCmdEndRendering);
+    MAP_PROC(vkCmdBeginRenderPass);
+    MAP_PROC(vkCmdNextSubpass);
+    MAP_PROC(vkCmdEndRenderPass);
+    MAP_PROC(vkCmdBeginRenderPass2);
+    MAP_ALIAS("vkCmdBeginRenderPass2KHR", vkCmdBeginRenderPass2);
+    MAP_PROC(vkCmdNextSubpass2);
+    MAP_ALIAS("vkCmdNextSubpass2KHR", vkCmdNextSubpass2);
+    MAP_PROC(vkCmdEndRenderPass2);
+    MAP_ALIAS("vkCmdEndRenderPass2KHR", vkCmdEndRenderPass2);
+    MAP_PROC(vkCmdBindVertexBuffers);
+    MAP_PROC(vkCmdBindVertexBuffers2);
+    MAP_ALIAS("vkCmdBindVertexBuffers2EXT", vkCmdBindVertexBuffers2);
+    MAP_PROC(vkCmdBindIndexBuffer);
+    MAP_PROC(vkCmdDraw);
+    MAP_PROC(vkCmdDrawIndexed);
+    MAP_PROC(vkCmdDrawIndirect);
+    MAP_PROC(vkCmdDrawIndexedIndirect);
     MAP_PROC(vkCmdBindDescriptorSets);
     MAP_PROC(vkCmdPushConstants);
     MAP_PROC(vkCmdPipelineBarrier);
