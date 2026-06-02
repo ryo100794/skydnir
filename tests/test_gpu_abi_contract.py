@@ -187,7 +187,7 @@ def c_struct_field_names(path, struct_name):
     )
     assert struct is not None, struct_name
     return re.findall(
-        r"^\s*(?:char|uint(?:16|32|64)_t|PdockerGpuVulkanDispatchV5[A-Za-z]+)\s+"
+        r"^\s*(?:char|u?int(?:16|32|64)_t|PdockerGpuVulkanDispatchV5[A-Za-z]+)\s+"
         r"([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]+\])?;",
         struct.group("body"),
         re.M,
@@ -990,6 +990,46 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH",
             ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_ATTRIBUTE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_ATTRIBUTE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_ATTRIBUTE_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
+            ),
         ]
         for header_path in [APP_HEADER, CONTAINER_HEADER]:
             for field_macro, count_macro, hash_macro in schemas:
@@ -999,6 +1039,58 @@ class GpuAbiContractTest(unittest.TestCase):
                     )
                     self.assertEqual(len(fields), count)
                     self.assertEqual(declared_hash, computed_hash)
+
+    def test_vulkan_graphics_v6_field_macros_match_packed_structs(self):
+        schemas = [
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV6FrameHeader",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV6ShaderStageEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV6PipelineEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV6VertexBindingEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_ATTRIBUTE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_ATTRIBUTE_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV6VertexAttributeEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV6AttachmentEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV6DynamicStateEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV6CommandEntry",
+            ),
+        ]
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            for field_macro, count_macro, struct_name in schemas:
+                with self.subTest(header=str(header_path), schema=field_macro):
+                    fields, count, _, _ = vulkan_dispatch_v5_schema(
+                        header_path, field_macro, count_macro
+                    )
+                    self.assertEqual([name for name, _ in fields], c_struct_field_names(header_path, struct_name))
+                    self.assertEqual(count, len(fields))
 
     def test_vulkan_dispatch_v5_1_object_field_macros_match_packed_structs(self):
         schemas = [

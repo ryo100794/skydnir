@@ -524,4 +524,382 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     uint64_t size;
 } PdockerGpuVulkanDispatchV5SpecializationEntry;
 
+/*
+ * V6 graphics submit ABI foundation.
+ *
+ * V5/V5.1 remains the compute-dispatch ABI.  V6 is reserved for ordered
+ * graphics command streams that can carry pipeline state, render targets,
+ * dynamic state, vertex/index bindings, and direct draw commands without
+ * overloading the compute dispatch header.
+ */
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC "PDGPUG6"
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ABI_MAJOR 6u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ABI_MINOR 0u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x1c07d4dfa7d62f94ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_SCHEMA_HASH 0xecf6011339e6aa3bull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_SCHEMA_HASH 0x7a735aaa6fdc4e5aull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_ATTRIBUTE_SCHEMA_HASH 0x0a82d873c2a230c5ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_SCHEMA_HASH 0x29ca5fee670cb0e0ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_SCHEMA_HASH 0x0305d9e579f44e90ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH 0xd78747046862f030ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES (8u * 1024u * 1024u)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES 16u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES 64u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS 64u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_ATTRIBUTES 128u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS 64u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_DYNAMIC_STATES 256u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS 4096u
+
+#define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR 1u
+#define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH 2u
+#define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL 3u
+#define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH_STENCIL 4u
+
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING 1u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING 2u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE 3u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS 4u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS 5u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS 6u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER 7u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE 8u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW 9u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED 10u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER 11u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELDS(X) \
+    X(magic, bytes8) \
+    X(header_size, u16) \
+    X(abi_major, u16) \
+    X(abi_minor, u16) \
+    X(command, u16) \
+    X(flags, u32) \
+    X(reserved0, u32) \
+    X(frame_size, u64) \
+    X(submit_id, u64) \
+    X(fd_count, u32) \
+    X(resource_count, u32) \
+    X(resource_entry_size, u32) \
+    X(resource_table_offset, u64) \
+    X(resource_table_size, u64) \
+    X(resource_schema_hash, u64) \
+    X(descriptor_count, u32) \
+    X(descriptor_entry_size, u32) \
+    X(descriptor_table_offset, u64) \
+    X(descriptor_table_size, u64) \
+    X(descriptor_schema_hash, u64) \
+    X(shader_stage_count, u32) \
+    X(shader_stage_entry_size, u32) \
+    X(shader_stage_table_offset, u64) \
+    X(shader_stage_table_size, u64) \
+    X(shader_stage_schema_hash, u64) \
+    X(pipeline_count, u32) \
+    X(pipeline_entry_size, u32) \
+    X(pipeline_table_offset, u64) \
+    X(pipeline_table_size, u64) \
+    X(pipeline_schema_hash, u64) \
+    X(vertex_binding_count, u32) \
+    X(vertex_binding_entry_size, u32) \
+    X(vertex_binding_table_offset, u64) \
+    X(vertex_binding_table_size, u64) \
+    X(vertex_binding_schema_hash, u64) \
+    X(vertex_attribute_count, u32) \
+    X(vertex_attribute_entry_size, u32) \
+    X(vertex_attribute_table_offset, u64) \
+    X(vertex_attribute_table_size, u64) \
+    X(vertex_attribute_schema_hash, u64) \
+    X(attachment_count, u32) \
+    X(attachment_entry_size, u32) \
+    X(attachment_table_offset, u64) \
+    X(attachment_table_size, u64) \
+    X(attachment_schema_hash, u64) \
+    X(dynamic_state_count, u32) \
+    X(dynamic_state_entry_size, u32) \
+    X(dynamic_state_table_offset, u64) \
+    X(dynamic_state_table_size, u64) \
+    X(dynamic_state_schema_hash, u64) \
+    X(command_count, u32) \
+    X(command_entry_size, u32) \
+    X(command_table_offset, u64) \
+    X(command_table_size, u64) \
+    X(command_schema_hash, u64) \
+    X(payload_hash, u64) \
+    X(frame_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELD_COUNT 57u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_FIELDS(X) \
+    X(stage_flags, u32) \
+    X(shader_fd_index, u32) \
+    X(shader_size, u64) \
+    X(shader_hash, u64) \
+    X(entry_name_offset, u64) \
+    X(entry_name_size, u64) \
+    X(specialization_offset, u64) \
+    X(specialization_size, u64) \
+    X(specialization_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_FIELD_COUNT 9u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_FIELDS(X) \
+    X(pipeline_id, u64) \
+    X(layout_id, u64) \
+    X(render_pass_id, u64) \
+    X(shader_stage_first, u32) \
+    X(shader_stage_count, u32) \
+    X(vertex_binding_first, u32) \
+    X(vertex_binding_count, u32) \
+    X(vertex_attribute_first, u32) \
+    X(vertex_attribute_count, u32) \
+    X(topology, u32) \
+    X(polygon_mode, u32) \
+    X(cull_mode, u32) \
+    X(front_face, u32) \
+    X(rasterization_samples, u32) \
+    X(color_attachment_count, u32) \
+    X(subpass, u32) \
+    X(depth_stencil_flags, u32) \
+    X(dynamic_state_mask, u64) \
+    X(pipeline_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_FIELD_COUNT 19u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_FIELDS(X) \
+    X(binding, u32) \
+    X(stride, u32) \
+    X(input_rate, u32) \
+    X(buffer_resource_index, u32) \
+    X(offset, u64) \
+    X(size, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_FIELD_COUNT 6u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_ATTRIBUTE_FIELDS(X) \
+    X(location, u32) \
+    X(binding, u32) \
+    X(format, u32) \
+    X(offset, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_ATTRIBUTE_FIELD_COUNT 4u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_FIELDS(X) \
+    X(attachment_role, u32) \
+    X(flags, u32) \
+    X(image_view_index, u32) \
+    X(resolve_image_view_index, u32) \
+    X(format, u32) \
+    X(samples, u32) \
+    X(layout, u32) \
+    X(load_op, u32) \
+    X(store_op, u32) \
+    X(stencil_load_op, u32) \
+    X(stencil_store_op, u32) \
+    X(clear_value_offset, u64) \
+    X(clear_value_size, u64) \
+    X(resource_id, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_FIELD_COUNT 14u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_FIELDS(X) \
+    X(state_type, u32) \
+    X(flags, u32) \
+    X(first_index, u32) \
+    X(count, u32) \
+    X(data_offset, u64) \
+    X(data_size, u64) \
+    X(data_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_FIELD_COUNT 7u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS(X) \
+    X(command_type, u32) \
+    X(flags, u32) \
+    X(pipeline_index, u32) \
+    X(first_descriptor, u32) \
+    X(descriptor_count, u32) \
+    X(first_dynamic_offset, u32) \
+    X(dynamic_offset_count, u32) \
+    X(vertex_binding_first, u32) \
+    X(vertex_binding_count, u32) \
+    X(index_buffer_resource_index, u32) \
+    X(index_type, u32) \
+    X(first_vertex, u32) \
+    X(vertex_count, u32) \
+    X(first_index, u32) \
+    X(index_count, u32) \
+    X(vertex_offset, i32) \
+    X(first_instance, u32) \
+    X(instance_count, u32) \
+    X(attachment_first, u32) \
+    X(attachment_count, u32) \
+    X(dynamic_state_first, u32) \
+    X(dynamic_state_count, u32) \
+    X(index_offset, u64) \
+    X(push_offset, u64) \
+    X(push_size, u64) \
+    X(push_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT 26u
+
+typedef struct PdockerGpuVulkanGraphicsV6FrameHeader {
+    char magic[8];
+    uint16_t header_size;
+    uint16_t abi_major;
+    uint16_t abi_minor;
+    uint16_t command;
+    uint32_t flags;
+    uint32_t reserved0;
+    uint64_t frame_size;
+    uint64_t submit_id;
+    uint32_t fd_count;
+    uint32_t resource_count;
+    uint32_t resource_entry_size;
+    uint64_t resource_table_offset;
+    uint64_t resource_table_size;
+    uint64_t resource_schema_hash;
+    uint32_t descriptor_count;
+    uint32_t descriptor_entry_size;
+    uint64_t descriptor_table_offset;
+    uint64_t descriptor_table_size;
+    uint64_t descriptor_schema_hash;
+    uint32_t shader_stage_count;
+    uint32_t shader_stage_entry_size;
+    uint64_t shader_stage_table_offset;
+    uint64_t shader_stage_table_size;
+    uint64_t shader_stage_schema_hash;
+    uint32_t pipeline_count;
+    uint32_t pipeline_entry_size;
+    uint64_t pipeline_table_offset;
+    uint64_t pipeline_table_size;
+    uint64_t pipeline_schema_hash;
+    uint32_t vertex_binding_count;
+    uint32_t vertex_binding_entry_size;
+    uint64_t vertex_binding_table_offset;
+    uint64_t vertex_binding_table_size;
+    uint64_t vertex_binding_schema_hash;
+    uint32_t vertex_attribute_count;
+    uint32_t vertex_attribute_entry_size;
+    uint64_t vertex_attribute_table_offset;
+    uint64_t vertex_attribute_table_size;
+    uint64_t vertex_attribute_schema_hash;
+    uint32_t attachment_count;
+    uint32_t attachment_entry_size;
+    uint64_t attachment_table_offset;
+    uint64_t attachment_table_size;
+    uint64_t attachment_schema_hash;
+    uint32_t dynamic_state_count;
+    uint32_t dynamic_state_entry_size;
+    uint64_t dynamic_state_table_offset;
+    uint64_t dynamic_state_table_size;
+    uint64_t dynamic_state_schema_hash;
+    uint32_t command_count;
+    uint32_t command_entry_size;
+    uint64_t command_table_offset;
+    uint64_t command_table_size;
+    uint64_t command_schema_hash;
+    uint64_t payload_hash;
+    uint64_t frame_hash;
+} PdockerGpuVulkanGraphicsV6FrameHeader;
+
+typedef struct PdockerGpuVulkanGraphicsV6ShaderStageEntry {
+    uint32_t stage_flags;
+    uint32_t shader_fd_index;
+    uint64_t shader_size;
+    uint64_t shader_hash;
+    uint64_t entry_name_offset;
+    uint64_t entry_name_size;
+    uint64_t specialization_offset;
+    uint64_t specialization_size;
+    uint64_t specialization_hash;
+} PdockerGpuVulkanGraphicsV6ShaderStageEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV6PipelineEntry {
+    uint64_t pipeline_id;
+    uint64_t layout_id;
+    uint64_t render_pass_id;
+    uint32_t shader_stage_first;
+    uint32_t shader_stage_count;
+    uint32_t vertex_binding_first;
+    uint32_t vertex_binding_count;
+    uint32_t vertex_attribute_first;
+    uint32_t vertex_attribute_count;
+    uint32_t topology;
+    uint32_t polygon_mode;
+    uint32_t cull_mode;
+    uint32_t front_face;
+    uint32_t rasterization_samples;
+    uint32_t color_attachment_count;
+    uint32_t subpass;
+    uint32_t depth_stencil_flags;
+    uint64_t dynamic_state_mask;
+    uint64_t pipeline_hash;
+} PdockerGpuVulkanGraphicsV6PipelineEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV6VertexBindingEntry {
+    uint32_t binding;
+    uint32_t stride;
+    uint32_t input_rate;
+    uint32_t buffer_resource_index;
+    uint64_t offset;
+    uint64_t size;
+} PdockerGpuVulkanGraphicsV6VertexBindingEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV6VertexAttributeEntry {
+    uint32_t location;
+    uint32_t binding;
+    uint32_t format;
+    uint32_t offset;
+} PdockerGpuVulkanGraphicsV6VertexAttributeEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV6AttachmentEntry {
+    uint32_t attachment_role;
+    uint32_t flags;
+    uint32_t image_view_index;
+    uint32_t resolve_image_view_index;
+    uint32_t format;
+    uint32_t samples;
+    uint32_t layout;
+    uint32_t load_op;
+    uint32_t store_op;
+    uint32_t stencil_load_op;
+    uint32_t stencil_store_op;
+    uint64_t clear_value_offset;
+    uint64_t clear_value_size;
+    uint64_t resource_id;
+} PdockerGpuVulkanGraphicsV6AttachmentEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV6DynamicStateEntry {
+    uint32_t state_type;
+    uint32_t flags;
+    uint32_t first_index;
+    uint32_t count;
+    uint64_t data_offset;
+    uint64_t data_size;
+    uint64_t data_hash;
+} PdockerGpuVulkanGraphicsV6DynamicStateEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV6CommandEntry {
+    uint32_t command_type;
+    uint32_t flags;
+    uint32_t pipeline_index;
+    uint32_t first_descriptor;
+    uint32_t descriptor_count;
+    uint32_t first_dynamic_offset;
+    uint32_t dynamic_offset_count;
+    uint32_t vertex_binding_first;
+    uint32_t vertex_binding_count;
+    uint32_t index_buffer_resource_index;
+    uint32_t index_type;
+    uint32_t first_vertex;
+    uint32_t vertex_count;
+    uint32_t first_index;
+    uint32_t index_count;
+    int32_t vertex_offset;
+    uint32_t first_instance;
+    uint32_t instance_count;
+    uint32_t attachment_first;
+    uint32_t attachment_count;
+    uint32_t dynamic_state_first;
+    uint32_t dynamic_state_count;
+    uint64_t index_offset;
+    uint64_t push_offset;
+    uint64_t push_size;
+    uint64_t push_hash;
+} PdockerGpuVulkanGraphicsV6CommandEntry;
+
 #endif
