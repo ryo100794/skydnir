@@ -2019,6 +2019,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("img->memory = mem;", icd)
         self.assertIn("view->image = image;", icd)
         self.assertIn("sampler->mag_filter = pCreateInfo->magFilter;", icd)
+        self.assertIn("if (!binding->buffer && !binding->image_view && !binding->sampler) continue;", icd)
         self.assertIn("set->has_image_descriptor = descriptor_set_has_image_descriptor(set);", icd)
         self.assertIn("image descriptor set=%u requires V5.1 frame emission", icd)
 

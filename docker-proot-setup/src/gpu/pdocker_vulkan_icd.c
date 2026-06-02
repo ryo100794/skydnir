@@ -2054,6 +2054,7 @@ static bool descriptor_set_has_image_descriptor(const PdockerVkDescriptorSet *se
     for (uint32_t i = 0; i < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++i) {
         const PdockerVkDescriptorBinding *binding = &set->storage_buffers[i];
         if (binding->image_view || binding->sampler) return true;
+        if (!binding->buffer && !binding->image_view && !binding->sampler) continue;
         VkDescriptorType descriptor_type = binding->descriptor_type;
         if (descriptor_type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
             descriptor_type == VK_DESCRIPTOR_TYPE_SAMPLER ||
