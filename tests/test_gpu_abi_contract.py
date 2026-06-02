@@ -1330,6 +1330,35 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(alias, proc_body)
 
+    def test_vulkan_image_sampler_object_apis_fail_closed_until_v5_object_transport(self):
+        icd = VULKAN_ICD.read_text()
+        for symbol in [
+            "vkCreateImage",
+            "vkDestroyImage",
+            "vkGetImageMemoryRequirements",
+            "vkGetImageMemoryRequirements2",
+            "vkBindImageMemory",
+            "vkBindImageMemory2",
+            "vkCreateImageView",
+            "vkDestroyImageView",
+            "vkCreateSampler",
+            "vkDestroySampler",
+        ]:
+            self.assertIn(symbol, icd)
+        self.assertIn("unsupported_image_transport_result", icd)
+        self.assertIn("V5 image/sampler object transport", icd)
+        self.assertIn('MAP_PROC(vkCreateImage);', icd)
+        self.assertIn('MAP_PROC(vkCreateImageView);', icd)
+        self.assertIn('MAP_PROC(vkCreateSampler);', icd)
+        self.assertIn('MAP_PROC(vkGetImageMemoryRequirements2);', icd)
+        self.assertIn('MAP_ALIAS("vkGetImageMemoryRequirements2KHR", vkGetImageMemoryRequirements2);', icd)
+        self.assertIn('MAP_PROC(vkBindImageMemory2);', icd)
+        self.assertIn('MAP_ALIAS("vkBindImageMemory2KHR", vkBindImageMemory2);', icd)
+        self.assertIn('return unsupported_image_transport_result("vkCreateImage");', icd)
+        self.assertIn('return unsupported_image_transport_result("vkBindImageMemory");', icd)
+        self.assertIn('return unsupported_image_transport_result("vkCreateImageView");', icd)
+        self.assertIn('return unsupported_image_transport_result("vkCreateSampler");', icd)
+
     def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("descriptor_type_supported_by_v4_transport", icd)

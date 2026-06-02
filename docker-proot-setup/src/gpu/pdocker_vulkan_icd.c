@@ -3121,6 +3121,118 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyBuffer(
     free((void *)buffer);
 }
 
+static VkResult unsupported_image_transport_result(const char *api_name) {
+    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: %s is unsupported until V5 image/sampler object transport is implemented; rejecting instead of fabricating image handles\n",
+                api_name ? api_name : "image-api");
+    }
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
+        VkDevice device,
+        const VkImageCreateInfo *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkImage *pImage) {
+    (void)device;
+    (void)pCreateInfo;
+    (void)pAllocator;
+    if (pImage) *pImage = VK_NULL_HANDLE;
+    return unsupported_image_transport_result("vkCreateImage");
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyImage(
+        VkDevice device,
+        VkImage image,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)image;
+    (void)pAllocator;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements(
+        VkDevice device,
+        VkImage image,
+        VkMemoryRequirements *pMemoryRequirements) {
+    (void)device;
+    (void)image;
+    if (pMemoryRequirements) memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements2(
+        VkDevice device,
+        const VkImageMemoryRequirementsInfo2 *pInfo,
+        VkMemoryRequirements2 *pMemoryRequirements) {
+    (void)pInfo;
+    if (!pMemoryRequirements) return;
+    vkGetImageMemoryRequirements(device, VK_NULL_HANDLE, &pMemoryRequirements->memoryRequirements);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
+        VkDevice device,
+        VkImage image,
+        VkDeviceMemory memory,
+        VkDeviceSize memoryOffset) {
+    (void)device;
+    (void)image;
+    (void)memory;
+    (void)memoryOffset;
+    return unsupported_image_transport_result("vkBindImageMemory");
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory2(
+        VkDevice device,
+        uint32_t bindInfoCount,
+        const VkBindImageMemoryInfo *pBindInfos) {
+    (void)device;
+    (void)bindInfoCount;
+    (void)pBindInfos;
+    return unsupported_image_transport_result("vkBindImageMemory2");
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
+        VkDevice device,
+        const VkImageViewCreateInfo *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkImageView *pView) {
+    (void)device;
+    (void)pCreateInfo;
+    (void)pAllocator;
+    if (pView) *pView = VK_NULL_HANDLE;
+    return unsupported_image_transport_result("vkCreateImageView");
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyImageView(
+        VkDevice device,
+        VkImageView imageView,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)imageView;
+    (void)pAllocator;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
+        VkDevice device,
+        const VkSamplerCreateInfo *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkSampler *pSampler) {
+    (void)device;
+    (void)pCreateInfo;
+    (void)pAllocator;
+    if (pSampler) *pSampler = VK_NULL_HANDLE;
+    return unsupported_image_transport_result("vkCreateSampler");
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroySampler(
+        VkDevice device,
+        VkSampler sampler,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)sampler;
+    (void)pAllocator;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements(
         VkDevice device,
         VkBuffer buffer,
@@ -4687,9 +4799,18 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkGetDeviceQueue2);
     MAP_PROC(vkCreateBuffer);
     MAP_PROC(vkDestroyBuffer);
+    MAP_PROC(vkCreateImage);
+    MAP_PROC(vkDestroyImage);
+    MAP_PROC(vkCreateImageView);
+    MAP_PROC(vkDestroyImageView);
+    MAP_PROC(vkCreateSampler);
+    MAP_PROC(vkDestroySampler);
     MAP_PROC(vkGetBufferMemoryRequirements);
     MAP_PROC(vkGetBufferMemoryRequirements2);
     MAP_ALIAS("vkGetBufferMemoryRequirements2KHR", vkGetBufferMemoryRequirements2);
+    MAP_PROC(vkGetImageMemoryRequirements);
+    MAP_PROC(vkGetImageMemoryRequirements2);
+    MAP_ALIAS("vkGetImageMemoryRequirements2KHR", vkGetImageMemoryRequirements2);
     MAP_PROC(vkAllocateMemory);
     MAP_PROC(vkFreeMemory);
     MAP_PROC(vkMapMemory);
@@ -4700,6 +4821,9 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkBindBufferMemory);
     MAP_PROC(vkBindBufferMemory2);
     MAP_ALIAS("vkBindBufferMemory2KHR", vkBindBufferMemory2);
+    MAP_PROC(vkBindImageMemory);
+    MAP_PROC(vkBindImageMemory2);
+    MAP_ALIAS("vkBindImageMemory2KHR", vkBindImageMemory2);
     MAP_PROC(vkCreateDescriptorSetLayout);
     MAP_PROC(vkDestroyDescriptorSetLayout);
     MAP_PROC(vkCreatePipelineLayout);
