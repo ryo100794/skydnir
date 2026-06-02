@@ -1818,6 +1818,43 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("free_submit_info_arrays", icd)
         self.assertIn("vkQueueSubmit(queue, submitCount, legacy_submits, fence)", icd)
 
+    def test_vulkan_icd_supports_query_pool_and_timestamp_api(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("struct PdockerVkQueryPool", icd)
+        self.assertIn("PDOCKER_VK_MAX_QUERY_COUNT", icd)
+        for marker in [
+            "PDOCKER_VK_COMMAND_QUERY_BEGIN",
+            "PDOCKER_VK_COMMAND_QUERY_END",
+            "PDOCKER_VK_COMMAND_QUERY_RESET",
+            "PDOCKER_VK_COMMAND_QUERY_TIMESTAMP",
+        ]:
+            self.assertIn(marker, icd)
+        for name in [
+            "vkCreateQueryPool",
+            "vkDestroyQueryPool",
+            "vkCmdBeginQuery",
+            "vkCmdEndQuery",
+            "vkCmdResetQueryPool",
+            "vkResetQueryPool",
+            "vkGetQueryPoolResults",
+            "vkCmdWriteTimestamp",
+            "vkCmdWriteTimestamp2",
+        ]:
+            self.assertIn(name, icd)
+            self.assertIn(f"MAP_PROC({name});", icd)
+        self.assertIn('MAP_ALIAS("vkCmdWriteTimestamp2KHR", vkCmdWriteTimestamp2);', icd)
+        self.assertIn("VK_QUERY_TYPE_TIMESTAMP", icd)
+        self.assertIn("query-type-unsupported", icd)
+        self.assertIn("VK_QUERY_RESULT_64_BIT", icd)
+        self.assertIn("VK_QUERY_RESULT_WITH_AVAILABILITY_BIT", icd)
+        self.assertIn("VK_QUERY_RESULT_WAIT_BIT", icd)
+        self.assertIn("VK_QUERY_RESULT_PARTIAL_BIT", icd)
+        self.assertIn("execute_recorded_query_op(op)", icd)
+        self.assertIn("monotonic_ns()", icd)
+        self.assertIn("timestampComputeAndGraphics = VK_TRUE;", icd)
+        self.assertIn("timestampPeriod = 1.0f;", icd)
+        self.assertIn("timestampValidBits = 64;", icd)
+
     def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("descriptor_type_supported_by_v4_transport", icd)

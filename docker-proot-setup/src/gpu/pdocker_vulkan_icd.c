@@ -86,6 +86,7 @@ typedef struct PdockerVkImage PdockerVkImage;
 typedef struct PdockerVkImageView PdockerVkImageView;
 typedef struct PdockerVkSampler PdockerVkSampler;
 typedef struct PdockerVkEvent PdockerVkEvent;
+typedef struct PdockerVkQueryPool PdockerVkQueryPool;
 
 #define PDOCKER_VK_MAX_STORAGE_BUFFERS 16
 #define PDOCKER_VK_MAX_DESCRIPTOR_SETS 8
@@ -97,6 +98,7 @@ typedef struct PdockerVkEvent PdockerVkEvent;
 #define PDOCKER_VK_MAX_COPY_OPS 64
 #define PDOCKER_VK_MAX_DISPATCH_OPS 128
 #define PDOCKER_VK_MAX_COMMAND_OPS 256
+#define PDOCKER_VK_MAX_QUERY_COUNT 4096
 #define PDOCKER_VK_MAX_COPY_ALIASES 128
 #define PDOCKER_VK_ALIAS_MIN_SOURCE_BYTES (64ull * 1024ull * 1024ull)
 #define PDOCKER_VK_MAX_GUARDED_MEMORIES 256
@@ -264,6 +266,14 @@ struct PdockerVkEvent {
     bool signaled;
 };
 
+struct PdockerVkQueryPool {
+    VkQueryType type;
+    uint32_t query_count;
+    uint64_t *values;
+    uint8_t *available;
+    uint8_t *active;
+};
+
 typedef struct {
     PdockerVkBuffer *src;
     PdockerVkBuffer *dst;
@@ -337,6 +347,10 @@ typedef enum {
     PDOCKER_VK_COMMAND_BLIT_IMAGE = 10,
     PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE = 11,
     PDOCKER_VK_COMMAND_EVENT = 12,
+    PDOCKER_VK_COMMAND_QUERY_BEGIN = 13,
+    PDOCKER_VK_COMMAND_QUERY_END = 14,
+    PDOCKER_VK_COMMAND_QUERY_RESET = 15,
+    PDOCKER_VK_COMMAND_QUERY_TIMESTAMP = 16,
 } PdockerVkCommandOpType;
 
 typedef struct {
@@ -349,6 +363,10 @@ typedef struct {
     void *payload;
     PdockerVkEvent *event;
     bool event_signaled;
+    PdockerVkQueryPool *query_pool;
+    uint32_t query_index;
+    uint32_t query_count;
+    VkPipelineStageFlags2 query_stage_mask;
 } PdockerVkCommandOp;
 
 typedef struct {
@@ -396,6 +414,7 @@ static bool g_guarded_sigsegv_installed;
 static uint64_t g_vulkan_object_generation;
 
 static bool trace_allocations(void);
+static void execute_recorded_query_op(PdockerVkCommandOp *op);
 
 static bool env_enabled(const char *name) {
     const char *value = getenv(name);
@@ -1106,6 +1125,12 @@ static double monotonic_ms(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0.0;
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+}
+
+static uint64_t monotonic_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
 static uint64_t fnv1a64_bytes(const void *data, size_t size) {
@@ -4210,7 +4235,8 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
     pProperties->limits.minUniformBufferOffsetAlignment = 16;
     pProperties->limits.minMemoryMapAlignment = 64;
     pProperties->limits.nonCoherentAtomSize = 64;
-    pProperties->limits.timestampComputeAndGraphics = VK_FALSE;
+    pProperties->limits.timestampComputeAndGraphics = VK_TRUE;
+    pProperties->limits.timestampPeriod = 1.0f;
     if (trace_allocations()) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: advertised limits maxBuffer=%llu maxStorageRange=%u subgroupSize=%u subgroupOps=0x%x shaderInt64=%u storage16=%u storage8=%u\n",
@@ -4838,7 +4864,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(
         memset(&pQueueFamilyProperties[0], 0, sizeof(pQueueFamilyProperties[0]));
         pQueueFamilyProperties[0].queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
         pQueueFamilyProperties[0].queueCount = 2;
-        pQueueFamilyProperties[0].timestampValidBits = 0;
+        pQueueFamilyProperties[0].timestampValidBits = 64;
         pQueueFamilyProperties[0].minImageTransferGranularity.width = 1;
         pQueueFamilyProperties[0].minImageTransferGranularity.height = 1;
         pQueueFamilyProperties[0].minImageTransferGranularity.depth = 1;
@@ -4860,6 +4886,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2(
         memset(&pQueueFamilyProperties[0].queueFamilyProperties, 0, sizeof(pQueueFamilyProperties[0].queueFamilyProperties));
         pQueueFamilyProperties[0].queueFamilyProperties.queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
         pQueueFamilyProperties[0].queueFamilyProperties.queueCount = 2;
+        pQueueFamilyProperties[0].queueFamilyProperties.timestampValidBits = 64;
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.width = 1;
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.height = 1;
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.depth = 1;
@@ -7022,6 +7049,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                         case PDOCKER_VK_COMMAND_EVENT:
                             if (op->event) op->event->signaled = op->event_signaled;
                             break;
+                        case PDOCKER_VK_COMMAND_QUERY_BEGIN:
+                        case PDOCKER_VK_COMMAND_QUERY_END:
+                        case PDOCKER_VK_COMMAND_QUERY_RESET:
+                        case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:
+                            execute_recorded_query_op(op);
+                            break;
                         case PDOCKER_VK_COMMAND_FILL:
                             execute_recorded_fill_op(op);
                             break;
@@ -7426,6 +7459,259 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
     vkCmdPipelineBarrier2(commandBuffer, pDependencyInfos);
 }
 
+static bool query_range_valid(
+        const PdockerVkQueryPool *pool,
+        uint32_t firstQuery,
+        uint32_t queryCount) {
+    return pool &&
+           firstQuery <= pool->query_count &&
+           queryCount <= pool->query_count - firstQuery;
+}
+
+static void reset_query_range(
+        PdockerVkQueryPool *pool,
+        uint32_t firstQuery,
+        uint32_t queryCount) {
+    if (!query_range_valid(pool, firstQuery, queryCount)) return;
+    for (uint32_t i = 0; i < queryCount; ++i) {
+        uint32_t q = firstQuery + i;
+        pool->values[q] = 0;
+        pool->available[q] = 0;
+        pool->active[q] = 0;
+    }
+}
+
+static void execute_recorded_query_op(PdockerVkCommandOp *op) {
+    if (!op || !op->query_pool ||
+        !query_range_valid(op->query_pool, op->query_index, op->query_count)) {
+        return;
+    }
+    PdockerVkQueryPool *pool = op->query_pool;
+    switch (op->type) {
+        case PDOCKER_VK_COMMAND_QUERY_BEGIN:
+            pool->active[op->query_index] = 1;
+            pool->available[op->query_index] = 0;
+            break;
+        case PDOCKER_VK_COMMAND_QUERY_END:
+            pool->active[op->query_index] = 0;
+            pool->values[op->query_index] = monotonic_ns();
+            pool->available[op->query_index] = 1;
+            break;
+        case PDOCKER_VK_COMMAND_QUERY_RESET:
+            reset_query_range(pool, op->query_index, op->query_count);
+            break;
+        case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:
+            (void)op->query_stage_mask;
+            pool->values[op->query_index] = monotonic_ns();
+            pool->available[op->query_index] = 1;
+            pool->active[op->query_index] = 0;
+            break;
+        default:
+            break;
+    }
+}
+
+static void record_query_command(
+        VkCommandBuffer commandBuffer,
+        PdockerVkCommandOpType type,
+        VkQueryPool queryPool,
+        uint32_t firstQuery,
+        uint32_t queryCount,
+        VkPipelineStageFlags2 stageMask) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkQueryPool *pool = (PdockerVkQueryPool *)queryPool;
+    if (!cmd || !query_range_valid(pool, firstQuery, queryCount)) return;
+    PdockerVkCommandOp op;
+    memset(&op, 0, sizeof(op));
+    op.type = type;
+    op.query_pool = pool;
+    op.query_index = firstQuery;
+    op.query_count = queryCount;
+    op.query_stage_mask = stageMask;
+    (void)append_command_op(cmd, &op);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
+        VkDevice device,
+        const VkQueryPoolCreateInfo *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkQueryPool *pQueryPool) {
+    (void)device;
+    (void)pAllocator;
+    if (!pCreateInfo || !pQueryPool || pCreateInfo->queryCount == 0 ||
+        pCreateInfo->queryCount > PDOCKER_VK_MAX_QUERY_COUNT) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (pCreateInfo->queryType != VK_QUERY_TYPE_TIMESTAMP) {
+        trace_icd_runtime_failure("query-type-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    PdockerVkQueryPool *pool = pdocker_alloc_handle(sizeof(*pool));
+    if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    pool->type = pCreateInfo->queryType;
+    pool->query_count = pCreateInfo->queryCount;
+    pool->values = calloc(pool->query_count, sizeof(pool->values[0]));
+    pool->available = calloc(pool->query_count, sizeof(pool->available[0]));
+    pool->active = calloc(pool->query_count, sizeof(pool->active[0]));
+    if (!pool->values || !pool->available || !pool->active) {
+        free(pool->values);
+        free(pool->available);
+        free(pool->active);
+        free(pool);
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+    *pQueryPool = (VkQueryPool)pool;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyQueryPool(
+        VkDevice device,
+        VkQueryPool queryPool,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)pAllocator;
+    PdockerVkQueryPool *pool = (PdockerVkQueryPool *)queryPool;
+    if (!pool) return;
+    free(pool->values);
+    free(pool->available);
+    free(pool->active);
+    free(pool);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBeginQuery(
+        VkCommandBuffer commandBuffer,
+        VkQueryPool queryPool,
+        uint32_t query,
+        VkQueryControlFlags flags) {
+    (void)flags;
+    record_query_command(commandBuffer,
+                         PDOCKER_VK_COMMAND_QUERY_BEGIN,
+                         queryPool,
+                         query,
+                         1,
+                         0);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdEndQuery(
+        VkCommandBuffer commandBuffer,
+        VkQueryPool queryPool,
+        uint32_t query) {
+    record_query_command(commandBuffer,
+                         PDOCKER_VK_COMMAND_QUERY_END,
+                         queryPool,
+                         query,
+                         1,
+                         0);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdResetQueryPool(
+        VkCommandBuffer commandBuffer,
+        VkQueryPool queryPool,
+        uint32_t firstQuery,
+        uint32_t queryCount) {
+    record_query_command(commandBuffer,
+                         PDOCKER_VK_COMMAND_QUERY_RESET,
+                         queryPool,
+                         firstQuery,
+                         queryCount,
+                         0);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkResetQueryPool(
+        VkDevice device,
+        VkQueryPool queryPool,
+        uint32_t firstQuery,
+        uint32_t queryCount) {
+    (void)device;
+    reset_query_range((PdockerVkQueryPool *)queryPool, firstQuery, queryCount);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdWriteTimestamp(
+        VkCommandBuffer commandBuffer,
+        VkPipelineStageFlagBits pipelineStage,
+        VkQueryPool queryPool,
+        uint32_t query) {
+    record_query_command(commandBuffer,
+                         PDOCKER_VK_COMMAND_QUERY_TIMESTAMP,
+                         queryPool,
+                         query,
+                         1,
+                         (VkPipelineStageFlags2)pipelineStage);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdWriteTimestamp2(
+        VkCommandBuffer commandBuffer,
+        VkPipelineStageFlags2 stage,
+        VkQueryPool queryPool,
+        uint32_t query) {
+    record_query_command(commandBuffer,
+                         PDOCKER_VK_COMMAND_QUERY_TIMESTAMP,
+                         queryPool,
+                         query,
+                         1,
+                         stage);
+}
+
+static void write_query_result_scalar(uint8_t *dst, bool result64, uint64_t value) {
+    if (result64) {
+        uint64_t v = value;
+        memcpy(dst, &v, sizeof(v));
+    } else {
+        uint32_t v = value > UINT32_MAX ? UINT32_MAX : (uint32_t)value;
+        memcpy(dst, &v, sizeof(v));
+    }
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetQueryPoolResults(
+        VkDevice device,
+        VkQueryPool queryPool,
+        uint32_t firstQuery,
+        uint32_t queryCount,
+        size_t dataSize,
+        void *pData,
+        VkDeviceSize stride,
+        VkQueryResultFlags flags) {
+    (void)device;
+    PdockerVkQueryPool *pool = (PdockerVkQueryPool *)queryPool;
+    if (!pData || !query_range_valid(pool, firstQuery, queryCount)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    bool result64 = (flags & VK_QUERY_RESULT_64_BIT) != 0;
+    bool with_availability = (flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) != 0;
+    bool wait = (flags & VK_QUERY_RESULT_WAIT_BIT) != 0;
+    bool partial = (flags & VK_QUERY_RESULT_PARTIAL_BIT) != 0;
+    size_t scalar_size = result64 ? sizeof(uint64_t) : sizeof(uint32_t);
+    size_t item_size = scalar_size + (with_availability ? scalar_size : 0);
+    if (queryCount > 1 && stride < item_size) return VK_INCOMPLETE;
+    uint8_t *bytes = (uint8_t *)pData;
+    VkResult rc = VK_SUCCESS;
+    for (uint32_t i = 0; i < queryCount; ++i) {
+        size_t offset = (size_t)i * (size_t)stride;
+        if ((VkDeviceSize)offset != (VkDeviceSize)i * stride ||
+            offset > dataSize || item_size > dataSize - offset) {
+            return VK_INCOMPLETE;
+        }
+        uint32_t q = firstQuery + i;
+        if (!pool->available[q] && wait) {
+            pool->values[q] = monotonic_ns();
+            pool->available[q] = 1;
+            pool->active[q] = 0;
+        }
+        if (!pool->available[q] && !partial) {
+            rc = VK_NOT_READY;
+            continue;
+        }
+        write_query_result_scalar(bytes + offset, result64, pool->values[q]);
+        if (with_availability) {
+            write_query_result_scalar(bytes + offset + scalar_size,
+                                      result64,
+                                      pool->available[q] ? 1 : 0);
+        }
+    }
+    return rc;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
         VkDevice device,
         const VkFenceCreateInfo *pCreateInfo,
@@ -7704,6 +7990,16 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_ALIAS("vkCmdResetEvent2KHR", vkCmdResetEvent2);
     MAP_PROC(vkCmdWaitEvents2);
     MAP_ALIAS("vkCmdWaitEvents2KHR", vkCmdWaitEvents2);
+    MAP_PROC(vkCreateQueryPool);
+    MAP_PROC(vkDestroyQueryPool);
+    MAP_PROC(vkCmdBeginQuery);
+    MAP_PROC(vkCmdEndQuery);
+    MAP_PROC(vkCmdResetQueryPool);
+    MAP_PROC(vkResetQueryPool);
+    MAP_PROC(vkGetQueryPoolResults);
+    MAP_PROC(vkCmdWriteTimestamp);
+    MAP_PROC(vkCmdWriteTimestamp2);
+    MAP_ALIAS("vkCmdWriteTimestamp2KHR", vkCmdWriteTimestamp2);
     MAP_PROC(vkCreateFence);
     MAP_PROC(vkDestroyFence);
     MAP_PROC(vkResetFences);
