@@ -669,6 +669,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdSetStencilCompareMask",
             "vkCmdSetStencilWriteMask",
             "vkCmdSetStencilReference",
+            "vkCmdClearAttachments",
+            "vkCmdExecuteCommands",
         ]:
             self.assertRegex(icd, rf"VKAPI_ATTR\s+[\w\s\*]+VKAPI_CALL\s+{name}\s*\(")
             self.assertIn(f"MAP_PROC({name});", icd)
@@ -698,6 +700,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->render_pass_active",
             "cmd->vertex_buffer_bound",
             "cmd->index_buffer_bound",
+            "graphics-command-unimplemented",
+            "VK_ERROR_EXTENSION_NOT_PRESENT",
+            "pProperties->apiVersion > VK_API_VERSION_1_2",
         ]:
             self.assertIn(marker, icd)
 

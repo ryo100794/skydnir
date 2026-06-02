@@ -4240,6 +4240,9 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     memset(pProperties, 0, sizeof(*pProperties));
     pProperties->apiVersion = caps && caps->api_version ? caps->api_version : pdocker_api_version();
+    if (pProperties->apiVersion > VK_API_VERSION_1_2) {
+        pProperties->apiVersion = VK_API_VERSION_1_2;
+    }
     pProperties->driverVersion = VK_MAKE_API_VERSION(0, 0, 1, 0);
     pProperties->vendorID = caps && caps->vendor_id ? caps->vendor_id : 0x5044; /* PD */
     pProperties->deviceID = caps && caps->device_id ? caps->device_id : 0x0001;
@@ -4828,9 +4831,25 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(
         const VkInstanceCreateInfo *pCreateInfo,
         const VkAllocationCallbacks *pAllocator,
         VkInstance *pInstance) {
-    (void)pCreateInfo;
     (void)pAllocator;
     if (!pInstance) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pCreateInfo && pCreateInfo->enabledExtensionCount > 0) {
+        for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i) {
+            const char *name = pCreateInfo->ppEnabledExtensionNames
+                ? pCreateInfo->ppEnabledExtensionNames[i]
+                : NULL;
+            if (name && name[0]) {
+                trace_icd_runtime_failure("instance-extension-not-present",
+                                          VK_ERROR_EXTENSION_NOT_PRESENT);
+                if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: instance extension unsupported: %s\n",
+                            name);
+                }
+                return VK_ERROR_EXTENSION_NOT_PRESENT;
+            }
+        }
+    }
     PdockerVkInstance *instance = calloc(1, sizeof(*instance));
     if (!instance) return VK_ERROR_OUT_OF_HOST_MEMORY;
     set_loader_magic_value(instance);
@@ -6731,6 +6750,39 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilReference(
     (void)reference;
 }
 
+VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments(
+        VkCommandBuffer commandBuffer,
+        uint32_t attachmentCount,
+        const VkClearAttachment *pAttachments,
+        uint32_t rectCount,
+        const VkClearRect *pRects) {
+    (void)attachmentCount;
+    (void)pAttachments;
+    (void)rectCount;
+    (void)pRects;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (cmd) cmd->graphics_unsupported = true;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdExecuteCommands(
+        VkCommandBuffer commandBuffer,
+        uint32_t commandBufferCount,
+        const VkCommandBuffer *pCommandBuffers) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!cmd) return;
+    for (uint32_t i = 0; i < commandBufferCount; ++i) {
+        PdockerVkCommandBuffer *secondary = pCommandBuffers
+            ? (PdockerVkCommandBuffer *)pCommandBuffers[i]
+            : NULL;
+        if (!secondary || secondary->graphics_unsupported ||
+                secondary->unsupported_descriptor_set_layout) {
+            cmd->graphics_unsupported = true;
+            return;
+        }
+    }
+    cmd->graphics_unsupported = true;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         VkCommandBuffer commandBuffer,
         VkPipelineBindPoint pipelineBindPoint,
@@ -7810,6 +7862,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                                           VK_ERROR_FEATURE_NOT_PRESENT);
                 return VK_ERROR_FEATURE_NOT_PRESENT;
             }
+            if (cmd->graphics_unsupported) {
+                trace_icd_runtime_failure("graphics-command-unimplemented",
+                                          VK_ERROR_FEATURE_NOT_PRESENT);
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+            }
             if (cmd->command_op_count > 0) {
                 PdockerVkCopyStats stats;
                 memset(&stats, 0, sizeof(stats));
@@ -8833,6 +8890,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdSetStencilCompareMask);
     MAP_PROC(vkCmdSetStencilWriteMask);
     MAP_PROC(vkCmdSetStencilReference);
+    MAP_PROC(vkCmdClearAttachments);
+    MAP_PROC(vkCmdExecuteCommands);
     MAP_PROC(vkCmdBindDescriptorSets);
     MAP_PROC(vkCmdPushConstants);
     MAP_PROC(vkCmdPipelineBarrier);
