@@ -536,7 +536,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ABI_MAJOR 6u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ABI_MINOR 0u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
-#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x1c07d4dfa7d62f94ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_SCHEMA_HASH 0xecf6011339e6aa3bull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_SCHEMA_HASH 0x7a735aaa6fdc4e5aull
@@ -591,6 +591,21 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(descriptor_table_offset, u64) \
     X(descriptor_table_size, u64) \
     X(descriptor_schema_hash, u64) \
+    X(image_count, u32) \
+    X(image_entry_size, u32) \
+    X(image_table_offset, u64) \
+    X(image_table_size, u64) \
+    X(image_schema_hash, u64) \
+    X(image_view_count, u32) \
+    X(image_view_entry_size, u32) \
+    X(image_view_table_offset, u64) \
+    X(image_view_table_size, u64) \
+    X(image_view_schema_hash, u64) \
+    X(sampler_count, u32) \
+    X(sampler_entry_size, u32) \
+    X(sampler_table_offset, u64) \
+    X(sampler_table_size, u64) \
+    X(sampler_schema_hash, u64) \
     X(shader_stage_count, u32) \
     X(shader_stage_entry_size, u32) \
     X(shader_stage_table_offset, u64) \
@@ -628,7 +643,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(command_schema_hash, u64) \
     X(payload_hash, u64) \
     X(frame_hash, u64)
-#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELD_COUNT 57u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_FIELD_COUNT 72u
 
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_FIELDS(X) \
     X(stage_flags, u32) \
@@ -757,6 +772,21 @@ typedef struct PdockerGpuVulkanGraphicsV6FrameHeader {
     uint64_t descriptor_table_offset;
     uint64_t descriptor_table_size;
     uint64_t descriptor_schema_hash;
+    uint32_t image_count;
+    uint32_t image_entry_size;
+    uint64_t image_table_offset;
+    uint64_t image_table_size;
+    uint64_t image_schema_hash;
+    uint32_t image_view_count;
+    uint32_t image_view_entry_size;
+    uint64_t image_view_table_offset;
+    uint64_t image_view_table_size;
+    uint64_t image_view_schema_hash;
+    uint32_t sampler_count;
+    uint32_t sampler_entry_size;
+    uint64_t sampler_table_offset;
+    uint64_t sampler_table_size;
+    uint64_t sampler_schema_hash;
     uint32_t shader_stage_count;
     uint32_t shader_stage_entry_size;
     uint64_t shader_stage_table_offset;
