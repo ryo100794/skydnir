@@ -1855,6 +1855,55 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("timestampPeriod = 1.0f;", icd)
         self.assertIn("timestampValidBits = 64;", icd)
 
+    def test_vulkan_icd_tracks_image_layout_barriers_and_transfer_layouts(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("VkImageLayout current_layout;", icd)
+        self.assertIn("uint64_t layout_generation;", icd)
+        self.assertIn("bool layout_mixed;", icd)
+        self.assertIn("PdockerVkImageBarrierOp", icd)
+        self.assertIn("PDOCKER_VK_COMMAND_IMAGE_BARRIER", icd)
+        self.assertIn("image_barrier_ops[PDOCKER_VK_MAX_COPY_OPS]", icd)
+        self.assertIn("execute_recorded_image_barrier_op", icd)
+        self.assertIn("record_image_barrier_op", icd)
+        self.assertIn("image_subresource_range_is_whole_image", icd)
+        self.assertIn("trace_image_layout_mismatch", icd)
+        self.assertIn("image->current_layout = pCreateInfo->initialLayout;", icd)
+        self.assertIn("image->layout_generation = next_vulkan_object_generation();", icd)
+        self.assertIn("image->layout_mixed = false;", icd)
+        barrier_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer", 1
+        )[0]
+        self.assertIn("pImageMemoryBarriers && i < imageMemoryBarrierCount", barrier_body)
+        self.assertIn("record_image_barrier_op(commandBuffer", barrier_body)
+        barrier2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1
+        )[0]
+        self.assertIn("pDependencyInfo->pImageMemoryBarriers", barrier2_body)
+        self.assertIn("const VkImageMemoryBarrier2 *b", barrier2_body)
+        self.assertIn("record_image_barrier_op(commandBuffer", barrier2_body)
+        self.assertNotIn("vkCmdPipelineBarrier(commandBuffer", barrier2_body)
+        self.assertIn("execute_recorded_image_barrier_op(", icd)
+        for field in [
+            "VkImageLayout image_layout;",
+            "VkImageLayout src_layout;",
+            "VkImageLayout dst_layout;",
+        ]:
+            self.assertIn(field, icd)
+        for stage in [
+            '"descriptor-update"',
+            '"copy-buffer-to-image"',
+            '"copy-image-to-buffer"',
+            '"copy-image-src"',
+            '"copy-image-dst"',
+            '"clear-color-image"',
+            '"resolve-image-src"',
+            '"resolve-image-dst"',
+            '"blit-image-src"',
+            '"blit-image-dst"',
+            '"clear-depth-stencil-image"',
+        ]:
+            self.assertIn(stage, icd)
+
     def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("descriptor_type_supported_by_v4_transport", icd)
