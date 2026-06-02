@@ -17,6 +17,7 @@
 #include <limits.h>
 #include <math.h>
 #include <signal.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14761,6 +14762,135 @@ static int parse_count(const char *s, int fallback) {
     long n = strtol(s, &end, 10);
     if (!end || *end || n <= 0 || n > 10000) return fallback;
     return (int)n;
+}
+
+
+static int read_exact_bytes(int fd, void *buf, size_t bytes) {
+    unsigned char *out = (unsigned char *)buf;
+    size_t off = 0;
+    while (off < bytes) {
+        ssize_t r = read(fd, out + off, bytes - off);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            return -errno;
+        }
+        if (r == 0) return -ECONNRESET;
+        off += (size_t)r;
+    }
+    return 0;
+}
+
+static int range_within_frame(uint64_t offset, uint64_t size, uint64_t frame_size) {
+    if (offset > frame_size) return 0;
+    if (size > frame_size - offset) return 0;
+    return 1;
+}
+
+static int validate_vulkan_dispatch_v5_header(
+        const PdockerGpuVulkanDispatchV5FrameHeader *header,
+        size_t received_fd_count) {
+    if (!header) return -EINVAL;
+    if (memcmp(header->magic, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC, 8) != 0) {
+        return -EPROTO;
+    }
+    if (header->header_size != sizeof(PdockerGpuVulkanDispatchV5FrameHeader)) {
+        return -EPROTO;
+    }
+    if (header->abi_major != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MAJOR ||
+        header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR ||
+        header->command != PDOCKER_GPU_VULKAN_DISPATCH_V5_COMMAND_DISPATCH) {
+        return -EPROTO;
+    }
+    if (header->frame_size < header->header_size ||
+        header->frame_size > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES) {
+        return -EMSGSIZE;
+    }
+    if (header->fd_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS ||
+        header->fd_count != received_fd_count ||
+        header->shader_fd_index >= header->fd_count) {
+        return -EBADF;
+    }
+    if (header->resource_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
+        header->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
+        return -E2BIG;
+    }
+    if (header->resource_entry_size != sizeof(PdockerGpuVulkanDispatchV5ResourceEntry) ||
+        header->descriptor_entry_size != sizeof(PdockerGpuVulkanDispatchV5DescriptorEntry) ||
+        (header->specialization_count > 0 &&
+         header->specialization_entry_size != sizeof(PdockerGpuVulkanDispatchV5SpecializationEntry))) {
+        return -EPROTO;
+    }
+    if (header->resource_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH ||
+        header->descriptor_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH) {
+        return -EPROTO;
+    }
+    if (header->specialization_count > 0 &&
+        header->specialization_hash != 0 &&
+        header->specialization_entry_size != sizeof(PdockerGpuVulkanDispatchV5SpecializationEntry)) {
+        return -EPROTO;
+    }
+    uint64_t resource_bytes = (uint64_t)header->resource_count * header->resource_entry_size;
+    uint64_t descriptor_bytes = (uint64_t)header->descriptor_count * header->descriptor_entry_size;
+    uint64_t specialization_bytes = (uint64_t)header->specialization_count * header->specialization_entry_size;
+    if (resource_bytes != header->resource_table_size ||
+        descriptor_bytes != header->descriptor_table_size ||
+        specialization_bytes != header->specialization_table_size) {
+        return -EPROTO;
+    }
+    if (!range_within_frame(header->resource_table_offset, header->resource_table_size, header->frame_size) ||
+        !range_within_frame(header->descriptor_table_offset, header->descriptor_table_size, header->frame_size) ||
+        !range_within_frame(header->specialization_table_offset, header->specialization_table_size, header->frame_size) ||
+        !range_within_frame(header->specialization_data_offset, header->specialization_data_size, header->frame_size) ||
+        !range_within_frame(header->push_offset, header->push_size, header->frame_size) ||
+        !range_within_frame(header->entry_name_offset, header->entry_name_size, header->frame_size) ||
+        !range_within_frame(header->option_text_offset, header->option_text_size, header->frame_size)) {
+        return -EPROTO;
+    }
+    if (header->resource_count == 0 || header->descriptor_count == 0 ||
+        header->shader_size == 0 || header->entry_name_size == 0) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static int recv_vulkan_dispatch_v5_header_with_fds(
+        int cfd,
+        PdockerGpuVulkanDispatchV5FrameHeader *header,
+        int *passed_fds,
+        size_t max_fds,
+        size_t *fd_count) {
+    if (!header || !passed_fds || !fd_count) return -EINVAL;
+    *fd_count = 0;
+    for (size_t i = 0; i < max_fds; ++i) passed_fds[i] = -1;
+    char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_MAX_PASSED_FDS)];
+    struct iovec iov = {.iov_base = header, .iov_len = sizeof(*header)};
+    struct msghdr msg;
+    memset(control, 0, sizeof(control));
+    memset(&msg, 0, sizeof(msg));
+    memset(header, 0, sizeof(*header));
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control;
+    msg.msg_controllen = sizeof(control);
+    ssize_t n = recvmsg(cfd, &msg, MSG_WAITALL);
+    if (n <= 0) return n < 0 ? -errno : 0;
+    if ((size_t)n != sizeof(*header) ||
+        (msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0) {
+        return -EMSGSIZE;
+    }
+    for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+         cmsg;
+         cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+        if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) continue;
+        size_t bytes = cmsg->cmsg_len - CMSG_LEN(0);
+        size_t count = bytes / sizeof(int);
+        int *fds = (int *)CMSG_DATA(cmsg);
+        for (size_t i = 0; i < count; ++i) {
+            if (*fd_count < max_fds) passed_fds[(*fd_count)++] = fds[i];
+            else close(fds[i]);
+        }
+    }
+    return validate_vulkan_dispatch_v5_header(header, *fd_count);
 }
 
 static int recv_command_with_fds(

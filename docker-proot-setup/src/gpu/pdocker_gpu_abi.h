@@ -1,6 +1,8 @@
 #ifndef PDOCKER_GPU_ABI_H
 #define PDOCKER_GPU_ABI_H
 
+#include <stdint.h>
+
 /*
  * Backend-neutral GPU command ABI labels.
  *
@@ -210,5 +212,92 @@
     X(offset, u32) \
     X(size, u64)
 #define PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_FIELD_COUNT 3u
+
+
+typedef struct PdockerGpuVulkanDispatchV5FrameHeader {
+    char magic[8];
+    uint16_t header_size;
+    uint16_t abi_major;
+    uint16_t abi_minor;
+    uint16_t command;
+    uint32_t flags;
+    uint32_t reserved0;
+    uint64_t frame_size;
+    uint64_t dispatch_id;
+    uint32_t fd_count;
+    uint32_t shader_fd_index;
+    uint64_t shader_size;
+    uint64_t shader_hash;
+    uint32_t gx;
+    uint32_t gy;
+    uint32_t gz;
+    uint32_t reserved1;
+    uint32_t resource_count;
+    uint32_t resource_entry_size;
+    uint64_t resource_table_offset;
+    uint64_t resource_table_size;
+    uint64_t resource_schema_hash;
+    uint32_t descriptor_count;
+    uint32_t descriptor_entry_size;
+    uint64_t descriptor_table_offset;
+    uint64_t descriptor_table_size;
+    uint64_t descriptor_schema_hash;
+    uint32_t specialization_count;
+    uint32_t specialization_entry_size;
+    uint64_t specialization_table_offset;
+    uint64_t specialization_table_size;
+    uint64_t specialization_data_offset;
+    uint64_t specialization_data_size;
+    uint64_t specialization_hash;
+    uint64_t push_offset;
+    uint64_t push_size;
+    uint64_t push_hash;
+    uint64_t entry_name_offset;
+    uint64_t entry_name_size;
+    uint64_t option_text_offset;
+    uint64_t option_text_size;
+    uint64_t option_hash;
+    uint64_t resource_hash;
+    uint64_t descriptor_hash;
+    uint64_t dispatch_hash;
+    uint64_t frame_hash;
+} PdockerGpuVulkanDispatchV5FrameHeader;
+
+typedef struct PdockerGpuVulkanDispatchV5ResourceEntry {
+    uint32_t resource_type;
+    uint32_t resource_flags;
+    uint64_t resource_id;
+    uint32_t parent_resource_index;
+    uint32_t fd_index;
+    uint64_t memory_offset;
+    uint64_t size;
+    uint64_t usage;
+    uint64_t memory_property_flags;
+    uint64_t external_offset;
+    uint64_t generation;
+} PdockerGpuVulkanDispatchV5ResourceEntry;
+
+typedef struct PdockerGpuVulkanDispatchV5DescriptorEntry {
+    uint32_t descriptor_set;
+    uint32_t binding;
+    uint32_t array_element;
+    uint32_t descriptor_type;
+    uint32_t descriptor_flags;
+    uint32_t access_flags;
+    uint32_t resource_index;
+    uint32_t reserved0;
+    uint64_t resource_id;
+    uint64_t buffer_offset;
+    uint64_t range;
+    uint64_t transfer_offset;
+    uint64_t transfer_size;
+    uint64_t dynamic_offset;
+} PdockerGpuVulkanDispatchV5DescriptorEntry;
+
+typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
+    uint32_t constant_id;
+    uint32_t offset;
+    uint64_t size;
+} PdockerGpuVulkanDispatchV5SpecializationEntry;
 
 #endif

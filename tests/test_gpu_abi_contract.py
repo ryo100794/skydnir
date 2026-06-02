@@ -585,6 +585,29 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+
+
+    def test_vulkan_dispatch_v5_header_validator_is_separate_from_text_commands(self):
+        executor = GPU_EXECUTOR.read_text()
+        self.assertIn("recv_vulkan_dispatch_v5_header_with_fds", executor)
+        self.assertIn("validate_vulkan_dispatch_v5_header", executor)
+        self.assertIn("MSG_WAITALL", executor)
+        self.assertIn("read_exact_bytes", executor)
+        self.assertIn("range_within_frame", executor)
+        self.assertIn("memcmp(header->magic, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC, 8)", executor)
+        self.assertIn("header->header_size != sizeof(PdockerGpuVulkanDispatchV5FrameHeader)", executor)
+        self.assertIn("header->fd_count != received_fd_count", executor)
+        self.assertIn("header->resource_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH", executor)
+        self.assertIn("header->descriptor_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH", executor)
+        self.assertIn("resource_bytes != header->resource_table_size", executor)
+        self.assertIn("descriptor_bytes != header->descriptor_table_size", executor)
+        self.assertIn("MSG_TRUNC | MSG_CTRUNC", executor)
+        text_recv = executor.split("static int recv_command_with_fds", 1)[1].split(
+            "static int serve_socket", 1
+        )[0]
+        self.assertIn('cmd[strcspn(cmd, "\\r\\n")] = \'\\0\';', text_recv)
+        self.assertNotIn("validate_vulkan_dispatch_v5_header", text_recv)
+
     def test_vulkan_dispatch_v5_schema_is_single_source_and_advertised(self):
         app = APP_HEADER.read_text()
         container = CONTAINER_HEADER.read_text()
