@@ -10802,7 +10802,8 @@ static int run_vulkan_dispatch_fd(
         uint32_t gx,
         uint32_t gy,
         uint32_t gz) {
-    if (shader_fd < 0 || !buffer_fds || !bindings || binding_count == 0 ||
+    if (shader_fd < 0 || !buffer_fds || !bindings ||
+        (binding_count == 0 && image_descriptor_count == 0) ||
         binding_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS || shader_size == 0 ||
         shader_size > 8 * 1024 * 1024 || push_size > PDOCKER_GPU_MAX_PUSH_BYTES ||
         specialization_count > PDOCKER_GPU_MAX_VULKAN_SPECIALIZATION_ENTRIES ||

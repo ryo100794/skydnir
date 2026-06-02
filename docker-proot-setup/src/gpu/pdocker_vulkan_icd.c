@@ -1502,11 +1502,57 @@ static int send_vulkan_dispatch_v5_frame_with_fds(
                           frame_size - sizeof(PdockerGpuVulkanDispatchV5FrameHeader));
 }
 
+static uint32_t float_bits_u32(float value) {
+    uint32_t bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+static int find_image_table_index(PdockerVkImage *const *images,
+                                  size_t count,
+                                  const PdockerVkImage *image) {
+    for (size_t i = 0; i < count; ++i) {
+        if (images[i] == image) return (int)i;
+    }
+    return -1;
+}
+
+static int find_image_view_table_index(PdockerVkImageView *const *views,
+                                       size_t count,
+                                       const PdockerVkImageView *view) {
+    for (size_t i = 0; i < count; ++i) {
+        if (views[i] == view) return (int)i;
+    }
+    return -1;
+}
+
+static int find_sampler_table_index(PdockerVkSampler *const *samplers,
+                                    size_t count,
+                                    const PdockerVkSampler *sampler) {
+    for (size_t i = 0; i < count; ++i) {
+        if (samplers[i] == sampler) return (int)i;
+    }
+    return -1;
+}
+
+static bool descriptor_type_requires_image_view(VkDescriptorType type) {
+    return type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
+           type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
+           type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
+           type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+}
+
+static bool descriptor_type_requires_sampler(VkDescriptorType type) {
+    return type == VK_DESCRIPTOR_TYPE_SAMPLER ||
+           type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+}
+
 static int send_generic_vulkan_dispatch_v5_1_op(
         int socket_fd,
         uint64_t dispatch_id,
         int *fds,
         size_t binding_count,
+        size_t image_descriptor_count,
         size_t shader_size,
         uint64_t shader_hash,
         uint32_t gx,
@@ -1536,18 +1582,47 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         const size_t *api_memory_sizes,
         const uintptr_t *api_memory_ids,
         const uintptr_t *api_buffer_ids,
+        const uint32_t *image_descriptor_sets,
+        const uint32_t *image_descriptor_bindings,
+        const uint32_t *image_descriptor_types,
+        const uint32_t *image_descriptor_view_indices,
+        const uint32_t *image_descriptor_sampler_indices,
+        const VkImageLayout *image_descriptor_layouts,
+        PdockerVkImage *const *image_objects,
+        size_t image_count,
+        PdockerVkImageView *const *image_view_objects,
+        size_t image_view_count,
+        PdockerVkSampler *const *sampler_objects,
+        size_t sampler_count,
         uint64_t descriptor_hash,
         uint64_t dispatch_hash) {
-    if (socket_fd < 0 || !fds || !entry_name || !api_descriptor_sets || !bindings ||
-        !offsets || !sizes || !api_offsets || !api_ranges || !api_buffer_sizes ||
-        !api_descriptor_types || !api_dynamic_flags || !api_memory_offsets ||
-        !api_memory_sizes || !api_memory_ids || !api_buffer_ids) {
+    (void)descriptor_hash;
+    if (socket_fd < 0 || !fds || !entry_name ||
+        (binding_count > 0 &&
+         (!api_descriptor_sets || !bindings || !offsets || !sizes || !api_offsets ||
+          !api_ranges || !api_buffer_sizes || !api_descriptor_types ||
+          !api_dynamic_flags || !api_memory_offsets || !api_memory_sizes ||
+          !api_memory_ids || !api_buffer_ids)) ||
+        (image_descriptor_count > 0 &&
+         (!image_descriptor_sets || !image_descriptor_bindings ||
+          !image_descriptor_types || !image_descriptor_view_indices ||
+          !image_descriptor_sampler_indices || !image_descriptor_layouts))) {
         return -EINVAL;
     }
-    if (binding_count == 0 || binding_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) return -EINVAL;
-    if (binding_count * 2u > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
-        binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
-        1u + binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
+    if (binding_count == 0 && image_descriptor_count == 0) return -EINVAL;
+    if (binding_count > PDOCKER_VK_MAX_STORAGE_BUFFERS ||
+        image_descriptor_count > PDOCKER_VK_MAX_STORAGE_BUFFERS ||
+        image_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES ||
+        image_view_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS ||
+        sampler_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS) {
+        return -E2BIG;
+    }
+    const size_t resource_count = binding_count * 2u + image_count;
+    const size_t descriptor_count = binding_count + image_descriptor_count;
+    const size_t fd_count = 1u + binding_count + image_count;
+    if (resource_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
+        descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
+        fd_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
         return -E2BIG;
     }
     if (specialization_entry_count > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES ||
@@ -1558,12 +1633,20 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     size_t entry_name_size = strlen(entry_name);
     if (entry_name_size == 0 || entry_name_size >= PDOCKER_VK_MAX_ENTRY_NAME) return -EINVAL;
 
-    PdockerGpuVulkanDispatchV5ResourceEntry resources[PDOCKER_VK_MAX_STORAGE_BUFFERS * 2];
-    PdockerGpuVulkanDispatchV5DescriptorObjectEntry descriptors[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    PdockerGpuVulkanDispatchV5ResourceEntry resources[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
+    PdockerGpuVulkanDispatchV5DescriptorObjectEntry descriptors[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
+    PdockerGpuVulkanDispatchV5ImageEntry image_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES];
+    PdockerGpuVulkanDispatchV5ImageViewEntry image_view_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS];
+    PdockerGpuVulkanDispatchV5SamplerEntry sampler_entries[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS];
     PdockerGpuVulkanDispatchV5SpecializationEntry specs[PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES];
     memset(resources, 0, sizeof(resources));
     memset(descriptors, 0, sizeof(descriptors));
+    memset(image_entries, 0, sizeof(image_entries));
+    memset(image_view_entries, 0, sizeof(image_view_entries));
+    memset(sampler_entries, 0, sizeof(sampler_entries));
     memset(specs, 0, sizeof(specs));
+    size_t resource_index = 0;
+    size_t fd_index = 1;
     for (size_t i = 0; i < binding_count; ++i) {
         if (api_memory_offsets[i] > offsets[i]) return -ERANGE;
         uint64_t transfer_offset = (uint64_t)(offsets[i] - api_memory_offsets[i]);
@@ -1571,15 +1654,16 @@ static int send_generic_vulkan_dispatch_v5_1_op(
             sizes[i] > api_buffer_sizes[i] - transfer_offset) {
             return -ERANGE;
         }
-        uint32_t memory_index = (uint32_t)(i * 2u);
+        uint32_t memory_index = (uint32_t)resource_index++;
         uint32_t buffer_index = memory_index + 1u;
+        resource_index++;
         resources[memory_index].resource_type = PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY;
         resources[memory_index].resource_flags =
             PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED |
             PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
         resources[memory_index].resource_id = (uint64_t)api_memory_ids[i];
         resources[memory_index].parent_resource_index = PDOCKER_GPU_V5_RESOURCE_PARENT_NONE;
-        resources[memory_index].fd_index = (uint32_t)(1u + i);
+        resources[memory_index].fd_index = (uint32_t)fd_index;
         resources[memory_index].memory_offset = 0;
         resources[memory_index].size = (uint64_t)api_memory_sizes[i];
         resources[memory_index].memory_property_flags =
@@ -1595,6 +1679,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         resources[buffer_index].memory_offset = (uint64_t)api_memory_offsets[i];
         resources[buffer_index].size = (uint64_t)api_buffer_sizes[i];
         resources[buffer_index].generation = dispatch_id;
+        fds[fd_index++] = fds[1u + i];
 
         descriptors[i].descriptor_set = api_descriptor_sets[i];
         descriptors[i].binding = bindings[i];
@@ -1615,6 +1700,121 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         descriptors[i].transfer_size = (uint64_t)sizes[i];
         descriptors[i].dynamic_offset = 0;
     }
+    for (size_t i = 0; i < image_count; ++i) {
+        PdockerVkImage *image = image_objects ? image_objects[i] : NULL;
+        if (!image || !image->memory || image->memory->fd < 0) return -EINVAL;
+        if (image->memory_offset > (VkDeviceSize)image->memory->size ||
+            image->requirements_size > (VkDeviceSize)image->memory->size - image->memory_offset) {
+            return -ERANGE;
+        }
+        const uint32_t memory_index = (uint32_t)resource_index++;
+        resources[memory_index].resource_type = PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY;
+        resources[memory_index].resource_flags =
+            PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED |
+            PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
+        resources[memory_index].resource_id = (uint64_t)(uintptr_t)image->memory;
+        resources[memory_index].parent_resource_index = PDOCKER_GPU_V5_RESOURCE_PARENT_NONE;
+        resources[memory_index].fd_index = (uint32_t)fd_index;
+        resources[memory_index].size = (uint64_t)image->memory->size;
+        resources[memory_index].memory_property_flags =
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        resources[memory_index].generation = dispatch_id;
+        fds[fd_index++] = image->memory->fd;
+
+        image_entries[i].flags =
+            ((image->flags & VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT)
+                ? PDOCKER_GPU_V5_IMAGE_FLAG_MUTABLE_FORMAT : 0u) |
+            ((image->flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT)
+                ? PDOCKER_GPU_V5_IMAGE_FLAG_CUBE_COMPATIBLE : 0u) |
+            ((image->flags & VK_IMAGE_CREATE_ALIAS_BIT)
+                ? PDOCKER_GPU_V5_IMAGE_FLAG_ALIAS : 0u);
+        image_entries[i].image_type = image->image_type;
+        image_entries[i].image_id = (uint64_t)(uintptr_t)image;
+        image_entries[i].memory_resource_index = memory_index;
+        image_entries[i].memory_offset = (uint64_t)image->memory_offset;
+        image_entries[i].memory_size = (uint64_t)image->requirements_size;
+        image_entries[i].format = image->format;
+        image_entries[i].extent_width = image->extent.width;
+        image_entries[i].extent_height = image->extent.height;
+        image_entries[i].extent_depth = image->extent.depth;
+        image_entries[i].mip_levels = image->mip_levels;
+        image_entries[i].array_layers = image->array_layers;
+        image_entries[i].samples = image->samples;
+        image_entries[i].tiling = image->tiling;
+        image_entries[i].usage = image->usage;
+        image_entries[i].create_flags = image->flags;
+        image_entries[i].sharing_mode = image->sharing_mode;
+        image_entries[i].initial_layout = image->initial_layout;
+        image_entries[i].generation = image->generation;
+    }
+    for (size_t i = 0; i < image_view_count; ++i) {
+        PdockerVkImageView *view = image_view_objects ? image_view_objects[i] : NULL;
+        if (!view || !view->image) return -EINVAL;
+        int image_index = find_image_table_index(image_objects, image_count, view->image);
+        if (image_index < 0) return -EINVAL;
+        image_view_entries[i].view_type = view->view_type;
+        image_view_entries[i].view_id = (uint64_t)(uintptr_t)view;
+        image_view_entries[i].image_index = (uint32_t)image_index;
+        image_view_entries[i].format = view->format;
+        image_view_entries[i].component_r = view->components.r;
+        image_view_entries[i].component_g = view->components.g;
+        image_view_entries[i].component_b = view->components.b;
+        image_view_entries[i].component_a = view->components.a;
+        image_view_entries[i].aspect_mask = view->subresource_range.aspectMask;
+        image_view_entries[i].base_mip_level = view->subresource_range.baseMipLevel;
+        image_view_entries[i].level_count = view->subresource_range.levelCount;
+        image_view_entries[i].base_array_layer = view->subresource_range.baseArrayLayer;
+        image_view_entries[i].layer_count = view->subresource_range.layerCount;
+        image_view_entries[i].generation = view->generation;
+    }
+    for (size_t i = 0; i < sampler_count; ++i) {
+        PdockerVkSampler *sampler = sampler_objects ? sampler_objects[i] : NULL;
+        if (!sampler) return -EINVAL;
+        sampler_entries[i].sampler_id = (uint64_t)(uintptr_t)sampler;
+        sampler_entries[i].mag_filter = sampler->mag_filter;
+        sampler_entries[i].min_filter = sampler->min_filter;
+        sampler_entries[i].mipmap_mode = sampler->mipmap_mode;
+        sampler_entries[i].address_mode_u = sampler->address_mode_u;
+        sampler_entries[i].address_mode_v = sampler->address_mode_v;
+        sampler_entries[i].address_mode_w = sampler->address_mode_w;
+        sampler_entries[i].mip_lod_bias_bits = float_bits_u32(sampler->mip_lod_bias);
+        sampler_entries[i].anisotropy_enable = sampler->anisotropy_enable;
+        sampler_entries[i].max_anisotropy_bits = float_bits_u32(sampler->max_anisotropy);
+        sampler_entries[i].compare_enable = sampler->compare_enable;
+        sampler_entries[i].compare_op = sampler->compare_op;
+        sampler_entries[i].min_lod_bits = float_bits_u32(sampler->min_lod);
+        sampler_entries[i].max_lod_bits = float_bits_u32(sampler->max_lod);
+        sampler_entries[i].border_color = sampler->border_color;
+        sampler_entries[i].unnormalized_coordinates = sampler->unnormalized_coordinates;
+        sampler_entries[i].generation = sampler->generation;
+    }
+    for (size_t i = 0; i < image_descriptor_count; ++i) {
+        const size_t descriptor_index = binding_count + i;
+        VkDescriptorType type = (VkDescriptorType)image_descriptor_types[i];
+        if (descriptor_type_requires_image_view(type) &&
+            image_descriptor_view_indices[i] == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+            return -EINVAL;
+        }
+        if (descriptor_type_requires_sampler(type) &&
+            image_descriptor_sampler_indices[i] == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+            return -EINVAL;
+        }
+        descriptors[descriptor_index].descriptor_set = image_descriptor_sets[i];
+        descriptors[descriptor_index].binding = image_descriptor_bindings[i];
+        descriptors[descriptor_index].descriptor_type = image_descriptor_types[i];
+        descriptors[descriptor_index].access_flags =
+            type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                ? (PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE)
+                : PDOCKER_GPU_V5_ACCESS_READ;
+        descriptors[descriptor_index].resource_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+        descriptors[descriptor_index].image_view_index = image_descriptor_view_indices[i];
+        descriptors[descriptor_index].sampler_index = image_descriptor_sampler_indices[i];
+        descriptors[descriptor_index].image_layout = image_descriptor_layouts[i];
+        descriptors[descriptor_index].resource_id =
+            image_descriptor_view_indices[i] != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE
+                ? (uint64_t)(uintptr_t)image_view_objects[image_descriptor_view_indices[i]]
+                : (uint64_t)(uintptr_t)sampler_objects[image_descriptor_sampler_indices[i]];
+    }
     for (uint32_t i = 0; i < specialization_entry_count; ++i) {
         specs[i].constant_id = specialization_entries[i].constantID;
         specs[i].offset = specialization_entries[i].offset;
@@ -1623,8 +1823,11 @@ static int send_generic_vulkan_dispatch_v5_1_op(
 
     size_t frame_capacity =
         sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader) +
-        align_size_8(sizeof(PdockerGpuVulkanDispatchV5ResourceEntry) * binding_count * 2u) +
-        align_size_8(sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry) * binding_count) +
+        align_size_8(sizeof(PdockerGpuVulkanDispatchV5ResourceEntry) * resource_count) +
+        align_size_8(sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry) * descriptor_count) +
+        align_size_8(sizeof(PdockerGpuVulkanDispatchV5ImageEntry) * image_count) +
+        align_size_8(sizeof(PdockerGpuVulkanDispatchV5ImageViewEntry) * image_view_count) +
+        align_size_8(sizeof(PdockerGpuVulkanDispatchV5SamplerEntry) * sampler_count) +
         align_size_8(sizeof(PdockerGpuVulkanDispatchV5SpecializationEntry) * specialization_entry_count) +
         align_size_8(specialization_data_size) +
         align_size_8(push_size) +
@@ -1643,17 +1846,17 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     header->abi_minor = PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS;
     header->command = PDOCKER_GPU_VULKAN_DISPATCH_V5_COMMAND_DISPATCH;
     header->dispatch_id = dispatch_id;
-    header->fd_count = (uint32_t)(1u + binding_count);
+    header->fd_count = (uint32_t)fd_count;
     header->shader_fd_index = 0;
     header->shader_size = shader_size;
     header->shader_hash = shader_hash;
     header->gx = gx;
     header->gy = gy ? gy : 1;
     header->gz = gz ? gz : 1;
-    header->resource_count = (uint32_t)(binding_count * 2u);
+    header->resource_count = (uint32_t)resource_count;
     header->resource_entry_size = sizeof(PdockerGpuVulkanDispatchV5ResourceEntry);
     header->resource_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH;
-    header->descriptor_count = (uint32_t)binding_count;
+    header->descriptor_count = (uint32_t)descriptor_count;
     header->descriptor_entry_size = sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry);
     header->descriptor_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH;
     header->specialization_count = specialization_entry_count;
@@ -1664,29 +1867,54 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     header->entry_name_size = entry_name_size;
     header->option_text_size = option_text_size;
     header->option_hash = fnv1a64_bytes(option_text, option_text_size);
-    header->resource_hash = fnv1a64_bytes(resources, sizeof(resources[0]) * binding_count * 2u);
-    header->descriptor_hash = descriptor_hash;
+    header->resource_hash = fnv1a64_bytes(resources, sizeof(resources[0]) * resource_count);
+    header->descriptor_hash = fnv1a64_bytes(descriptors, sizeof(descriptors[0]) * descriptor_count);
     header->dispatch_hash = dispatch_hash;
 
-    object_header->objects.image_count = 0;
-    object_header->objects.image_view_count = 0;
-    object_header->objects.sampler_count = 0;
-    object_header->objects.object_hash = 0;
+    object_header->objects.image_count = (uint32_t)image_count;
+    object_header->objects.image_entry_size = sizeof(PdockerGpuVulkanDispatchV5ImageEntry);
+    object_header->objects.image_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_SCHEMA_HASH;
+    object_header->objects.image_view_count = (uint32_t)image_view_count;
+    object_header->objects.image_view_entry_size = sizeof(PdockerGpuVulkanDispatchV5ImageViewEntry);
+    object_header->objects.image_view_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_SCHEMA_HASH;
+    object_header->objects.sampler_count = (uint32_t)sampler_count;
+    object_header->objects.sampler_entry_size = sizeof(PdockerGpuVulkanDispatchV5SamplerEntry);
+    object_header->objects.sampler_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH;
+    uint64_t object_hash = 1469598103934665603ull;
+    object_hash = fnv1a64_update_u64(object_hash, image_count);
+    object_hash = fnv1a64_update_bytes(object_hash, image_entries, sizeof(image_entries[0]) * image_count);
+    object_hash = fnv1a64_update_u64(object_hash, image_view_count);
+    object_hash = fnv1a64_update_bytes(object_hash, image_view_entries, sizeof(image_view_entries[0]) * image_view_count);
+    object_hash = fnv1a64_update_u64(object_hash, sampler_count);
+    object_hash = fnv1a64_update_bytes(object_hash, sampler_entries, sizeof(sampler_entries[0]) * sampler_count);
+    object_header->objects.object_hash = object_hash;
 
     size_t cursor = sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader);
     int rc = frame_append_bytes(frame, frame_capacity, &cursor,
-                                resources, sizeof(resources[0]) * binding_count * 2u,
+                                resources, sizeof(resources[0]) * resource_count,
                                 &header->resource_table_offset);
     if (rc != 0) goto cleanup;
-    header->resource_table_size = sizeof(resources[0]) * binding_count * 2u;
+    header->resource_table_size = sizeof(resources[0]) * resource_count;
     rc = frame_append_bytes(frame, frame_capacity, &cursor,
-                            descriptors, sizeof(descriptors[0]) * binding_count,
+                            descriptors, sizeof(descriptors[0]) * descriptor_count,
                             &header->descriptor_table_offset);
     if (rc != 0) goto cleanup;
-    header->descriptor_table_size = sizeof(descriptors[0]) * binding_count;
-    object_header->objects.image_table_offset = (uint64_t)align_size_8(cursor);
-    object_header->objects.image_view_table_offset = object_header->objects.image_table_offset;
-    object_header->objects.sampler_table_offset = object_header->objects.image_table_offset;
+    header->descriptor_table_size = sizeof(descriptors[0]) * descriptor_count;
+    rc = frame_append_bytes(frame, frame_capacity, &cursor,
+                            image_entries, sizeof(image_entries[0]) * image_count,
+                            &object_header->objects.image_table_offset);
+    if (rc != 0) goto cleanup;
+    object_header->objects.image_table_size = sizeof(image_entries[0]) * image_count;
+    rc = frame_append_bytes(frame, frame_capacity, &cursor,
+                            image_view_entries, sizeof(image_view_entries[0]) * image_view_count,
+                            &object_header->objects.image_view_table_offset);
+    if (rc != 0) goto cleanup;
+    object_header->objects.image_view_table_size = sizeof(image_view_entries[0]) * image_view_count;
+    rc = frame_append_bytes(frame, frame_capacity, &cursor,
+                            sampler_entries, sizeof(sampler_entries[0]) * sampler_count,
+                            &object_header->objects.sampler_table_offset);
+    if (rc != 0) goto cleanup;
+    object_header->objects.sampler_table_size = sizeof(sampler_entries[0]) * sampler_count;
     rc = frame_append_bytes(frame, frame_capacity, &cursor,
                             specs, sizeof(specs[0]) * specialization_entry_count,
                             &header->specialization_table_offset);
@@ -1706,7 +1934,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     header->frame_size = cursor;
     header->frame_hash = fnv1a64_bytes(frame, cursor);
 
-    rc = send_vulkan_dispatch_v5_frame_with_fds(socket_fd, frame, cursor, fds, 1u + binding_count);
+    rc = send_vulkan_dispatch_v5_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
 cleanup:
     free(frame);
     return rc;
@@ -1718,6 +1946,7 @@ static int validate_descriptor_transport_shape(
         uint32_t set_index,
         uint32_t binding_index,
         size_t *effective_size);
+static bool descriptor_type_supported_by_v5_object_transport(VkDescriptorType type);
 static VkSubgroupFeatureFlags advertised_subgroup_operations(void);
 static uint32_t advertised_subgroup_size(void);
 static bool resolve_copy_alias(PdockerVkBuffer *buffer,
@@ -1739,7 +1968,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     }
     const uint64_t dispatch_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
 
-    int fds[1 + PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS];
     uint32_t bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkDeviceSize offsets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     size_t sizes[PDOCKER_VK_MAX_STORAGE_BUFFERS];
@@ -1753,13 +1982,91 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     uintptr_t api_memory_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uintptr_t api_buffer_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t api_descriptor_sets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t image_descriptor_sets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t image_descriptor_bindings[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t image_descriptor_types[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t image_descriptor_view_indices[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t image_descriptor_sampler_indices[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkImageLayout image_descriptor_layouts[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    PdockerVkImage *image_objects[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    PdockerVkImageView *image_view_objects[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    PdockerVkSampler *sampler_objects[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     size_t binding_count = 0;
+    size_t image_descriptor_count = 0;
+    size_t image_count = 0;
+    size_t image_view_count = 0;
+    size_t sampler_count = 0;
+    memset(fds, -1, sizeof(fds));
+    memset(image_descriptor_sets, 0, sizeof(image_descriptor_sets));
+    memset(image_descriptor_bindings, 0, sizeof(image_descriptor_bindings));
+    memset(image_descriptor_types, 0, sizeof(image_descriptor_types));
+    for (size_t i = 0; i < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++i) {
+        image_descriptor_view_indices[i] = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+        image_descriptor_sampler_indices[i] = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+    }
+    memset(image_descriptor_layouts, 0, sizeof(image_descriptor_layouts));
+    memset(image_objects, 0, sizeof(image_objects));
+    memset(image_view_objects, 0, sizeof(image_view_objects));
+    memset(sampler_objects, 0, sizeof(sampler_objects));
     fds[0] = shader->code_fd;
     for (uint32_t set_index = 0; set_index < PDOCKER_VK_MAX_DESCRIPTOR_SETS; ++set_index) {
         if (!op->set_snapshot_used[set_index]) continue;
         const PdockerVkDescriptorSet *set = &op->set_snapshots[set_index];
         for (uint32_t i = 0; i < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++i) {
             PdockerVkDescriptorBinding *binding = (PdockerVkDescriptorBinding *)&set->storage_buffers[i];
+            if (descriptor_type_supported_by_v5_object_transport(binding->descriptor_type)) {
+                if (!vulkan_v5_frame_enabled()) return -EOPNOTSUPP;
+                if (image_descriptor_count >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return -E2BIG;
+                VkDescriptorType descriptor_type = binding->descriptor_type;
+                uint32_t view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+                uint32_t sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+                if (descriptor_type_requires_image_view(descriptor_type)) {
+                    if (!binding->image_view || !binding->image_view->image ||
+                        !binding->image_view->image->memory ||
+                        binding->image_view->image->memory->fd < 0) {
+                        return -EINVAL;
+                    }
+                    int existing_view =
+                        find_image_view_table_index(image_view_objects,
+                                                    image_view_count,
+                                                    binding->image_view);
+                    if (existing_view < 0) {
+                        if (image_view_count >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return -E2BIG;
+                        existing_view = (int)image_view_count;
+                        image_view_objects[image_view_count++] = binding->image_view;
+                    }
+                    view_index = (uint32_t)existing_view;
+                    int existing_image =
+                        find_image_table_index(image_objects,
+                                               image_count,
+                                               binding->image_view->image);
+                    if (existing_image < 0) {
+                        if (image_count >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return -E2BIG;
+                        image_objects[image_count++] = binding->image_view->image;
+                    }
+                }
+                if (descriptor_type_requires_sampler(descriptor_type)) {
+                    if (!binding->sampler) return -EINVAL;
+                    int existing_sampler =
+                        find_sampler_table_index(sampler_objects,
+                                                 sampler_count,
+                                                 binding->sampler);
+                    if (existing_sampler < 0) {
+                        if (sampler_count >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return -E2BIG;
+                        existing_sampler = (int)sampler_count;
+                        sampler_objects[sampler_count++] = binding->sampler;
+                    }
+                    sampler_index = (uint32_t)existing_sampler;
+                }
+                image_descriptor_sets[image_descriptor_count] = set_index;
+                image_descriptor_bindings[image_descriptor_count] = i;
+                image_descriptor_types[image_descriptor_count] = descriptor_type;
+                image_descriptor_view_indices[image_descriptor_count] = view_index;
+                image_descriptor_sampler_indices[image_descriptor_count] = sampler_index;
+                image_descriptor_layouts[image_descriptor_count] = binding->image_layout;
+                image_descriptor_count++;
+                continue;
+            }
             if (!binding->buffer || !binding->buffer->memory) continue;
             size_t bytes = 0;
             int shape_rc = validate_descriptor_transport_shape(binding, set_index, i, &bytes);
@@ -1814,7 +2121,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             binding_count++;
         }
     }
-    if (binding_count == 0) return -EINVAL;
+    if (binding_count == 0 && image_descriptor_count == 0) return -EINVAL;
 
     const uint64_t source_shader_hash =
         (shader->code_map && shader->code_map != MAP_FAILED)
@@ -2172,6 +2479,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             dispatch_id,
             fds,
             binding_count,
+            image_descriptor_count,
             shader_size_to_send,
             shader_hash,
             op->dispatch_x,
@@ -2201,6 +2509,18 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             api_memory_sizes,
             api_memory_ids,
             api_buffer_ids,
+            image_descriptor_sets,
+            image_descriptor_bindings,
+            image_descriptor_types,
+            image_descriptor_view_indices,
+            image_descriptor_sampler_indices,
+            image_descriptor_layouts,
+            image_objects,
+            image_count,
+            image_view_objects,
+            image_view_count,
+            sampler_objects,
+            sampler_count,
             descriptor_hash,
             dispatch_hash);
         if (rc == 0) rc = read_dispatch_response_status(socket_fd, "VULKAN_DISPATCH_V5.1");
@@ -4837,11 +5157,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                   set->layout->unsupported_descriptor_type))) {
                 cmd->unsupported_descriptor_set_layout = true;
             }
-            if (set->has_image_descriptor) {
+            if (set->has_image_descriptor && !vulkan_v5_frame_enabled()) {
                 cmd->unsupported_descriptor_set_layout = true;
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                     fprintf(stderr,
-                            "pdocker-vulkan-icd: image descriptor set=%u requires V5.1 frame emission; rejecting submit instead of ignoring image objects\n",
+                            "pdocker-vulkan-icd: image descriptor set=%u requires V5.1 frame emission; rejecting submit because PDOCKER_VULKAN_USE_V5_FRAME is disabled\n",
                             target_set);
                 }
             }
