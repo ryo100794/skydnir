@@ -1118,6 +1118,31 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+
+    def test_vulkan_v4_transport_supports_uniform_buffer_descriptor_type(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER", icd)
+        self.assertIn("type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC", icd)
+        executor = GPU_EXECUTOR.read_text()
+        self.assertIn("vulkan_dispatch_descriptor_type_from_api", executor)
+        self.assertIn("VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC", executor)
+        self.assertIn("set_binding_types", executor)
+        self.assertIn("descriptor_pool_uniform_count", executor)
+        self.assertIn("unsupported descriptor write type for V4 transport", executor)
+        generic_body = executor.split("create-generic-descriptor-set-layout", 1)[0].rsplit(
+            "VkDescriptorSetLayoutBinding layout_bindings", 1
+        )[1]
+        self.assertIn("layout_bindings[set_index][i].descriptorType = set_binding_types[set_index][i];", generic_body)
+        pool_body = executor.split("descriptor_pool_uniform_count", 1)[1].split(
+            "create-generic-descriptor-pool", 1
+        )[0]
+        self.assertIn("VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER", pool_body)
+        write_body = executor.split("VkDescriptorBufferInfo infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS]", 1)[1].split(
+            "vkUpdateDescriptorSets", 1
+        )[0]
+        self.assertIn("vulkan_dispatch_descriptor_type_from_api(bindings[i].api_descriptor_type", write_body)
+        self.assertNotIn("writes[write_count].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;", write_body)
+
     def test_vulkan_binary_semaphores_are_not_noop_in_v4_submit(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("typedef struct PdockerVkSemaphore", icd)

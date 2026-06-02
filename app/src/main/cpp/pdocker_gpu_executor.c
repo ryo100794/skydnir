@@ -851,6 +851,25 @@ typedef struct {
     uint64_t api_buffer_id;
 } VulkanDispatchBinding;
 
+
+static int vulkan_dispatch_descriptor_type_from_api(
+        uint32_t api_descriptor_type,
+        VkDescriptorType *out_type) {
+    if (!out_type) return -EINVAL;
+    switch ((VkDescriptorType)api_descriptor_type) {
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+            *out_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            return 0;
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+            *out_type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            return 0;
+        default:
+            return -EOPNOTSUPP;
+    }
+}
+
 static size_t vulkan_binding_descriptor_range(
         const VulkanDispatchBinding *binding,
         int strict_passthrough) {
@@ -10793,6 +10812,7 @@ static int run_vulkan_dispatch_fd(
     VkDescriptorSetLayout set_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
     VkDescriptorSet descriptor_sets[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
     uint32_t set_binding_counts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
+    VkDescriptorType set_binding_types[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
     VkShaderModule shader = VK_NULL_HANDLE;
     VkPipeline pipeline = VK_NULL_HANDLE;
@@ -11001,6 +11021,11 @@ static int run_vulkan_dispatch_fd(
     memset(set_layouts, 0, sizeof(set_layouts));
     memset(descriptor_sets, 0, sizeof(descriptor_sets));
     memset(set_binding_counts, 0, sizeof(set_binding_counts));
+    for (uint32_t set_index = 0; set_index < PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS; ++set_index) {
+        for (uint32_t binding_index = 0; binding_index < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++binding_index) {
+            set_binding_types[set_index][binding_index] = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        }
+    }
     memset(shader_used_bindings, 0, sizeof(shader_used_bindings));
     memset(shader_binding_access, 0, sizeof(shader_binding_access));
     memset(active_bindings, 0, sizeof(active_bindings));
@@ -11990,6 +12015,20 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
+        VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        if (vulkan_dispatch_descriptor_type_from_api(bindings[i].api_descriptor_type,
+                                                     &descriptor_type) != 0) {
+            json_fail("vulkan-dispatch", "unsupported descriptor type for V4 transport");
+            ret = 64;
+            goto cleanup;
+        }
+        if (set_binding_counts[set_index] > bindings[i].binding &&
+            set_binding_types[set_index][bindings[i].binding] != descriptor_type) {
+            json_fail("vulkan-dispatch", "conflicting descriptor types for set binding");
+            ret = 64;
+            goto cleanup;
+        }
+        set_binding_types[set_index][bindings[i].binding] = descriptor_type;
         const uint32_t needed = bindings[i].binding + 1;
         if (needed > set_binding_counts[set_index]) {
             set_binding_counts[set_index] = needed;
@@ -12012,6 +12051,29 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
+        int original_index = binding_index_for_number(
+            bindings,
+            binding_count,
+            binding_aliases[i].original_binding);
+        if (original_index < 0) {
+            json_fail("vulkan-dispatch", "descriptor alias source missing");
+            ret = 64;
+            goto cleanup;
+        }
+        VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        if (vulkan_dispatch_descriptor_type_from_api(bindings[original_index].api_descriptor_type,
+                                                     &descriptor_type) != 0) {
+            json_fail("vulkan-dispatch", "unsupported descriptor alias type for V4 transport");
+            ret = 64;
+            goto cleanup;
+        }
+        if (set_binding_counts[alias_set] > binding_aliases[i].rewritten_binding &&
+            set_binding_types[alias_set][binding_aliases[i].rewritten_binding] != descriptor_type) {
+            json_fail("vulkan-dispatch", "conflicting descriptor alias types for set binding");
+            ret = 64;
+            goto cleanup;
+        }
+        set_binding_types[alias_set][binding_aliases[i].rewritten_binding] = descriptor_type;
         const uint32_t needed = binding_aliases[i].rewritten_binding + 1;
         if (needed > set_binding_counts[alias_set]) {
             set_binding_counts[alias_set] = needed;
@@ -12049,7 +12111,7 @@ static int run_vulkan_dispatch_fd(
             const uint32_t set_layout_count = set_binding_counts[set_index];
             for (uint32_t i = 0; i < set_layout_count; ++i) {
                 layout_bindings[set_index][i].binding = i;
-                layout_bindings[set_index][i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                layout_bindings[set_index][i].descriptorType = set_binding_types[set_index][i];
                 layout_bindings[set_index][i].descriptorCount = 1;
                 layout_bindings[set_index][i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
             }
@@ -12174,19 +12236,38 @@ static int run_vulkan_dispatch_fd(
         }
     }
     uint32_t descriptor_pool_storage_count = 0;
+    uint32_t descriptor_pool_uniform_count = 0;
     for (uint32_t set_index = 0; set_index < descriptor_set_count; ++set_index) {
-        descriptor_pool_storage_count += set_binding_counts[set_index];
+        for (uint32_t binding_index = 0; binding_index < set_binding_counts[set_index]; ++binding_index) {
+            if (set_binding_types[set_index][binding_index] == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
+                descriptor_pool_uniform_count++;
+            } else {
+                descriptor_pool_storage_count++;
+            }
+        }
     }
-    if (descriptor_pool_storage_count == 0) descriptor_pool_storage_count = 1;
-    VkDescriptorPoolSize pool_size = {
-        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .descriptorCount = descriptor_pool_storage_count,
-    };
+    VkDescriptorPoolSize pool_sizes[2];
+    uint32_t pool_size_count = 0;
+    if (descriptor_pool_storage_count > 0) {
+        pool_sizes[pool_size_count].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        pool_sizes[pool_size_count].descriptorCount = descriptor_pool_storage_count;
+        pool_size_count++;
+    }
+    if (descriptor_pool_uniform_count > 0) {
+        pool_sizes[pool_size_count].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        pool_sizes[pool_size_count].descriptorCount = descriptor_pool_uniform_count;
+        pool_size_count++;
+    }
+    if (pool_size_count == 0) {
+        pool_sizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        pool_sizes[0].descriptorCount = 1;
+        pool_size_count = 1;
+    }
     VkDescriptorPoolCreateInfo dpci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .maxSets = descriptor_set_count,
-        .poolSizeCount = 1,
-        .pPoolSizes = &pool_size,
+        .poolSizeCount = pool_size_count,
+        .pPoolSizes = pool_sizes,
     };
     fail_stage = "create-generic-descriptor-pool";
     double descriptor_pool_start = now_ms();
@@ -12236,7 +12317,12 @@ static int run_vulkan_dispatch_fd(
         writes[write_count].dstSet = descriptor_sets[bindings[i].descriptor_set];
         writes[write_count].dstBinding = bindings[i].binding;
         writes[write_count].descriptorCount = 1;
-        writes[write_count].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        if (vulkan_dispatch_descriptor_type_from_api(bindings[i].api_descriptor_type,
+                                                     &writes[write_count].descriptorType) != 0) {
+            json_fail("vulkan-dispatch", "unsupported descriptor write type for V4 transport");
+            ret = 64;
+            goto cleanup;
+        }
         writes[write_count].pBufferInfo = &infos[write_count];
         descriptor_write_dst_bindings[write_count] = bindings[i].binding;
         descriptor_write_source_indices[write_count] = i;
@@ -12298,7 +12384,12 @@ static int run_vulkan_dispatch_fd(
         writes[write_count].dstSet = descriptor_sets[binding_aliases[i].descriptor_set];
         writes[write_count].dstBinding = binding_aliases[i].rewritten_binding;
         writes[write_count].descriptorCount = 1;
-        writes[write_count].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        if (vulkan_dispatch_descriptor_type_from_api(bindings[original_index].api_descriptor_type,
+                                                     &writes[write_count].descriptorType) != 0) {
+            json_fail("vulkan-dispatch", "unsupported descriptor alias write type for V4 transport");
+            ret = 64;
+            goto cleanup;
+        }
         writes[write_count].pBufferInfo = &infos[write_count];
         descriptor_write_dst_bindings[write_count] = binding_aliases[i].rewritten_binding;
         descriptor_write_source_indices[write_count] = (size_t)original_index;

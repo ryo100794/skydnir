@@ -3549,7 +3549,9 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
 
 static bool descriptor_type_supported_by_v4_transport(VkDescriptorType type) {
     return type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
-           type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+           type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC ||
+           type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
+           type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
