@@ -2078,12 +2078,19 @@ static void write_json_string_literal(FILE *out, const char *value) {
     fputc('"', out);
 }
 
-static int create_vulkan_vector_buffer(VkPhysicalDevice physical_device, VkDevice device, size_t bytes, const void *initial, VulkanVectorBuffer *out) {
+static int create_vulkan_buffer_with_usage(
+        VkPhysicalDevice physical_device,
+        VkDevice device,
+        size_t bytes,
+        VkBufferUsageFlags usage,
+        const void *initial,
+        VulkanVectorBuffer *out) {
     memset(out, 0, sizeof(*out));
+    if (bytes == 0) return -EINVAL;
     VkBufferCreateInfo bci = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = (VkDeviceSize)bytes,
-        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        .usage = usage,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
     VkResult rc = vkCreateBuffer(device, &bci, NULL, &out->buffer);
@@ -2109,6 +2116,16 @@ static int create_vulkan_vector_buffer(VkPhysicalDevice physical_device, VkDevic
     out->size = bytes;
     if (initial) memcpy(out->map, initial, bytes);
     return 0;
+}
+
+static int create_vulkan_vector_buffer(VkPhysicalDevice physical_device, VkDevice device, size_t bytes, const void *initial, VulkanVectorBuffer *out) {
+    return create_vulkan_buffer_with_usage(
+        physical_device,
+        device,
+        bytes,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        initial,
+        out);
 }
 
 static void destroy_vulkan_vector_buffer(VkDevice device, VulkanVectorBuffer *buf) {
@@ -2155,9 +2172,11 @@ typedef struct {
     uint64_t memory_id;
     int fd;
     size_t size;
+    size_t allocation_size;
     uint64_t external_offset;
     uint32_t memory_type_bits;
     uint32_t memory_type_index;
+    int needs_host_map;
     VkDeviceMemory memory;
     void *map;
 } VulkanDispatchImageMemoryObject;
@@ -2173,7 +2192,17 @@ typedef struct {
     VkMemoryRequirements requirements;
     VkImageLayout current_layout;
     VkImageLayout descriptor_layout;
+    VkExtent3D extent;
+    VkFormat format;
+    VkImageTiling tiling;
+    VkImageUsageFlags usage;
+    uint32_t array_layers;
+    uint32_t mip_levels;
+    VkImageAspectFlags copy_aspect_mask;
+    VulkanVectorBuffer staging;
     int descriptor_layout_seen;
+    int requires_staging;
+    int upload_pending;
     int writeback_needed;
 } VulkanDispatchImageObject;
 
@@ -2316,6 +2345,7 @@ static void destroy_vulkan_dispatch_image_objects(
     }
     if (images) {
         for (size_t i = 0; i < image_count; ++i) {
+            destroy_vulkan_vector_buffer(device, &images[i].staging);
             if (images[i].image) vkDestroyImage(device, images[i].image, NULL);
             memset(&images[i], 0, sizeof(images[i]));
         }
@@ -2379,18 +2409,18 @@ static int materialize_vulkan_dispatch_images(
             src->array_layers == 0 || src->memory_size > (uint64_t)SIZE_MAX) {
             return -EPROTO;
         }
-        if (src->tiling != VK_IMAGE_TILING_LINEAR) {
-            /*
-             * The bridge can safely materialize host-fd image bytes only when
-             * the image has a linear, host-visible memory layout.  Optimal
-             * tiling needs explicit staging-copy support; raw fd bytes must not
-             * be treated as implementation-defined tiled image memory.
-             */
-            return -ENOTSUP;
-        }
         if (src->initial_layout != VK_IMAGE_LAYOUT_UNDEFINED &&
             src->initial_layout != VK_IMAGE_LAYOUT_PREINITIALIZED) {
             return -EPROTO;
+        }
+        if (src->tiling == VK_IMAGE_TILING_OPTIMAL) {
+            if (src->initial_layout == VK_IMAGE_LAYOUT_PREINITIALIZED ||
+                src->mip_levels != 1 ||
+                src->samples != VK_SAMPLE_COUNT_1_BIT) {
+                return -ENOTSUP;
+            }
+        } else if (src->tiling != VK_IMAGE_TILING_LINEAR) {
+            return -ENOTSUP;
         }
         int mem_index = find_image_memory_object(
             memories, *memory_count, src->memory_resource_index);
@@ -2401,6 +2431,7 @@ static int materialize_vulkan_dispatch_images(
             memories[mem_index].memory_id = mem->resource_id;
             memories[mem_index].fd = object_tables->passed_fds[mem->fd_index];
             memories[mem_index].size = (size_t)mem->size;
+            memories[mem_index].allocation_size = (size_t)mem->size;
             memories[mem_index].external_offset = mem->external_offset;
             memories[mem_index].memory_type_bits = UINT32_MAX;
         }
@@ -2414,21 +2445,33 @@ static int materialize_vulkan_dispatch_images(
         dst->memory_offset = (VkDeviceSize)src->memory_offset;
         dst->memory_size = (VkDeviceSize)src->memory_size;
         dst->current_layout = (VkImageLayout)src->initial_layout;
+        dst->extent = (VkExtent3D){
+            .width = src->extent_width,
+            .height = src->extent_height,
+            .depth = src->extent_depth,
+        };
+        dst->format = (VkFormat)src->format;
+        dst->tiling = (VkImageTiling)src->tiling;
+        dst->usage = (VkImageUsageFlags)src->usage;
+        dst->array_layers = src->array_layers;
+        dst->mip_levels = src->mip_levels;
+        dst->requires_staging = src->tiling == VK_IMAGE_TILING_OPTIMAL;
+        dst->upload_pending = dst->requires_staging;
         VkImageCreateInfo ici = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .flags = (VkImageCreateFlags)src->create_flags,
             .imageType = (VkImageType)src->image_type,
             .format = (VkFormat)src->format,
-            .extent = {
-                .width = src->extent_width,
-                .height = src->extent_height,
-                .depth = src->extent_depth,
-            },
+            .extent = dst->extent,
             .mipLevels = src->mip_levels,
             .arrayLayers = src->array_layers,
             .samples = (VkSampleCountFlagBits)src->samples,
             .tiling = (VkImageTiling)src->tiling,
-            .usage = (VkImageUsageFlags)src->usage,
+            .usage = dst->requires_staging
+                ? ((VkImageUsageFlags)src->usage |
+                   VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+                : (VkImageUsageFlags)src->usage,
             .sharingMode = (VkSharingMode)src->sharing_mode,
             .initialLayout = (VkImageLayout)src->initial_layout,
         };
@@ -2443,25 +2486,51 @@ static int materialize_vulkan_dispatch_images(
             return -ERANGE;
         }
         if (dst->memory_size < dst->requirements.size) return -ERANGE;
+        uint64_t native_end = 0;
+        if (checked_u64_add3((uint64_t)dst->memory_offset,
+                             (uint64_t)dst->requirements.size,
+                             0,
+                             &native_end) != 0 ||
+            native_end > (uint64_t)SIZE_MAX) {
+            return -EOVERFLOW;
+        }
+        if ((size_t)native_end > memory->allocation_size) {
+            memory->allocation_size = (size_t)native_end;
+        }
+        if (!dst->requires_staging) {
+            memory->needs_host_map = 1;
+        }
     }
 
     for (size_t m = 0; m < *memory_count; ++m) {
+        VkMemoryPropertyFlags required_flags = memories[m].needs_host_map
+            ? (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+            : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         uint32_t memory_type = find_vulkan_memory_type(
             physical_device,
             memories[m].memory_type_bits,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            required_flags);
+        if (memory_type == UINT32_MAX && !memories[m].needs_host_map) {
+            memory_type = find_vulkan_memory_type(
+                physical_device,
+                memories[m].memory_type_bits,
+                0);
+        }
         if (memory_type == UINT32_MAX) return -ENOTSUP;
         memories[m].memory_type_index = memory_type;
         VkMemoryAllocateInfo mai = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .allocationSize = (VkDeviceSize)memories[m].size,
+            .allocationSize = (VkDeviceSize)memories[m].allocation_size,
             .memoryTypeIndex = memory_type,
         };
         VkResult rc = vkAllocateMemory(device, &mai, NULL, &memories[m].memory);
         if (rc != VK_SUCCESS) return -ENOMEM;
-        rc = vkMapMemory(device, memories[m].memory, 0,
-                         (VkDeviceSize)memories[m].size, 0, &memories[m].map);
-        if (rc != VK_SUCCESS || !memories[m].map) return -EIO;
+        if (memories[m].needs_host_map) {
+            rc = vkMapMemory(device, memories[m].memory, 0,
+                             (VkDeviceSize)memories[m].allocation_size, 0,
+                             &memories[m].map);
+            if (rc != VK_SUCCESS || !memories[m].map) return -EIO;
+        }
     }
     for (size_t i = 0; i < *image_count; ++i) {
         VulkanDispatchImageObject *image = &images[i];
@@ -2475,19 +2544,37 @@ static int materialize_vulkan_dispatch_images(
             checked_u64_to_off_t(fd_offset_u64, &fd_offset) != 0) {
             return -EOVERFLOW;
         }
-        if (image->memory_offset > (VkDeviceSize)memory->size ||
-            image->memory_size > (VkDeviceSize)memory->size - image->memory_offset) {
+        if (image->memory_offset > (VkDeviceSize)memory->allocation_size ||
+            image->memory_size > (VkDeviceSize)memory->allocation_size - image->memory_offset) {
             return -ERANGE;
-        }
-        if (read_fd_exact(memory->fd,
-                          (unsigned char *)memory->map + image->memory_offset,
-                          (size_t)image->memory_size,
-                          fd_offset) != 0) {
-            return -EIO;
         }
         VkResult rc = vkBindImageMemory(device, image->image,
                                         memory->memory, image->memory_offset);
         if (rc != VK_SUCCESS) return -EINVAL;
+        if (image->requires_staging) {
+            int brc = create_vulkan_buffer_with_usage(
+                physical_device,
+                device,
+                (size_t)image->memory_size,
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                NULL,
+                &image->staging);
+            if (brc != 0) return brc;
+            if (read_fd_exact(memory->fd,
+                              image->staging.map,
+                              (size_t)image->memory_size,
+                              fd_offset) != 0) {
+                return -EIO;
+            }
+        } else {
+            if (!memory->map) return -EIO;
+            if (read_fd_exact(memory->fd,
+                              (unsigned char *)memory->map + image->memory_offset,
+                              (size_t)image->memory_size,
+                              fd_offset) != 0) {
+                return -EIO;
+            }
+        }
     }
     for (size_t i = 0; i < object_tables->image_view_count; ++i) {
         const PdockerGpuVulkanDispatchV5ImageViewEntry *src = &object_tables->image_views[i];
@@ -2583,6 +2670,20 @@ static int materialize_vulkan_dispatch_images(
                 images[image_index].descriptor_layout != d->image_layout) {
                 return -EOPNOTSUPP;
             }
+            if (images[image_index].copy_aspect_mask &&
+                images[image_index].copy_aspect_mask != views[d->image_view_index].range.aspectMask) {
+                return -EOPNOTSUPP;
+            }
+            if (images[image_index].requires_staging &&
+                (views[d->image_view_index].range.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+                 views[d->image_view_index].range.baseMipLevel != 0 ||
+                 views[d->image_view_index].range.levelCount != 1 ||
+                 views[d->image_view_index].range.baseArrayLayer != 0 ||
+                 views[d->image_view_index].range.layerCount != images[image_index].array_layers)) {
+                return -ENOTSUP;
+            }
+            images[image_index].copy_aspect_mask =
+                views[d->image_view_index].range.aspectMask;
             images[image_index].descriptor_layout = d->image_layout;
             images[image_index].descriptor_layout_seen = 1;
             if (d->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) {
@@ -13216,6 +13317,92 @@ static int run_vulkan_dispatch_fd(
             strict_staging_upload_bytes += bindings[i].size;
         }
     }
+    VkImageMemoryBarrier image_upload_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint32_t image_upload_barrier_count = 0;
+    VkBufferMemoryBarrier image_staging_upload_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint32_t image_staging_upload_barrier_count = 0;
+    for (size_t i = 0; i < dispatch_image_count; ++i) {
+        VulkanDispatchImageObject *image = &dispatch_images[i];
+        if (!image->requires_staging || !image->upload_pending ||
+            !image->staging.buffer || !image->descriptor_layout_seen ||
+            !image->copy_aspect_mask) {
+            continue;
+        }
+        if (image_upload_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+            image_staging_upload_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+            io_rc = -E2BIG;
+            goto cleanup;
+        }
+        image_staging_upload_barriers[image_staging_upload_barrier_count++] =
+            (VkBufferMemoryBarrier){
+                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_HOST_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .buffer = image->staging.buffer,
+                .offset = 0,
+                .size = (VkDeviceSize)image->memory_size,
+            };
+        image_upload_barriers[image_upload_barrier_count++] =
+            (VkImageMemoryBarrier){
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = 0,
+                .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .oldLayout = image->current_layout,
+                .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = image->image,
+                .subresourceRange = {
+                    .aspectMask = image->copy_aspect_mask,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = image->array_layers,
+                },
+            };
+    }
+    if (image_upload_barrier_count || image_staging_upload_barrier_count) {
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_HOST_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0,
+                             0, NULL,
+                             image_staging_upload_barrier_count,
+                             image_staging_upload_barriers,
+                             image_upload_barrier_count,
+                             image_upload_barriers);
+    }
+    for (size_t i = 0; i < dispatch_image_count; ++i) {
+        VulkanDispatchImageObject *image = &dispatch_images[i];
+        if (!image->requires_staging || !image->upload_pending ||
+            !image->staging.buffer || !image->descriptor_layout_seen ||
+            !image->copy_aspect_mask) {
+            continue;
+        }
+        VkBufferImageCopy region = {
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource = {
+                .aspectMask = image->copy_aspect_mask,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = image->array_layers,
+            },
+            .imageOffset = {0, 0, 0},
+            .imageExtent = image->extent,
+        };
+        vkCmdCopyBufferToImage(command_buffer,
+                               image->staging.buffer,
+                               image->image,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               1,
+                               &region);
+        image->current_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        image->upload_pending = 0;
+    }
     VkBufferMemoryBarrier pre_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t pre_barrier_count = 0;
     for (size_t i = 0; i < binding_count && pre_barrier_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) {
@@ -13262,7 +13449,9 @@ static int run_vulkan_dispatch_fd(
         VulkanDispatchImageObject *image = &dispatch_images[view->image_index];
         image_pre_barriers[image_pre_barrier_count++] = (VkImageMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_HOST_WRITE_BIT,
+            .srcAccessMask = image->requires_staging
+                ? VK_ACCESS_TRANSFER_WRITE_BIT
+                : VK_ACCESS_HOST_WRITE_BIT,
             .dstAccessMask = (d->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE)
                 ? (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
                 : VK_ACCESS_SHADER_READ_BIT,
@@ -13277,7 +13466,7 @@ static int run_vulkan_dispatch_fd(
     }
     if (image_pre_barrier_count) {
         vkCmdPipelineBarrier(command_buffer,
-                             VK_PIPELINE_STAGE_HOST_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              0,
                              0, NULL,
@@ -13330,23 +13519,83 @@ static int run_vulkan_dispatch_fd(
         image_post_barriers[image_post_barrier_count++] = (VkImageMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+            .dstAccessMask = image->requires_staging
+                ? VK_ACCESS_TRANSFER_READ_BIT
+                : VK_ACCESS_HOST_READ_BIT,
             .oldLayout = image->current_layout,
-            .newLayout = image->current_layout,
+            .newLayout = image->requires_staging
+                ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                : image->current_layout,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = image->image,
             .subresourceRange = view->range,
         };
+        if (image->requires_staging) {
+            image->current_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        }
     }
     if (image_post_barrier_count) {
         vkCmdPipelineBarrier(command_buffer,
                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_HOST_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT,
                              0,
                              0, NULL,
                              0, NULL,
                              image_post_barrier_count, image_post_barriers);
+    }
+    VkBufferMemoryBarrier image_staging_download_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint32_t image_staging_download_count = 0;
+    for (size_t i = 0; i < dispatch_image_count; ++i) {
+        VulkanDispatchImageObject *image = &dispatch_images[i];
+        if (!image->requires_staging || !image->writeback_needed ||
+            !image->staging.buffer || !image->copy_aspect_mask) {
+            continue;
+        }
+        VkBufferImageCopy region = {
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource = {
+                .aspectMask = image->copy_aspect_mask,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = image->array_layers,
+            },
+            .imageOffset = {0, 0, 0},
+            .imageExtent = image->extent,
+        };
+        vkCmdCopyImageToBuffer(command_buffer,
+                               image->image,
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               image->staging.buffer,
+                               1,
+                               &region);
+        if (image_staging_download_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+            io_rc = -E2BIG;
+            goto cleanup;
+        }
+        image_staging_download_barriers[image_staging_download_count++] =
+            (VkBufferMemoryBarrier){
+                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .buffer = image->staging.buffer,
+                .offset = 0,
+                .size = (VkDeviceSize)image->memory_size,
+            };
+    }
+    if (image_staging_download_count) {
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT,
+                             0,
+                             0, NULL,
+                             image_staging_download_count,
+                             image_staging_download_barriers,
+                             0, NULL);
     }
     if (strict_device_local_staging) {
         for (size_t i = 0; i < binding_count; ++i) {
@@ -13830,10 +14079,10 @@ static int run_vulkan_dispatch_fd(
         }
         VulkanDispatchImageMemoryObject *memory =
             &image_memories[dispatch_images[i].memory_object_index];
-        if (!memory->map || memory->fd < 0 ||
-            dispatch_images[i].memory_offset > (VkDeviceSize)memory->size ||
+        if (memory->fd < 0 ||
+            dispatch_images[i].memory_offset > (VkDeviceSize)memory->allocation_size ||
             dispatch_images[i].memory_size >
-                (VkDeviceSize)memory->size - dispatch_images[i].memory_offset) {
+                (VkDeviceSize)memory->allocation_size - dispatch_images[i].memory_offset) {
             io_rc = -EINVAL;
             goto cleanup;
         }
@@ -13847,9 +14096,24 @@ static int run_vulkan_dispatch_fd(
             io_rc = -EOVERFLOW;
             goto cleanup;
         }
+        const unsigned char *image_writeback_ptr = NULL;
+        if (dispatch_images[i].requires_staging) {
+            if (!dispatch_images[i].staging.map ||
+                dispatch_images[i].staging.size < dispatch_images[i].memory_size) {
+                io_rc = -EINVAL;
+                goto cleanup;
+            }
+            image_writeback_ptr = (const unsigned char *)dispatch_images[i].staging.map;
+        } else {
+            if (!memory->map) {
+                io_rc = -EINVAL;
+                goto cleanup;
+            }
+            image_writeback_ptr =
+                (const unsigned char *)memory->map + dispatch_images[i].memory_offset;
+        }
         io_rc = write_fd_exact(memory->fd,
-                               (const unsigned char *)memory->map +
-                                   dispatch_images[i].memory_offset,
+                               image_writeback_ptr,
                                (size_t)dispatch_images[i].memory_size,
                                fd_offset);
         if (io_rc != 0) goto cleanup;
