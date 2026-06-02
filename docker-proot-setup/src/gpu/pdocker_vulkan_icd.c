@@ -105,6 +105,9 @@ typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
 #define PDOCKER_VK_MAX_COPY_OPS 64
 #define PDOCKER_VK_MAX_DISPATCH_OPS 128
 #define PDOCKER_VK_MAX_COMMAND_OPS 256
+#define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS 16
+#define PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES 32
+#define PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES 64
 #define PDOCKER_VK_MAX_QUERY_COUNT 4096
 #define PDOCKER_VK_MAX_COPY_ALIASES 128
 #define PDOCKER_VK_ALIAS_MIN_SOURCE_BYTES (64ull * 1024ull * 1024ull)
@@ -270,6 +273,21 @@ struct PdockerVkPipeline {
     PdockerVkRenderPass *render_pass;
     uint32_t shader_stage_count;
     VkShaderStageFlags shader_stage_flags;
+    PdockerVkShaderModule *graphics_stage_modules[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
+    VkShaderStageFlagBits graphics_stage_flags[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
+    char graphics_stage_entry_names[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS][PDOCKER_VK_MAX_ENTRY_NAME];
+    VkPrimitiveTopology topology;
+    VkPolygonMode polygon_mode;
+    VkCullModeFlags cull_mode;
+    VkFrontFace front_face;
+    VkSampleCountFlagBits rasterization_samples;
+    uint32_t subpass;
+    uint32_t color_attachment_count;
+    uint32_t vertex_binding_count;
+    VkVertexInputBindingDescription vertex_bindings[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
+    uint32_t vertex_attribute_count;
+    VkVertexInputAttributeDescription vertex_attributes[PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES];
+    uint64_t dynamic_state_mask;
 };
 
 struct PdockerVkFence {
@@ -427,9 +445,35 @@ typedef struct {
     VkPipelineStageFlags2 query_stage_mask;
     uint32_t draw_vertex_count;
     uint32_t draw_instance_count;
+    uint32_t draw_first_vertex;
+    uint32_t draw_first_instance;
+    uint32_t draw_first_index;
+    uint32_t draw_index_count;
+    int32_t draw_vertex_offset;
+    PdockerVkBuffer *draw_indirect_buffer;
+    VkDeviceSize draw_indirect_offset;
+    uint32_t draw_indirect_stride;
+    PdockerVkBuffer *draw_count_buffer;
+    VkDeviceSize draw_count_offset;
     bool draw_indexed;
     bool draw_indirect;
 } PdockerVkCommandOp;
+
+typedef struct {
+    PdockerVkBuffer *buffer;
+    VkDeviceSize offset;
+    VkDeviceSize size;
+    VkDeviceSize stride;
+    bool bound;
+} PdockerVkVertexBindingState;
+
+typedef struct {
+    uint32_t state_type;
+    uint32_t first_index;
+    uint32_t count;
+    uint8_t data[128];
+    uint32_t data_size;
+} PdockerVkDynamicStateSnapshot;
 
 typedef struct {
     VK_LOADER_DATA loader;
@@ -469,8 +513,15 @@ typedef struct {
     PdockerVkFramebuffer *active_framebuffer;
     uint32_t active_color_attachment_count;
     bool graphics_unsupported;
-    bool vertex_buffer_bound;
+    PdockerVkVertexBindingState vertex_bindings[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
+    uint32_t vertex_binding_count;
+    PdockerVkBuffer *index_buffer;
+    VkDeviceSize index_offset;
+    VkIndexType index_type;
     bool index_buffer_bound;
+    PdockerVkDynamicStateSnapshot dynamic_states[PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES];
+    uint32_t dynamic_state_count;
+    bool vertex_buffer_bound;
 } PdockerVkCommandBuffer;
 
 typedef struct {
@@ -518,6 +569,41 @@ static bool vulkan_v5_object_transport_enabled(void) {
 
 static uint64_t next_vulkan_object_generation(void) {
     return __sync_add_and_fetch(&g_vulkan_object_generation, 1);
+}
+
+static uint32_t clamp_u32(uint32_t value, uint32_t limit) {
+    return value > limit ? limit : value;
+}
+
+static void safe_copy_cstr(char *dst, size_t dst_size, const char *src) {
+    if (!dst || dst_size == 0) return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    snprintf(dst, dst_size, "%s", src);
+}
+
+static void record_graphics_dynamic_state_bytes(
+        PdockerVkCommandBuffer *cmd,
+        VkDynamicState state_type,
+        uint32_t first_index,
+        uint32_t count,
+        const void *data,
+        size_t data_size) {
+    if (!cmd) return;
+    if (cmd->dynamic_state_count >= PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES ||
+        data_size > sizeof(cmd->dynamic_states[0].data)) {
+        cmd->graphics_unsupported = true;
+        return;
+    }
+    PdockerVkDynamicStateSnapshot *state = &cmd->dynamic_states[cmd->dynamic_state_count++];
+    memset(state, 0, sizeof(*state));
+    state->state_type = (uint32_t)state_type;
+    state->first_index = first_index;
+    state->count = count;
+    state->data_size = (uint32_t)data_size;
+    if (data && data_size) memcpy(state->data, data, data_size);
 }
 
 static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
@@ -6227,13 +6313,63 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
         pipeline->graphics = true;
         pipeline->graphics_unsupported = true;
-        pipeline->layout = (PdockerVkPipelineLayout *)pCreateInfos[i].layout;
-        pipeline->render_pass = (PdockerVkRenderPass *)pCreateInfos[i].renderPass;
-        pipeline->shader_stage_count = pCreateInfos[i].stageCount;
-        for (uint32_t stage_i = 0; stage_i < pCreateInfos[i].stageCount; ++stage_i) {
-            pipeline->shader_stage_flags |= pCreateInfos[i].pStages
-                ? pCreateInfos[i].pStages[stage_i].stage
-                : 0;
+        const VkGraphicsPipelineCreateInfo *ci = &pCreateInfos[i];
+        pipeline->layout = (PdockerVkPipelineLayout *)ci->layout;
+        pipeline->render_pass = (PdockerVkRenderPass *)ci->renderPass;
+        pipeline->shader_stage_count = ci->stageCount;
+        uint32_t captured_stages = clamp_u32(ci->stageCount, PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS);
+        if (ci->stageCount > PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS) {
+            pipeline->graphics_unsupported = true;
+        }
+        for (uint32_t stage_i = 0; stage_i < captured_stages; ++stage_i) {
+            const VkPipelineShaderStageCreateInfo *stage = ci->pStages ? &ci->pStages[stage_i] : NULL;
+            pipeline->shader_stage_flags |= stage ? stage->stage : 0;
+            pipeline->graphics_stage_flags[stage_i] = stage ? stage->stage : 0;
+            pipeline->graphics_stage_modules[stage_i] = stage ? (PdockerVkShaderModule *)stage->module : NULL;
+            safe_copy_cstr(pipeline->graphics_stage_entry_names[stage_i],
+                           sizeof(pipeline->graphics_stage_entry_names[stage_i]),
+                           stage ? stage->pName : NULL);
+        }
+        if (ci->pInputAssemblyState) {
+            pipeline->topology = ci->pInputAssemblyState->topology;
+        }
+        if (ci->pRasterizationState) {
+            pipeline->polygon_mode = ci->pRasterizationState->polygonMode;
+            pipeline->cull_mode = ci->pRasterizationState->cullMode;
+            pipeline->front_face = ci->pRasterizationState->frontFace;
+        }
+        if (ci->pMultisampleState) {
+            pipeline->rasterization_samples = ci->pMultisampleState->rasterizationSamples;
+        }
+        pipeline->subpass = ci->subpass;
+        pipeline->color_attachment_count = ci->pColorBlendState
+            ? ci->pColorBlendState->attachmentCount
+            : 0;
+        if (ci->pVertexInputState) {
+            pipeline->vertex_binding_count = clamp_u32(
+                ci->pVertexInputState->vertexBindingDescriptionCount,
+                PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS);
+            if (ci->pVertexInputState->vertexBindingDescriptionCount > PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS) {
+                pipeline->graphics_unsupported = true;
+            }
+            for (uint32_t b = 0; b < pipeline->vertex_binding_count; ++b) {
+                pipeline->vertex_bindings[b] = ci->pVertexInputState->pVertexBindingDescriptions[b];
+            }
+            pipeline->vertex_attribute_count = clamp_u32(
+                ci->pVertexInputState->vertexAttributeDescriptionCount,
+                PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES);
+            if (ci->pVertexInputState->vertexAttributeDescriptionCount > PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES) {
+                pipeline->graphics_unsupported = true;
+            }
+            for (uint32_t a = 0; a < pipeline->vertex_attribute_count; ++a) {
+                pipeline->vertex_attributes[a] = ci->pVertexInputState->pVertexAttributeDescriptions[a];
+            }
+        }
+        if (ci->pDynamicState) {
+            for (uint32_t d = 0; d < ci->pDynamicState->dynamicStateCount; ++d) {
+                VkDynamicState state = ci->pDynamicState->pDynamicStates[d];
+                if ((uint32_t)state < 64u) pipeline->dynamic_state_mask |= (1ull << (uint32_t)state);
+            }
         }
         pPipelines[i] = (VkPipeline)pipeline;
     }
@@ -6559,8 +6695,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     cmd->active_framebuffer = NULL;
     cmd->active_color_attachment_count = 0;
     cmd->graphics_unsupported = false;
-    cmd->vertex_buffer_bound = false;
+    memset(cmd->vertex_bindings, 0, sizeof(cmd->vertex_bindings));
+    cmd->vertex_binding_count = 0;
+    cmd->index_buffer = NULL;
+    cmd->index_offset = 0;
+    cmd->index_type = VK_INDEX_TYPE_UINT16;
     cmd->index_buffer_bound = false;
+    memset(cmd->dynamic_states, 0, sizeof(cmd->dynamic_states));
+    cmd->dynamic_state_count = 0;
+    cmd->vertex_buffer_bound = false;
     return VK_SUCCESS;
 }
 
@@ -6663,18 +6806,45 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass2(
     vkCmdEndRenderPass(commandBuffer);
 }
 
+static void record_vertex_buffer_bindings(
+        VkCommandBuffer commandBuffer,
+        uint32_t firstBinding,
+        uint32_t bindingCount,
+        const VkBuffer *pBuffers,
+        const VkDeviceSize *pOffsets,
+        const VkDeviceSize *pSizes,
+        const VkDeviceSize *pStrides) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!cmd) return;
+    if (bindingCount > 0 && (!pBuffers || !pOffsets)) {
+        cmd->graphics_unsupported = true;
+        return;
+    }
+    if (firstBinding > PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS ||
+        bindingCount > PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS - firstBinding) {
+        cmd->graphics_unsupported = true;
+        return;
+    }
+    for (uint32_t i = 0; i < bindingCount; ++i) {
+        uint32_t slot = firstBinding + i;
+        PdockerVkVertexBindingState *binding = &cmd->vertex_bindings[slot];
+        binding->buffer = (PdockerVkBuffer *)pBuffers[i];
+        binding->offset = pOffsets[i];
+        binding->size = pSizes ? pSizes[i] : VK_WHOLE_SIZE;
+        binding->stride = pStrides ? pStrides[i] : 0;
+        binding->bound = true;
+        if (slot + 1 > cmd->vertex_binding_count) cmd->vertex_binding_count = slot + 1;
+    }
+    cmd->vertex_buffer_bound = true;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdBindVertexBuffers(
         VkCommandBuffer commandBuffer,
         uint32_t firstBinding,
         uint32_t bindingCount,
         const VkBuffer *pBuffers,
         const VkDeviceSize *pOffsets) {
-    (void)firstBinding;
-    (void)bindingCount;
-    (void)pBuffers;
-    (void)pOffsets;
-    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    if (cmd) cmd->vertex_buffer_bound = true;
+    record_vertex_buffer_bindings(commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets, NULL, NULL);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdBindVertexBuffers2(
@@ -6685,9 +6855,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindVertexBuffers2(
         const VkDeviceSize *pOffsets,
         const VkDeviceSize *pSizes,
         const VkDeviceSize *pStrides) {
-    (void)pSizes;
-    (void)pStrides;
-    vkCmdBindVertexBuffers(commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets);
+    record_vertex_buffer_bindings(commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets, pSizes, pStrides);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdBindIndexBuffer(
@@ -6695,19 +6863,30 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindIndexBuffer(
         VkBuffer buffer,
         VkDeviceSize offset,
         VkIndexType indexType) {
-    (void)buffer;
-    (void)offset;
-    (void)indexType;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    if (cmd) cmd->index_buffer_bound = true;
+    if (!cmd) return;
+    cmd->index_buffer = (PdockerVkBuffer *)buffer;
+    cmd->index_offset = offset;
+    cmd->index_type = indexType;
+    cmd->index_buffer_bound = true;
 }
 
 static void record_graphics_draw_command(
         VkCommandBuffer commandBuffer,
         uint32_t vertexCount,
         uint32_t instanceCount,
+        uint32_t firstVertex,
+        uint32_t firstInstance,
+        uint32_t indexCount,
+        uint32_t firstIndex,
+        int32_t vertexOffset,
         bool indexed,
-        bool indirect) {
+        bool indirect,
+        VkBuffer indirectBuffer,
+        VkDeviceSize indirectOffset,
+        VkBuffer countBuffer,
+        VkDeviceSize countOffset,
+        uint32_t stride) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
     cmd->graphics_unsupported = true;
@@ -6716,8 +6895,18 @@ static void record_graphics_draw_command(
     op.type = PDOCKER_VK_COMMAND_GRAPHICS_DRAW;
     op.draw_vertex_count = vertexCount;
     op.draw_instance_count = instanceCount;
+    op.draw_first_vertex = firstVertex;
+    op.draw_first_instance = firstInstance;
+    op.draw_index_count = indexCount;
+    op.draw_first_index = firstIndex;
+    op.draw_vertex_offset = vertexOffset;
     op.draw_indexed = indexed;
     op.draw_indirect = indirect;
+    op.draw_indirect_buffer = (PdockerVkBuffer *)indirectBuffer;
+    op.draw_indirect_offset = indirectOffset;
+    op.draw_count_buffer = (PdockerVkBuffer *)countBuffer;
+    op.draw_count_offset = countOffset;
+    op.draw_indirect_stride = stride;
     (void)append_command_op(cmd, &op);
 }
 
@@ -6727,9 +6916,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDraw(
         uint32_t instanceCount,
         uint32_t firstVertex,
         uint32_t firstInstance) {
-    (void)firstVertex;
-    (void)firstInstance;
-    record_graphics_draw_command(commandBuffer, vertexCount, instanceCount, false, false);
+    record_graphics_draw_command(commandBuffer, vertexCount, instanceCount, firstVertex, firstInstance, 0, 0, 0, false, false, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0, 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndexed(
@@ -6739,10 +6926,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndexed(
         uint32_t firstIndex,
         int32_t vertexOffset,
         uint32_t firstInstance) {
-    (void)firstIndex;
-    (void)vertexOffset;
-    (void)firstInstance;
-    record_graphics_draw_command(commandBuffer, indexCount, instanceCount, true, false);
+    record_graphics_draw_command(commandBuffer, 0, instanceCount, 0, firstInstance, indexCount, firstIndex, vertexOffset, true, false, VK_NULL_HANDLE, 0, VK_NULL_HANDLE, 0, 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndirect(
@@ -6751,10 +6935,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndirect(
         VkDeviceSize offset,
         uint32_t drawCount,
         uint32_t stride) {
-    (void)buffer;
-    (void)offset;
-    (void)stride;
-    record_graphics_draw_command(commandBuffer, drawCount, 1, false, true);
+    record_graphics_draw_command(commandBuffer, drawCount, 1, 0, 0, 0, 0, 0, false, true, buffer, offset, VK_NULL_HANDLE, 0, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndexedIndirect(
@@ -6763,10 +6944,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndexedIndirect(
         VkDeviceSize offset,
         uint32_t drawCount,
         uint32_t stride) {
-    (void)buffer;
-    (void)offset;
-    (void)stride;
-    record_graphics_draw_command(commandBuffer, drawCount, 1, true, true);
+    record_graphics_draw_command(commandBuffer, drawCount, 1, 0, 0, 0, 0, 0, true, true, buffer, offset, VK_NULL_HANDLE, 0, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndirectCount(
@@ -6777,12 +6955,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndirectCount(
         VkDeviceSize countBufferOffset,
         uint32_t maxDrawCount,
         uint32_t stride) {
-    (void)buffer;
-    (void)offset;
-    (void)countBuffer;
-    (void)countBufferOffset;
-    (void)stride;
-    record_graphics_draw_command(commandBuffer, maxDrawCount, 1, false, true);
+    record_graphics_draw_command(commandBuffer, maxDrawCount, 1, 0, 0, 0, 0, 0, false, true, buffer, offset, countBuffer, countBufferOffset, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndexedIndirectCount(
@@ -6793,12 +6966,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndexedIndirectCount(
         VkDeviceSize countBufferOffset,
         uint32_t maxDrawCount,
         uint32_t stride) {
-    (void)buffer;
-    (void)offset;
-    (void)countBuffer;
-    (void)countBufferOffset;
-    (void)stride;
-    record_graphics_draw_command(commandBuffer, maxDrawCount, 1, true, true);
+    record_graphics_draw_command(commandBuffer, maxDrawCount, 1, 0, 0, 0, 0, 0, true, true, buffer, offset, countBuffer, countBufferOffset, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetViewport(
@@ -6806,10 +6974,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetViewport(
         uint32_t firstViewport,
         uint32_t viewportCount,
         const VkViewport *pViewports) {
-    (void)commandBuffer;
-    (void)firstViewport;
-    (void)viewportCount;
-    (void)pViewports;
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_VIEWPORT,
+                                        firstViewport,
+                                        viewportCount,
+                                        pViewports,
+                                        pViewports ? (size_t)viewportCount * sizeof(VkViewport) : 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetScissor(
@@ -6817,17 +6987,20 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetScissor(
         uint32_t firstScissor,
         uint32_t scissorCount,
         const VkRect2D *pScissors) {
-    (void)commandBuffer;
-    (void)firstScissor;
-    (void)scissorCount;
-    (void)pScissors;
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_SCISSOR,
+                                        firstScissor,
+                                        scissorCount,
+                                        pScissors,
+                                        pScissors ? (size_t)scissorCount * sizeof(VkRect2D) : 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetLineWidth(
         VkCommandBuffer commandBuffer,
         float lineWidth) {
-    (void)commandBuffer;
-    (void)lineWidth;
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_LINE_WIDTH,
+                                        0, 1, &lineWidth, sizeof(lineWidth));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBias(
@@ -6835,53 +7008,58 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBias(
         float depthBiasConstantFactor,
         float depthBiasClamp,
         float depthBiasSlopeFactor) {
-    (void)commandBuffer;
-    (void)depthBiasConstantFactor;
-    (void)depthBiasClamp;
-    (void)depthBiasSlopeFactor;
+    float values[3] = {depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor};
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_DEPTH_BIAS,
+                                        0, 3, values, sizeof(values));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetBlendConstants(
         VkCommandBuffer commandBuffer,
         const float blendConstants[4]) {
-    (void)commandBuffer;
-    (void)blendConstants;
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_BLEND_CONSTANTS,
+                                        0, 4, blendConstants, blendConstants ? sizeof(float) * 4u : 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBounds(
         VkCommandBuffer commandBuffer,
         float minDepthBounds,
         float maxDepthBounds) {
-    (void)commandBuffer;
-    (void)minDepthBounds;
-    (void)maxDepthBounds;
+    float values[2] = {minDepthBounds, maxDepthBounds};
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_DEPTH_BOUNDS,
+                                        0, 2, values, sizeof(values));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilCompareMask(
         VkCommandBuffer commandBuffer,
         VkStencilFaceFlags faceMask,
         uint32_t compareMask) {
-    (void)commandBuffer;
-    (void)faceMask;
-    (void)compareMask;
+    uint32_t values[2] = {(uint32_t)faceMask, compareMask};
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
+                                        0, 2, values, sizeof(values));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilWriteMask(
         VkCommandBuffer commandBuffer,
         VkStencilFaceFlags faceMask,
         uint32_t writeMask) {
-    (void)commandBuffer;
-    (void)faceMask;
-    (void)writeMask;
+    uint32_t values[2] = {(uint32_t)faceMask, writeMask};
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
+                                        0, 2, values, sizeof(values));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilReference(
         VkCommandBuffer commandBuffer,
         VkStencilFaceFlags faceMask,
         uint32_t reference) {
-    (void)commandBuffer;
-    (void)faceMask;
-    (void)reference;
+    uint32_t values[2] = {(uint32_t)faceMask, reference};
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_STENCIL_REFERENCE,
+                                        0, 2, values, sizeof(values));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetViewportWithCount(
@@ -6901,50 +7079,57 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetScissorWithCount(
 VKAPI_ATTR void VKAPI_CALL vkCmdSetCullMode(
         VkCommandBuffer commandBuffer,
         VkCullModeFlags cullMode) {
-    (void)commandBuffer;
-    (void)cullMode;
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_CULL_MODE,
+                                        0, 1, &cullMode, sizeof(cullMode));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetFrontFace(
         VkCommandBuffer commandBuffer,
         VkFrontFace frontFace) {
-    (void)commandBuffer;
-    (void)frontFace;
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_FRONT_FACE,
+                                        0, 1, &frontFace, sizeof(frontFace));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetPrimitiveTopology(
         VkCommandBuffer commandBuffer,
         VkPrimitiveTopology primitiveTopology) {
-    (void)commandBuffer;
-    (void)primitiveTopology;
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
+                                        0, 1, &primitiveTopology, sizeof(primitiveTopology));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthTestEnable(
         VkCommandBuffer commandBuffer,
         VkBool32 depthTestEnable) {
-    (void)commandBuffer;
-    (void)depthTestEnable;
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
+                                        0, 1, &depthTestEnable, sizeof(depthTestEnable));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthWriteEnable(
         VkCommandBuffer commandBuffer,
         VkBool32 depthWriteEnable) {
-    (void)commandBuffer;
-    (void)depthWriteEnable;
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
+                                        0, 1, &depthWriteEnable, sizeof(depthWriteEnable));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthCompareOp(
         VkCommandBuffer commandBuffer,
         VkCompareOp depthCompareOp) {
-    (void)commandBuffer;
-    (void)depthCompareOp;
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
+                                        0, 1, &depthCompareOp, sizeof(depthCompareOp));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilTestEnable(
         VkCommandBuffer commandBuffer,
         VkBool32 stencilTestEnable) {
-    (void)commandBuffer;
-    (void)stencilTestEnable;
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE,
+                                        0, 1, &stencilTestEnable, sizeof(stencilTestEnable));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilOp(
@@ -6954,12 +7139,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilOp(
         VkStencilOp passOp,
         VkStencilOp depthFailOp,
         VkCompareOp compareOp) {
-    (void)commandBuffer;
-    (void)faceMask;
-    (void)failOp;
-    (void)passOp;
-    (void)depthFailOp;
-    (void)compareOp;
+    uint32_t values[5] = {(uint32_t)faceMask, (uint32_t)failOp, (uint32_t)passOp, (uint32_t)depthFailOp, (uint32_t)compareOp};
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_STENCIL_OP,
+                                        0, 5, values, sizeof(values));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdClearAttachments(
