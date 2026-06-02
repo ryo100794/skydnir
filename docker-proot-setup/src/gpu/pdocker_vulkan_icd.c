@@ -6616,6 +6616,121 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndexedIndirect(
     record_graphics_draw_command(commandBuffer, drawCount, 1, true, true);
 }
 
+VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndirectCount(
+        VkCommandBuffer commandBuffer,
+        VkBuffer buffer,
+        VkDeviceSize offset,
+        VkBuffer countBuffer,
+        VkDeviceSize countBufferOffset,
+        uint32_t maxDrawCount,
+        uint32_t stride) {
+    (void)buffer;
+    (void)offset;
+    (void)countBuffer;
+    (void)countBufferOffset;
+    (void)stride;
+    record_graphics_draw_command(commandBuffer, maxDrawCount, 1, false, true);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdDrawIndexedIndirectCount(
+        VkCommandBuffer commandBuffer,
+        VkBuffer buffer,
+        VkDeviceSize offset,
+        VkBuffer countBuffer,
+        VkDeviceSize countBufferOffset,
+        uint32_t maxDrawCount,
+        uint32_t stride) {
+    (void)buffer;
+    (void)offset;
+    (void)countBuffer;
+    (void)countBufferOffset;
+    (void)stride;
+    record_graphics_draw_command(commandBuffer, maxDrawCount, 1, true, true);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetViewport(
+        VkCommandBuffer commandBuffer,
+        uint32_t firstViewport,
+        uint32_t viewportCount,
+        const VkViewport *pViewports) {
+    (void)commandBuffer;
+    (void)firstViewport;
+    (void)viewportCount;
+    (void)pViewports;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetScissor(
+        VkCommandBuffer commandBuffer,
+        uint32_t firstScissor,
+        uint32_t scissorCount,
+        const VkRect2D *pScissors) {
+    (void)commandBuffer;
+    (void)firstScissor;
+    (void)scissorCount;
+    (void)pScissors;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetLineWidth(
+        VkCommandBuffer commandBuffer,
+        float lineWidth) {
+    (void)commandBuffer;
+    (void)lineWidth;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBias(
+        VkCommandBuffer commandBuffer,
+        float depthBiasConstantFactor,
+        float depthBiasClamp,
+        float depthBiasSlopeFactor) {
+    (void)commandBuffer;
+    (void)depthBiasConstantFactor;
+    (void)depthBiasClamp;
+    (void)depthBiasSlopeFactor;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetBlendConstants(
+        VkCommandBuffer commandBuffer,
+        const float blendConstants[4]) {
+    (void)commandBuffer;
+    (void)blendConstants;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBounds(
+        VkCommandBuffer commandBuffer,
+        float minDepthBounds,
+        float maxDepthBounds) {
+    (void)commandBuffer;
+    (void)minDepthBounds;
+    (void)maxDepthBounds;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilCompareMask(
+        VkCommandBuffer commandBuffer,
+        VkStencilFaceFlags faceMask,
+        uint32_t compareMask) {
+    (void)commandBuffer;
+    (void)faceMask;
+    (void)compareMask;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilWriteMask(
+        VkCommandBuffer commandBuffer,
+        VkStencilFaceFlags faceMask,
+        uint32_t writeMask) {
+    (void)commandBuffer;
+    (void)faceMask;
+    (void)writeMask;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilReference(
+        VkCommandBuffer commandBuffer,
+        VkStencilFaceFlags faceMask,
+        uint32_t reference) {
+    (void)commandBuffer;
+    (void)faceMask;
+    (void)reference;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         VkCommandBuffer commandBuffer,
         VkPipelineBindPoint pipelineBindPoint,
@@ -8703,6 +8818,21 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdDrawIndexed);
     MAP_PROC(vkCmdDrawIndirect);
     MAP_PROC(vkCmdDrawIndexedIndirect);
+    MAP_PROC(vkCmdDrawIndirectCount);
+    MAP_ALIAS("vkCmdDrawIndirectCountKHR", vkCmdDrawIndirectCount);
+    MAP_ALIAS("vkCmdDrawIndirectCountAMD", vkCmdDrawIndirectCount);
+    MAP_PROC(vkCmdDrawIndexedIndirectCount);
+    MAP_ALIAS("vkCmdDrawIndexedIndirectCountKHR", vkCmdDrawIndexedIndirectCount);
+    MAP_ALIAS("vkCmdDrawIndexedIndirectCountAMD", vkCmdDrawIndexedIndirectCount);
+    MAP_PROC(vkCmdSetViewport);
+    MAP_PROC(vkCmdSetScissor);
+    MAP_PROC(vkCmdSetLineWidth);
+    MAP_PROC(vkCmdSetDepthBias);
+    MAP_PROC(vkCmdSetBlendConstants);
+    MAP_PROC(vkCmdSetDepthBounds);
+    MAP_PROC(vkCmdSetStencilCompareMask);
+    MAP_PROC(vkCmdSetStencilWriteMask);
+    MAP_PROC(vkCmdSetStencilReference);
     MAP_PROC(vkCmdBindDescriptorSets);
     MAP_PROC(vkCmdPushConstants);
     MAP_PROC(vkCmdPipelineBarrier);

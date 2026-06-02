@@ -658,6 +658,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdDrawIndexed",
             "vkCmdDrawIndirect",
             "vkCmdDrawIndexedIndirect",
+            "vkCmdDrawIndirectCount",
+            "vkCmdDrawIndexedIndirectCount",
+            "vkCmdSetViewport",
+            "vkCmdSetScissor",
+            "vkCmdSetLineWidth",
+            "vkCmdSetDepthBias",
+            "vkCmdSetBlendConstants",
+            "vkCmdSetDepthBounds",
+            "vkCmdSetStencilCompareMask",
+            "vkCmdSetStencilWriteMask",
+            "vkCmdSetStencilReference",
         ]:
             self.assertRegex(icd, rf"VKAPI_ATTR\s+[\w\s\*]+VKAPI_CALL\s+{name}\s*\(")
             self.assertIn(f"MAP_PROC({name});", icd)
@@ -669,6 +680,10 @@ class GpuAbiContractTest(unittest.TestCase):
             'MAP_ALIAS("vkCmdNextSubpass2KHR", vkCmdNextSubpass2);',
             'MAP_ALIAS("vkCmdEndRenderPass2KHR", vkCmdEndRenderPass2);',
             'MAP_ALIAS("vkCmdBindVertexBuffers2EXT", vkCmdBindVertexBuffers2);',
+            'MAP_ALIAS("vkCmdDrawIndirectCountKHR", vkCmdDrawIndirectCount);',
+            'MAP_ALIAS("vkCmdDrawIndirectCountAMD", vkCmdDrawIndirectCount);',
+            'MAP_ALIAS("vkCmdDrawIndexedIndirectCountKHR", vkCmdDrawIndexedIndirectCount);',
+            'MAP_ALIAS("vkCmdDrawIndexedIndirectCountAMD", vkCmdDrawIndexedIndirectCount);',
         ]:
             self.assertIn(alias, icd)
         for marker in [
