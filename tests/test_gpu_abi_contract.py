@@ -1117,6 +1117,30 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+
+    def test_vulkan_binary_semaphores_are_not_noop_in_v4_submit(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("typedef struct PdockerVkSemaphore", icd)
+        self.assertIn("validate_submit_wait_semaphores", icd)
+        self.assertIn("complete_submit_semaphores", icd)
+        self.assertIn("semaphore-wait-unsignaled", icd)
+        self.assertIn("sem->signaled = false;", icd)
+        self.assertIn("sem->signaled = true;", icd)
+        self.assertIn("semaphore-pnext-unsupported", icd)
+        submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
+        )[0]
+        self.assertNotIn("(void)fence;", submit_body)
+        self.assertIn("validate_submit_wait_semaphores(&pSubmits[i])", submit_body)
+        self.assertIn("complete_submit_semaphores(&pSubmits[i]);", submit_body)
+        self.assertIn("submit_fence->signaled = false;", submit_body)
+        self.assertIn("submit_fence) submit_fence->signaled = true;", submit_body)
+        create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroySemaphore", 1
+        )[0]
+        self.assertNotIn("sizeof(PdockerHandle)", create_body)
+        self.assertIn("PdockerVkSemaphore *sem", create_body)
+
     def test_vulkan_create_device_validates_advertised_extensions_and_features(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("device_extension_advertised_name", icd)

@@ -190,6 +190,10 @@ struct PdockerVkFence {
     bool signaled;
 };
 
+typedef struct PdockerVkSemaphore {
+    bool signaled;
+} PdockerVkSemaphore;
+
 typedef struct {
     PdockerVkBuffer *src;
     PdockerVkBuffer *dst;
@@ -4273,14 +4277,49 @@ VKAPI_ATTR void VKAPI_CALL vkCmdUpdateBuffer(
     if (!append_command_op(cmd, &op)) free(payload);
 }
 
+static VkResult validate_submit_wait_semaphores(const VkSubmitInfo *submit) {
+    if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = submit->pWaitSemaphores
+            ? (PdockerVkSemaphore *)submit->pWaitSemaphores[i]
+            : NULL;
+        if (!sem || !sem->signaled) {
+            trace_icd_runtime_failure("semaphore-wait-unsignaled",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+    }
+    return VK_SUCCESS;
+}
+
+static void complete_submit_semaphores(const VkSubmitInfo *submit) {
+    if (!submit) return;
+    for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = submit->pWaitSemaphores
+            ? (PdockerVkSemaphore *)submit->pWaitSemaphores[i]
+            : NULL;
+        if (sem) sem->signaled = false;
+    }
+    for (uint32_t i = 0; i < submit->signalSemaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = submit->pSignalSemaphores
+            ? (PdockerVkSemaphore *)submit->pSignalSemaphores[i]
+            : NULL;
+        if (sem) sem->signaled = true;
+    }
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         VkQueue queue,
         uint32_t submitCount,
         const VkSubmitInfo *pSubmits,
         VkFence fence) {
     (void)queue;
-    (void)fence;
+    PdockerVkFence *submit_fence = (PdockerVkFence *)fence;
+    if (submit_fence) submit_fence->signaled = false;
     for (uint32_t i = 0; i < submitCount; ++i) {
+        if (!pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
+        VkResult semaphore_rc = validate_submit_wait_semaphores(&pSubmits[i]);
+        if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
         for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; ++j) {
             PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)pSubmits[i].pCommandBuffers[j];
             if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
@@ -4452,9 +4491,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             int rc = send_vector_add_3fd(n, a->memory->fd, b->memory->fd, out->memory->fd);
             if (rc != 0) return VK_ERROR_DEVICE_LOST;
         }
+        complete_submit_semaphores(&pSubmits[i]);
     }
-    PdockerVkFence *f = (PdockerVkFence *)fence;
-    if (f) f->signaled = true;
+    if (submit_fence) submit_fence->signaled = true;
     return VK_SUCCESS;
 }
 
@@ -4534,11 +4573,19 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
         const VkAllocationCallbacks *pAllocator,
         VkSemaphore *pSemaphore) {
     (void)device;
-    (void)pCreateInfo;
     (void)pAllocator;
     if (!pSemaphore) return VK_ERROR_INITIALIZATION_FAILED;
-    *pSemaphore = (VkSemaphore)pdocker_alloc_handle(sizeof(PdockerHandle));
-    return *pSemaphore ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+    PdockerVkSemaphore *sem = pdocker_alloc_handle(sizeof(*sem));
+    if (!sem) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    sem->signaled = false;
+    if (pCreateInfo && pCreateInfo->pNext) {
+        trace_icd_runtime_failure("semaphore-pnext-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        free(sem);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    *pSemaphore = (VkSemaphore)sem;
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroySemaphore(
