@@ -383,6 +383,16 @@ unused binding number.  The V4 schema, required command tokens, model, prompt,
 Dockerfile, and llama.cpp source remain unchanged; original/effective/probe
 hashes are correlated through the probe manifest and artifact logs.
 
+V5 framed transport ABI proposal: keep `VULKAN_DISPATCH_V4` as the default and
+wire-compatible fallback.  A V5 frame may be used only when the ICD and executor
+negotiate the same explicit capability/version bit; any missing or mismatched
+capability falls back to V4 behavior.  The frame should carry a compact header
+plus a resource table for object IDs, fds, memory offsets, sizes, and lifetime
+tokens, and a descriptor table for set/binding/type/resource-index/offset/range
+entries.  SPIR-V, push constants, specialization data, and buffer bytes remain
+byte-preserved; the first goal is unambiguous transport growth, not a semantics
+or performance claim.
+
 2026-05-24 Q6 write10 probe integration status:
 
 - Evidence artifact:

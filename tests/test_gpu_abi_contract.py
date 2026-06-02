@@ -583,6 +583,48 @@ class GpuAbiContractTest(unittest.TestCase):
             executor,
         )
 
+
+
+    def test_vulkan_dispatch_v5_schema_is_single_source_and_advertised(self):
+        app = APP_HEADER.read_text()
+        container = CONTAINER_HEADER.read_text()
+        markers = [
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_FIELDS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELDS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_FIELDS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_FIELDS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES",
+        ]
+        for marker in markers:
+            self.assertIn(marker, app)
+            self.assertIn(marker, container)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_FIELD_COUNT 46u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT 11u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_FIELD_COUNT 14u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_FIELD_COUNT 3u', app)
+        for marker in markers:
+            app_line = next(line for line in app.splitlines() if marker in line and line.startswith("#define"))
+            container_line = next(line for line in container.splitlines() if marker in line and line.startswith("#define"))
+            self.assertEqual(app_line, container_line)
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            '\\"vulkan_dispatch_v5_frame\\":true',
+            '\\"vulkan_dispatch_v5\\"',
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MAJOR",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
+        ]:
+            self.assertIn(marker, executor)
+
     def test_llama_gpu_env_manifest_covers_abi_dispatch_options(self):
         manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
         app_options = vulkan_dispatch_option_envs(APP_HEADER)

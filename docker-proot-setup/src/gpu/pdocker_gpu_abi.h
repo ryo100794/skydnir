@@ -91,4 +91,124 @@
 #define PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_FIELD_COUNT 13u
 #define PDOCKER_GPU_VULKAN_DISPATCH_V4_BINDING_SCHEMA_HASH 0x4a322a1f9f143a20ull
 
+
+/*
+ * Framed VULKAN_DISPATCH_V5 schema foundation.
+ *
+ * V5 is a new command family and must not reinterpret or extend the positional
+ * V4 binding list.  The executor advertises these schema hashes through
+ * CAPABILITIES; ICDs may use V5 only when every advertised hash matches.
+ */
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC "PDGPUV5"
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MAJOR 5u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR 0u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_COMMAND_DISPATCH 1u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_SCHEMA_HASH 0x3de711f5a527e2f8ull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH 0x5fd531f2d77e9ad1ull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH 0xb262ddf93c2ca096ull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_SCHEMA_HASH 0xae7e0f61a22df66eull
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES (4u * 1024u * 1024u)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS 253u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES 1024u
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS 2048u
+
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_FIELDS(X) \
+    X(magic, bytes8) \
+    X(header_size, u16) \
+    X(abi_major, u16) \
+    X(abi_minor, u16) \
+    X(command, u16) \
+    X(flags, u32) \
+    X(reserved0, u32) \
+    X(frame_size, u64) \
+    X(dispatch_id, u64) \
+    X(fd_count, u32) \
+    X(shader_fd_index, u32) \
+    X(shader_size, u64) \
+    X(shader_hash, u64) \
+    X(gx, u32) \
+    X(gy, u32) \
+    X(gz, u32) \
+    X(reserved1, u32) \
+    X(resource_count, u32) \
+    X(resource_entry_size, u32) \
+    X(resource_table_offset, u64) \
+    X(resource_table_size, u64) \
+    X(resource_schema_hash, u64) \
+    X(descriptor_count, u32) \
+    X(descriptor_entry_size, u32) \
+    X(descriptor_table_offset, u64) \
+    X(descriptor_table_size, u64) \
+    X(descriptor_schema_hash, u64) \
+    X(specialization_count, u32) \
+    X(specialization_entry_size, u32) \
+    X(specialization_table_offset, u64) \
+    X(specialization_table_size, u64) \
+    X(specialization_data_offset, u64) \
+    X(specialization_data_size, u64) \
+    X(specialization_hash, u64) \
+    X(push_offset, u64) \
+    X(push_size, u64) \
+    X(push_hash, u64) \
+    X(entry_name_offset, u64) \
+    X(entry_name_size, u64) \
+    X(option_text_offset, u64) \
+    X(option_text_size, u64) \
+    X(option_hash, u64) \
+    X(resource_hash, u64) \
+    X(descriptor_hash, u64) \
+    X(dispatch_hash, u64) \
+    X(frame_hash, u64)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_FIELD_COUNT 46u
+
+#define PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY 1u
+#define PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER 2u
+#define PDOCKER_GPU_V5_RESOURCE_PARENT_NONE 0xffffffffu
+#define PDOCKER_GPU_V5_RESOURCE_FD_NONE 0xffffffffu
+#define PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED (1u << 0)
+#define PDOCKER_GPU_V5_RESOURCE_FLAG_DEVICE_LOCAL_PREFERRED (1u << 1)
+#define PDOCKER_GPU_V5_RESOURCE_FLAG_READONLY_SNAPSHOT (1u << 2)
+#define PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE (1u << 3)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELDS(X) \
+    X(resource_type, u32) \
+    X(resource_flags, u32) \
+    X(resource_id, u64) \
+    X(parent_resource_index, u32) \
+    X(fd_index, u32) \
+    X(memory_offset, u64) \
+    X(size, u64) \
+    X(usage, u64) \
+    X(memory_property_flags, u64) \
+    X(external_offset, u64) \
+    X(generation, u64)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT 11u
+
+#define PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC (1u << 0)
+#define PDOCKER_GPU_V5_DESCRIPTOR_FLAG_WHOLE_SIZE (1u << 1)
+#define PDOCKER_GPU_V5_DESCRIPTOR_FLAG_ARRAY_ENTRY (1u << 2)
+#define PDOCKER_GPU_V5_ACCESS_READ (1u << 0)
+#define PDOCKER_GPU_V5_ACCESS_WRITE (1u << 1)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_FIELDS(X) \
+    X(descriptor_set, u32) \
+    X(binding, u32) \
+    X(array_element, u32) \
+    X(descriptor_type, u32) \
+    X(descriptor_flags, u32) \
+    X(access_flags, u32) \
+    X(resource_index, u32) \
+    X(reserved0, u32) \
+    X(resource_id, u64) \
+    X(buffer_offset, u64) \
+    X(range, u64) \
+    X(transfer_offset, u64) \
+    X(transfer_size, u64) \
+    X(dynamic_offset, u64)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_FIELD_COUNT 14u
+
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_FIELDS(X) \
+    X(constant_id, u32) \
+    X(offset, u32) \
+    X(size, u64)
+#define PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_FIELD_COUNT 3u
+
 #endif

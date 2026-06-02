@@ -14018,6 +14018,15 @@ static void print_capabilities(const char *transport) {
             "\"backend_affinity_policy\":\"same-api-first\","
             "\"container_contract\":\"glibc-shim-command-queue\","
             "\"fd_shared_buffer\":true,"
+            "\"vulkan_dispatch_v5_frame\":true,"
+            "\"vulkan_dispatch_v5\":{"
+            "\"abi_major\":%u,\"abi_minor\":%u,\"command_dispatch\":%u,"
+            "\"frame_header_schema_hash\":\"0x%016llx\","
+            "\"resource_schema_hash\":\"0x%016llx\","
+            "\"descriptor_schema_hash\":\"0x%016llx\","
+            "\"specialization_schema_hash\":\"0x%016llx\","
+            "\"max_frame_bytes\":%u,\"max_fds\":%u,"
+            "\"max_resources\":%u,\"max_descriptors\":%u},"
             "\"android_vulkan_ready\":%s,"
             "\"android_vulkan_features\":{"
             "\"api_major\":%u,\"api_minor\":%u,"
@@ -14035,6 +14044,17 @@ static void print_capabilities(const char *transport) {
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
             PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
             transport,
+            PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MAJOR,
+            PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR,
+            PDOCKER_GPU_VULKAN_DISPATCH_V5_COMMAND_DISPATCH,
+            (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_SCHEMA_HASH,
+            (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH,
+            (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH,
+            (unsigned long long)PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_SCHEMA_HASH,
+            PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES,
+            PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS,
+            PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES,
+            PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS,
             vulkan_ready ? "true" : "false",
             rt ? VK_API_VERSION_MAJOR(rt->api_version) : 0,
             rt ? VK_API_VERSION_MINOR(rt->api_version) : 0,
