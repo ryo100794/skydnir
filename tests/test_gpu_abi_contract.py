@@ -671,6 +671,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdSetStencilReference",
             "vkCmdClearAttachments",
             "vkCmdExecuteCommands",
+            "vkDestroySurfaceKHR",
+            "vkGetPhysicalDeviceSurfaceSupportKHR",
+            "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
+            "vkGetPhysicalDeviceSurfaceFormatsKHR",
+            "vkGetPhysicalDeviceSurfacePresentModesKHR",
+            "vkCreateSwapchainKHR",
+            "vkDestroySwapchainKHR",
+            "vkGetSwapchainImagesKHR",
+            "vkAcquireNextImageKHR",
+            "vkAcquireNextImage2KHR",
+            "vkQueuePresentKHR",
         ]:
             self.assertRegex(icd, rf"VKAPI_ATTR\s+[\w\s\*]+VKAPI_CALL\s+{name}\s*\(")
             self.assertIn(f"MAP_PROC({name});", icd)
@@ -703,8 +714,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "graphics-command-unimplemented",
             "VK_ERROR_EXTENSION_NOT_PRESENT",
             "pProperties->apiVersion > VK_API_VERSION_1_2",
+            "surface-unimplemented",
+            "swapchain-unimplemented",
         ]:
             self.assertIn(marker, icd)
+        self.assertNotIn("ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME", icd)
 
 
 

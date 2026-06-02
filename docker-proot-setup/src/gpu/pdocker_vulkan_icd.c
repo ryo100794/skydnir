@@ -6341,6 +6341,140 @@ VKAPI_ATTR void VKAPI_CALL vkGetRenderAreaGranularity(
     }
 }
 
+VKAPI_ATTR void VKAPI_CALL vkDestroySurfaceKHR(
+        VkInstance instance,
+        VkSurfaceKHR surface,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)instance;
+    (void)surface;
+    (void)pAllocator;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
+        VkPhysicalDevice physicalDevice,
+        uint32_t queueFamilyIndex,
+        VkSurfaceKHR surface,
+        VkBool32 *pSupported) {
+    (void)physicalDevice;
+    (void)queueFamilyIndex;
+    (void)surface;
+    if (!pSupported) return VK_ERROR_INITIALIZATION_FAILED;
+    *pSupported = VK_FALSE;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+        VkPhysicalDevice physicalDevice,
+        VkSurfaceKHR surface,
+        VkSurfaceCapabilitiesKHR *pSurfaceCapabilities) {
+    (void)physicalDevice;
+    (void)surface;
+    (void)pSurfaceCapabilities;
+    trace_icd_runtime_failure("surface-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
+        VkPhysicalDevice physicalDevice,
+        VkSurfaceKHR surface,
+        uint32_t *pSurfaceFormatCount,
+        VkSurfaceFormatKHR *pSurfaceFormats) {
+    (void)physicalDevice;
+    (void)surface;
+    (void)pSurfaceFormats;
+    if (!pSurfaceFormatCount) return VK_ERROR_INITIALIZATION_FAILED;
+    *pSurfaceFormatCount = 0;
+    trace_icd_runtime_failure("surface-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
+        VkPhysicalDevice physicalDevice,
+        VkSurfaceKHR surface,
+        uint32_t *pPresentModeCount,
+        VkPresentModeKHR *pPresentModes) {
+    (void)physicalDevice;
+    (void)surface;
+    (void)pPresentModes;
+    if (!pPresentModeCount) return VK_ERROR_INITIALIZATION_FAILED;
+    *pPresentModeCount = 0;
+    trace_icd_runtime_failure("surface-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
+        VkDevice device,
+        const VkSwapchainCreateInfoKHR *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkSwapchainKHR *pSwapchain) {
+    (void)device;
+    (void)pCreateInfo;
+    (void)pAllocator;
+    if (pSwapchain) *pSwapchain = VK_NULL_HANDLE;
+    trace_icd_runtime_failure("swapchain-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroySwapchainKHR(
+        VkDevice device,
+        VkSwapchainKHR swapchain,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)swapchain;
+    (void)pAllocator;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
+        VkDevice device,
+        VkSwapchainKHR swapchain,
+        uint32_t *pSwapchainImageCount,
+        VkImage *pSwapchainImages) {
+    (void)device;
+    (void)swapchain;
+    (void)pSwapchainImages;
+    if (!pSwapchainImageCount) return VK_ERROR_INITIALIZATION_FAILED;
+    *pSwapchainImageCount = 0;
+    trace_icd_runtime_failure("swapchain-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
+        VkDevice device,
+        VkSwapchainKHR swapchain,
+        uint64_t timeout,
+        VkSemaphore semaphore,
+        VkFence fence,
+        uint32_t *pImageIndex) {
+    (void)device;
+    (void)swapchain;
+    (void)timeout;
+    (void)semaphore;
+    (void)fence;
+    if (pImageIndex) *pImageIndex = 0;
+    trace_icd_runtime_failure("swapchain-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImage2KHR(
+        VkDevice device,
+        const VkAcquireNextImageInfoKHR *pAcquireInfo,
+        uint32_t *pImageIndex) {
+    (void)device;
+    (void)pAcquireInfo;
+    if (pImageIndex) *pImageIndex = 0;
+    trace_icd_runtime_failure("swapchain-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(
+        VkQueue queue,
+        const VkPresentInfoKHR *pPresentInfo) {
+    (void)queue;
+    (void)pPresentInfo;
+    trace_icd_runtime_failure("swapchain-unimplemented", VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateCommandPool(
         VkDevice device,
         const VkCommandPoolCreateInfo *pCreateInfo,
@@ -8845,6 +8979,17 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCreateFramebuffer);
     MAP_PROC(vkDestroyFramebuffer);
     MAP_PROC(vkGetRenderAreaGranularity);
+    MAP_PROC(vkDestroySurfaceKHR);
+    MAP_PROC(vkGetPhysicalDeviceSurfaceSupportKHR);
+    MAP_PROC(vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
+    MAP_PROC(vkGetPhysicalDeviceSurfaceFormatsKHR);
+    MAP_PROC(vkGetPhysicalDeviceSurfacePresentModesKHR);
+    MAP_PROC(vkCreateSwapchainKHR);
+    MAP_PROC(vkDestroySwapchainKHR);
+    MAP_PROC(vkGetSwapchainImagesKHR);
+    MAP_PROC(vkAcquireNextImageKHR);
+    MAP_PROC(vkAcquireNextImage2KHR);
+    MAP_PROC(vkQueuePresentKHR);
     MAP_PROC(vkCreateCommandPool);
     MAP_PROC(vkDestroyCommandPool);
     MAP_PROC(vkResetCommandPool);
