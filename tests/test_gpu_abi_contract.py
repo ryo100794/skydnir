@@ -1778,6 +1778,25 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VkBlitImageInfo2", icd)
         self.assertIn("VkResolveImageInfo2", icd)
 
+    def test_vulkan_icd_supports_basic_event_synchronization_api(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("struct PdockerVkEvent", icd)
+        self.assertIn("PDOCKER_VK_COMMAND_EVENT", icd)
+        self.assertIn("record_event_command", icd)
+        self.assertIn("case PDOCKER_VK_COMMAND_EVENT:", icd)
+        for name in [
+            "vkCreateEvent",
+            "vkDestroyEvent",
+            "vkGetEventStatus",
+            "vkSetEvent",
+            "vkResetEvent",
+            "vkCmdSetEvent",
+            "vkCmdResetEvent",
+            "vkCmdWaitEvents",
+        ]:
+            self.assertIn(name, icd)
+            self.assertIn(f"MAP_PROC({name});", icd)
+
     def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("descriptor_type_supported_by_v4_transport", icd)

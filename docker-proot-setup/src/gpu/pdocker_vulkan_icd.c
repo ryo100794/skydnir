@@ -80,6 +80,7 @@ typedef struct PdockerVkFence PdockerVkFence;
 typedef struct PdockerVkImage PdockerVkImage;
 typedef struct PdockerVkImageView PdockerVkImageView;
 typedef struct PdockerVkSampler PdockerVkSampler;
+typedef struct PdockerVkEvent PdockerVkEvent;
 
 #define PDOCKER_VK_MAX_STORAGE_BUFFERS 16
 #define PDOCKER_VK_MAX_DESCRIPTOR_SETS 8
@@ -254,6 +255,10 @@ typedef struct PdockerVkSemaphore {
     bool signaled;
 } PdockerVkSemaphore;
 
+struct PdockerVkEvent {
+    bool signaled;
+};
+
 typedef struct {
     PdockerVkBuffer *src;
     PdockerVkBuffer *dst;
@@ -326,6 +331,7 @@ typedef enum {
     PDOCKER_VK_COMMAND_RESOLVE_IMAGE = 9,
     PDOCKER_VK_COMMAND_BLIT_IMAGE = 10,
     PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE = 11,
+    PDOCKER_VK_COMMAND_EVENT = 12,
 } PdockerVkCommandOpType;
 
 typedef struct {
@@ -336,6 +342,8 @@ typedef struct {
     VkDeviceSize size;
     uint32_t data;
     void *payload;
+    PdockerVkEvent *event;
+    bool event_signaled;
 } PdockerVkCommandOp;
 
 typedef struct {
@@ -6997,6 +7005,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                                     &cmd->depth_stencil_clear_ops[op->index], &stats);
                             }
                             break;
+                        case PDOCKER_VK_COMMAND_EVENT:
+                            if (op->event) op->event->signaled = op->event_signaled;
+                            break;
                         case PDOCKER_VK_COMMAND_FILL:
                             execute_recorded_fill_op(op);
                             break;
@@ -7162,6 +7173,116 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
 VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
     (void)device;
     return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateEvent(
+        VkDevice device,
+        const VkEventCreateInfo *pCreateInfo,
+        const VkAllocationCallbacks *pAllocator,
+        VkEvent *pEvent) {
+    (void)device;
+    (void)pCreateInfo;
+    (void)pAllocator;
+    if (!pEvent) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkEvent *event = pdocker_alloc_handle(sizeof(*event));
+    if (!event) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    event->signaled = false;
+    *pEvent = (VkEvent)event;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyEvent(
+        VkDevice device,
+        VkEvent event,
+        const VkAllocationCallbacks *pAllocator) {
+    (void)device;
+    (void)pAllocator;
+    free((void *)event);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetEventStatus(
+        VkDevice device,
+        VkEvent event) {
+    (void)device;
+    PdockerVkEvent *e = (PdockerVkEvent *)event;
+    if (!e) return VK_EVENT_RESET;
+    return e->signaled ? VK_EVENT_SET : VK_EVENT_RESET;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkSetEvent(
+        VkDevice device,
+        VkEvent event) {
+    (void)device;
+    PdockerVkEvent *e = (PdockerVkEvent *)event;
+    if (!e) return VK_ERROR_INITIALIZATION_FAILED;
+    e->signaled = true;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkResetEvent(
+        VkDevice device,
+        VkEvent event) {
+    (void)device;
+    PdockerVkEvent *e = (PdockerVkEvent *)event;
+    if (!e) return VK_ERROR_INITIALIZATION_FAILED;
+    e->signaled = false;
+    return VK_SUCCESS;
+}
+
+static void record_event_command(VkCommandBuffer commandBuffer,
+                                 VkEvent event,
+                                 bool signaled) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkEvent *e = (PdockerVkEvent *)event;
+    if (!cmd || !e) return;
+    PdockerVkCommandOp op;
+    memset(&op, 0, sizeof(op));
+    op.type = PDOCKER_VK_COMMAND_EVENT;
+    op.event = e;
+    op.event_signaled = signaled;
+    (void)append_command_op(cmd, &op);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent(
+        VkCommandBuffer commandBuffer,
+        VkEvent event,
+        VkPipelineStageFlags stageMask) {
+    (void)stageMask;
+    record_event_command(commandBuffer, event, true);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent(
+        VkCommandBuffer commandBuffer,
+        VkEvent event,
+        VkPipelineStageFlags stageMask) {
+    (void)stageMask;
+    record_event_command(commandBuffer, event, false);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
+        VkCommandBuffer commandBuffer,
+        uint32_t eventCount,
+        const VkEvent *pEvents,
+        VkPipelineStageFlags srcStageMask,
+        VkPipelineStageFlags dstStageMask,
+        uint32_t memoryBarrierCount,
+        const VkMemoryBarrier *pMemoryBarriers,
+        uint32_t bufferMemoryBarrierCount,
+        const VkBufferMemoryBarrier *pBufferMemoryBarriers,
+        uint32_t imageMemoryBarrierCount,
+        const VkImageMemoryBarrier *pImageMemoryBarriers) {
+    (void)eventCount;
+    (void)pEvents;
+    vkCmdPipelineBarrier(commandBuffer,
+                         srcStageMask,
+                         dstStageMask,
+                         0,
+                         memoryBarrierCount,
+                         pMemoryBarriers,
+                         bufferMemoryBarrierCount,
+                         pBufferMemoryBarriers,
+                         imageMemoryBarrierCount,
+                         pImageMemoryBarriers);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
@@ -7424,6 +7545,14 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkQueueSubmit);
     MAP_PROC(vkQueueWaitIdle);
     MAP_PROC(vkDeviceWaitIdle);
+    MAP_PROC(vkCreateEvent);
+    MAP_PROC(vkDestroyEvent);
+    MAP_PROC(vkGetEventStatus);
+    MAP_PROC(vkSetEvent);
+    MAP_PROC(vkResetEvent);
+    MAP_PROC(vkCmdSetEvent);
+    MAP_PROC(vkCmdResetEvent);
+    MAP_PROC(vkCmdWaitEvents);
     MAP_PROC(vkCreateFence);
     MAP_PROC(vkDestroyFence);
     MAP_PROC(vkResetFences);
