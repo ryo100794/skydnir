@@ -761,6 +761,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "rp->attachments[a].load_op = src->loadOp;",
             "cmd->active_clear_values[i]",
             "cmd->active_subpass += 1;",
+            "VkDeviceSize base_offset;",
+            "VkDeviceSize dynamic_offset;",
+            "api_dynamic_offsets[binding_count] = binding->dynamic_offset;",
+            "descriptors[i].dynamic_offset = (uint64_t)api_dynamic_offsets[i];",
+            "slot->offset = slot->base_offset + slot->dynamic_offset;",
+            "slot->range == VK_WHOLE_SIZE",
+            "UINT64_MAX - slot->base_offset",
+            "dynamic descriptor with VK_WHOLE_SIZE is unsupported",
             "graphics-command-unimplemented",
             "VK_ERROR_EXTENSION_NOT_PRESENT",
             "pProperties->apiVersion > VK_API_VERSION_1_2",
@@ -829,6 +837,41 @@ class GpuAbiContractTest(unittest.TestCase):
             "graphics execution is not implemented",
         ]:
             self.assertIn(marker, executor)
+
+    def test_vulkan_graphics_v6_submit_validator_hardens_resource_descriptor_and_draw_refs(self):
+        executor = GPU_EXECUTOR.read_text()
+        validator = executor.split("static int validate_vulkan_graphics_v6_frame_content", 1)[1].split(
+            "static int recv_vulkan_graphics_v6_header_with_fds", 1
+        )[0]
+        for marker in [
+            "static int u64_range_within_size",
+            "resource->parent_resource_index != PDOCKER_GPU_V5_RESOURCE_PARENT_NONE) return -EPROTO;",
+            "resource->fd_index != PDOCKER_GPU_V5_RESOURCE_FD_NONE) return -EPROTO;",
+            "memory->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY",
+            "!u64_range_within_size(resource->memory_offset, resource->size, memory->size)",
+            "images[i].memory_resource_index >= header->resource_count",
+            "!u64_range_within_size(images[i].memory_offset, images[i].memory_size, memory->size)",
+            "vulkan_dispatch_descriptor_type_from_api(descriptor->descriptor_type, &descriptor_type) == 0",
+            "descriptor->resource_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE",
+            "descriptor->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||",
+            "uint64_t effective_offset = 0;",
+            "checked_u64_add3(descriptor->buffer_offset, descriptor->dynamic_offset, 0, &effective_offset)",
+            "descriptor->dynamic_offset != 0",
+            "!u64_range_within_size(effective_offset, descriptor->range, buffer->size)",
+            "!u64_range_within_size(descriptor->transfer_offset, descriptor->transfer_size, buffer->size)",
+            "vulkan_dispatch_image_descriptor_type_from_api(descriptor->descriptor_type, &descriptor_type)",
+            "descriptor->resource_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) return -EPROTO;",
+            "vulkan_descriptor_type_requires_image_view(descriptor_type)",
+            "vulkan_descriptor_type_requires_sampler(descriptor_type)",
+            "vertex_bindings[i].buffer_resource_index >= header->resource_count",
+            "!u64_range_within_size(vertex_bindings[i].offset, vertex_bindings[i].size, buffer->size)",
+            "command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW &&",
+            "command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED",
+            "command->index_buffer_resource_index == UINT32_MAX",
+            "index_buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER",
+            "command->index_offset > index_buffer->size",
+        ]:
+            self.assertIn(marker, validator if marker != "static int u64_range_within_size" else executor)
 
     def test_vulkan_dispatch_v5_1_object_header_is_full_frame_validated(self):
         executor = GPU_EXECUTOR.read_text()

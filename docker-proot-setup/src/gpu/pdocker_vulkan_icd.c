@@ -221,6 +221,8 @@ struct PdockerVkDescriptorBinding {
     PdockerVkImageView *image_view;
     PdockerVkSampler *sampler;
     VkDeviceSize offset;
+    VkDeviceSize base_offset;
+    VkDeviceSize dynamic_offset;
     VkDeviceSize range;
     VkImageLayout image_layout;
     VkDescriptorType descriptor_type;
@@ -1885,6 +1887,7 @@ static void trace_vulkan_reconcile_evidence(
         const size_t *api_buffer_sizes,
         const uint32_t *api_descriptor_types,
         const uint32_t *api_dynamic_flags,
+        const VkDeviceSize *api_dynamic_offsets,
         const VkDeviceSize *api_memory_offsets,
         const size_t *api_memory_sizes,
         const uintptr_t *api_memory_ids,
@@ -1929,7 +1932,7 @@ static void trace_vulkan_reconcile_evidence(
                 "%s{\"set\":%u,\"binding\":%u,\"offset\":%llu,\"size\":%zu,"
                 "\"api_offset\":%llu,\"api_range\":%llu,"
                 "\"api_buffer_size\":%zu,\"api_descriptor_type\":%u,"
-                "\"api_dynamic\":%u,\"api_memory_offset\":%llu,"
+                "\"api_dynamic\":%u,\"api_dynamic_offset\":%llu,\"api_memory_offset\":%llu,"
                 "\"api_memory_size\":%zu,\"api_memory_id\":%llu,"
                 "\"api_buffer_id\":%llu}",
                 i ? "," : "",
@@ -1942,6 +1945,7 @@ static void trace_vulkan_reconcile_evidence(
                 api_buffer_sizes[i],
                 api_descriptor_types[i],
                 api_dynamic_flags[i],
+                (unsigned long long)api_dynamic_offsets[i],
                 (unsigned long long)api_memory_offsets[i],
                 api_memory_sizes[i],
                 (unsigned long long)api_memory_ids[i],
@@ -2076,6 +2080,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         const size_t *api_buffer_sizes,
         const uint32_t *api_descriptor_types,
         const uint32_t *api_dynamic_flags,
+        const VkDeviceSize *api_dynamic_offsets,
         const VkDeviceSize *api_memory_offsets,
         const size_t *api_memory_sizes,
         const uintptr_t *api_memory_ids,
@@ -2099,7 +2104,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         (binding_count > 0 &&
          (!api_descriptor_sets || !bindings || !offsets || !sizes || !api_offsets ||
           !api_ranges || !api_buffer_sizes || !api_descriptor_types ||
-          !api_dynamic_flags || !api_memory_offsets || !api_memory_sizes ||
+          !api_dynamic_flags || !api_dynamic_offsets || !api_memory_offsets || !api_memory_sizes ||
           !api_memory_ids || !api_buffer_ids)) ||
         (image_descriptor_count > 0 &&
          (!image_descriptor_sets || !image_descriptor_bindings ||
@@ -2196,7 +2201,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         descriptors[i].range = (uint64_t)api_ranges[i];
         descriptors[i].transfer_offset = transfer_offset;
         descriptors[i].transfer_size = (uint64_t)sizes[i];
-        descriptors[i].dynamic_offset = 0;
+        descriptors[i].dynamic_offset = (uint64_t)api_dynamic_offsets[i];
     }
     for (size_t i = 0; i < image_count; ++i) {
         PdockerVkImage *image = image_objects ? image_objects[i] : NULL;
@@ -2475,6 +2480,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     size_t api_buffer_sizes[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t api_descriptor_types[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t api_dynamic_flags[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    VkDeviceSize api_dynamic_offsets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     VkDeviceSize api_memory_offsets[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     size_t api_memory_sizes[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uintptr_t api_memory_ids[PDOCKER_VK_MAX_STORAGE_BUFFERS];
@@ -2595,11 +2601,12 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             }
             offsets[binding_count] = dispatch_offset;
             sizes[binding_count] = bytes;
-            api_offsets[binding_count] = binding->offset;
+            api_offsets[binding_count] = binding->base_offset;
             api_ranges[binding_count] = binding->range;
             api_buffer_sizes[binding_count] = binding->buffer ? binding->buffer->size : 0;
             api_descriptor_types[binding_count] = (uint32_t)binding->descriptor_type;
             api_dynamic_flags[binding_count] = binding->dynamic ? 1u : 0u;
+            api_dynamic_offsets[binding_count] = binding->dynamic_offset;
             api_memory_offsets[binding_count] = binding->buffer ? binding->buffer->memory_offset : 0;
             api_memory_sizes[binding_count] = dispatch_memory ? dispatch_memory->size : 0;
             api_memory_ids[binding_count] = (uintptr_t)dispatch_memory;
@@ -2673,6 +2680,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         api_buffer_sizes[binding_count] = probe.debug_bytes;
         api_descriptor_types[binding_count] = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         api_dynamic_flags[binding_count] = 0;
+        api_dynamic_offsets[binding_count] = 0;
         api_memory_offsets[binding_count] = 0;
         api_memory_sizes[binding_count] = probe.debug_bytes;
         /*
@@ -2922,6 +2930,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
                                     api_buffer_sizes,
                                     api_descriptor_types,
                                     api_dynamic_flags,
+                                    api_dynamic_offsets,
                                     api_memory_offsets,
                                     api_memory_sizes,
                                     api_memory_ids,
@@ -3003,6 +3012,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             api_buffer_sizes,
             api_descriptor_types,
             api_dynamic_flags,
+            api_dynamic_offsets,
             api_memory_offsets,
             api_memory_sizes,
             api_memory_ids,
@@ -6153,6 +6163,10 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                 set->storage_buffers[binding].image_view = (PdockerVkImageView *)info->imageView;
                 set->storage_buffers[binding].sampler = (PdockerVkSampler *)info->sampler;
                 set->storage_buffers[binding].image_layout = info->imageLayout;
+                set->storage_buffers[binding].base_offset = 0;
+                set->storage_buffers[binding].dynamic_offset = 0;
+                set->storage_buffers[binding].offset = 0;
+                set->storage_buffers[binding].range = 0;
                 set->storage_buffers[binding].descriptor_type = w->descriptorType;
                 set->storage_buffers[binding].dynamic = false;
                 set->has_image_descriptor = true;
@@ -6183,6 +6197,8 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                 set->storage_buffers[binding].image_view = NULL;
                 set->storage_buffers[binding].sampler = NULL;
                 set->storage_buffers[binding].image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+                set->storage_buffers[binding].base_offset = w->pBufferInfo[j].offset;
+                set->storage_buffers[binding].dynamic_offset = 0;
                 set->storage_buffers[binding].offset = w->pBufferInfo[j].offset;
                 set->storage_buffers[binding].range = w->pBufferInfo[j].range;
                 set->storage_buffers[binding].descriptor_type = w->descriptorType;
@@ -7420,20 +7436,34 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                                 binding);
                     }
                 }
+                if (slot->range == VK_WHOLE_SIZE &&
+                    dynamic_index < dynamicOffsetCount && pDynamicOffsets &&
+                    pDynamicOffsets[dynamic_index] != 0) {
+                    cmd->unsupported_descriptor_set_layout = true;
+                    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                        fprintf(stderr,
+                                "pdocker-vulkan-icd: dynamic descriptor with VK_WHOLE_SIZE is unsupported set=%u binding=%u dyn_index=%u add=%u\n",
+                                target_set,
+                                binding,
+                                dynamic_index,
+                                pDynamicOffsets[dynamic_index]);
+                    }
+                }
                 if (dynamic_index < dynamicOffsetCount && pDynamicOffsets) {
                     if ((VkDeviceSize)pDynamicOffsets[dynamic_index] >
-                        (VkDeviceSize)(UINT64_MAX - slot->offset)) {
+                        (VkDeviceSize)(UINT64_MAX - slot->base_offset)) {
                         cmd->unsupported_descriptor_set_layout = true;
                         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                             fprintf(stderr,
                                     "pdocker-vulkan-icd: dynamic descriptor offset overflow set=%u binding=%u base=%llu add=%u\n",
                                     target_set,
                                     binding,
-                                    (unsigned long long)slot->offset,
+                                    (unsigned long long)slot->base_offset,
                                     pDynamicOffsets[dynamic_index]);
                         }
                     } else {
-                        slot->offset += pDynamicOffsets[dynamic_index];
+                        slot->dynamic_offset = pDynamicOffsets[dynamic_index];
+                        slot->offset = slot->base_offset + slot->dynamic_offset;
                     }
                     if (trace_allocations()) {
                         fprintf(stderr,
@@ -7444,14 +7474,16 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                                 pDynamicOffsets[dynamic_index],
                                 (unsigned long long)slot->offset);
                     }
-                } else if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                } else {
                     cmd->unsupported_descriptor_set_layout = true;
-                    fprintf(stderr,
-                            "pdocker-vulkan-icd: missing dynamic offset set=%u binding=%u dyn_index=%u count=%u\n",
-                            target_set,
-                            binding,
-                            dynamic_index,
-                            dynamicOffsetCount);
+                    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                        fprintf(stderr,
+                                "pdocker-vulkan-icd: missing dynamic offset set=%u binding=%u dyn_index=%u count=%u\n",
+                                target_set,
+                                binding,
+                                dynamic_index,
+                                dynamicOffsetCount);
+                    }
                 }
                 dynamic_index++;
             }

@@ -16779,6 +16779,12 @@ static const void *graphics_v6_table_ptr(
     return frame + offset;
 }
 
+static int u64_range_within_size(uint64_t offset, uint64_t size, uint64_t limit) {
+    if (offset > limit) return 0;
+    if (size > limit - offset) return 0;
+    return 1;
+}
+
 static int validate_vulkan_graphics_v6_frame_content(
         const unsigned char *frame,
         size_t received_fd_count) {
@@ -16826,32 +16832,79 @@ static int validate_vulkan_graphics_v6_frame_content(
         const PdockerGpuVulkanDispatchV5ResourceEntry *resource = &resources[i];
         switch (resource->resource_type) {
             case PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY:
+                if (resource->parent_resource_index != PDOCKER_GPU_V5_RESOURCE_PARENT_NONE) return -EPROTO;
+                if (resource->fd_index != PDOCKER_GPU_V5_RESOURCE_FD_NONE && resource->fd_index >= received_fd_count) return -EPROTO;
+                break;
             case PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER:
+                if (resource->fd_index != PDOCKER_GPU_V5_RESOURCE_FD_NONE) return -EPROTO;
+                if (resource->parent_resource_index >= header->resource_count) return -EPROTO;
+                const PdockerGpuVulkanDispatchV5ResourceEntry *memory =
+                    &resources[resource->parent_resource_index];
+                if (memory->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY) return -EPROTO;
+                if (!u64_range_within_size(resource->memory_offset, resource->size, memory->size)) return -ERANGE;
+                break;
             case PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE:
             case PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE_VIEW:
             case PDOCKER_GPU_V5_RESOURCE_TYPE_SAMPLER:
+                if (resource->fd_index != PDOCKER_GPU_V5_RESOURCE_FD_NONE) return -EPROTO;
                 break;
             default:
                 return -EPROTO;
         }
-        if (resource->fd_index != PDOCKER_GPU_V5_RESOURCE_FD_NONE && resource->fd_index >= received_fd_count) return -EPROTO;
         if (resource->parent_resource_index != PDOCKER_GPU_V5_RESOURCE_PARENT_NONE &&
             resource->parent_resource_index >= header->resource_count) return -EPROTO;
     }
     for (uint32_t i = 0; i < header->image_count; ++i) {
         if (images[i].memory_resource_index >= header->resource_count) return -EPROTO;
+        const PdockerGpuVulkanDispatchV5ResourceEntry *memory =
+            &resources[images[i].memory_resource_index];
+        if (memory->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY) return -EPROTO;
+        if (!u64_range_within_size(images[i].memory_offset, images[i].memory_size, memory->size)) return -ERANGE;
     }
     for (uint32_t i = 0; i < header->image_view_count; ++i) {
         if (image_views[i].image_index >= header->image_count) return -EPROTO;
     }
     for (uint32_t i = 0; i < header->descriptor_count; ++i) {
         const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor = &descriptors[i];
-        if (descriptor->resource_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
-            descriptor->resource_index >= header->resource_count) return -EPROTO;
-        if (descriptor->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
-            descriptor->image_view_index >= header->image_view_count) return -EPROTO;
-        if (descriptor->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE &&
-            descriptor->sampler_index >= header->sampler_count) return -EPROTO;
+        VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+        if (vulkan_dispatch_descriptor_type_from_api(descriptor->descriptor_type, &descriptor_type) == 0) {
+            if (descriptor->resource_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                descriptor->resource_index >= header->resource_count) return -EPROTO;
+            if (descriptor->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                descriptor->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) return -EPROTO;
+            const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
+                &resources[descriptor->resource_index];
+            if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) return -EPROTO;
+            uint64_t effective_offset = 0;
+            if (checked_u64_add3(descriptor->buffer_offset, descriptor->dynamic_offset, 0, &effective_offset) != 0) {
+                return -EOVERFLOW;
+            }
+            if (descriptor->range == UINT64_MAX) {
+                if (descriptor->dynamic_offset != 0 || descriptor->buffer_offset > buffer->size) return -ERANGE;
+            } else if (!u64_range_within_size(effective_offset, descriptor->range, buffer->size)) {
+                return -ERANGE;
+            }
+            if (!u64_range_within_size(descriptor->transfer_offset, descriptor->transfer_size, buffer->size)) {
+                return -ERANGE;
+            }
+            continue;
+        }
+        if (vulkan_dispatch_image_descriptor_type_from_api(descriptor->descriptor_type, &descriptor_type) != 0) {
+            return -EOPNOTSUPP;
+        }
+        if (descriptor->resource_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) return -EPROTO;
+        if (vulkan_descriptor_type_requires_image_view(descriptor_type)) {
+            if (descriptor->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                descriptor->image_view_index >= header->image_view_count) return -EPROTO;
+        } else if (descriptor->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+            return -EPROTO;
+        }
+        if (vulkan_descriptor_type_requires_sampler(descriptor_type)) {
+            if (descriptor->sampler_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                descriptor->sampler_index >= header->sampler_count) return -EPROTO;
+        } else if (descriptor->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+            return -EPROTO;
+        }
     }
 
     for (uint32_t i = 0; i < header->shader_stage_count; ++i) {
@@ -16872,6 +16925,10 @@ static int validate_vulkan_graphics_v6_frame_content(
     }
     for (uint32_t i = 0; i < header->vertex_binding_count; ++i) {
         if (vertex_bindings[i].buffer_resource_index >= header->resource_count) return -EPROTO;
+        const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
+            &resources[vertex_bindings[i].buffer_resource_index];
+        if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) return -EPROTO;
+        if (!u64_range_within_size(vertex_bindings[i].offset, vertex_bindings[i].size, buffer->size)) return -ERANGE;
     }
     for (uint32_t i = 0; i < header->attachment_count; ++i) {
         const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment = &attachments[i];
@@ -16912,8 +16969,17 @@ static int validate_vulkan_graphics_v6_frame_content(
             !range_add_u32(command->dynamic_state_first, command->dynamic_state_count, header->dynamic_state_count)) {
             return -EPROTO;
         }
-        if (command->index_buffer_resource_index != UINT32_MAX &&
-            command->index_buffer_resource_index >= header->resource_count) {
+        if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW &&
+            command->index_buffer_resource_index != UINT32_MAX) return -EPROTO;
+        if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) {
+            if (command->index_buffer_resource_index == UINT32_MAX ||
+                command->index_buffer_resource_index >= header->resource_count) return -EPROTO;
+            const PdockerGpuVulkanDispatchV5ResourceEntry *index_buffer =
+                &resources[command->index_buffer_resource_index];
+            if (index_buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) return -EPROTO;
+            if (command->index_offset > index_buffer->size) return -ERANGE;
+        } else if (command->index_buffer_resource_index != UINT32_MAX &&
+                   command->index_buffer_resource_index >= header->resource_count) {
             return -EPROTO;
         }
         if (!payload_range_valid(command->push_offset, command->push_size, header->frame_size)) return -EPROTO;
