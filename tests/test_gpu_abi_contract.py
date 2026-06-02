@@ -587,6 +587,29 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+
+
+    def test_vulkan_dispatch_v5_tables_convert_to_existing_v4_semantics(self):
+        executor = GPU_EXECUTOR.read_text()
+        self.assertIn("convert_vulkan_dispatch_v5_to_v4_bindings", executor)
+        self.assertIn("PdockerGpuVulkanDispatchV5ResourceEntry", executor)
+        self.assertIn("PdockerGpuVulkanDispatchV5DescriptorEntry", executor)
+        self.assertIn("PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY", executor)
+        self.assertIn("PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER", executor)
+        self.assertIn("PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED", executor)
+        self.assertIn("vulkan_dispatch_descriptor_type_from_api(d->descriptor_type", executor)
+        self.assertIn("bindings[i].descriptor_set = d->descriptor_set;", executor)
+        self.assertIn("bindings[i].binding = d->binding;", executor)
+        self.assertIn("bindings[i].api_descriptor_type = d->descriptor_type;", executor)
+        self.assertIn("bindings[i].api_memory_id = memory->resource_id;", executor)
+        self.assertIn("bindings[i].api_buffer_id = buffer->resource_id;", executor)
+        self.assertIn("binding_fds[i] = passed_fds[memory->fd_index];", executor)
+        self.assertIn("checked_u64_add3(memory->external_offset, buffer->memory_offset", executor)
+        self.assertIn("checked_u64_add3(d->buffer_offset, d->dynamic_offset, 0, &api_offset)", executor)
+        self.assertIn("bindings[i].api_offset = (off_t)api_offset;", executor)
+        self.assertIn("return -EOPNOTSUPP;", executor)
+        self.assertIn("return -ERANGE;", executor)
+
     def test_vulkan_dispatch_v5_header_validator_is_separate_from_text_commands(self):
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("recv_vulkan_dispatch_v5_header_with_fds", executor)

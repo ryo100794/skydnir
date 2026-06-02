@@ -14853,6 +14853,126 @@ static int validate_vulkan_dispatch_v5_header(
     return 0;
 }
 
+
+
+static const void *v5_frame_range(
+        const unsigned char *frame,
+        const PdockerGpuVulkanDispatchV5FrameHeader *header,
+        uint64_t offset,
+        uint64_t size) {
+    if (!frame || !header || !range_within_frame(offset, size, header->frame_size)) return NULL;
+    return frame + offset;
+}
+
+static int checked_u64_add3(uint64_t a, uint64_t b, uint64_t c, uint64_t *out) {
+    if (!out) return -EINVAL;
+    if (a > UINT64_MAX - b) return -EOVERFLOW;
+    uint64_t ab = a + b;
+    if (ab > UINT64_MAX - c) return -EOVERFLOW;
+    *out = ab + c;
+    return 0;
+}
+
+static int v5_resource_index_valid(
+        const PdockerGpuVulkanDispatchV5FrameHeader *header,
+        uint32_t index) {
+    return header && index < header->resource_count;
+}
+
+static int convert_vulkan_dispatch_v5_to_v4_bindings(
+        const unsigned char *frame,
+        const PdockerGpuVulkanDispatchV5FrameHeader *header,
+        const int *passed_fds,
+        size_t passed_fd_count,
+        VulkanDispatchBinding *bindings,
+        int *binding_fds,
+        size_t binding_capacity,
+        size_t *binding_count_out) {
+    if (!frame || !header || !passed_fds || !bindings || !binding_fds || !binding_count_out) {
+        return -EINVAL;
+    }
+    if (header->descriptor_count > binding_capacity) return -E2BIG;
+    const PdockerGpuVulkanDispatchV5ResourceEntry *resources =
+        (const PdockerGpuVulkanDispatchV5ResourceEntry *)v5_frame_range(
+            frame, header, header->resource_table_offset, header->resource_table_size);
+    const PdockerGpuVulkanDispatchV5DescriptorEntry *descriptors =
+        (const PdockerGpuVulkanDispatchV5DescriptorEntry *)v5_frame_range(
+            frame, header, header->descriptor_table_offset, header->descriptor_table_size);
+    if (!resources || !descriptors) return -EPROTO;
+    for (uint32_t i = 0; i < header->resource_count; ++i) {
+        const PdockerGpuVulkanDispatchV5ResourceEntry *r = &resources[i];
+        if (r->resource_type == PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY) {
+            if ((r->resource_flags & PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED) &&
+                (r->fd_index == PDOCKER_GPU_V5_RESOURCE_FD_NONE ||
+                 r->fd_index >= passed_fd_count ||
+                 passed_fds[r->fd_index] < 0)) {
+                return -EBADF;
+            }
+            if (r->parent_resource_index != PDOCKER_GPU_V5_RESOURCE_PARENT_NONE) return -EPROTO;
+        } else if (r->resource_type == PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) {
+            if (!v5_resource_index_valid(header, r->parent_resource_index)) return -EPROTO;
+            const PdockerGpuVulkanDispatchV5ResourceEntry *mem = &resources[r->parent_resource_index];
+            if (mem->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY) return -EPROTO;
+            if (r->memory_offset > mem->size || r->size > mem->size - r->memory_offset) {
+                return -ERANGE;
+            }
+            if (r->fd_index != PDOCKER_GPU_V5_RESOURCE_FD_NONE) return -EPROTO;
+        } else {
+            return -EOPNOTSUPP;
+        }
+    }
+    for (uint32_t i = 0; i < header->descriptor_count; ++i) {
+        const PdockerGpuVulkanDispatchV5DescriptorEntry *d = &descriptors[i];
+        if (!v5_resource_index_valid(header, d->resource_index)) return -EPROTO;
+        const PdockerGpuVulkanDispatchV5ResourceEntry *buffer = &resources[d->resource_index];
+        if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) return -EPROTO;
+        const PdockerGpuVulkanDispatchV5ResourceEntry *memory = &resources[buffer->parent_resource_index];
+        if (memory->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY) return -EPROTO;
+        if (memory->fd_index >= passed_fd_count || passed_fds[memory->fd_index] < 0) return -EBADF;
+        VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        if (vulkan_dispatch_descriptor_type_from_api(d->descriptor_type, &descriptor_type) != 0) {
+            return -EOPNOTSUPP;
+        }
+        (void)descriptor_type;
+        if (d->range == UINT64_MAX) {
+            if (d->buffer_offset > buffer->size) return -ERANGE;
+        } else if (d->buffer_offset > buffer->size || d->range > buffer->size - d->buffer_offset) {
+            return -ERANGE;
+        }
+        if (d->transfer_offset > buffer->size || d->transfer_size > buffer->size - d->transfer_offset) {
+            return -ERANGE;
+        }
+        uint64_t fd_offset = 0;
+        if (checked_u64_add3(memory->external_offset, buffer->memory_offset,
+                             d->transfer_offset, &fd_offset) != 0) {
+            return -EOVERFLOW;
+        }
+        uint64_t api_offset = 0;
+        if (checked_u64_add3(d->buffer_offset, d->dynamic_offset, 0, &api_offset) != 0) {
+            return -EOVERFLOW;
+        }
+        memset(&bindings[i], 0, sizeof(bindings[i]));
+        bindings[i].descriptor_set = d->descriptor_set;
+        bindings[i].binding = d->binding;
+        bindings[i].offset = (off_t)fd_offset;
+        bindings[i].size = (size_t)d->transfer_size;
+        bindings[i].api_offset = (off_t)api_offset;
+        bindings[i].api_range = d->range == UINT64_MAX
+            ? (size_t)(buffer->size - d->buffer_offset)
+            : (size_t)d->range;
+        bindings[i].api_buffer_size = (size_t)buffer->size;
+        bindings[i].api_descriptor_type = d->descriptor_type;
+        bindings[i].api_dynamic = (d->descriptor_flags & PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC) ? 1 : 0;
+        bindings[i].api_memory_offset = (off_t)buffer->memory_offset;
+        bindings[i].api_memory_size = (size_t)memory->size;
+        bindings[i].api_memory_id = memory->resource_id;
+        bindings[i].api_buffer_id = buffer->resource_id;
+        binding_fds[i] = passed_fds[memory->fd_index];
+    }
+    *binding_count_out = header->descriptor_count;
+    return 0;
+}
+
 static int recv_vulkan_dispatch_v5_header_with_fds(
         int cfd,
         PdockerGpuVulkanDispatchV5FrameHeader *header,
