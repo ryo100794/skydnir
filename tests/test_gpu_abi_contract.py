@@ -1576,6 +1576,40 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_dispatch_descriptor_type_from_api(bindings[i].api_descriptor_type", write_body)
         self.assertNotIn("writes[write_count].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;", write_body)
 
+    def test_vulkan_pipeline_layout_drives_descriptor_layout_and_dynamic_offsets(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("uint32_t set_layout_count;", icd)
+        self.assertIn("set_layouts[PDOCKER_VK_MAX_DESCRIPTOR_SETS]", icd)
+        self.assertIn("bool unsupported_set_layout_count;", icd)
+        self.assertIn("descriptor_set_layout_compatible", icd)
+        self.assertIn("descriptor_type_is_dynamic", icd)
+        self.assertIn("VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC", icd)
+        self.assertIn("VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC", icd)
+        create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout", 1
+        )[0]
+        self.assertIn("layout->set_layout_count = pCreateInfo->setLayoutCount;", create_body)
+        self.assertIn("pCreateInfo->pSetLayouts", create_body)
+        self.assertIn("layout->unsupported_set_layout_count = true;", create_body)
+        bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
+            "static void validate_bound_descriptor_layouts_before_dispatch", 1
+        )[0]
+        self.assertNotIn("(void)layout;", bind_body)
+        self.assertIn("PdockerVkPipelineLayout *pipeline_layout", bind_body)
+        self.assertIn("descriptor_set_layout_compatible(pipeline_layout->set_layouts[target_set]", bind_body)
+        self.assertIn("layout expects dynamic descriptor", bind_body)
+        self.assertIn("missing dynamic offset", bind_body)
+        self.assertIn("extra dynamic offsets", bind_body)
+        self.assertIn("dynamic descriptor offset overflow", bind_body)
+        self.assertIn("cmd->unsupported_descriptor_set_layout = true;", bind_body)
+        self.assertIn("set->storage_buffers[binding].dynamic = descriptor_type_is_dynamic", icd)
+        self.assertIn("validate_bound_descriptor_layouts_before_dispatch", icd)
+        self.assertIn("dispatch descriptor layout mismatch", icd)
+        dispatch_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdDispatch", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1
+        )[0]
+        self.assertIn("validate_bound_descriptor_layouts_before_dispatch(cmd);", dispatch_body)
+
     def test_vulkan_binary_semaphores_are_not_noop_in_v4_submit(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("typedef struct PdockerVkSemaphore", icd)

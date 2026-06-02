@@ -242,6 +242,9 @@ struct PdockerVkShaderModule {
 
 struct PdockerVkPipelineLayout {
     uint32_t push_constant_size;
+    uint32_t set_layout_count;
+    PdockerVkDescriptorSetLayout *set_layouts[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+    bool unsupported_set_layout_count;
 };
 
 struct PdockerVkPipeline {
@@ -5709,6 +5712,30 @@ static bool descriptor_type_supported_by_v5_object_transport(VkDescriptorType ty
            type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
 }
 
+static bool descriptor_type_is_dynamic(VkDescriptorType type) {
+    return type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC ||
+           type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+}
+
+static bool descriptor_set_layout_compatible(
+        const PdockerVkDescriptorSetLayout *expected,
+        const PdockerVkDescriptorSetLayout *actual) {
+    if (!expected || !actual) return false;
+    if (expected == actual) return true;
+    if (expected->storage_binding_count != actual->storage_binding_count ||
+        expected->unsupported_descriptor_array != actual->unsupported_descriptor_array ||
+        expected->unsupported_descriptor_type != actual->unsupported_descriptor_type) {
+        return false;
+    }
+    for (uint32_t i = 0; i < expected->storage_binding_count; ++i) {
+        if (expected->storage_binding_types[i] != actual->storage_binding_types[i] ||
+            expected->storage_binding_counts[i] != actual->storage_binding_counts[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
         VkDevice device,
         const VkDescriptorSetLayoutCreateInfo *pCreateInfo,
@@ -5782,6 +5809,19 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     if (!pPipelineLayout) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkPipelineLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    if (pCreateInfo) {
+        layout->set_layout_count = pCreateInfo->setLayoutCount;
+        if (layout->set_layout_count > PDOCKER_VK_MAX_DESCRIPTOR_SETS) {
+            layout->unsupported_set_layout_count = true;
+            layout->set_layout_count = PDOCKER_VK_MAX_DESCRIPTOR_SETS;
+        }
+        for (uint32_t i = 0; i < layout->set_layout_count; ++i) {
+            layout->set_layouts[i] =
+                pCreateInfo->pSetLayouts
+                    ? (PdockerVkDescriptorSetLayout *)pCreateInfo->pSetLayouts[i]
+                    : NULL;
+        }
+    }
     for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->pushConstantRangeCount; ++i) {
         const VkPushConstantRange *range = &pCreateInfo->pPushConstantRanges[i];
         uint32_t end = range->offset + range->size;
@@ -5941,8 +5981,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                 set->storage_buffers[binding].offset = w->pBufferInfo[j].offset;
                 set->storage_buffers[binding].range = w->pBufferInfo[j].range;
                 set->storage_buffers[binding].descriptor_type = w->descriptorType;
-                set->storage_buffers[binding].dynamic =
-                    w->descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+                set->storage_buffers[binding].dynamic = descriptor_type_is_dynamic(w->descriptorType);
                 if (trace_allocations()) {
                     PdockerVkBuffer *buffer = set->storage_buffers[binding].buffer;
                     fprintf(stderr,
@@ -6221,9 +6260,17 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         uint32_t dynamicOffsetCount,
         const uint32_t *pDynamicOffsets) {
     (void)pipelineBindPoint;
-    (void)layout;
+    PdockerVkPipelineLayout *pipeline_layout = (PdockerVkPipelineLayout *)layout;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (cmd && descriptorSetCount > 0 && pDescriptorSets) {
+        if (pipeline_layout && pipeline_layout->unsupported_set_layout_count) {
+            cmd->unsupported_descriptor_set_layout = true;
+            if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: pipeline layout set count exceeds passthrough limit=%u\n",
+                        PDOCKER_VK_MAX_DESCRIPTOR_SETS);
+            }
+        }
         if (firstSet + descriptorSetCount > PDOCKER_VK_MAX_DESCRIPTOR_SETS) {
             cmd->unsupported_descriptor_set_layout = true;
         }
@@ -6241,6 +6288,28 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             PdockerVkDescriptorSet *set = (PdockerVkDescriptorSet *)pDescriptorSets[set_i];
             if (!set) continue;
             uint32_t target_set = firstSet + set_i;
+            if (pipeline_layout &&
+                target_set < pipeline_layout->set_layout_count &&
+                !descriptor_set_layout_compatible(pipeline_layout->set_layouts[target_set],
+                                                  set->layout)) {
+                cmd->unsupported_descriptor_set_layout = true;
+                if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: descriptor set layout mismatch set=%u expected=%p actual=%p\n",
+                            target_set,
+                            (void *)pipeline_layout->set_layouts[target_set],
+                            (void *)set->layout);
+                }
+            }
+            if (pipeline_layout && target_set >= pipeline_layout->set_layout_count) {
+                cmd->unsupported_descriptor_set_layout = true;
+                if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: descriptor set=%u has no pipeline layout slot count=%u\n",
+                            target_set,
+                            pipeline_layout->set_layout_count);
+                }
+            }
             if (set->unsupported_descriptor_array || set->unsupported_descriptor_type ||
                 (set->layout &&
                  (set->layout->unsupported_descriptor_array ||
@@ -6257,12 +6326,47 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             }
             cmd->bound_set_snapshots[target_set] = *set;
             cmd->bound_set_used[target_set] = true;
-            for (uint32_t binding = 0; binding < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++binding) {
+            PdockerVkDescriptorSetLayout *expected_layout =
+                pipeline_layout && target_set < pipeline_layout->set_layout_count
+                    ? pipeline_layout->set_layouts[target_set]
+                    : set->layout;
+            uint32_t binding_limit = expected_layout
+                ? expected_layout->storage_binding_count
+                : PDOCKER_VK_MAX_STORAGE_BUFFERS;
+            if (binding_limit > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+                binding_limit = PDOCKER_VK_MAX_STORAGE_BUFFERS;
+            }
+            for (uint32_t binding = 0; binding < binding_limit; ++binding) {
                 PdockerVkDescriptorBinding *slot =
                     &cmd->bound_set_snapshots[target_set].storage_buffers[binding];
-                if (!slot->dynamic) continue;
+                bool expects_dynamic = expected_layout
+                    ? descriptor_type_is_dynamic(expected_layout->storage_binding_types[binding])
+                    : slot->dynamic;
+                if (!expects_dynamic) continue;
+                if (!slot->dynamic) {
+                    cmd->unsupported_descriptor_set_layout = true;
+                    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                        fprintf(stderr,
+                                "pdocker-vulkan-icd: layout expects dynamic descriptor set=%u binding=%u but descriptor write is not dynamic\n",
+                                target_set,
+                                binding);
+                    }
+                }
                 if (dynamic_index < dynamicOffsetCount && pDynamicOffsets) {
-                    slot->offset += pDynamicOffsets[dynamic_index];
+                    if ((VkDeviceSize)pDynamicOffsets[dynamic_index] >
+                        (VkDeviceSize)(UINT64_MAX - slot->offset)) {
+                        cmd->unsupported_descriptor_set_layout = true;
+                        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                            fprintf(stderr,
+                                    "pdocker-vulkan-icd: dynamic descriptor offset overflow set=%u binding=%u base=%llu add=%u\n",
+                                    target_set,
+                                    binding,
+                                    (unsigned long long)slot->offset,
+                                    pDynamicOffsets[dynamic_index]);
+                        }
+                    } else {
+                        slot->offset += pDynamicOffsets[dynamic_index];
+                    }
                     if (trace_allocations()) {
                         fprintf(stderr,
                                 "pdocker-vulkan-icd: dynamic descriptor set=%u binding=%u dyn_index=%u add=%u effective_offset=%llu\n",
@@ -6273,6 +6377,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                                 (unsigned long long)slot->offset);
                     }
                 } else if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                    cmd->unsupported_descriptor_set_layout = true;
                     fprintf(stderr,
                             "pdocker-vulkan-icd: missing dynamic offset set=%u binding=%u dyn_index=%u count=%u\n",
                             target_set,
@@ -6281,6 +6386,40 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                             dynamicOffsetCount);
                 }
                 dynamic_index++;
+            }
+        }
+        if (dynamic_index != dynamicOffsetCount) {
+            cmd->unsupported_descriptor_set_layout = true;
+            if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: extra dynamic offsets expected=%u supplied=%u\n",
+                        dynamic_index,
+                        dynamicOffsetCount);
+            }
+        }
+    }
+}
+
+static void validate_bound_descriptor_layouts_before_dispatch(PdockerVkCommandBuffer *cmd) {
+    if (!cmd || !cmd->pipeline || !cmd->pipeline->layout) return;
+    PdockerVkPipelineLayout *layout = cmd->pipeline->layout;
+    if (layout->unsupported_set_layout_count) {
+        cmd->unsupported_descriptor_set_layout = true;
+        return;
+    }
+    for (uint32_t set_i = 0; set_i < PDOCKER_VK_MAX_DESCRIPTOR_SETS; ++set_i) {
+        if (!cmd->bound_set_used[set_i]) continue;
+        if (set_i >= layout->set_layout_count ||
+            !descriptor_set_layout_compatible(layout->set_layouts[set_i],
+                                              cmd->bound_set_snapshots[set_i].layout)) {
+            cmd->unsupported_descriptor_set_layout = true;
+            if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: dispatch descriptor layout mismatch set=%u layout_count=%u expected=%p actual=%p\n",
+                        set_i,
+                        layout->set_layout_count,
+                        set_i < layout->set_layout_count ? (void *)layout->set_layouts[set_i] : NULL,
+                        (void *)cmd->bound_set_snapshots[set_i].layout);
             }
         }
     }
@@ -6299,6 +6438,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
         cmd->dispatch_y = groupCountY;
         cmd->dispatch_z = groupCountZ;
         cmd->has_dispatch = true;
+        validate_bound_descriptor_layouts_before_dispatch(cmd);
         if (cmd->dispatch_op_count < PDOCKER_VK_MAX_DISPATCH_OPS) {
             uint32_t op_index = cmd->dispatch_op_count++;
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
