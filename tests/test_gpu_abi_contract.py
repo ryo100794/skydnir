@@ -609,6 +609,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(serve_loop.index("handle_vulkan_dispatch_v5_frame(cfd)"), serve_loop.index("recv_command_with_fds(cfd, cmd"))
         self.assertNotIn("VULKAN_DISPATCH_V5 ", executor)
 
+    def test_vulkan_dispatch_v5_1_object_header_is_full_frame_validated(self):
+        executor = GPU_EXECUTOR.read_text()
+        self.assertIn("PdockerGpuVulkanDispatchV5ObjectFrameHeader", executor)
+        self.assertIn("validate_vulkan_dispatch_v5_object_extension", executor)
+        self.assertIn("header_out->header_size > sizeof(*header_out)", executor)
+        self.assertIn("extension_bytes = (size_t)(header_out->header_size - sizeof(*header_out))", executor)
+        self.assertIn("read_exact_bytes(cfd, frame + sizeof(*header_out), extension_bytes)", executor)
+        self.assertIn("validate_vulkan_dispatch_v5_object_extension(frame, header_out)", executor)
+        self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS", executor)
+        self.assertIn("header->header_size != sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader)", executor)
+        self.assertIn("objects->image_entry_size != sizeof(PdockerGpuVulkanDispatchV5ImageEntry)", executor)
+        self.assertIn("objects->image_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_SCHEMA_HASH", executor)
+        self.assertIn("objects->image_table_offset, objects->image_table_size", executor)
+
     def test_vulkan_dispatch_v5_tables_convert_to_existing_v4_semantics(self):
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("convert_vulkan_dispatch_v5_to_v4_bindings", executor)
@@ -696,6 +710,21 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE",
             "PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE_VIEW",
             "PDOCKER_GPU_V5_RESOURCE_TYPE_SAMPLER",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_OBJECT_FIELDS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_OBJECT_FIELD_COUNT",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_FIELDS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_FIELD_COUNT",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_FIELDS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_FIELD_COUNT",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_FIELDS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_FIELD_COUNT",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELDS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH",
         ]:
             self.assertIn(marker, app)
             self.assertIn(marker, container)
@@ -703,6 +732,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT 11u', app)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_FIELD_COUNT 14u', app)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_FIELD_COUNT 3u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_OBJECT_FIELD_COUNT 16u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_FIELD_COUNT 20u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_FIELD_COUNT 15u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_FIELD_COUNT 19u', app)
+        self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT 16u', app)
         for marker in markers:
             app_line = next(line for line in app.splitlines() if marker in line and line.startswith("#define"))
             container_line = next(line for line in container.splitlines() if marker in line and line.startswith("#define"))
@@ -712,14 +746,25 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"vulkan_dispatch_v5_frame\\":true',
             '\\"vulkan_dispatch_v5\\"',
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MAJOR",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS",
+            "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS",
+            "validate_vulkan_dispatch_v5_object_extension",
+            "Vulkan V5.1 object transport accepted but executor object materialization is pending",
         ]:
             self.assertIn(marker, executor)
+        self.assertIn("supported_minors", executor)
 
     def test_llama_gpu_env_manifest_covers_abi_dispatch_options(self):
         manifest = json.loads(LLAMA_GPU_ENV_MANIFEST.read_text())
