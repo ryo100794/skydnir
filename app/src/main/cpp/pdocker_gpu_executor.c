@@ -15036,9 +15036,20 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
         (const PdockerGpuVulkanDispatchV5ResourceEntry *)v5_frame_range(
             frame, header, header->resource_table_offset, header->resource_table_size);
     const PdockerGpuVulkanDispatchV5DescriptorEntry *descriptors =
-        (const PdockerGpuVulkanDispatchV5DescriptorEntry *)v5_frame_range(
-            frame, header, header->descriptor_table_offset, header->descriptor_table_size);
-    if (!resources || !descriptors) return -EPROTO;
+        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR
+            ? (const PdockerGpuVulkanDispatchV5DescriptorEntry *)v5_frame_range(
+                  frame, header, header->descriptor_table_offset, header->descriptor_table_size)
+            : NULL;
+    const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *object_descriptors =
+        header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS
+            ? (const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *)v5_frame_range(
+                  frame, header, header->descriptor_table_offset, header->descriptor_table_size)
+            : NULL;
+    if (!resources ||
+        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR && !descriptors) ||
+        (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS && !object_descriptors)) {
+        return -EPROTO;
+    }
     for (uint32_t i = 0; i < header->resource_count; ++i) {
         const PdockerGpuVulkanDispatchV5ResourceEntry *r = &resources[i];
         if (r->resource_type == PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY) {
@@ -15066,7 +15077,35 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
         }
     }
     for (uint32_t i = 0; i < header->descriptor_count; ++i) {
-        const PdockerGpuVulkanDispatchV5DescriptorEntry *d = &descriptors[i];
+        PdockerGpuVulkanDispatchV5DescriptorObjectEntry object_copy;
+        const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *d = NULL;
+        if (header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS) {
+            d = &object_descriptors[i];
+        } else {
+            const PdockerGpuVulkanDispatchV5DescriptorEntry *legacy = &descriptors[i];
+            memset(&object_copy, 0, sizeof(object_copy));
+            object_copy.descriptor_set = legacy->descriptor_set;
+            object_copy.binding = legacy->binding;
+            object_copy.array_element = legacy->array_element;
+            object_copy.descriptor_type = legacy->descriptor_type;
+            object_copy.descriptor_flags = legacy->descriptor_flags;
+            object_copy.access_flags = legacy->access_flags;
+            object_copy.resource_index = legacy->resource_index;
+            object_copy.image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+            object_copy.sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+            object_copy.image_layout = 0;
+            object_copy.resource_id = legacy->resource_id;
+            object_copy.buffer_offset = legacy->buffer_offset;
+            object_copy.range = legacy->range;
+            object_copy.transfer_offset = legacy->transfer_offset;
+            object_copy.transfer_size = legacy->transfer_size;
+            object_copy.dynamic_offset = legacy->dynamic_offset;
+            d = &object_copy;
+        }
+        if (d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+            d->sampler_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+            return -EOPNOTSUPP;
+        }
         if (!v5_resource_index_valid(header, d->resource_index)) return -EPROTO;
         const PdockerGpuVulkanDispatchV5ResourceEntry *buffer = &resources[d->resource_index];
         if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) return -EPROTO;
@@ -15230,11 +15269,6 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         cfd, &frame, &header, passed_fds, PDOCKER_GPU_MAX_PASSED_FDS, &passed_fd_count);
     if (rc != 0) {
         json_fail("vulkan-dispatch-v5", strerror(-rc));
-        goto cleanup;
-    }
-    if (header.abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS) {
-        json_fail("vulkan-dispatch-v5",
-                  "Vulkan V5.1 object transport accepted but executor object materialization is pending");
         goto cleanup;
     }
     VulkanDispatchBinding bindings[PDOCKER_GPU_MAX_VULKAN_BINDINGS];

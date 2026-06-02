@@ -148,6 +148,52 @@ def v4_binding_schema(path):
     return fields, int(macro.group("count")), int(macro.group("hash"), 16), fnv
 
 
+def schema_hash(fields):
+    fnv = 1469598103934665603
+    for name, field_type in fields:
+        for byte in f"{name}:{field_type}\0".encode():
+            fnv ^= byte
+            fnv = (fnv * 1099511628211) & ((1 << 64) - 1)
+    return fnv
+
+
+def vulkan_dispatch_v5_schema(path, field_macro, count_macro, hash_macro=None):
+    source = path.read_text()
+    macro = re.search(
+        rf"#define\s+{field_macro}\(X\)\s+\\\n(?P<body>.*?)\n"
+        rf"#define\s+{count_macro}\s+(?P<count>\d+)u",
+        source,
+        re.S,
+    )
+    assert macro is not None, field_macro
+    fields = re.findall(r"X\(([^,\s]+),\s*([^)\\\s]+)\)", macro.group("body"))
+    declared_hash = None
+    if hash_macro is not None:
+        hash_define = re.search(
+            rf"#define\s+{hash_macro}\s+(?P<hash>0x[0-9a-fA-F]+)ull",
+            source,
+        )
+        assert hash_define is not None, hash_macro
+        declared_hash = int(hash_define.group("hash"), 16)
+    return fields, int(macro.group("count")), declared_hash, schema_hash(fields)
+
+
+def c_struct_field_names(path, struct_name):
+    source = path.read_text()
+    struct = re.search(
+        rf"typedef\s+struct\s+{struct_name}\s*\{{(?P<body>.*?)\}}\s+{struct_name};",
+        source,
+        re.S,
+    )
+    assert struct is not None, struct_name
+    return re.findall(
+        r"^\s*(?:char|uint(?:16|32|64)_t|PdockerGpuVulkanDispatchV5[A-Za-z]+)\s+"
+        r"([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]+\])?;",
+        struct.group("body"),
+        re.M,
+    )
+
+
 def vulkan_dispatch_option_envs(path):
     source = path.read_text()
 
@@ -619,15 +665,75 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("validate_vulkan_dispatch_v5_object_extension(frame, header_out)", executor)
         self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS", executor)
         self.assertIn("header->header_size != sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader)", executor)
+        self.assertIn("header->descriptor_entry_size != sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry)", executor)
+        self.assertIn("header->descriptor_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH", executor)
+        self.assertIn("objects->image_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES", executor)
+        self.assertIn("objects->image_view_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS", executor)
+        self.assertIn("objects->sampler_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS", executor)
         self.assertIn("objects->image_entry_size != sizeof(PdockerGpuVulkanDispatchV5ImageEntry)", executor)
+        self.assertIn("objects->image_view_entry_size != sizeof(PdockerGpuVulkanDispatchV5ImageViewEntry)", executor)
+        self.assertIn("objects->sampler_entry_size != sizeof(PdockerGpuVulkanDispatchV5SamplerEntry)", executor)
         self.assertIn("objects->image_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_SCHEMA_HASH", executor)
+        self.assertIn("objects->image_view_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_SCHEMA_HASH", executor)
+        self.assertIn("objects->sampler_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH", executor)
         self.assertIn("objects->image_table_offset, objects->image_table_size", executor)
+        self.assertIn("objects->image_view_table_offset, objects->image_view_table_size", executor)
+        self.assertIn("objects->sampler_table_offset, objects->sampler_table_size", executor)
+
+    def test_vulkan_dispatch_v5_0_header_compatibility_survives_v5_1_objects(self):
+        executor = GPU_EXECUTOR.read_text()
+        validator = executor.split("static int validate_vulkan_dispatch_v5_header", 1)[1].split(
+            "static int validate_vulkan_dispatch_v5_object_extension", 1
+        )[0]
+        v5_0_minor = "header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR"
+        v5_1_minor = "header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS"
+        self.assertIn(v5_0_minor, validator)
+        self.assertIn(v5_1_minor, validator)
+        self.assertLess(validator.index(v5_0_minor), validator.index(v5_1_minor))
+        self.assertIn("header->header_size != sizeof(PdockerGpuVulkanDispatchV5FrameHeader)", validator)
+        self.assertIn("header->header_size != sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader)", validator)
+        self.assertIn("header->descriptor_entry_size != sizeof(PdockerGpuVulkanDispatchV5DescriptorEntry)", validator)
+        self.assertIn("header->descriptor_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH", validator)
+        self.assertIn("header->descriptor_entry_size != sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry)", validator)
+        self.assertIn(
+            "header->descriptor_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH",
+            validator,
+        )
+        object_validator = executor.split("static int validate_vulkan_dispatch_v5_object_extension", 1)[1].split(
+            "static const void *v5_frame_range", 1
+        )[0]
+        self.assertIn(
+            "if (header->abi_minor != PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS) return 0;",
+            object_validator,
+        )
+
+    def test_vulkan_dispatch_v5_1_object_transport_buffer_descriptors_reuse_v4_execution_path(self):
+        executor = GPU_EXECUTOR.read_text()
+        handler = executor.split("static int handle_vulkan_dispatch_v5_frame", 1)[1].split(
+            "static int serve_socket", 1
+        )[0]
+        conversion = "convert_vulkan_dispatch_v5_to_v4_bindings"
+        self.assertIn(conversion, handler)
+        self.assertIn("run_vulkan_dispatch_fd(", handler)
+        self.assertNotIn("object materialization is pending", handler)
+        self.assertLess(handler.index(conversion), handler.index("run_vulkan_dispatch_fd("))
+        converter = executor.split("static int convert_vulkan_dispatch_v5_to_v4_bindings", 1)[1].split(
+            "static int recv_vulkan_dispatch_v5_header_with_fds", 1
+        )[0]
+        self.assertIn("PdockerGpuVulkanDispatchV5DescriptorObjectEntry", converter)
+        self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS", converter)
+        self.assertIn("object_descriptors[i]", converter)
+        self.assertIn("object_copy.image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;", converter)
+        self.assertIn("object_copy.sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;", converter)
+        self.assertIn("d->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE", converter)
+        self.assertIn("return -EOPNOTSUPP;", converter)
 
     def test_vulkan_dispatch_v5_tables_convert_to_existing_v4_semantics(self):
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("convert_vulkan_dispatch_v5_to_v4_bindings", executor)
         self.assertIn("PdockerGpuVulkanDispatchV5ResourceEntry", executor)
         self.assertIn("PdockerGpuVulkanDispatchV5DescriptorEntry", executor)
+        self.assertIn("PdockerGpuVulkanDispatchV5DescriptorObjectEntry", executor)
         self.assertIn("PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY", executor)
         self.assertIn("PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER", executor)
         self.assertIn("PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE", executor)
@@ -687,6 +793,93 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn('cmd[strcspn(cmd, "\\r\\n")] = \'\\0\';', text_recv)
         self.assertNotIn("validate_vulkan_dispatch_v5_header", text_recv)
+
+    def test_vulkan_dispatch_v5_schema_hashes_match_declared_field_macros(self):
+        schemas = [
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_SPECIALIZATION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH",
+            ),
+        ]
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            for field_macro, count_macro, hash_macro in schemas:
+                with self.subTest(header=str(header_path), schema=field_macro):
+                    fields, count, declared_hash, computed_hash = vulkan_dispatch_v5_schema(
+                        header_path, field_macro, count_macro, hash_macro
+                    )
+                    self.assertEqual(len(fields), count)
+                    self.assertEqual(declared_hash, computed_hash)
+
+    def test_vulkan_dispatch_v5_1_object_field_macros_match_packed_structs(self):
+        schemas = [
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_OBJECT_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_OBJECT_FIELD_COUNT",
+                "PdockerGpuVulkanDispatchV5ObjectHeaderExtension",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_FIELD_COUNT",
+                "PdockerGpuVulkanDispatchV5ImageEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_FIELD_COUNT",
+                "PdockerGpuVulkanDispatchV5ImageViewEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_FIELD_COUNT",
+                "PdockerGpuVulkanDispatchV5SamplerEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELDS",
+                "PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_FIELD_COUNT",
+                "PdockerGpuVulkanDispatchV5DescriptorObjectEntry",
+            ),
+        ]
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            for field_macro, count_macro, struct_name in schemas:
+                with self.subTest(header=str(header_path), schema=field_macro):
+                    fields, count, _, _ = vulkan_dispatch_v5_schema(header_path, field_macro, count_macro)
+                    self.assertEqual(len(fields), count)
+                    self.assertEqual([name for name, _ in fields], c_struct_field_names(header_path, struct_name))
 
     def test_vulkan_dispatch_v5_schema_is_single_source_and_advertised(self):
         app = APP_HEADER.read_text()
@@ -761,7 +954,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGE_VIEWS",
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS",
             "validate_vulkan_dispatch_v5_object_extension",
-            "Vulkan V5.1 object transport accepted but executor object materialization is pending",
+            "PdockerGpuVulkanDispatchV5DescriptorObjectEntry",
         ]:
             self.assertIn(marker, executor)
         self.assertIn("supported_minors", executor)
