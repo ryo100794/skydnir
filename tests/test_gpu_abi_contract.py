@@ -873,6 +873,56 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, validator if marker != "static int u64_range_within_size" else executor)
 
+    def test_vulkan_graphics_v61_metadata_extension_is_fail_closed_validated(self):
+        executor = GPU_EXECUTOR.read_text()
+        header_validator = executor.split("static int validate_vulkan_graphics_v6_header", 1)[1].split(
+            "static const void *graphics_v6_table_ptr", 1
+        )[0]
+        content_validator = executor.split("static int validate_vulkan_graphics_v6_frame_content", 1)[1].split(
+            "static int recv_vulkan_graphics_v6_header_with_fds", 1
+        )[0]
+        recv_body = executor.split("static int recv_vulkan_graphics_v6_header_with_fds", 1)[1].split(
+            "static int connection_starts_with_graphics_v6_magic", 1
+        )[0]
+        handle_body = executor.split("static int handle_vulkan_graphics_v6_frame", 1)[1].split(
+            "static int handle_vulkan_dispatch_v5_frame", 1
+        )[0]
+        for marker in [
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR",
+            "sizeof(PdockerGpuVulkanGraphicsV61FrameHeader)",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_DYNAMIC_OFFSETS",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_PUSH_CONSTANT_METADATA",
+        ]:
+            self.assertIn(marker, header_validator)
+        range_body = header_validator.split("FrameRange ranges[14]", 1)[1].split(
+            "table_range_valid(header->resource_table_offset", 1
+        )[0]
+        self.assertLess(
+            range_body.index("{header->command_table_offset, header->command_table_size}"),
+            range_body.index("header_v61->v61.dynamic_offset_table_offset"),
+        )
+        self.assertIn("validate_vulkan_graphics_v6_header_prefix", recv_body)
+        self.assertIn("header.frame_size - sizeof(header)", handle_body)
+        for marker in [
+            "PdockerGpuVulkanGraphicsV61DynamicOffsetEntry",
+            "PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry",
+            "extension_hash = fnv1a64_update(extension_hash, dynamic_offsets",
+            "dynamic_offsets[i].reserved0 != 0",
+            "(dynamic_offsets[i].offset & 3u) != 0",
+            "commands[meta->command_index].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS",
+            "meta->stage_flags == 0",
+            "(meta->range_offset & 3u) != 0",
+            "range_add_u32(command->first_dynamic_offset, command->dynamic_offset_count",
+            "PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC",
+            "descriptor->dynamic_offset != 0",
+            "dynamic_descriptor_count != command->dynamic_offset_count",
+            "push_hash = fnv1a64_update(1469598103934665603ull",
+            "metadata_count != 1",
+        ]:
+            self.assertIn(marker, content_validator)
+
     def test_vulkan_dispatch_v5_1_object_header_is_full_frame_validated(self):
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("PdockerGpuVulkanDispatchV5ObjectFrameHeader", executor)
@@ -1134,6 +1184,21 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -1184,6 +1249,21 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV6DynamicStateEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV61HeaderExtension",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV61DynamicOffsetEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
