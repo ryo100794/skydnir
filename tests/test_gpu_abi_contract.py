@@ -1116,6 +1116,43 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cmd->unsupported_descriptor_set_layout = true;", bind_body)
 
 
+
+    def test_vulkan_create_device_validates_advertised_extensions_and_features(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("device_extension_advertised_name", icd)
+        self.assertIn("validate_device_extensions", icd)
+        self.assertIn("create-device rejected unadvertised extension", icd)
+        self.assertIn("VK_ERROR_EXTENSION_NOT_PRESENT", icd)
+        self.assertIn("advertised_feature_mask", icd)
+        self.assertIn("requested_features_supported", icd)
+        self.assertIn("create-device rejected unsupported feature_mask", icd)
+        self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", icd)
+        create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyDevice", 1
+        )[0]
+        self.assertIn("*pDevice = VK_NULL_HANDLE;", create_body)
+        self.assertIn("validate_device_extensions(pCreateInfo)", create_body)
+        self.assertIn("requested_feature_mask_from_device_create_info(pCreateInfo)", create_body)
+        self.assertIn("advertised_feature_mask()", create_body)
+        self.assertIn("requested_features_supported(requested_feature_mask, supported_feature_mask", create_body)
+        self.assertIn("device->requested_feature_mask = requested_feature_mask;", create_body)
+
+    def test_vulkan_proc_table_exposes_khr_aliases_for_advertised_core2_apis(self):
+        icd = VULKAN_ICD.read_text()
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split(
+            "VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr", 1
+        )[0]
+        self.assertIn("MAP_ALIAS", proc_body)
+        for alias in [
+            '"vkGetPhysicalDeviceProperties2KHR", vkGetPhysicalDeviceProperties2',
+            '"vkGetPhysicalDeviceFeatures2KHR", vkGetPhysicalDeviceFeatures2',
+            '"vkGetPhysicalDeviceQueueFamilyProperties2KHR", vkGetPhysicalDeviceQueueFamilyProperties2',
+            '"vkGetPhysicalDeviceMemoryProperties2KHR", vkGetPhysicalDeviceMemoryProperties2',
+            '"vkGetBufferMemoryRequirements2KHR", vkGetBufferMemoryRequirements2',
+            '"vkBindBufferMemory2KHR", vkBindBufferMemory2',
+        ]:
+            self.assertIn(alias, proc_body)
+
     def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("descriptor_type_supported_by_v4_transport", icd)

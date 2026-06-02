@@ -2714,6 +2714,56 @@ static uint64_t requested_feature_mask_from_device_create_info(
     return mask;
 }
 
+static uint64_t advertised_feature_mask(void) {
+    uint64_t mask = 0;
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (advertised_shader_int64()) mask |= PDOCKER_VK_FEATURE_SHADER_INT64;
+    if (caps) {
+        bool storage16_disabled = env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE");
+        bool storage8_disabled = env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
+        if (!storage16_disabled && caps->storage16.storageBuffer16BitAccess) {
+            mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
+        }
+        if (!storage16_disabled && caps->storage16.uniformAndStorageBuffer16BitAccess) {
+            mask |= PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16;
+        }
+        if (!storage16_disabled && caps->storage16.storagePushConstant16) {
+            mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16;
+        }
+        if (!storage8_disabled && caps->storage8.storageBuffer8BitAccess) {
+            mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_8;
+        }
+        if (!storage8_disabled && caps->storage8.uniformAndStorageBuffer8BitAccess) {
+            mask |= PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_8;
+        }
+        if (!storage8_disabled && caps->storage8.storagePushConstant8) {
+            mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_8;
+        }
+        if (caps->float16_int8.shaderFloat16) {
+            mask |= PDOCKER_VK_FEATURE_SHADER_FLOAT16;
+        }
+        if (!storage8_disabled && caps->float16_int8.shaderInt8) {
+            mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
+        }
+    } else {
+        if (advertised_storage16()) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
+        if (advertised_storage8()) {
+            mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_8;
+            mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
+        }
+    }
+#ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
+    mask |= PDOCKER_VK_FEATURE_MAINTENANCE_4;
+#endif
+    return mask;
+}
+
+static bool requested_features_supported(uint64_t requested, uint64_t supported, uint64_t *unsupported) {
+    uint64_t missing = requested & ~supported;
+    if (unsupported) *unsupported = missing;
+    return missing == 0;
+}
+
 static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) {
     if (!pCreateInfo || !(trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG"))) return;
     const VkPhysicalDeviceFeatures *features = pCreateInfo->pEnabledFeatures;
@@ -3377,6 +3427,43 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
     return VK_SUCCESS;
 }
 
+static bool device_extension_advertised_name(const char *name) {
+    if (!name) return false;
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    if (strcmp(name, VK_KHR_16BIT_STORAGE_EXTENSION_NAME) == 0) {
+        return caps ? caps->ext_16bit_storage : advertised_storage16();
+    }
+    if (strcmp(name, VK_KHR_8BIT_STORAGE_EXTENSION_NAME) == 0) {
+        return caps ? caps->ext_8bit_storage : advertised_storage8();
+    }
+    if (strcmp(name, VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME) == 0) {
+        return caps ? caps->ext_shader_float16_int8 : advertised_storage8();
+    }
+    if (strcmp(name, VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME) == 0) {
+        return !caps || caps->ext_storage_buffer_storage_class;
+    }
+#ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
+    if (strcmp(name, VK_KHR_MAINTENANCE_4_EXTENSION_NAME) == 0) return true;
+#endif
+    return false;
+}
+
+static VkResult validate_device_extensions(const VkDeviceCreateInfo *pCreateInfo) {
+    if (!pCreateInfo) return VK_SUCCESS;
+    for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i) {
+        const char *name = pCreateInfo->ppEnabledExtensionNames
+            ? pCreateInfo->ppEnabledExtensionNames[i]
+            : NULL;
+        if (!device_extension_advertised_name(name)) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: create-device rejected unadvertised extension %s\n",
+                    name ? name : "<null>");
+            return VK_ERROR_EXTENSION_NOT_PRESENT;
+        }
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceLayerProperties(
         VkPhysicalDevice physicalDevice,
         uint32_t *pPropertyCount,
@@ -3399,14 +3486,30 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     (void)physicalDevice;
     (void)pAllocator;
     if (!pDevice) return VK_ERROR_INITIALIZATION_FAILED;
+    *pDevice = VK_NULL_HANDLE;
     trace_device_create_features(pCreateInfo);
+    VkResult extension_rc = validate_device_extensions(pCreateInfo);
+    if (extension_rc != VK_SUCCESS) return extension_rc;
+    uint64_t requested_feature_mask = requested_feature_mask_from_device_create_info(pCreateInfo);
+    uint64_t supported_feature_mask = advertised_feature_mask();
+    uint64_t unsupported_feature_mask = 0;
+    if (!requested_features_supported(requested_feature_mask, supported_feature_mask,
+                                      &unsupported_feature_mask)) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: create-device rejected unsupported feature_mask=0x%016llx supported=0x%016llx requested=0x%016llx\n",
+                (unsigned long long)unsupported_feature_mask,
+                (unsigned long long)supported_feature_mask,
+                (unsigned long long)requested_feature_mask);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     PdockerVkDevice *device = calloc(1, sizeof(*device));
     if (!device) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    device->requested_feature_mask = requested_feature_mask_from_device_create_info(pCreateInfo);
+    device->requested_feature_mask = requested_feature_mask;
     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
         fprintf(stderr,
-                "pdocker-vulkan-icd: create-device requested_feature_mask=0x%016llx\n",
-                (unsigned long long)device->requested_feature_mask);
+                "pdocker-vulkan-icd: create-device requested_feature_mask=0x%016llx supported_feature_mask=0x%016llx\n",
+                (unsigned long long)device->requested_feature_mask,
+                (unsigned long long)supported_feature_mask);
     }
     set_loader_magic_value(device);
     *pDevice = (VkDevice)device;
@@ -4503,6 +4606,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 static PFN_vkVoidFunction proc_address(const char *pName) {
     if (!pName) return NULL;
 #define MAP_PROC(name) if (strcmp(pName, #name) == 0) return (PFN_vkVoidFunction)name
+#define MAP_ALIAS(alias, name) if (strcmp(pName, (alias)) == 0) return (PFN_vkVoidFunction)name
     MAP_PROC(vkGetInstanceProcAddr);
     MAP_PROC(vkGetDeviceProcAddr);
     MAP_PROC(vkEnumerateInstanceVersion);
@@ -4513,15 +4617,19 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkEnumeratePhysicalDevices);
     MAP_PROC(vkGetPhysicalDeviceProperties);
     MAP_PROC(vkGetPhysicalDeviceProperties2);
+    MAP_ALIAS("vkGetPhysicalDeviceProperties2KHR", vkGetPhysicalDeviceProperties2);
     MAP_PROC(vkGetPhysicalDeviceFeatures);
     MAP_PROC(vkGetPhysicalDeviceFeatures2);
+    MAP_ALIAS("vkGetPhysicalDeviceFeatures2KHR", vkGetPhysicalDeviceFeatures2);
     MAP_PROC(vkGetPhysicalDeviceFormatProperties);
     MAP_PROC(vkGetPhysicalDeviceImageFormatProperties);
     MAP_PROC(vkGetPhysicalDeviceSparseImageFormatProperties);
     MAP_PROC(vkGetPhysicalDeviceQueueFamilyProperties);
     MAP_PROC(vkGetPhysicalDeviceQueueFamilyProperties2);
+    MAP_ALIAS("vkGetPhysicalDeviceQueueFamilyProperties2KHR", vkGetPhysicalDeviceQueueFamilyProperties2);
     MAP_PROC(vkGetPhysicalDeviceMemoryProperties);
     MAP_PROC(vkGetPhysicalDeviceMemoryProperties2);
+    MAP_ALIAS("vkGetPhysicalDeviceMemoryProperties2KHR", vkGetPhysicalDeviceMemoryProperties2);
     MAP_PROC(vkEnumerateDeviceExtensionProperties);
     MAP_PROC(vkEnumerateDeviceLayerProperties);
     MAP_PROC(vkCreateDevice);
@@ -4532,6 +4640,7 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkDestroyBuffer);
     MAP_PROC(vkGetBufferMemoryRequirements);
     MAP_PROC(vkGetBufferMemoryRequirements2);
+    MAP_ALIAS("vkGetBufferMemoryRequirements2KHR", vkGetBufferMemoryRequirements2);
     MAP_PROC(vkAllocateMemory);
     MAP_PROC(vkFreeMemory);
     MAP_PROC(vkMapMemory);
@@ -4541,6 +4650,7 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkInvalidateMappedMemoryRanges);
     MAP_PROC(vkBindBufferMemory);
     MAP_PROC(vkBindBufferMemory2);
+    MAP_ALIAS("vkBindBufferMemory2KHR", vkBindBufferMemory2);
     MAP_PROC(vkCreateDescriptorSetLayout);
     MAP_PROC(vkDestroyDescriptorSetLayout);
     MAP_PROC(vkCreatePipelineLayout);
@@ -4586,6 +4696,7 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCreateSemaphore);
     MAP_PROC(vkDestroySemaphore);
     MAP_PROC(vk_icdNegotiateLoaderICDInterfaceVersion);
+#undef MAP_ALIAS
 #undef MAP_PROC
     return NULL;
 }
