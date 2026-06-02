@@ -72,6 +72,9 @@ typedef struct PdockerVkShaderModule PdockerVkShaderModule;
 typedef struct PdockerVkPipelineLayout PdockerVkPipelineLayout;
 typedef struct PdockerVkPipeline PdockerVkPipeline;
 typedef struct PdockerVkFence PdockerVkFence;
+typedef struct PdockerVkImage PdockerVkImage;
+typedef struct PdockerVkImageView PdockerVkImageView;
+typedef struct PdockerVkSampler PdockerVkSampler;
 
 #define PDOCKER_VK_MAX_STORAGE_BUFFERS 16
 #define PDOCKER_VK_MAX_DESCRIPTOR_SETS 8
@@ -139,10 +142,61 @@ struct PdockerVkBuffer {
     uint32_t alias_count;
 };
 
+struct PdockerVkImage {
+    VkImageCreateFlags flags;
+    VkImageType image_type;
+    VkFormat format;
+    VkExtent3D extent;
+    uint32_t mip_levels;
+    uint32_t array_layers;
+    VkSampleCountFlagBits samples;
+    VkImageTiling tiling;
+    VkImageUsageFlags usage;
+    VkSharingMode sharing_mode;
+    VkImageLayout initial_layout;
+    VkDeviceSize requirements_size;
+    VkDeviceSize requirements_alignment;
+    uint32_t memory_type_bits;
+    PdockerVkMemory *memory;
+    VkDeviceSize memory_offset;
+    uint64_t generation;
+};
+
+struct PdockerVkImageView {
+    PdockerVkImage *image;
+    VkImageViewType view_type;
+    VkFormat format;
+    VkComponentMapping components;
+    VkImageSubresourceRange subresource_range;
+    uint64_t generation;
+};
+
+struct PdockerVkSampler {
+    VkFilter mag_filter;
+    VkFilter min_filter;
+    VkSamplerMipmapMode mipmap_mode;
+    VkSamplerAddressMode address_mode_u;
+    VkSamplerAddressMode address_mode_v;
+    VkSamplerAddressMode address_mode_w;
+    float mip_lod_bias;
+    VkBool32 anisotropy_enable;
+    float max_anisotropy;
+    VkBool32 compare_enable;
+    VkCompareOp compare_op;
+    float min_lod;
+    float max_lod;
+    VkBorderColor border_color;
+    VkBool32 unnormalized_coordinates;
+    uint64_t generation;
+};
+
 struct PdockerVkDescriptorBinding {
     PdockerVkBuffer *buffer;
+    PdockerVkImageView *image_view;
+    PdockerVkSampler *sampler;
     VkDeviceSize offset;
     VkDeviceSize range;
+    VkImageLayout image_layout;
     VkDescriptorType descriptor_type;
     bool dynamic;
 };
@@ -160,6 +214,7 @@ struct PdockerVkDescriptorSet {
     PdockerVkDescriptorBinding storage_buffers[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     bool unsupported_descriptor_array;
     bool unsupported_descriptor_type;
+    bool has_image_descriptor;
 };
 
 struct PdockerVkShaderModule {
@@ -259,6 +314,7 @@ static unsigned g_shader_dump_counter;
 static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
 static struct sigaction g_previous_sigsegv;
 static bool g_guarded_sigsegv_installed;
+static uint64_t g_vulkan_object_generation;
 
 static bool trace_allocations(void);
 
@@ -280,6 +336,14 @@ static bool env_truthy_default(const char *name, bool default_value) {
         return false;
     }
     return true;
+}
+
+static bool vulkan_v5_object_transport_enabled(void) {
+    return env_truthy_default("PDOCKER_VULKAN_ENABLE_V5_OBJECT_TRANSPORT", false);
+}
+
+static uint64_t next_vulkan_object_generation(void) {
+    return __sync_add_and_fetch(&g_vulkan_object_generation, 1);
 }
 
 static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
@@ -403,6 +467,70 @@ static VkDeviceSize align_device_size(VkDeviceSize value, VkDeviceSize alignment
     VkDeviceSize rem = value % alignment;
     if (rem == 0) return value;
     return value + alignment - rem;
+}
+
+static bool checked_mul_u64(uint64_t a, uint64_t b, uint64_t *out) {
+    if (!out) return false;
+    if (a != 0 && b > UINT64_MAX / a) return false;
+    *out = a * b;
+    return true;
+}
+
+static uint32_t conservative_format_bytes_per_pixel(VkFormat format) {
+    switch (format) {
+        case VK_FORMAT_R8_UNORM:
+        case VK_FORMAT_R8_SNORM:
+        case VK_FORMAT_R8_UINT:
+        case VK_FORMAT_R8_SINT:
+            return 1;
+        case VK_FORMAT_R8G8_UNORM:
+        case VK_FORMAT_R8G8_SNORM:
+        case VK_FORMAT_R8G8_UINT:
+        case VK_FORMAT_R8G8_SINT:
+        case VK_FORMAT_R16_SFLOAT:
+        case VK_FORMAT_R16_UINT:
+        case VK_FORMAT_R16_SINT:
+            return 2;
+        case VK_FORMAT_R8G8B8A8_UNORM:
+        case VK_FORMAT_R8G8B8A8_SNORM:
+        case VK_FORMAT_R8G8B8A8_UINT:
+        case VK_FORMAT_R8G8B8A8_SINT:
+        case VK_FORMAT_B8G8R8A8_UNORM:
+        case VK_FORMAT_R16G16_SFLOAT:
+        case VK_FORMAT_R32_SFLOAT:
+        case VK_FORMAT_R32_UINT:
+        case VK_FORMAT_R32_SINT:
+            return 4;
+        case VK_FORMAT_R16G16B16A16_SFLOAT:
+        case VK_FORMAT_R32G32_SFLOAT:
+        case VK_FORMAT_R32G32_UINT:
+        case VK_FORMAT_R32G32_SINT:
+            return 8;
+        case VK_FORMAT_R32G32B32A32_SFLOAT:
+        case VK_FORMAT_R32G32B32A32_UINT:
+        case VK_FORMAT_R32G32B32A32_SINT:
+            return 16;
+        default:
+            /*
+             * Fail safe for block-compressed/depth/vendor formats: reserve a
+             * conservative RGBA32F-sized image footprint rather than returning
+             * a too-small requirement that would corrupt later bind validation.
+             */
+            return 16;
+    }
+}
+
+static VkDeviceSize estimate_image_requirement_size(const VkImageCreateInfo *info) {
+    if (!info) return 0;
+    uint64_t pixels = 0;
+    if (!checked_mul_u64(info->extent.width ? info->extent.width : 1, info->extent.height ? info->extent.height : 1, &pixels)) {
+        return 0;
+    }
+    if (!checked_mul_u64(pixels, info->extent.depth ? info->extent.depth : 1, &pixels)) return 0;
+    if (!checked_mul_u64(pixels, info->arrayLayers ? info->arrayLayers : 1, &pixels)) return 0;
+    if (!checked_mul_u64(pixels, info->mipLevels ? info->mipLevels : 1, &pixels)) return 0;
+    if (!checked_mul_u64(pixels, conservative_format_bytes_per_pixel(info->format), &pixels)) return 0;
+    return align_device_size((VkDeviceSize)pixels, PDOCKER_VK_REQUIREMENT_ALIGNMENT);
 }
 
 static VkDeviceSize pdocker_vulkan_max_buffer_size(void) {
@@ -3136,10 +3264,49 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
         const VkAllocationCallbacks *pAllocator,
         VkImage *pImage) {
     (void)device;
-    (void)pCreateInfo;
     (void)pAllocator;
-    if (pImage) *pImage = VK_NULL_HANDLE;
-    return unsupported_image_transport_result("vkCreateImage");
+    if (!pImage || !pCreateInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    *pImage = VK_NULL_HANDLE;
+    if (!vulkan_v5_object_transport_enabled()) {
+        return unsupported_image_transport_result("vkCreateImage");
+    }
+    VkDeviceSize requirements_size = estimate_image_requirement_size(pCreateInfo);
+    if (requirements_size == 0 || requirements_size > pdocker_vulkan_max_buffer_size()) {
+        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
+    PdockerVkImage *image = pdocker_alloc_handle(sizeof(*image));
+    if (!image) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    image->flags = pCreateInfo->flags;
+    image->image_type = pCreateInfo->imageType;
+    image->format = pCreateInfo->format;
+    image->extent = pCreateInfo->extent;
+    image->mip_levels = pCreateInfo->mipLevels;
+    image->array_layers = pCreateInfo->arrayLayers;
+    image->samples = pCreateInfo->samples;
+    image->tiling = pCreateInfo->tiling;
+    image->usage = pCreateInfo->usage;
+    image->sharing_mode = pCreateInfo->sharingMode;
+    image->initial_layout = pCreateInfo->initialLayout;
+    image->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+    image->requirements_size = requirements_size;
+    image->memory_type_bits = 0x3;
+    image->generation = next_vulkan_object_generation();
+    if (trace_allocations()) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: create-image type=%u format=%u extent=%ux%ux%u mips=%u layers=%u usage=0x%x req=%llu generation=%llu\n",
+                (unsigned)image->image_type,
+                (unsigned)image->format,
+                image->extent.width,
+                image->extent.height,
+                image->extent.depth,
+                image->mip_levels,
+                image->array_layers,
+                (unsigned)image->usage,
+                (unsigned long long)image->requirements_size,
+                (unsigned long long)image->generation);
+    }
+    *pImage = (VkImage)image;
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyImage(
@@ -3147,8 +3314,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyImage(
         VkImage image,
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
-    (void)image;
     (void)pAllocator;
+    free((void *)image);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements(
@@ -3156,17 +3323,22 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements(
         VkImage image,
         VkMemoryRequirements *pMemoryRequirements) {
     (void)device;
-    (void)image;
-    if (pMemoryRequirements) memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
+    if (!pMemoryRequirements) return;
+    PdockerVkImage *img = (PdockerVkImage *)image;
+    memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
+    pMemoryRequirements->size = img ? img->requirements_size : 0;
+    pMemoryRequirements->alignment =
+        img && img->requirements_alignment ? img->requirements_alignment : PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+    pMemoryRequirements->memoryTypeBits = img ? img->memory_type_bits : 0;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements2(
         VkDevice device,
         const VkImageMemoryRequirementsInfo2 *pInfo,
         VkMemoryRequirements2 *pMemoryRequirements) {
-    (void)pInfo;
     if (!pMemoryRequirements) return;
-    vkGetImageMemoryRequirements(device, VK_NULL_HANDLE, &pMemoryRequirements->memoryRequirements);
+    vkGetImageMemoryRequirements(device, pInfo ? pInfo->image : VK_NULL_HANDLE,
+                                 &pMemoryRequirements->memoryRequirements);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
@@ -3175,20 +3347,42 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(
         VkDeviceMemory memory,
         VkDeviceSize memoryOffset) {
     (void)device;
-    (void)image;
-    (void)memory;
-    (void)memoryOffset;
-    return unsupported_image_transport_result("vkBindImageMemory");
+    PdockerVkImage *img = (PdockerVkImage *)image;
+    PdockerVkMemory *mem = (PdockerVkMemory *)memory;
+    if (!img || !mem) return VK_ERROR_INITIALIZATION_FAILED;
+    VkDeviceSize alignment = img->requirements_alignment ? img->requirements_alignment : PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+    VkDeviceSize needed = img->requirements_size;
+    if ((memoryOffset % alignment) != 0 ||
+        memoryOffset > (VkDeviceSize)mem->size ||
+        needed > (VkDeviceSize)mem->size - memoryOffset) {
+        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
+    img->memory = mem;
+    img->memory_offset = memoryOffset;
+    if (trace_allocations()) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: bind-image req=%llu memory_size=%zu offset=%llu generation=%llu\n",
+                (unsigned long long)needed,
+                mem->size,
+                (unsigned long long)memoryOffset,
+                (unsigned long long)img->generation);
+    }
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory2(
         VkDevice device,
         uint32_t bindInfoCount,
         const VkBindImageMemoryInfo *pBindInfos) {
-    (void)device;
-    (void)bindInfoCount;
-    (void)pBindInfos;
-    return unsupported_image_transport_result("vkBindImageMemory2");
+    if (bindInfoCount > 0 && !pBindInfos) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t i = 0; i < bindInfoCount; ++i) {
+        VkResult rc = vkBindImageMemory(device,
+                                        pBindInfos[i].image,
+                                        pBindInfos[i].memory,
+                                        pBindInfos[i].memoryOffset);
+        if (rc != VK_SUCCESS) return rc;
+    }
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
@@ -3197,10 +3391,24 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
         const VkAllocationCallbacks *pAllocator,
         VkImageView *pView) {
     (void)device;
-    (void)pCreateInfo;
     (void)pAllocator;
-    if (pView) *pView = VK_NULL_HANDLE;
-    return unsupported_image_transport_result("vkCreateImageView");
+    if (!pCreateInfo || !pView) return VK_ERROR_INITIALIZATION_FAILED;
+    *pView = VK_NULL_HANDLE;
+    if (!vulkan_v5_object_transport_enabled()) {
+        return unsupported_image_transport_result("vkCreateImageView");
+    }
+    PdockerVkImage *image = (PdockerVkImage *)pCreateInfo->image;
+    if (!image) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkImageView *view = pdocker_alloc_handle(sizeof(*view));
+    if (!view) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    view->image = image;
+    view->view_type = pCreateInfo->viewType;
+    view->format = pCreateInfo->format;
+    view->components = pCreateInfo->components;
+    view->subresource_range = pCreateInfo->subresourceRange;
+    view->generation = next_vulkan_object_generation();
+    *pView = (VkImageView)view;
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyImageView(
@@ -3208,8 +3416,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyImageView(
         VkImageView imageView,
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
-    (void)imageView;
     (void)pAllocator;
+    free((void *)imageView);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
@@ -3218,10 +3426,32 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
         const VkAllocationCallbacks *pAllocator,
         VkSampler *pSampler) {
     (void)device;
-    (void)pCreateInfo;
     (void)pAllocator;
-    if (pSampler) *pSampler = VK_NULL_HANDLE;
-    return unsupported_image_transport_result("vkCreateSampler");
+    if (!pCreateInfo || !pSampler) return VK_ERROR_INITIALIZATION_FAILED;
+    *pSampler = VK_NULL_HANDLE;
+    if (!vulkan_v5_object_transport_enabled()) {
+        return unsupported_image_transport_result("vkCreateSampler");
+    }
+    PdockerVkSampler *sampler = pdocker_alloc_handle(sizeof(*sampler));
+    if (!sampler) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    sampler->mag_filter = pCreateInfo->magFilter;
+    sampler->min_filter = pCreateInfo->minFilter;
+    sampler->mipmap_mode = pCreateInfo->mipmapMode;
+    sampler->address_mode_u = pCreateInfo->addressModeU;
+    sampler->address_mode_v = pCreateInfo->addressModeV;
+    sampler->address_mode_w = pCreateInfo->addressModeW;
+    sampler->mip_lod_bias = pCreateInfo->mipLodBias;
+    sampler->anisotropy_enable = pCreateInfo->anisotropyEnable;
+    sampler->max_anisotropy = pCreateInfo->maxAnisotropy;
+    sampler->compare_enable = pCreateInfo->compareEnable;
+    sampler->compare_op = pCreateInfo->compareOp;
+    sampler->min_lod = pCreateInfo->minLod;
+    sampler->max_lod = pCreateInfo->maxLod;
+    sampler->border_color = pCreateInfo->borderColor;
+    sampler->unnormalized_coordinates = pCreateInfo->unnormalizedCoordinates;
+    sampler->generation = next_vulkan_object_generation();
+    *pSampler = (VkSampler)sampler;
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroySampler(
@@ -3229,8 +3459,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySampler(
         VkSampler sampler,
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
-    (void)sampler;
     (void)pAllocator;
+    free((void *)sampler);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements(
@@ -3666,6 +3896,14 @@ static bool descriptor_type_supported_by_v4_transport(VkDescriptorType type) {
            type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
 }
 
+static bool descriptor_type_supported_by_v5_object_transport(VkDescriptorType type) {
+    return type == VK_DESCRIPTOR_TYPE_SAMPLER ||
+           type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
+           type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
+           type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
+           type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
         VkDevice device,
         const VkDescriptorSetLayoutCreateInfo *pCreateInfo,
@@ -3679,10 +3917,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
     for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->bindingCount; ++i) {
         const VkDescriptorSetLayoutBinding *binding = &pCreateInfo->pBindings[i];
-        if (!descriptor_type_supported_by_v4_transport(binding->descriptorType)) {
+        bool v4_descriptor = descriptor_type_supported_by_v4_transport(binding->descriptorType);
+        bool v5_object_descriptor =
+            vulkan_v5_object_transport_enabled() &&
+            descriptor_type_supported_by_v5_object_transport(binding->descriptorType);
+        if (!v4_descriptor && !v5_object_descriptor) {
             layout->unsupported_descriptor_type = true;
             fprintf(stderr,
-                    "pdocker-vulkan-icd: descriptor type binding=%u type=%u is unsupported by V4 transport; rejecting instead of ignoring\n",
+                    "pdocker-vulkan-icd: descriptor type binding=%u type=%u is unsupported by current transport; rejecting instead of ignoring\n",
                     binding->binding,
                     binding->descriptorType);
             continue;
@@ -3695,13 +3937,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
                     PDOCKER_VK_MAX_STORAGE_BUFFERS);
             continue;
         }
-        if (descriptor_type_supported_by_v4_transport(binding->descriptorType) &&
-            binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS &&
+        if ((v4_descriptor || v5_object_descriptor) && binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS &&
             binding->binding + 1 > layout->storage_binding_count) {
             layout->storage_binding_count = binding->binding + 1;
         }
-        if (descriptor_type_supported_by_v4_transport(binding->descriptorType) &&
-            binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        if ((v4_descriptor || v5_object_descriptor) && binding->binding < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
             layout->storage_binding_types[binding->binding] = binding->descriptorType;
             layout->storage_binding_counts[binding->binding] = binding->descriptorCount;
             if (binding->descriptorCount > 1) {
@@ -3832,15 +4072,18 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
         const VkWriteDescriptorSet *w = &pDescriptorWrites[i];
         PdockerVkDescriptorSet *set = (PdockerVkDescriptorSet *)w->dstSet;
         if (!set) continue;
-        if (!descriptor_type_supported_by_v4_transport(w->descriptorType)) {
+        bool v4_descriptor = descriptor_type_supported_by_v4_transport(w->descriptorType);
+        bool v5_object_descriptor =
+            vulkan_v5_object_transport_enabled() &&
+            descriptor_type_supported_by_v5_object_transport(w->descriptorType);
+        if (!v4_descriptor && !v5_object_descriptor) {
             set->unsupported_descriptor_type = true;
             fprintf(stderr,
-                    "pdocker-vulkan-icd: descriptor write binding=%u type=%u is unsupported by V4 transport; rejecting instead of ignoring\n",
+                    "pdocker-vulkan-icd: descriptor write binding=%u type=%u is unsupported by current transport; rejecting instead of ignoring\n",
                     w->dstBinding,
                     w->descriptorType);
             continue;
         }
-        if (!w->pBufferInfo) continue;
         if (w->descriptorCount > 1 || w->dstArrayElement != 0 ||
             (set->layout && set->layout->unsupported_descriptor_array)) {
             set->unsupported_descriptor_array = true;
@@ -3851,10 +4094,38 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                     w->descriptorCount);
             continue;
         }
+        if (v5_object_descriptor) {
+            if (!w->pImageInfo) continue;
+            uint32_t binding = w->dstBinding;
+            if (binding < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+                const VkDescriptorImageInfo *info = &w->pImageInfo[0];
+                set->storage_buffers[binding].buffer = NULL;
+                set->storage_buffers[binding].image_view = (PdockerVkImageView *)info->imageView;
+                set->storage_buffers[binding].sampler = (PdockerVkSampler *)info->sampler;
+                set->storage_buffers[binding].image_layout = info->imageLayout;
+                set->storage_buffers[binding].descriptor_type = w->descriptorType;
+                set->storage_buffers[binding].dynamic = false;
+                set->has_image_descriptor = true;
+                if (trace_allocations()) {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: descriptor image binding=%u type=%u view=%p sampler=%p layout=%u\n",
+                            binding,
+                            w->descriptorType,
+                            (void *)set->storage_buffers[binding].image_view,
+                            (void *)set->storage_buffers[binding].sampler,
+                            (unsigned)set->storage_buffers[binding].image_layout);
+                }
+            }
+            continue;
+        }
+        if (!w->pBufferInfo) continue;
         for (uint32_t j = 0; j < w->descriptorCount; ++j) {
             uint32_t binding = w->dstBinding;
             if (binding < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
                 set->storage_buffers[binding].buffer = (PdockerVkBuffer *)w->pBufferInfo[j].buffer;
+                set->storage_buffers[binding].image_view = NULL;
+                set->storage_buffers[binding].sampler = NULL;
+                set->storage_buffers[binding].image_layout = VK_IMAGE_LAYOUT_UNDEFINED;
                 set->storage_buffers[binding].offset = w->pBufferInfo[j].offset;
                 set->storage_buffers[binding].range = w->pBufferInfo[j].range;
                 set->storage_buffers[binding].descriptor_type = w->descriptorType;
@@ -3906,6 +4177,10 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                 continue;
             }
             dst->storage_buffers[dst_binding] = src->storage_buffers[src_binding];
+            if (src->storage_buffers[src_binding].image_view ||
+                src->storage_buffers[src_binding].sampler) {
+                dst->has_image_descriptor = true;
+            }
             if (trace_allocations()) {
                 fprintf(stderr,
                         "pdocker-vulkan-icd: descriptor copy src=%u dst=%u count=%u\n",
@@ -4159,6 +4434,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                  (set->layout->unsupported_descriptor_array ||
                   set->layout->unsupported_descriptor_type))) {
                 cmd->unsupported_descriptor_set_layout = true;
+            }
+            if (set->has_image_descriptor) {
+                cmd->unsupported_descriptor_set_layout = true;
+                if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: image descriptor set=%u requires V5.1 frame emission; rejecting submit instead of ignoring image objects\n",
+                            target_set);
+                }
             }
             cmd->bound_set_snapshots[target_set] = *set;
             cmd->bound_set_used[target_set] = true;

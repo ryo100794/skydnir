@@ -1578,7 +1578,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(alias, proc_body)
 
-    def test_vulkan_image_sampler_object_apis_fail_closed_until_v5_object_transport(self):
+    def test_vulkan_image_sampler_object_apis_are_gated_and_tracked_for_v5_object_transport(self):
         icd = VULKAN_ICD.read_text()
         for symbol in [
             "vkCreateImage",
@@ -1595,6 +1595,14 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(symbol, icd)
         self.assertIn("unsupported_image_transport_result", icd)
         self.assertIn("V5 image/sampler object transport", icd)
+        self.assertIn("vulkan_v5_object_transport_enabled", icd)
+        self.assertIn('"PDOCKER_VULKAN_ENABLE_V5_OBJECT_TRANSPORT"', icd)
+        self.assertIn("typedef struct PdockerVkImage PdockerVkImage;", icd)
+        self.assertIn("typedef struct PdockerVkImageView PdockerVkImageView;", icd)
+        self.assertIn("typedef struct PdockerVkSampler PdockerVkSampler;", icd)
+        self.assertIn("struct PdockerVkImage {", icd)
+        self.assertIn("struct PdockerVkImageView {", icd)
+        self.assertIn("struct PdockerVkSampler {", icd)
         self.assertIn('MAP_PROC(vkCreateImage);', icd)
         self.assertIn('MAP_PROC(vkCreateImageView);', icd)
         self.assertIn('MAP_PROC(vkCreateSampler);', icd)
@@ -1603,16 +1611,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('MAP_PROC(vkBindImageMemory2);', icd)
         self.assertIn('MAP_ALIAS("vkBindImageMemory2KHR", vkBindImageMemory2);', icd)
         self.assertIn('return unsupported_image_transport_result("vkCreateImage");', icd)
-        self.assertIn('return unsupported_image_transport_result("vkBindImageMemory");', icd)
         self.assertIn('return unsupported_image_transport_result("vkCreateImageView");', icd)
         self.assertIn('return unsupported_image_transport_result("vkCreateSampler");', icd)
+        self.assertIn("image->requirements_size = requirements_size;", icd)
+        self.assertIn("vkBindImageMemory(device,", icd)
+        self.assertIn("img->memory = mem;", icd)
+        self.assertIn("view->image = image;", icd)
+        self.assertIn("sampler->mag_filter = pCreateInfo->magFilter;", icd)
+        self.assertIn("set->has_image_descriptor = true;", icd)
+        self.assertIn("image descriptor set=%u requires V5.1 frame emission", icd)
 
     def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("descriptor_type_supported_by_v4_transport", icd)
+        self.assertIn("descriptor_type_supported_by_v5_object_transport", icd)
         self.assertIn("unsupported_descriptor_type", icd)
-        self.assertIn("descriptor type binding=%u type=%u is unsupported by V4 transport", icd)
-        self.assertIn("descriptor write binding=%u type=%u is unsupported by V4 transport", icd)
+        self.assertIn("descriptor type binding=%u type=%u is unsupported by current transport", icd)
+        self.assertIn("descriptor write binding=%u type=%u is unsupported by current transport", icd)
         self.assertIn("descriptor binding=%u exceeds V4 transport limit=%u", icd)
         self.assertIn("layout->unsupported_descriptor_type = true;", icd)
         self.assertIn("set->unsupported_descriptor_type = true;", icd)
@@ -1620,7 +1635,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1
         )[0]
         self.assertNotIn("w->descriptorType != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER &&", update_body)
-        self.assertIn("!descriptor_type_supported_by_v4_transport(w->descriptorType)", update_body)
+        self.assertIn("!v4_descriptor && !v5_object_descriptor", update_body)
         bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1
         )[0]
