@@ -620,6 +620,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_dispatch_descriptor_type_from_api(d->descriptor_type", executor)
         self.assertIn("bindings[i].descriptor_set = d->descriptor_set;", executor)
         self.assertIn("bindings[i].binding = d->binding;", executor)
+        self.assertIn("bindings[i].api_array_element = d->array_element;", executor)
         self.assertIn("bindings[i].api_descriptor_type = d->descriptor_type;", executor)
         self.assertIn("bindings[i].api_memory_id = memory->resource_id;", executor)
         self.assertIn("bindings[i].api_buffer_id = buffer->resource_id;", executor)
@@ -629,6 +630,25 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("bindings[i].api_offset = (off_t)api_offset;", executor)
         self.assertIn("return -EOPNOTSUPP;", executor)
         self.assertIn("return -ERANGE;", executor)
+
+    def test_vulkan_dispatch_v5_descriptor_arrays_drive_executor_layout_pool_write_and_cache(self):
+        executor = GPU_EXECUTOR.read_text()
+        self.assertIn("uint32_t api_array_element;", executor)
+        self.assertIn("u32 = bindings[i].api_array_element;", executor)
+        self.assertIn("bindings[i].api_array_element = d->array_element;", executor)
+        self.assertIn("set_binding_descriptor_counts", executor)
+        self.assertIn("bindings[i].api_array_element >= PDOCKER_GPU_MAX_VULKAN_BINDINGS", executor)
+        self.assertIn("const uint32_t needed_descriptor_count = bindings[i].api_array_element + 1;", executor)
+        self.assertIn("layout_bindings[set_index][i].descriptorCount =", executor)
+        self.assertIn("set_binding_descriptor_counts[set_index][i] ?", executor)
+        self.assertIn("descriptor_pool_uniform_count += descriptor_count;", executor)
+        self.assertIn("descriptor_pool_storage_count += descriptor_count;", executor)
+        self.assertIn("writes[write_count].dstArrayElement = bindings[i].api_array_element;", executor)
+        self.assertIn("descriptor_layout_hash", executor)
+        self.assertIn("vulkan_descriptor_layout_hash", executor)
+        self.assertIn("entry->descriptor_layout_hash == descriptor_layout_hash", executor)
+        self.assertIn("pipeline_cache_entry->descriptor_layout_hash = descriptor_layout_hash;", executor)
+        self.assertIn("descriptor alias rewrite does not support descriptor arrays", executor)
 
     def test_vulkan_dispatch_v5_header_validator_is_separate_from_text_commands(self):
         executor = GPU_EXECUTOR.read_text()

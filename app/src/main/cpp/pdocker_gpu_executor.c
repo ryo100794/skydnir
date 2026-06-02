@@ -839,6 +839,7 @@ typedef struct {
 typedef struct {
     uint32_t descriptor_set;
     uint32_t binding;
+    uint32_t api_array_element;
     off_t offset;
     size_t size;
     off_t api_offset;
@@ -1209,6 +1210,7 @@ typedef struct {
     uint64_t shader_hash;
     uint64_t spec_hash;
     uint64_t policy_hash;
+    uint64_t descriptor_layout_hash;
     size_t shader_size;
     size_t specialization_data_size;
     size_t specialization_count;
@@ -3243,6 +3245,8 @@ static uint64_t reconcile_descriptor_hash(
         hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u32 = bindings[i].binding;
         hash = fnv1a64_update(hash, &u32, sizeof(u32));
+        u32 = bindings[i].api_array_element;
+        hash = fnv1a64_update(hash, &u32, sizeof(u32));
         u64 = (uint64_t)bindings[i].offset;
         hash = fnv1a64_update(hash, &u64, sizeof(u64));
         u64 = (uint64_t)bindings[i].size;
@@ -4971,6 +4975,30 @@ static int binding_index_for_number(const VulkanDispatchBinding *bindings,
     return -1;
 }
 
+static uint64_t vulkan_descriptor_layout_hash(
+        const uint32_t set_binding_counts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS],
+        const VkDescriptorType set_binding_types[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS],
+        const uint32_t set_binding_descriptor_counts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS],
+        uint32_t descriptor_set_count) {
+    uint64_t hash = 1469598103934665603ull;
+    hash = fnv1a64_update(hash, &descriptor_set_count, sizeof(descriptor_set_count));
+    for (uint32_t set_index = 0; set_index < descriptor_set_count; ++set_index) {
+        const uint32_t binding_count = set_binding_counts[set_index];
+        hash = fnv1a64_update(hash, &set_index, sizeof(set_index));
+        hash = fnv1a64_update(hash, &binding_count, sizeof(binding_count));
+        for (uint32_t binding_index = 0; binding_index < binding_count; ++binding_index) {
+            const uint32_t descriptor_type = (uint32_t)set_binding_types[set_index][binding_index];
+            const uint32_t descriptor_count =
+                set_binding_descriptor_counts[set_index][binding_index] ?
+                    set_binding_descriptor_counts[set_index][binding_index] : 1u;
+            hash = fnv1a64_update(hash, &binding_index, sizeof(binding_index));
+            hash = fnv1a64_update(hash, &descriptor_type, sizeof(descriptor_type));
+            hash = fnv1a64_update(hash, &descriptor_count, sizeof(descriptor_count));
+        }
+    }
+    return hash;
+}
+
 static void destroy_pipeline_cache_entry(VkDevice device, VulkanPipelineCacheEntry *entry) {
     if (!entry || !entry->valid) return;
     if (entry->pipeline) vkDestroyPipeline(device, entry->pipeline, NULL);
@@ -4988,6 +5016,7 @@ static VulkanPipelineCacheEntry *find_pipeline_cache_entry(
         size_t specialization_data_size,
         size_t specialization_count,
         uint32_t layout_count,
+        uint64_t descriptor_layout_hash,
         uint32_t push_size,
         const char *entry_name) {
     for (size_t i = 0; i < PDOCKER_GPU_PIPELINE_CACHE_SLOTS; ++i) {
@@ -5000,6 +5029,7 @@ static VulkanPipelineCacheEntry *find_pipeline_cache_entry(
             entry->specialization_data_size == specialization_data_size &&
             entry->specialization_count == specialization_count &&
             entry->layout_count == layout_count &&
+            entry->descriptor_layout_hash == descriptor_layout_hash &&
             entry->push_size == push_size &&
             strncmp(entry->entry_name, entry_name, sizeof(entry->entry_name)) == 0) {
             return entry;
@@ -10813,6 +10843,7 @@ static int run_vulkan_dispatch_fd(
     VkDescriptorSetLayout set_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
     VkDescriptorSet descriptor_sets[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
     uint32_t set_binding_counts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
+    uint32_t set_binding_descriptor_counts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     VkDescriptorType set_binding_types[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
     VkShaderModule shader = VK_NULL_HANDLE;
@@ -11022,6 +11053,7 @@ static int run_vulkan_dispatch_fd(
     memset(set_layouts, 0, sizeof(set_layouts));
     memset(descriptor_sets, 0, sizeof(descriptor_sets));
     memset(set_binding_counts, 0, sizeof(set_binding_counts));
+    memset(set_binding_descriptor_counts, 0, sizeof(set_binding_descriptor_counts));
     for (uint32_t set_index = 0; set_index < PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS; ++set_index) {
         for (uint32_t binding_index = 0; binding_index < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++binding_index) {
             set_binding_types[set_index][binding_index] = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -12011,8 +12043,9 @@ static int run_vulkan_dispatch_fd(
         if (!active_bindings[i]) continue;
         const uint32_t set_index = bindings[i].descriptor_set;
         if (set_index >= descriptor_set_count ||
-            bindings[i].binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
-            json_fail("vulkan-dispatch", "invalid descriptor set or binding");
+            bindings[i].binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+            bindings[i].api_array_element >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
+            json_fail("vulkan-dispatch", "invalid descriptor set, binding, or array element");
             ret = 64;
             goto cleanup;
         }
@@ -12023,16 +12056,29 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
-        if (set_binding_counts[set_index] > bindings[i].binding &&
+        if (set_binding_descriptor_counts[set_index][bindings[i].binding] > 0 &&
             set_binding_types[set_index][bindings[i].binding] != descriptor_type) {
             json_fail("vulkan-dispatch", "conflicting descriptor types for set binding");
             ret = 64;
             goto cleanup;
         }
         set_binding_types[set_index][bindings[i].binding] = descriptor_type;
+        const uint32_t needed_descriptor_count = bindings[i].api_array_element + 1;
+        if (needed_descriptor_count > set_binding_descriptor_counts[set_index][bindings[i].binding]) {
+            set_binding_descriptor_counts[set_index][bindings[i].binding] = needed_descriptor_count;
+        }
         const uint32_t needed = bindings[i].binding + 1;
         if (needed > set_binding_counts[set_index]) {
             set_binding_counts[set_index] = needed;
+        }
+    }
+    if (binding_alias_count > 0) {
+        for (size_t i = 0; i < binding_count; ++i) {
+            if (active_bindings[i] && bindings[i].api_array_element != 0) {
+                json_fail("vulkan-dispatch", "descriptor alias rewrite does not support descriptor arrays");
+                ret = 64;
+                goto cleanup;
+            }
         }
     }
     for (size_t i = 0; i < binding_alias_count; ++i) {
@@ -12068,18 +12114,26 @@ static int run_vulkan_dispatch_fd(
             ret = 64;
             goto cleanup;
         }
-        if (set_binding_counts[alias_set] > binding_aliases[i].rewritten_binding &&
+        if (set_binding_descriptor_counts[alias_set][binding_aliases[i].rewritten_binding] > 0 &&
             set_binding_types[alias_set][binding_aliases[i].rewritten_binding] != descriptor_type) {
             json_fail("vulkan-dispatch", "conflicting descriptor alias types for set binding");
             ret = 64;
             goto cleanup;
         }
         set_binding_types[alias_set][binding_aliases[i].rewritten_binding] = descriptor_type;
+        if (set_binding_descriptor_counts[alias_set][binding_aliases[i].rewritten_binding] == 0) {
+            set_binding_descriptor_counts[alias_set][binding_aliases[i].rewritten_binding] = 1;
+        }
         const uint32_t needed = binding_aliases[i].rewritten_binding + 1;
         if (needed > set_binding_counts[alias_set]) {
             set_binding_counts[alias_set] = needed;
         }
     }
+    const uint64_t descriptor_layout_hash = vulkan_descriptor_layout_hash(
+        set_binding_counts,
+        set_binding_types,
+        set_binding_descriptor_counts,
+        descriptor_set_count);
     if (!multi_descriptor_set) {
         double pipeline_lookup_start = now_ms();
         pipeline_cache_entry = find_pipeline_cache_entry(
@@ -12090,6 +12144,7 @@ static int run_vulkan_dispatch_fd(
             specialization_data_size,
             specialization_count,
             layout_count,
+            descriptor_layout_hash,
             (uint32_t)push_size,
             entry_name);
         timing_pipeline_lookup_ms = now_ms() - pipeline_lookup_start;
@@ -12113,7 +12168,9 @@ static int run_vulkan_dispatch_fd(
             for (uint32_t i = 0; i < set_layout_count; ++i) {
                 layout_bindings[set_index][i].binding = i;
                 layout_bindings[set_index][i].descriptorType = set_binding_types[set_index][i];
-                layout_bindings[set_index][i].descriptorCount = 1;
+                layout_bindings[set_index][i].descriptorCount =
+                    set_binding_descriptor_counts[set_index][i] ?
+                        set_binding_descriptor_counts[set_index][i] : 1;
                 layout_bindings[set_index][i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
             }
             VkDescriptorSetLayoutCreateInfo dslci = {
@@ -12226,6 +12283,7 @@ static int run_vulkan_dispatch_fd(
             pipeline_cache_entry->specialization_data_size = specialization_data_size;
             pipeline_cache_entry->specialization_count = specialization_count;
             pipeline_cache_entry->layout_count = layout_count;
+            pipeline_cache_entry->descriptor_layout_hash = descriptor_layout_hash;
             pipeline_cache_entry->push_size = (uint32_t)push_size;
             snprintf(pipeline_cache_entry->entry_name, sizeof(pipeline_cache_entry->entry_name), "%s", entry_name);
             pipeline_cache_entry->hits = 1;
@@ -12240,10 +12298,13 @@ static int run_vulkan_dispatch_fd(
     uint32_t descriptor_pool_uniform_count = 0;
     for (uint32_t set_index = 0; set_index < descriptor_set_count; ++set_index) {
         for (uint32_t binding_index = 0; binding_index < set_binding_counts[set_index]; ++binding_index) {
+            const uint32_t descriptor_count =
+                set_binding_descriptor_counts[set_index][binding_index] ?
+                    set_binding_descriptor_counts[set_index][binding_index] : 1;
             if (set_binding_types[set_index][binding_index] == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-                descriptor_pool_uniform_count++;
+                descriptor_pool_uniform_count += descriptor_count;
             } else {
-                descriptor_pool_storage_count++;
+                descriptor_pool_storage_count += descriptor_count;
             }
         }
     }
@@ -12317,6 +12378,7 @@ static int run_vulkan_dispatch_fd(
         writes[write_count].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[write_count].dstSet = descriptor_sets[bindings[i].descriptor_set];
         writes[write_count].dstBinding = bindings[i].binding;
+        writes[write_count].dstArrayElement = bindings[i].api_array_element;
         writes[write_count].descriptorCount = 1;
         if (vulkan_dispatch_descriptor_type_from_api(bindings[i].api_descriptor_type,
                                                      &writes[write_count].descriptorType) != 0) {
@@ -14954,6 +15016,7 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
         memset(&bindings[i], 0, sizeof(bindings[i]));
         bindings[i].descriptor_set = d->descriptor_set;
         bindings[i].binding = d->binding;
+        bindings[i].api_array_element = d->array_element;
         bindings[i].offset = (off_t)fd_offset;
         bindings[i].size = (size_t)d->transfer_size;
         bindings[i].api_offset = (off_t)api_offset;
