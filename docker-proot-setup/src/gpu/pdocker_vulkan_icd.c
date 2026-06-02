@@ -110,6 +110,7 @@ typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS 16
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES 32
 #define PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES 64
+#define PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS 128
 #define PDOCKER_VK_MAX_QUERY_COUNT 4096
 #define PDOCKER_VK_MAX_COPY_ALIASES 128
 #define PDOCKER_VK_ALIAS_MIN_SOURCE_BYTES (64ull * 1024ull * 1024ull)
@@ -523,6 +524,52 @@ typedef struct {
 } PdockerVkDynamicStateSnapshot;
 
 typedef struct {
+    PdockerVkPipeline *pipeline;
+    PdockerVkDescriptorSet set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+    bool set_snapshot_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+    uint8_t push_constants[PDOCKER_VK_MAX_PUSH_BYTES];
+    uint32_t push_constant_size;
+    PdockerVkPushConstantOpSnapshot push_constant_ops[PDOCKER_VK_MAX_PUSH_CONSTANT_OPS];
+    uint32_t push_constant_op_count;
+    PdockerVkVertexBindingState vertex_bindings[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
+    uint32_t vertex_binding_count;
+    bool vertex_buffer_bound;
+    PdockerVkBuffer *index_buffer;
+    VkDeviceSize index_offset;
+    VkIndexType index_type;
+    bool index_buffer_bound;
+    uint32_t vertex_count;
+    uint32_t instance_count;
+    uint32_t first_vertex;
+    uint32_t first_instance;
+    uint32_t index_count;
+    uint32_t first_index;
+    int32_t vertex_offset;
+    bool indexed;
+    bool indirect;
+    PdockerVkBuffer *indirect_buffer;
+    VkDeviceSize indirect_offset;
+    PdockerVkBuffer *count_buffer;
+    VkDeviceSize count_offset;
+    uint32_t indirect_stride;
+    PdockerVkDynamicStateSnapshot dynamic_states[PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES];
+    uint32_t dynamic_state_count;
+    bool dynamic_rendering_active;
+    bool render_pass_active;
+    PdockerVkRenderPass *active_render_pass;
+    PdockerVkFramebuffer *active_framebuffer;
+    VkRect2D active_render_area;
+    VkSubpassContents active_subpass_contents;
+    uint32_t active_subpass;
+    uint32_t active_color_attachment_count;
+    PdockerVkRenderingAttachmentState active_color_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    PdockerVkRenderingAttachmentState active_depth_attachment;
+    PdockerVkRenderingAttachmentState active_stencil_attachment;
+    VkClearValue active_clear_values[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t active_clear_value_count;
+} PdockerVkGraphicsDrawSnapshot;
+
+typedef struct {
     VK_LOADER_DATA loader;
     PdockerVkPipeline *pipeline;
     PdockerVkDescriptorSet bound_set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
@@ -547,6 +594,8 @@ typedef struct {
     uint32_t dispatch_op_count;
     PdockerVkCommandOp command_ops[PDOCKER_VK_MAX_COMMAND_OPS];
     uint32_t command_op_count;
+    PdockerVkGraphicsDrawSnapshot graphics_draw_ops[PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS];
+    uint32_t graphics_draw_op_count;
     uint32_t dispatch_x;
     uint32_t dispatch_y;
     uint32_t dispatch_z;
@@ -698,6 +747,8 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
     cmd->depth_stencil_clear_op_count = 0;
     cmd->image_barrier_op_count = 0;
     cmd->dispatch_op_count = 0;
+    cmd->graphics_draw_op_count = 0;
+    cmd->push_constant_op_count = 0;
 }
 
 static bool append_command_op(PdockerVkCommandBuffer *cmd, const PdockerVkCommandOp *op) {
@@ -7103,9 +7154,65 @@ static void record_graphics_draw_command(
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
     cmd->graphics_unsupported = true;
+    if (cmd->graphics_draw_op_count >= PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS) {
+        return;
+    }
+    uint32_t snapshot_index = cmd->graphics_draw_op_count++;
+    PdockerVkGraphicsDrawSnapshot *snapshot = &cmd->graphics_draw_ops[snapshot_index];
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->pipeline = cmd->pipeline;
+    memcpy(snapshot->set_snapshots, cmd->bound_set_snapshots, sizeof(snapshot->set_snapshots));
+    memcpy(snapshot->set_snapshot_used, cmd->bound_set_used, sizeof(snapshot->set_snapshot_used));
+    memcpy(snapshot->push_constants, cmd->push_constants, sizeof(snapshot->push_constants));
+    snapshot->push_constant_size = cmd->push_constant_size;
+    memcpy(snapshot->push_constant_ops, cmd->push_constant_ops, sizeof(snapshot->push_constant_ops));
+    snapshot->push_constant_op_count = cmd->push_constant_op_count;
+    memcpy(snapshot->vertex_bindings, cmd->vertex_bindings, sizeof(snapshot->vertex_bindings));
+    snapshot->vertex_binding_count = cmd->vertex_binding_count;
+    snapshot->vertex_buffer_bound = cmd->vertex_buffer_bound;
+    snapshot->index_buffer = cmd->index_buffer;
+    snapshot->index_offset = cmd->index_offset;
+    snapshot->index_type = cmd->index_type;
+    snapshot->index_buffer_bound = cmd->index_buffer_bound;
+    memcpy(snapshot->dynamic_states, cmd->dynamic_states, sizeof(snapshot->dynamic_states));
+    snapshot->dynamic_state_count = cmd->dynamic_state_count;
+    snapshot->dynamic_rendering_active = cmd->dynamic_rendering_active;
+    snapshot->render_pass_active = cmd->render_pass_active;
+    snapshot->active_render_pass = cmd->active_render_pass;
+    snapshot->active_framebuffer = cmd->active_framebuffer;
+    snapshot->active_render_area = cmd->active_render_area;
+    snapshot->active_subpass_contents = cmd->active_subpass_contents;
+    snapshot->active_subpass = cmd->active_subpass;
+    snapshot->active_color_attachment_count = cmd->active_color_attachment_count;
+    memcpy(snapshot->active_color_attachments, cmd->active_color_attachments,
+           sizeof(snapshot->active_color_attachments));
+    snapshot->active_depth_attachment = cmd->active_depth_attachment;
+    snapshot->active_stencil_attachment = cmd->active_stencil_attachment;
+    memcpy(snapshot->active_clear_values, cmd->active_clear_values,
+           sizeof(snapshot->active_clear_values));
+    snapshot->active_clear_value_count = cmd->active_clear_value_count;
+    if (snapshot->pipeline && snapshot->pipeline->layout &&
+        snapshot->pipeline->layout->push_constant_size > snapshot->push_constant_size) {
+        snapshot->push_constant_size = snapshot->pipeline->layout->push_constant_size;
+    }
+    snapshot->vertex_count = vertexCount;
+    snapshot->instance_count = instanceCount;
+    snapshot->first_vertex = firstVertex;
+    snapshot->first_instance = firstInstance;
+    snapshot->index_count = indexCount;
+    snapshot->first_index = firstIndex;
+    snapshot->vertex_offset = vertexOffset;
+    snapshot->indexed = indexed;
+    snapshot->indirect = indirect;
+    snapshot->indirect_buffer = (PdockerVkBuffer *)indirectBuffer;
+    snapshot->indirect_offset = indirectOffset;
+    snapshot->count_buffer = (PdockerVkBuffer *)countBuffer;
+    snapshot->count_offset = countOffset;
+    snapshot->indirect_stride = stride;
     PdockerVkCommandOp op;
     memset(&op, 0, sizeof(op));
     op.type = PDOCKER_VK_COMMAND_GRAPHICS_DRAW;
+    op.index = snapshot_index;
     op.draw_vertex_count = vertexCount;
     op.draw_instance_count = instanceCount;
     op.draw_first_vertex = firstVertex;
