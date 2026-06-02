@@ -572,8 +572,12 @@ typedef struct {
 typedef struct {
     VK_LOADER_DATA loader;
     PdockerVkPipeline *pipeline;
+    PdockerVkPipeline *compute_pipeline;
+    PdockerVkPipeline *graphics_pipeline;
     PdockerVkDescriptorSet bound_set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
     bool bound_set_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+    PdockerVkDescriptorSet graphics_bound_set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+    bool graphics_bound_set_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
     PdockerVkCopyOp copy_ops[PDOCKER_VK_MAX_COPY_OPS];
     uint32_t copy_op_count;
     PdockerVkImageCopyOp image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];
@@ -3238,7 +3242,7 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
     if (!cmd) return -EINVAL;
     PdockerVkDispatchOp op;
     memset(&op, 0, sizeof(op));
-    op.pipeline = cmd->pipeline;
+    op.pipeline = cmd->compute_pipeline;
     memcpy(op.set_snapshots, cmd->bound_set_snapshots, sizeof(op.set_snapshots));
     memcpy(op.set_snapshot_used, cmd->bound_set_used, sizeof(op.set_snapshot_used));
     op.dispatch_x = cmd->dispatch_x;
@@ -6892,8 +6896,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
     clear_recorded_command_ops(cmd);
     cmd->pipeline = NULL;
+    cmd->compute_pipeline = NULL;
+    cmd->graphics_pipeline = NULL;
     memset(cmd->bound_set_snapshots, 0, sizeof(cmd->bound_set_snapshots));
     memset(cmd->bound_set_used, 0, sizeof(cmd->bound_set_used));
+    memset(cmd->graphics_bound_set_snapshots, 0, sizeof(cmd->graphics_bound_set_snapshots));
+    memset(cmd->graphics_bound_set_used, 0, sizeof(cmd->graphics_bound_set_used));
     cmd->dispatch_x = 0;
     cmd->dispatch_y = 0;
     cmd->dispatch_z = 0;
@@ -6942,9 +6950,16 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindPipeline(
         VkCommandBuffer commandBuffer,
         VkPipelineBindPoint pipelineBindPoint,
         VkPipeline pipeline) {
-    (void)pipelineBindPoint;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    if (cmd) cmd->pipeline = (PdockerVkPipeline *)pipeline;
+    if (!cmd) return;
+    if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
+        cmd->compute_pipeline = (PdockerVkPipeline *)pipeline;
+        cmd->pipeline = cmd->compute_pipeline;
+    } else if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+        cmd->graphics_pipeline = (PdockerVkPipeline *)pipeline;
+    } else {
+        cmd->graphics_unsupported = true;
+    }
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
@@ -7160,9 +7175,9 @@ static void record_graphics_draw_command(
     uint32_t snapshot_index = cmd->graphics_draw_op_count++;
     PdockerVkGraphicsDrawSnapshot *snapshot = &cmd->graphics_draw_ops[snapshot_index];
     memset(snapshot, 0, sizeof(*snapshot));
-    snapshot->pipeline = cmd->pipeline;
-    memcpy(snapshot->set_snapshots, cmd->bound_set_snapshots, sizeof(snapshot->set_snapshots));
-    memcpy(snapshot->set_snapshot_used, cmd->bound_set_used, sizeof(snapshot->set_snapshot_used));
+    snapshot->pipeline = cmd->graphics_pipeline;
+    memcpy(snapshot->set_snapshots, cmd->graphics_bound_set_snapshots, sizeof(snapshot->set_snapshots));
+    memcpy(snapshot->set_snapshot_used, cmd->graphics_bound_set_used, sizeof(snapshot->set_snapshot_used));
     memcpy(snapshot->push_constants, cmd->push_constants, sizeof(snapshot->push_constants));
     snapshot->push_constant_size = cmd->push_constant_size;
     memcpy(snapshot->push_constant_ops, cmd->push_constant_ops, sizeof(snapshot->push_constant_ops));
@@ -7507,10 +7522,21 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
         const VkDescriptorSet *pDescriptorSets,
         uint32_t dynamicOffsetCount,
         const uint32_t *pDynamicOffsets) {
-    (void)pipelineBindPoint;
     PdockerVkPipelineLayout *pipeline_layout = (PdockerVkPipelineLayout *)layout;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (cmd && descriptorSetCount > 0 && pDescriptorSets) {
+        PdockerVkDescriptorSet *target_set_snapshots = NULL;
+        bool *target_set_used = NULL;
+        if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+            target_set_snapshots = cmd->graphics_bound_set_snapshots;
+            target_set_used = cmd->graphics_bound_set_used;
+        } else if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
+            target_set_snapshots = cmd->bound_set_snapshots;
+            target_set_used = cmd->bound_set_used;
+        } else {
+            cmd->unsupported_descriptor_set_layout = true;
+            return;
+        }
         if (pipeline_layout && pipeline_layout->unsupported_set_layout_count) {
             cmd->unsupported_descriptor_set_layout = true;
             if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
@@ -7572,8 +7598,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                             target_set);
                 }
             }
-            cmd->bound_set_snapshots[target_set] = *set;
-            cmd->bound_set_used[target_set] = true;
+            target_set_snapshots[target_set] = *set;
+            target_set_used[target_set] = true;
             PdockerVkDescriptorSetLayout *expected_layout =
                 pipeline_layout && target_set < pipeline_layout->set_layout_count
                     ? pipeline_layout->set_layouts[target_set]
@@ -7586,7 +7612,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             }
             for (uint32_t binding = 0; binding < binding_limit; ++binding) {
                 PdockerVkDescriptorBinding *slot =
-                    &cmd->bound_set_snapshots[target_set].storage_buffers[binding];
+                    &target_set_snapshots[target_set].storage_buffers[binding];
                 bool expects_dynamic = expected_layout
                     ? descriptor_type_is_dynamic(expected_layout->storage_binding_types[binding])
                     : slot->dynamic;
@@ -7665,8 +7691,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
 }
 
 static void validate_bound_descriptor_layouts_before_dispatch(PdockerVkCommandBuffer *cmd) {
-    if (!cmd || !cmd->pipeline || !cmd->pipeline->layout) return;
-    PdockerVkPipelineLayout *layout = cmd->pipeline->layout;
+    if (!cmd || !cmd->compute_pipeline || !cmd->compute_pipeline->layout) return;
+    PdockerVkPipelineLayout *layout = cmd->compute_pipeline->layout;
     if (layout->unsupported_set_layout_count) {
         cmd->unsupported_descriptor_set_layout = true;
         return;
@@ -7706,7 +7732,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
         if (cmd->dispatch_op_count < PDOCKER_VK_MAX_DISPATCH_OPS) {
             uint32_t op_index = cmd->dispatch_op_count++;
             PdockerVkDispatchOp *op = &cmd->dispatch_ops[op_index];
-            op->pipeline = cmd->pipeline;
+            op->pipeline = cmd->compute_pipeline;
             memcpy(op->set_snapshots, cmd->bound_set_snapshots, sizeof(op->set_snapshots));
             memcpy(op->set_snapshot_used, cmd->bound_set_used, sizeof(op->set_snapshot_used));
             op->dispatch_x = groupCountX;
@@ -8795,7 +8821,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                     continue;
                 }
             }
-            if (cmd->pipeline && cmd->pipeline->shader && cmd->pipeline->shader->code_size > sizeof(uint32_t)) {
+            if (cmd->compute_pipeline && cmd->compute_pipeline->shader && cmd->compute_pipeline->shader->code_size > sizeof(uint32_t)) {
                 int generic_rc = send_generic_vulkan_dispatch(cmd);
                 if (generic_rc == 0) continue;
                 trace_icd_runtime_failure("generic-dispatch-single", generic_rc);
@@ -8803,8 +8829,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                     fprintf(stderr,
                             "pdocker-vulkan-icd: generic SPIR-V dispatch failed rc=%d code_size=%zu first_word=0x%08x dispatch=%u,%u,%u push=%u\n",
                             generic_rc,
-                            cmd->pipeline->shader->code_size,
-                            cmd->pipeline->shader->first_word,
+                            cmd->compute_pipeline->shader->code_size,
+                            cmd->compute_pipeline->shader->first_word,
                             cmd->dispatch_x,
                             cmd->dispatch_y,
                             cmd->dispatch_z,
@@ -8833,8 +8859,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             size_t out_n = descriptor_binding_size(&legacy_set->storage_buffers[2]) / sizeof(float);
             if (b_n < n) n = b_n;
             if (out_n < n) n = out_n;
-            if (cmd->dispatch_x && cmd->pipeline && cmd->pipeline->local_size_x) {
-                size_t dispatched = (size_t)cmd->dispatch_x * cmd->pipeline->local_size_x;
+            if (cmd->dispatch_x && cmd->compute_pipeline && cmd->compute_pipeline->local_size_x) {
+                size_t dispatched = (size_t)cmd->dispatch_x * cmd->compute_pipeline->local_size_x;
                 if (dispatched < n) n = dispatched;
             }
             int rc = send_vector_add_3fd(n, a->memory->fd, b->memory->fd, out->memory->fd);
