@@ -1670,6 +1670,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("set->has_image_descriptor = true;", icd)
         self.assertIn("image descriptor set=%u requires V5.1 frame emission", icd)
 
+    def test_vulkan_icd_records_buffer_image_copy_commands_before_dispatch(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("PdockerVkImageCopyOp image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];", icd)
+        self.assertIn("PDOCKER_VK_COMMAND_IMAGE_COPY", icd)
+        self.assertIn("vkCmdCopyBufferToImage", icd)
+        self.assertIn("vkCmdCopyImageToBuffer", icd)
+        self.assertIn("record_image_copy_op", icd)
+        self.assertIn("execute_recorded_image_copy_op", icd)
+        self.assertIn("image_tight_subresource_offset", icd)
+        self.assertIn("image_ptr(op->image", icd)
+        self.assertIn("case PDOCKER_VK_COMMAND_IMAGE_COPY:", icd)
+        self.assertIn("MAP_PROC(vkCmdCopyBufferToImage);", icd)
+        self.assertIn("MAP_PROC(vkCmdCopyImageToBuffer);", icd)
+
     def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("descriptor_type_supported_by_v4_transport", icd)

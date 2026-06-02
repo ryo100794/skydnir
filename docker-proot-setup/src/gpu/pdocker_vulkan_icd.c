@@ -255,6 +255,18 @@ typedef struct {
     VkBufferCopy region;
 } PdockerVkCopyOp;
 
+typedef enum {
+    PDOCKER_VK_IMAGE_COPY_BUFFER_TO_IMAGE = 1,
+    PDOCKER_VK_IMAGE_COPY_IMAGE_TO_BUFFER = 2,
+} PdockerVkImageCopyDirection;
+
+typedef struct {
+    PdockerVkImageCopyDirection direction;
+    PdockerVkBuffer *buffer;
+    PdockerVkImage *image;
+    VkBufferImageCopy region;
+} PdockerVkImageCopyOp;
+
 typedef struct {
     PdockerVkPipeline *pipeline;
     PdockerVkDescriptorSet set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
@@ -272,6 +284,7 @@ typedef enum {
     PDOCKER_VK_COMMAND_UPDATE = 3,
     PDOCKER_VK_COMMAND_DISPATCH = 4,
     PDOCKER_VK_COMMAND_BARRIER = 5,
+    PDOCKER_VK_COMMAND_IMAGE_COPY = 6,
 } PdockerVkCommandOpType;
 
 typedef struct {
@@ -291,6 +304,8 @@ typedef struct {
     bool bound_set_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
     PdockerVkCopyOp copy_ops[PDOCKER_VK_MAX_COPY_OPS];
     uint32_t copy_op_count;
+    PdockerVkImageCopyOp image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t image_copy_op_count;
     PdockerVkDispatchOp dispatch_ops[PDOCKER_VK_MAX_DISPATCH_OPS];
     uint32_t dispatch_op_count;
     PdockerVkCommandOp command_ops[PDOCKER_VK_MAX_COMMAND_OPS];
@@ -356,6 +371,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
     }
     cmd->command_op_count = 0;
     cmd->copy_op_count = 0;
+    cmd->image_copy_op_count = 0;
     cmd->dispatch_op_count = 0;
 }
 
@@ -2669,6 +2685,115 @@ static void *buffer_ptr(PdockerVkBuffer *buffer, VkDeviceSize offset, VkDeviceSi
     return (char *)buffer->memory->map + buffer->memory_offset + offset;
 }
 
+static bool checked_add_u64(uint64_t a, uint64_t b, uint64_t *out) {
+    if (!out || a > UINT64_MAX - b) return false;
+    *out = a + b;
+    return true;
+}
+
+static bool image_mip_extent(const PdockerVkImage *image,
+                             uint32_t mip_level,
+                             VkExtent3D *out) {
+    if (!image || !out || mip_level >= image->mip_levels) return false;
+    out->width = image->extent.width >> mip_level;
+    out->height = image->extent.height >> mip_level;
+    out->depth = image->extent.depth >> mip_level;
+    if (out->width == 0) out->width = 1;
+    if (out->height == 0) out->height = 1;
+    if (out->depth == 0) out->depth = 1;
+    return true;
+}
+
+static bool image_tight_mip_size(const PdockerVkImage *image,
+                                 uint32_t mip_level,
+                                 uint64_t *out_size) {
+    VkExtent3D extent;
+    if (!image_mip_extent(image, mip_level, &extent) || !out_size) return false;
+    uint64_t pixels = 0;
+    if (!checked_mul_u64(extent.width, extent.height, &pixels)) return false;
+    if (!checked_mul_u64(pixels, extent.depth, &pixels)) return false;
+    if (!checked_mul_u64(pixels, conservative_format_bytes_per_pixel(image->format), out_size)) return false;
+    return true;
+}
+
+static bool image_tight_layer_stride(const PdockerVkImage *image,
+                                     uint64_t *out_stride) {
+    if (!image || !out_stride) return false;
+    uint64_t stride = 0;
+    for (uint32_t mip = 0; mip < image->mip_levels; ++mip) {
+        uint64_t mip_size = 0;
+        if (!image_tight_mip_size(image, mip, &mip_size)) return false;
+        if (!checked_add_u64(stride, mip_size, &stride)) return false;
+    }
+    *out_stride = stride;
+    return true;
+}
+
+static bool image_tight_subresource_offset(const PdockerVkImage *image,
+                                           uint32_t mip_level,
+                                           uint32_t array_layer,
+                                           VkOffset3D image_offset,
+                                           uint64_t *out_offset) {
+    if (!image || !out_offset || mip_level >= image->mip_levels ||
+        array_layer >= image->array_layers ||
+        image_offset.x < 0 || image_offset.y < 0 || image_offset.z < 0) {
+        return false;
+    }
+    VkExtent3D extent;
+    if (!image_mip_extent(image, mip_level, &extent)) return false;
+    if ((uint32_t)image_offset.x > extent.width ||
+        (uint32_t)image_offset.y > extent.height ||
+        (uint32_t)image_offset.z > extent.depth) {
+        return false;
+    }
+    uint64_t layer_stride = 0;
+    if (!image_tight_layer_stride(image, &layer_stride)) return false;
+    uint64_t offset = 0;
+    if (!checked_mul_u64(layer_stride, array_layer, &offset)) return false;
+    for (uint32_t mip = 0; mip < mip_level; ++mip) {
+        uint64_t mip_size = 0;
+        if (!image_tight_mip_size(image, mip, &mip_size)) return false;
+        if (!checked_add_u64(offset, mip_size, &offset)) return false;
+    }
+    uint64_t bpp = conservative_format_bytes_per_pixel(image->format);
+    uint64_t row_bytes = 0;
+    uint64_t slice_bytes = 0;
+    if (!checked_mul_u64(extent.width, bpp, &row_bytes)) return false;
+    if (!checked_mul_u64(row_bytes, extent.height, &slice_bytes)) return false;
+    uint64_t z_bytes = 0;
+    uint64_t y_bytes = 0;
+    uint64_t x_bytes = 0;
+    if (!checked_mul_u64((uint64_t)image_offset.z, slice_bytes, &z_bytes) ||
+        !checked_mul_u64((uint64_t)image_offset.y, row_bytes, &y_bytes) ||
+        !checked_mul_u64((uint64_t)image_offset.x, bpp, &x_bytes) ||
+        !checked_add_u64(offset, z_bytes, &offset) ||
+        !checked_add_u64(offset, y_bytes, &offset) ||
+        !checked_add_u64(offset, x_bytes, &offset)) {
+        return false;
+    }
+    *out_offset = offset;
+    return true;
+}
+
+static void *image_ptr(PdockerVkImage *image,
+                       uint32_t mip_level,
+                       uint32_t array_layer,
+                       VkOffset3D image_offset,
+                       VkDeviceSize bytes) {
+    if (!image || !image->memory) return NULL;
+    uint64_t relative = 0;
+    if (!image_tight_subresource_offset(image, mip_level, array_layer, image_offset, &relative)) {
+        return NULL;
+    }
+    uint64_t absolute = 0;
+    if (!checked_add_u64((uint64_t)image->memory_offset, relative, &absolute) ||
+        absolute > (uint64_t)image->memory->size ||
+        (uint64_t)bytes > (uint64_t)image->memory->size - absolute) {
+        return NULL;
+    }
+    return (char *)image->memory->map + absolute;
+}
+
 static bool ranges_overlap(VkDeviceSize a_offset, VkDeviceSize a_size,
                            VkDeviceSize b_offset, VkDeviceSize b_size) {
     if (a_size == 0 || b_size == 0) return false;
@@ -2783,6 +2908,91 @@ static void execute_recorded_copy_op(PdockerVkCopyOp *op, PdockerVkCopyStats *st
     if (stats) {
         stats->memmove_ops++;
         stats->memmove_bytes += op->region.size;
+    }
+}
+
+static void execute_recorded_image_copy_op(PdockerVkImageCopyOp *op, PdockerVkCopyStats *stats) {
+    if (!op || !op->buffer || !op->image || !op->buffer->memory ||
+        !op->image->memory ||
+        op->region.imageSubresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        op->region.imageSubresource.layerCount == 0 ||
+        op->region.imageExtent.width == 0 ||
+        op->region.imageExtent.height == 0 ||
+        op->region.imageExtent.depth == 0) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    const uint64_t bpp = conservative_format_bytes_per_pixel(op->image->format);
+    VkExtent3D mip_extent;
+    if (!image_mip_extent(op->image, op->region.imageSubresource.mipLevel, &mip_extent)) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    const uint64_t buffer_row_texels =
+        op->region.bufferRowLength ? op->region.bufferRowLength : op->region.imageExtent.width;
+    const uint64_t buffer_image_rows =
+        op->region.bufferImageHeight ? op->region.bufferImageHeight : op->region.imageExtent.height;
+    uint64_t buffer_row_bytes = 0;
+    uint64_t buffer_slice_bytes = 0;
+    if (!checked_mul_u64(buffer_row_texels, bpp, &buffer_row_bytes) ||
+        !checked_mul_u64(buffer_row_bytes, buffer_image_rows, &buffer_slice_bytes)) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    for (uint32_t layer = 0; layer < op->region.imageSubresource.layerCount; ++layer) {
+        uint32_t array_layer = op->region.imageSubresource.baseArrayLayer + layer;
+        for (uint32_t z = 0; z < op->region.imageExtent.depth; ++z) {
+            for (uint32_t y = 0; y < op->region.imageExtent.height; ++y) {
+                VkOffset3D image_offset = {
+                    .x = op->region.imageOffset.x,
+                    .y = op->region.imageOffset.y + (int32_t)y,
+                    .z = op->region.imageOffset.z + (int32_t)z,
+                };
+                if ((uint32_t)image_offset.x + op->region.imageExtent.width > mip_extent.width ||
+                    (uint32_t)image_offset.y > mip_extent.height ||
+                    (uint32_t)image_offset.z > mip_extent.depth) {
+                    if (stats) stats->skipped_ops++;
+                    return;
+                }
+                uint64_t buffer_offset = op->region.bufferOffset;
+                uint64_t layer_bytes = 0;
+                uint64_t z_bytes = 0;
+                uint64_t y_bytes = 0;
+                uint64_t row_copy_bytes = 0;
+                if (!checked_mul_u64((uint64_t)layer, buffer_slice_bytes, &layer_bytes) ||
+                    !checked_mul_u64((uint64_t)z, buffer_slice_bytes, &z_bytes) ||
+                    !checked_mul_u64((uint64_t)y, buffer_row_bytes, &y_bytes) ||
+                    !checked_mul_u64(op->region.imageExtent.width, bpp, &row_copy_bytes) ||
+                    !checked_add_u64(buffer_offset, layer_bytes, &buffer_offset) ||
+                    !checked_add_u64(buffer_offset, z_bytes, &buffer_offset) ||
+                    !checked_add_u64(buffer_offset, y_bytes, &buffer_offset)) {
+                    if (stats) stats->skipped_ops++;
+                    return;
+                }
+                void *buffer_row = buffer_ptr(op->buffer,
+                                              (VkDeviceSize)buffer_offset,
+                                              (VkDeviceSize)row_copy_bytes);
+                void *image_row = image_ptr(op->image,
+                                            op->region.imageSubresource.mipLevel,
+                                            array_layer,
+                                            image_offset,
+                                            (VkDeviceSize)row_copy_bytes);
+                if (!buffer_row || !image_row) {
+                    if (stats) stats->skipped_ops++;
+                    return;
+                }
+                if (op->direction == PDOCKER_VK_IMAGE_COPY_BUFFER_TO_IMAGE) {
+                    memmove(image_row, buffer_row, (size_t)row_copy_bytes);
+                } else {
+                    memmove(buffer_row, image_row, (size_t)row_copy_bytes);
+                }
+                if (stats) {
+                    stats->op_count++;
+                    stats->memmove_ops++;
+                    stats->memmove_bytes += (VkDeviceSize)row_copy_bytes;
+                }
+            }
+        }
     }
 }
 
@@ -5329,6 +5539,90 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer(
     }
 }
 
+static void record_image_copy_op(PdockerVkCommandBuffer *cmd,
+                                 PdockerVkImageCopyDirection direction,
+                                 PdockerVkBuffer *buffer,
+                                 PdockerVkImage *image,
+                                 const VkBufferImageCopy *region) {
+    if (!cmd || !buffer || !image || !region) return;
+    if (cmd->image_copy_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: image-copy command buffer full max=%u\n",
+                    PDOCKER_VK_MAX_COPY_OPS);
+        }
+        return;
+    }
+    uint32_t op_index = cmd->image_copy_op_count++;
+    PdockerVkImageCopyOp *op = &cmd->image_copy_ops[op_index];
+    memset(op, 0, sizeof(*op));
+    op->direction = direction;
+    op->buffer = buffer;
+    op->image = image;
+    op->region = *region;
+    PdockerVkCommandOp command_op;
+    memset(&command_op, 0, sizeof(command_op));
+    command_op.type = PDOCKER_VK_COMMAND_IMAGE_COPY;
+    command_op.index = op_index;
+    (void)append_command_op(cmd, &command_op);
+    if (trace_allocations()) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: record-image-copy dir=%u buffer_size=%zu image_req=%llu mip=%u layer=%u layers=%u extent=%ux%ux%u buffer_offset=%llu\n",
+                (unsigned)direction,
+                buffer->size,
+                (unsigned long long)image->requirements_size,
+                region->imageSubresource.mipLevel,
+                region->imageSubresource.baseArrayLayer,
+                region->imageSubresource.layerCount,
+                region->imageExtent.width,
+                region->imageExtent.height,
+                region->imageExtent.depth,
+                (unsigned long long)region->bufferOffset);
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage(
+        VkCommandBuffer commandBuffer,
+        VkBuffer srcBuffer,
+        VkImage dstImage,
+        VkImageLayout dstImageLayout,
+        uint32_t regionCount,
+        const VkBufferImageCopy *pRegions) {
+    (void)dstImageLayout;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkBuffer *src = (PdockerVkBuffer *)srcBuffer;
+    PdockerVkImage *dst = (PdockerVkImage *)dstImage;
+    if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
+    for (uint32_t i = 0; i < regionCount; ++i) {
+        record_image_copy_op(cmd,
+                             PDOCKER_VK_IMAGE_COPY_BUFFER_TO_IMAGE,
+                             src,
+                             dst,
+                             &pRegions[i]);
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer(
+        VkCommandBuffer commandBuffer,
+        VkImage srcImage,
+        VkImageLayout srcImageLayout,
+        VkBuffer dstBuffer,
+        uint32_t regionCount,
+        const VkBufferImageCopy *pRegions) {
+    (void)srcImageLayout;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkImage *src = (PdockerVkImage *)srcImage;
+    PdockerVkBuffer *dst = (PdockerVkBuffer *)dstBuffer;
+    if (!cmd || !src || !dst || !src->memory || !dst->memory || !pRegions) return;
+    for (uint32_t i = 0; i < regionCount; ++i) {
+        record_image_copy_op(cmd,
+                             PDOCKER_VK_IMAGE_COPY_IMAGE_TO_BUFFER,
+                             dst,
+                             src,
+                             &pRegions[i]);
+    }
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(
         VkCommandBuffer commandBuffer,
         VkBuffer dstBuffer,
@@ -5457,6 +5751,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                         case PDOCKER_VK_COMMAND_COPY:
                             if (op->index < cmd->copy_op_count) {
                                 execute_recorded_copy_op(&cmd->copy_ops[op->index], &stats);
+                            }
+                            break;
+                        case PDOCKER_VK_COMMAND_IMAGE_COPY:
+                            if (op->index < cmd->image_copy_op_count) {
+                                execute_recorded_image_copy_op(
+                                    &cmd->image_copy_ops[op->index], &stats);
                             }
                             break;
                         case PDOCKER_VK_COMMAND_FILL:
@@ -5860,6 +6160,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdPushConstants);
     MAP_PROC(vkCmdPipelineBarrier);
     MAP_PROC(vkCmdCopyBuffer);
+    MAP_PROC(vkCmdCopyBufferToImage);
+    MAP_PROC(vkCmdCopyImageToBuffer);
     MAP_PROC(vkCmdFillBuffer);
     MAP_PROC(vkCmdUpdateBuffer);
     MAP_PROC(vkCmdDispatch);
