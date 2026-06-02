@@ -1692,6 +1692,29 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("MAP_PROC(vkCmdCopyBufferToImage);", icd)
         self.assertIn("MAP_PROC(vkCmdCopyImageToBuffer);", icd)
 
+    def test_vulkan_icd_records_image_to_image_copy_commands(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("PdockerVkImageToImageCopyOp image_to_image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];", icd)
+        self.assertIn("PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY", icd)
+        self.assertIn("vkCmdCopyImage", icd)
+        self.assertIn("record_image_to_image_copy_op", icd)
+        self.assertIn("execute_recorded_image_to_image_copy_op", icd)
+        self.assertIn("case PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY:", icd)
+        self.assertIn("image_ptr(op->src", icd)
+        self.assertIn("image_ptr(op->dst", icd)
+        self.assertIn("MAP_PROC(vkCmdCopyImage);", icd)
+
+    def test_vulkan_icd_exposes_tight_image_subresource_layout(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("vkGetImageSubresourceLayout", icd)
+        self.assertIn("VkSubresourceLayout *pLayout", icd)
+        self.assertIn("image_tight_subresource_offset(img", icd)
+        self.assertIn("image_tight_mip_size(img", icd)
+        self.assertIn("image_tight_layer_stride(img", icd)
+        self.assertIn("pLayout->rowPitch", icd)
+        self.assertIn("pLayout->depthPitch", icd)
+        self.assertIn("MAP_PROC(vkGetImageSubresourceLayout);", icd)
+
     def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("descriptor_type_supported_by_v4_transport", icd)
