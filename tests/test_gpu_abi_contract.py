@@ -1901,6 +1901,11 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("layout->set_layout_count = pCreateInfo->setLayoutCount;", create_body)
         self.assertIn("pCreateInfo->pSetLayouts", create_body)
         self.assertIn("layout->unsupported_set_layout_count = true;", create_body)
+        self.assertIn("push_constant_ranges[PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES]", icd)
+        self.assertIn("push_constant_ops[PDOCKER_VK_MAX_PUSH_CONSTANT_OPS]", icd)
+        self.assertIn("layout->push_constant_range_count < PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES", create_body)
+        self.assertIn("snapshot->stage_flags = range->stageFlags;", create_body)
+        self.assertIn("layout->unsupported_push_constant_ranges = true;", create_body)
         bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
             "static void validate_bound_descriptor_layouts_before_dispatch", 1
         )[0]
@@ -1919,6 +1924,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1
         )[0]
         self.assertIn("validate_bound_descriptor_layouts_before_dispatch(cmd);", dispatch_body)
+        self.assertIn("op->push_constant_op_count = cmd->push_constant_op_count;", dispatch_body)
+        push_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[1].split(
+            "static bool image_subresource_range_is_whole_image", 1
+        )[0]
+        self.assertNotIn("(void)stageFlags;", push_body)
+        self.assertIn("op->stage_flags = stageFlags;", push_body)
+        self.assertIn("op->offset = offset;", push_body)
+        self.assertIn("op->value_hash = fnv1a64_bytes(pValues, size);", push_body)
+        self.assertIn("cmd->graphics_unsupported = true;", push_body)
 
     def test_vulkan_binary_semaphores_are_not_noop_in_v4_submit(self):
         icd = VULKAN_ICD.read_text()

@@ -98,6 +98,8 @@ typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
 #define PDOCKER_VK_MAX_STORAGE_BUFFERS 16
 #define PDOCKER_VK_MAX_DESCRIPTOR_SETS 8
 #define PDOCKER_VK_MAX_PUSH_BYTES 256
+#define PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES 8
+#define PDOCKER_VK_MAX_PUSH_CONSTANT_OPS 64
 #define PDOCKER_VK_MAX_ENTRY_NAME 128
 #define PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES 16
 #define PDOCKER_VK_MAX_SPECIALIZATION_BYTES 256
@@ -252,11 +254,27 @@ struct PdockerVkShaderModule {
     void *code_map;
 };
 
+typedef struct {
+    VkShaderStageFlags stage_flags;
+    uint32_t offset;
+    uint32_t size;
+} PdockerVkPushConstantRangeSnapshot;
+
+typedef struct {
+    VkShaderStageFlags stage_flags;
+    uint32_t offset;
+    uint32_t size;
+    uint64_t value_hash;
+} PdockerVkPushConstantOpSnapshot;
+
 struct PdockerVkPipelineLayout {
     uint32_t push_constant_size;
+    PdockerVkPushConstantRangeSnapshot push_constant_ranges[PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES];
+    uint32_t push_constant_range_count;
     uint32_t set_layout_count;
     PdockerVkDescriptorSetLayout *set_layouts[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
     bool unsupported_set_layout_count;
+    bool unsupported_push_constant_ranges;
 };
 
 struct PdockerVkPipeline {
@@ -433,6 +451,8 @@ typedef struct {
     uint32_t dispatch_z;
     uint8_t push_constants[PDOCKER_VK_MAX_PUSH_BYTES];
     uint32_t push_constant_size;
+    PdockerVkPushConstantOpSnapshot push_constant_ops[PDOCKER_VK_MAX_PUSH_CONSTANT_OPS];
+    uint32_t push_constant_op_count;
 } PdockerVkDispatchOp;
 
 typedef enum {
@@ -532,6 +552,8 @@ typedef struct {
     uint32_t dispatch_z;
     uint8_t push_constants[PDOCKER_VK_MAX_PUSH_BYTES];
     uint32_t push_constant_size;
+    PdockerVkPushConstantOpSnapshot push_constant_ops[PDOCKER_VK_MAX_PUSH_CONSTANT_OPS];
+    uint32_t push_constant_op_count;
     bool has_dispatch;
     bool unsupported_descriptor_set_layout;
     bool dynamic_rendering_active;
@@ -3173,6 +3195,8 @@ static int send_generic_vulkan_dispatch(PdockerVkCommandBuffer *cmd) {
     op.dispatch_z = cmd->dispatch_z;
     op.push_constant_size = cmd->push_constant_size;
     memcpy(op.push_constants, cmd->push_constants, sizeof(op.push_constants));
+    memcpy(op.push_constant_ops, cmd->push_constant_ops, sizeof(op.push_constant_ops));
+    op.push_constant_op_count = cmd->push_constant_op_count;
     return send_generic_vulkan_dispatch_op(&op);
 }
 
@@ -6057,8 +6081,22 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
     }
     for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->pushConstantRangeCount; ++i) {
         const VkPushConstantRange *range = &pCreateInfo->pPushConstantRanges[i];
-        uint32_t end = range->offset + range->size;
+        uint64_t end64 = (uint64_t)range->offset + (uint64_t)range->size;
+        if (end64 > UINT32_MAX) {
+            free(layout);
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
+        uint32_t end = (uint32_t)end64;
         if (end > layout->push_constant_size) layout->push_constant_size = end;
+        if (layout->push_constant_range_count < PDOCKER_VK_MAX_PUSH_CONSTANT_RANGES) {
+            PdockerVkPushConstantRangeSnapshot *snapshot =
+                &layout->push_constant_ranges[layout->push_constant_range_count++];
+            snapshot->stage_flags = range->stageFlags;
+            snapshot->offset = range->offset;
+            snapshot->size = range->size;
+        } else {
+            layout->unsupported_push_constant_ranges = true;
+        }
     }
     if (layout->push_constant_size > PDOCKER_VK_MAX_PUSH_BYTES) {
         free(layout);
@@ -7573,6 +7611,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
                 op->push_constant_size = op->pipeline->layout->push_constant_size;
             }
             memcpy(op->push_constants, cmd->push_constants, sizeof(op->push_constants));
+            memcpy(op->push_constant_ops, cmd->push_constant_ops, sizeof(op->push_constant_ops));
+            op->push_constant_op_count = cmd->push_constant_op_count;
             PdockerVkCommandOp command_op;
             memset(&command_op, 0, sizeof(command_op));
             command_op.type = PDOCKER_VK_COMMAND_DISPATCH;
@@ -7594,12 +7634,22 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         uint32_t size,
         const void *pValues) {
     (void)layout;
-    (void)stageFlags;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd || !pValues || offset >= PDOCKER_VK_MAX_PUSH_BYTES) return;
-    if (offset + size > PDOCKER_VK_MAX_PUSH_BYTES) size = PDOCKER_VK_MAX_PUSH_BYTES - offset;
+    uint64_t end64 = (uint64_t)offset + (uint64_t)size;
+    if (end64 > PDOCKER_VK_MAX_PUSH_BYTES) size = PDOCKER_VK_MAX_PUSH_BYTES - offset;
     memcpy(cmd->push_constants + offset, pValues, size);
     if (offset + size > cmd->push_constant_size) cmd->push_constant_size = offset + size;
+    if (cmd->push_constant_op_count < PDOCKER_VK_MAX_PUSH_CONSTANT_OPS) {
+        PdockerVkPushConstantOpSnapshot *op =
+            &cmd->push_constant_ops[cmd->push_constant_op_count++];
+        op->stage_flags = stageFlags;
+        op->offset = offset;
+        op->size = size;
+        op->value_hash = fnv1a64_bytes(pValues, size);
+    } else {
+        cmd->graphics_unsupported = true;
+    }
 }
 
 static bool image_subresource_range_is_whole_image(
