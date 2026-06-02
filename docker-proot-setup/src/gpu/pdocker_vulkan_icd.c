@@ -51,6 +51,11 @@
 #define VK_KHR_COPY_COMMANDS_2_SPEC_VERSION 1
 #endif
 
+#ifndef VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+#define VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME "VK_KHR_synchronization2"
+#define VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION 1
+#endif
+
 typedef struct {
     VK_LOADER_DATA loader;
 } PdockerVkInstance;
@@ -4418,6 +4423,13 @@ static void fill_pnext_features(void *pNext) {
                 }
                 break;
             }
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES: {
+                VkPhysicalDeviceSynchronization2Features *p = (VkPhysicalDeviceSynchronization2Features *)node;
+                p->synchronization2 = VK_TRUE;
+                break;
+            }
+#endif
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 VkPhysicalDeviceMaintenance4Features *p = (VkPhysicalDeviceMaintenance4Features *)node;
@@ -5453,7 +5465,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkExtensionProperties *pProperties) {
     (void)physicalDevice;
     (void)pLayerName;
-    VkExtensionProperties available[9];
+    VkExtensionProperties available[10];
     uint32_t available_count = 0;
 #define ADD_DEVICE_EXTENSION(name, version) do { \
         if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
@@ -5482,6 +5494,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_4_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_SPEC_VERSION);
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME, VK_KHR_COPY_COMMANDS_2_SPEC_VERSION);
+    ADD_DEVICE_EXTENSION(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION);
 #undef ADD_DEVICE_EXTENSION
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
     return VK_SUCCESS;
@@ -5506,6 +5519,7 @@ static bool device_extension_advertised_name(const char *name) {
     if (strcmp(name, VK_KHR_MAINTENANCE_4_EXTENSION_NAME) == 0) return true;
 #endif
     if (strcmp(name, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME) == 0) return true;
+    if (strcmp(name, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) == 0) return true;
     return false;
 }
 
@@ -7165,6 +7179,92 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
     return VK_SUCCESS;
 }
 
+static void free_submit_info_arrays(VkSubmitInfo *submits, uint32_t submitCount) {
+    if (!submits) return;
+    for (uint32_t i = 0; i < submitCount; ++i) {
+        free((void *)submits[i].pWaitSemaphores);
+        free((void *)submits[i].pWaitDstStageMask);
+        free((void *)submits[i].pCommandBuffers);
+        free((void *)submits[i].pSignalSemaphores);
+    }
+    free(submits);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
+        VkQueue queue,
+        uint32_t submitCount,
+        const VkSubmitInfo2 *pSubmits,
+        VkFence fence) {
+    if (submitCount == 0) return vkQueueSubmit(queue, 0, NULL, fence);
+    if (!pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
+    VkSubmitInfo *legacy_submits = calloc(submitCount, sizeof(*legacy_submits));
+    if (!legacy_submits) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    VkResult rc = VK_SUCCESS;
+    for (uint32_t i = 0; i < submitCount; ++i) {
+        const VkSubmitInfo2 *src = &pSubmits[i];
+        VkSubmitInfo *dst = &legacy_submits[i];
+        dst->sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        dst->waitSemaphoreCount = src->waitSemaphoreInfoCount;
+        dst->commandBufferCount = src->commandBufferInfoCount;
+        dst->signalSemaphoreCount = src->signalSemaphoreInfoCount;
+        if (src->waitSemaphoreInfoCount > 0 && !src->pWaitSemaphoreInfos) {
+            rc = VK_ERROR_INITIALIZATION_FAILED;
+            break;
+        }
+        if (src->commandBufferInfoCount > 0 && !src->pCommandBufferInfos) {
+            rc = VK_ERROR_INITIALIZATION_FAILED;
+            break;
+        }
+        if (src->signalSemaphoreInfoCount > 0 && !src->pSignalSemaphoreInfos) {
+            rc = VK_ERROR_INITIALIZATION_FAILED;
+            break;
+        }
+        if (src->waitSemaphoreInfoCount > 0) {
+            VkSemaphore *waits = calloc(src->waitSemaphoreInfoCount, sizeof(*waits));
+            VkPipelineStageFlags *stages = calloc(src->waitSemaphoreInfoCount, sizeof(*stages));
+            if (!waits || !stages) {
+                free(waits);
+                free(stages);
+                rc = VK_ERROR_OUT_OF_HOST_MEMORY;
+                break;
+            }
+            for (uint32_t j = 0; j < src->waitSemaphoreInfoCount; ++j) {
+                waits[j] = src->pWaitSemaphoreInfos[j].semaphore;
+                stages[j] = src->pWaitSemaphoreInfos[j].stageMask
+                    ? (VkPipelineStageFlags)src->pWaitSemaphoreInfos[j].stageMask
+                    : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+            }
+            dst->pWaitSemaphores = waits;
+            dst->pWaitDstStageMask = stages;
+        }
+        if (src->commandBufferInfoCount > 0) {
+            VkCommandBuffer *cmds = calloc(src->commandBufferInfoCount, sizeof(*cmds));
+            if (!cmds) {
+                rc = VK_ERROR_OUT_OF_HOST_MEMORY;
+                break;
+            }
+            for (uint32_t j = 0; j < src->commandBufferInfoCount; ++j) {
+                cmds[j] = src->pCommandBufferInfos[j].commandBuffer;
+            }
+            dst->pCommandBuffers = cmds;
+        }
+        if (src->signalSemaphoreInfoCount > 0) {
+            VkSemaphore *signals = calloc(src->signalSemaphoreInfoCount, sizeof(*signals));
+            if (!signals) {
+                rc = VK_ERROR_OUT_OF_HOST_MEMORY;
+                break;
+            }
+            for (uint32_t j = 0; j < src->signalSemaphoreInfoCount; ++j) {
+                signals[j] = src->pSignalSemaphoreInfos[j].semaphore;
+            }
+            dst->pSignalSemaphores = signals;
+        }
+    }
+    if (rc == VK_SUCCESS) rc = vkQueueSubmit(queue, submitCount, legacy_submits, fence);
+    free_submit_info_arrays(legacy_submits, submitCount);
+    return rc;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
     (void)queue;
     return VK_SUCCESS;
@@ -7283,6 +7383,47 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
                          pBufferMemoryBarriers,
                          imageMemoryBarrierCount,
                          pImageMemoryBarriers);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
+        VkCommandBuffer commandBuffer,
+        const VkDependencyInfo *pDependencyInfo) {
+    vkCmdPipelineBarrier(commandBuffer,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         pDependencyInfo ? pDependencyInfo->dependencyFlags : 0,
+                         pDependencyInfo ? pDependencyInfo->memoryBarrierCount : 0,
+                         NULL,
+                         pDependencyInfo ? pDependencyInfo->bufferMemoryBarrierCount : 0,
+                         NULL,
+                         pDependencyInfo ? pDependencyInfo->imageMemoryBarrierCount : 0,
+                         NULL);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
+        VkCommandBuffer commandBuffer,
+        VkEvent event,
+        const VkDependencyInfo *pDependencyInfo) {
+    (void)pDependencyInfo;
+    record_event_command(commandBuffer, event, true);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2(
+        VkCommandBuffer commandBuffer,
+        VkEvent event,
+        VkPipelineStageFlags2 stageMask) {
+    (void)stageMask;
+    record_event_command(commandBuffer, event, false);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
+        VkCommandBuffer commandBuffer,
+        uint32_t eventCount,
+        const VkEvent *pEvents,
+        const VkDependencyInfo *pDependencyInfos) {
+    (void)eventCount;
+    (void)pEvents;
+    vkCmdPipelineBarrier2(commandBuffer, pDependencyInfos);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
@@ -7519,6 +7660,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdBindDescriptorSets);
     MAP_PROC(vkCmdPushConstants);
     MAP_PROC(vkCmdPipelineBarrier);
+    MAP_PROC(vkCmdPipelineBarrier2);
+    MAP_ALIAS("vkCmdPipelineBarrier2KHR", vkCmdPipelineBarrier2);
     MAP_PROC(vkCmdCopyBuffer);
     MAP_PROC(vkCmdCopyBuffer2);
     MAP_ALIAS("vkCmdCopyBuffer2KHR", vkCmdCopyBuffer2);
@@ -7543,6 +7686,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdUpdateBuffer);
     MAP_PROC(vkCmdDispatch);
     MAP_PROC(vkQueueSubmit);
+    MAP_PROC(vkQueueSubmit2);
+    MAP_ALIAS("vkQueueSubmit2KHR", vkQueueSubmit2);
     MAP_PROC(vkQueueWaitIdle);
     MAP_PROC(vkDeviceWaitIdle);
     MAP_PROC(vkCreateEvent);
@@ -7553,6 +7698,12 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdSetEvent);
     MAP_PROC(vkCmdResetEvent);
     MAP_PROC(vkCmdWaitEvents);
+    MAP_PROC(vkCmdSetEvent2);
+    MAP_ALIAS("vkCmdSetEvent2KHR", vkCmdSetEvent2);
+    MAP_PROC(vkCmdResetEvent2);
+    MAP_ALIAS("vkCmdResetEvent2KHR", vkCmdResetEvent2);
+    MAP_PROC(vkCmdWaitEvents2);
+    MAP_ALIAS("vkCmdWaitEvents2KHR", vkCmdWaitEvents2);
     MAP_PROC(vkCreateFence);
     MAP_PROC(vkDestroyFence);
     MAP_PROC(vkResetFences);

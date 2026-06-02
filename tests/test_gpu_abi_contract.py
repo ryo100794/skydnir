@@ -1797,6 +1797,27 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(name, icd)
             self.assertIn(f"MAP_PROC({name});", icd)
 
+    def test_vulkan_icd_supports_synchronization2_submit_and_barrier_api(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME", icd)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME", icd)
+        self.assertIn("VkPhysicalDeviceSynchronization2Features", icd)
+        self.assertIn("p->synchronization2 = VK_TRUE;", icd)
+        for name in [
+            "vkQueueSubmit2",
+            "vkCmdPipelineBarrier2",
+            "vkCmdSetEvent2",
+            "vkCmdResetEvent2",
+            "vkCmdWaitEvents2",
+        ]:
+            self.assertIn(name, icd)
+            self.assertIn(f"MAP_PROC({name});", icd)
+            self.assertIn(f'MAP_ALIAS("{name}KHR", {name});', icd)
+        self.assertIn("VkSubmitInfo2", icd)
+        self.assertIn("VkDependencyInfo", icd)
+        self.assertIn("free_submit_info_arrays", icd)
+        self.assertIn("vkQueueSubmit(queue, submitCount, legacy_submits, fence)", icd)
+
     def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("descriptor_type_supported_by_v4_transport", icd)
