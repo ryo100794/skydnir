@@ -310,9 +310,34 @@ struct PdockerVkQueryPool {
     uint8_t *active;
 };
 
+typedef struct {
+    VkFormat format;
+    VkSampleCountFlagBits samples;
+    VkAttachmentLoadOp load_op;
+    VkAttachmentStoreOp store_op;
+    VkAttachmentLoadOp stencil_load_op;
+    VkAttachmentStoreOp stencil_store_op;
+    VkImageLayout initial_layout;
+    VkImageLayout final_layout;
+} PdockerVkRenderPassAttachmentState;
+
+typedef struct {
+    PdockerVkImageView *image_view;
+    VkImageLayout image_layout;
+    PdockerVkImageView *resolve_image_view;
+    VkImageLayout resolve_image_layout;
+    VkResolveModeFlagBits resolve_mode;
+    VkAttachmentLoadOp load_op;
+    VkAttachmentStoreOp store_op;
+    VkClearValue clear_value;
+    bool valid;
+} PdockerVkRenderingAttachmentState;
+
 struct PdockerVkRenderPass {
     uint32_t attachment_count;
     uint32_t subpass_count;
+    PdockerVkRenderPassAttachmentState attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    bool attachment_overflow;
     uint64_t generation;
 };
 
@@ -511,7 +536,15 @@ typedef struct {
     bool render_pass_active;
     PdockerVkRenderPass *active_render_pass;
     PdockerVkFramebuffer *active_framebuffer;
+    VkRect2D active_render_area;
+    VkSubpassContents active_subpass_contents;
+    uint32_t active_subpass;
     uint32_t active_color_attachment_count;
+    PdockerVkRenderingAttachmentState active_color_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    PdockerVkRenderingAttachmentState active_depth_attachment;
+    PdockerVkRenderingAttachmentState active_stencil_attachment;
+    VkClearValue active_clear_values[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    uint32_t active_clear_value_count;
     bool graphics_unsupported;
     PdockerVkVertexBindingState vertex_bindings[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
     uint32_t vertex_binding_count;
@@ -604,6 +637,23 @@ static void record_graphics_dynamic_state_bytes(
     state->count = count;
     state->data_size = (uint32_t)data_size;
     if (data && data_size) memcpy(state->data, data, data_size);
+}
+
+static void copy_rendering_attachment_state(
+        PdockerVkRenderingAttachmentState *dst,
+        const VkRenderingAttachmentInfo *src) {
+    if (!dst) return;
+    memset(dst, 0, sizeof(*dst));
+    if (!src) return;
+    dst->image_view = (PdockerVkImageView *)src->imageView;
+    dst->image_layout = src->imageLayout;
+    dst->resolve_image_view = (PdockerVkImageView *)src->resolveImageView;
+    dst->resolve_image_layout = src->resolveImageLayout;
+    dst->resolve_mode = src->resolveMode;
+    dst->load_op = src->loadOp;
+    dst->store_op = src->storeOp;
+    dst->clear_value = src->clearValue;
+    dst->valid = true;
 }
 
 static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
@@ -6397,6 +6447,25 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
     if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
     rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
     rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
+    if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        rp->attachment_overflow = true;
+        rp->attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
+    }
+    if (rp->attachment_count > 0 && (!pCreateInfo || !pCreateInfo->pAttachments)) {
+        rp->attachment_overflow = true;
+        rp->attachment_count = 0;
+    }
+    for (uint32_t a = 0; pCreateInfo && a < rp->attachment_count; ++a) {
+        const VkAttachmentDescription *src = &pCreateInfo->pAttachments[a];
+        rp->attachments[a].format = src->format;
+        rp->attachments[a].samples = src->samples;
+        rp->attachments[a].load_op = src->loadOp;
+        rp->attachments[a].store_op = src->storeOp;
+        rp->attachments[a].stencil_load_op = src->stencilLoadOp;
+        rp->attachments[a].stencil_store_op = src->stencilStoreOp;
+        rp->attachments[a].initial_layout = src->initialLayout;
+        rp->attachments[a].final_layout = src->finalLayout;
+    }
     rp->generation = next_vulkan_object_generation();
     *pRenderPass = (VkRenderPass)rp;
     return VK_SUCCESS;
@@ -6414,6 +6483,25 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
     if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
     rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
     rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
+    if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        rp->attachment_overflow = true;
+        rp->attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
+    }
+    if (rp->attachment_count > 0 && (!pCreateInfo || !pCreateInfo->pAttachments)) {
+        rp->attachment_overflow = true;
+        rp->attachment_count = 0;
+    }
+    for (uint32_t a = 0; pCreateInfo && a < rp->attachment_count; ++a) {
+        const VkAttachmentDescription2 *src = &pCreateInfo->pAttachments[a];
+        rp->attachments[a].format = src->format;
+        rp->attachments[a].samples = src->samples;
+        rp->attachments[a].load_op = src->loadOp;
+        rp->attachments[a].store_op = src->storeOp;
+        rp->attachments[a].stencil_load_op = src->stencilLoadOp;
+        rp->attachments[a].stencil_store_op = src->stencilStoreOp;
+        rp->attachments[a].initial_layout = src->initialLayout;
+        rp->attachments[a].final_layout = src->finalLayout;
+    }
     rp->generation = next_vulkan_object_generation();
     *pRenderPass = (VkRenderPass)rp;
     return VK_SUCCESS;
@@ -6693,7 +6781,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     cmd->render_pass_active = false;
     cmd->active_render_pass = NULL;
     cmd->active_framebuffer = NULL;
+    memset(&cmd->active_render_area, 0, sizeof(cmd->active_render_area));
+    cmd->active_subpass_contents = VK_SUBPASS_CONTENTS_INLINE;
+    cmd->active_subpass = 0;
     cmd->active_color_attachment_count = 0;
+    memset(cmd->active_color_attachments, 0, sizeof(cmd->active_color_attachments));
+    memset(&cmd->active_depth_attachment, 0, sizeof(cmd->active_depth_attachment));
+    memset(&cmd->active_stencil_attachment, 0, sizeof(cmd->active_stencil_attachment));
+    memset(cmd->active_clear_values, 0, sizeof(cmd->active_clear_values));
+    cmd->active_clear_value_count = 0;
     cmd->graphics_unsupported = false;
     memset(cmd->vertex_bindings, 0, sizeof(cmd->vertex_bindings));
     cmd->vertex_binding_count = 0;
@@ -6736,9 +6832,31 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
     cmd->render_pass_active = false;
     cmd->active_render_pass = NULL;
     cmd->active_framebuffer = NULL;
+    memset(cmd->active_color_attachments, 0, sizeof(cmd->active_color_attachments));
+    memset(&cmd->active_depth_attachment, 0, sizeof(cmd->active_depth_attachment));
+    memset(&cmd->active_stencil_attachment, 0, sizeof(cmd->active_stencil_attachment));
     cmd->active_color_attachment_count = pRenderingInfo
         ? pRenderingInfo->colorAttachmentCount
         : 0;
+    if (pRenderingInfo) {
+        cmd->active_render_area = pRenderingInfo->renderArea;
+        if (cmd->active_color_attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+            cmd->graphics_unsupported = true;
+            cmd->active_color_attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
+        }
+        for (uint32_t i = 0; i < cmd->active_color_attachment_count; ++i) {
+            copy_rendering_attachment_state(&cmd->active_color_attachments[i],
+                                            pRenderingInfo->pColorAttachments
+                                                ? &pRenderingInfo->pColorAttachments[i]
+                                                : NULL);
+        }
+        copy_rendering_attachment_state(&cmd->active_depth_attachment,
+                                        pRenderingInfo->pDepthAttachment);
+        copy_rendering_attachment_state(&cmd->active_stencil_attachment,
+                                        pRenderingInfo->pStencilAttachment);
+    } else {
+        memset(&cmd->active_render_area, 0, sizeof(cmd->active_render_area));
+    }
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdEndRendering(VkCommandBuffer commandBuffer) {
@@ -6746,13 +6864,15 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRendering(VkCommandBuffer commandBuffer) {
     if (!cmd) return;
     cmd->dynamic_rendering_active = false;
     cmd->active_color_attachment_count = 0;
+    memset(cmd->active_color_attachments, 0, sizeof(cmd->active_color_attachments));
+    memset(&cmd->active_depth_attachment, 0, sizeof(cmd->active_depth_attachment));
+    memset(&cmd->active_stencil_attachment, 0, sizeof(cmd->active_stencil_attachment));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
         VkCommandBuffer commandBuffer,
         const VkRenderPassBeginInfo *pRenderPassBegin,
         VkSubpassContents contents) {
-    (void)contents;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
     cmd->render_pass_active = true;
@@ -6763,13 +6883,30 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
     cmd->active_framebuffer = pRenderPassBegin
         ? (PdockerVkFramebuffer *)pRenderPassBegin->framebuffer
         : NULL;
+    cmd->active_subpass = 0;
+    cmd->active_subpass_contents = contents;
+    cmd->active_render_area = pRenderPassBegin ? pRenderPassBegin->renderArea : (VkRect2D){{0, 0}, {0, 0}};
+    cmd->active_clear_value_count = pRenderPassBegin ? pRenderPassBegin->clearValueCount : 0;
+    if (cmd->active_clear_value_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        cmd->graphics_unsupported = true;
+        cmd->active_clear_value_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
+    }
+    if (cmd->active_clear_value_count > 0 && (!pRenderPassBegin || !pRenderPassBegin->pClearValues)) {
+        cmd->graphics_unsupported = true;
+        cmd->active_clear_value_count = 0;
+    }
+    for (uint32_t i = 0; pRenderPassBegin && i < cmd->active_clear_value_count; ++i) {
+        cmd->active_clear_values[i] = pRenderPassBegin->pClearValues[i];
+    }
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass(
         VkCommandBuffer commandBuffer,
         VkSubpassContents contents) {
-    (void)commandBuffer;
-    (void)contents;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!cmd) return;
+    cmd->active_subpass += 1;
+    cmd->active_subpass_contents = contents;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer commandBuffer) {
@@ -6778,6 +6915,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer commandBuffer) {
     cmd->render_pass_active = false;
     cmd->active_render_pass = NULL;
     cmd->active_framebuffer = NULL;
+    cmd->active_subpass = 0;
+    cmd->active_clear_value_count = 0;
+    memset(cmd->active_clear_values, 0, sizeof(cmd->active_clear_values));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2(
