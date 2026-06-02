@@ -877,6 +877,82 @@ static uint64_t fnv1a64_update_u64(uint64_t hash, uint64_t value) {
     return fnv1a64_update_bytes(hash, &value, sizeof(value));
 }
 
+static bool vulkan_v5_frame_enabled(void) {
+    return env_truthy_default("PDOCKER_VULKAN_USE_V5_FRAME", false);
+}
+
+static size_t align_size_8(size_t value) {
+    return (value + 7u) & ~(size_t)7u;
+}
+
+static int write_exact_fd(int fd, const void *data, size_t size) {
+    const unsigned char *p = (const unsigned char *)data;
+    size_t off = 0;
+    while (off < size) {
+        ssize_t n = write(fd, p + off, size - off);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -errno;
+        }
+        if (n == 0) return -EPIPE;
+        off += (size_t)n;
+    }
+    return 0;
+}
+
+static int read_dispatch_response_status(int socket_fd, const char *transport_name) {
+    const size_t max_response = 1024 * 1024;
+    char stack_line[16384];
+    size_t line_cap = sizeof(stack_line);
+    size_t line_off = 0;
+    char *heap_line = NULL;
+    char *line = stack_line;
+    int rc = 0;
+    while (line_off + 1 < max_response) {
+        if (line_off + 1 >= line_cap) {
+            size_t next_cap = line_cap * 2;
+            if (next_cap < line_cap) {
+                rc = -EOVERFLOW;
+                break;
+            }
+            if (next_cap > max_response) next_cap = max_response;
+            char *next = (char *)malloc(next_cap);
+            if (!next) {
+                rc = -ENOMEM;
+                break;
+            }
+            memcpy(next, line, line_off);
+            free(heap_line);
+            heap_line = next;
+            line = heap_line;
+            line_cap = next_cap;
+        }
+        char ch;
+        ssize_t r = read(socket_fd, &ch, 1);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            rc = -errno;
+            break;
+        }
+        if (r == 0) break;
+        line[line_off++] = ch;
+        if (ch == '\n') break;
+    }
+    line[line_off] = '\0';
+    if (rc == 0 && line_off + 1 >= max_response) rc = -EMSGSIZE;
+    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG") ||
+        env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: %s dispatch response: %s",
+                transport_name ? transport_name : "generic",
+                line);
+        if (line_off == 0 || line[line_off - 1] != '\n') fprintf(stderr, "\n");
+    }
+    if (rc == 0 && strstr(line, "\"valid\":true") == NULL) rc = -EIO;
+    free(heap_line);
+    return rc;
+}
+
 typedef struct {
     bool enabled;
     int shader_fd;
@@ -1377,6 +1453,265 @@ static void trace_vulkan_reconcile_evidence(
     fflush(stderr);
 }
 
+static int frame_append_bytes(unsigned char *frame,
+                              size_t frame_capacity,
+                              size_t *cursor,
+                              const void *data,
+                              size_t size,
+                              uint64_t *offset_out) {
+    if (!frame || !cursor || !offset_out) return -EINVAL;
+    size_t aligned = align_size_8(*cursor);
+    if (aligned > frame_capacity || size > frame_capacity - aligned) return -EMSGSIZE;
+    *offset_out = (uint64_t)aligned;
+    if (size > 0 && data) memcpy(frame + aligned, data, size);
+    *cursor = aligned + size;
+    return 0;
+}
+
+static int send_vulkan_dispatch_v5_frame_with_fds(
+        int socket_fd,
+        const unsigned char *frame,
+        size_t frame_size,
+        const int *fds,
+        size_t fd_count) {
+    if (socket_fd < 0 || !frame || frame_size < sizeof(PdockerGpuVulkanDispatchV5FrameHeader) ||
+        !fds || fd_count == 0 || fd_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
+        return -EINVAL;
+    }
+    char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS)];
+    struct iovec iov;
+    struct msghdr msg;
+    memset(control, 0, sizeof(control));
+    memset(&iov, 0, sizeof(iov));
+    memset(&msg, 0, sizeof(msg));
+    iov.iov_base = (void *)frame;
+    iov.iov_len = sizeof(PdockerGpuVulkanDispatchV5FrameHeader);
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control;
+    msg.msg_controllen = sizeof(control);
+    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fd_count);
+    memcpy(CMSG_DATA(cmsg), fds, sizeof(int) * fd_count);
+    msg.msg_controllen = CMSG_SPACE(sizeof(int) * fd_count);
+    if (sendmsg(socket_fd, &msg, 0) < 0) return -errno;
+    return write_exact_fd(socket_fd,
+                          frame + sizeof(PdockerGpuVulkanDispatchV5FrameHeader),
+                          frame_size - sizeof(PdockerGpuVulkanDispatchV5FrameHeader));
+}
+
+static int send_generic_vulkan_dispatch_v5_1_op(
+        int socket_fd,
+        uint64_t dispatch_id,
+        int *fds,
+        size_t binding_count,
+        size_t shader_size,
+        uint64_t shader_hash,
+        uint32_t gx,
+        uint32_t gy,
+        uint32_t gz,
+        const uint8_t *push,
+        size_t push_size,
+        uint64_t push_hash,
+        const char *entry_name,
+        const VkSpecializationMapEntry *specialization_entries,
+        uint32_t specialization_entry_count,
+        const uint8_t *specialization_data,
+        size_t specialization_data_size,
+        uint64_t specialization_hash,
+        const char *option_text,
+        size_t option_text_size,
+        const uint32_t *api_descriptor_sets,
+        const uint32_t *bindings,
+        const VkDeviceSize *offsets,
+        const size_t *sizes,
+        const VkDeviceSize *api_offsets,
+        const VkDeviceSize *api_ranges,
+        const size_t *api_buffer_sizes,
+        const uint32_t *api_descriptor_types,
+        const uint32_t *api_dynamic_flags,
+        const VkDeviceSize *api_memory_offsets,
+        const size_t *api_memory_sizes,
+        const uintptr_t *api_memory_ids,
+        const uintptr_t *api_buffer_ids,
+        uint64_t descriptor_hash,
+        uint64_t dispatch_hash) {
+    if (socket_fd < 0 || !fds || !entry_name || !api_descriptor_sets || !bindings ||
+        !offsets || !sizes || !api_offsets || !api_ranges || !api_buffer_sizes ||
+        !api_descriptor_types || !api_dynamic_flags || !api_memory_offsets ||
+        !api_memory_sizes || !api_memory_ids || !api_buffer_ids) {
+        return -EINVAL;
+    }
+    if (binding_count == 0 || binding_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) return -EINVAL;
+    if (binding_count * 2u > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
+        binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
+        1u + binding_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
+        return -E2BIG;
+    }
+    if (specialization_entry_count > PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES ||
+        specialization_data_size > PDOCKER_VK_MAX_SPECIALIZATION_BYTES ||
+        push_size > PDOCKER_VK_MAX_PUSH_BYTES) {
+        return -E2BIG;
+    }
+    size_t entry_name_size = strlen(entry_name);
+    if (entry_name_size == 0 || entry_name_size >= PDOCKER_VK_MAX_ENTRY_NAME) return -EINVAL;
+
+    PdockerGpuVulkanDispatchV5ResourceEntry resources[PDOCKER_VK_MAX_STORAGE_BUFFERS * 2];
+    PdockerGpuVulkanDispatchV5DescriptorObjectEntry descriptors[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    PdockerGpuVulkanDispatchV5SpecializationEntry specs[PDOCKER_VK_MAX_SPECIALIZATION_ENTRIES];
+    memset(resources, 0, sizeof(resources));
+    memset(descriptors, 0, sizeof(descriptors));
+    memset(specs, 0, sizeof(specs));
+    for (size_t i = 0; i < binding_count; ++i) {
+        if (api_memory_offsets[i] > offsets[i]) return -ERANGE;
+        uint64_t transfer_offset = (uint64_t)(offsets[i] - api_memory_offsets[i]);
+        if (transfer_offset > api_buffer_sizes[i] ||
+            sizes[i] > api_buffer_sizes[i] - transfer_offset) {
+            return -ERANGE;
+        }
+        uint32_t memory_index = (uint32_t)(i * 2u);
+        uint32_t buffer_index = memory_index + 1u;
+        resources[memory_index].resource_type = PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY;
+        resources[memory_index].resource_flags =
+            PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED |
+            PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
+        resources[memory_index].resource_id = (uint64_t)api_memory_ids[i];
+        resources[memory_index].parent_resource_index = PDOCKER_GPU_V5_RESOURCE_PARENT_NONE;
+        resources[memory_index].fd_index = (uint32_t)(1u + i);
+        resources[memory_index].memory_offset = 0;
+        resources[memory_index].size = (uint64_t)api_memory_sizes[i];
+        resources[memory_index].memory_property_flags =
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        resources[memory_index].external_offset = 0;
+        resources[memory_index].generation = dispatch_id;
+
+        resources[buffer_index].resource_type = PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER;
+        resources[buffer_index].resource_flags = PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
+        resources[buffer_index].resource_id = (uint64_t)api_buffer_ids[i];
+        resources[buffer_index].parent_resource_index = memory_index;
+        resources[buffer_index].fd_index = PDOCKER_GPU_V5_RESOURCE_FD_NONE;
+        resources[buffer_index].memory_offset = (uint64_t)api_memory_offsets[i];
+        resources[buffer_index].size = (uint64_t)api_buffer_sizes[i];
+        resources[buffer_index].generation = dispatch_id;
+
+        descriptors[i].descriptor_set = api_descriptor_sets[i];
+        descriptors[i].binding = bindings[i];
+        descriptors[i].array_element = 0;
+        descriptors[i].descriptor_type = api_descriptor_types[i];
+        descriptors[i].descriptor_flags =
+            (api_dynamic_flags[i] ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC : 0u) |
+            (api_ranges[i] == VK_WHOLE_SIZE ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_WHOLE_SIZE : 0u);
+        descriptors[i].access_flags = PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE;
+        descriptors[i].resource_index = buffer_index;
+        descriptors[i].image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+        descriptors[i].sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+        descriptors[i].image_layout = 0;
+        descriptors[i].resource_id = (uint64_t)api_buffer_ids[i];
+        descriptors[i].buffer_offset = (uint64_t)api_offsets[i];
+        descriptors[i].range = (uint64_t)api_ranges[i];
+        descriptors[i].transfer_offset = transfer_offset;
+        descriptors[i].transfer_size = (uint64_t)sizes[i];
+        descriptors[i].dynamic_offset = 0;
+    }
+    for (uint32_t i = 0; i < specialization_entry_count; ++i) {
+        specs[i].constant_id = specialization_entries[i].constantID;
+        specs[i].offset = specialization_entries[i].offset;
+        specs[i].size = specialization_entries[i].size;
+    }
+
+    size_t frame_capacity =
+        sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader) +
+        align_size_8(sizeof(PdockerGpuVulkanDispatchV5ResourceEntry) * binding_count * 2u) +
+        align_size_8(sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry) * binding_count) +
+        align_size_8(sizeof(PdockerGpuVulkanDispatchV5SpecializationEntry) * specialization_entry_count) +
+        align_size_8(specialization_data_size) +
+        align_size_8(push_size) +
+        align_size_8(entry_name_size) +
+        align_size_8(option_text_size) +
+        64u;
+    if (frame_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES) return -EMSGSIZE;
+    unsigned char *frame = (unsigned char *)calloc(1, frame_capacity);
+    if (!frame) return -ENOMEM;
+    PdockerGpuVulkanDispatchV5ObjectFrameHeader *object_header =
+        (PdockerGpuVulkanDispatchV5ObjectFrameHeader *)frame;
+    PdockerGpuVulkanDispatchV5FrameHeader *header = &object_header->base;
+    memcpy(header->magic, PDOCKER_GPU_VULKAN_DISPATCH_V5_MAGIC, 8);
+    header->header_size = sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader);
+    header->abi_major = PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MAJOR;
+    header->abi_minor = PDOCKER_GPU_VULKAN_DISPATCH_V5_ABI_MINOR_OBJECTS;
+    header->command = PDOCKER_GPU_VULKAN_DISPATCH_V5_COMMAND_DISPATCH;
+    header->dispatch_id = dispatch_id;
+    header->fd_count = (uint32_t)(1u + binding_count);
+    header->shader_fd_index = 0;
+    header->shader_size = shader_size;
+    header->shader_hash = shader_hash;
+    header->gx = gx;
+    header->gy = gy ? gy : 1;
+    header->gz = gz ? gz : 1;
+    header->resource_count = (uint32_t)(binding_count * 2u);
+    header->resource_entry_size = sizeof(PdockerGpuVulkanDispatchV5ResourceEntry);
+    header->resource_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH;
+    header->descriptor_count = (uint32_t)binding_count;
+    header->descriptor_entry_size = sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry);
+    header->descriptor_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH;
+    header->specialization_count = specialization_entry_count;
+    header->specialization_entry_size = sizeof(PdockerGpuVulkanDispatchV5SpecializationEntry);
+    header->specialization_hash = specialization_hash;
+    header->push_size = push_size;
+    header->push_hash = push_hash;
+    header->entry_name_size = entry_name_size;
+    header->option_text_size = option_text_size;
+    header->option_hash = fnv1a64_bytes(option_text, option_text_size);
+    header->resource_hash = fnv1a64_bytes(resources, sizeof(resources[0]) * binding_count * 2u);
+    header->descriptor_hash = descriptor_hash;
+    header->dispatch_hash = dispatch_hash;
+
+    object_header->objects.image_count = 0;
+    object_header->objects.image_view_count = 0;
+    object_header->objects.sampler_count = 0;
+    object_header->objects.object_hash = 0;
+
+    size_t cursor = sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader);
+    int rc = frame_append_bytes(frame, frame_capacity, &cursor,
+                                resources, sizeof(resources[0]) * binding_count * 2u,
+                                &header->resource_table_offset);
+    if (rc != 0) goto cleanup;
+    header->resource_table_size = sizeof(resources[0]) * binding_count * 2u;
+    rc = frame_append_bytes(frame, frame_capacity, &cursor,
+                            descriptors, sizeof(descriptors[0]) * binding_count,
+                            &header->descriptor_table_offset);
+    if (rc != 0) goto cleanup;
+    header->descriptor_table_size = sizeof(descriptors[0]) * binding_count;
+    object_header->objects.image_table_offset = (uint64_t)align_size_8(cursor);
+    object_header->objects.image_view_table_offset = object_header->objects.image_table_offset;
+    object_header->objects.sampler_table_offset = object_header->objects.image_table_offset;
+    rc = frame_append_bytes(frame, frame_capacity, &cursor,
+                            specs, sizeof(specs[0]) * specialization_entry_count,
+                            &header->specialization_table_offset);
+    if (rc != 0) goto cleanup;
+    header->specialization_table_size = sizeof(specs[0]) * specialization_entry_count;
+    rc = frame_append_bytes(frame, frame_capacity, &cursor,
+                            specialization_data, specialization_data_size,
+                            &header->specialization_data_offset);
+    if (rc != 0) goto cleanup;
+    header->specialization_data_size = specialization_data_size;
+    rc = frame_append_bytes(frame, frame_capacity, &cursor, push, push_size, &header->push_offset);
+    if (rc != 0) goto cleanup;
+    rc = frame_append_bytes(frame, frame_capacity, &cursor, entry_name, entry_name_size, &header->entry_name_offset);
+    if (rc != 0) goto cleanup;
+    rc = frame_append_bytes(frame, frame_capacity, &cursor, option_text, option_text_size, &header->option_text_offset);
+    if (rc != 0) goto cleanup;
+    header->frame_size = cursor;
+    header->frame_hash = fnv1a64_bytes(frame, cursor);
+
+    rc = send_vulkan_dispatch_v5_frame_with_fds(socket_fd, frame, cursor, fds, 1u + binding_count);
+cleanup:
+    free(frame);
+    return rc;
+}
+
 static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding);
 static int validate_descriptor_transport_shape(
         const PdockerVkDescriptorBinding *binding,
@@ -1820,6 +2155,73 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         }
         close_spirv_probe_replay(&probe);
         return socket_fd;
+    }
+    if (vulkan_v5_frame_enabled() && !copy_alias_enabled()) {
+        const char *option_text = "";
+        size_t option_text_size = 0;
+        if (raw_command_len > core_command_len + 1u &&
+            command[core_command_len] == ' ') {
+            option_text = command + core_command_len + 1u;
+            option_text_size = raw_command_len - core_command_len - 1u;
+            if (option_text_size > 0 && option_text[option_text_size - 1u] == '\n') {
+                option_text_size--;
+            }
+        }
+        int rc = send_generic_vulkan_dispatch_v5_1_op(
+            socket_fd,
+            dispatch_id,
+            fds,
+            binding_count,
+            shader_size_to_send,
+            shader_hash,
+            op->dispatch_x,
+            dispatch_y,
+            dispatch_z,
+            op->push_constants,
+            push_size,
+            push_hash,
+            entry_name,
+            op->pipeline->specialization_entries,
+            op->pipeline->specialization_entry_count,
+            op->pipeline->specialization_data,
+            op->pipeline->specialization_data_size,
+            specialization_hash,
+            option_text,
+            option_text_size,
+            api_descriptor_sets,
+            bindings,
+            offsets,
+            sizes,
+            api_offsets,
+            api_ranges,
+            api_buffer_sizes,
+            api_descriptor_types,
+            api_dynamic_flags,
+            api_memory_offsets,
+            api_memory_sizes,
+            api_memory_ids,
+            api_buffer_ids,
+            descriptor_hash,
+            dispatch_hash);
+        if (rc == 0) rc = read_dispatch_response_status(socket_fd, "VULKAN_DISPATCH_V5.1");
+        if (lifecycle_log) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: generic dispatch lifecycle: "
+                    "{\"component\":\"icd\",\"event\":\"end\",\"dispatch_id\":%llu,"
+                    "\"rc\":%d,\"elapsed_ms\":%.3f,\"stage\":\"v5.1-response\"}\n",
+                    (unsigned long long)dispatch_id,
+                    rc,
+                    monotonic_ms() - lifecycle_start_ms);
+            fflush(stderr);
+        }
+        close(socket_fd);
+        close_spirv_probe_replay(&probe);
+        return rc;
+    }
+    if (vulkan_v5_frame_enabled() && copy_alias_enabled() &&
+        (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG"))) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: V5.1 frame disabled for this dispatch because PDOCKER_VULKAN_ALIAS_COPIES is active; using V4 text transport\n");
     }
     char control[CMSG_SPACE(sizeof(fds))];
     struct iovec iov;
