@@ -274,6 +274,12 @@ typedef struct {
 } PdockerVkImageToImageCopyOp;
 
 typedef struct {
+    PdockerVkImage *image;
+    VkClearColorValue color;
+    VkImageSubresourceRange range;
+} PdockerVkImageClearOp;
+
+typedef struct {
     PdockerVkPipeline *pipeline;
     PdockerVkDescriptorSet set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
     bool set_snapshot_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
@@ -292,6 +298,7 @@ typedef enum {
     PDOCKER_VK_COMMAND_BARRIER = 5,
     PDOCKER_VK_COMMAND_IMAGE_COPY = 6,
     PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY = 7,
+    PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE = 8,
 } PdockerVkCommandOpType;
 
 typedef struct {
@@ -315,6 +322,8 @@ typedef struct {
     uint32_t image_copy_op_count;
     PdockerVkImageToImageCopyOp image_to_image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];
     uint32_t image_to_image_copy_op_count;
+    PdockerVkImageClearOp image_clear_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t image_clear_op_count;
     PdockerVkDispatchOp dispatch_ops[PDOCKER_VK_MAX_DISPATCH_OPS];
     uint32_t dispatch_op_count;
     PdockerVkCommandOp command_ops[PDOCKER_VK_MAX_COMMAND_OPS];
@@ -382,6 +391,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
     cmd->copy_op_count = 0;
     cmd->image_copy_op_count = 0;
     cmd->image_to_image_copy_op_count = 0;
+    cmd->image_clear_op_count = 0;
     cmd->dispatch_op_count = 0;
 }
 
@@ -544,6 +554,176 @@ static uint32_t conservative_format_bytes_per_pixel(VkFormat format) {
              */
             return 16;
     }
+}
+
+static uint8_t clear_unorm8(float v) {
+    if (v <= 0.0f) return 0;
+    if (v >= 1.0f) return 255;
+    return (uint8_t)(v * 255.0f + 0.5f);
+}
+
+static int8_t clear_snorm8(float v) {
+    if (v <= -1.0f) return -127;
+    if (v >= 1.0f) return 127;
+    return (int8_t)(v * 127.0f + (v >= 0.0f ? 0.5f : -0.5f));
+}
+
+static uint16_t clear_float32_to_float16_bits(float value) {
+    union {
+        float f;
+        uint32_t u;
+    } in;
+    in.f = value;
+    uint32_t sign = (in.u >> 16) & 0x8000u;
+    int32_t exponent = (int32_t)((in.u >> 23) & 0xffu) - 127 + 15;
+    uint32_t mantissa = in.u & 0x7fffffu;
+    if (exponent <= 0) {
+        if (exponent < -10) return (uint16_t)sign;
+        mantissa |= 0x800000u;
+        uint32_t shifted = mantissa >> (uint32_t)(1 - exponent + 13);
+        return (uint16_t)(sign | shifted);
+    }
+    if (exponent >= 31) {
+        return (uint16_t)(sign | 0x7c00u | (mantissa ? 0x0200u : 0u));
+    }
+    return (uint16_t)(sign | ((uint32_t)exponent << 10) | (mantissa >> 13));
+}
+
+static void encode_clear_color_pixel(
+        VkFormat format,
+        const VkClearColorValue *color,
+        uint8_t *pixel,
+        size_t pixel_size) {
+    if (!color || !pixel || pixel_size == 0) return;
+    memset(pixel, 0, pixel_size);
+#define COPY_BYTES(ptr_, size_) do { \
+        size_t n_ = (size_) < pixel_size ? (size_) : pixel_size; \
+        memcpy(pixel, (ptr_), n_); \
+    } while (0)
+    switch (format) {
+        case VK_FORMAT_R8_UNORM:
+            pixel[0] = clear_unorm8(color->float32[0]);
+            break;
+        case VK_FORMAT_R8_SNORM:
+            pixel[0] = (uint8_t)clear_snorm8(color->float32[0]);
+            break;
+        case VK_FORMAT_R8_UINT:
+            pixel[0] = (uint8_t)color->uint32[0];
+            break;
+        case VK_FORMAT_R8_SINT:
+            pixel[0] = (uint8_t)color->int32[0];
+            break;
+        case VK_FORMAT_R8G8_UNORM:
+            pixel[0] = clear_unorm8(color->float32[0]);
+            pixel[1] = clear_unorm8(color->float32[1]);
+            break;
+        case VK_FORMAT_R8G8_SNORM:
+            pixel[0] = (uint8_t)clear_snorm8(color->float32[0]);
+            pixel[1] = (uint8_t)clear_snorm8(color->float32[1]);
+            break;
+        case VK_FORMAT_R8G8_UINT:
+            pixel[0] = (uint8_t)color->uint32[0];
+            pixel[1] = (uint8_t)color->uint32[1];
+            break;
+        case VK_FORMAT_R8G8_SINT:
+            pixel[0] = (uint8_t)color->int32[0];
+            pixel[1] = (uint8_t)color->int32[1];
+            break;
+        case VK_FORMAT_R8G8B8A8_UNORM:
+            pixel[0] = clear_unorm8(color->float32[0]);
+            pixel[1] = clear_unorm8(color->float32[1]);
+            pixel[2] = clear_unorm8(color->float32[2]);
+            pixel[3] = clear_unorm8(color->float32[3]);
+            break;
+        case VK_FORMAT_R8G8B8A8_SNORM:
+            pixel[0] = (uint8_t)clear_snorm8(color->float32[0]);
+            pixel[1] = (uint8_t)clear_snorm8(color->float32[1]);
+            pixel[2] = (uint8_t)clear_snorm8(color->float32[2]);
+            pixel[3] = (uint8_t)clear_snorm8(color->float32[3]);
+            break;
+        case VK_FORMAT_R8G8B8A8_UINT:
+            pixel[0] = (uint8_t)color->uint32[0];
+            pixel[1] = (uint8_t)color->uint32[1];
+            pixel[2] = (uint8_t)color->uint32[2];
+            pixel[3] = (uint8_t)color->uint32[3];
+            break;
+        case VK_FORMAT_R8G8B8A8_SINT:
+            pixel[0] = (uint8_t)color->int32[0];
+            pixel[1] = (uint8_t)color->int32[1];
+            pixel[2] = (uint8_t)color->int32[2];
+            pixel[3] = (uint8_t)color->int32[3];
+            break;
+        case VK_FORMAT_B8G8R8A8_UNORM:
+            pixel[0] = clear_unorm8(color->float32[2]);
+            pixel[1] = clear_unorm8(color->float32[1]);
+            pixel[2] = clear_unorm8(color->float32[0]);
+            pixel[3] = clear_unorm8(color->float32[3]);
+            break;
+        case VK_FORMAT_R16_SFLOAT: {
+            uint16_t v = clear_float32_to_float16_bits(color->float32[0]);
+            COPY_BYTES(&v, sizeof(v));
+            break;
+        }
+        case VK_FORMAT_R16_UINT: {
+            uint16_t v = (uint16_t)color->uint32[0];
+            COPY_BYTES(&v, sizeof(v));
+            break;
+        }
+        case VK_FORMAT_R16_SINT: {
+            int16_t v = (int16_t)color->int32[0];
+            COPY_BYTES(&v, sizeof(v));
+            break;
+        }
+        case VK_FORMAT_R16G16_SFLOAT: {
+            uint16_t v[2] = {
+                clear_float32_to_float16_bits(color->float32[0]),
+                clear_float32_to_float16_bits(color->float32[1]),
+            };
+            COPY_BYTES(&v, sizeof(v));
+            break;
+        }
+        case VK_FORMAT_R16G16B16A16_SFLOAT: {
+            uint16_t v[4] = {
+                clear_float32_to_float16_bits(color->float32[0]),
+                clear_float32_to_float16_bits(color->float32[1]),
+                clear_float32_to_float16_bits(color->float32[2]),
+                clear_float32_to_float16_bits(color->float32[3]),
+            };
+            COPY_BYTES(&v, sizeof(v));
+            break;
+        }
+        case VK_FORMAT_R32_SFLOAT:
+            COPY_BYTES(&color->float32[0], sizeof(color->float32[0]));
+            break;
+        case VK_FORMAT_R32_UINT:
+            COPY_BYTES(&color->uint32[0], sizeof(color->uint32[0]));
+            break;
+        case VK_FORMAT_R32_SINT:
+            COPY_BYTES(&color->int32[0], sizeof(color->int32[0]));
+            break;
+        case VK_FORMAT_R32G32_SFLOAT:
+            COPY_BYTES(color->float32, sizeof(color->float32));
+            break;
+        case VK_FORMAT_R32G32_UINT:
+            COPY_BYTES(color->uint32, sizeof(color->uint32));
+            break;
+        case VK_FORMAT_R32G32_SINT:
+            COPY_BYTES(color->int32, sizeof(color->int32));
+            break;
+        case VK_FORMAT_R32G32B32A32_SFLOAT:
+            COPY_BYTES(color->float32, sizeof(color->float32));
+            break;
+        case VK_FORMAT_R32G32B32A32_UINT:
+            COPY_BYTES(color->uint32, sizeof(color->uint32));
+            break;
+        case VK_FORMAT_R32G32B32A32_SINT:
+            COPY_BYTES(color->int32, sizeof(color->int32));
+            break;
+        default:
+            COPY_BYTES(color->uint32, sizeof(color->uint32));
+            break;
+    }
+#undef COPY_BYTES
 }
 
 static VkDeviceSize estimate_image_requirement_size(const VkImageCreateInfo *info) {
@@ -3084,6 +3264,104 @@ static void execute_recorded_image_to_image_copy_op(
                     stats->op_count++;
                     stats->memmove_ops++;
                     stats->memmove_bytes += (VkDeviceSize)row_copy_bytes;
+                }
+            }
+        }
+    }
+}
+
+static bool resolve_image_subresource_range(
+        const PdockerVkImage *image,
+        const VkImageSubresourceRange *range,
+        uint32_t *first_mip,
+        uint32_t *mip_count,
+        uint32_t *first_layer,
+        uint32_t *layer_count) {
+    if (!image || !range || !first_mip || !mip_count || !first_layer || !layer_count ||
+        range->aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        range->baseMipLevel >= image->mip_levels ||
+        range->baseArrayLayer >= image->array_layers) {
+        return false;
+    }
+    uint32_t resolved_mips = range->levelCount == VK_REMAINING_MIP_LEVELS
+        ? image->mip_levels - range->baseMipLevel
+        : range->levelCount;
+    uint32_t resolved_layers = range->layerCount == VK_REMAINING_ARRAY_LAYERS
+        ? image->array_layers - range->baseArrayLayer
+        : range->layerCount;
+    if (resolved_mips == 0 || resolved_layers == 0 ||
+        resolved_mips > image->mip_levels - range->baseMipLevel ||
+        resolved_layers > image->array_layers - range->baseArrayLayer) {
+        return false;
+    }
+    *first_mip = range->baseMipLevel;
+    *mip_count = resolved_mips;
+    *first_layer = range->baseArrayLayer;
+    *layer_count = resolved_layers;
+    return true;
+}
+
+static void execute_recorded_clear_color_image_op(
+        PdockerVkImageClearOp *op,
+        PdockerVkCopyStats *stats) {
+    if (!op || !op->image || !op->image->memory) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    uint32_t first_mip = 0;
+    uint32_t mip_count = 0;
+    uint32_t first_layer = 0;
+    uint32_t layer_count = 0;
+    if (!resolve_image_subresource_range(op->image,
+                                         &op->range,
+                                         &first_mip,
+                                         &mip_count,
+                                         &first_layer,
+                                         &layer_count)) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    const uint64_t bpp = conservative_format_bytes_per_pixel(op->image->format);
+    if (bpp == 0 || bpp > 16) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    uint8_t pixel[16];
+    encode_clear_color_pixel(op->image->format, &op->color, pixel, (size_t)bpp);
+    for (uint32_t mip_i = 0; mip_i < mip_count; ++mip_i) {
+        const uint32_t mip = first_mip + mip_i;
+        VkExtent3D extent;
+        if (!image_mip_extent(op->image, mip, &extent)) {
+            if (stats) stats->skipped_ops++;
+            return;
+        }
+        uint64_t row_bytes = 0;
+        if (!checked_mul_u64(extent.width, bpp, &row_bytes)) {
+            if (stats) stats->skipped_ops++;
+            return;
+        }
+        for (uint32_t layer_i = 0; layer_i < layer_count; ++layer_i) {
+            const uint32_t layer = first_layer + layer_i;
+            for (uint32_t z = 0; z < extent.depth; ++z) {
+                for (uint32_t y = 0; y < extent.height; ++y) {
+                    void *row = image_ptr(op->image,
+                                          mip,
+                                          layer,
+                                          (VkOffset3D){0, (int32_t)y, (int32_t)z},
+                                          (VkDeviceSize)row_bytes);
+                    if (!row) {
+                        if (stats) stats->skipped_ops++;
+                        return;
+                    }
+                    uint8_t *dst = (uint8_t *)row;
+                    for (uint32_t x = 0; x < extent.width; ++x) {
+                        memcpy(dst + (uint64_t)x * bpp, pixel, (size_t)bpp);
+                    }
+                    if (stats) {
+                        stats->op_count++;
+                        stats->memmove_ops++;
+                        stats->memmove_bytes += (VkDeviceSize)row_bytes;
+                    }
                 }
             }
         }
@@ -5813,6 +6091,61 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage(
     }
 }
 
+static void record_clear_color_image_op(PdockerVkCommandBuffer *cmd,
+                                        PdockerVkImage *image,
+                                        const VkClearColorValue *color,
+                                        const VkImageSubresourceRange *range) {
+    if (!cmd || !image || !color || !range) return;
+    if (cmd->image_clear_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: clear-color-image command buffer full max=%u\n",
+                    PDOCKER_VK_MAX_COPY_OPS);
+        }
+        return;
+    }
+    uint32_t op_index = cmd->image_clear_op_count++;
+    PdockerVkImageClearOp *op = &cmd->image_clear_ops[op_index];
+    memset(op, 0, sizeof(*op));
+    op->image = image;
+    op->color = *color;
+    op->range = *range;
+    PdockerVkCommandOp command_op;
+    memset(&command_op, 0, sizeof(command_op));
+    command_op.type = PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE;
+    command_op.index = op_index;
+    (void)append_command_op(cmd, &command_op);
+    if (trace_allocations()) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: record-clear-color-image image_req=%llu base_mip=%u levels=%u base_layer=%u layers=%u color_u32=%08x,%08x,%08x,%08x\n",
+                (unsigned long long)image->requirements_size,
+                range->baseMipLevel,
+                range->levelCount,
+                range->baseArrayLayer,
+                range->layerCount,
+                color->uint32[0],
+                color->uint32[1],
+                color->uint32[2],
+                color->uint32[3]);
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdClearColorImage(
+        VkCommandBuffer commandBuffer,
+        VkImage image,
+        VkImageLayout imageLayout,
+        const VkClearColorValue *pColor,
+        uint32_t rangeCount,
+        const VkImageSubresourceRange *pRanges) {
+    (void)imageLayout;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkImage *img = (PdockerVkImage *)image;
+    if (!cmd || !img || !img->memory || !pColor || !pRanges) return;
+    for (uint32_t i = 0; i < rangeCount; ++i) {
+        record_clear_color_image_op(cmd, img, pColor, &pRanges[i]);
+    }
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(
         VkCommandBuffer commandBuffer,
         VkBuffer dstBuffer,
@@ -5953,6 +6286,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                             if (op->index < cmd->image_to_image_copy_op_count) {
                                 execute_recorded_image_to_image_copy_op(
                                     &cmd->image_to_image_copy_ops[op->index], &stats);
+                            }
+                            break;
+                        case PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE:
+                            if (op->index < cmd->image_clear_op_count) {
+                                execute_recorded_clear_color_image_op(
+                                    &cmd->image_clear_ops[op->index], &stats);
                             }
                             break;
                         case PDOCKER_VK_COMMAND_FILL:
@@ -6360,6 +6699,7 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdCopyBufferToImage);
     MAP_PROC(vkCmdCopyImageToBuffer);
     MAP_PROC(vkCmdCopyImage);
+    MAP_PROC(vkCmdClearColorImage);
     MAP_PROC(vkCmdFillBuffer);
     MAP_PROC(vkCmdUpdateBuffer);
     MAP_PROC(vkCmdDispatch);
