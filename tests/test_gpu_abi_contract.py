@@ -757,13 +757,40 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("recv_vulkan_dispatch_v5_frame", executor)
         self.assertIn("read_exact_bytes(cfd, frame + header_out->header_size", executor)
         self.assertIn("run_vulkan_dispatch_fd(\n        passed_fds[header.shader_fd_index], binding_fds", executor)
-        serve_loop = executor.split("for (;;) {\n            int v5_prefix = connection_starts_with_v5_magic", 1)[1].split(
+        serve_loop = executor.split("for (;;) {\n            int graphics_v6_prefix = connection_starts_with_graphics_v6_magic", 1)[1].split(
             "if (nread == -EMSGSIZE)", 1
         )[0]
+        self.assertIn("handle_vulkan_graphics_v6_frame(cfd)", serve_loop)
         self.assertIn("handle_vulkan_dispatch_v5_frame(cfd)", serve_loop)
         self.assertIn("recv_command_with_fds(cfd, cmd", serve_loop)
+        self.assertLess(serve_loop.index("handle_vulkan_graphics_v6_frame(cfd)"), serve_loop.index("handle_vulkan_dispatch_v5_frame(cfd)"))
         self.assertLess(serve_loop.index("handle_vulkan_dispatch_v5_frame(cfd)"), serve_loop.index("recv_command_with_fds(cfd, cmd"))
         self.assertNotIn("VULKAN_DISPATCH_V5 ", executor)
+
+    def test_vulkan_graphics_v6_executor_frame_is_validated_and_fail_closed(self):
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "connection_starts_with_graphics_v6_magic",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC",
+            "validate_vulkan_graphics_v6_header",
+            "recv_vulkan_graphics_v6_header_with_fds",
+            "validate_vulkan_graphics_v6_frame_content",
+            "table_range_valid",
+            "payload_range_valid",
+            "frame_ranges_do_not_overlap",
+            "handle_vulkan_graphics_v6_frame",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
+            "header->resource_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH",
+            "header->descriptor_schema_hash != PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH",
+            "header->flags != 0",
+            "command->pipeline_index != UINT32_MAX",
+            "graphics execution is not implemented",
+        ]:
+            self.assertIn(marker, executor)
 
     def test_vulkan_dispatch_v5_1_object_header_is_full_frame_validated(self):
         executor = GPU_EXECUTOR.read_text()
