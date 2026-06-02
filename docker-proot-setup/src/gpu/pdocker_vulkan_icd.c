@@ -293,6 +293,12 @@ typedef struct {
 } PdockerVkImageBlitOp;
 
 typedef struct {
+    PdockerVkImage *image;
+    VkClearDepthStencilValue value;
+    VkImageSubresourceRange range;
+} PdockerVkDepthStencilClearOp;
+
+typedef struct {
     PdockerVkPipeline *pipeline;
     PdockerVkDescriptorSet set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
     bool set_snapshot_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
@@ -314,6 +320,7 @@ typedef enum {
     PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE = 8,
     PDOCKER_VK_COMMAND_RESOLVE_IMAGE = 9,
     PDOCKER_VK_COMMAND_BLIT_IMAGE = 10,
+    PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE = 11,
 } PdockerVkCommandOpType;
 
 typedef struct {
@@ -343,6 +350,8 @@ typedef struct {
     uint32_t image_resolve_op_count;
     PdockerVkImageBlitOp image_blit_ops[PDOCKER_VK_MAX_COPY_OPS];
     uint32_t image_blit_op_count;
+    PdockerVkDepthStencilClearOp depth_stencil_clear_ops[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t depth_stencil_clear_op_count;
     PdockerVkDispatchOp dispatch_ops[PDOCKER_VK_MAX_DISPATCH_OPS];
     uint32_t dispatch_op_count;
     PdockerVkCommandOp command_ops[PDOCKER_VK_MAX_COMMAND_OPS];
@@ -413,6 +422,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
     cmd->image_clear_op_count = 0;
     cmd->image_resolve_op_count = 0;
     cmd->image_blit_op_count = 0;
+    cmd->depth_stencil_clear_op_count = 0;
     cmd->dispatch_op_count = 0;
 }
 
@@ -539,6 +549,7 @@ static uint32_t conservative_format_bytes_per_pixel(VkFormat format) {
         case VK_FORMAT_R8_SNORM:
         case VK_FORMAT_R8_UINT:
         case VK_FORMAT_R8_SINT:
+        case VK_FORMAT_S8_UINT:
             return 1;
         case VK_FORMAT_R8G8_UNORM:
         case VK_FORMAT_R8G8_SNORM:
@@ -547,6 +558,7 @@ static uint32_t conservative_format_bytes_per_pixel(VkFormat format) {
         case VK_FORMAT_R16_SFLOAT:
         case VK_FORMAT_R16_UINT:
         case VK_FORMAT_R16_SINT:
+        case VK_FORMAT_D16_UNORM:
             return 2;
         case VK_FORMAT_R8G8B8A8_UNORM:
         case VK_FORMAT_R8G8B8A8_SNORM:
@@ -557,11 +569,14 @@ static uint32_t conservative_format_bytes_per_pixel(VkFormat format) {
         case VK_FORMAT_R32_SFLOAT:
         case VK_FORMAT_R32_UINT:
         case VK_FORMAT_R32_SINT:
+        case VK_FORMAT_D32_SFLOAT:
+        case VK_FORMAT_D24_UNORM_S8_UINT:
             return 4;
         case VK_FORMAT_R16G16B16A16_SFLOAT:
         case VK_FORMAT_R32G32_SFLOAT:
         case VK_FORMAT_R32G32_UINT:
         case VK_FORMAT_R32G32_SINT:
+        case VK_FORMAT_D32_SFLOAT_S8_UINT:
             return 8;
         case VK_FORMAT_R32G32B32A32_SFLOAT:
         case VK_FORMAT_R32G32B32A32_UINT:
@@ -3578,6 +3593,140 @@ static void execute_recorded_blit_image_op(
     }
 }
 
+static uint16_t clear_depth_unorm16(float v) {
+    if (v <= 0.0f) return 0;
+    if (v >= 1.0f) return 65535u;
+    return (uint16_t)(v * 65535.0f + 0.5f);
+}
+
+static uint32_t clear_depth_unorm24(float v) {
+    if (v <= 0.0f) return 0;
+    if (v >= 1.0f) return 0x00ffffffu;
+    return (uint32_t)(v * 16777215.0f + 0.5f) & 0x00ffffffu;
+}
+
+static bool encode_clear_depth_stencil_pixel(
+        VkFormat format,
+        VkImageAspectFlags aspect_mask,
+        const VkClearDepthStencilValue *value,
+        uint8_t *pixel,
+        size_t pixel_size) {
+    if (!value || !pixel) return false;
+    switch (format) {
+        case VK_FORMAT_D16_UNORM:
+            if (!(aspect_mask & VK_IMAGE_ASPECT_DEPTH_BIT) || pixel_size < 2) return false;
+            {
+                uint16_t depth = clear_depth_unorm16(value->depth);
+                memcpy(pixel, &depth, sizeof(depth));
+            }
+            return true;
+        case VK_FORMAT_D32_SFLOAT:
+            if (!(aspect_mask & VK_IMAGE_ASPECT_DEPTH_BIT) || pixel_size < 4) return false;
+            memcpy(pixel, &value->depth, sizeof(value->depth));
+            return true;
+        case VK_FORMAT_S8_UINT:
+            if (!(aspect_mask & VK_IMAGE_ASPECT_STENCIL_BIT) || pixel_size < 1) return false;
+            pixel[0] = (uint8_t)value->stencil;
+            return true;
+        case VK_FORMAT_D24_UNORM_S8_UINT:
+            if (pixel_size < 4) return false;
+            {
+                uint32_t packed = 0;
+                memcpy(&packed, pixel, sizeof(packed));
+                if (aspect_mask & VK_IMAGE_ASPECT_DEPTH_BIT) {
+                    packed = (packed & 0xff000000u) | clear_depth_unorm24(value->depth);
+                }
+                if (aspect_mask & VK_IMAGE_ASPECT_STENCIL_BIT) {
+                    packed = (packed & 0x00ffffffu) | ((uint32_t)(uint8_t)value->stencil << 24);
+                }
+                memcpy(pixel, &packed, sizeof(packed));
+            }
+            return true;
+        case VK_FORMAT_D32_SFLOAT_S8_UINT:
+            if (pixel_size < 8) return false;
+            if (aspect_mask & VK_IMAGE_ASPECT_DEPTH_BIT) {
+                memcpy(pixel, &value->depth, sizeof(value->depth));
+            }
+            if (aspect_mask & VK_IMAGE_ASPECT_STENCIL_BIT) {
+                pixel[4] = (uint8_t)value->stencil;
+            }
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void execute_recorded_clear_depth_stencil_image_op(
+        PdockerVkDepthStencilClearOp *op,
+        PdockerVkCopyStats *stats) {
+    if (!op || !op->image || !op->image->memory ||
+        !(op->range.aspectMask & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) ||
+        op->range.baseMipLevel >= op->image->mip_levels ||
+        op->range.baseArrayLayer >= op->image->array_layers) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    uint32_t mip_count = op->range.levelCount == VK_REMAINING_MIP_LEVELS
+        ? op->image->mip_levels - op->range.baseMipLevel
+        : op->range.levelCount;
+    uint32_t layer_count = op->range.layerCount == VK_REMAINING_ARRAY_LAYERS
+        ? op->image->array_layers - op->range.baseArrayLayer
+        : op->range.layerCount;
+    if (mip_count == 0 || layer_count == 0 ||
+        mip_count > op->image->mip_levels - op->range.baseMipLevel ||
+        layer_count > op->image->array_layers - op->range.baseArrayLayer) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    const uint64_t bpp = conservative_format_bytes_per_pixel(op->image->format);
+    if (bpp == 0 || bpp > 16) {
+        if (stats) stats->skipped_ops++;
+        return;
+    }
+    uint8_t pixel[16];
+    for (uint32_t mip_i = 0; mip_i < mip_count; ++mip_i) {
+        const uint32_t mip = op->range.baseMipLevel + mip_i;
+        VkExtent3D extent;
+        if (!image_mip_extent(op->image, mip, &extent)) {
+            if (stats) stats->skipped_ops++;
+            return;
+        }
+        for (uint32_t layer_i = 0; layer_i < layer_count; ++layer_i) {
+            const uint32_t layer = op->range.baseArrayLayer + layer_i;
+            for (uint32_t z = 0; z < extent.depth; ++z) {
+                for (uint32_t y = 0; y < extent.height; ++y) {
+                    for (uint32_t x = 0; x < extent.width; ++x) {
+                        void *dst_pixel = image_ptr(op->image,
+                                                    mip,
+                                                    layer,
+                                                    (VkOffset3D){(int32_t)x, (int32_t)y, (int32_t)z},
+                                                    (VkDeviceSize)bpp);
+                        if (!dst_pixel) {
+                            if (stats) stats->skipped_ops++;
+                            return;
+                        }
+                        memcpy(pixel, dst_pixel, (size_t)bpp);
+                        if (!encode_clear_depth_stencil_pixel(op->image->format,
+                                                              op->range.aspectMask,
+                                                              &op->value,
+                                                              pixel,
+                                                              (size_t)bpp)) {
+                            if (stats) stats->skipped_ops++;
+                            return;
+                        }
+                        memcpy(dst_pixel, pixel, (size_t)bpp);
+                        if (stats) {
+                            stats->op_count++;
+                            stats->memmove_ops++;
+                            stats->memmove_bytes += (VkDeviceSize)bpp;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 static void execute_recorded_fill_op(const PdockerVkCommandOp *op) {
     if (!op || !op->buffer || !op->buffer->memory || op->size == 0) return;
     uint32_t *p = (uint32_t *)buffer_ptr(op->buffer, op->offset, op->size);
@@ -6483,6 +6632,60 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage(
     }
 }
 
+static void record_clear_depth_stencil_image_op(PdockerVkCommandBuffer *cmd,
+                                                PdockerVkImage *image,
+                                                const VkClearDepthStencilValue *value,
+                                                const VkImageSubresourceRange *range) {
+    if (!cmd || !image || !value || !range) return;
+    if (cmd->depth_stencil_clear_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: clear-depth-stencil-image command buffer full max=%u\n",
+                    PDOCKER_VK_MAX_COPY_OPS);
+        }
+        return;
+    }
+    uint32_t op_index = cmd->depth_stencil_clear_op_count++;
+    PdockerVkDepthStencilClearOp *op = &cmd->depth_stencil_clear_ops[op_index];
+    memset(op, 0, sizeof(*op));
+    op->image = image;
+    op->value = *value;
+    op->range = *range;
+    PdockerVkCommandOp command_op;
+    memset(&command_op, 0, sizeof(command_op));
+    command_op.type = PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE;
+    command_op.index = op_index;
+    (void)append_command_op(cmd, &command_op);
+    if (trace_allocations()) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: record-clear-depth-stencil-image image_req=%llu base_mip=%u levels=%u base_layer=%u layers=%u aspect=0x%x depth=%f stencil=%u\n",
+                (unsigned long long)image->requirements_size,
+                range->baseMipLevel,
+                range->levelCount,
+                range->baseArrayLayer,
+                range->layerCount,
+                (unsigned)range->aspectMask,
+                value->depth,
+                value->stencil);
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdClearDepthStencilImage(
+        VkCommandBuffer commandBuffer,
+        VkImage image,
+        VkImageLayout imageLayout,
+        const VkClearDepthStencilValue *pDepthStencil,
+        uint32_t rangeCount,
+        const VkImageSubresourceRange *pRanges) {
+    (void)imageLayout;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkImage *img = (PdockerVkImage *)image;
+    if (!cmd || !img || !img->memory || !pDepthStencil || !pRanges) return;
+    for (uint32_t i = 0; i < rangeCount; ++i) {
+        record_clear_depth_stencil_image_op(cmd, img, pDepthStencil, &pRanges[i]);
+    }
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(
         VkCommandBuffer commandBuffer,
         VkBuffer dstBuffer,
@@ -6641,6 +6844,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                             if (op->index < cmd->image_blit_op_count) {
                                 execute_recorded_blit_image_op(
                                     &cmd->image_blit_ops[op->index], &stats);
+                            }
+                            break;
+                        case PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:
+                            if (op->index < cmd->depth_stencil_clear_op_count) {
+                                execute_recorded_clear_depth_stencil_image_op(
+                                    &cmd->depth_stencil_clear_ops[op->index], &stats);
                             }
                             break;
                         case PDOCKER_VK_COMMAND_FILL:
@@ -7051,6 +7260,7 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdClearColorImage);
     MAP_PROC(vkCmdResolveImage);
     MAP_PROC(vkCmdBlitImage);
+    MAP_PROC(vkCmdClearDepthStencilImage);
     MAP_PROC(vkCmdFillBuffer);
     MAP_PROC(vkCmdUpdateBuffer);
     MAP_PROC(vkCmdDispatch);
