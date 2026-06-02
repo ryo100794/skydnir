@@ -46,6 +46,11 @@
 #define VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION 1
 #endif
 
+#ifndef VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME
+#define VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME "VK_KHR_copy_commands2"
+#define VK_KHR_COPY_COMMANDS_2_SPEC_VERSION 1
+#endif
+
 typedef struct {
     VK_LOADER_DATA loader;
 } PdockerVkInstance;
@@ -5440,7 +5445,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkExtensionProperties *pProperties) {
     (void)physicalDevice;
     (void)pLayerName;
-    VkExtensionProperties available[8];
+    VkExtensionProperties available[9];
     uint32_t available_count = 0;
 #define ADD_DEVICE_EXTENSION(name, version) do { \
         if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
@@ -5468,6 +5473,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_4_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_SPEC_VERSION);
 #endif
+    ADD_DEVICE_EXTENSION(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME, VK_KHR_COPY_COMMANDS_2_SPEC_VERSION);
 #undef ADD_DEVICE_EXTENSION
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
     return VK_SUCCESS;
@@ -5491,6 +5497,7 @@ static bool device_extension_advertised_name(const char *name) {
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     if (strcmp(name, VK_KHR_MAINTENANCE_4_EXTENSION_NAME) == 0) return true;
 #endif
+    if (strcmp(name, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME) == 0) return true;
     return false;
 }
 
@@ -6686,6 +6693,144 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearDepthStencilImage(
     }
 }
 
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer2(
+        VkCommandBuffer commandBuffer,
+        const VkCopyBufferInfo2 *pCopyBufferInfo) {
+    if (!pCopyBufferInfo || !pCopyBufferInfo->pRegions) return;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkBuffer *src = (PdockerVkBuffer *)pCopyBufferInfo->srcBuffer;
+    PdockerVkBuffer *dst = (PdockerVkBuffer *)pCopyBufferInfo->dstBuffer;
+    if (!cmd || !src || !dst || !src->memory || !dst->memory) return;
+    for (uint32_t i = 0; i < pCopyBufferInfo->regionCount; ++i) {
+        const VkBufferCopy2 *r2 = &pCopyBufferInfo->pRegions[i];
+        VkBufferCopy r = {
+            .srcOffset = r2->srcOffset,
+            .dstOffset = r2->dstOffset,
+            .size = r2->size,
+        };
+        vkCmdCopyBuffer(commandBuffer,
+                        pCopyBufferInfo->srcBuffer,
+                        pCopyBufferInfo->dstBuffer,
+                        1,
+                        &r);
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage2(
+        VkCommandBuffer commandBuffer,
+        const VkCopyImageInfo2 *pCopyImageInfo) {
+    if (!pCopyImageInfo || !pCopyImageInfo->pRegions) return;
+    for (uint32_t i = 0; i < pCopyImageInfo->regionCount; ++i) {
+        const VkImageCopy2 *r2 = &pCopyImageInfo->pRegions[i];
+        VkImageCopy r = {
+            .srcSubresource = r2->srcSubresource,
+            .srcOffset = r2->srcOffset,
+            .dstSubresource = r2->dstSubresource,
+            .dstOffset = r2->dstOffset,
+            .extent = r2->extent,
+        };
+        vkCmdCopyImage(commandBuffer,
+                       pCopyImageInfo->srcImage,
+                       pCopyImageInfo->srcImageLayout,
+                       pCopyImageInfo->dstImage,
+                       pCopyImageInfo->dstImageLayout,
+                       1,
+                       &r);
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage2(
+        VkCommandBuffer commandBuffer,
+        const VkCopyBufferToImageInfo2 *pCopyBufferToImageInfo) {
+    if (!pCopyBufferToImageInfo || !pCopyBufferToImageInfo->pRegions) return;
+    for (uint32_t i = 0; i < pCopyBufferToImageInfo->regionCount; ++i) {
+        const VkBufferImageCopy2 *r2 = &pCopyBufferToImageInfo->pRegions[i];
+        VkBufferImageCopy r = {
+            .bufferOffset = r2->bufferOffset,
+            .bufferRowLength = r2->bufferRowLength,
+            .bufferImageHeight = r2->bufferImageHeight,
+            .imageSubresource = r2->imageSubresource,
+            .imageOffset = r2->imageOffset,
+            .imageExtent = r2->imageExtent,
+        };
+        vkCmdCopyBufferToImage(commandBuffer,
+                               pCopyBufferToImageInfo->srcBuffer,
+                               pCopyBufferToImageInfo->dstImage,
+                               pCopyBufferToImageInfo->dstImageLayout,
+                               1,
+                               &r);
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer2(
+        VkCommandBuffer commandBuffer,
+        const VkCopyImageToBufferInfo2 *pCopyImageToBufferInfo) {
+    if (!pCopyImageToBufferInfo || !pCopyImageToBufferInfo->pRegions) return;
+    for (uint32_t i = 0; i < pCopyImageToBufferInfo->regionCount; ++i) {
+        const VkBufferImageCopy2 *r2 = &pCopyImageToBufferInfo->pRegions[i];
+        VkBufferImageCopy r = {
+            .bufferOffset = r2->bufferOffset,
+            .bufferRowLength = r2->bufferRowLength,
+            .bufferImageHeight = r2->bufferImageHeight,
+            .imageSubresource = r2->imageSubresource,
+            .imageOffset = r2->imageOffset,
+            .imageExtent = r2->imageExtent,
+        };
+        vkCmdCopyImageToBuffer(commandBuffer,
+                               pCopyImageToBufferInfo->srcImage,
+                               pCopyImageToBufferInfo->srcImageLayout,
+                               pCopyImageToBufferInfo->dstBuffer,
+                               1,
+                               &r);
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage2(
+        VkCommandBuffer commandBuffer,
+        const VkBlitImageInfo2 *pBlitImageInfo) {
+    if (!pBlitImageInfo || !pBlitImageInfo->pRegions) return;
+    for (uint32_t i = 0; i < pBlitImageInfo->regionCount; ++i) {
+        const VkImageBlit2 *r2 = &pBlitImageInfo->pRegions[i];
+        VkImageBlit r = {
+            .srcSubresource = r2->srcSubresource,
+            .srcOffsets = { r2->srcOffsets[0], r2->srcOffsets[1] },
+            .dstSubresource = r2->dstSubresource,
+            .dstOffsets = { r2->dstOffsets[0], r2->dstOffsets[1] },
+        };
+        vkCmdBlitImage(commandBuffer,
+                       pBlitImageInfo->srcImage,
+                       pBlitImageInfo->srcImageLayout,
+                       pBlitImageInfo->dstImage,
+                       pBlitImageInfo->dstImageLayout,
+                       1,
+                       &r,
+                       pBlitImageInfo->filter);
+    }
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage2(
+        VkCommandBuffer commandBuffer,
+        const VkResolveImageInfo2 *pResolveImageInfo) {
+    if (!pResolveImageInfo || !pResolveImageInfo->pRegions) return;
+    for (uint32_t i = 0; i < pResolveImageInfo->regionCount; ++i) {
+        const VkImageResolve2 *r2 = &pResolveImageInfo->pRegions[i];
+        VkImageResolve r = {
+            .srcSubresource = r2->srcSubresource,
+            .srcOffset = r2->srcOffset,
+            .dstSubresource = r2->dstSubresource,
+            .dstOffset = r2->dstOffset,
+            .extent = r2->extent,
+        };
+        vkCmdResolveImage(commandBuffer,
+                          pResolveImageInfo->srcImage,
+                          pResolveImageInfo->srcImageLayout,
+                          pResolveImageInfo->dstImage,
+                          pResolveImageInfo->dstImageLayout,
+                          1,
+                          &r);
+    }
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(
         VkCommandBuffer commandBuffer,
         VkBuffer dstBuffer,
@@ -7254,12 +7399,24 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdPushConstants);
     MAP_PROC(vkCmdPipelineBarrier);
     MAP_PROC(vkCmdCopyBuffer);
+    MAP_PROC(vkCmdCopyBuffer2);
+    MAP_ALIAS("vkCmdCopyBuffer2KHR", vkCmdCopyBuffer2);
     MAP_PROC(vkCmdCopyBufferToImage);
+    MAP_PROC(vkCmdCopyBufferToImage2);
+    MAP_ALIAS("vkCmdCopyBufferToImage2KHR", vkCmdCopyBufferToImage2);
     MAP_PROC(vkCmdCopyImageToBuffer);
+    MAP_PROC(vkCmdCopyImageToBuffer2);
+    MAP_ALIAS("vkCmdCopyImageToBuffer2KHR", vkCmdCopyImageToBuffer2);
     MAP_PROC(vkCmdCopyImage);
+    MAP_PROC(vkCmdCopyImage2);
+    MAP_ALIAS("vkCmdCopyImage2KHR", vkCmdCopyImage2);
     MAP_PROC(vkCmdClearColorImage);
     MAP_PROC(vkCmdResolveImage);
+    MAP_PROC(vkCmdResolveImage2);
+    MAP_ALIAS("vkCmdResolveImage2KHR", vkCmdResolveImage2);
     MAP_PROC(vkCmdBlitImage);
+    MAP_PROC(vkCmdBlitImage2);
+    MAP_ALIAS("vkCmdBlitImage2KHR", vkCmdBlitImage2);
     MAP_PROC(vkCmdClearDepthStencilImage);
     MAP_PROC(vkCmdFillBuffer);
     MAP_PROC(vkCmdUpdateBuffer);

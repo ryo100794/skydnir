@@ -1759,6 +1759,25 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("case PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:", icd)
         self.assertIn("MAP_PROC(vkCmdClearDepthStencilImage);", icd)
 
+    def test_vulkan_icd_maps_copy_commands2_to_existing_transfer_paths(self):
+        icd = VULKAN_ICD.read_text()
+        for name in [
+            "vkCmdCopyBuffer2",
+            "vkCmdCopyImage2",
+            "vkCmdCopyBufferToImage2",
+            "vkCmdCopyImageToBuffer2",
+            "vkCmdBlitImage2",
+            "vkCmdResolveImage2",
+        ]:
+            self.assertIn(name, icd)
+            self.assertIn(f"MAP_PROC({name});", icd)
+            self.assertIn(f'MAP_ALIAS("{name}KHR", {name});', icd)
+        self.assertIn("VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME", icd)
+        self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME", icd)
+        self.assertIn("VkCopyBufferInfo2", icd)
+        self.assertIn("VkBlitImageInfo2", icd)
+        self.assertIn("VkResolveImageInfo2", icd)
+
     def test_vulkan_non_storage_descriptors_fail_closed_until_v5_transport(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("descriptor_type_supported_by_v4_transport", icd)
