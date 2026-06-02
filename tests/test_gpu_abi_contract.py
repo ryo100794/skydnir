@@ -616,6 +616,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerGpuVulkanDispatchV5DescriptorEntry", executor)
         self.assertIn("PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY", executor)
         self.assertIn("PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER", executor)
+        self.assertIn("PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE", executor)
+        self.assertIn("PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE_VIEW", executor)
+        self.assertIn("PDOCKER_GPU_V5_RESOURCE_TYPE_SAMPLER", executor)
         self.assertIn("PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED", executor)
         self.assertIn("vulkan_dispatch_descriptor_type_from_api(d->descriptor_type", executor)
         self.assertIn("bindings[i].descriptor_set = d->descriptor_set;", executor)
@@ -687,6 +690,13 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES",
         ]
         for marker in markers:
+            self.assertIn(marker, app)
+            self.assertIn(marker, container)
+        for marker in [
+            "PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE",
+            "PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE_VIEW",
+            "PDOCKER_GPU_V5_RESOURCE_TYPE_SAMPLER",
+        ]:
             self.assertIn(marker, app)
             self.assertIn(marker, container)
         self.assertIn('#define PDOCKER_GPU_VULKAN_DISPATCH_V5_FRAME_HEADER_FIELD_COUNT 46u', app)

@@ -14979,6 +14979,10 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
                 return -ERANGE;
             }
             if (r->fd_index != PDOCKER_GPU_V5_RESOURCE_FD_NONE) return -EPROTO;
+        } else if (r->resource_type == PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE ||
+                   r->resource_type == PDOCKER_GPU_V5_RESOURCE_TYPE_IMAGE_VIEW ||
+                   r->resource_type == PDOCKER_GPU_V5_RESOURCE_TYPE_SAMPLER) {
+            return -EOPNOTSUPP;
         } else {
             return -EOPNOTSUPP;
         }
