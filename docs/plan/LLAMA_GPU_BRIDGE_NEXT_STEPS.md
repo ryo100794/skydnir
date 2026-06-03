@@ -1,6 +1,6 @@
 # llama.cpp GPU Bridge Next Steps
 
-Snapshot date: 2026-05-26.
+Snapshot date: 2026-06-03.
 
 This document is the handoff plan for continuing the llama.cpp GPU bridge work
 with a smaller or faster coding model.  It assumes the repository is on or
@@ -38,6 +38,7 @@ Confirmed facts:
 | 2026-05-31 final-store sample lane | Executor-side Q6 binding-2 sampling now appends final-store `output_index` values extracted from the debug probe SSBO before emitting f32 dispatch/writeback evidence.  The latest device run joined a final-store sample and classified the remaining failure as `native-final-store-mismatch`: `final_store_value_f32 == fd_after_writeback == 3.22796106`, expected `6.38452625`, with alias/writeback cleared.  This narrows the next target to native Q6 SPIR-V execution/final-store semantics, not executor writeback. | `app/src/main/cpp/pdocker_gpu_executor.c`; `scripts/android-llama-gpu-compare.sh`; `docs/test/llama-gpu-ngl1-q6-final-store-samples-adb46015-20260531T051758Z.json` (local evidence); host gate `tests.test_gpu_abi_contract tests.test_llama_gpu_artifact_verifier`; APK run on `192.168.179.21:46015` |
 | 2026-05-31 final-store provenance lane | Fresh run with the installed APK on `192.168.0.212:32925` preserved final-store layout provenance and split the failure to `native-final-store-mismatch`: the debug SSBO final-store value matches post-writeback, while both differ from the CPU oracle.  The verifier now accepts latest-event identity by dispatch id or by matching source/effective SPIR-V compact hashes because executor compare events can omit `dispatch_id`.  The offline effective-SPIR-V reconstructor now mirrors the executor's storage16-to-storage8 lowering and reproduces the observed effective hash `0x72f4a362b00221fd` from the instrumented Q6 source hash `0xd2d7fbedceb5a8a6`. | `scripts/reconstruct-q6-effective-spirv.py`; `scripts/verify-llama-gpu-artifact.py`; `tests.test_gpu_abi_contract`; `tests.test_llama_gpu_artifact_verifier`; local evidence `docs/test/llama-gpu-ngl1-q6-final-store-provenance-192_168_0_212_32925-20260531T093549Z.json` |
 | 2026-05-31 Q6 final-store barrier lane | Static analysis of the effective Q6 module shows the final store reads Workgroup `%143` at lane0 immediately after the reduction loop.  A hash-gated compatibility lowering now inserts one additional Workgroup-memory `OpControlBarrier` after the reduction loop convergence and before the lane0 final-store branch.  This keeps descriptor, buffer, push, specialization, dispatch, model, prompt, and llama.cpp bytes unchanged; it only tightens shader-side workgroup-memory visibility before final-store. | `app/src/main/cpp/pdocker_gpu_executor.c`; `scripts/reconstruct-q6-effective-spirv.py`; packaged `libpdockergpuexecutor.so`; host gate `tests.test_gpu_abi_contract tests.test_llama_gpu_artifact_verifier tests.test_termport_docker_api_contract`; APK build `:app:assembleCompatDebug` |
+| 2026-06-03 Vulkan graphics V6.1 P0-P6 preflight lane | Producer commit `9d6e724` has completed V6.1 serialization through the attachment table and command table.  The executor now validates/describes V6.1 frames, runs an explicit `vulkan-graphics-v6-replay-preflight`, and accepts only validated no-op frames as implemented.  Non-empty graphics command replay still fails closed until Android Vulkan command recording/materialization is implemented. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -123,6 +124,54 @@ Q6 diagnostic boundary remains native Q6 final-store/output-layout semantics
 rather than executor writeback.  The next target is not another storage16
 view rewrite; inspect the output-index/layout path and final-store value
 selection using the lowered effective module as the new baseline.
+
+### Vulkan graphics V6.1 P0-P6 handoff
+
+The current graphics lane is a preflight/diagnostic contract, not a replay
+implementation.  Producer commit `9d6e724` is the current ground truth for the
+container ICD side: V6.1 frame construction reaches resource, descriptor,
+image, image-view, sampler, shader-stage, pipeline, vertex, dynamic-state,
+command, dynamic-offset, push-metadata, and attachment table serialization.
+The Android executor validates and describes those frames, then runs a replay
+preflight gate.  Executor replay is only implemented for validated no-op frames;
+non-empty command recording still fails closed.  Treat the describe event as a
+schema/preflight result only.
+
+P0-P6 test/design scope:
+
+- **P0 ABI/header gate:** graphics frames must use the `PDGPUG6` magic, ABI
+  major 6, V6 or V6.1 minor, fixed header sizes, zero flags/reserved fields,
+  bounded frame/fd counts, and matching table schema hashes.
+- **P1 object graph gate:** resources, descriptors, images, image views, and
+  samplers must reference valid table entries and fd-backed memory ranges;
+  invalid indexes, unsupported descriptor object combinations, and overflows
+  fail closed before diagnostics are promoted.
+- **P2 shader/pipeline gate:** shader fd hashes, entry-name/specialization
+  payload ranges, pipeline stage ranges, vertex binding/attribute links, and
+  dynamic rendering metadata must be self-consistent before any future replay.
+- **P3 command-stream gate:** bind-pipeline, bind-descriptor, push-constant,
+  dynamic-state, vertex/index-buffer, draw, indexed-draw, barrier, and V6.1
+  dynamic-offset references are checked as table ranges, not guessed from host
+  handles.
+- **P4 attachment gate:** begin-rendering/render-pass snapshots must serialize
+  the attachment table, including image-view/resolve-view refs and clear-value
+  payload ranges.  Missing or out-of-range attachment evidence is a preflight
+  failure, not a partial graphics pass.
+- **P5 diagnostic/preflight executor gate:** the executor must emit the
+  nonterminal `vulkan-graphics-v6-describe` JSON with
+  `execution_implemented=false` and table counts, then run
+  `vulkan-graphics-v6-replay-preflight`.  It may report success only for a
+  validated no-op frame; non-empty command streams must fail closed with a
+  specific unsupported reason.  A describe event alone is never graphics
+  success.
+- **P6 command replay gate:** after P0-P5 pass, Android Vulkan replay must
+  reconstruct an Android object graph from serialized IDs/ranges/fds and replay
+  commands in order; it must not copy process-local container `Vk*` handles or
+  weaken any V6.1 validation to make a frame run.
+
+Until P6 exists, graphics evidence can validate producer/executor ABI
+understanding and fail-closed behavior only.  It must not be mixed with llama
+Q6 correctness claims, served-HTTP readiness, or benchmark claims.
 
 ## Non-Negotiable Rules
 

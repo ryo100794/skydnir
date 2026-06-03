@@ -977,9 +977,26 @@ class GpuAbiContractTest(unittest.TestCase):
             '\\"stage\\":\\"vulkan-graphics-v6-describe\\"',
             '\\"execution_implemented\\":false',
             "describe_vulkan_graphics_v6_frame(json_out(), &view);",
-            "graphics execution is not implemented",
+            "preflight_vulkan_graphics_v6_replay_supported",
+            "vulkan-graphics-v6-replay-preflight",
+            "graphics descriptor replay is not implemented",
+            "graphics command recording is not implemented yet",
+            "run_vulkan_graphics_v6_frame",
         ]:
             self.assertIn(marker, executor)
+        handle_body = executor.split("static int handle_vulkan_graphics_v6_frame", 1)[1].split(
+            "static int handle_vulkan_dispatch_v5_frame", 1
+        )[0]
+        self.assertLess(
+            handle_body.index("validate_vulkan_graphics_v6_frame_content"),
+            handle_body.index("describe_vulkan_graphics_v6_frame(json_out(), &view);"),
+        )
+        self.assertLess(
+            handle_body.index("describe_vulkan_graphics_v6_frame(json_out(), &view);"),
+            handle_body.index("run_vulkan_graphics_v6_frame(&view);"),
+        )
+        self.assertNotIn("vkCmdDraw", handle_body)
+        self.assertNotIn("vkQueueSubmit", handle_body)
 
     def test_vulkan_graphics_v6_submit_validator_hardens_resource_descriptor_and_draw_refs(self):
         executor = GPU_EXECUTOR.read_text()
@@ -1008,6 +1025,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "vulkan_descriptor_type_requires_sampler(descriptor_type)",
             "vertex_bindings[i].buffer_resource_index >= header->resource_count",
             "!u64_range_within_size(vertex_bindings[i].offset, vertex_bindings[i].size, buffer->size)",
+            "attachment->image_view_index >= header->image_view_count",
+            "attachment->resolve_image_view_index >= header->image_view_count",
+            "payload_range_valid(attachment->clear_value_offset, attachment->clear_value_size",
+            "range_add_u32(command->attachment_first, command->attachment_count, header->attachment_count)",
             "command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW &&",
             "command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED",
             "payload_hash != header->payload_hash",
@@ -1023,6 +1044,32 @@ class GpuAbiContractTest(unittest.TestCase):
             "command->index_offset > index_buffer->size",
         ]:
             self.assertIn(marker, validator if marker != "static int u64_range_within_size" else executor)
+
+    def test_vulkan_graphics_v61_p0_p6_plan_matches_current_executor_preflight(self):
+        plan = LLAMA_GPU_NEXT_STEPS.read_text()
+        for marker in [
+            "Vulkan graphics V6.1 P0-P6",
+            "9d6e724",
+            "attachment table",
+            "`execution_implemented=false`",
+            "`vulkan-graphics-v6-replay-preflight`",
+            "replay is only implemented for validated no-op frames",
+            "fail closed",
+        ]:
+            self.assertIn(marker, plan)
+
+        executor = GPU_EXECUTOR.read_text()
+        describe_body = executor.split("static void describe_vulkan_graphics_v6_frame", 1)[1].split(
+            "static int u64_range_within_size", 1
+        )[0]
+        for marker in [
+            '\\"stage\\":\\"vulkan-graphics-v6-describe\\"',
+            '\\"execution_implemented\\":false',
+            "write_vulkan_graphics_v6_table_desc(out, \"attachments\"",
+            "write_vulkan_graphics_v6_table_desc(out, \"dynamic_offsets\"",
+            "write_vulkan_graphics_v6_table_desc(out, \"push_constant_metadata\"",
+        ]:
+            self.assertIn(marker, describe_body)
 
     def test_vulkan_graphics_v61_metadata_extension_is_fail_closed_validated(self):
         executor = GPU_EXECUTOR.read_text()

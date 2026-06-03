@@ -17349,6 +17349,212 @@ static int validate_vulkan_graphics_v6_frame_content(
     return 0;
 }
 
+static int preflight_vulkan_graphics_v6_replay_supported(
+        const VulkanGraphicsV6FrameView *view,
+        const char **reason_out) {
+    const char *reason = "unsupported graphics replay frame";
+    if (reason_out) *reason_out = reason;
+    if (!view || !view->header) {
+        reason = "missing graphics frame view";
+        if (reason_out) *reason_out = reason;
+        return -EINVAL;
+    }
+    const PdockerGpuVulkanGraphicsV6FrameHeader *header = view->header;
+    const PdockerGpuVulkanGraphicsV61FrameHeader *header_v61 = view->header_v61;
+    if (!view->is_v61 || !header_v61) {
+        reason = "graphics replay requires V6.1 metadata";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    if (header->command_count == 0) {
+        if (reason_out) *reason_out = "no graphics commands";
+        return 0;
+    }
+    if (!view->commands) {
+        reason = "missing graphics command table";
+        if (reason_out) *reason_out = reason;
+        return -EPROTO;
+    }
+    if (header->descriptor_count != 0) {
+        reason = "graphics descriptor replay is not implemented";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+
+    int rendering_active = 0;
+    int pipeline_bound = 0;
+    for (uint32_t i = 0; i < header->command_count; ++i) {
+        const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[i];
+        switch (command->command_type) {
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING:
+                if (rendering_active) {
+                    reason = "nested dynamic rendering is not supported";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                if (command->attachment_count == 0) {
+                    reason = "dynamic rendering without attachments is not supported";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                for (uint32_t a = 0; a < command->attachment_count; ++a) {
+                    const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
+                        &view->attachments[command->attachment_first + a];
+                    if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR) {
+                        reason = "depth/stencil graphics replay is not implemented";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                    if (attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                        attachment->samples != VK_SAMPLE_COUNT_1_BIT) {
+                        reason = "multisample/resolve graphics replay is not implemented";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                    if (attachment->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+                        reason = "null color attachment replay is not supported";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                    if (attachment->layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
+                        attachment->layout != VK_IMAGE_LAYOUT_GENERAL) {
+                        reason = "unsupported color attachment layout";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                }
+                rendering_active = 1;
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING:
+                if (!rendering_active) {
+                    reason = "end rendering without active rendering";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                rendering_active = 0;
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE:
+                if (command->pipeline_index == UINT32_MAX ||
+                    command->pipeline_index >= header->pipeline_count) {
+                    reason = "invalid graphics pipeline bind";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                for (uint32_t stage_i = 0;
+                     stage_i < view->pipelines[command->pipeline_index].shader_stage_count;
+                     ++stage_i) {
+                    const uint32_t stage_flags =
+                        view->shader_stages[view->pipelines[command->pipeline_index].shader_stage_first + stage_i].stage_flags;
+                    if ((stage_flags & ~(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)) != 0) {
+                        reason = "non vertex/fragment graphics shaders are not implemented";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                }
+                pipeline_bound = 1;
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE:
+                for (uint32_t d = 0; d < command->dynamic_state_count; ++d) {
+                    const PdockerGpuVulkanGraphicsV6DynamicStateEntry *state =
+                        &view->dynamic_states[command->dynamic_state_first + d];
+                    if (state->state_type != VK_DYNAMIC_STATE_VIEWPORT &&
+                        state->state_type != VK_DYNAMIC_STATE_SCISSOR) {
+                        reason = "only viewport/scissor dynamic state replay is implemented first";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                }
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS:
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW:
+                if (!rendering_active) {
+                    reason = "draw outside dynamic rendering";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                if (!pipeline_bound) {
+                    reason = "draw without bound graphics pipeline";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                if (command->instance_count != 1 || command->first_instance != 0) {
+                    reason = "instanced graphics replay is not implemented";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
+                reason = "indexed graphics replay is not implemented";
+                if (reason_out) *reason_out = reason;
+                return -EOPNOTSUPP;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS:
+                reason = "graphics descriptor replay is not implemented";
+                if (reason_out) *reason_out = reason;
+                return -EOPNOTSUPP;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:
+                reason = "graphics barrier replay is not implemented";
+                if (reason_out) *reason_out = reason;
+                return -EOPNOTSUPP;
+            default:
+                reason = "unknown graphics command";
+                if (reason_out) *reason_out = reason;
+                return -EPROTO;
+        }
+    }
+    if (rendering_active) {
+        reason = "dynamic rendering left active at frame end";
+        if (reason_out) *reason_out = reason;
+        return -EPROTO;
+    }
+    if (reason_out) *reason_out = "supported graphics replay preflight";
+    return 0;
+}
+
+static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
+    const char *reason = NULL;
+    int rc = preflight_vulkan_graphics_v6_replay_supported(view, &reason);
+    if (rc != 0) {
+        FILE *out = json_out();
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"stage\":\"vulkan-graphics-v6-replay-preflight\",\"valid\":false,"
+                "\"execution_implemented\":false,\"error\":\"%s\"}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                reason ? reason : strerror(-rc));
+        fflush(out);
+        return rc;
+    }
+    if (view && view->header && view->header->command_count == 0) {
+        FILE *out = json_out();
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":true,"
+                "\"execution_implemented\":true,\"no_op\":true,"
+                "\"command_count\":0,\"submit_id\":%llu}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                (unsigned long long)view->header->submit_id);
+        fflush(out);
+        return 0;
+    }
+    FILE *out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":false,"
+            "\"execution_implemented\":false,"
+            "\"error\":\"graphics command recording is not implemented yet\"}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION);
+    fflush(out);
+    return -EOPNOTSUPP;
+}
+
 static int recv_vulkan_graphics_v6_header_with_fds(
         int cfd,
         PdockerGpuVulkanGraphicsV6FrameHeader *header,
@@ -17445,7 +17651,7 @@ static int handle_vulkan_graphics_v6_frame(int cfd) {
         goto fail_close;
     }
     describe_vulkan_graphics_v6_frame(json_out(), &view);
-    json_fail("vulkan-graphics-v6", "graphics execution is not implemented");
+    (void)run_vulkan_graphics_v6_frame(&view);
     free(frame);
     frame = NULL;
     for (size_t i = 0; i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS; ++i) {
