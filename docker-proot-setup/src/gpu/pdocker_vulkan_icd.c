@@ -1543,52 +1543,76 @@ static int write_exact_fd(int fd, const void *data, size_t size) {
 static int read_dispatch_response_status(int socket_fd, const char *transport_name) {
     const size_t max_response = 1024 * 1024;
     char stack_line[16384];
-    size_t line_cap = sizeof(stack_line);
-    size_t line_off = 0;
     char *heap_line = NULL;
     char *line = stack_line;
-    int rc = 0;
-    while (line_off + 1 < max_response) {
-        if (line_off + 1 >= line_cap) {
-            size_t next_cap = line_cap * 2;
-            if (next_cap < line_cap) {
-                rc = -EOVERFLOW;
+    size_t line_cap = sizeof(stack_line);
+    size_t total_read = 0;
+    bool saw_nonterminal = false;
+    int rc = -EIO;
+
+    for (unsigned line_index = 0; line_index < 16 && total_read < max_response; ++line_index) {
+        size_t line_off = 0;
+        int read_rc = 0;
+        while (line_off + 1 < max_response - total_read) {
+            if (line_off + 1 >= line_cap) {
+                size_t next_cap = line_cap * 2;
+                if (next_cap < line_cap) {
+                    read_rc = -EOVERFLOW;
+                    break;
+                }
+                if (next_cap > max_response) next_cap = max_response;
+                char *next = (char *)malloc(next_cap);
+                if (!next) {
+                    read_rc = -ENOMEM;
+                    break;
+                }
+                memcpy(next, line, line_off);
+                free(heap_line);
+                heap_line = next;
+                line = heap_line;
+                line_cap = next_cap;
+            }
+            char ch;
+            ssize_t r = read(socket_fd, &ch, 1);
+            if (r < 0) {
+                if (errno == EINTR) continue;
+                read_rc = -errno;
                 break;
             }
-            if (next_cap > max_response) next_cap = max_response;
-            char *next = (char *)malloc(next_cap);
-            if (!next) {
-                rc = -ENOMEM;
-                break;
-            }
-            memcpy(next, line, line_off);
-            free(heap_line);
-            heap_line = next;
-            line = heap_line;
-            line_cap = next_cap;
+            if (r == 0) break;
+            line[line_off++] = ch;
+            total_read++;
+            if (ch == '\n') break;
         }
-        char ch;
-        ssize_t r = read(socket_fd, &ch, 1);
-        if (r < 0) {
-            if (errno == EINTR) continue;
-            rc = -errno;
+        line[line_off] = '\0';
+        if (read_rc != 0) {
+            rc = read_rc;
             break;
         }
-        if (r == 0) break;
-        line[line_off++] = ch;
-        if (ch == '\n') break;
+        if (line_off == 0) {
+            rc = saw_nonterminal ? -EPROTO : -EIO;
+            break;
+        }
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG") ||
+            env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: %s dispatch response: %s",
+                    transport_name ? transport_name : "generic",
+                    line);
+            if (line[line_off - 1] != '\n') fprintf(stderr, "\n");
+        }
+        if (strstr(line, "\"stage\":\"vulkan-graphics-v6-describe\"") != NULL) {
+            saw_nonterminal = true;
+            continue;
+        }
+        if (strstr(line, "\"valid\":true") != NULL) {
+            rc = 0;
+            break;
+        }
+        rc = -EIO;
+        break;
     }
-    line[line_off] = '\0';
-    if (rc == 0 && line_off + 1 >= max_response) rc = -EMSGSIZE;
-    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG") ||
-        env_truthy_default("PDOCKER_GPU_DISPATCH_PROFILE_LOG", false)) {
-        fprintf(stderr,
-                "pdocker-vulkan-icd: %s dispatch response: %s",
-                transport_name ? transport_name : "generic",
-                line);
-        if (line_off == 0 || line[line_off - 1] != '\n') fprintf(stderr, "\n");
-    }
-    if (rc == 0 && strstr(line, "\"valid\":true") == NULL) rc = -EIO;
+    if (total_read >= max_response) rc = -EMSGSIZE;
     free(heap_line);
     return rc;
 }

@@ -865,6 +865,18 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+
+    def test_vulkan_graphics_v6_describe_response_is_nonterminal(self):
+        icd = VULKAN_ICD.read_text()
+        response_reader = icd.split("static int read_dispatch_response_status", 1)[1].split("typedef struct {", 1)[0]
+        self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-describe\\"', response_reader)
+        self.assertIn("saw_nonterminal = true;", response_reader)
+        self.assertLess(
+            response_reader.index('\\"stage\\":\\"vulkan-graphics-v6-describe\\"'),
+            response_reader.index('\\"valid\\":true'),
+        )
+        self.assertIn("rc = saw_nonterminal ? -EPROTO : -EIO;", response_reader)
+
     def test_vulkan_dispatch_v5_socket_path_is_magic_framed_not_line_framed(self):
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("connection_starts_with_v5_magic", executor)
