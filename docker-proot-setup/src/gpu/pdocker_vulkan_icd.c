@@ -8108,6 +8108,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         pipeline->graphics = true;
         pipeline->graphics_unsupported = false;
         const VkGraphicsPipelineCreateInfo *ci = &pCreateInfos[i];
+        uint64_t captured_dynamic_state_mask = 0;
+        if (ci->pDynamicState) {
+            for (uint32_t d = 0; d < ci->pDynamicState->dynamicStateCount; ++d) {
+                VkDynamicState state = ci->pDynamicState->pDynamicStates[d];
+                if ((uint32_t)state < 64u) captured_dynamic_state_mask |= (1ull << (uint32_t)state);
+            }
+        }
+        pipeline->dynamic_state_mask = captured_dynamic_state_mask;
         pipeline->layout = (PdockerVkPipelineLayout *)ci->layout;
         pipeline->render_pass = (PdockerVkRenderPass *)ci->renderPass;
         pipeline->shader_stage_count = ci->stageCount;
@@ -8126,11 +8134,20 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         }
         if (ci->pInputAssemblyState) {
             pipeline->topology = ci->pInputAssemblyState->topology;
+            if (ci->pInputAssemblyState->primitiveRestartEnable) {
+                pipeline->graphics_unsupported = true;
+            }
         }
         if (ci->pRasterizationState) {
             pipeline->polygon_mode = ci->pRasterizationState->polygonMode;
             pipeline->cull_mode = ci->pRasterizationState->cullMode;
             pipeline->front_face = ci->pRasterizationState->frontFace;
+            if (ci->pRasterizationState->depthClampEnable ||
+                ci->pRasterizationState->rasterizerDiscardEnable ||
+                ci->pRasterizationState->depthBiasEnable ||
+                ci->pRasterizationState->lineWidth != 1.0f) {
+                pipeline->graphics_unsupported = true;
+            }
         }
         if (ci->pMultisampleState) {
             pipeline->rasterization_samples = ci->pMultisampleState->rasterizationSamples;
@@ -8139,6 +8156,49 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         pipeline->color_attachment_count = ci->pColorBlendState
             ? ci->pColorBlendState->attachmentCount
             : 0;
+        if (ci->pColorBlendState) {
+            if (ci->pColorBlendState->logicOpEnable ||
+                ci->pColorBlendState->blendConstants[0] != 0.0f ||
+                ci->pColorBlendState->blendConstants[1] != 0.0f ||
+                ci->pColorBlendState->blendConstants[2] != 0.0f ||
+                ci->pColorBlendState->blendConstants[3] != 0.0f) {
+                pipeline->graphics_unsupported = true;
+            }
+            for (uint32_t a = 0; a < ci->pColorBlendState->attachmentCount; ++a) {
+                const VkPipelineColorBlendAttachmentState *attachment =
+                    ci->pColorBlendState->pAttachments
+                        ? &ci->pColorBlendState->pAttachments[a]
+                        : NULL;
+                if (!attachment ||
+                    attachment->blendEnable ||
+                    attachment->colorWriteMask !=
+                        (VK_COLOR_COMPONENT_R_BIT |
+                         VK_COLOR_COMPONENT_G_BIT |
+                         VK_COLOR_COMPONENT_B_BIT |
+                         VK_COLOR_COMPONENT_A_BIT)) {
+                    pipeline->graphics_unsupported = true;
+                    break;
+                }
+            }
+        }
+        if (ci->pDepthStencilState) {
+            if (ci->pDepthStencilState->depthTestEnable ||
+                ci->pDepthStencilState->depthWriteEnable ||
+                ci->pDepthStencilState->depthBoundsTestEnable ||
+                ci->pDepthStencilState->stencilTestEnable) {
+                pipeline->graphics_unsupported = true;
+            }
+        }
+        if (ci->pViewportState) {
+            if (ci->pViewportState->viewportCount > 0 &&
+                !(captured_dynamic_state_mask & (1ull << (uint32_t)VK_DYNAMIC_STATE_VIEWPORT))) {
+                pipeline->graphics_unsupported = true;
+            }
+            if (ci->pViewportState->scissorCount > 0 &&
+                !(captured_dynamic_state_mask & (1ull << (uint32_t)VK_DYNAMIC_STATE_SCISSOR))) {
+                pipeline->graphics_unsupported = true;
+            }
+        }
         for (const VkBaseInStructure *chain = (const VkBaseInStructure *)ci->pNext;
              chain;
              chain = (const VkBaseInStructure *)chain->pNext) {
@@ -8181,12 +8241,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             }
             for (uint32_t a = 0; a < pipeline->vertex_attribute_count; ++a) {
                 pipeline->vertex_attributes[a] = ci->pVertexInputState->pVertexAttributeDescriptions[a];
-            }
-        }
-        if (ci->pDynamicState) {
-            for (uint32_t d = 0; d < ci->pDynamicState->dynamicStateCount; ++d) {
-                VkDynamicState state = ci->pDynamicState->pDynamicStates[d];
-                if ((uint32_t)state < 64u) pipeline->dynamic_state_mask |= (1ull << (uint32_t)state);
             }
         }
         pPipelines[i] = (VkPipeline)pipeline;

@@ -908,13 +908,40 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, icd)
         self.assertNotIn("ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME", icd)
 
+    def test_vulkan_graphics_pipeline_unserialized_state_fails_closed(self):
+        icd = VULKAN_ICD.read_text()
+        body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline", 1
+        )[0]
+        for marker in [
+            "uint64_t captured_dynamic_state_mask = 0;",
+            "pipeline->dynamic_state_mask = captured_dynamic_state_mask;",
+            "ci->pInputAssemblyState->primitiveRestartEnable",
+            "ci->pRasterizationState->depthClampEnable",
+            "ci->pRasterizationState->rasterizerDiscardEnable",
+            "ci->pRasterizationState->depthBiasEnable",
+            "ci->pRasterizationState->lineWidth != 1.0f",
+            "ci->pColorBlendState->logicOpEnable",
+            "ci->pColorBlendState->blendConstants[0] != 0.0f",
+            "attachment->blendEnable",
+            "attachment->colorWriteMask !=",
+            "VK_COLOR_COMPONENT_R_BIT",
+            "ci->pDepthStencilState->depthTestEnable",
+            "ci->pDepthStencilState->depthWriteEnable",
+            "ci->pDepthStencilState->depthBoundsTestEnable",
+            "ci->pDepthStencilState->stencilTestEnable",
+            "ci->pViewportState->viewportCount > 0",
+            "VK_DYNAMIC_STATE_VIEWPORT",
+            "ci->pViewportState->scissorCount > 0",
+            "VK_DYNAMIC_STATE_SCISSOR",
+        ]:
+            self.assertIn(marker, body)
 
-
-
-
-
-
-
+        self.assertLess(
+            body.index("uint64_t captured_dynamic_state_mask = 0;"),
+            body.index("ci->pViewportState->viewportCount > 0"),
+        )
+        self.assertEqual(body.count("pipeline->dynamic_state_mask = captured_dynamic_state_mask;"), 1)
 
     def test_vulkan_graphics_v6_describe_response_is_nonterminal(self):
         icd = VULKAN_ICD.read_text()

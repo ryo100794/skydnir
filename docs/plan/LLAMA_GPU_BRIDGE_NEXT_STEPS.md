@@ -39,6 +39,7 @@ Confirmed facts:
 | 2026-05-31 final-store provenance lane | Fresh run with the installed APK on `192.168.0.212:32925` preserved final-store layout provenance and split the failure to `native-final-store-mismatch`: the debug SSBO final-store value matches post-writeback, while both differ from the CPU oracle.  The verifier now accepts latest-event identity by dispatch id or by matching source/effective SPIR-V compact hashes because executor compare events can omit `dispatch_id`.  The offline effective-SPIR-V reconstructor now mirrors the executor's storage16-to-storage8 lowering and reproduces the observed effective hash `0x72f4a362b00221fd` from the instrumented Q6 source hash `0xd2d7fbedceb5a8a6`. | `scripts/reconstruct-q6-effective-spirv.py`; `scripts/verify-llama-gpu-artifact.py`; `tests.test_gpu_abi_contract`; `tests.test_llama_gpu_artifact_verifier`; local evidence `docs/test/llama-gpu-ngl1-q6-final-store-provenance-192_168_0_212_32925-20260531T093549Z.json` |
 | 2026-05-31 Q6 final-store barrier lane | Static analysis of the effective Q6 module shows the final store reads Workgroup `%143` at lane0 immediately after the reduction loop.  A hash-gated compatibility lowering now inserts one additional Workgroup-memory `OpControlBarrier` after the reduction loop convergence and before the lane0 final-store branch.  This keeps descriptor, buffer, push, specialization, dispatch, model, prompt, and llama.cpp bytes unchanged; it only tightens shader-side workgroup-memory visibility before final-store. | `app/src/main/cpp/pdocker_gpu_executor.c`; `scripts/reconstruct-q6-effective-spirv.py`; packaged `libpdockergpuexecutor.so`; host gate `tests.test_gpu_abi_contract tests.test_llama_gpu_artifact_verifier tests.test_termport_docker_api_contract`; APK build `:app:assembleCompatDebug` |
 | 2026-06-03 Vulkan graphics V6.1 P0-P6 preflight lane | Producer commit `9d6e724` has completed V6.1 serialization through the attachment table and command table.  The executor now validates/describes V6.1 frames, runs an explicit `vulkan-graphics-v6-replay-preflight`, and accepts only validated no-op frames as implemented.  Non-empty graphics command replay still fails closed until Android Vulkan command recording/materialization is implemented. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
+| 2026-06-03 Vulkan graphics pipeline-state fail-closed lane | The container ICD now refuses to promote graphics pipelines that depend on static state not yet serialized into V6.1 replay ABI: primitive restart, rasterizer discard/depth clamp/depth bias/non-1.0 line width, blend/logic-op/blend constants/non-RGBA write masks, depth/stencil tests, and non-dynamic viewport/scissor.  This prevents executor P6 from reconstructing guessed defaults when real Android Vulkan replay is added. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -135,8 +136,11 @@ command, dynamic-offset, push-metadata, and attachment table serialization.
 The Android executor validates and describes those frames, then runs a replay
 preflight gate.  Executor replay is only implemented for validated no-op frames;
 non-empty command recording still fails closed after a graphics-capable Android
-Vulkan runtime gate.  Treat the describe event as a schema/preflight result
-only.
+Vulkan runtime gate.  The producer also marks graphics pipelines unsupported
+when they require state that is not serialized into the V6.1 ABI yet: blend,
+depth/stencil, static viewport/scissor, primitive restart, or rasterization
+features that would require additional replay state.  Treat the describe event
+as a schema/preflight result only.
 
 P0-P6 test/design scope:
 
