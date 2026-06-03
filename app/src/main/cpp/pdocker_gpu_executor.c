@@ -1202,6 +1202,10 @@ typedef struct {
     VkDevice device;
     VkQueue queue;
     uint32_t queue_family;
+    VkQueueFlags queue_family_flags;
+    VkQueue graphics_queue;
+    uint32_t graphics_queue_family;
+    VkQueueFlags graphics_queue_family_flags;
     VkShaderModule shader;
     VkShaderModule matmul_shader;
     VkDescriptorSetLayout set_layout;
@@ -1209,6 +1213,7 @@ typedef struct {
     VkPipeline pipeline;
     VkPipeline matmul_pipeline;
     VkCommandPool command_pool;
+    VkCommandPool graphics_command_pool;
     uint32_t api_version;
     VkPhysicalDeviceProperties physical_properties;
     VkPhysicalDeviceFeatures physical_features;
@@ -1217,18 +1222,24 @@ typedef struct {
     VkPhysicalDevice16BitStorageFeatures physical_storage16;
     VkPhysicalDevice8BitStorageFeatures physical_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features physical_float16_int8;
+    VkPhysicalDeviceDynamicRenderingFeatures physical_dynamic_rendering;
     VkPhysicalDeviceFeatures enabled_features;
     VkPhysicalDeviceVulkan11Features enabled_vulkan11;
     VkPhysicalDeviceVulkan12Features enabled_vulkan12;
     VkPhysicalDevice16BitStorageFeatures enabled_storage16;
     VkPhysicalDevice8BitStorageFeatures enabled_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
+    VkPhysicalDeviceDynamicRenderingFeatures enabled_dynamic_rendering;
     uint32_t enabled_extension_count;
     uint8_t enabled_ext_16bit_storage;
     uint8_t enabled_ext_8bit_storage;
     uint8_t enabled_ext_shader_float16_int8;
     uint8_t enabled_ext_storage_buffer_storage_class;
+    uint8_t enabled_ext_dynamic_rendering;
     uint8_t enabled_chain_compat_feature_structs;
+    uint8_t graphics_ready;
+    PFN_vkCmdBeginRenderingKHR cmd_begin_rendering;
+    PFN_vkCmdEndRenderingKHR cmd_end_rendering;
     VkPhysicalDeviceSubgroupProperties subgroup_properties;
     double init_ms;
 } VulkanRuntime;
@@ -10452,12 +10463,14 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     memset(&rt->physical_storage16, 0, sizeof(rt->physical_storage16));
     memset(&rt->physical_storage8, 0, sizeof(rt->physical_storage8));
     memset(&rt->physical_float16_int8, 0, sizeof(rt->physical_float16_int8));
+    memset(&rt->physical_dynamic_rendering, 0, sizeof(rt->physical_dynamic_rendering));
     memset(&rt->subgroup_properties, 0, sizeof(rt->subgroup_properties));
     rt->physical_vulkan11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     rt->physical_vulkan12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     rt->physical_storage16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
     rt->physical_storage8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
     rt->physical_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    rt->physical_dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
     rt->subgroup_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
     PFN_vkGetPhysicalDeviceFeatures2 get_features2 =
         (PFN_vkGetPhysicalDeviceFeatures2)vkGetInstanceProcAddr(rt->instance, "vkGetPhysicalDeviceFeatures2");
@@ -10473,6 +10486,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_vulkan12.pNext = &rt->physical_storage16;
         rt->physical_storage16.pNext = &rt->physical_storage8;
         rt->physical_storage8.pNext = &rt->physical_float16_int8;
+        rt->physical_float16_int8.pNext = &rt->physical_dynamic_rendering;
         get_features2(rt->physical_device, &features2);
         rt->physical_features = features2.features;
         rt->physical_vulkan11.pNext = NULL;
@@ -10480,6 +10494,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_storage16.pNext = NULL;
         rt->physical_storage8.pNext = NULL;
         rt->physical_float16_int8.pNext = NULL;
+        rt->physical_dynamic_rendering.pNext = NULL;
     }
     PFN_vkGetPhysicalDeviceProperties2 get_properties2 =
         (PFN_vkGetPhysicalDeviceProperties2)vkGetInstanceProcAddr(rt->instance, "vkGetPhysicalDeviceProperties2");
@@ -10500,6 +10515,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     if (family_count > 16) family_count = 16;
     vkGetPhysicalDeviceQueueFamilyProperties(rt->physical_device, &family_count, families);
     rt->queue_family = UINT32_MAX;
+    rt->graphics_queue_family = UINT32_MAX;
     for (uint32_t i = 0; i < family_count; ++i) {
         if (families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
             rt->queue_family = i;
@@ -10507,24 +10523,49 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         }
     }
     if (rt->queue_family == UINT32_MAX) { stage = "queue-family-compute"; goto fail; }
+    rt->queue_family_flags = families[rt->queue_family].queueFlags;
+    if (families[rt->queue_family].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+        rt->graphics_queue_family = rt->queue_family;
+    } else {
+        for (uint32_t i = 0; i < family_count; ++i) {
+            if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+                rt->graphics_queue_family = i;
+                break;
+            }
+        }
+    }
+    if (rt->graphics_queue_family != UINT32_MAX) {
+        rt->graphics_queue_family_flags = families[rt->graphics_queue_family].queueFlags;
+    }
     float priority = 1.0f;
-    VkDeviceQueueCreateInfo qci = {
-        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-        .queueFamilyIndex = rt->queue_family,
-        .queueCount = 1,
-        .pQueuePriorities = &priority,
-    };
+    VkDeviceQueueCreateInfo qcis[2];
+    memset(qcis, 0, sizeof(qcis));
+    qcis[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    qcis[0].queueFamilyIndex = rt->queue_family;
+    qcis[0].queueCount = 1;
+    qcis[0].pQueuePriorities = &priority;
+    uint32_t qci_count = 1;
+    if (rt->graphics_queue_family != UINT32_MAX &&
+        rt->graphics_queue_family != rt->queue_family) {
+        qcis[qci_count].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        qcis[qci_count].queueFamilyIndex = rt->graphics_queue_family;
+        qcis[qci_count].queueCount = 1;
+        qcis[qci_count].pQueuePriorities = &priority;
+        qci_count++;
+    }
     VkPhysicalDeviceFeatures enabled_features = rt->physical_features;
     VkPhysicalDeviceVulkan11Features enabled_vulkan11;
     VkPhysicalDeviceVulkan12Features enabled_vulkan12;
     VkPhysicalDevice16BitStorageFeatures enabled_storage16;
     VkPhysicalDevice8BitStorageFeatures enabled_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
+    VkPhysicalDeviceDynamicRenderingFeatures enabled_dynamic_rendering;
     memset(&enabled_vulkan11, 0, sizeof(enabled_vulkan11));
     memset(&enabled_vulkan12, 0, sizeof(enabled_vulkan12));
     memset(&enabled_storage16, 0, sizeof(enabled_storage16));
     memset(&enabled_storage8, 0, sizeof(enabled_storage8));
     memset(&enabled_float16_int8, 0, sizeof(enabled_float16_int8));
+    memset(&enabled_dynamic_rendering, 0, sizeof(enabled_dynamic_rendering));
     enabled_vulkan11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     enabled_vulkan11.storageBuffer16BitAccess =
         rt->physical_vulkan11.storageBuffer16BitAccess || rt->physical_storage16.storageBuffer16BitAccess;
@@ -10555,6 +10596,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_storage8.uniformAndStorageBuffer8BitAccess = rt->physical_storage8.uniformAndStorageBuffer8BitAccess;
     enabled_storage8.storagePushConstant8 = rt->physical_storage8.storagePushConstant8;
     enabled_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    enabled_dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+    enabled_dynamic_rendering.dynamicRendering = rt->physical_dynamic_rendering.dynamicRendering;
     enabled_float16_int8.shaderFloat16 = rt->physical_float16_int8.shaderFloat16;
     enabled_float16_int8.shaderInt8 = rt->physical_float16_int8.shaderInt8;
     void *device_features_pnext = NULL;
@@ -10582,6 +10625,15 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
          enabled_vulkan11.storageInputOutput16)) {
         enabled_vulkan11.pNext = device_features_pnext;
         device_features_pnext = &enabled_vulkan11;
+    }
+    const int dynamic_rendering_available =
+        enabled_dynamic_rendering.dynamicRendering &&
+        (rt->api_version >= VK_API_VERSION_1_3 ||
+         vulkan_device_extension_supported(rt->physical_device,
+                                           VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME));
+    if (dynamic_rendering_available) {
+        enabled_dynamic_rendering.pNext = device_features_pnext;
+        device_features_pnext = &enabled_dynamic_rendering;
     }
     const int chain_compat_feature_structs =
         env_truthy("PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS", 1);
@@ -10640,6 +10692,18 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
                                        VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
         rt->enabled_ext_shader_float16_int8 = enabled_extension_count > before;
     }
+    const uint32_t dynamic_rendering_before = enabled_extension_count;
+    if (enabled_dynamic_rendering.dynamicRendering) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+        rt->enabled_ext_dynamic_rendering =
+            dynamic_rendering_available &&
+            (rt->api_version >= VK_API_VERSION_1_3 ||
+             enabled_extension_count > dynamic_rendering_before);
+    }
     const uint32_t storage_class_before = enabled_extension_count;
     append_vulkan_device_extension(rt->physical_device,
                                    enabled_extensions,
@@ -10653,18 +10717,20 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->enabled_storage16 = enabled_storage16;
     rt->enabled_storage8 = enabled_storage8;
     rt->enabled_float16_int8 = enabled_float16_int8;
+    rt->enabled_dynamic_rendering = enabled_dynamic_rendering;
     rt->enabled_vulkan11.pNext = NULL;
     rt->enabled_vulkan12.pNext = NULL;
     rt->enabled_storage16.pNext = NULL;
     rt->enabled_storage8.pNext = NULL;
     rt->enabled_float16_int8.pNext = NULL;
+    rt->enabled_dynamic_rendering.pNext = NULL;
     rt->enabled_extension_count = enabled_extension_count;
     rt->enabled_chain_compat_feature_structs = (uint8_t)chain_compat_feature_structs;
     VkDeviceCreateInfo dci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = device_features_pnext,
-        .queueCreateInfoCount = 1,
-        .pQueueCreateInfos = &qci,
+        .queueCreateInfoCount = qci_count,
+        .pQueueCreateInfos = qcis,
         .pEnabledFeatures = &enabled_features,
         .enabledExtensionCount = enabled_extension_count,
         .ppEnabledExtensionNames = enabled_extension_count ? enabled_extensions : NULL,
@@ -10675,6 +10741,23 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rc = vkCreateDevice(rt->physical_device, &dci, NULL, &rt->device);
     if (rc != VK_SUCCESS) goto fail;
     vkGetDeviceQueue(rt->device, rt->queue_family, 0, &rt->queue);
+    if (rt->graphics_queue_family == rt->queue_family) {
+        rt->graphics_queue = rt->queue;
+    } else if (rt->graphics_queue_family != UINT32_MAX) {
+        vkGetDeviceQueue(rt->device, rt->graphics_queue_family, 0, &rt->graphics_queue);
+    }
+    rt->cmd_begin_rendering =
+        (PFN_vkCmdBeginRenderingKHR)vkGetDeviceProcAddr(rt->device, "vkCmdBeginRenderingKHR");
+    if (!rt->cmd_begin_rendering) {
+        rt->cmd_begin_rendering =
+            (PFN_vkCmdBeginRenderingKHR)vkGetDeviceProcAddr(rt->device, "vkCmdBeginRendering");
+    }
+    rt->cmd_end_rendering =
+        (PFN_vkCmdEndRenderingKHR)vkGetDeviceProcAddr(rt->device, "vkCmdEndRenderingKHR");
+    if (!rt->cmd_end_rendering) {
+        rt->cmd_end_rendering =
+            (PFN_vkCmdEndRenderingKHR)vkGetDeviceProcAddr(rt->device, "vkCmdEndRendering");
+    }
     VkShaderModuleCreateInfo smci = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = sizeof(kVectorAddSpv),
@@ -10740,11 +10823,29 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     stage = "create-command-pool";
     rc = vkCreateCommandPool(rt->device, &cpoci, NULL, &rt->command_pool);
     if (rc != VK_SUCCESS) goto fail;
+    if (rt->graphics_queue_family != UINT32_MAX &&
+        rt->graphics_queue_family != rt->queue_family) {
+        VkCommandPoolCreateInfo gpci = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .queueFamilyIndex = rt->graphics_queue_family,
+        };
+        stage = "create-graphics-command-pool";
+        rc = vkCreateCommandPool(rt->device, &gpci, NULL, &rt->graphics_command_pool);
+        if (rc != VK_SUCCESS) goto fail;
+    }
+    rt->graphics_ready =
+        rt->graphics_queue_family != UINT32_MAX &&
+        rt->graphics_queue != VK_NULL_HANDLE &&
+        rt->enabled_dynamic_rendering.dynamicRendering &&
+        (rt->api_version >= VK_API_VERSION_1_3 || rt->enabled_ext_dynamic_rendering) &&
+        rt->cmd_begin_rendering &&
+        rt->cmd_end_rendering;
     rt->init_ms = now_ms() - start;
     rt->ready = 1;
     return 0;
 fail:
     fprintf(stderr, "pdocker-gpu-executor: Vulkan runtime init failed stage=%s rc=%d\n", stage, rc);
+    if (rt->graphics_command_pool) vkDestroyCommandPool(rt->device, rt->graphics_command_pool, NULL);
     if (rt->command_pool) vkDestroyCommandPool(rt->device, rt->command_pool, NULL);
     if (rt->matmul_pipeline) vkDestroyPipeline(rt->device, rt->matmul_pipeline, NULL);
     if (rt->pipeline) vkDestroyPipeline(rt->device, rt->pipeline, NULL);
@@ -17512,6 +17613,39 @@ static int preflight_vulkan_graphics_v6_replay_supported(
     return 0;
 }
 
+static int preflight_vulkan_graphics_v6_runtime_supported(const char **reason_out) {
+    const char *reason = "unsupported graphics runtime";
+    if (reason_out) *reason_out = reason;
+    if (init_vulkan_runtime(&g_vulkan_runtime) != 0) {
+        reason = "vulkan runtime initialization failed";
+        if (reason_out) *reason_out = reason;
+        return -ENODEV;
+    }
+    if (g_vulkan_runtime.graphics_queue_family == UINT32_MAX ||
+        (g_vulkan_runtime.graphics_queue_family_flags & VK_QUEUE_GRAPHICS_BIT) == 0 ||
+        g_vulkan_runtime.graphics_queue == VK_NULL_HANDLE) {
+        reason = "Vulkan graphics queue is unavailable";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    if (!g_vulkan_runtime.enabled_dynamic_rendering.dynamicRendering ||
+        !(g_vulkan_runtime.api_version >= VK_API_VERSION_1_3 ||
+          g_vulkan_runtime.enabled_ext_dynamic_rendering) ||
+        !g_vulkan_runtime.cmd_begin_rendering ||
+        !g_vulkan_runtime.cmd_end_rendering) {
+        reason = "dynamic rendering is not enabled on the Android Vulkan device";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    if (!g_vulkan_runtime.graphics_ready) {
+        reason = "graphics runtime preflight is not ready";
+        if (reason_out) *reason_out = reason;
+        return -EOPNOTSUPP;
+    }
+    if (reason_out) *reason_out = "graphics runtime supports replay preflight";
+    return 0;
+}
+
 static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     const char *reason = NULL;
     int rc = preflight_vulkan_graphics_v6_replay_supported(view, &reason);
@@ -17541,6 +17675,20 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 (unsigned long long)view->header->submit_id);
         fflush(out);
         return 0;
+    }
+    rc = preflight_vulkan_graphics_v6_runtime_supported(&reason);
+    if (rc != 0) {
+        FILE *out = json_out();
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"stage\":\"vulkan-graphics-v6-runtime-preflight\",\"valid\":false,"
+                "\"execution_implemented\":false,\"error\":\"%s\"}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                reason ? reason : strerror(-rc));
+        fflush(out);
+        return rc;
     }
     FILE *out = json_out();
     fprintf(out,

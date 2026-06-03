@@ -8835,8 +8835,12 @@ static void record_graphics_draw_command(
         uint32_t stride) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
-    cmd->graphics_unsupported = true;
+    if (indirect || !cmd->graphics_pipeline || !cmd->dynamic_rendering_active ||
+        cmd->render_pass_active || (indexed && !cmd->index_buffer_bound)) {
+        cmd->graphics_unsupported = true;
+    }
     if (cmd->graphics_draw_op_count >= PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS) {
+        cmd->graphics_unsupported = true;
         return;
     }
     uint32_t snapshot_index = cmd->graphics_draw_op_count++;
@@ -10391,6 +10395,32 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 trace_icd_runtime_failure("graphics-command-unimplemented",
                                           VK_ERROR_FEATURE_NOT_PRESENT);
                 return VK_ERROR_FEATURE_NOT_PRESENT;
+            }
+            if (cmd->graphics_command_op_count > 0) {
+                bool graphics_only_submit = true;
+                for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
+                    if (cmd->command_ops[op_index].type != PDOCKER_VK_COMMAND_GRAPHICS_DRAW) {
+                        graphics_only_submit = false;
+                        break;
+                    }
+                }
+                if (!graphics_only_submit) {
+                    trace_icd_runtime_failure("graphics-mixed-submit-unimplemented",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(cmd);
+                if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                    fprintf(stderr,
+                            "pdocker-vulkan-icd: graphics V6.1 submit rc=%d\n",
+                            graphics_rc);
+                }
+                if (graphics_rc != 0) {
+                    trace_icd_runtime_failure("graphics-v6-submit-failed",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                continue;
             }
             if (cmd->command_op_count > 0) {
                 PdockerVkCopyStats stats;

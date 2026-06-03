@@ -134,8 +134,9 @@ image, image-view, sampler, shader-stage, pipeline, vertex, dynamic-state,
 command, dynamic-offset, push-metadata, and attachment table serialization.
 The Android executor validates and describes those frames, then runs a replay
 preflight gate.  Executor replay is only implemented for validated no-op frames;
-non-empty command recording still fails closed.  Treat the describe event as a
-schema/preflight result only.
+non-empty command recording still fails closed after a graphics-capable Android
+Vulkan runtime gate.  Treat the describe event as a schema/preflight result
+only.
 
 P0-P6 test/design scope:
 
