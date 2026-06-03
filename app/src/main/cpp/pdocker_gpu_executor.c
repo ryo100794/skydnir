@@ -2511,8 +2511,15 @@ static int materialize_vulkan_dispatch_images(
     *image_count = 0;
     *view_count = 0;
     *sampler_count = 0;
-    if (image_descriptor_count == 0) return 0;
-    if (!image_descriptors || !object_tables || !object_tables->resources ||
+    if (image_descriptor_count == 0 &&
+        (!object_tables ||
+         (object_tables->image_count == 0 &&
+          object_tables->image_view_count == 0 &&
+          object_tables->sampler_count == 0))) {
+        return 0;
+    }
+    if ((image_descriptor_count > 0 && !image_descriptors) ||
+        !object_tables || !object_tables->resources ||
         !object_tables->passed_fds || !object_tables->images ||
         !object_tables->image_views || !memories || !images || !views || !samplers) {
         return -EINVAL;
@@ -17680,6 +17687,7 @@ static int preflight_vulkan_graphics_v6_runtime_supported(const char **reason_ou
 
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES 4u
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES 8u
+#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS 16u
 
 typedef struct VulkanGraphicsReplayPipeline {
     VkShaderModule shader_modules[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES];
@@ -17785,7 +17793,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
         const PdockerGpuVulkanGraphicsV6PipelineEntry *src = &view->pipelines[pidx];
         if (src->shader_stage_count == 0 ||
             src->shader_stage_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES ||
-            src->color_attachment_count > 16u ||
+            src->color_attachment_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS ||
             src->dynamic_rendering_depth_format != VK_FORMAT_UNDEFINED ||
             src->dynamic_rendering_stencil_format != VK_FORMAT_UNDEFINED) {
             return -EOPNOTSUPP;
@@ -17956,6 +17964,273 @@ static int materialize_vulkan_graphics_v6_pipelines(
     return 0;
 }
 
+typedef struct VulkanGraphicsReplayAttachments {
+    VulkanDispatchImageMemoryObject memories[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VulkanDispatchImageObject images[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VulkanDispatchImageViewObject views[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VulkanDispatchSamplerObject samplers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    size_t memory_count;
+    size_t image_count;
+    size_t view_count;
+    size_t sampler_count;
+} VulkanGraphicsReplayAttachments;
+
+static void destroy_vulkan_graphics_replay_attachments(
+        VkDevice device,
+        VulkanGraphicsReplayAttachments *attachments) {
+    if (!attachments) return;
+    destroy_vulkan_dispatch_image_objects(
+        device,
+        attachments->memories, attachments->memory_count,
+        attachments->images, attachments->image_count,
+        attachments->views, attachments->view_count,
+        attachments->samplers, attachments->sampler_count);
+    memset(attachments, 0, sizeof(*attachments));
+}
+
+static int materialize_vulkan_graphics_v6_attachments(
+        VulkanRuntime *rt,
+        const VulkanGraphicsV6FrameView *view,
+        VulkanGraphicsReplayAttachments *out) {
+    if (!rt || !view || !view->header || !out) return -EINVAL;
+    memset(out, 0, sizeof(*out));
+    VulkanDispatchV5ObjectTables object_tables = {
+        .resources = view->resources,
+        .resource_count = view->header->resource_count,
+        .passed_fds = view->passed_fds,
+        .passed_fd_count = view->passed_fd_count,
+        .images = view->images,
+        .image_count = view->header->image_count,
+        .image_views = view->image_views,
+        .image_view_count = view->header->image_view_count,
+        .samplers = view->samplers,
+        .sampler_count = view->header->sampler_count,
+    };
+    int rc = materialize_vulkan_dispatch_images(
+        rt->physical_device,
+        rt->device,
+        NULL,
+        0,
+        &object_tables,
+        out->memories,
+        &out->memory_count,
+        out->images,
+        &out->image_count,
+        out->views,
+        &out->view_count,
+        out->samplers,
+        &out->sampler_count);
+    if (rc != 0) return rc;
+
+    for (uint32_t c = 0; c < view->header->command_count; ++c) {
+        const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[c];
+        if (command->command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING) continue;
+        if (command->attachment_count == 0) return -EOPNOTSUPP;
+        for (uint32_t a = 0; a < command->attachment_count; ++a) {
+            const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
+                &view->attachments[command->attachment_first + a];
+            if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR ||
+                attachment->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                attachment->image_view_index >= out->view_count) {
+                return -EPROTO;
+            }
+            VulkanDispatchImageViewObject *replay_view =
+                &out->views[attachment->image_view_index];
+            if (!replay_view->view || replay_view->image_index >= out->image_count) return -EPROTO;
+            VulkanDispatchImageObject *image = &out->images[replay_view->image_index];
+            if (!image->image || !(image->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) {
+                return -EOPNOTSUPP;
+            }
+            if (attachment->format != VK_FORMAT_UNDEFINED &&
+                image->format != (VkFormat)attachment->format) {
+                return -EPROTO;
+            }
+            if (attachment->load_op == VK_ATTACHMENT_LOAD_OP_LOAD && image->requires_staging) {
+                return -EOPNOTSUPP;
+            }
+            if (attachment->layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
+                attachment->layout != VK_IMAGE_LAYOUT_GENERAL) {
+                return -EOPNOTSUPP;
+            }
+            image->current_layout = (VkImageLayout)view->images[image->source_index].initial_layout;
+        }
+    }
+    return 0;
+}
+
+static int graphics_push_metadata_for_command(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t command_index,
+        const PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry **out_meta) {
+    if (!view || !out_meta || !view->is_v61 || !view->header_v61) return -EINVAL;
+    *out_meta = NULL;
+    for (uint32_t i = 0; i < view->header_v61->v61.push_constant_metadata_count; ++i) {
+        const PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry *meta =
+            &view->push_constant_metadata[i];
+        if (meta->command_index != command_index) continue;
+        if (*out_meta) return -EPROTO;
+        *out_meta = meta;
+    }
+    return *out_meta ? 0 : -EPROTO;
+}
+
+static int record_vulkan_graphics_v6_command_buffer(
+        VulkanRuntime *rt,
+        const VulkanGraphicsV6FrameView *view,
+        const VulkanGraphicsReplayPipeline *pipelines,
+        uint32_t pipeline_count,
+        const VulkanGraphicsReplayAttachments *attachments) {
+    if (!rt || !view || !view->header || !pipelines || !attachments) return -EINVAL;
+    VkCommandPool command_pool = rt->graphics_command_pool ? rt->graphics_command_pool : rt->command_pool;
+    if (!command_pool) return -ENODEV;
+    VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+    VkCommandBufferAllocateInfo cbai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    VkResult vrc = vkAllocateCommandBuffers(rt->device, &cbai, &command_buffer);
+    if (vrc != VK_SUCCESS) return -EIO;
+    int rc = 0;
+    VkCommandBufferBeginInfo cbi = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    vrc = vkBeginCommandBuffer(command_buffer, &cbi);
+    if (vrc != VK_SUCCESS) { rc = -EIO; goto cleanup; }
+
+    uint32_t bound_pipeline_index = UINT32_MAX;
+    for (uint32_t ci = 0; ci < view->header->command_count; ++ci) {
+        const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[ci];
+        switch (command->command_type) {
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING: {
+                if (command->attachment_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS) { rc = -E2BIG; goto cleanup; }
+                VkRenderingAttachmentInfo color_attachments[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS];
+                VkClearValue clear_values[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS];
+                memset(color_attachments, 0, sizeof(color_attachments));
+                memset(clear_values, 0, sizeof(clear_values));
+                for (uint32_t a = 0; a < command->attachment_count; ++a) {
+                    const PdockerGpuVulkanGraphicsV6AttachmentEntry *src =
+                        &view->attachments[command->attachment_first + a];
+                    if (src->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR ||
+                        src->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                        src->image_view_index >= attachments->view_count ||
+                        !attachments->views[src->image_view_index].view) {
+                        rc = -EPROTO;
+                        goto cleanup;
+                    }
+                    if (src->clear_value_size) {
+                        if (src->clear_value_size != sizeof(VkClearValue) ||
+                            !payload_range_valid(src->clear_value_offset, src->clear_value_size,
+                                                 view->header->frame_size)) {
+                            rc = -EPROTO;
+                            goto cleanup;
+                        }
+                        memcpy(&clear_values[a], view->frame + src->clear_value_offset, sizeof(VkClearValue));
+                    }
+                    color_attachments[a] = (VkRenderingAttachmentInfo){
+                        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                        .imageView = attachments->views[src->image_view_index].view,
+                        .imageLayout = (VkImageLayout)src->layout,
+                        .loadOp = (VkAttachmentLoadOp)src->load_op,
+                        .storeOp = (VkAttachmentStoreOp)src->store_op,
+                        .clearValue = clear_values[a],
+                    };
+                }
+                VkRenderingInfo rendering = {
+                    .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                    .renderArea = {
+                        .offset = {command->render_area_offset_x, command->render_area_offset_y},
+                        .extent = {command->render_area_extent_width, command->render_area_extent_height},
+                    },
+                    .layerCount = command->rendering_layer_count ? command->rendering_layer_count : 1u,
+                    .viewMask = command->rendering_view_mask,
+                    .colorAttachmentCount = command->attachment_count,
+                    .pColorAttachments = command->attachment_count ? color_attachments : NULL,
+                };
+                rt->cmd_begin_rendering(command_buffer, &rendering);
+                break;
+            }
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING:
+                rt->cmd_end_rendering(command_buffer);
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE:
+                if (command->pipeline_index >= pipeline_count ||
+                    !pipelines[command->pipeline_index].pipeline) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  pipelines[command->pipeline_index].pipeline);
+                bound_pipeline_index = command->pipeline_index;
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE:
+                for (uint32_t d = 0; d < command->dynamic_state_count; ++d) {
+                    const PdockerGpuVulkanGraphicsV6DynamicStateEntry *state =
+                        &view->dynamic_states[command->dynamic_state_first + d];
+                    if (!payload_range_valid(state->data_offset, state->data_size,
+                                             view->header->frame_size)) {
+                        rc = -EPROTO;
+                        goto cleanup;
+                    }
+                    const void *data = view->frame + state->data_offset;
+                    if (state->state_type == VK_DYNAMIC_STATE_VIEWPORT) {
+                        if (state->data_size != (uint64_t)state->count * sizeof(VkViewport)) {
+                            rc = -EPROTO;
+                            goto cleanup;
+                        }
+                        vkCmdSetViewport(command_buffer, state->first_index, state->count,
+                                         (const VkViewport *)data);
+                    } else if (state->state_type == VK_DYNAMIC_STATE_SCISSOR) {
+                        if (state->data_size != (uint64_t)state->count * sizeof(VkRect2D)) {
+                            rc = -EPROTO;
+                            goto cleanup;
+                        }
+                        vkCmdSetScissor(command_buffer, state->first_index, state->count,
+                                        (const VkRect2D *)data);
+                    } else {
+                        rc = -EOPNOTSUPP;
+                        goto cleanup;
+                    }
+                }
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS: {
+                if (bound_pipeline_index >= pipeline_count || command->push_size > UINT32_MAX ||
+                    !payload_range_valid(command->push_offset, command->push_size,
+                                         view->header->frame_size)) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                const PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry *meta = NULL;
+                rc = graphics_push_metadata_for_command(view, ci, &meta);
+                if (rc != 0) goto cleanup;
+                vkCmdPushConstants(command_buffer, pipelines[bound_pipeline_index].layout,
+                                   (VkShaderStageFlags)meta->stage_flags,
+                                   meta->range_offset, meta->range_size,
+                                   view->frame + command->push_offset);
+                break;
+            }
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:
+                rc = -EOPNOTSUPP;
+                goto cleanup;
+            default:
+                rc = -EPROTO;
+                goto cleanup;
+        }
+    }
+    vrc = vkEndCommandBuffer(command_buffer);
+    if (vrc != VK_SUCCESS) rc = -EIO;
+cleanup:
+    if (command_buffer) vkFreeCommandBuffers(rt->device, command_pool, 1, &command_buffer);
+    return rc;
+}
+
 static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     const char *reason = NULL;
     int rc = preflight_vulkan_graphics_v6_replay_supported(view, &reason);
@@ -18001,8 +18276,10 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         return rc;
     }
     VulkanGraphicsReplayPipeline replay_pipelines[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
+    VulkanGraphicsReplayAttachments replay_attachments;
     uint32_t replay_pipeline_count = 0;
     memset(replay_pipelines, 0, sizeof(replay_pipelines));
+    memset(&replay_attachments, 0, sizeof(replay_attachments));
     rc = materialize_vulkan_graphics_v6_pipelines(
         &g_vulkan_runtime, view, replay_pipelines,
         PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES, &replay_pipeline_count);
@@ -18032,6 +18309,68 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             replay_pipeline_count,
             (unsigned long long)view->header->submit_id);
     fflush(out);
+
+    rc = materialize_vulkan_graphics_v6_attachments(&g_vulkan_runtime, view, &replay_attachments);
+    if (rc != 0) {
+        out = json_out();
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"stage\":\"vulkan-graphics-v6-attachment-materialize\",\"valid\":false,"
+                "\"execution_implemented\":false,\"error\":\"%s\"}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                strerror(-rc));
+        fflush(out);
+        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
+        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        return rc;
+    }
+    out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"vulkan-graphics-v6-attachment-materialize\",\"valid\":true,"
+            "\"execution_implemented\":true,\"image_count\":%zu,"
+            "\"image_view_count\":%zu,\"submit_id\":%llu}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            replay_attachments.image_count, replay_attachments.view_count,
+            (unsigned long long)view->header->submit_id);
+    fflush(out);
+
+    rc = record_vulkan_graphics_v6_command_buffer(
+        &g_vulkan_runtime, view, replay_pipelines,
+        replay_pipeline_count, &replay_attachments);
+    if (rc != 0) {
+        out = json_out();
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"stage\":\"vulkan-graphics-v6-command-record\",\"valid\":false,"
+                "\"execution_implemented\":false,\"error\":\"%s\"}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                strerror(-rc));
+        fflush(out);
+        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
+        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        return rc;
+    }
+    out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"vulkan-graphics-v6-command-record\",\"valid\":true,"
+            "\"execution_implemented\":true,\"command_count\":%u,"
+            "\"submit_id\":%llu}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            view->header->command_count,
+            (unsigned long long)view->header->submit_id);
+    fflush(out);
+
+    destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
     destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
     out = json_out();
     fprintf(out,
@@ -18039,7 +18378,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
             "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":false,"
             "\"execution_implemented\":false,"
-            "\"error\":\"graphics attachment and command buffer replay is not implemented yet\"}\n",
+            "\"error\":\"graphics queue submit/writeback is not implemented yet\"}\n",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
             PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION);
     fflush(out);
