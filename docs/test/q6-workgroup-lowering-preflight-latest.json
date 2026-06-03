@@ -26,7 +26,7 @@
       1
     ]
   },
-  "path": "/tmp/q6write10-bundle/native-q6.write.spv",
+  "path": "/tmp/q6write-clean/native-q6.write.spv",
   "schema": "pdocker.q6-workgroup-lowering-preflight.v1",
   "workgroup_size_components": [
     782,

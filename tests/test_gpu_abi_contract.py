@@ -730,10 +730,26 @@ class GpuAbiContractTest(unittest.TestCase):
             "layout->layout_id = next_vulkan_object_generation();",
             "op->layout_id = captured_layout ? captured_layout->layout_id : 0;",
             "graphics_bound_set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS]",
+            "PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS",
+            "PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS",
+            "PdockerVkGraphicsCommandRecord",
+            "graphics_command_ops[PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS]",
+            "graphics_dynamic_offsets[PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS]",
+            "append_graphics_command_record",
+            "cmd->graphics_command_op_count = 0;",
+            "cmd->graphics_dynamic_offset_count = 0;",
             "pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE",
             "pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS",
             "cmd->compute_pipeline = (PdockerVkPipeline *)pipeline;",
             "cmd->graphics_pipeline = (PdockerVkPipeline *)pipeline;",
+            "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE;",
+            "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING;",
+            "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING;",
+            "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS;",
+            "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS;",
+            "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS;",
+            "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER;",
+            "graphics_record.command_type = indexed",
             "target_set_snapshots = cmd->graphics_bound_set_snapshots;",
             "target_set_snapshots = cmd->bound_set_snapshots;",
             "PDOCKER_VK_COMMAND_GRAPHICS_DRAW",
@@ -1486,6 +1502,7 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS": "1",
                 "PDOCKER_GPU_DISPATCH_PROFILE_LOG": "1",
                 "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE": "1",
+                "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING": "1",
                 "PDOCKER_GPU_Q6K_COMPAT_REWRITES": "1",
                 "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT": "1",
             },
@@ -1742,6 +1759,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("staging_download_copies", source)
         self.assertIn("PDOCKER_GPU_DISPATCH_TIMEOUT_MS", source)
         self.assertIn("vulkan-dispatch-timeout", source)
+        self.assertIn("submit-generic-dispatch", source)
+        self.assertIn("vkQueueSubmit failed", source)
         self.assertIn("(strict_passthrough && !strict_device_local_staging) ? 0", source)
         self.assertIn("!binding_read_needed[i] || !vk_buffers[i]", source)
         self.assertIn("only the union of descriptor", source)
@@ -1967,25 +1986,38 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("resident_cache_candidate(options, 1, b->size)", source)
         self.assertIn("resident_cache_candidate(options, 0, binding->size)", source)
 
-    def test_vulkan_descriptor_arrays_fail_closed_until_v5_transport(self):
+    def test_vulkan_descriptor_arrays_preserve_array_elements_with_v5_transport(self):
         icd = VULKAN_ICD.read_text()
-        self.assertIn("unsupported_descriptor_array", icd)
-        self.assertIn("descriptor array layout binding=%u count=%u type=%u is unsupported by V4 transport", icd)
-        self.assertIn("descriptor array write binding=%u array=%u count=%u is unsupported by V4 transport", icd)
-        self.assertIn("descriptor array copy src_binding=%u src_array=%u dst_binding=%u dst_array=%u count=%u is unsupported by V4 transport", icd)
+        self.assertIn("PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", icd)
+        self.assertIn("[PDOCKER_VK_MAX_STORAGE_BUFFERS][PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS]", icd)
+        self.assertIn("uint32_t api_descriptor_array_elements[PDOCKER_VK_MAX_STORAGE_BUFFERS];", icd)
+        self.assertIn("uint32_t image_descriptor_array_elements[PDOCKER_VK_MAX_STORAGE_BUFFERS];", icd)
+        self.assertIn("descriptor_linear_slot", icd)
+        self.assertIn("descriptors[i].array_element = api_descriptor_array_elements[i];", icd)
+        self.assertIn("descriptors[descriptor_index].array_element = image_descriptor_array_elements[i];", icd)
+        self.assertIn("descriptor_array_transport_required || image_descriptor_count > 0", icd)
+        self.assertIn("api_descriptor_array_elements[binding_count] = array_element;", icd)
+        self.assertIn("image_descriptor_array_elements[image_descriptor_count] = array_element;", icd)
+        self.assertIn("set->storage_buffers[binding][array_element]", icd)
+        self.assertIn("src->storage_buffers[src_binding][src_array]", icd)
+        self.assertIn("dst->storage_buffers[dst_binding][dst_array]", icd)
+        self.assertNotIn("descriptor array layout binding=%u count=%u type=%u is unsupported by V4 transport", icd)
+        self.assertNotIn("descriptor array write binding=%u array=%u count=%u is unsupported by V4 transport", icd)
+        self.assertNotIn("descriptor array copy src_binding=%u src_array=%u dst_binding=%u dst_array=%u count=%u is unsupported by V4 transport", icd)
         update_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1
         )[0]
-        self.assertIn("w->descriptorCount > 1 || w->dstArrayElement != 0", update_body)
-        self.assertIn("set->unsupported_descriptor_array = true;", update_body)
-        self.assertIn("c->descriptorCount > 1 || c->srcArrayElement != 0 || c->dstArrayElement != 0", update_body)
-        self.assertNotIn("w->dstBinding + w->dstArrayElement + j", update_body)
-        self.assertNotIn("c->srcBinding + c->srcArrayElement + j", update_body)
+        self.assertNotIn("w->descriptorCount > 1 || w->dstArrayElement != 0", update_body)
+        self.assertNotIn("c->descriptorCount > 1 || c->srcArrayElement != 0 || c->dstArrayElement != 0", update_body)
+        self.assertIn("descriptor_linear_slot(set->layout, w->dstBinding, w->dstArrayElement", update_body)
+        self.assertIn("descriptor_linear_slot(src->layout, c->srcBinding, c->srcArrayElement", update_body)
+        self.assertNotIn("exceeds layout count", update_body)
         bind_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1
         )[0]
-        self.assertIn("set->unsupported_descriptor_array", bind_body)
-        self.assertIn("cmd->unsupported_descriptor_set_layout = true;", bind_body)
+        self.assertIn("storage_binding_counts[binding]", bind_body)
+        self.assertIn("storage_buffers[binding][array_element]", bind_body)
+        self.assertNotIn("PDOCKER_VULKAN_USE_V5_FRAME is disabled", bind_body)
 
 
 
@@ -2046,7 +2078,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("extra dynamic offsets", bind_body)
         self.assertIn("dynamic descriptor offset overflow", bind_body)
         self.assertIn("cmd->unsupported_descriptor_set_layout = true;", bind_body)
-        self.assertIn("set->storage_buffers[binding].dynamic = descriptor_type_is_dynamic", icd)
+        self.assertIn("slot->dynamic = descriptor_type_is_dynamic", icd)
+        self.assertIn("storage_buffers[binding][array_element]", bind_body)
         self.assertIn("validate_bound_descriptor_layouts_before_dispatch", icd)
         self.assertIn("dispatch descriptor layout mismatch", icd)
         dispatch_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdDispatch", 1)[1].split(
@@ -2164,7 +2197,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("sampler->mag_filter = pCreateInfo->magFilter;", icd)
         self.assertIn("if (!binding->buffer && !binding->image_view && !binding->sampler) continue;", icd)
         self.assertIn("set->has_image_descriptor = descriptor_set_has_image_descriptor(set);", icd)
-        self.assertIn("image descriptor set=%u requires V5.1 frame emission", icd)
+        self.assertIn("descriptor_array_transport_required || image_descriptor_count > 0", icd)
+        self.assertIn("V5.1 frame required but disabled for this dispatch", icd)
+        self.assertIn("because PDOCKER_VULKAN_ALIAS_COPIES is active", icd)
 
     def test_vulkan_icd_records_buffer_image_copy_commands_before_dispatch(self):
         icd = VULKAN_ICD.read_text()
@@ -4014,6 +4049,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("q6_storage16_lowering_identity_hash", executor)
         self.assertIn("options->has_source_spirv_hash", executor)
         self.assertIn("options->source_spirv_hash", executor)
+        self.assertIn("q6_probe_effective_replay", executor)
+        self.assertIn("options->source_spirv_hash != options->effective_spirv_hash", executor)
+        self.assertIn("options->effective_spirv_hash == original_spirv_hash", executor)
+        self.assertIn("!q6_probe_effective_replay", executor)
+        self.assertIn("else if (q6_probe_effective_replay && q6_native_callsite_detected", executor)
+        self.assertIn("q6_final_store_pre_barrier_inserted = insert_q6k_final_store_pre_barrier", executor)
+        self.assertIn('\\"q6_probe_effective_replay\\":%s', executor)
         self.assertIn("Q6_STORAGE8_VAR_ID = 346", executor)
         self.assertIn("Q6_STORAGE16_VAR_ID = 371", executor)
         self.assertIn("OP_U_CONVERT", executor)

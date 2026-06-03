@@ -1,7 +1,7 @@
 {
   "adb_policy": "do not connect until the user says the Android device is prepared",
-  "artifact_path": "docs/test/llama-gpu-ngl1-q6-readonly-snapshot-192_168_43_47_34827-20260531T145546Z.json",
-  "created_utc": "2026-05-31T15:25:58Z",
+  "artifact_path": "docs/test/llama-gpu-ngl1-q6-workgroup-192_168_179_21_36763-20260603Tprobe-final-barrier.json",
+  "created_utc": "2026-06-03T05:27:39Z",
   "fail_branches": [
     {
       "action": "extend the SPIR-V materializer only for the reported specialization expression",
@@ -52,7 +52,7 @@
   "git_commit_expected_at_run_time": "record with git rev-parse HEAD immediately before run",
   "inputs": {
     "cpu_ctx": 512,
-    "cpu_tps": "0.04702448956650603",
+    "cpu_tps": "0.47024489566506034",
     "dockerfile_may_change": false,
     "gpu_ctx": 512,
     "gpu_layers": 1,
@@ -61,7 +61,7 @@
     "predict": 4,
     "prompt_may_change": false,
     "repeat": 1,
-    "serial": "192.168.43.47:34827"
+    "serial": "192.168.179.21:36763"
   },
   "must_not_report_complete_until": [
     "artifact exists",
@@ -80,6 +80,9 @@
     "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE": "1",
     "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC": "1",
     "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS": "1",
+    "PDOCKER_GPU_Q6K_COMPAT_REWRITES": "1",
+    "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT": "1",
+    "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING": "1",
     "PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION": "1",
     "PDOCKER_GPU_STRICT_PASSTHROUGH": "1",
     "PDOCKER_GPU_STRICT_RECONCILIATION": "1"
@@ -122,7 +125,7 @@
     "writeback_matches_final_store"
   ],
   "runner": "scripts/android-llama-gpu-q6-workgroup-run.sh",
-  "runner_command": "ANDROID_SERIAL=192.168.43.47:34827 scripts/android-llama-gpu-q6-workgroup-run.sh --out docs/test/llama-gpu-ngl1-q6-readonly-snapshot-192_168_43_47_34827-20260531T145546Z.json --cpu-tps 0.04702448956650603 --cpu-ctx 512 --gpu-ctx 512 --gpu-layers 1 --predict 4 --repeat 1",
+  "runner_command": "ANDROID_SERIAL=192.168.179.21:36763 scripts/android-llama-gpu-q6-workgroup-run.sh --out docs/test/llama-gpu-ngl1-q6-workgroup-192_168_179_21_36763-20260603Tprobe-final-barrier.json --cpu-tps 0.47024489566506034 --cpu-ctx 512 --gpu-ctx 512 --gpu-layers 1 --predict 4 --repeat 1",
   "runner_step_contract": [
     {
       "command": "scripts/plan-llama-gpu-q6-run.py",
@@ -157,6 +160,9 @@
         "PDOCKER_GPU_DISPATCH_PROFILE_RESPONSE": "1",
         "PDOCKER_GPU_LEGALIZE_WORKGROUP_SIZE_FROM_SPEC": "1",
         "PDOCKER_GPU_MATERIALIZE_SPIRV_SPECIALIZATION_CONSTANTS": "1",
+        "PDOCKER_GPU_Q6K_COMPAT_REWRITES": "1",
+        "PDOCKER_GPU_Q6K_READONLY_OVERLAP_SNAPSHOT": "1",
+        "PDOCKER_GPU_STRICT_DEVICE_LOCAL_STAGING": "1",
         "PDOCKER_GPU_STRICT_DUPLICATE_DESCRIPTOR_NORMALIZATION": "1",
         "PDOCKER_GPU_STRICT_PASSTHROUGH": "1",
         "PDOCKER_GPU_STRICT_RECONCILIATION": "1"

@@ -11977,11 +11977,17 @@ static int run_vulkan_dispatch_fd(
          is_q6k_matvec_hash(options->source_spirv_hash))
             ? options->source_spirv_hash
             : original_spirv_hash;
+    const int q6_probe_effective_replay =
+        options && options->has_source_spirv_hash &&
+        options->has_effective_spirv_hash &&
+        options->source_spirv_hash != options->effective_spirv_hash &&
+        options->effective_spirv_hash == original_spirv_hash;
     const int q6_native_callsite_detected =
         !q6k_safe_kernel_requested &&
         is_q6k_matvec_hash(q6_storage16_lowering_identity_hash);
     const int q6_compat_rewrites_enabled =
-        q6_native_callsite_detected && q6k_compat_rewrites_requested;
+        q6_native_callsite_detected && q6k_compat_rewrites_requested &&
+        !q6_probe_effective_replay;
     if (q6_compat_rewrites_enabled) {
         q6_storage16_loads_lowered = lower_q6k_storage16_loads_to_storage8(
             &shader_code,
@@ -11993,6 +11999,12 @@ static int run_vulkan_dispatch_fd(
             &shader_size,
             q6_storage16_lowering_identity_hash,
             &q6_u32_to_u8vec4_bitcasts_lowered_count);
+        q6_final_store_pre_barrier_inserted = insert_q6k_final_store_pre_barrier(
+            &shader_code,
+            &shader_size,
+            q6_storage16_lowering_identity_hash);
+    } else if (q6_probe_effective_replay && q6_native_callsite_detected &&
+               q6k_compat_rewrites_requested) {
         q6_final_store_pre_barrier_inserted = insert_q6k_final_store_pre_barrier(
             &shader_code,
             &shader_size,
@@ -13846,7 +13858,11 @@ static int run_vulkan_dispatch_fd(
     double queue_submit_start = now_ms();
     rc = vkQueueSubmit(rt->queue, 1, &submit, fence);
     timing_queue_submit_ms = now_ms() - queue_submit_start;
-    if (rc != VK_SUCCESS) goto cleanup;
+    if (rc != VK_SUCCESS) {
+        json_fail("submit-generic-dispatch", "vkQueueSubmit failed");
+        ret = 75;
+        goto cleanup;
+    }
     fail_stage = "wait-generic-fence";
     const uint64_t dispatch_timeout_ns =
         env_timeout_ns("PDOCKER_GPU_DISPATCH_TIMEOUT_MS", 30000, 1000, 600000);
@@ -14064,6 +14080,7 @@ static int run_vulkan_dispatch_fd(
                 "\"descriptor_sets\":%u,\"push_bytes\":%zu},"
                 "\"cpu_oracle_requested\":%s,"
                 "\"q6k_safe_kernel\":%s,"
+                "\"q6_probe_effective_replay\":%s,"
                 "\"q6_storage16_loads_lowered\":%s,"
                 "\"q6_storage16_loads_lowered_count\":%zu,"
                 "\"q6_u32_to_u8vec4_bitcasts_lowered\":%s,"
@@ -14097,6 +14114,7 @@ static int run_vulkan_dispatch_fd(
                 push_size,
                 cpu_oracle_requested ? "true" : "false",
                 q6k_safe_kernel_used ? "true" : "false",
+                q6_probe_effective_replay ? "true" : "false",
                 q6_storage16_loads_lowered ? "true" : "false",
                 q6_storage16_loads_lowered_count,
                 q6_u32_to_u8vec4_bitcasts_lowered ? "true" : "false",
@@ -14422,6 +14440,7 @@ static int run_vulkan_dispatch_fd(
                 "\"q4k_pipeline_retry_attempted\":%s,"
                 "\"local_size_patched\":%s,"
                 "\"float16_capability_added\":%s,"
+                "\"q6_probe_effective_replay\":%s,"
                 "\"q6_storage16_loads_lowered\":%s,"
                 "\"q6_storage16_loads_lowered_count\":%zu,"
                 "\"q6_u32_to_u8vec4_bitcasts_lowered\":%s,"
@@ -14518,6 +14537,7 @@ static int run_vulkan_dispatch_fd(
                 q4k_pipeline_retry_attempted ? "true" : "false",
                 local_size_patched ? "true" : "false",
                 float16_capability_added ? "true" : "false",
+                q6_probe_effective_replay ? "true" : "false",
                 q6_storage16_loads_lowered ? "true" : "false",
                 q6_storage16_loads_lowered_count,
                 q6_u32_to_u8vec4_bitcasts_lowered ? "true" : "false",
@@ -14682,6 +14702,7 @@ static int run_vulkan_dispatch_fd(
             "\"q4k_pipeline_retry_attempted\":%s,"
             "\"local_size_patched\":%s,"
             "\"float16_capability_added\":%s,"
+            "\"q6_probe_effective_replay\":%s,"
             "\"q6_storage16_loads_lowered\":%s,"
             "\"q6_storage16_loads_lowered_count\":%zu,"
             "\"q6_u32_to_u8vec4_bitcasts_lowered\":%s,"
@@ -14788,6 +14809,7 @@ static int run_vulkan_dispatch_fd(
             q4k_pipeline_retry_attempted ? "true" : "false",
             local_size_patched ? "true" : "false",
             float16_capability_added ? "true" : "false",
+            q6_probe_effective_replay ? "true" : "false",
             q6_storage16_loads_lowered ? "true" : "false",
             q6_storage16_loads_lowered_count,
             q6_u32_to_u8vec4_bitcasts_lowered ? "true" : "false",
@@ -14979,6 +15001,7 @@ cleanup:
                 "\"q4k_pipeline_retry_attempted\":%s,"
                 "\"local_size_patched\":%s,"
                 "\"float16_capability_added\":%s,"
+                "\"q6_probe_effective_replay\":%s,"
                 "\"q6_storage16_loads_lowered\":%s,"
                 "\"q6_storage16_loads_lowered_count\":%zu,"
                 "\"q6_u32_to_u8vec4_bitcasts_lowered\":%s,"
@@ -15021,6 +15044,7 @@ cleanup:
                 q4k_pipeline_retry_attempted ? "true" : "false",
                 local_size_patched ? "true" : "false",
                 float16_capability_added ? "true" : "false",
+                q6_probe_effective_replay ? "true" : "false",
                 q6_storage16_loads_lowered ? "true" : "false",
                 q6_storage16_loads_lowered_count,
                 q6_u32_to_u8vec4_bitcasts_lowered ? "true" : "false",
