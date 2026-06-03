@@ -599,6 +599,7 @@ typedef struct {
 
 typedef struct {
     VkRenderingFlags flags;
+    VkRect2D render_area;
     uint32_t layer_count;
     uint32_t view_mask;
     uint32_t color_attachment_count;
@@ -835,6 +836,7 @@ static bool append_graphics_rendering_snapshot(PdockerVkCommandBuffer *cmd,
     PdockerVkGraphicsRenderingSnapshot *snapshot = &cmd->graphics_rendering_ops[index];
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->flags = cmd->active_rendering_flags;
+    snapshot->render_area = cmd->active_render_area;
     snapshot->layer_count = cmd->active_rendering_layer_count;
     snapshot->view_mask = cmd->active_rendering_view_mask;
     snapshot->color_attachment_count = cmd->active_color_attachment_count;
@@ -2999,14 +3001,38 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
             ? pipeline->dynamic_rendering_color_attachment_count
             : pipeline->color_attachment_count;
         pipeline_entry->subpass = pipeline->subpass;
+        pipeline_entry->dynamic_rendering_view_mask = pipeline->dynamic_rendering_view_mask;
+        pipeline_entry->dynamic_rendering_depth_format = pipeline->dynamic_rendering_depth_format;
+        pipeline_entry->dynamic_rendering_stencil_format = pipeline->dynamic_rendering_stencil_format;
+        uint32_t *color_formats = &pipeline_entry->color_attachment_format0;
+        for (uint32_t c = 0; c < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++c) {
+            color_formats[c] = c < pipeline->dynamic_rendering_color_attachment_count
+                ? pipeline->dynamic_rendering_color_formats[c]
+                : VK_FORMAT_UNDEFINED;
+        }
         pipeline_entry->dynamic_state_mask = pipeline->dynamic_state_mask;
-        pipeline_entry->vertex_attribute_first = (uint32_t)vertex_attribute_count;
-        pipeline_entry->vertex_attribute_count = pipeline->vertex_attribute_count;
-        if (vertex_attribute_count + pipeline->vertex_attribute_count >
-            PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_ATTRIBUTES) {
+        pipeline_entry->vertex_binding_first = (uint32_t)vertex_binding_count;
+        pipeline_entry->vertex_binding_count = pipeline->vertex_binding_count;
+        if (vertex_binding_count + pipeline->vertex_binding_count >
+                PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS ||
+            vertex_attribute_count + pipeline->vertex_attribute_count >
+                PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_ATTRIBUTES) {
             rc = -E2BIG;
             goto cleanup;
         }
+        for (uint32_t b = 0; b < pipeline->vertex_binding_count; ++b) {
+            const VkVertexInputBindingDescription *src = &pipeline->vertex_bindings[b];
+            PdockerGpuVulkanGraphicsV6VertexBindingEntry *entry =
+                &vertex_bindings[vertex_binding_count++];
+            entry->binding = src->binding;
+            entry->stride = src->stride;
+            entry->input_rate = src->inputRate;
+            entry->buffer_resource_index = UINT32_MAX;
+            entry->offset = 0;
+            entry->size = 0;
+        }
+        pipeline_entry->vertex_attribute_first = (uint32_t)vertex_attribute_count;
+        pipeline_entry->vertex_attribute_count = pipeline->vertex_attribute_count;
         for (uint32_t a = 0; a < pipeline->vertex_attribute_count; ++a) {
             PdockerGpuVulkanGraphicsV6VertexAttributeEntry *attr =
                 &vertex_attributes[vertex_attribute_count++];
@@ -3082,7 +3108,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
         command->command_type = record->command_type;
         command->flags = record->flags;
         command->pipeline_index = UINT32_MAX;
+        command->descriptor_first_set = UINT32_MAX;
         command->index_buffer_resource_index = UINT32_MAX;
+        command->pipeline_layout_id = record->layout_id;
         if (record->pipeline) {
             int pipeline_index = find_graphics_pipeline_index(
                 pipeline_objects, pipeline_count, record->pipeline);
@@ -3109,6 +3137,12 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                 fds, &fd_count, submit_id);
             if (rc != 0) goto cleanup;
             command->attachment_count = (uint32_t)(attachment_count - command->attachment_first);
+            command->render_area_offset_x = snapshot->render_area.offset.x;
+            command->render_area_offset_y = snapshot->render_area.offset.y;
+            command->render_area_extent_width = snapshot->render_area.extent.width;
+            command->render_area_extent_height = snapshot->render_area.extent.height;
+            command->rendering_layer_count = snapshot->layer_count;
+            command->rendering_view_mask = snapshot->view_mask;
         } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS) {
             if (record->descriptor_bind_snapshot_index >= cmd->graphics_descriptor_bind_op_count) {
                 rc = -EPROTO;
@@ -3123,6 +3157,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                 &cmd->graphics_descriptor_bind_ops[record->descriptor_bind_snapshot_index];
             uint32_t dynamic_descriptor_count = 0;
             command->first_descriptor = (uint32_t)descriptor_count;
+            command->descriptor_first_set = snapshot->first_set;
             command->first_dynamic_offset = record->first_dynamic_offset;
             command->dynamic_offset_count = record->dynamic_offset_count;
             rc = collect_graphics_descriptor_entries(

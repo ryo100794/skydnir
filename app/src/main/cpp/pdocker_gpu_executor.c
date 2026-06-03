@@ -17325,6 +17325,10 @@ static int validate_vulkan_graphics_v6_frame_content(
         }
     }
     for (uint32_t i = 0; i < header->vertex_binding_count; ++i) {
+        if (vertex_bindings[i].buffer_resource_index == UINT32_MAX) {
+            if (vertex_bindings[i].offset != 0 || vertex_bindings[i].size != 0) return -EPROTO;
+            continue;
+        }
         if (vertex_bindings[i].buffer_resource_index >= header->resource_count) return -EPROTO;
         const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
             &resources[vertex_bindings[i].buffer_resource_index];
@@ -17393,6 +17397,15 @@ static int validate_vulkan_graphics_v6_frame_content(
         if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) &&
             command->pipeline_index == UINT32_MAX) return -EPROTO;
+        if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS) {
+            for (uint32_t b = 0; b < command->vertex_binding_count; ++b) {
+                const PdockerGpuVulkanGraphicsV6VertexBindingEntry *binding =
+                    &vertex_bindings[command->vertex_binding_first + b];
+                if (binding->buffer_resource_index == UINT32_MAX) return -EPROTO;
+            }
+        }
+        if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS &&
+            command->descriptor_first_set == UINT32_MAX) return -EPROTO;
         if (is_v61 && command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS) {
             uint32_t dynamic_descriptor_count = 0;
             for (uint32_t d = 0; d < command->descriptor_count; ++d) {

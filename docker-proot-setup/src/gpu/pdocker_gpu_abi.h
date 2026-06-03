@@ -539,12 +539,12 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
-#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_SCHEMA_HASH 0xecf6011339e6aa3bull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_SCHEMA_HASH 0x37218816fe25c7ddull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_SCHEMA_HASH 0x7a735aaa6fdc4e5aull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_ATTRIBUTE_SCHEMA_HASH 0x0a82d873c2a230c5ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_SCHEMA_HASH 0x29ca5fee670cb0e0ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_SCHEMA_HASH 0x0305d9e579f44e90ull
-#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH 0xd78747046862f030ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH 0x3e932210bbed0c3cull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_HEADER_EXTENSION_SCHEMA_HASH 0x042f652f20dad404ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_SCHEMA_HASH 0x4fed60f52743cc94ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_SCHEMA_HASH 0xfec2e2aff5874940ull
@@ -681,9 +681,28 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(color_attachment_count, u32) \
     X(subpass, u32) \
     X(depth_stencil_flags, u32) \
+    X(dynamic_rendering_view_mask, u32) \
+    X(dynamic_rendering_depth_format, u32) \
+    X(dynamic_rendering_stencil_format, u32) \
+    X(color_attachment_format0, u32) \
+    X(color_attachment_format1, u32) \
+    X(color_attachment_format2, u32) \
+    X(color_attachment_format3, u32) \
+    X(color_attachment_format4, u32) \
+    X(color_attachment_format5, u32) \
+    X(color_attachment_format6, u32) \
+    X(color_attachment_format7, u32) \
+    X(color_attachment_format8, u32) \
+    X(color_attachment_format9, u32) \
+    X(color_attachment_format10, u32) \
+    X(color_attachment_format11, u32) \
+    X(color_attachment_format12, u32) \
+    X(color_attachment_format13, u32) \
+    X(color_attachment_format14, u32) \
+    X(color_attachment_format15, u32) \
     X(dynamic_state_mask, u64) \
     X(pipeline_hash, u64)
-#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_FIELD_COUNT 19u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_FIELD_COUNT 38u
 
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_FIELDS(X) \
     X(binding, u32) \
@@ -761,6 +780,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(pipeline_index, u32) \
     X(first_descriptor, u32) \
     X(descriptor_count, u32) \
+    X(descriptor_first_set, u32) \
     X(first_dynamic_offset, u32) \
     X(dynamic_offset_count, u32) \
     X(vertex_binding_first, u32) \
@@ -776,13 +796,20 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(instance_count, u32) \
     X(attachment_first, u32) \
     X(attachment_count, u32) \
+    X(render_area_offset_x, i32) \
+    X(render_area_offset_y, i32) \
+    X(render_area_extent_width, u32) \
+    X(render_area_extent_height, u32) \
+    X(rendering_layer_count, u32) \
+    X(rendering_view_mask, u32) \
     X(dynamic_state_first, u32) \
     X(dynamic_state_count, u32) \
     X(index_offset, u64) \
     X(push_offset, u64) \
     X(push_size, u64) \
-    X(push_hash, u64)
-#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT 26u
+    X(push_hash, u64) \
+    X(pipeline_layout_id, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT 34u
 
 typedef struct PdockerGpuVulkanGraphicsV6FrameHeader {
     char magic[8];
@@ -889,6 +916,25 @@ typedef struct PdockerGpuVulkanGraphicsV6PipelineEntry {
     uint32_t color_attachment_count;
     uint32_t subpass;
     uint32_t depth_stencil_flags;
+    uint32_t dynamic_rendering_view_mask;
+    uint32_t dynamic_rendering_depth_format;
+    uint32_t dynamic_rendering_stencil_format;
+    uint32_t color_attachment_format0;
+    uint32_t color_attachment_format1;
+    uint32_t color_attachment_format2;
+    uint32_t color_attachment_format3;
+    uint32_t color_attachment_format4;
+    uint32_t color_attachment_format5;
+    uint32_t color_attachment_format6;
+    uint32_t color_attachment_format7;
+    uint32_t color_attachment_format8;
+    uint32_t color_attachment_format9;
+    uint32_t color_attachment_format10;
+    uint32_t color_attachment_format11;
+    uint32_t color_attachment_format12;
+    uint32_t color_attachment_format13;
+    uint32_t color_attachment_format14;
+    uint32_t color_attachment_format15;
     uint64_t dynamic_state_mask;
     uint64_t pipeline_hash;
 } PdockerGpuVulkanGraphicsV6PipelineEntry;
@@ -974,6 +1020,7 @@ typedef struct PdockerGpuVulkanGraphicsV6CommandEntry {
     uint32_t pipeline_index;
     uint32_t first_descriptor;
     uint32_t descriptor_count;
+    uint32_t descriptor_first_set;
     uint32_t first_dynamic_offset;
     uint32_t dynamic_offset_count;
     uint32_t vertex_binding_first;
@@ -989,12 +1036,19 @@ typedef struct PdockerGpuVulkanGraphicsV6CommandEntry {
     uint32_t instance_count;
     uint32_t attachment_first;
     uint32_t attachment_count;
+    int32_t render_area_offset_x;
+    int32_t render_area_offset_y;
+    uint32_t render_area_extent_width;
+    uint32_t render_area_extent_height;
+    uint32_t rendering_layer_count;
+    uint32_t rendering_view_mask;
     uint32_t dynamic_state_first;
     uint32_t dynamic_state_count;
     uint64_t index_offset;
     uint64_t push_offset;
     uint64_t push_size;
     uint64_t push_hash;
+    uint64_t pipeline_layout_id;
 } PdockerGpuVulkanGraphicsV6CommandEntry;
 
 #endif

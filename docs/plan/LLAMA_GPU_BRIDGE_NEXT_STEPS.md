@@ -1803,3 +1803,5 @@ running.  If the target is not running, the wait event records
 `stale-same-device-http-target-not-running` and refuses to use stale server
 output as Q6 evidence.  The next device run must therefore either keep the
 target container running or fail before prompt/evidence collection.
+
+- 2026-06-03: Graphics V6.1 ABI now carries explicit dynamic-rendering replay data needed to avoid heuristic reconstruction: render area, layer count, view mask, pipeline dynamic-rendering attachment formats, descriptor `firstSet`, and command pipeline-layout id.  Producer fills these fields; executor validation distinguishes static pipeline vertex input bindings from actual bound vertex buffers.
