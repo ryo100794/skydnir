@@ -2241,6 +2241,343 @@ static int send_empty_vulkan_graphics_v6_1_validation_frame(void) {
     return rc;
 }
 
+
+static int find_graphics_pipeline_index(
+        PdockerVkPipeline *const *pipelines,
+        size_t count,
+        const PdockerVkPipeline *pipeline) {
+    for (size_t i = 0; i < count; ++i) {
+        if (pipelines[i] == pipeline) return (int)i;
+    }
+    return -1;
+}
+
+static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer *cmd) {
+    if (!cmd || cmd->graphics_command_op_count == 0) {
+        return send_empty_vulkan_graphics_v6_1_validation_frame();
+    }
+    int socket_fd = connect_queue();
+    if (socket_fd < 0) return socket_fd;
+
+    PdockerVkPipeline *pipeline_objects[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
+    PdockerGpuVulkanGraphicsV6ShaderStageEntry shader_stages[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES];
+    PdockerGpuVulkanGraphicsV6PipelineEntry pipelines[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
+    PdockerGpuVulkanGraphicsV6VertexAttributeEntry vertex_attributes[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_ATTRIBUTES];
+    PdockerGpuVulkanGraphicsV6DynamicStateEntry dynamic_states[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_DYNAMIC_STATES];
+    PdockerGpuVulkanGraphicsV6CommandEntry commands[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS];
+    PdockerGpuVulkanGraphicsV61DynamicOffsetEntry dynamic_offsets[PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_DYNAMIC_OFFSETS];
+    PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry push_metadata[PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_PUSH_CONSTANT_METADATA];
+    int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS];
+    memset(pipeline_objects, 0, sizeof(pipeline_objects));
+    memset(shader_stages, 0, sizeof(shader_stages));
+    memset(pipelines, 0, sizeof(pipelines));
+    memset(vertex_attributes, 0, sizeof(vertex_attributes));
+    memset(dynamic_states, 0, sizeof(dynamic_states));
+    memset(commands, 0, sizeof(commands));
+    memset(dynamic_offsets, 0, sizeof(dynamic_offsets));
+    memset(push_metadata, 0, sizeof(push_metadata));
+    memset(fds, -1, sizeof(fds));
+
+    unsigned char *frame = (unsigned char *)calloc(1, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES);
+    if (!frame) {
+        close(socket_fd);
+        return -ENOMEM;
+    }
+    PdockerGpuVulkanGraphicsV61FrameHeader *frame_header =
+        (PdockerGpuVulkanGraphicsV61FrameHeader *)frame;
+    PdockerGpuVulkanGraphicsV6FrameHeader *header = &frame_header->base;
+    size_t cursor = sizeof(*frame_header);
+    size_t fd_count = 0;
+    size_t pipeline_count = 0;
+    size_t shader_stage_count = 0;
+    size_t vertex_attribute_count = 0;
+    size_t dynamic_state_count = 0;
+    size_t command_count = 0;
+    size_t dynamic_offset_count = 0;
+    size_t push_metadata_count = 0;
+    int rc = 0;
+
+    for (uint32_t i = 0; i < cmd->graphics_command_op_count; ++i) {
+        const PdockerVkGraphicsCommandRecord *record = &cmd->graphics_command_ops[i];
+        if (!record->pipeline) continue;
+        if (find_graphics_pipeline_index(pipeline_objects, pipeline_count, record->pipeline) >= 0) {
+            continue;
+        }
+        if (pipeline_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES) {
+            rc = -E2BIG;
+            goto cleanup;
+        }
+        PdockerVkPipeline *pipeline = record->pipeline;
+        if (pipeline->graphics_unsupported ||
+            pipeline->dynamic_rendering_format_overflow ||
+            pipeline->shader_stage_count > PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS ||
+            shader_stage_count + pipeline->shader_stage_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES) {
+            rc = -EOPNOTSUPP;
+            goto cleanup;
+        }
+        PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline_entry = &pipelines[pipeline_count];
+        pipeline_entry->pipeline_id = (uint64_t)(uintptr_t)pipeline;
+        pipeline_entry->layout_id = pipeline->layout ? pipeline->layout->layout_id : 0;
+        pipeline_entry->render_pass_id = (uint64_t)(uintptr_t)pipeline->render_pass;
+        pipeline_entry->shader_stage_first = (uint32_t)shader_stage_count;
+        pipeline_entry->shader_stage_count = pipeline->shader_stage_count;
+        pipeline_entry->topology = pipeline->topology;
+        pipeline_entry->polygon_mode = pipeline->polygon_mode;
+        pipeline_entry->cull_mode = pipeline->cull_mode;
+        pipeline_entry->front_face = pipeline->front_face;
+        pipeline_entry->rasterization_samples = pipeline->rasterization_samples;
+        pipeline_entry->color_attachment_count = pipeline->dynamic_rendering_pipeline
+            ? pipeline->dynamic_rendering_color_attachment_count
+            : pipeline->color_attachment_count;
+        pipeline_entry->subpass = pipeline->subpass;
+        pipeline_entry->dynamic_state_mask = pipeline->dynamic_state_mask;
+        pipeline_entry->vertex_attribute_first = (uint32_t)vertex_attribute_count;
+        pipeline_entry->vertex_attribute_count = pipeline->vertex_attribute_count;
+        if (vertex_attribute_count + pipeline->vertex_attribute_count >
+            PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_ATTRIBUTES) {
+            rc = -E2BIG;
+            goto cleanup;
+        }
+        for (uint32_t a = 0; a < pipeline->vertex_attribute_count; ++a) {
+            PdockerGpuVulkanGraphicsV6VertexAttributeEntry *attr =
+                &vertex_attributes[vertex_attribute_count++];
+            attr->location = pipeline->vertex_attributes[a].location;
+            attr->binding = pipeline->vertex_attributes[a].binding;
+            attr->format = pipeline->vertex_attributes[a].format;
+            attr->offset = pipeline->vertex_attributes[a].offset;
+        }
+        for (uint32_t stage_i = 0; stage_i < pipeline->shader_stage_count; ++stage_i) {
+            PdockerVkShaderModule *shader = pipeline->graphics_stage_modules[stage_i];
+            if (!shader || shader->code_fd < 0 || shader->code_size == 0 ||
+                fd_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
+                rc = -EINVAL;
+                goto cleanup;
+            }
+            const char *entry_name = pipeline->graphics_stage_entry_names[stage_i][0]
+                ? pipeline->graphics_stage_entry_names[stage_i]
+                : "main";
+            PdockerGpuVulkanGraphicsV6ShaderStageEntry *stage =
+                &shader_stages[shader_stage_count++];
+            stage->stage_flags = pipeline->graphics_stage_flags[stage_i];
+            stage->shader_fd_index = (uint32_t)fd_count;
+            stage->shader_size = shader->code_size;
+            stage->shader_hash =
+                (shader->code_map && shader->code_map != MAP_FAILED)
+                    ? fnv1a64_bytes(shader->code_map, shader->code_size)
+                    : 0;
+            stage->entry_name_size = strlen(entry_name);
+            rc = frame_append_bytes(frame, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES,
+                                    &cursor, entry_name, (size_t)stage->entry_name_size,
+                                    &stage->entry_name_offset);
+            if (rc != 0) goto cleanup;
+            fds[fd_count++] = shader->code_fd;
+        }
+        pipeline_entry->pipeline_hash =
+            fnv1a64_bytes(pipeline_entry, sizeof(*pipeline_entry));
+        pipeline_objects[pipeline_count++] = pipeline;
+    }
+
+    for (uint32_t i = 0; i < cmd->dynamic_state_count; ++i) {
+        if (dynamic_state_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_DYNAMIC_STATES) {
+            rc = -E2BIG;
+            goto cleanup;
+        }
+        const PdockerVkDynamicStateSnapshot *src = &cmd->dynamic_states[i];
+        PdockerGpuVulkanGraphicsV6DynamicStateEntry *dst =
+            &dynamic_states[dynamic_state_count++];
+        dst->state_type = src->state_type;
+        dst->first_index = src->first_index;
+        dst->count = src->count;
+        dst->data_size = src->data_size;
+        dst->data_hash = fnv1a64_bytes(src->data, src->data_size);
+        rc = frame_append_bytes(frame, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES,
+                                &cursor, src->data, src->data_size, &dst->data_offset);
+        if (rc != 0) goto cleanup;
+    }
+
+    for (uint32_t i = 0; i < cmd->graphics_dynamic_offset_count; ++i) {
+        if (dynamic_offset_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_DYNAMIC_OFFSETS) {
+            rc = -E2BIG;
+            goto cleanup;
+        }
+        dynamic_offsets[dynamic_offset_count++].offset = cmd->graphics_dynamic_offsets[i];
+    }
+
+    for (uint32_t i = 0; i < cmd->graphics_command_op_count; ++i) {
+        if (command_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) {
+            rc = -E2BIG;
+            goto cleanup;
+        }
+        const PdockerVkGraphicsCommandRecord *record = &cmd->graphics_command_ops[i];
+        PdockerGpuVulkanGraphicsV6CommandEntry *command = &commands[command_count];
+        command->command_type = record->command_type;
+        command->flags = record->flags;
+        command->pipeline_index = UINT32_MAX;
+        command->index_buffer_resource_index = UINT32_MAX;
+        if (record->pipeline) {
+            int pipeline_index = find_graphics_pipeline_index(
+                pipeline_objects, pipeline_count, record->pipeline);
+            if (pipeline_index < 0) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            command->pipeline_index = (uint32_t)pipeline_index;
+        }
+        if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS) {
+            if (record->descriptor_set_count != 0 || record->dynamic_offset_count != 0) {
+                rc = -EOPNOTSUPP;
+                goto cleanup;
+            }
+            command->first_dynamic_offset = record->first_dynamic_offset;
+            command->dynamic_offset_count = record->dynamic_offset_count;
+        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE) {
+            if (record->dynamic_state_index >= dynamic_state_count) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            command->dynamic_state_first = record->dynamic_state_index;
+            command->dynamic_state_count = 1;
+        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS) {
+            if (record->push_op_index >= cmd->push_constant_op_count ||
+                push_metadata_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_PUSH_CONSTANT_METADATA) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            const PdockerVkPushConstantOpSnapshot *push = &cmd->push_constant_ops[record->push_op_index];
+            if ((uint64_t)push->offset + (uint64_t)push->size > cmd->push_constant_size ||
+                push->size > PDOCKER_VK_MAX_PUSH_BYTES) {
+                rc = -ERANGE;
+                goto cleanup;
+            }
+            const uint8_t *push_data = cmd->push_constants + push->offset;
+            command->push_size = push->size;
+            command->push_hash = fnv1a64_bytes(push_data, push->size);
+            rc = frame_append_bytes(frame, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES,
+                                    &cursor, push_data, push->size, &command->push_offset);
+            if (rc != 0) goto cleanup;
+            PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry *meta =
+                &push_metadata[push_metadata_count++];
+            meta->command_index = (uint32_t)command_count;
+            meta->stage_flags = push->stage_flags;
+            meta->layout_id = push->layout_id;
+            meta->range_offset = push->offset;
+            meta->range_size = push->size;
+        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW ||
+                   record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) {
+            if (record->draw_snapshot_index >= cmd->graphics_draw_op_count) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            const PdockerVkGraphicsDrawSnapshot *draw =
+                &cmd->graphics_draw_ops[record->draw_snapshot_index];
+            if (draw->indirect || draw->vertex_buffer_bound || draw->index_buffer_bound) {
+                rc = -EOPNOTSUPP;
+                goto cleanup;
+            }
+            command->first_vertex = draw->first_vertex;
+            command->vertex_count = draw->vertex_count;
+            command->first_index = draw->first_index;
+            command->index_count = draw->index_count;
+            command->vertex_offset = draw->vertex_offset;
+            command->first_instance = draw->first_instance;
+            command->instance_count = draw->instance_count;
+        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS ||
+                   record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER) {
+            rc = -EOPNOTSUPP;
+            goto cleanup;
+        }
+        command_count++;
+    }
+
+    memcpy(header->magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, 8);
+    header->header_size = sizeof(*frame_header);
+    header->abi_major = PDOCKER_GPU_VULKAN_GRAPHICS_V6_ABI_MAJOR;
+    header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR;
+    header->command = PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT;
+    header->submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
+    header->fd_count = (uint32_t)fd_count;
+    header->resource_entry_size = sizeof(PdockerGpuVulkanDispatchV5ResourceEntry);
+    header->resource_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH;
+    header->descriptor_entry_size = sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry);
+    header->descriptor_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH;
+    header->image_entry_size = sizeof(PdockerGpuVulkanDispatchV5ImageEntry);
+    header->image_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_SCHEMA_HASH;
+    header->image_view_entry_size = sizeof(PdockerGpuVulkanDispatchV5ImageViewEntry);
+    header->image_view_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_SCHEMA_HASH;
+    header->sampler_entry_size = sizeof(PdockerGpuVulkanDispatchV5SamplerEntry);
+    header->sampler_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH;
+    header->shader_stage_count = (uint32_t)shader_stage_count;
+    header->shader_stage_entry_size = sizeof(PdockerGpuVulkanGraphicsV6ShaderStageEntry);
+    header->shader_stage_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH;
+    header->pipeline_count = (uint32_t)pipeline_count;
+    header->pipeline_entry_size = sizeof(PdockerGpuVulkanGraphicsV6PipelineEntry);
+    header->pipeline_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_SCHEMA_HASH;
+    header->vertex_binding_entry_size = sizeof(PdockerGpuVulkanGraphicsV6VertexBindingEntry);
+    header->vertex_binding_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_SCHEMA_HASH;
+    header->vertex_attribute_count = (uint32_t)vertex_attribute_count;
+    header->vertex_attribute_entry_size = sizeof(PdockerGpuVulkanGraphicsV6VertexAttributeEntry);
+    header->vertex_attribute_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_ATTRIBUTE_SCHEMA_HASH;
+    header->attachment_entry_size = sizeof(PdockerGpuVulkanGraphicsV6AttachmentEntry);
+    header->attachment_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_SCHEMA_HASH;
+    header->dynamic_state_count = (uint32_t)dynamic_state_count;
+    header->dynamic_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV6DynamicStateEntry);
+    header->dynamic_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_SCHEMA_HASH;
+    header->command_count = (uint32_t)command_count;
+    header->command_entry_size = sizeof(PdockerGpuVulkanGraphicsV6CommandEntry);
+    header->command_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH;
+    frame_header->v61.dynamic_offset_count = (uint32_t)dynamic_offset_count;
+    frame_header->v61.dynamic_offset_entry_size = sizeof(PdockerGpuVulkanGraphicsV61DynamicOffsetEntry);
+    frame_header->v61.dynamic_offset_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_SCHEMA_HASH;
+    frame_header->v61.push_constant_metadata_count = (uint32_t)push_metadata_count;
+    frame_header->v61.push_constant_metadata_entry_size = sizeof(PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry);
+    frame_header->v61.push_constant_metadata_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_SCHEMA_HASH;
+
+#define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
+    do { \
+        if ((count_) > 0) { \
+            rc = frame_append_bytes(frame, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES, \
+                                    &cursor, (data_), (entry_size_) * (count_), &(offset_field_)); \
+            if (rc != 0) goto cleanup; \
+            (size_field_) = (uint64_t)((entry_size_) * (count_)); \
+        } \
+    } while (0)
+    APPEND_GRAPHICS_TABLE(shader_stages, shader_stage_count, sizeof(shader_stages[0]),
+                          header->shader_stage_table_offset, header->shader_stage_table_size);
+    APPEND_GRAPHICS_TABLE(pipelines, pipeline_count, sizeof(pipelines[0]),
+                          header->pipeline_table_offset, header->pipeline_table_size);
+    APPEND_GRAPHICS_TABLE(vertex_attributes, vertex_attribute_count, sizeof(vertex_attributes[0]),
+                          header->vertex_attribute_table_offset, header->vertex_attribute_table_size);
+    APPEND_GRAPHICS_TABLE(dynamic_states, dynamic_state_count, sizeof(dynamic_states[0]),
+                          header->dynamic_state_table_offset, header->dynamic_state_table_size);
+    APPEND_GRAPHICS_TABLE(commands, command_count, sizeof(commands[0]),
+                          header->command_table_offset, header->command_table_size);
+    APPEND_GRAPHICS_TABLE(dynamic_offsets, dynamic_offset_count, sizeof(dynamic_offsets[0]),
+                          frame_header->v61.dynamic_offset_table_offset,
+                          frame_header->v61.dynamic_offset_table_size);
+    APPEND_GRAPHICS_TABLE(push_metadata, push_metadata_count, sizeof(push_metadata[0]),
+                          frame_header->v61.push_constant_metadata_table_offset,
+                          frame_header->v61.push_constant_metadata_table_size);
+#undef APPEND_GRAPHICS_TABLE
+    frame_header->v61.extension_hash = 1469598103934665603ull;
+    frame_header->v61.extension_hash = fnv1a64_update_bytes(
+        frame_header->v61.extension_hash, dynamic_offsets,
+        sizeof(dynamic_offsets[0]) * dynamic_offset_count);
+    frame_header->v61.extension_hash = fnv1a64_update_bytes(
+        frame_header->v61.extension_hash, push_metadata,
+        sizeof(push_metadata[0]) * push_metadata_count);
+    header->frame_size = cursor;
+    header->payload_hash = fnv1a64_bytes(frame + sizeof(*frame_header),
+                                         cursor - sizeof(*frame_header));
+    header->frame_hash = fnv1a64_bytes(frame, cursor);
+    rc = send_vulkan_graphics_v6_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
+    if (rc == 0) rc = read_dispatch_response_status(socket_fd, "VULKAN_GRAPHICS_V6.1");
+
+cleanup:
+    free(frame);
+    close(socket_fd);
+    return rc;
+}
+
 static int find_image_table_index(PdockerVkImage *const *images,
                                   size_t count,
                                   const PdockerVkImage *image) {
@@ -6951,7 +7288,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         PdockerVkPipeline *pipeline = pdocker_alloc_handle(sizeof(*pipeline));
         if (!pipeline) return VK_ERROR_OUT_OF_HOST_MEMORY;
         pipeline->graphics = true;
-        pipeline->graphics_unsupported = true;
+        pipeline->graphics_unsupported = false;
         const VkGraphicsPipelineCreateInfo *ci = &pCreateInfos[i];
         pipeline->layout = (PdockerVkPipelineLayout *)ci->layout;
         pipeline->render_pass = (PdockerVkRenderPass *)ci->renderPass;
@@ -9238,7 +9575,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             }
             if (cmd->graphics_unsupported) {
                 if (env_truthy_default("PDOCKER_VULKAN_GRAPHICS_V6_VALIDATE_PRODUCER", false)) {
-                    int graphics_rc = send_empty_vulkan_graphics_v6_1_validation_frame();
+                    int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(cmd);
                     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                         fprintf(stderr,
                                 "pdocker-vulkan-icd: graphics V6.1 validation producer rc=%d\n",

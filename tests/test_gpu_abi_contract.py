@@ -723,7 +723,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "struct PdockerVkRenderPass",
             "struct PdockerVkFramebuffer",
             "pipeline->graphics = true;",
-            "pipeline->graphics_unsupported = true;",
+            "pipeline->graphics_unsupported = false;",
             "PdockerVkPipeline *compute_pipeline;",
             "PdockerVkPipeline *graphics_pipeline;",
             "uint64_t layout_id;",
@@ -744,6 +744,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->graphics_pipeline = (PdockerVkPipeline *)pipeline;",
             "send_vulkan_graphics_v6_frame_with_fds",
             "send_empty_vulkan_graphics_v6_1_validation_frame",
+            "send_recorded_vulkan_graphics_v6_1_frame",
+            "find_graphics_pipeline_index",
+            "PdockerGpuVulkanGraphicsV6ShaderStageEntry shader_stages",
+            "PdockerGpuVulkanGraphicsV6PipelineEntry pipelines",
+            "PdockerGpuVulkanGraphicsV6CommandEntry commands",
+            "send_recorded_vulkan_graphics_v6_1_frame(cmd)",
+            "command->vertex_count = draw->vertex_count;",
+            "command->push_hash = fnv1a64_bytes(push_data, push->size);",
             "PDOCKER_VULKAN_GRAPHICS_V6_VALIDATE_PRODUCER",
             "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR;",
             "frame.v61.extension_hash = 1469598103934665603ull;",
@@ -881,6 +889,9 @@ class GpuAbiContractTest(unittest.TestCase):
         executor = GPU_EXECUTOR.read_text()
         for marker in [
             "connection_starts_with_graphics_v6_magic",
+            "typedef struct VulkanGraphicsV6FrameView",
+            "init_vulkan_graphics_v6_frame_view",
+            "describe_vulkan_graphics_v6_frame",
             "validate_vulkan_graphics_v6_header",
             "recv_vulkan_graphics_v6_header_with_fds",
             "validate_vulkan_graphics_v6_frame_content",
@@ -905,6 +916,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "attachment->image_view_index >= header->image_view_count",
             "header->flags != 0",
             "command->pipeline_index != UINT32_MAX",
+            '\\"stage\\":\\"vulkan-graphics-v6-describe\\"',
+            '\\"execution_implemented\\":false',
+            "describe_vulkan_graphics_v6_frame(json_out(), &view);",
             "graphics execution is not implemented",
         ]:
             self.assertIn(marker, executor)
