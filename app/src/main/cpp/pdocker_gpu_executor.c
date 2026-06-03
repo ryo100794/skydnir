@@ -17078,6 +17078,20 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV6CommandEntry *commands = view.commands;
     const PdockerGpuVulkanGraphicsV61DynamicOffsetEntry *dynamic_offsets = view.dynamic_offsets;
     const PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry *push_metadata = view.push_constant_metadata;
+    const size_t frame_hash_offset = offsetof(PdockerGpuVulkanGraphicsV6FrameHeader, frame_hash);
+    uint64_t payload_hash = fnv1a64_update(1469598103934665603ull,
+                                           frame + header->header_size,
+                                           (size_t)(header->frame_size - header->header_size));
+    if (payload_hash != header->payload_hash) return -EPROTO;
+    uint64_t zero_frame_hash = 0;
+    uint64_t frame_hash = 1469598103934665603ull;
+    frame_hash = fnv1a64_update(frame_hash, frame, frame_hash_offset);
+    frame_hash = fnv1a64_update(frame_hash, &zero_frame_hash, sizeof(zero_frame_hash));
+    frame_hash = fnv1a64_update(frame_hash,
+                                frame + frame_hash_offset + sizeof(header->frame_hash),
+                                (size_t)(header->frame_size -
+                                         (frame_hash_offset + sizeof(header->frame_hash))));
+    if (frame_hash != header->frame_hash) return -EPROTO;
     if (is_v61) {
         uint64_t extension_hash = 1469598103934665603ull;
         extension_hash = fnv1a64_update(extension_hash, dynamic_offsets, (size_t)header_v61->v61.dynamic_offset_table_size);
@@ -17086,7 +17100,6 @@ static int validate_vulkan_graphics_v6_frame_content(
     }
 
     (void)samplers;
-    (void)vertex_attributes;
     for (uint32_t i = 0; i < header->resource_count; ++i) {
         const PdockerGpuVulkanDispatchV5ResourceEntry *resource = &resources[i];
         switch (resource->resource_type) {
@@ -17173,6 +17186,20 @@ static int validate_vulkan_graphics_v6_frame_content(
             !payload_range_valid(stage->specialization_offset, stage->specialization_size, header->frame_size)) {
             return -EPROTO;
         }
+        if (stage->shader_hash == 0) return -EPROTO;
+        if (stage->shader_size > SIZE_MAX) return -EOVERFLOW;
+        uint64_t shader_hash = full_fd_hash(passed_fds[stage->shader_fd_index],
+                                            0, (size_t)stage->shader_size);
+        if (shader_hash != stage->shader_hash) return -EPROTO;
+        if (stage->specialization_size > 0) {
+            uint64_t specialization_hash = fnv1a64_update(1469598103934665603ull,
+                                                          frame + stage->specialization_offset,
+                                                          (size_t)stage->specialization_size);
+            if (specialization_hash != stage->specialization_hash) return -EPROTO;
+        } else if (stage->specialization_hash != 0 &&
+                   stage->specialization_hash != 1469598103934665603ull) {
+            return -EPROTO;
+        }
     }
     for (uint32_t i = 0; i < header->pipeline_count; ++i) {
         const PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline = &pipelines[i];
@@ -17180,6 +17207,20 @@ static int validate_vulkan_graphics_v6_frame_content(
             !range_add_u32(pipeline->vertex_binding_first, pipeline->vertex_binding_count, header->vertex_binding_count) ||
             !range_add_u32(pipeline->vertex_attribute_first, pipeline->vertex_attribute_count, header->vertex_attribute_count)) {
             return -EPROTO;
+        }
+        for (uint32_t a = 0; a < pipeline->vertex_attribute_count; ++a) {
+            const PdockerGpuVulkanGraphicsV6VertexAttributeEntry *attribute =
+                &vertex_attributes[pipeline->vertex_attribute_first + a];
+            int binding_found = 0;
+            for (uint32_t b = 0; b < pipeline->vertex_binding_count; ++b) {
+                const PdockerGpuVulkanGraphicsV6VertexBindingEntry *binding =
+                    &vertex_bindings[pipeline->vertex_binding_first + b];
+                if (attribute->binding == binding->binding) {
+                    binding_found = 1;
+                    break;
+                }
+            }
+            if (!binding_found) return -EPROTO;
         }
     }
     for (uint32_t i = 0; i < header->vertex_binding_count; ++i) {
@@ -17202,6 +17243,10 @@ static int validate_vulkan_graphics_v6_frame_content(
     for (uint32_t i = 0; i < header->dynamic_state_count; ++i) {
         const PdockerGpuVulkanGraphicsV6DynamicStateEntry *state = &dynamic_states[i];
         if (!payload_range_valid(state->data_offset, state->data_size, header->frame_size)) return -EPROTO;
+        uint64_t data_hash = fnv1a64_update(1469598103934665603ull,
+                                            frame + state->data_offset,
+                                            (size_t)state->data_size);
+        if (data_hash != state->data_hash) return -EPROTO;
     }
     if (is_v61) {
         for (uint32_t i = 0; i < header_v61->v61.dynamic_offset_count; ++i) {
@@ -17244,6 +17289,9 @@ static int validate_vulkan_graphics_v6_frame_content(
             (is_v61 && !range_add_u32(command->first_dynamic_offset, command->dynamic_offset_count, header_v61->v61.dynamic_offset_count))) {
             return -EPROTO;
         }
+        if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW ||
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) &&
+            command->pipeline_index == UINT32_MAX) return -EPROTO;
         if (is_v61 && command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS) {
             uint32_t dynamic_descriptor_count = 0;
             for (uint32_t d = 0; d < command->descriptor_count; ++d) {
