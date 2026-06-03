@@ -2146,10 +2146,99 @@ static int send_vulkan_dispatch_v5_frame_with_fds(
                           frame_size - sizeof(PdockerGpuVulkanDispatchV5FrameHeader));
 }
 
+
+static int send_vulkan_graphics_v6_frame_with_fds(
+        int socket_fd,
+        const unsigned char *frame,
+        size_t frame_size,
+        const int *fds,
+        size_t fd_count) {
+    if (socket_fd < 0 || !frame || frame_size < sizeof(PdockerGpuVulkanGraphicsV6FrameHeader) ||
+        fd_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS || (fd_count > 0 && !fds)) {
+        return -EINVAL;
+    }
+    char control[CMSG_SPACE(sizeof(int) * PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS)];
+    struct iovec iov;
+    struct msghdr msg;
+    memset(control, 0, sizeof(control));
+    memset(&iov, 0, sizeof(iov));
+    memset(&msg, 0, sizeof(msg));
+    iov.iov_base = (void *)frame;
+    iov.iov_len = sizeof(PdockerGpuVulkanGraphicsV6FrameHeader);
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    if (fd_count > 0) {
+        msg.msg_control = control;
+        msg.msg_controllen = sizeof(control);
+        struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type = SCM_RIGHTS;
+        cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fd_count);
+        memcpy(CMSG_DATA(cmsg), fds, sizeof(int) * fd_count);
+        msg.msg_controllen = CMSG_SPACE(sizeof(int) * fd_count);
+    }
+    if (sendmsg(socket_fd, &msg, 0) < 0) return -errno;
+    return write_exact_fd(socket_fd,
+                          frame + sizeof(PdockerGpuVulkanGraphicsV6FrameHeader),
+                          frame_size - sizeof(PdockerGpuVulkanGraphicsV6FrameHeader));
+}
+
 static uint32_t float_bits_u32(float value) {
     uint32_t bits = 0;
     memcpy(&bits, &value, sizeof(bits));
     return bits;
+}
+
+
+static int send_empty_vulkan_graphics_v6_1_validation_frame(void) {
+    int socket_fd = connect_queue();
+    if (socket_fd < 0) return socket_fd;
+    PdockerGpuVulkanGraphicsV61FrameHeader frame;
+    memset(&frame, 0, sizeof(frame));
+    PdockerGpuVulkanGraphicsV6FrameHeader *header = &frame.base;
+    memcpy(header->magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, 8);
+    header->header_size = sizeof(frame);
+    header->abi_major = PDOCKER_GPU_VULKAN_GRAPHICS_V6_ABI_MAJOR;
+    header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR;
+    header->command = PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT;
+    header->frame_size = sizeof(frame);
+    header->submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
+    header->resource_entry_size = sizeof(PdockerGpuVulkanDispatchV5ResourceEntry);
+    header->resource_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH;
+    header->descriptor_entry_size = sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry);
+    header->descriptor_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH;
+    header->image_entry_size = sizeof(PdockerGpuVulkanDispatchV5ImageEntry);
+    header->image_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_SCHEMA_HASH;
+    header->image_view_entry_size = sizeof(PdockerGpuVulkanDispatchV5ImageViewEntry);
+    header->image_view_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_IMAGE_VIEW_SCHEMA_HASH;
+    header->sampler_entry_size = sizeof(PdockerGpuVulkanDispatchV5SamplerEntry);
+    header->sampler_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_SAMPLER_SCHEMA_HASH;
+    header->shader_stage_entry_size = sizeof(PdockerGpuVulkanGraphicsV6ShaderStageEntry);
+    header->shader_stage_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH;
+    header->pipeline_entry_size = sizeof(PdockerGpuVulkanGraphicsV6PipelineEntry);
+    header->pipeline_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_PIPELINE_SCHEMA_HASH;
+    header->vertex_binding_entry_size = sizeof(PdockerGpuVulkanGraphicsV6VertexBindingEntry);
+    header->vertex_binding_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_BINDING_SCHEMA_HASH;
+    header->vertex_attribute_entry_size = sizeof(PdockerGpuVulkanGraphicsV6VertexAttributeEntry);
+    header->vertex_attribute_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_VERTEX_ATTRIBUTE_SCHEMA_HASH;
+    header->attachment_entry_size = sizeof(PdockerGpuVulkanGraphicsV6AttachmentEntry);
+    header->attachment_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_SCHEMA_HASH;
+    header->dynamic_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV6DynamicStateEntry);
+    header->dynamic_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_SCHEMA_HASH;
+    header->command_entry_size = sizeof(PdockerGpuVulkanGraphicsV6CommandEntry);
+    header->command_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH;
+    frame.v61.dynamic_offset_entry_size = sizeof(PdockerGpuVulkanGraphicsV61DynamicOffsetEntry);
+    frame.v61.dynamic_offset_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_SCHEMA_HASH;
+    frame.v61.push_constant_metadata_entry_size = sizeof(PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry);
+    frame.v61.push_constant_metadata_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_SCHEMA_HASH;
+    frame.v61.extension_hash = 1469598103934665603ull;
+    header->payload_hash = 1469598103934665603ull;
+    header->frame_hash = fnv1a64_bytes(&frame, sizeof(frame));
+    int rc = send_vulkan_graphics_v6_frame_with_fds(
+        socket_fd, (const unsigned char *)&frame, sizeof(frame), NULL, 0);
+    if (rc == 0) rc = read_dispatch_response_status(socket_fd, "VULKAN_GRAPHICS_V6.1");
+    close(socket_fd);
+    return rc;
 }
 
 static int find_image_table_index(PdockerVkImage *const *images,
@@ -9148,6 +9237,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 return VK_ERROR_FEATURE_NOT_PRESENT;
             }
             if (cmd->graphics_unsupported) {
+                if (env_truthy_default("PDOCKER_VULKAN_GRAPHICS_V6_VALIDATE_PRODUCER", false)) {
+                    int graphics_rc = send_empty_vulkan_graphics_v6_1_validation_frame();
+                    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                        fprintf(stderr,
+                                "pdocker-vulkan-icd: graphics V6.1 validation producer rc=%d\n",
+                                graphics_rc);
+                    }
+                }
                 trace_icd_runtime_failure("graphics-command-unimplemented",
                                           VK_ERROR_FEATURE_NOT_PRESENT);
                 return VK_ERROR_FEATURE_NOT_PRESENT;

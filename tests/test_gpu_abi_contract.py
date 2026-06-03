@@ -742,6 +742,13 @@ class GpuAbiContractTest(unittest.TestCase):
             "pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS",
             "cmd->compute_pipeline = (PdockerVkPipeline *)pipeline;",
             "cmd->graphics_pipeline = (PdockerVkPipeline *)pipeline;",
+            "send_vulkan_graphics_v6_frame_with_fds",
+            "send_empty_vulkan_graphics_v6_1_validation_frame",
+            "PDOCKER_VULKAN_GRAPHICS_V6_VALIDATE_PRODUCER",
+            "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR;",
+            "frame.v61.extension_hash = 1469598103934665603ull;",
+            "CMSG_SPACE(sizeof(int) * PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS)",
+            "frame + sizeof(PdockerGpuVulkanGraphicsV6FrameHeader)",
             "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE;",
             "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING;",
             "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING;",
@@ -874,7 +881,6 @@ class GpuAbiContractTest(unittest.TestCase):
         executor = GPU_EXECUTOR.read_text()
         for marker in [
             "connection_starts_with_graphics_v6_magic",
-            "PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC",
             "validate_vulkan_graphics_v6_header",
             "recv_vulkan_graphics_v6_header_with_fds",
             "validate_vulkan_graphics_v6_frame_content",
@@ -4329,6 +4335,7 @@ class GpuAbiContractTest(unittest.TestCase):
         internal_only = {
             "PDOCKER_GPU_QUEUE_SOCKET",
             "PDOCKER_GPU_SHARED_DIR",
+            "PDOCKER_VULKAN_GRAPHICS_V6_VALIDATE_PRODUCER",
         }
         app_process_only = set(
             manifest.get("env_bridge_classifications", {}).get("app_process_only", [])
