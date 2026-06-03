@@ -112,6 +112,7 @@ typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES 32
 #define PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES 64
 #define PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS 128
+#define PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS 128
 #define PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS 512
 #define PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS 4096
 #define PDOCKER_VK_MAX_QUERY_COUNT 4096
@@ -587,6 +588,15 @@ typedef struct {
 } PdockerVkGraphicsDrawSnapshot;
 
 typedef struct {
+    uint32_t first_set;
+    uint32_t descriptor_set_count;
+    uint32_t first_dynamic_offset;
+    uint32_t dynamic_offset_count;
+    PdockerVkDescriptorSet set_snapshots[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+    bool set_snapshot_used[PDOCKER_VK_MAX_DESCRIPTOR_SETS];
+} PdockerVkGraphicsDescriptorBindSnapshot;
+
+typedef struct {
     uint32_t command_type;
     uint32_t flags;
     PdockerVkPipeline *pipeline;
@@ -595,6 +605,7 @@ typedef struct {
     uint32_t descriptor_set_count;
     uint32_t first_dynamic_offset;
     uint32_t dynamic_offset_count;
+    uint32_t descriptor_bind_snapshot_index;
     uint32_t dynamic_state_index;
     uint32_t draw_snapshot_index;
     uint32_t push_op_index;
@@ -637,6 +648,9 @@ typedef struct {
     uint32_t command_op_count;
     PdockerVkGraphicsDrawSnapshot graphics_draw_ops[PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS];
     uint32_t graphics_draw_op_count;
+    PdockerVkGraphicsDescriptorBindSnapshot
+        graphics_descriptor_bind_ops[PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS];
+    uint32_t graphics_descriptor_bind_op_count;
     PdockerVkGraphicsCommandRecord graphics_command_ops[PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS];
     uint32_t graphics_command_op_count;
     uint32_t graphics_dynamic_offsets[PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS];
@@ -813,6 +827,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
     cmd->image_barrier_op_count = 0;
     cmd->dispatch_op_count = 0;
     cmd->graphics_draw_op_count = 0;
+    cmd->graphics_descriptor_bind_op_count = 0;
     cmd->graphics_command_op_count = 0;
     cmd->graphics_dynamic_offset_count = 0;
     cmd->push_constant_op_count = 0;
@@ -2386,6 +2401,112 @@ static int collect_graphics_buffer_resource(
     return (int)index;
 }
 
+static bool descriptor_type_supported_by_v4_transport(VkDescriptorType type);
+static bool descriptor_type_supported_by_v5_object_transport(VkDescriptorType type);
+static int validate_descriptor_transport_shape(
+        const PdockerVkDescriptorBinding *binding,
+        uint32_t set_index,
+        uint32_t binding_index,
+        size_t *effective_size);
+
+static int collect_graphics_descriptor_entries(
+        PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors,
+        size_t *descriptor_count,
+        PdockerGpuVulkanDispatchV5ResourceEntry *resources,
+        size_t *resource_count,
+        PdockerVkMemory **memory_objects,
+        uint32_t *memory_resource_indices,
+        size_t *memory_count,
+        PdockerVkBuffer **buffer_objects,
+        uint32_t *buffer_resource_indices,
+        size_t *buffer_count,
+        int *fds,
+        size_t *fd_count,
+        const PdockerVkGraphicsDescriptorBindSnapshot *snapshot,
+        uint64_t generation,
+        uint32_t *dynamic_descriptor_count_out) {
+    if (dynamic_descriptor_count_out) *dynamic_descriptor_count_out = 0;
+    if (!descriptors || !descriptor_count || !resources || !resource_count ||
+        !snapshot || !dynamic_descriptor_count_out) {
+        return -EINVAL;
+    }
+    if (snapshot->descriptor_set_count > PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
+        snapshot->first_set > PDOCKER_VK_MAX_DESCRIPTOR_SETS ||
+        snapshot->descriptor_set_count > PDOCKER_VK_MAX_DESCRIPTOR_SETS - snapshot->first_set) {
+        return -ERANGE;
+    }
+    uint32_t dynamic_descriptor_count = 0;
+    for (uint32_t set_i = 0; set_i < snapshot->descriptor_set_count; ++set_i) {
+        uint32_t set_index = snapshot->first_set + set_i;
+        if (!snapshot->set_snapshot_used[set_index]) return -EPROTO;
+        const PdockerVkDescriptorSet *set = &snapshot->set_snapshots[set_index];
+        const PdockerVkDescriptorSetLayout *layout = set->layout;
+        if (set->unsupported_descriptor_array || set->unsupported_descriptor_type ||
+            (layout && (layout->unsupported_descriptor_array || layout->unsupported_descriptor_type))) {
+            return -EOPNOTSUPP;
+        }
+        uint32_t binding_limit = layout ? layout->storage_binding_count : PDOCKER_VK_MAX_STORAGE_BUFFERS;
+        if (binding_limit > PDOCKER_VK_MAX_STORAGE_BUFFERS) return -E2BIG;
+        for (uint32_t binding_index = 0; binding_index < binding_limit; ++binding_index) {
+            uint32_t array_limit = layout
+                ? layout->storage_binding_counts[binding_index]
+                : PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
+            if (array_limit == 0 && !layout) array_limit = PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
+            if (array_limit > PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS) return -E2BIG;
+            for (uint32_t array_element = 0; array_element < array_limit; ++array_element) {
+                const PdockerVkDescriptorBinding *binding =
+                    &set->storage_buffers[binding_index][array_element];
+                if (!binding->buffer && !binding->image_view && !binding->sampler) continue;
+                if (descriptor_type_supported_by_v5_object_transport(binding->descriptor_type) ||
+                    binding->image_view || binding->sampler) {
+                    return -EOPNOTSUPP;
+                }
+                if (!descriptor_type_supported_by_v4_transport(binding->descriptor_type)) {
+                    return -EOPNOTSUPP;
+                }
+                size_t bytes = 0;
+                int rc = validate_descriptor_transport_shape(
+                    binding, set_index, binding_index, &bytes);
+                if (rc < 0) return rc;
+                int buffer_index = collect_graphics_buffer_resource(
+                    resources, resource_count,
+                    memory_objects, memory_resource_indices, memory_count,
+                    buffer_objects, buffer_resource_indices, buffer_count,
+                    fds, fd_count, binding->buffer, generation);
+                if (buffer_index < 0) return buffer_index;
+                if (*descriptor_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS) {
+                    return -E2BIG;
+                }
+                PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
+                    &descriptors[(*descriptor_count)++];
+                memset(descriptor, 0, sizeof(*descriptor));
+                descriptor->descriptor_set = set_index;
+                descriptor->binding = binding_index;
+                descriptor->array_element = array_element;
+                descriptor->descriptor_type = binding->descriptor_type;
+                descriptor->descriptor_flags =
+                    (binding->dynamic ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC : 0u) |
+                    (binding->range == VK_WHOLE_SIZE ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_WHOLE_SIZE : 0u) |
+                    (array_element ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_ARRAY_ENTRY : 0u);
+                descriptor->access_flags = PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE;
+                descriptor->resource_index = (uint32_t)buffer_index;
+                descriptor->image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+                descriptor->sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+                descriptor->image_layout = 0;
+                descriptor->resource_id = (uint64_t)(uintptr_t)binding->buffer;
+                descriptor->buffer_offset = (uint64_t)binding->base_offset;
+                descriptor->range = (uint64_t)binding->range;
+                descriptor->transfer_offset = (uint64_t)binding->offset;
+                descriptor->transfer_size = (uint64_t)bytes;
+                descriptor->dynamic_offset = (uint64_t)binding->dynamic_offset;
+                if (binding->dynamic) dynamic_descriptor_count++;
+            }
+        }
+    }
+    *dynamic_descriptor_count_out = dynamic_descriptor_count;
+    return 0;
+}
+
 static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer *cmd) {
     if (!cmd || cmd->graphics_command_op_count == 0) {
         return send_empty_vulkan_graphics_v6_1_validation_frame();
@@ -2399,6 +2520,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     PdockerVkBuffer *buffer_objects[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
     uint32_t buffer_resource_indices[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
     PdockerGpuVulkanDispatchV5ResourceEntry resources[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES];
+    PdockerGpuVulkanDispatchV5DescriptorObjectEntry descriptors[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS];
     PdockerGpuVulkanGraphicsV6ShaderStageEntry shader_stages[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES];
     PdockerGpuVulkanGraphicsV6PipelineEntry pipelines[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
     PdockerGpuVulkanGraphicsV6VertexBindingEntry vertex_bindings[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS];
@@ -2414,6 +2536,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     memset(buffer_objects, 0, sizeof(buffer_objects));
     memset(buffer_resource_indices, 0, sizeof(buffer_resource_indices));
     memset(resources, 0, sizeof(resources));
+    memset(descriptors, 0, sizeof(descriptors));
     memset(shader_stages, 0, sizeof(shader_stages));
     memset(pipelines, 0, sizeof(pipelines));
     memset(vertex_bindings, 0, sizeof(vertex_bindings));
@@ -2435,6 +2558,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     size_t cursor = sizeof(*frame_header);
     size_t fd_count = 0;
     size_t resource_count = 0;
+    size_t descriptor_count = 0;
     size_t memory_count = 0;
     size_t buffer_count = 0;
     size_t pipeline_count = 0;
@@ -2575,12 +2699,32 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
             command->pipeline_index = (uint32_t)pipeline_index;
         }
         if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS) {
-            if (record->descriptor_set_count != 0 || record->dynamic_offset_count != 0) {
-                rc = -EOPNOTSUPP;
+            if (record->descriptor_bind_snapshot_index >= cmd->graphics_descriptor_bind_op_count) {
+                rc = -EPROTO;
                 goto cleanup;
             }
+            if (record->first_dynamic_offset > dynamic_offset_count ||
+                record->dynamic_offset_count > dynamic_offset_count - record->first_dynamic_offset) {
+                rc = -ERANGE;
+                goto cleanup;
+            }
+            const PdockerVkGraphicsDescriptorBindSnapshot *snapshot =
+                &cmd->graphics_descriptor_bind_ops[record->descriptor_bind_snapshot_index];
+            uint32_t dynamic_descriptor_count = 0;
+            command->first_descriptor = (uint32_t)descriptor_count;
             command->first_dynamic_offset = record->first_dynamic_offset;
             command->dynamic_offset_count = record->dynamic_offset_count;
+            rc = collect_graphics_descriptor_entries(
+                descriptors, &descriptor_count, resources, &resource_count,
+                memory_objects, memory_resource_indices, &memory_count,
+                buffer_objects, buffer_resource_indices, &buffer_count,
+                fds, &fd_count, snapshot, submit_id, &dynamic_descriptor_count);
+            if (rc != 0) goto cleanup;
+            if (dynamic_descriptor_count != record->dynamic_offset_count) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            command->descriptor_count = (uint32_t)(descriptor_count - command->first_descriptor);
         } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE) {
             if (record->dynamic_state_index >= dynamic_state_count) {
                 rc = -EPROTO;
@@ -2703,6 +2847,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     header->resource_count = (uint32_t)resource_count;
     header->resource_entry_size = sizeof(PdockerGpuVulkanDispatchV5ResourceEntry);
     header->resource_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_RESOURCE_SCHEMA_HASH;
+    header->descriptor_count = (uint32_t)descriptor_count;
     header->descriptor_entry_size = sizeof(PdockerGpuVulkanDispatchV5DescriptorObjectEntry);
     header->descriptor_schema_hash = PDOCKER_GPU_VULKAN_DISPATCH_V5_DESCRIPTOR_OBJECT_SCHEMA_HASH;
     header->image_entry_size = sizeof(PdockerGpuVulkanDispatchV5ImageEntry);
@@ -2749,6 +2894,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     } while (0)
     APPEND_GRAPHICS_TABLE(resources, resource_count, sizeof(resources[0]),
                           header->resource_table_offset, header->resource_table_size);
+    APPEND_GRAPHICS_TABLE(descriptors, descriptor_count, sizeof(descriptors[0]),
+                          header->descriptor_table_offset, header->descriptor_table_size);
     APPEND_GRAPHICS_TABLE(shader_stages, shader_stage_count, sizeof(shader_stages[0]),
                           header->shader_stage_table_offset, header->shader_stage_table_size);
     APPEND_GRAPHICS_TABLE(pipelines, pipeline_count, sizeof(pipelines[0]),
@@ -8819,6 +8966,23 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             }
         }
         if (pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+            if (cmd->graphics_descriptor_bind_op_count >= PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS) {
+                cmd->unsupported_descriptor_set_layout = true;
+                return;
+            }
+            uint32_t bind_snapshot_index = cmd->graphics_descriptor_bind_op_count++;
+            PdockerVkGraphicsDescriptorBindSnapshot *bind_snapshot =
+                &cmd->graphics_descriptor_bind_ops[bind_snapshot_index];
+            memset(bind_snapshot, 0, sizeof(*bind_snapshot));
+            bind_snapshot->first_set = firstSet;
+            bind_snapshot->descriptor_set_count = descriptorSetCount;
+            bind_snapshot->first_dynamic_offset = graphics_first_dynamic_offset;
+            bind_snapshot->dynamic_offset_count = dynamicOffsetCount;
+            memcpy(bind_snapshot->set_snapshots, cmd->graphics_bound_set_snapshots,
+                   sizeof(bind_snapshot->set_snapshots));
+            memcpy(bind_snapshot->set_snapshot_used, cmd->graphics_bound_set_used,
+                   sizeof(bind_snapshot->set_snapshot_used));
+
             PdockerVkGraphicsCommandRecord record;
             memset(&record, 0, sizeof(record));
             record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS;
@@ -8827,6 +8991,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
             record.descriptor_set_count = descriptorSetCount;
             record.first_dynamic_offset = graphics_first_dynamic_offset;
             record.dynamic_offset_count = dynamicOffsetCount;
+            record.descriptor_bind_snapshot_index = bind_snapshot_index;
             (void)append_graphics_command_record(cmd, &record);
         }
     }
