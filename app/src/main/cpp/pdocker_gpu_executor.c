@@ -17554,13 +17554,32 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
                 }
+                const PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline =
+                    &view->pipelines[command->pipeline_index];
+                if (pipeline->dynamic_rendering_depth_format != VK_FORMAT_UNDEFINED ||
+                    pipeline->dynamic_rendering_stencil_format != VK_FORMAT_UNDEFINED) {
+                    reason = "depth/stencil graphics pipeline replay is not implemented";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                if (pipeline->rasterization_samples != VK_SAMPLE_COUNT_1_BIT) {
+                    reason = "multisample graphics pipeline replay is not implemented";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
                 for (uint32_t stage_i = 0;
-                     stage_i < view->pipelines[command->pipeline_index].shader_stage_count;
+                     stage_i < pipeline->shader_stage_count;
                      ++stage_i) {
-                    const uint32_t stage_flags =
-                        view->shader_stages[view->pipelines[command->pipeline_index].shader_stage_first + stage_i].stage_flags;
+                    const PdockerGpuVulkanGraphicsV6ShaderStageEntry *stage =
+                        &view->shader_stages[pipeline->shader_stage_first + stage_i];
+                    const uint32_t stage_flags = stage->stage_flags;
                     if ((stage_flags & ~(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)) != 0) {
                         reason = "non vertex/fragment graphics shaders are not implemented";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                    if (stage->specialization_size != 0) {
+                        reason = "graphics shader specialization replay is not implemented";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
@@ -17659,6 +17678,284 @@ static int preflight_vulkan_graphics_v6_runtime_supported(const char **reason_ou
     return 0;
 }
 
+#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES 4u
+#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES 8u
+
+typedef struct VulkanGraphicsReplayPipeline {
+    VkShaderModule shader_modules[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES];
+    VkPipelineLayout layout;
+    VkPipeline pipeline;
+} VulkanGraphicsReplayPipeline;
+
+static void destroy_vulkan_graphics_replay_pipelines(
+        VkDevice device,
+        VulkanGraphicsReplayPipeline *pipelines,
+        uint32_t pipeline_count) {
+    if (!pipelines) return;
+    for (uint32_t i = 0; i < pipeline_count; ++i) {
+        if (pipelines[i].pipeline) vkDestroyPipeline(device, pipelines[i].pipeline, NULL);
+        if (pipelines[i].layout) vkDestroyPipelineLayout(device, pipelines[i].layout, NULL);
+        for (uint32_t s = 0; s < PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES; ++s) {
+            if (pipelines[i].shader_modules[s]) {
+                vkDestroyShaderModule(device, pipelines[i].shader_modules[s], NULL);
+            }
+        }
+        memset(&pipelines[i], 0, sizeof(pipelines[i]));
+    }
+}
+
+static int read_graphics_shader_fd(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV6ShaderStageEntry *stage,
+        uint32_t **code_out) {
+    if (!view || !stage || !code_out || stage->shader_size == 0 ||
+        (stage->shader_size & 3u) != 0 || stage->shader_size > SIZE_MAX ||
+        stage->shader_fd_index >= view->passed_fd_count ||
+        view->passed_fds[stage->shader_fd_index] < 0) {
+        return -EINVAL;
+    }
+    uint32_t *code = (uint32_t *)malloc((size_t)stage->shader_size);
+    if (!code) return -ENOMEM;
+    if (read_fd_exact(view->passed_fds[stage->shader_fd_index], code,
+                      (size_t)stage->shader_size, 0) != 0) {
+        free(code);
+        return -EIO;
+    }
+    if (fnv1a64_update(1469598103934665603ull, code, (size_t)stage->shader_size) != stage->shader_hash) {
+        free(code);
+        return -EPROTO;
+    }
+    *code_out = code;
+    return 0;
+}
+
+static int copy_graphics_entry_name(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV6ShaderStageEntry *stage,
+        char *out,
+        size_t out_size) {
+    if (!view || !stage || !out || out_size == 0) return -EINVAL;
+    if (stage->entry_name_size == 0) {
+        snprintf(out, out_size, "main");
+        return 0;
+    }
+    if (stage->entry_name_size >= out_size ||
+        !payload_range_valid(stage->entry_name_offset, stage->entry_name_size,
+                             view->header->frame_size)) {
+        return -ENAMETOOLONG;
+    }
+    memcpy(out, view->frame + stage->entry_name_offset, (size_t)stage->entry_name_size);
+    out[stage->entry_name_size] = '\0';
+    return 0;
+}
+
+static int collect_graphics_push_ranges_for_layout(
+        const VulkanGraphicsV6FrameView *view,
+        uint64_t layout_id,
+        VkPushConstantRange *ranges,
+        uint32_t *range_count) {
+    if (!view || !ranges || !range_count) return -EINVAL;
+    *range_count = 0;
+    if (!view->is_v61 || !view->header_v61) return 0;
+    for (uint32_t i = 0; i < view->header_v61->v61.push_constant_metadata_count; ++i) {
+        const PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry *meta =
+            &view->push_constant_metadata[i];
+        if (meta->layout_id != layout_id) continue;
+        if (*range_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES) return -E2BIG;
+        ranges[*range_count] = (VkPushConstantRange){
+            .stageFlags = (VkShaderStageFlags)meta->stage_flags,
+            .offset = meta->range_offset,
+            .size = meta->range_size,
+        };
+        (*range_count)++;
+    }
+    return 0;
+}
+
+static int materialize_vulkan_graphics_v6_pipelines(
+        VulkanRuntime *rt,
+        const VulkanGraphicsV6FrameView *view,
+        VulkanGraphicsReplayPipeline *out_pipelines,
+        uint32_t max_pipelines,
+        uint32_t *out_pipeline_count) {
+    if (!rt || !view || !view->header || !out_pipelines || !out_pipeline_count) return -EINVAL;
+    *out_pipeline_count = 0;
+    if (view->header->pipeline_count > max_pipelines) return -E2BIG;
+    for (uint32_t pidx = 0; pidx < view->header->pipeline_count; ++pidx) {
+        const PdockerGpuVulkanGraphicsV6PipelineEntry *src = &view->pipelines[pidx];
+        if (src->shader_stage_count == 0 ||
+            src->shader_stage_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES ||
+            src->color_attachment_count > 16u ||
+            src->dynamic_rendering_depth_format != VK_FORMAT_UNDEFINED ||
+            src->dynamic_rendering_stencil_format != VK_FORMAT_UNDEFINED) {
+            return -EOPNOTSUPP;
+        }
+        VulkanGraphicsReplayPipeline *dst = &out_pipelines[pidx];
+        *out_pipeline_count = pidx + 1u;
+        VkPipelineShaderStageCreateInfo shader_stages[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES];
+        char entry_names[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES][128];
+        memset(shader_stages, 0, sizeof(shader_stages));
+        memset(entry_names, 0, sizeof(entry_names));
+        for (uint32_t sidx = 0; sidx < src->shader_stage_count; ++sidx) {
+            const PdockerGpuVulkanGraphicsV6ShaderStageEntry *stage =
+                &view->shader_stages[src->shader_stage_first + sidx];
+            if (stage->specialization_size != 0) return -EOPNOTSUPP;
+            uint32_t *shader_code = NULL;
+            int rc = read_graphics_shader_fd(view, stage, &shader_code);
+            if (rc != 0) return rc;
+            VkShaderModuleCreateInfo smci = {
+                .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                .codeSize = (size_t)stage->shader_size,
+                .pCode = shader_code,
+            };
+            VkResult vrc = vkCreateShaderModule(rt->device, &smci, NULL, &dst->shader_modules[sidx]);
+            free(shader_code);
+            if (vrc != VK_SUCCESS) return -EIO;
+            rc = copy_graphics_entry_name(view, stage, entry_names[sidx], sizeof(entry_names[sidx]));
+            if (rc != 0) return rc;
+            shader_stages[sidx] = (VkPipelineShaderStageCreateInfo){
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = (VkShaderStageFlagBits)stage->stage_flags,
+                .module = dst->shader_modules[sidx],
+                .pName = entry_names[sidx],
+            };
+        }
+
+        VkPushConstantRange push_ranges[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES];
+        uint32_t push_range_count = 0;
+        memset(push_ranges, 0, sizeof(push_ranges));
+        int rc = collect_graphics_push_ranges_for_layout(
+            view, src->layout_id, push_ranges, &push_range_count);
+        if (rc != 0) return rc;
+        VkPipelineLayoutCreateInfo plci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .setLayoutCount = 0,
+            .pSetLayouts = NULL,
+            .pushConstantRangeCount = push_range_count,
+            .pPushConstantRanges = push_range_count ? push_ranges : NULL,
+        };
+        VkResult vrc = vkCreatePipelineLayout(rt->device, &plci, NULL, &dst->layout);
+        if (vrc != VK_SUCCESS) return -EIO;
+
+        VkVertexInputBindingDescription bindings[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS];
+        VkVertexInputAttributeDescription attributes[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_ATTRIBUTES];
+        memset(bindings, 0, sizeof(bindings));
+        memset(attributes, 0, sizeof(attributes));
+        for (uint32_t b = 0; b < src->vertex_binding_count; ++b) {
+            const PdockerGpuVulkanGraphicsV6VertexBindingEntry *vb =
+                &view->vertex_bindings[src->vertex_binding_first + b];
+            if (vb->buffer_resource_index != UINT32_MAX) return -EPROTO;
+            bindings[b] = (VkVertexInputBindingDescription){
+                .binding = vb->binding,
+                .stride = vb->stride,
+                .inputRate = (VkVertexInputRate)vb->input_rate,
+            };
+        }
+        for (uint32_t a = 0; a < src->vertex_attribute_count; ++a) {
+            const PdockerGpuVulkanGraphicsV6VertexAttributeEntry *va =
+                &view->vertex_attributes[src->vertex_attribute_first + a];
+            attributes[a] = (VkVertexInputAttributeDescription){
+                .location = va->location,
+                .binding = va->binding,
+                .format = (VkFormat)va->format,
+                .offset = va->offset,
+            };
+        }
+        VkPipelineVertexInputStateCreateInfo visci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            .vertexBindingDescriptionCount = src->vertex_binding_count,
+            .pVertexBindingDescriptions = src->vertex_binding_count ? bindings : NULL,
+            .vertexAttributeDescriptionCount = src->vertex_attribute_count,
+            .pVertexAttributeDescriptions = src->vertex_attribute_count ? attributes : NULL,
+        };
+        VkPipelineInputAssemblyStateCreateInfo iasci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            .topology = (VkPrimitiveTopology)src->topology,
+            .primitiveRestartEnable = VK_FALSE,
+        };
+        VkPipelineViewportStateCreateInfo vpsci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            .viewportCount = 1,
+            .scissorCount = 1,
+        };
+        VkPipelineRasterizationStateCreateInfo rsci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            .depthClampEnable = VK_FALSE,
+            .rasterizerDiscardEnable = VK_FALSE,
+            .polygonMode = (VkPolygonMode)src->polygon_mode,
+            .cullMode = (VkCullModeFlags)src->cull_mode,
+            .frontFace = (VkFrontFace)src->front_face,
+            .depthBiasEnable = VK_FALSE,
+            .lineWidth = 1.0f,
+        };
+        VkPipelineMultisampleStateCreateInfo msci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .rasterizationSamples = (VkSampleCountFlagBits)src->rasterization_samples,
+        };
+        VkPipelineColorBlendAttachmentState blend_attachments[16];
+        memset(blend_attachments, 0, sizeof(blend_attachments));
+        for (uint32_t c = 0; c < src->color_attachment_count; ++c) {
+            blend_attachments[c].blendEnable = VK_FALSE;
+            blend_attachments[c].colorWriteMask =
+                VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        }
+        VkPipelineColorBlendStateCreateInfo cbsci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            .logicOpEnable = VK_FALSE,
+            .attachmentCount = src->color_attachment_count,
+            .pAttachments = src->color_attachment_count ? blend_attachments : NULL,
+        };
+        VkDynamicState dynamic_states[2];
+        uint32_t dynamic_state_count = 0;
+        if (src->dynamic_state_mask & (1ull << (uint32_t)VK_DYNAMIC_STATE_VIEWPORT)) {
+            dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_VIEWPORT;
+        }
+        if (src->dynamic_state_mask & (1ull << (uint32_t)VK_DYNAMIC_STATE_SCISSOR)) {
+            dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_SCISSOR;
+        }
+        if (dynamic_state_count != 2u) return -EOPNOTSUPP;
+        VkPipelineDynamicStateCreateInfo dsci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            .dynamicStateCount = dynamic_state_count,
+            .pDynamicStates = dynamic_states,
+        };
+        const uint32_t *formats = &src->color_attachment_format0;
+        VkFormat color_formats[16];
+        for (uint32_t c = 0; c < src->color_attachment_count; ++c) {
+            color_formats[c] = (VkFormat)formats[c];
+            if (color_formats[c] == VK_FORMAT_UNDEFINED) return -EPROTO;
+        }
+        VkPipelineRenderingCreateInfo rendering = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+            .viewMask = src->dynamic_rendering_view_mask,
+            .colorAttachmentCount = src->color_attachment_count,
+            .pColorAttachmentFormats = src->color_attachment_count ? color_formats : NULL,
+            .depthAttachmentFormat = VK_FORMAT_UNDEFINED,
+            .stencilAttachmentFormat = VK_FORMAT_UNDEFINED,
+        };
+        VkGraphicsPipelineCreateInfo gpci = {
+            .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+            .pNext = &rendering,
+            .stageCount = src->shader_stage_count,
+            .pStages = shader_stages,
+            .pVertexInputState = &visci,
+            .pInputAssemblyState = &iasci,
+            .pViewportState = &vpsci,
+            .pRasterizationState = &rsci,
+            .pMultisampleState = &msci,
+            .pColorBlendState = &cbsci,
+            .pDynamicState = &dsci,
+            .layout = dst->layout,
+            .renderPass = VK_NULL_HANDLE,
+            .subpass = 0,
+        };
+        vrc = vkCreateGraphicsPipelines(rt->device, VK_NULL_HANDLE, 1, &gpci, NULL, &dst->pipeline);
+        if (vrc != VK_SUCCESS) return -EIO;
+    }
+    return 0;
+}
+
 static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     const char *reason = NULL;
     int rc = preflight_vulkan_graphics_v6_replay_supported(view, &reason);
@@ -17703,13 +18000,46 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         fflush(out);
         return rc;
     }
+    VulkanGraphicsReplayPipeline replay_pipelines[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
+    uint32_t replay_pipeline_count = 0;
+    memset(replay_pipelines, 0, sizeof(replay_pipelines));
+    rc = materialize_vulkan_graphics_v6_pipelines(
+        &g_vulkan_runtime, view, replay_pipelines,
+        PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES, &replay_pipeline_count);
+    if (rc != 0) {
+        FILE *out = json_out();
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"stage\":\"vulkan-graphics-v6-pipeline-materialize\",\"valid\":false,"
+                "\"execution_implemented\":false,\"error\":\"%s\"}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                strerror(-rc));
+        fflush(out);
+        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        return rc;
+    }
     FILE *out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"vulkan-graphics-v6-pipeline-materialize\",\"valid\":true,"
+            "\"execution_implemented\":true,\"pipeline_count\":%u,"
+            "\"submit_id\":%llu}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            replay_pipeline_count,
+            (unsigned long long)view->header->submit_id);
+    fflush(out);
+    destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+    out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
             "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
             "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":false,"
             "\"execution_implemented\":false,"
-            "\"error\":\"graphics command recording is not implemented yet\"}\n",
+            "\"error\":\"graphics attachment and command buffer replay is not implemented yet\"}\n",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
             PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION);
     fflush(out);

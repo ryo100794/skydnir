@@ -1011,7 +1011,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "preflight_vulkan_graphics_v6_replay_supported",
             "vulkan-graphics-v6-replay-preflight",
             "graphics descriptor replay is not implemented",
-            "graphics command recording is not implemented yet",
+            "graphics shader specialization replay is not implemented",
+            "materialize_vulkan_graphics_v6_pipelines",
+            "vulkan-graphics-v6-pipeline-materialize",
+            "graphics attachment and command buffer replay is not implemented yet",
             "run_vulkan_graphics_v6_frame",
         ]:
             self.assertIn(marker, executor)
@@ -1028,6 +1031,40 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertNotIn("vkCmdDraw", handle_body)
         self.assertNotIn("vkQueueSubmit", handle_body)
+
+    def test_vulkan_graphics_v6_executor_materializes_pipelines_before_command_replay(self):
+        executor = GPU_EXECUTOR.read_text()
+        materializer = executor.split("static int materialize_vulkan_graphics_v6_pipelines", 1)[1].split(
+            "static int run_vulkan_graphics_v6_frame", 1
+        )[0]
+        for marker in [
+            "read_graphics_shader_fd",
+            "copy_graphics_entry_name",
+            "collect_graphics_push_ranges_for_layout",
+            "vkCreateShaderModule",
+            "vkCreatePipelineLayout",
+            "VkPipelineVertexInputStateCreateInfo",
+            "VkPipelineRenderingCreateInfo",
+            "VK_DYNAMIC_STATE_VIEWPORT",
+            "VK_DYNAMIC_STATE_SCISSOR",
+            "vkCreateGraphicsPipelines",
+        ]:
+            self.assertIn(marker, materializer)
+        self.assertIn("fnv1a64_update(1469598103934665603ull, code, (size_t)stage->shader_size) != stage->shader_hash", executor)
+        run_body = executor.split("static int run_vulkan_graphics_v6_frame", 1)[1].split(
+            "static int recv_vulkan_graphics_v6_header_with_fds", 1
+        )[0]
+        self.assertIn("materialize_vulkan_graphics_v6_pipelines", run_body)
+        self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-pipeline-materialize\\"', run_body)
+        self.assertIn("destroy_vulkan_graphics_replay_pipelines", run_body)
+        self.assertLess(
+            run_body.index("preflight_vulkan_graphics_v6_runtime_supported"),
+            run_body.index("materialize_vulkan_graphics_v6_pipelines"),
+        )
+        self.assertLess(
+            run_body.index("materialize_vulkan_graphics_v6_pipelines"),
+            run_body.index("graphics attachment and command buffer replay is not implemented yet"),
+        )
 
     def test_vulkan_graphics_v6_submit_validator_hardens_resource_descriptor_and_draw_refs(self):
         executor = GPU_EXECUTOR.read_text()

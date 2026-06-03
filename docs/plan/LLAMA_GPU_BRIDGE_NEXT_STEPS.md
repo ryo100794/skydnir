@@ -40,6 +40,7 @@ Confirmed facts:
 | 2026-05-31 Q6 final-store barrier lane | Static analysis of the effective Q6 module shows the final store reads Workgroup `%143` at lane0 immediately after the reduction loop.  A hash-gated compatibility lowering now inserts one additional Workgroup-memory `OpControlBarrier` after the reduction loop convergence and before the lane0 final-store branch.  This keeps descriptor, buffer, push, specialization, dispatch, model, prompt, and llama.cpp bytes unchanged; it only tightens shader-side workgroup-memory visibility before final-store. | `app/src/main/cpp/pdocker_gpu_executor.c`; `scripts/reconstruct-q6-effective-spirv.py`; packaged `libpdockergpuexecutor.so`; host gate `tests.test_gpu_abi_contract tests.test_llama_gpu_artifact_verifier tests.test_termport_docker_api_contract`; APK build `:app:assembleCompatDebug` |
 | 2026-06-03 Vulkan graphics V6.1 P0-P6 preflight lane | Producer commit `9d6e724` has completed V6.1 serialization through the attachment table and command table.  The executor now validates/describes V6.1 frames, runs an explicit `vulkan-graphics-v6-replay-preflight`, and accepts only validated no-op frames as implemented.  Non-empty graphics command replay still fails closed until Android Vulkan command recording/materialization is implemented. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 | 2026-06-03 Vulkan graphics pipeline-state fail-closed lane | The container ICD now refuses to promote graphics pipelines that depend on static state not yet serialized into V6.1 replay ABI: primitive restart, rasterizer discard/depth clamp/depth bias/non-1.0 line width, blend/logic-op/blend constants/non-RGBA write masks, depth/stencil tests, and non-dynamic viewport/scissor.  This prevents executor P6 from reconstructing guessed defaults when real Android Vulkan replay is added. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract` |
+| 2026-06-03 Vulkan graphics pipeline-materialization lane | Executor P6 now advances past generic command-recording refusal by materializing the serialized graphics pipeline object graph first: shader fd hash revalidation, entry-name copy, push-constant layout reconstruction, vertex input state, dynamic-rendering color formats, viewport/scissor dynamic state, and Android `vkCreateGraphicsPipelines`.  Attachment image materialization and command-buffer replay still fail closed after pipeline materialization; no success or benchmark claim is promoted from this partial P6 step. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -174,9 +175,12 @@ P0-P6 test/design scope:
   commands in order; it must not copy process-local container `Vk*` handles or
   weaken any V6.1 validation to make a frame run.
 
-Until P6 exists, graphics evidence can validate producer/executor ABI
-understanding and fail-closed behavior only.  It must not be mixed with llama
-Q6 correctness claims, served-HTTP readiness, or benchmark claims.
+Until P6 command-buffer execution and writeback exists, graphics evidence can
+validate producer/executor ABI understanding, pipeline materialization, and
+fail-closed behavior only.  The current executor can create Android graphics
+pipelines from V6.1 metadata, but attachment image materialization and command
+submission remain non-promoting.  It must not be mixed with llama Q6
+correctness claims, served-HTTP readiness, or benchmark claims.
 
 ## Non-Negotiable Rules
 
