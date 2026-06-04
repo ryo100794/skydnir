@@ -17720,11 +17720,6 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
                 }
-                if (command->instance_count != 1 || command->first_instance != 0) {
-                    reason = "instanced graphics replay is not implemented";
-                    if (reason_out) *reason_out = reason;
-                    return -EOPNOTSUPP;
-                }
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
                 if (!rendering_active) {
@@ -17736,11 +17731,6 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     reason = "indexed draw without bound graphics pipeline";
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
-                }
-                if (command->instance_count != 1 || command->first_instance != 0) {
-                    reason = "instanced indexed graphics replay is not implemented";
-                    if (reason_out) *reason_out = reason;
-                    return -EOPNOTSUPP;
                 }
                 if (vulkan_graphics_index_stride(command->index_type, &(uint64_t){0}) != 0) {
                     reason = "unsupported graphics index type";
