@@ -1342,10 +1342,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_DYNAMIC_OFFSETS",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_PUSH_CONSTANT_METADATA",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_IMAGE_BARRIER_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MEMORY_BARRIER_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_IMAGE_BARRIERS",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_MEMORY_BARRIERS",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[15]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[17]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(
@@ -1353,6 +1357,8 @@ class GpuAbiContractTest(unittest.TestCase):
             range_body.index("header_v61->v61.dynamic_offset_table_offset"),
         )
         self.assertIn("header_v61->v61.image_barrier_table_offset", range_body)
+        self.assertIn("header_v61->v61.memory_barrier_table_offset", range_body)
+        self.assertIn("header_v61->v61.buffer_barrier_table_offset", range_body)
         self.assertIn("validate_vulkan_graphics_v6_header_prefix", recv_body)
         self.assertIn("header.frame_size - sizeof(header)", handle_body)
         for marker in [
@@ -1367,8 +1373,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "range_add_u32(command->first_dynamic_offset, command->dynamic_offset_count",
             "PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC",
             "PdockerGpuVulkanGraphicsV61ImageBarrierEntry",
+            "PdockerGpuVulkanGraphicsV61MemoryBarrierEntry",
+            "PdockerGpuVulkanGraphicsV61BufferBarrierEntry",
             "extension_hash = fnv1a64_update(extension_hash, image_barriers",
+            "extension_hash = fnv1a64_update(extension_hash, memory_barriers",
+            "extension_hash = fnv1a64_update(extension_hash, buffer_barriers",
             "commands[barrier->command_index].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER",
+            "barrier->resource_index >= header->resource_count",
+            "barrier->src_access_mask > UINT32_MAX",
             "barrier->src_queue_family_index != VK_QUEUE_FAMILY_IGNORED",
             "descriptor->dynamic_offset != 0",
             "dynamic_descriptor_count != command->dynamic_offset_count",
@@ -1386,7 +1398,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "static int submit_vulkan_graphics_v6_command_buffer", 1
         )[0]
         self.assertNotIn("graphics barrier replay is not implemented", preflight)
-        self.assertIn("graphics barrier without image barriers is not supported", preflight)
+        self.assertIn("graphics barrier without memory/buffer/image barriers is not supported", preflight)
+        self.assertIn("graphics barrier batch exceeds replay stack limit", preflight)
+        self.assertIn("matched_memory_barriers > PDOCKER_GPU_MAX_VULKAN_BINDINGS", preflight)
         self.assertIn("PdockerGpuVulkanGraphicsV61ImageBarrierEntry", executor)
         self.assertIn("vkCmdPipelineBarrier(command_buffer", recorder)
         self.assertIn("attachments->images[barrier->image_index].current_layout", recorder)
@@ -1396,11 +1410,22 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         self.assertIn("PdockerGpuVulkanGraphicsV61ImageBarrierEntry image_barriers", icd)
         self.assertIn("frame_header->v61.image_barrier_count", icd)
+        self.assertIn("frame_header->v61.memory_barrier_count", icd)
+        self.assertIn("frame_header->v61.buffer_barrier_count", icd)
         self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V61_IMAGE_BARRIER_SCHEMA_HASH", icd)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V61_MEMORY_BARRIER_SCHEMA_HASH", icd)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_SCHEMA_HASH", icd)
         self.assertIn("collect_graphics_image_entry(", icd)
+        self.assertIn("record_memory_barrier_op(commandBuffer", icd)
+        self.assertIn("record_buffer_barrier_op(commandBuffer", icd)
         self.assertIn("record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER", icd)
+        self.assertIn("dependencyFlags != 0", icd)
+        self.assertIn("pDependencyInfo && pDependencyInfo->dependencyFlags != 0", icd)
+        self.assertIn("eventCount > 1", icd)
         self.assertIn("op_type != PDOCKER_VK_COMMAND_IMAGE_BARRIER", icd)
         self.assertIn("sizeof(image_barriers[0]) * image_barrier_count", icd)
+        self.assertIn("sizeof(memory_barriers[0]) * memory_barrier_count", icd)
+        self.assertIn("sizeof(buffer_barriers[0]) * buffer_barrier_count", icd)
 
     def test_vulkan_dispatch_v5_1_object_header_is_full_frame_validated(self):
         executor = GPU_EXECUTOR.read_text()
@@ -1683,6 +1708,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V61_IMAGE_BARRIER_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MEMORY_BARRIER_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MEMORY_BARRIER_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MEMORY_BARRIER_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -1753,6 +1788,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V61_IMAGE_BARRIER_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V61_IMAGE_BARRIER_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV61ImageBarrierEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MEMORY_BARRIER_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MEMORY_BARRIER_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV61MemoryBarrierEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV61BufferBarrierEntry",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
@@ -2822,12 +2867,14 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("pImageMemoryBarriers && i < imageMemoryBarrierCount", barrier_body)
         self.assertIn("record_image_barrier_op(commandBuffer", barrier_body)
+        self.assertIn("dependencyFlags != 0", barrier_body)
         barrier2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1
         )[0]
         self.assertIn("pDependencyInfo->pImageMemoryBarriers", barrier2_body)
         self.assertIn("const VkImageMemoryBarrier2 *b", barrier2_body)
         self.assertIn("record_image_barrier_op(commandBuffer", barrier2_body)
+        self.assertIn("pDependencyInfo && pDependencyInfo->dependencyFlags != 0", barrier2_body)
         self.assertNotIn("vkCmdPipelineBarrier(commandBuffer", barrier2_body)
         self.assertIn("execute_recorded_image_barrier_op(", icd)
         for field in [
