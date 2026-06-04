@@ -17470,6 +17470,8 @@ static int validate_vulkan_graphics_v6_frame_content(
     return 0;
 }
 
+static int vulkan_graphics_index_stride(uint32_t index_type, uint64_t *out_stride);
+
 static int preflight_vulkan_graphics_v6_replay_supported(
         const VulkanGraphicsV6FrameView *view,
         const char **reason_out) {
@@ -17606,6 +17608,7 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 }
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS:
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW:
@@ -17626,9 +17629,27 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 }
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
-                reason = "indexed graphics replay is not implemented";
-                if (reason_out) *reason_out = reason;
-                return -EOPNOTSUPP;
+                if (!rendering_active) {
+                    reason = "indexed draw outside dynamic rendering";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                if (!pipeline_bound) {
+                    reason = "indexed draw without bound graphics pipeline";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                if (command->instance_count != 1 || command->first_instance != 0) {
+                    reason = "instanced indexed graphics replay is not implemented";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                if (vulkan_graphics_index_stride(command->index_type, &(uint64_t){0}) != 0) {
+                    reason = "unsupported graphics index type";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS:
                 reason = "graphics descriptor replay is not implemented";
                 if (reason_out) *reason_out = reason;
@@ -18252,6 +18273,7 @@ typedef struct VulkanGraphicsReplayBuffer {
     uint32_t resource_index;
     uint64_t upload_base;
     uint64_t upload_end;
+    VkBufferUsageFlags usage;
     VulkanVectorBuffer buffer;
 } VulkanGraphicsReplayBuffer;
 
@@ -18280,12 +18302,27 @@ static void destroy_vulkan_graphics_replay_buffers(
     memset(buffers, 0, sizeof(*buffers));
 }
 
+static int vulkan_graphics_index_stride(uint32_t index_type, uint64_t *out_stride) {
+    if (!out_stride) return -EINVAL;
+    switch ((VkIndexType)index_type) {
+        case VK_INDEX_TYPE_UINT16:
+            *out_stride = 2;
+            return 0;
+        case VK_INDEX_TYPE_UINT32:
+            *out_stride = 4;
+            return 0;
+        default:
+            return -EOPNOTSUPP;
+    }
+}
+
 static int add_vulkan_graphics_replay_buffer_range(
         const VulkanGraphicsV6FrameView *view,
         VulkanGraphicsReplayBuffers *out,
         uint32_t resource_index,
         uint64_t offset,
-        uint64_t size) {
+        uint64_t size,
+        VkBufferUsageFlags usage) {
     if (!view || !view->header || !out || resource_index >= view->header->resource_count) return -EINVAL;
     if (size == 0 || size > (uint64_t)SIZE_MAX) return -EOPNOTSUPP;
     const PdockerGpuVulkanDispatchV5ResourceEntry *buffer = &view->resources[resource_index];
@@ -18314,10 +18351,12 @@ static int add_vulkan_graphics_replay_buffer_range(
         dst->resource_index = resource_index;
         dst->upload_base = offset;
         dst->upload_end = end;
+        dst->usage = usage;
     } else {
         dst = &out->buffers[(uint32_t)found];
         if (offset < dst->upload_base) dst->upload_base = offset;
         if (end > dst->upload_end) dst->upload_end = end;
+        dst->usage |= usage;
     }
     return 0;
 }
@@ -18330,12 +18369,39 @@ static int materialize_vulkan_graphics_v6_buffers(
     memset(out, 0, sizeof(*out));
     for (uint32_t c = 0; c < view->header->command_count; ++c) {
         const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[c];
-        if (command->command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS) continue;
-        for (uint32_t b = 0; b < command->vertex_binding_count; ++b) {
-            const PdockerGpuVulkanGraphicsV6VertexBindingEntry *binding =
-                &view->vertex_bindings[command->vertex_binding_first + b];
-            int rc = add_vulkan_graphics_replay_buffer_range(
-                view, out, binding->buffer_resource_index, binding->offset, binding->size);
+        if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS) {
+            for (uint32_t b = 0; b < command->vertex_binding_count; ++b) {
+                const PdockerGpuVulkanGraphicsV6VertexBindingEntry *binding =
+                    &view->vertex_bindings[command->vertex_binding_first + b];
+                int rc = add_vulkan_graphics_replay_buffer_range(
+                    view, out, binding->buffer_resource_index, binding->offset, binding->size,
+                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+                if (rc != 0) {
+                    destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                    return rc;
+                }
+            }
+        } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) {
+            uint64_t index_stride = 0;
+            uint64_t index_span = 0;
+            uint64_t first_index_bytes = 0;
+            uint64_t range_offset = 0;
+            uint64_t range_size = 0;
+            int rc = vulkan_graphics_index_stride(command->index_type, &index_stride);
+            if (rc != 0) {
+                destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                return rc;
+            }
+            if (!checked_mul_u64_executor(command->first_index, index_stride, &first_index_bytes) ||
+                !checked_mul_u64_executor(command->index_count, index_stride, &index_span) ||
+                checked_u64_add3(command->index_offset, first_index_bytes, 0, &range_offset) != 0) {
+                destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                return -EOVERFLOW;
+            }
+            range_size = index_span;
+            rc = add_vulkan_graphics_replay_buffer_range(
+                view, out, command->index_buffer_resource_index, range_offset, range_size,
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
             if (rc != 0) {
                 destroy_vulkan_graphics_replay_buffers(rt->device, out);
                 return rc;
@@ -18357,7 +18423,7 @@ static int materialize_vulkan_graphics_v6_buffers(
         }
         int rc = create_vulkan_buffer_with_usage(
             rt->physical_device, rt->device, (size_t)upload_size_u64,
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            dst->usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             NULL, &dst->buffer);
         if (rc != 0) {
             destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -18633,8 +18699,72 @@ static int record_vulkan_graphics_v6_command_buffer(
                           command->instance_count, command->first_vertex,
                           command->first_instance);
                 break;
-            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER:
-            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER: {
+                uint64_t index_stride = 0;
+                rc = vulkan_graphics_index_stride(command->index_type, &index_stride);
+                if (rc != 0) goto cleanup;
+                (void)index_stride;
+                int buffer_index = find_vulkan_graphics_replay_buffer(
+                    buffers, command->index_buffer_resource_index);
+                if (buffer_index < 0) {
+                    rc = buffer_index;
+                    goto cleanup;
+                }
+                const VulkanGraphicsReplayBuffer *replay_buffer =
+                    &buffers->buffers[(uint32_t)buffer_index];
+                if (!replay_buffer->buffer.buffer ||
+                    command->index_offset < replay_buffer->upload_base ||
+                    command->index_offset > replay_buffer->upload_end) {
+                    rc = -ERANGE;
+                    goto cleanup;
+                }
+                vkCmdBindIndexBuffer(command_buffer, replay_buffer->buffer.buffer,
+                                     (VkDeviceSize)(command->index_offset - replay_buffer->upload_base),
+                                     (VkIndexType)command->index_type);
+                break;
+            }
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED: {
+                if (command->pipeline_index >= pipeline_count ||
+                    command->pipeline_index != bound_pipeline_index) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                uint64_t index_stride = 0;
+                uint64_t first_index_bytes = 0;
+                uint64_t index_span = 0;
+                uint64_t draw_range_offset = 0;
+                uint64_t draw_range_end = 0;
+                rc = vulkan_graphics_index_stride(command->index_type, &index_stride);
+                if (rc != 0) goto cleanup;
+                if (!checked_mul_u64_executor(command->first_index, index_stride, &first_index_bytes) ||
+                    !checked_mul_u64_executor(command->index_count, index_stride, &index_span) ||
+                    checked_u64_add3(command->index_offset, first_index_bytes, 0, &draw_range_offset) != 0 ||
+                    checked_u64_add3(draw_range_offset, index_span, 0, &draw_range_end) != 0) {
+                    rc = -EOVERFLOW;
+                    goto cleanup;
+                }
+                int buffer_index = find_vulkan_graphics_replay_buffer(
+                    buffers, command->index_buffer_resource_index);
+                if (buffer_index < 0) {
+                    rc = buffer_index;
+                    goto cleanup;
+                }
+                const VulkanGraphicsReplayBuffer *replay_buffer =
+                    &buffers->buffers[(uint32_t)buffer_index];
+                if (!replay_buffer->buffer.buffer ||
+                    draw_range_offset < replay_buffer->upload_base ||
+                    draw_range_end > replay_buffer->upload_end) {
+                    rc = -ERANGE;
+                    goto cleanup;
+                }
+                vkCmdBindIndexBuffer(command_buffer, replay_buffer->buffer.buffer,
+                                     (VkDeviceSize)(command->index_offset - replay_buffer->upload_base),
+                                     (VkIndexType)command->index_type);
+                vkCmdDrawIndexed(command_buffer, command->index_count,
+                                  command->instance_count, command->first_index,
+                                  command->vertex_offset, command->first_instance);
+                break;
+            }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:
                 rc = -EOPNOTSUPP;
