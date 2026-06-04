@@ -545,9 +545,10 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ATTACHMENT_SCHEMA_HASH 0x29ca5fee670cb0e0ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_DYNAMIC_STATE_SCHEMA_HASH 0x0305d9e579f44e90ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH 0x3e932210bbed0c3cull
-#define PDOCKER_GPU_VULKAN_GRAPHICS_V61_HEADER_EXTENSION_SCHEMA_HASH 0x042f652f20dad404ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V61_HEADER_EXTENSION_SCHEMA_HASH 0x82b1db69d8368e56ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_SCHEMA_HASH 0x4fed60f52743cc94ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_SCHEMA_HASH 0xfec2e2aff5874940ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V61_IMAGE_BARRIER_SCHEMA_HASH 0xfab42820638bfb19ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES (8u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES 64u
@@ -557,6 +558,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_DYNAMIC_STATES 256u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_DYNAMIC_OFFSETS 4096u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_PUSH_CONSTANT_METADATA PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_IMAGE_BARRIERS 4096u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS 4096u
 
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR 1u
@@ -758,8 +760,13 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(push_constant_metadata_table_offset, u64) \
     X(push_constant_metadata_table_size, u64) \
     X(push_constant_metadata_schema_hash, u64) \
+    X(image_barrier_count, u32) \
+    X(image_barrier_entry_size, u32) \
+    X(image_barrier_table_offset, u64) \
+    X(image_barrier_table_size, u64) \
+    X(image_barrier_schema_hash, u64) \
     X(extension_hash, u64)
-#define PDOCKER_GPU_VULKAN_GRAPHICS_V61_HEADER_EXTENSION_FIELD_COUNT 11u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V61_HEADER_EXTENSION_FIELD_COUNT 16u
 
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_FIELDS(X) \
     X(offset, u32) \
@@ -773,6 +780,25 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(range_offset, u32) \
     X(range_size, u32)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_FIELD_COUNT 5u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V61_IMAGE_BARRIER_FIELDS(X) \
+    X(command_index, u32) \
+    X(image_index, u32) \
+    X(old_layout, u32) \
+    X(new_layout, u32) \
+    X(aspect_mask, u32) \
+    X(base_mip_level, u32) \
+    X(level_count, u32) \
+    X(base_array_layer, u32) \
+    X(layer_count, u32) \
+    X(src_access_mask, u64) \
+    X(dst_access_mask, u64) \
+    X(src_stage_mask, u64) \
+    X(dst_stage_mask, u64) \
+    X(src_queue_family_index, u32) \
+    X(dst_queue_family_index, u32) \
+    X(reserved0, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V61_IMAGE_BARRIER_FIELD_COUNT 16u
 
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS(X) \
     X(command_type, u32) \
@@ -993,6 +1019,11 @@ typedef struct PdockerGpuVulkanGraphicsV61HeaderExtension {
     uint64_t push_constant_metadata_table_offset;
     uint64_t push_constant_metadata_table_size;
     uint64_t push_constant_metadata_schema_hash;
+    uint32_t image_barrier_count;
+    uint32_t image_barrier_entry_size;
+    uint64_t image_barrier_table_offset;
+    uint64_t image_barrier_table_size;
+    uint64_t image_barrier_schema_hash;
     uint64_t extension_hash;
 } PdockerGpuVulkanGraphicsV61HeaderExtension;
 
@@ -1013,6 +1044,25 @@ typedef struct PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry {
     uint32_t range_offset;
     uint32_t range_size;
 } PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV61ImageBarrierEntry {
+    uint32_t command_index;
+    uint32_t image_index;
+    uint32_t old_layout;
+    uint32_t new_layout;
+    uint32_t aspect_mask;
+    uint32_t base_mip_level;
+    uint32_t level_count;
+    uint32_t base_array_layer;
+    uint32_t layer_count;
+    uint64_t src_access_mask;
+    uint64_t dst_access_mask;
+    uint64_t src_stage_mask;
+    uint64_t dst_stage_mask;
+    uint32_t src_queue_family_index;
+    uint32_t dst_queue_family_index;
+    uint32_t reserved0;
+} PdockerGpuVulkanGraphicsV61ImageBarrierEntry;
 
 typedef struct PdockerGpuVulkanGraphicsV6CommandEntry {
     uint32_t command_type;

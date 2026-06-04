@@ -622,6 +622,8 @@ typedef struct {
     uint32_t dynamic_state_index;
     uint32_t draw_snapshot_index;
     uint32_t push_op_index;
+    uint32_t image_barrier_op_first;
+    uint32_t image_barrier_op_count;
     uint32_t vertex_binding_first;
     uint32_t vertex_binding_count;
     uint64_t index_offset;
@@ -2311,6 +2313,8 @@ static int send_empty_vulkan_graphics_v6_1_validation_frame(void) {
     frame.v61.dynamic_offset_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_DYNAMIC_OFFSET_SCHEMA_HASH;
     frame.v61.push_constant_metadata_entry_size = sizeof(PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry);
     frame.v61.push_constant_metadata_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_SCHEMA_HASH;
+    frame.v61.image_barrier_entry_size = sizeof(PdockerGpuVulkanGraphicsV61ImageBarrierEntry);
+    frame.v61.image_barrier_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_IMAGE_BARRIER_SCHEMA_HASH;
     frame.v61.extension_hash = 1469598103934665603ull;
     header->payload_hash = 1469598103934665603ull;
     header->frame_hash = fnv1a64_bytes(&frame, sizeof(frame));
@@ -2914,6 +2918,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     PdockerGpuVulkanGraphicsV6CommandEntry commands[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS];
     PdockerGpuVulkanGraphicsV61DynamicOffsetEntry dynamic_offsets[PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_DYNAMIC_OFFSETS];
     PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry push_metadata[PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_PUSH_CONSTANT_METADATA];
+    PdockerGpuVulkanGraphicsV61ImageBarrierEntry image_barriers[PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_IMAGE_BARRIERS];
     int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS];
     memset(pipeline_objects, 0, sizeof(pipeline_objects));
     memset(memory_objects, 0, sizeof(memory_objects));
@@ -2937,6 +2942,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     memset(commands, 0, sizeof(commands));
     memset(dynamic_offsets, 0, sizeof(dynamic_offsets));
     memset(push_metadata, 0, sizeof(push_metadata));
+    memset(image_barriers, 0, sizeof(image_barriers));
     memset(fds, -1, sizeof(fds));
 
     unsigned char *frame = (unsigned char *)calloc(1, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES);
@@ -2965,6 +2971,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     size_t command_count = 0;
     size_t dynamic_offset_count = 0;
     size_t push_metadata_count = 0;
+    size_t image_barrier_count = 0;
     uint64_t submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
     int rc = 0;
 
@@ -3252,6 +3259,41 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
             meta->layout_id = push->layout_id;
             meta->range_offset = push->offset;
             meta->range_size = push->size;
+        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER) {
+            for (uint32_t bi = 0; bi < record->image_barrier_op_count; ++bi) {
+                uint32_t op_index = record->image_barrier_op_first + bi;
+                if (op_index >= cmd->image_barrier_op_count ||
+                    image_barrier_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_IMAGE_BARRIERS) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                const PdockerVkImageBarrierOp *src = &cmd->image_barrier_ops[op_index];
+                if (!src->image) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                int image_index = collect_graphics_image_entry(
+                    image_entries, image_objects, &image_count,
+                    resources, &resource_count, memory_objects, memory_resource_indices, &memory_count,
+                    fds, &fd_count, src->image, submit_id);
+                if (image_index < 0) { rc = image_index; goto cleanup; }
+                PdockerGpuVulkanGraphicsV61ImageBarrierEntry *dst = &image_barriers[image_barrier_count++];
+                dst->command_index = (uint32_t)command_count;
+                dst->image_index = (uint32_t)image_index;
+                dst->old_layout = (uint32_t)src->old_layout;
+                dst->new_layout = (uint32_t)src->new_layout;
+                dst->aspect_mask = (uint32_t)src->range.aspectMask;
+                dst->base_mip_level = src->range.baseMipLevel;
+                dst->level_count = src->range.levelCount;
+                dst->base_array_layer = src->range.baseArrayLayer;
+                dst->layer_count = src->range.layerCount;
+                dst->src_access_mask = (uint64_t)src->src_access_mask;
+                dst->dst_access_mask = (uint64_t)src->dst_access_mask;
+                dst->src_stage_mask = (uint64_t)src->src_stage_mask;
+                dst->dst_stage_mask = (uint64_t)src->dst_stage_mask;
+                dst->src_queue_family_index = src->src_queue_family_index;
+                dst->dst_queue_family_index = src->dst_queue_family_index;
+            }
         } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW ||
                    record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) {
             if (record->draw_snapshot_index >= cmd->graphics_draw_op_count) {
@@ -3335,6 +3377,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     frame_header->v61.push_constant_metadata_count = (uint32_t)push_metadata_count;
     frame_header->v61.push_constant_metadata_entry_size = sizeof(PdockerGpuVulkanGraphicsV61PushConstantMetadataEntry);
     frame_header->v61.push_constant_metadata_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_PUSH_CONSTANT_METADATA_SCHEMA_HASH;
+    frame_header->v61.image_barrier_count = (uint32_t)image_barrier_count;
+    frame_header->v61.image_barrier_entry_size = sizeof(PdockerGpuVulkanGraphicsV61ImageBarrierEntry);
+    frame_header->v61.image_barrier_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_IMAGE_BARRIER_SCHEMA_HASH;
 
 #define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
     do { \
@@ -3375,6 +3420,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     APPEND_GRAPHICS_TABLE(push_metadata, push_metadata_count, sizeof(push_metadata[0]),
                           frame_header->v61.push_constant_metadata_table_offset,
                           frame_header->v61.push_constant_metadata_table_size);
+    APPEND_GRAPHICS_TABLE(image_barriers, image_barrier_count, sizeof(image_barriers[0]),
+                          frame_header->v61.image_barrier_table_offset,
+                          frame_header->v61.image_barrier_table_size);
 #undef APPEND_GRAPHICS_TABLE
     frame_header->v61.extension_hash = 1469598103934665603ull;
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
@@ -3383,6 +3431,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
         frame_header->v61.extension_hash, push_metadata,
         sizeof(push_metadata[0]) * push_metadata_count);
+    frame_header->v61.extension_hash = fnv1a64_update_bytes(
+        frame_header->v61.extension_hash, image_barriers,
+        sizeof(image_barriers[0]) * image_barrier_count);
     header->frame_size = cursor;
     header->payload_hash = fnv1a64_bytes(frame + sizeof(*frame_header),
                                          cursor - sizeof(*frame_header));
@@ -9750,15 +9801,16 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
         const VkBufferMemoryBarrier *pBufferMemoryBarriers,
         uint32_t imageMemoryBarrierCount,
         const VkImageMemoryBarrier *pImageMemoryBarriers) {
-    (void)srcStageMask;
-    (void)dstStageMask;
     (void)dependencyFlags;
-    (void)memoryBarrierCount;
     (void)pMemoryBarriers;
-    (void)bufferMemoryBarrierCount;
     (void)pBufferMemoryBarriers;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (cmd) {
+        if ((memoryBarrierCount || bufferMemoryBarrierCount) &&
+            (cmd->graphics_command_op_count > 0 || cmd->dynamic_rendering_active || cmd->graphics_pipeline)) {
+            cmd->graphics_unsupported = true;
+        }
+        uint32_t graphics_barrier_first = cmd->image_barrier_op_count;
         for (uint32_t i = 0; pImageMemoryBarriers && i < imageMemoryBarrierCount; ++i) {
             const VkImageMemoryBarrier *b = &pImageMemoryBarriers[i];
             record_image_barrier_op(commandBuffer,
@@ -9772,6 +9824,15 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
                                     (VkPipelineStageFlags2)dstStageMask,
                                     b->srcQueueFamilyIndex,
                                     b->dstQueueFamilyIndex);
+        }
+        uint32_t graphics_barrier_count = cmd->image_barrier_op_count - graphics_barrier_first;
+        if (graphics_barrier_count) {
+            PdockerVkGraphicsCommandRecord record;
+            memset(&record, 0, sizeof(record));
+            record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER;
+            record.image_barrier_op_first = graphics_barrier_first;
+            record.image_barrier_op_count = graphics_barrier_count;
+            (void)append_graphics_command_record(cmd, &record);
         }
         PdockerVkCommandOp op;
         memset(&op, 0, sizeof(op));
@@ -10488,7 +10549,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             if (cmd->graphics_command_op_count > 0) {
                 bool graphics_only_submit = true;
                 for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
-                    if (cmd->command_ops[op_index].type != PDOCKER_VK_COMMAND_GRAPHICS_DRAW) {
+                    PdockerVkCommandOpType op_type = cmd->command_ops[op_index].type;
+                    if (op_type != PDOCKER_VK_COMMAND_GRAPHICS_DRAW &&
+                        op_type != PDOCKER_VK_COMMAND_IMAGE_BARRIER &&
+                        op_type != PDOCKER_VK_COMMAND_BARRIER) {
                         graphics_only_submit = false;
                         break;
                     }
@@ -10958,6 +11022,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         const VkDependencyInfo *pDependencyInfo) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
+    uint32_t graphics_barrier_first = cmd->image_barrier_op_count;
+    if (pDependencyInfo && (pDependencyInfo->memoryBarrierCount || pDependencyInfo->bufferMemoryBarrierCount) &&
+        (cmd->graphics_command_op_count > 0 || cmd->dynamic_rendering_active || cmd->graphics_pipeline)) {
+        cmd->graphics_unsupported = true;
+    }
     if (pDependencyInfo && pDependencyInfo->pImageMemoryBarriers) {
         for (uint32_t i = 0; i < pDependencyInfo->imageMemoryBarrierCount; ++i) {
             const VkImageMemoryBarrier2 *b = &pDependencyInfo->pImageMemoryBarriers[i];
@@ -10973,6 +11042,15 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
                                     b->srcQueueFamilyIndex,
                                     b->dstQueueFamilyIndex);
         }
+    }
+    uint32_t graphics_barrier_count = cmd->image_barrier_op_count - graphics_barrier_first;
+    if (graphics_barrier_count) {
+        PdockerVkGraphicsCommandRecord record;
+        memset(&record, 0, sizeof(record));
+        record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER;
+        record.image_barrier_op_first = graphics_barrier_first;
+        record.image_barrier_op_count = graphics_barrier_count;
+        (void)append_graphics_command_record(cmd, &record);
     }
     PdockerVkCommandOp op;
     memset(&op, 0, sizeof(op));
