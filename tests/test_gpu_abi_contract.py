@@ -1193,8 +1193,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_SAMPLER", executor)
         self.assertIn("vulkan_image_descriptor_layout_valid", executor)
+        self.assertIn("record_vulkan_graphics_v6_staged_image_uploads", executor)
+        self.assertIn("vkCmdCopyBufferToImage", executor)
+        self.assertIn("VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL", executor)
+        self.assertIn("image->upload_pending = 0", executor)
+        self.assertIn("image->descriptor_layout_seen = 1", executor)
+        self.assertIn("image->copy_base_mip", executor)
+        self.assertIn("image->copy_level_count", executor)
+        self.assertIn("VK_ACCESS_TRANSFER_WRITE_BIT", helper)
+        self.assertIn("VK_PIPELINE_STAGE_TRANSFER_BIT", helper)
         self.assertIn("VK_ACCESS_SHADER_READ_BIT", helper)
         self.assertIn("vkCmdPipelineBarrier(command_buffer", helper)
+        self.assertNotIn("if (image->requires_staging) return -EOPNOTSUPP;", executor)
         self.assertIn("rc = -EOPNOTSUPP;", helper)
         run_body = executor.split("static int run_vulkan_graphics_v6_frame", 1)[1].split(
             "static int recv_vulkan_graphics_v6_header_with_fds", 1
