@@ -1223,6 +1223,7 @@ typedef struct {
     VkPhysicalDevice8BitStorageFeatures physical_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features physical_float16_int8;
     VkPhysicalDeviceDynamicRenderingFeatures physical_dynamic_rendering;
+    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT physical_extended_dynamic_state;
     VkPhysicalDeviceFeatures enabled_features;
     VkPhysicalDeviceVulkan11Features enabled_vulkan11;
     VkPhysicalDeviceVulkan12Features enabled_vulkan12;
@@ -1230,21 +1231,64 @@ typedef struct {
     VkPhysicalDevice8BitStorageFeatures enabled_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
     VkPhysicalDeviceDynamicRenderingFeatures enabled_dynamic_rendering;
+    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT enabled_extended_dynamic_state;
     uint32_t enabled_extension_count;
     uint8_t enabled_ext_16bit_storage;
     uint8_t enabled_ext_8bit_storage;
     uint8_t enabled_ext_shader_float16_int8;
     uint8_t enabled_ext_storage_buffer_storage_class;
     uint8_t enabled_ext_dynamic_rendering;
+    uint8_t enabled_ext_extended_dynamic_state;
     uint8_t enabled_chain_compat_feature_structs;
     uint8_t graphics_ready;
     PFN_vkCmdBeginRenderingKHR cmd_begin_rendering;
     PFN_vkCmdEndRenderingKHR cmd_end_rendering;
+    PFN_vkCmdSetCullModeEXT cmd_set_cull_mode;
+    PFN_vkCmdSetFrontFaceEXT cmd_set_front_face;
+    PFN_vkCmdSetPrimitiveTopologyEXT cmd_set_primitive_topology;
     VkPhysicalDeviceSubgroupProperties subgroup_properties;
     double init_ms;
 } VulkanRuntime;
 
 static VulkanRuntime g_vulkan_runtime;
+
+static uint32_t vulkan_graphics_dynamic_state_bit_index(uint32_t state_type) {
+    switch ((VkDynamicState)state_type) {
+        case VK_DYNAMIC_STATE_VIEWPORT: return 0u;
+        case VK_DYNAMIC_STATE_SCISSOR: return 1u;
+        case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
+        case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
+        case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;
+        case VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY: return 5u;
+        default: return UINT32_MAX;
+    }
+}
+
+static uint64_t vulkan_graphics_dynamic_state_bit(uint32_t state_type) {
+    const uint32_t bit = vulkan_graphics_dynamic_state_bit_index(state_type);
+    return bit < 64u ? (1ull << bit) : 0ull;
+}
+
+static int vulkan_graphics_dynamic_state_payload_supported(
+        const PdockerGpuVulkanGraphicsV6DynamicStateEntry *state) {
+    if (!state) return -EINVAL;
+    switch ((VkDynamicState)state->state_type) {
+        case VK_DYNAMIC_STATE_VIEWPORT:
+            return (state->count > 0 && state->data_size == (uint64_t)state->count * sizeof(VkViewport)) ? 0 : -EPROTO;
+        case VK_DYNAMIC_STATE_SCISSOR:
+            return (state->count > 0 && state->data_size == (uint64_t)state->count * sizeof(VkRect2D)) ? 0 : -EPROTO;
+        case VK_DYNAMIC_STATE_LINE_WIDTH:
+            return (state->first_index == 0 && state->count == 1 && state->data_size == sizeof(float)) ? 0 : -EPROTO;
+        case VK_DYNAMIC_STATE_CULL_MODE:
+            return (state->first_index == 0 && state->count == 1 && state->data_size == sizeof(VkCullModeFlags)) ? 0 : -EPROTO;
+        case VK_DYNAMIC_STATE_FRONT_FACE:
+            return (state->first_index == 0 && state->count == 1 && state->data_size == sizeof(VkFrontFace)) ? 0 : -EPROTO;
+        case VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY:
+            return (state->first_index == 0 && state->count == 1 && state->data_size == sizeof(VkPrimitiveTopology)) ? 0 : -EPROTO;
+        default:
+            return -EOPNOTSUPP;
+    }
+}
 
 #define PDOCKER_GPU_EXECUTOR_BUILD_MARKER "gpu-executor-q6-readonly-snapshot-20260531"
 
@@ -1648,13 +1692,15 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"core12_storagePushConstant8\":%u,"
             "\"core12_shaderFloat16\":%u,"
             "\"core12_shaderInt8\":%u,"
+            "\"extendedDynamicState\":%u,"
             "\"extension_count\":%u,"
             "\"chain_compat_feature_structs\":%u,"
             "\"extensions\":{"
             "\"VK_KHR_16bit_storage\":%u,"
             "\"VK_KHR_8bit_storage\":%u,"
             "\"VK_KHR_shader_float16_int8\":%u,"
-            "\"VK_KHR_storage_buffer_storage_class\":%u}}",
+            "\"VK_KHR_storage_buffer_storage_class\":%u,"
+            "\"VK_EXT_extended_dynamic_state\":%u}}",
             rt ? rt->enabled_features.shaderInt64 : 0,
             rt ? rt->enabled_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.uniformAndStorageBuffer16BitAccess : 0,
@@ -1672,12 +1718,14 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_vulkan12.storagePushConstant8 : 0,
             rt ? rt->enabled_vulkan12.shaderFloat16 : 0,
             rt ? rt->enabled_vulkan12.shaderInt8 : 0,
+            rt ? rt->enabled_extended_dynamic_state.extendedDynamicState : 0,
             rt ? rt->enabled_extension_count : 0,
             rt ? rt->enabled_chain_compat_feature_structs : 0,
             rt ? rt->enabled_ext_16bit_storage : 0,
             rt ? rt->enabled_ext_8bit_storage : 0,
             rt ? rt->enabled_ext_shader_float16_int8 : 0,
-            rt ? rt->enabled_ext_storage_buffer_storage_class : 0);
+            rt ? rt->enabled_ext_storage_buffer_storage_class : 0,
+            rt ? rt->enabled_ext_extended_dynamic_state : 0);
 }
 
 static void log_spirv_trace(
@@ -10471,6 +10519,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     memset(&rt->physical_storage8, 0, sizeof(rt->physical_storage8));
     memset(&rt->physical_float16_int8, 0, sizeof(rt->physical_float16_int8));
     memset(&rt->physical_dynamic_rendering, 0, sizeof(rt->physical_dynamic_rendering));
+    memset(&rt->physical_extended_dynamic_state, 0, sizeof(rt->physical_extended_dynamic_state));
     memset(&rt->subgroup_properties, 0, sizeof(rt->subgroup_properties));
     rt->physical_vulkan11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     rt->physical_vulkan12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -10478,6 +10527,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->physical_storage8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
     rt->physical_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
     rt->physical_dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+    rt->physical_extended_dynamic_state.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
     rt->subgroup_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
     PFN_vkGetPhysicalDeviceFeatures2 get_features2 =
         (PFN_vkGetPhysicalDeviceFeatures2)vkGetInstanceProcAddr(rt->instance, "vkGetPhysicalDeviceFeatures2");
@@ -10494,6 +10544,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_storage16.pNext = &rt->physical_storage8;
         rt->physical_storage8.pNext = &rt->physical_float16_int8;
         rt->physical_float16_int8.pNext = &rt->physical_dynamic_rendering;
+        rt->physical_dynamic_rendering.pNext = &rt->physical_extended_dynamic_state;
         get_features2(rt->physical_device, &features2);
         rt->physical_features = features2.features;
         rt->physical_vulkan11.pNext = NULL;
@@ -10502,6 +10553,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_storage8.pNext = NULL;
         rt->physical_float16_int8.pNext = NULL;
         rt->physical_dynamic_rendering.pNext = NULL;
+        rt->physical_extended_dynamic_state.pNext = NULL;
     }
     PFN_vkGetPhysicalDeviceProperties2 get_properties2 =
         (PFN_vkGetPhysicalDeviceProperties2)vkGetInstanceProcAddr(rt->instance, "vkGetPhysicalDeviceProperties2");
@@ -10567,12 +10619,14 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     VkPhysicalDevice8BitStorageFeatures enabled_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
     VkPhysicalDeviceDynamicRenderingFeatures enabled_dynamic_rendering;
+    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT enabled_extended_dynamic_state;
     memset(&enabled_vulkan11, 0, sizeof(enabled_vulkan11));
     memset(&enabled_vulkan12, 0, sizeof(enabled_vulkan12));
     memset(&enabled_storage16, 0, sizeof(enabled_storage16));
     memset(&enabled_storage8, 0, sizeof(enabled_storage8));
     memset(&enabled_float16_int8, 0, sizeof(enabled_float16_int8));
     memset(&enabled_dynamic_rendering, 0, sizeof(enabled_dynamic_rendering));
+    memset(&enabled_extended_dynamic_state, 0, sizeof(enabled_extended_dynamic_state));
     enabled_vulkan11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     enabled_vulkan11.storageBuffer16BitAccess =
         rt->physical_vulkan11.storageBuffer16BitAccess || rt->physical_storage16.storageBuffer16BitAccess;
@@ -10604,7 +10658,9 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_storage8.storagePushConstant8 = rt->physical_storage8.storagePushConstant8;
     enabled_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
     enabled_dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+    enabled_extended_dynamic_state.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
     enabled_dynamic_rendering.dynamicRendering = rt->physical_dynamic_rendering.dynamicRendering;
+    enabled_extended_dynamic_state.extendedDynamicState = rt->physical_extended_dynamic_state.extendedDynamicState;
     enabled_float16_int8.shaderFloat16 = rt->physical_float16_int8.shaderFloat16;
     enabled_float16_int8.shaderInt8 = rt->physical_float16_int8.shaderInt8;
     void *device_features_pnext = NULL;
@@ -10642,6 +10698,14 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         enabled_dynamic_rendering.pNext = device_features_pnext;
         device_features_pnext = &enabled_dynamic_rendering;
     }
+    const int extended_dynamic_state_available =
+        enabled_extended_dynamic_state.extendedDynamicState &&
+        vulkan_device_extension_supported(rt->physical_device,
+                                          VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
+    if (extended_dynamic_state_available) {
+        enabled_extended_dynamic_state.pNext = device_features_pnext;
+        device_features_pnext = &enabled_extended_dynamic_state;
+    }
     const int chain_compat_feature_structs =
         env_truthy("PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS", 1);
     if ((rt->api_version < VK_API_VERSION_1_2 || chain_compat_feature_structs) &&
@@ -10664,7 +10728,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         enabled_storage16.pNext = device_features_pnext;
         device_features_pnext = &enabled_storage16;
     }
-    const char *enabled_extensions[8];
+    const char *enabled_extensions[12];
     uint32_t enabled_extension_count = 0;
     memset(enabled_extensions, 0, sizeof(enabled_extensions));
     if (enabled_storage16.storageBuffer16BitAccess ||
@@ -10718,6 +10782,17 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
                                    (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
                                    VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME);
     rt->enabled_ext_storage_buffer_storage_class = enabled_extension_count > storage_class_before;
+    const uint32_t extended_dynamic_state_before = enabled_extension_count;
+    if (enabled_extended_dynamic_state.extendedDynamicState) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
+        rt->enabled_ext_extended_dynamic_state =
+            extended_dynamic_state_available &&
+            enabled_extension_count > extended_dynamic_state_before;
+    }
     rt->enabled_features = enabled_features;
     rt->enabled_vulkan11 = enabled_vulkan11;
     rt->enabled_vulkan12 = enabled_vulkan12;
@@ -10725,12 +10800,14 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->enabled_storage8 = enabled_storage8;
     rt->enabled_float16_int8 = enabled_float16_int8;
     rt->enabled_dynamic_rendering = enabled_dynamic_rendering;
+    rt->enabled_extended_dynamic_state = enabled_extended_dynamic_state;
     rt->enabled_vulkan11.pNext = NULL;
     rt->enabled_vulkan12.pNext = NULL;
     rt->enabled_storage16.pNext = NULL;
     rt->enabled_storage8.pNext = NULL;
     rt->enabled_float16_int8.pNext = NULL;
     rt->enabled_dynamic_rendering.pNext = NULL;
+    rt->enabled_extended_dynamic_state.pNext = NULL;
     rt->enabled_extension_count = enabled_extension_count;
     rt->enabled_chain_compat_feature_structs = (uint8_t)chain_compat_feature_structs;
     VkDeviceCreateInfo dci = {
@@ -10764,6 +10841,24 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     if (!rt->cmd_end_rendering) {
         rt->cmd_end_rendering =
             (PFN_vkCmdEndRenderingKHR)vkGetDeviceProcAddr(rt->device, "vkCmdEndRendering");
+    }
+    rt->cmd_set_cull_mode =
+        (PFN_vkCmdSetCullModeEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetCullMode");
+    if (!rt->cmd_set_cull_mode) {
+        rt->cmd_set_cull_mode =
+            (PFN_vkCmdSetCullModeEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetCullModeEXT");
+    }
+    rt->cmd_set_front_face =
+        (PFN_vkCmdSetFrontFaceEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetFrontFace");
+    if (!rt->cmd_set_front_face) {
+        rt->cmd_set_front_face =
+            (PFN_vkCmdSetFrontFaceEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetFrontFaceEXT");
+    }
+    rt->cmd_set_primitive_topology =
+        (PFN_vkCmdSetPrimitiveTopologyEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetPrimitiveTopology");
+    if (!rt->cmd_set_primitive_topology) {
+        rt->cmd_set_primitive_topology =
+            (PFN_vkCmdSetPrimitiveTopologyEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetPrimitiveTopologyEXT");
     }
     VkShaderModuleCreateInfo smci = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -15582,7 +15677,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"storagePushConstant8\":%u},"
             "\"float16_int8\":{"
             "\"shaderFloat16\":%u,"
-            "\"shaderInt8\":%u}},",
+            "\"shaderInt8\":%u},"
+            "\"extendedDynamicState\":%u},",
             rt ? rt->physical_features.shaderInt64 : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
@@ -15592,7 +15688,8 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_storage8.uniformAndStorageBuffer8BitAccess : 0,
             rt ? rt->physical_storage8.storagePushConstant8 : 0,
             rt ? rt->physical_float16_int8.shaderFloat16 : 0,
-            rt ? rt->physical_float16_int8.shaderInt8 : 0);
+            rt ? rt->physical_float16_int8.shaderInt8 : 0,
+            rt ? rt->physical_extended_dynamic_state.extendedDynamicState : 0);
     fprintf(out,
             "\"subgroup\":{"
             "\"subgroupSize\":%u,"
@@ -17697,9 +17794,16 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 for (uint32_t d = 0; d < command->dynamic_state_count; ++d) {
                     const PdockerGpuVulkanGraphicsV6DynamicStateEntry *state =
                         &view->dynamic_states[command->dynamic_state_first + d];
-                    if (state->state_type != VK_DYNAMIC_STATE_VIEWPORT &&
-                        state->state_type != VK_DYNAMIC_STATE_SCISSOR) {
-                        reason = "only viewport/scissor dynamic state replay is implemented first";
+                    int src = vulkan_graphics_dynamic_state_payload_supported(state);
+                    if (src != 0) {
+                        reason = src == -EOPNOTSUPP
+                            ? "unsupported graphics dynamic state replay"
+                            : "invalid graphics dynamic state payload";
+                        if (reason_out) *reason_out = reason;
+                        return src;
+                    }
+                    if (vulkan_graphics_dynamic_state_bit(state->state_type) == 0) {
+                        reason = "unsupported graphics dynamic state bit mapping";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
@@ -18224,15 +18328,31 @@ static int materialize_vulkan_graphics_v6_pipelines(
             .attachmentCount = src->color_attachment_count,
             .pAttachments = src->color_attachment_count ? blend_attachments : NULL,
         };
-        VkDynamicState dynamic_states[2];
+        VkDynamicState dynamic_states[8];
         uint32_t dynamic_state_count = 0;
-        if (src->dynamic_state_mask & (1ull << (uint32_t)VK_DYNAMIC_STATE_VIEWPORT)) {
-            dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_VIEWPORT;
+#define ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(mask_value, state_value) do { \
+            uint64_t bit = vulkan_graphics_dynamic_state_bit((uint32_t)(state_value)); \
+            if (((mask_value) & bit) != 0) dynamic_states[dynamic_state_count++] = (state_value); \
+        } while (0)
+        const uint64_t supported_dynamic_state_mask =
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LINE_WIDTH) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_CULL_MODE) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_FRONT_FACE) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY);
+        if ((src->dynamic_state_mask & ~supported_dynamic_state_mask) != 0) return -EOPNOTSUPP;
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_VIEWPORT);
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_SCISSOR);
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_LINE_WIDTH);
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_CULL_MODE);
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_FRONT_FACE);
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY);
+#undef ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT
+        if ((src->dynamic_state_mask & vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT)) == 0 ||
+            (src->dynamic_state_mask & vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR)) == 0) {
+            return -EOPNOTSUPP;
         }
-        if (src->dynamic_state_mask & (1ull << (uint32_t)VK_DYNAMIC_STATE_SCISSOR)) {
-            dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_SCISSOR;
-        }
-        if (dynamic_state_count != 2u) return -EOPNOTSUPP;
         VkPipelineDynamicStateCreateInfo dsci = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
             .dynamicStateCount = dynamic_state_count,
@@ -19382,23 +19502,68 @@ static int record_vulkan_graphics_v6_command_buffer(
                         goto cleanup;
                     }
                     const void *data = view->frame + state->data_offset;
-                    if (state->state_type == VK_DYNAMIC_STATE_VIEWPORT) {
-                        if (state->data_size != (uint64_t)state->count * sizeof(VkViewport)) {
-                            rc = -EPROTO;
-                            goto cleanup;
+                    rc = vulkan_graphics_dynamic_state_payload_supported(state);
+                    if (rc != 0) goto cleanup;
+                    switch ((VkDynamicState)state->state_type) {
+                        case VK_DYNAMIC_STATE_VIEWPORT:
+                            vkCmdSetViewport(command_buffer, state->first_index, state->count,
+                                             (const VkViewport *)data);
+                            break;
+                        case VK_DYNAMIC_STATE_SCISSOR:
+                            vkCmdSetScissor(command_buffer, state->first_index, state->count,
+                                            (const VkRect2D *)data);
+                            break;
+                        case VK_DYNAMIC_STATE_LINE_WIDTH: {
+                            float line_width = 1.0f;
+                            memcpy(&line_width, data, sizeof(line_width));
+                            if (line_width != 1.0f) {
+                                const VkPhysicalDeviceLimits *limits = &rt->physical_properties.limits;
+                                if (!rt->enabled_features.wideLines ||
+                                    line_width < limits->lineWidthRange[0] ||
+                                    line_width > limits->lineWidthRange[1]) {
+                                    rc = -EOPNOTSUPP;
+                                    goto cleanup;
+                                }
+                            }
+                            vkCmdSetLineWidth(command_buffer, line_width);
+                            break;
                         }
-                        vkCmdSetViewport(command_buffer, state->first_index, state->count,
-                                         (const VkViewport *)data);
-                    } else if (state->state_type == VK_DYNAMIC_STATE_SCISSOR) {
-                        if (state->data_size != (uint64_t)state->count * sizeof(VkRect2D)) {
-                            rc = -EPROTO;
-                            goto cleanup;
+                        case VK_DYNAMIC_STATE_CULL_MODE: {
+                            if (!rt->enabled_extended_dynamic_state.extendedDynamicState ||
+                                !rt->cmd_set_cull_mode) {
+                                rc = -EOPNOTSUPP;
+                                goto cleanup;
+                            }
+                            VkCullModeFlags value = 0;
+                            memcpy(&value, data, sizeof(value));
+                            rt->cmd_set_cull_mode(command_buffer, value);
+                            break;
                         }
-                        vkCmdSetScissor(command_buffer, state->first_index, state->count,
-                                        (const VkRect2D *)data);
-                    } else {
-                        rc = -EOPNOTSUPP;
-                        goto cleanup;
+                        case VK_DYNAMIC_STATE_FRONT_FACE: {
+                            if (!rt->enabled_extended_dynamic_state.extendedDynamicState ||
+                                !rt->cmd_set_front_face) {
+                                rc = -EOPNOTSUPP;
+                                goto cleanup;
+                            }
+                            VkFrontFace value = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+                            memcpy(&value, data, sizeof(value));
+                            rt->cmd_set_front_face(command_buffer, value);
+                            break;
+                        }
+                        case VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY: {
+                            if (!rt->enabled_extended_dynamic_state.extendedDynamicState ||
+                                !rt->cmd_set_primitive_topology) {
+                                rc = -EOPNOTSUPP;
+                                goto cleanup;
+                            }
+                            VkPrimitiveTopology value = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+                            memcpy(&value, data, sizeof(value));
+                            rt->cmd_set_primitive_topology(command_buffer, value);
+                            break;
+                        }
+                        default:
+                            rc = -EOPNOTSUPP;
+                            goto cleanup;
                     }
                 }
                 break;

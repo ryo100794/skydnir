@@ -111,6 +111,23 @@ typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS 16
 #define PDOCKER_VK_MAX_GRAPHICS_VERTEX_ATTRIBUTES 32
 #define PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES 64
+
+static uint32_t pdocker_vk_graphics_dynamic_state_bit_index(VkDynamicState state) {
+    switch (state) {
+        case VK_DYNAMIC_STATE_VIEWPORT: return 0u;
+        case VK_DYNAMIC_STATE_SCISSOR: return 1u;
+        case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
+        case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
+        case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;
+        case VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY: return 5u;
+        default: return UINT32_MAX;
+    }
+}
+
+static uint64_t pdocker_vk_graphics_dynamic_state_bit(VkDynamicState state) {
+    uint32_t bit = pdocker_vk_graphics_dynamic_state_bit_index(state);
+    return bit < 64u ? (1ull << bit) : 0ull;
+}
 #define PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS 128
 #define PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS 128
 #define PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS 128
@@ -5978,6 +5995,7 @@ typedef struct {
     bool ext_8bit_storage;
     bool ext_shader_float16_int8;
     bool ext_storage_buffer_storage_class;
+    bool ext_extended_dynamic_state;
 } PdockerVkAdvertisedCaps;
 
 static const char *json_find_value(const char *json, const char *key) {
@@ -6083,6 +6101,7 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "VK_KHR_8bit_storage", &value)) caps->ext_8bit_storage = value != 0;
     if (json_read_u32(json, "VK_KHR_shader_float16_int8", &value)) caps->ext_shader_float16_int8 = value != 0;
     if (json_read_u32(json, "VK_KHR_storage_buffer_storage_class", &value)) caps->ext_storage_buffer_storage_class = value != 0;
+    if (json_read_u32(json, "VK_EXT_extended_dynamic_state", &value)) caps->ext_extended_dynamic_state = value != 0;
     return caps->api_version != 0;
 }
 
@@ -6216,7 +6235,7 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
                               : VK_PHYSICAL_DEVICE_TYPE_CPU);
     if (caps) {
         snprintf(pProperties->deviceName, sizeof(pProperties->deviceName),
-                 "skydnir Vulkan bridge (%s)", caps->device_name);
+                 "skydnir Vulkan bridge (%.200s)", caps->device_name);
     } else {
         snprintf(pProperties->deviceName, sizeof(pProperties->deviceName),
                  "pdocker Vulkan bridge (%s)", bridge_available() ? "queue" : "offline");
@@ -6511,6 +6530,13 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES: {
                 VkPhysicalDeviceDynamicRenderingFeatures *p = (VkPhysicalDeviceDynamicRenderingFeatures *)node;
                 p->dynamicRendering = VK_TRUE;
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
+                VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
+                p->extendedDynamicState = caps ? (caps->ext_extended_dynamic_state ? VK_TRUE : VK_FALSE) : VK_TRUE;
                 break;
             }
 #endif
@@ -7569,7 +7595,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkExtensionProperties *pProperties) {
     (void)physicalDevice;
     (void)pLayerName;
-    VkExtensionProperties available[11];
+    VkExtensionProperties available[12];
     uint32_t available_count = 0;
 #define ADD_DEVICE_EXTENSION(name, version) do { \
         if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
@@ -7600,6 +7626,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
     ADD_DEVICE_EXTENSION(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME, VK_KHR_COPY_COMMANDS_2_SPEC_VERSION);
     ADD_DEVICE_EXTENSION(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION);
     ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION);
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
+    if (!caps || caps->ext_extended_dynamic_state) {
+        ADD_DEVICE_EXTENSION(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
+                             VK_EXT_EXTENDED_DYNAMIC_STATE_SPEC_VERSION);
+    }
+#endif
 #undef ADD_DEVICE_EXTENSION
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
     return VK_SUCCESS;
@@ -8259,7 +8291,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         if (ci->pDynamicState) {
             for (uint32_t d = 0; d < ci->pDynamicState->dynamicStateCount; ++d) {
                 VkDynamicState state = ci->pDynamicState->pDynamicStates[d];
-                if ((uint32_t)state < 64u) captured_dynamic_state_mask |= (1ull << (uint32_t)state);
+                captured_dynamic_state_mask |= pdocker_vk_graphics_dynamic_state_bit(state);
             }
         }
         pipeline->dynamic_state_mask = captured_dynamic_state_mask;
@@ -8292,7 +8324,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             if (ci->pRasterizationState->depthClampEnable ||
                 ci->pRasterizationState->rasterizerDiscardEnable ||
                 ci->pRasterizationState->depthBiasEnable ||
-                ci->pRasterizationState->lineWidth != 1.0f) {
+                (ci->pRasterizationState->lineWidth != 1.0f &&
+                 !(captured_dynamic_state_mask &
+                   pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LINE_WIDTH)))) {
                 pipeline->graphics_unsupported = true;
             }
         }
@@ -8338,11 +8372,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         }
         if (ci->pViewportState) {
             if (ci->pViewportState->viewportCount > 0 &&
-                !(captured_dynamic_state_mask & (1ull << (uint32_t)VK_DYNAMIC_STATE_VIEWPORT))) {
+                !(captured_dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT))) {
                 pipeline->graphics_unsupported = true;
             }
             if (ci->pViewportState->scissorCount > 0 &&
-                !(captured_dynamic_state_mask & (1ull << (uint32_t)VK_DYNAMIC_STATE_SCISSOR))) {
+                !(captured_dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR))) {
                 pipeline->graphics_unsupported = true;
             }
         }

@@ -870,6 +870,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "record_graphics_dynamic_state_bytes",
             "VK_DYNAMIC_STATE_VIEWPORT",
             "VK_DYNAMIC_STATE_SCISSOR",
+            "VK_DYNAMIC_STATE_LINE_WIDTH",
+            "VK_DYNAMIC_STATE_CULL_MODE",
+            "VK_DYNAMIC_STATE_FRONT_FACE",
+            "VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY",
             "pipeline->vertex_bindings[b]",
             "pipeline->vertex_attributes[a]",
             "pipeline->dynamic_state_mask",
@@ -909,6 +913,30 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, icd)
         self.assertNotIn("ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME", icd)
 
+
+    def test_vulkan_graphics_executor_replays_non_depth_dynamic_states(self):
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "VkPhysicalDeviceExtendedDynamicStateFeaturesEXT physical_extended_dynamic_state",
+            "VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME",
+            "cmd_set_cull_mode",
+            "cmd_set_front_face",
+            "cmd_set_primitive_topology",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_CULL_MODE)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_FRONT_FACE)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY)",
+            "sizeof(VkCullModeFlags)",
+            "sizeof(VkFrontFace)",
+            "sizeof(VkPrimitiveTopology)",
+            "vkCmdSetLineWidth(command_buffer, line_width);",
+            "rt->cmd_set_cull_mode(command_buffer, value);",
+            "rt->cmd_set_front_face(command_buffer, value);",
+            "rt->cmd_set_primitive_topology(command_buffer, value);",
+        ]:
+            self.assertIn(marker, executor)
+        self.assertNotIn("only viewport/scissor dynamic state replay is implemented first", executor)
+        self.assertNotIn("VkDynamicState dynamic_states[2]", executor)
+
     def test_vulkan_graphics_pipeline_unserialized_state_fails_closed(self):
         icd = VULKAN_ICD.read_text()
         body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1)[1].split(
@@ -922,6 +950,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "ci->pRasterizationState->rasterizerDiscardEnable",
             "ci->pRasterizationState->depthBiasEnable",
             "ci->pRasterizationState->lineWidth != 1.0f",
+            "pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LINE_WIDTH)",
             "ci->pColorBlendState->logicOpEnable",
             "ci->pColorBlendState->blendConstants[0] != 0.0f",
             "attachment->blendEnable",
