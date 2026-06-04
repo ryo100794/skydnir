@@ -654,6 +654,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdBindVertexBuffers",
             "vkCmdBindVertexBuffers2",
             "vkCmdBindIndexBuffer",
+            "vkCmdBindDescriptorSets",
             "vkCmdDraw",
             "vkCmdDrawIndexed",
             "vkCmdDrawIndirect",
@@ -1018,6 +1019,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "vulkan-graphics-v6-attachment-materialize",
             "materialize_vulkan_graphics_v6_buffers",
             "vulkan-graphics-v6-buffer-materialize",
+            "materialize_vulkan_graphics_v6_descriptors",
+            "vulkan-graphics-v6-descriptor-materialize",
             "record_vulkan_graphics_v6_attachment_writeback_commands",
             "writeback_vulkan_graphics_v6_attachments",
             "vulkan-graphics-v6-attachment-writeback",
@@ -1081,6 +1084,12 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertLess(
             run_body.index("materialize_vulkan_graphics_v6_buffers"),
+            run_body.index("materialize_vulkan_graphics_v6_descriptors"),
+        )
+        self.assertIn("materialize_vulkan_graphics_v6_descriptors", run_body)
+        self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-descriptor-materialize\\"', run_body)
+        self.assertLess(
+            run_body.index("materialize_vulkan_graphics_v6_descriptors"),
             run_body.index("record_vulkan_graphics_v6_command_buffer"),
         )
 
@@ -1161,6 +1170,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdPushConstants",
             "vkCmdBindVertexBuffers",
             "vkCmdBindIndexBuffer",
+            "vkCmdBindDescriptorSets",
             "vkCmdDraw",
             "vkCmdDrawIndexed",
             "vkEndCommandBuffer",
@@ -1171,6 +1181,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS",
         ]:
             self.assertIn(marker, helper)
+        self.assertIn("vkAllocateDescriptorSets", executor)
+        self.assertIn("vkUpdateDescriptorSets", executor)
+        self.assertIn("collect_graphics_descriptor_layout_for_layout", executor)
+        self.assertIn("find_vulkan_graphics_replay_descriptor_bind", executor)
+        self.assertIn("graphics image descriptor replay is not implemented", executor)
+        self.assertIn("graphics write descriptor replay is not implemented", executor)
         self.assertIn("rc = -EOPNOTSUPP;", helper)
         run_body = executor.split("static int run_vulkan_graphics_v6_frame", 1)[1].split(
             "static int recv_vulkan_graphics_v6_header_with_fds", 1

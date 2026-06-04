@@ -17651,9 +17651,24 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 }
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS:
-                reason = "graphics descriptor replay is not implemented";
-                if (reason_out) *reason_out = reason;
-                return -EOPNOTSUPP;
+                for (uint32_t d = 0; d < command->descriptor_count; ++d) {
+                    const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
+                        &view->descriptors[command->first_descriptor + d];
+                    VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+                    if (vulkan_dispatch_descriptor_type_from_api(
+                            descriptor->descriptor_type, &descriptor_type) != 0) {
+                        reason = "graphics image descriptor replay is not implemented";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                    if (descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) {
+                        reason = "graphics write descriptor replay is not implemented";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                    (void)descriptor_type;
+                }
+                break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:
                 reason = "graphics barrier replay is not implemented";
                 if (reason_out) *reason_out = reason;
@@ -17712,6 +17727,9 @@ static int preflight_vulkan_graphics_v6_runtime_supported(const char **reason_ou
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS
 
 typedef struct VulkanGraphicsReplayPipeline {
+    uint64_t layout_id;
+    VkDescriptorSetLayout set_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
+    uint32_t descriptor_set_count;
     VkShaderModule shader_modules[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES];
     VkPipelineLayout layout;
     VkPipeline pipeline;
@@ -17725,6 +17743,11 @@ static void destroy_vulkan_graphics_replay_pipelines(
     for (uint32_t i = 0; i < pipeline_count; ++i) {
         if (pipelines[i].pipeline) vkDestroyPipeline(device, pipelines[i].pipeline, NULL);
         if (pipelines[i].layout) vkDestroyPipelineLayout(device, pipelines[i].layout, NULL);
+        for (uint32_t d = 0; d < PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS; ++d) {
+            if (pipelines[i].set_layouts[d]) {
+                vkDestroyDescriptorSetLayout(device, pipelines[i].set_layouts[d], NULL);
+            }
+        }
         for (uint32_t s = 0; s < PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES; ++s) {
             if (pipelines[i].shader_modules[s]) {
                 vkDestroyShaderModule(device, pipelines[i].shader_modules[s], NULL);
@@ -17802,6 +17825,75 @@ static int collect_graphics_push_ranges_for_layout(
     return 0;
 }
 
+static int collect_graphics_descriptor_layout_for_layout(
+        const VulkanGraphicsV6FrameView *view,
+        uint64_t layout_id,
+        uint32_t set_binding_counts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS],
+        VkDescriptorType set_binding_types[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS],
+        uint32_t set_binding_descriptor_counts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS],
+        uint32_t *out_descriptor_set_count) {
+    if (!view || !view->header || !set_binding_counts || !set_binding_types ||
+        !set_binding_descriptor_counts || !out_descriptor_set_count) {
+        return -EINVAL;
+    }
+    memset(set_binding_counts, 0,
+           sizeof(uint32_t) * PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS);
+    memset(set_binding_types, 0,
+           sizeof(VkDescriptorType) * PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS *
+               PDOCKER_GPU_MAX_VULKAN_BINDINGS);
+    memset(set_binding_descriptor_counts, 0,
+           sizeof(uint32_t) * PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS *
+               PDOCKER_GPU_MAX_VULKAN_BINDINGS);
+    *out_descriptor_set_count = 0;
+    for (uint32_t c = 0; c < view->header->command_count; ++c) {
+        const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[c];
+        if (command->command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS ||
+            command->pipeline_layout_id != layout_id) {
+            continue;
+        }
+        uint32_t max_set = command->descriptor_first_set;
+        for (uint32_t d = 0; d < command->descriptor_count; ++d) {
+            const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
+                &view->descriptors[command->first_descriptor + d];
+            if (descriptor->descriptor_set >= PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS ||
+                descriptor->binding >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+                descriptor->array_element >= PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
+                descriptor->descriptor_set < command->descriptor_first_set) {
+                return -EPROTO;
+            }
+            if (descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) {
+                return -EOPNOTSUPP;
+            }
+            VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+            if (vulkan_dispatch_descriptor_type_from_api(descriptor->descriptor_type,
+                                                         &descriptor_type) != 0) {
+                return -EOPNOTSUPP;
+            }
+            const uint32_t set = descriptor->descriptor_set;
+            const uint32_t binding = descriptor->binding;
+            if (set_binding_descriptor_counts[set][binding] > 0 &&
+                set_binding_types[set][binding] != descriptor_type) {
+                return -EPROTO;
+            }
+            set_binding_types[set][binding] = descriptor_type;
+            const uint32_t needed_descriptors = descriptor->array_element + 1u;
+            if (needed_descriptors > set_binding_descriptor_counts[set][binding]) {
+                set_binding_descriptor_counts[set][binding] = needed_descriptors;
+            }
+            const uint32_t needed_bindings = binding + 1u;
+            if (needed_bindings > set_binding_counts[set]) {
+                set_binding_counts[set] = needed_bindings;
+            }
+            if (set > max_set) max_set = set;
+        }
+        const uint32_t needed_sets = max_set + 1u;
+        if (needed_sets > *out_descriptor_set_count) {
+            *out_descriptor_set_count = needed_sets;
+        }
+    }
+    return 0;
+}
+
 static int materialize_vulkan_graphics_v6_pipelines(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -17821,6 +17913,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
             return -EOPNOTSUPP;
         }
         VulkanGraphicsReplayPipeline *dst = &out_pipelines[pidx];
+        dst->layout_id = src->layout_id;
         *out_pipeline_count = pidx + 1u;
         VkPipelineShaderStageCreateInfo shader_stages[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES];
         char entry_names[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES][128];
@@ -17857,10 +17950,43 @@ static int materialize_vulkan_graphics_v6_pipelines(
         int rc = collect_graphics_push_ranges_for_layout(
             view, src->layout_id, push_ranges, &push_range_count);
         if (rc != 0) return rc;
+        uint32_t set_binding_counts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
+        VkDescriptorType set_binding_types[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+        uint32_t set_binding_descriptor_counts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+        memset(set_binding_counts, 0, sizeof(set_binding_counts));
+        memset(set_binding_types, 0, sizeof(set_binding_types));
+        memset(set_binding_descriptor_counts, 0, sizeof(set_binding_descriptor_counts));
+        rc = collect_graphics_descriptor_layout_for_layout(
+            view, src->layout_id, set_binding_counts, set_binding_types,
+            set_binding_descriptor_counts, &dst->descriptor_set_count);
+        if (rc != 0) return rc;
+        VkDescriptorSetLayoutBinding layout_bindings
+            [PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS][PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+        memset(layout_bindings, 0, sizeof(layout_bindings));
+        for (uint32_t set = 0; set < dst->descriptor_set_count; ++set) {
+            uint32_t layout_binding_count = 0;
+            for (uint32_t b = 0; b < set_binding_counts[set]; ++b) {
+                if (set_binding_descriptor_counts[set][b] == 0) continue;
+                layout_bindings[set][layout_binding_count++] = (VkDescriptorSetLayoutBinding){
+                    .binding = b,
+                    .descriptorType = set_binding_types[set][b],
+                    .descriptorCount = set_binding_descriptor_counts[set][b],
+                    .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                };
+            }
+            VkDescriptorSetLayoutCreateInfo dslci = {
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                .bindingCount = layout_binding_count,
+                .pBindings = layout_binding_count ? layout_bindings[set] : NULL,
+            };
+            VkResult dsrc = vkCreateDescriptorSetLayout(
+                rt->device, &dslci, NULL, &dst->set_layouts[set]);
+            if (dsrc != VK_SUCCESS) return -EIO;
+        }
         VkPipelineLayoutCreateInfo plci = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-            .setLayoutCount = 0,
-            .pSetLayouts = NULL,
+            .setLayoutCount = dst->descriptor_set_count,
+            .pSetLayouts = dst->descriptor_set_count ? dst->set_layouts : NULL,
             .pushConstantRangeCount = push_range_count,
             .pPushConstantRanges = push_range_count ? push_ranges : NULL,
         };
@@ -18381,6 +18507,56 @@ static int materialize_vulkan_graphics_v6_buffers(
                     return rc;
                 }
             }
+        } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS) {
+            for (uint32_t d = 0; d < command->descriptor_count; ++d) {
+                const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
+                    &view->descriptors[command->first_descriptor + d];
+                VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+                int type_rc = vulkan_dispatch_descriptor_type_from_api(
+                    descriptor->descriptor_type, &descriptor_type);
+                if (type_rc != 0) {
+                    destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                    return type_rc;
+                }
+                if (descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) {
+                    destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                    return -EOPNOTSUPP;
+                }
+                if (descriptor->resource_index >= view->header->resource_count) {
+                    destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                    return -EPROTO;
+                }
+                const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
+                    &view->resources[descriptor->resource_index];
+                if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) {
+                    destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                    return -EPROTO;
+                }
+                uint64_t effective_offset = 0;
+                if (checked_u64_add3(descriptor->buffer_offset,
+                                     descriptor->dynamic_offset, 0,
+                                     &effective_offset) != 0) {
+                    destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                    return -EOVERFLOW;
+                }
+                uint64_t range = descriptor->range;
+                if (range == UINT64_MAX) {
+                    if (effective_offset > buffer->size) {
+                        destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                        return -ERANGE;
+                    }
+                    range = buffer->size - effective_offset;
+                }
+                int rc = add_vulkan_graphics_replay_buffer_range(
+                    view, out, descriptor->resource_index, effective_offset, range,
+                    descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+                        ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+                        : VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+                if (rc != 0) {
+                    destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                    return rc;
+                }
+            }
         } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) {
             uint64_t index_stride = 0;
             uint64_t index_span = 0;
@@ -18446,6 +18622,196 @@ static int materialize_vulkan_graphics_v6_buffers(
     return 0;
 }
 
+typedef struct VulkanGraphicsReplayDescriptorBind {
+    uint32_t command_index;
+    uint64_t layout_id;
+    uint32_t first_set;
+    uint32_t set_count;
+    VkDescriptorPool pool;
+    VkDescriptorSet sets[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
+} VulkanGraphicsReplayDescriptorBind;
+
+typedef struct VulkanGraphicsReplayDescriptors {
+    VulkanGraphicsReplayDescriptorBind binds[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS];
+    uint32_t bind_count;
+} VulkanGraphicsReplayDescriptors;
+
+static void destroy_vulkan_graphics_replay_descriptors(
+        VkDevice device,
+        VulkanGraphicsReplayDescriptors *descriptors) {
+    if (!descriptors) return;
+    for (uint32_t i = 0; i < descriptors->bind_count; ++i) {
+        if (descriptors->binds[i].pool) {
+            vkDestroyDescriptorPool(device, descriptors->binds[i].pool, NULL);
+        }
+    }
+    memset(descriptors, 0, sizeof(*descriptors));
+}
+
+static int find_vulkan_graphics_replay_pipeline_by_layout(
+        const VulkanGraphicsReplayPipeline *pipelines,
+        uint32_t pipeline_count,
+        uint64_t layout_id) {
+    if (!pipelines) return -EINVAL;
+    for (uint32_t i = 0; i < pipeline_count; ++i) {
+        if (pipelines[i].layout_id == layout_id) return (int)i;
+    }
+    return -ENOENT;
+}
+
+static const VulkanGraphicsReplayDescriptorBind *find_vulkan_graphics_replay_descriptor_bind(
+        const VulkanGraphicsReplayDescriptors *descriptors,
+        uint32_t command_index) {
+    if (!descriptors) return NULL;
+    for (uint32_t i = 0; i < descriptors->bind_count; ++i) {
+        if (descriptors->binds[i].command_index == command_index) return &descriptors->binds[i];
+    }
+    return NULL;
+}
+
+static int materialize_vulkan_graphics_v6_descriptors(
+        VulkanRuntime *rt,
+        const VulkanGraphicsV6FrameView *view,
+        const VulkanGraphicsReplayPipeline *pipelines,
+        uint32_t pipeline_count,
+        const VulkanGraphicsReplayBuffers *buffers,
+        VulkanGraphicsReplayDescriptors *out) {
+    if (!rt || !view || !view->header || !pipelines || !buffers || !out) return -EINVAL;
+    memset(out, 0, sizeof(*out));
+    for (uint32_t ci = 0; ci < view->header->command_count; ++ci) {
+        const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[ci];
+        if (command->command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS) continue;
+        if (out->bind_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) return -E2BIG;
+        int pipeline_index = find_vulkan_graphics_replay_pipeline_by_layout(
+            pipelines, pipeline_count, command->pipeline_layout_id);
+        if (pipeline_index < 0) return pipeline_index;
+        const VulkanGraphicsReplayPipeline *pipeline = &pipelines[(uint32_t)pipeline_index];
+        if (command->descriptor_first_set >= pipeline->descriptor_set_count ||
+            command->descriptor_count == 0) {
+            return -EPROTO;
+        }
+        uint32_t max_set = command->descriptor_first_set;
+        uint32_t descriptor_pool_storage_count = 0;
+        uint32_t descriptor_pool_uniform_count = 0;
+        for (uint32_t d = 0; d < command->descriptor_count; ++d) {
+            const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
+                &view->descriptors[command->first_descriptor + d];
+            if (descriptor->descriptor_set > max_set) max_set = descriptor->descriptor_set;
+            VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+            int rc = vulkan_dispatch_descriptor_type_from_api(
+                descriptor->descriptor_type, &descriptor_type);
+            if (rc != 0) return rc;
+            if (descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) return -EOPNOTSUPP;
+            if (descriptor_type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
+                descriptor_pool_uniform_count++;
+            } else {
+                descriptor_pool_storage_count++;
+            }
+        }
+        VulkanGraphicsReplayDescriptorBind *bind = &out->binds[out->bind_count++];
+        memset(bind, 0, sizeof(*bind));
+        bind->command_index = ci;
+        bind->layout_id = command->pipeline_layout_id;
+        bind->first_set = command->descriptor_first_set;
+        bind->set_count = max_set + 1u - command->descriptor_first_set;
+        if (max_set >= pipeline->descriptor_set_count ||
+            bind->set_count > PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS) {
+            return -EPROTO;
+        }
+        VkDescriptorPoolSize pool_sizes[2];
+        uint32_t pool_size_count = 0;
+        if (descriptor_pool_storage_count) {
+            pool_sizes[pool_size_count++] = (VkDescriptorPoolSize){
+                .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = descriptor_pool_storage_count,
+            };
+        }
+        if (descriptor_pool_uniform_count) {
+            pool_sizes[pool_size_count++] = (VkDescriptorPoolSize){
+                .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = descriptor_pool_uniform_count,
+            };
+        }
+        if (pool_size_count == 0) return -EPROTO;
+        VkDescriptorPoolCreateInfo dpci = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .maxSets = bind->set_count,
+            .poolSizeCount = pool_size_count,
+            .pPoolSizes = pool_sizes,
+        };
+        VkResult vrc = vkCreateDescriptorPool(rt->device, &dpci, NULL, &bind->pool);
+        if (vrc != VK_SUCCESS) return -EIO;
+        VkDescriptorSetLayout alloc_layouts[PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS];
+        for (uint32_t sidx = 0; sidx < bind->set_count; ++sidx) {
+            alloc_layouts[sidx] = pipeline->set_layouts[bind->first_set + sidx];
+        }
+        VkDescriptorSetAllocateInfo dsai = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = bind->pool,
+            .descriptorSetCount = bind->set_count,
+            .pSetLayouts = alloc_layouts,
+        };
+        vrc = vkAllocateDescriptorSets(rt->device, &dsai, bind->sets);
+        if (vrc != VK_SUCCESS) return -EIO;
+        VkDescriptorBufferInfo infos[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+        VkWriteDescriptorSet writes[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+        memset(infos, 0, sizeof(infos));
+        memset(writes, 0, sizeof(writes));
+        if (command->descriptor_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        for (uint32_t d = 0; d < command->descriptor_count; ++d) {
+            const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
+                &view->descriptors[command->first_descriptor + d];
+            if (descriptor->descriptor_set < bind->first_set ||
+                descriptor->descriptor_set >= bind->first_set + bind->set_count) {
+                return -EPROTO;
+            }
+            VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+            int rc = vulkan_dispatch_descriptor_type_from_api(
+                descriptor->descriptor_type, &descriptor_type);
+            if (rc != 0) return rc;
+            uint64_t effective_offset = 0;
+            if (checked_u64_add3(descriptor->buffer_offset,
+                                 descriptor->dynamic_offset, 0,
+                                 &effective_offset) != 0) {
+                return -EOVERFLOW;
+            }
+            const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
+                &view->resources[descriptor->resource_index];
+            uint64_t range = descriptor->range;
+            if (range == UINT64_MAX) {
+                if (effective_offset > buffer->size) return -ERANGE;
+                range = buffer->size - effective_offset;
+            }
+            int buffer_index = find_vulkan_graphics_replay_buffer(
+                buffers, descriptor->resource_index);
+            if (buffer_index < 0) return buffer_index;
+            const VulkanGraphicsReplayBuffer *replay_buffer =
+                &buffers->buffers[(uint32_t)buffer_index];
+            if (!replay_buffer->buffer.buffer ||
+                effective_offset < replay_buffer->upload_base ||
+                range > replay_buffer->upload_end - effective_offset) {
+                return -ERANGE;
+            }
+            infos[d] = (VkDescriptorBufferInfo){
+                .buffer = replay_buffer->buffer.buffer,
+                .offset = (VkDeviceSize)(effective_offset - replay_buffer->upload_base),
+                .range = (VkDeviceSize)range,
+            };
+            writes[d] = (VkWriteDescriptorSet){
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = bind->sets[descriptor->descriptor_set - bind->first_set],
+                .dstBinding = descriptor->binding,
+                .dstArrayElement = descriptor->array_element,
+                .descriptorCount = 1,
+                .descriptorType = descriptor_type,
+                .pBufferInfo = &infos[d],
+            };
+        }
+        vkUpdateDescriptorSets(rt->device, command->descriptor_count, writes, 0, NULL);
+    }
+    return 0;
+}
+
 static int graphics_push_metadata_for_command(
         const VulkanGraphicsV6FrameView *view,
         uint32_t command_index,
@@ -18469,10 +18835,11 @@ static int record_vulkan_graphics_v6_command_buffer(
         uint32_t pipeline_count,
         VulkanGraphicsReplayAttachments *attachments,
         const VulkanGraphicsReplayBuffers *buffers,
+        const VulkanGraphicsReplayDescriptors *descriptors,
         VkCommandPool *out_command_pool,
         VkCommandBuffer *out_command_buffer) {
     if (!rt || !view || !view->header || !pipelines || !attachments || !buffers ||
-        !out_command_pool || !out_command_buffer) return -EINVAL;
+        !descriptors || !out_command_pool || !out_command_buffer) return -EINVAL;
     *out_command_pool = VK_NULL_HANDLE;
     *out_command_buffer = VK_NULL_HANDLE;
     VkCommandPool command_pool = rt->graphics_command_pool ? rt->graphics_command_pool : rt->command_pool;
@@ -18765,7 +19132,28 @@ static int record_vulkan_graphics_v6_command_buffer(
                                   command->vertex_offset, command->first_instance);
                 break;
             }
-            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS: {
+                if (command->pipeline_layout_id == 0 || bound_pipeline_index >= pipeline_count) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                const VulkanGraphicsReplayDescriptorBind *bind =
+                    find_vulkan_graphics_replay_descriptor_bind(descriptors, ci);
+                if (!bind || bind->layout_id != command->pipeline_layout_id ||
+                    bind->set_count == 0) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                vkCmdBindDescriptorSets(command_buffer,
+                                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        pipelines[bound_pipeline_index].layout,
+                                        bind->first_set,
+                                        bind->set_count,
+                                        bind->sets,
+                                        0,
+                                        NULL);
+                break;
+            }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:
                 rc = -EOPNOTSUPP;
                 goto cleanup;
@@ -18868,12 +19256,14 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     VulkanGraphicsReplayPipeline replay_pipelines[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
     VulkanGraphicsReplayAttachments replay_attachments;
     VulkanGraphicsReplayBuffers replay_buffers;
+    VulkanGraphicsReplayDescriptors replay_descriptors;
     VkCommandPool replay_command_pool = VK_NULL_HANDLE;
     VkCommandBuffer replay_command_buffer = VK_NULL_HANDLE;
     uint32_t replay_pipeline_count = 0;
     memset(replay_pipelines, 0, sizeof(replay_pipelines));
     memset(&replay_attachments, 0, sizeof(replay_attachments));
     memset(&replay_buffers, 0, sizeof(replay_buffers));
+    memset(&replay_descriptors, 0, sizeof(replay_descriptors));
     rc = materialize_vulkan_graphics_v6_pipelines(
         &g_vulkan_runtime, view, replay_pipelines,
         PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES, &replay_pipeline_count);
@@ -18945,6 +19335,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
+        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
         destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
         destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
         destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
@@ -18963,9 +19354,43 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
+    rc = materialize_vulkan_graphics_v6_descriptors(
+        &g_vulkan_runtime, view, replay_pipelines, replay_pipeline_count,
+        &replay_buffers, &replay_descriptors);
+    if (rc != 0) {
+        out = json_out();
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"stage\":\"vulkan-graphics-v6-descriptor-materialize\",\"valid\":false,"
+                "\"execution_implemented\":false,\"error\":\"%s\"}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                strerror(-rc));
+        fflush(out);
+        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
+        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
+        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
+        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        return rc;
+    }
+    out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"vulkan-graphics-v6-descriptor-materialize\",\"valid\":true,"
+            "\"execution_implemented\":true,\"bind_count\":%u,"
+            "\"submit_id\":%llu}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            replay_descriptors.bind_count,
+            (unsigned long long)view->header->submit_id);
+    fflush(out);
+
     rc = record_vulkan_graphics_v6_command_buffer(
         &g_vulkan_runtime, view, replay_pipelines,
         replay_pipeline_count, &replay_attachments, &replay_buffers,
+        &replay_descriptors,
         &replay_command_pool, &replay_command_buffer);
     if (rc != 0) {
         out = json_out();
@@ -18978,6 +19403,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
+        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
         destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
         destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
         destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
@@ -19012,6 +19438,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             vkFreeCommandBuffers(g_vulkan_runtime.device, replay_command_pool, 1, &replay_command_buffer);
             replay_command_buffer = VK_NULL_HANDLE;
         }
+        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
         destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
         destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
         destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
@@ -19045,6 +19472,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
+        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
         destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
         destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
         destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
