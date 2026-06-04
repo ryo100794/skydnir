@@ -17688,6 +17688,7 @@ static int preflight_vulkan_graphics_v6_runtime_supported(const char **reason_ou
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES 4u
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_PUSH_RANGES 8u
 #define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS 16u
+#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_VERTEX_BINDINGS
 
 typedef struct VulkanGraphicsReplayPipeline {
     VkShaderModule shader_modules[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES];
@@ -18058,6 +18059,138 @@ static int materialize_vulkan_graphics_v6_attachments(
     return 0;
 }
 
+typedef struct VulkanGraphicsReplayBuffer {
+    uint32_t resource_index;
+    uint64_t upload_base;
+    uint64_t upload_end;
+    VulkanVectorBuffer buffer;
+} VulkanGraphicsReplayBuffer;
+
+typedef struct VulkanGraphicsReplayBuffers {
+    VulkanGraphicsReplayBuffer buffers[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
+    uint32_t buffer_count;
+} VulkanGraphicsReplayBuffers;
+
+static int find_vulkan_graphics_replay_buffer(
+        const VulkanGraphicsReplayBuffers *buffers,
+        uint32_t resource_index) {
+    if (!buffers) return -EINVAL;
+    for (uint32_t i = 0; i < buffers->buffer_count; ++i) {
+        if (buffers->buffers[i].resource_index == resource_index) return (int)i;
+    }
+    return -ENOENT;
+}
+
+static void destroy_vulkan_graphics_replay_buffers(
+        VkDevice device,
+        VulkanGraphicsReplayBuffers *buffers) {
+    if (!buffers) return;
+    for (uint32_t i = 0; i < buffers->buffer_count; ++i) {
+        destroy_vulkan_vector_buffer(device, &buffers->buffers[i].buffer);
+    }
+    memset(buffers, 0, sizeof(*buffers));
+}
+
+static int add_vulkan_graphics_replay_buffer_range(
+        const VulkanGraphicsV6FrameView *view,
+        VulkanGraphicsReplayBuffers *out,
+        uint32_t resource_index,
+        uint64_t offset,
+        uint64_t size) {
+    if (!view || !view->header || !out || resource_index >= view->header->resource_count) return -EINVAL;
+    if (size == 0 || size > (uint64_t)SIZE_MAX) return -EOPNOTSUPP;
+    const PdockerGpuVulkanDispatchV5ResourceEntry *buffer = &view->resources[resource_index];
+    if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER ||
+        buffer->parent_resource_index >= view->header->resource_count ||
+        !u64_range_within_size(offset, size, buffer->size)) {
+        return -EPROTO;
+    }
+    const PdockerGpuVulkanDispatchV5ResourceEntry *memory =
+        &view->resources[buffer->parent_resource_index];
+    if (memory->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY ||
+        !(memory->resource_flags & PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED) ||
+        memory->fd_index >= view->passed_fd_count ||
+        view->passed_fds[memory->fd_index] < 0 ||
+        !u64_range_within_size(buffer->memory_offset, buffer->size, memory->size)) {
+        return -EPROTO;
+    }
+    uint64_t end = 0;
+    if (checked_u64_add3(offset, size, 0, &end) != 0) return -EOVERFLOW;
+    int found = find_vulkan_graphics_replay_buffer(out, resource_index);
+    VulkanGraphicsReplayBuffer *dst = NULL;
+    if (found < 0) {
+        if (out->buffer_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS) return -E2BIG;
+        dst = &out->buffers[out->buffer_count++];
+        memset(dst, 0, sizeof(*dst));
+        dst->resource_index = resource_index;
+        dst->upload_base = offset;
+        dst->upload_end = end;
+    } else {
+        dst = &out->buffers[(uint32_t)found];
+        if (offset < dst->upload_base) dst->upload_base = offset;
+        if (end > dst->upload_end) dst->upload_end = end;
+    }
+    return 0;
+}
+
+static int materialize_vulkan_graphics_v6_buffers(
+        VulkanRuntime *rt,
+        const VulkanGraphicsV6FrameView *view,
+        VulkanGraphicsReplayBuffers *out) {
+    if (!rt || !view || !view->header || !out) return -EINVAL;
+    memset(out, 0, sizeof(*out));
+    for (uint32_t c = 0; c < view->header->command_count; ++c) {
+        const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[c];
+        if (command->command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS) continue;
+        for (uint32_t b = 0; b < command->vertex_binding_count; ++b) {
+            const PdockerGpuVulkanGraphicsV6VertexBindingEntry *binding =
+                &view->vertex_bindings[command->vertex_binding_first + b];
+            int rc = add_vulkan_graphics_replay_buffer_range(
+                view, out, binding->buffer_resource_index, binding->offset, binding->size);
+            if (rc != 0) {
+                destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                return rc;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < out->buffer_count; ++i) {
+        VulkanGraphicsReplayBuffer *dst = &out->buffers[i];
+        const PdockerGpuVulkanDispatchV5ResourceEntry *buffer = &view->resources[dst->resource_index];
+        const PdockerGpuVulkanDispatchV5ResourceEntry *memory = &view->resources[buffer->parent_resource_index];
+        if (dst->upload_end <= dst->upload_base) {
+            destroy_vulkan_graphics_replay_buffers(rt->device, out);
+            return -EOPNOTSUPP;
+        }
+        uint64_t upload_size_u64 = dst->upload_end - dst->upload_base;
+        if (upload_size_u64 > (uint64_t)SIZE_MAX) {
+            destroy_vulkan_graphics_replay_buffers(rt->device, out);
+            return -EOVERFLOW;
+        }
+        int rc = create_vulkan_buffer_with_usage(
+            rt->physical_device, rt->device, (size_t)upload_size_u64,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            NULL, &dst->buffer);
+        if (rc != 0) {
+            destroy_vulkan_graphics_replay_buffers(rt->device, out);
+            return rc;
+        }
+        uint64_t fd_offset_u64 = 0;
+        off_t fd_offset = 0;
+        if (checked_u64_add3(memory->external_offset, buffer->memory_offset,
+                             dst->upload_base, &fd_offset_u64) != 0 ||
+            checked_u64_to_off_t(fd_offset_u64, &fd_offset) != 0) {
+            destroy_vulkan_graphics_replay_buffers(rt->device, out);
+            return -EOVERFLOW;
+        }
+        if (read_fd_exact(view->passed_fds[memory->fd_index], dst->buffer.map,
+                          (size_t)upload_size_u64, fd_offset) != 0) {
+            destroy_vulkan_graphics_replay_buffers(rt->device, out);
+            return -EIO;
+        }
+    }
+    return 0;
+}
+
 static int graphics_push_metadata_for_command(
         const VulkanGraphicsV6FrameView *view,
         uint32_t command_index,
@@ -18079,8 +18212,9 @@ static int record_vulkan_graphics_v6_command_buffer(
         const VulkanGraphicsV6FrameView *view,
         const VulkanGraphicsReplayPipeline *pipelines,
         uint32_t pipeline_count,
-        const VulkanGraphicsReplayAttachments *attachments) {
-    if (!rt || !view || !view->header || !pipelines || !attachments) return -EINVAL;
+        const VulkanGraphicsReplayAttachments *attachments,
+        const VulkanGraphicsReplayBuffers *buffers) {
+    if (!rt || !view || !view->header || !pipelines || !attachments || !buffers) return -EINVAL;
     VkCommandPool command_pool = rt->graphics_command_pool ? rt->graphics_command_pool : rt->command_pool;
     if (!command_pool) return -ENODEV;
     VkCommandBuffer command_buffer = VK_NULL_HANDLE;
@@ -18211,9 +18345,58 @@ static int record_vulkan_graphics_v6_command_buffer(
                                    view->frame + command->push_offset);
                 break;
             }
-            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS:
-            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS: {
+                if (command->vertex_binding_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS) {
+                    rc = -E2BIG;
+                    goto cleanup;
+                }
+                VkBuffer vk_buffers[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
+                VkDeviceSize offsets[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
+                uint32_t first_binding = UINT32_MAX;
+                for (uint32_t b = 0; b < command->vertex_binding_count; ++b) {
+                    const PdockerGpuVulkanGraphicsV6VertexBindingEntry *binding =
+                        &view->vertex_bindings[command->vertex_binding_first + b];
+                    if (first_binding == UINT32_MAX) first_binding = binding->binding;
+                    if (binding->binding != first_binding + b) {
+                        rc = -EOPNOTSUPP;
+                        goto cleanup;
+                    }
+                    int buffer_index = find_vulkan_graphics_replay_buffer(
+                        buffers, binding->buffer_resource_index);
+                    if (buffer_index < 0) {
+                        rc = buffer_index;
+                        goto cleanup;
+                    }
+                    const VulkanGraphicsReplayBuffer *replay_buffer =
+                        &buffers->buffers[(uint32_t)buffer_index];
+                    if (!replay_buffer->buffer.buffer ||
+                        binding->offset < replay_buffer->upload_base ||
+                        binding->offset > replay_buffer->upload_end ||
+                        binding->size > replay_buffer->upload_end - binding->offset) {
+                        rc = -ERANGE;
+                        goto cleanup;
+                    }
+                    vk_buffers[b] = replay_buffer->buffer.buffer;
+                    offsets[b] = (VkDeviceSize)(binding->offset - replay_buffer->upload_base);
+                }
+                if (command->vertex_binding_count > 0) {
+                    vkCmdBindVertexBuffers(command_buffer, first_binding,
+                                           command->vertex_binding_count,
+                                           vk_buffers, offsets);
+                }
+                break;
+            }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW:
+                if (command->pipeline_index >= pipeline_count ||
+                    command->pipeline_index != bound_pipeline_index) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                vkCmdDraw(command_buffer, command->vertex_count,
+                          command->instance_count, command->first_vertex,
+                          command->first_instance);
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:
@@ -18277,9 +18460,11 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     }
     VulkanGraphicsReplayPipeline replay_pipelines[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
     VulkanGraphicsReplayAttachments replay_attachments;
+    VulkanGraphicsReplayBuffers replay_buffers;
     uint32_t replay_pipeline_count = 0;
     memset(replay_pipelines, 0, sizeof(replay_pipelines));
     memset(&replay_attachments, 0, sizeof(replay_attachments));
+    memset(&replay_buffers, 0, sizeof(replay_buffers));
     rc = materialize_vulkan_graphics_v6_pipelines(
         &g_vulkan_runtime, view, replay_pipelines,
         PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES, &replay_pipeline_count);
@@ -18339,9 +18524,39 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
+    rc = materialize_vulkan_graphics_v6_buffers(&g_vulkan_runtime, view, &replay_buffers);
+    if (rc != 0) {
+        out = json_out();
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"stage\":\"vulkan-graphics-v6-buffer-materialize\",\"valid\":false,"
+                "\"execution_implemented\":false,\"error\":\"%s\"}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                strerror(-rc));
+        fflush(out);
+        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
+        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
+        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        return rc;
+    }
+    out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"vulkan-graphics-v6-buffer-materialize\",\"valid\":true,"
+            "\"execution_implemented\":true,\"buffer_count\":%u,"
+            "\"submit_id\":%llu}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            replay_buffers.buffer_count,
+            (unsigned long long)view->header->submit_id);
+    fflush(out);
+
     rc = record_vulkan_graphics_v6_command_buffer(
         &g_vulkan_runtime, view, replay_pipelines,
-        replay_pipeline_count, &replay_attachments);
+        replay_pipeline_count, &replay_attachments, &replay_buffers);
     if (rc != 0) {
         out = json_out();
         fprintf(out,
@@ -18353,6 +18568,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
+        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
         destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
         destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
         return rc;
@@ -18370,6 +18586,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
+    destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
     destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
     destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
     out = json_out();

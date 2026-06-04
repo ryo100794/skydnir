@@ -43,6 +43,7 @@ Confirmed facts:
 | 2026-06-03 Vulkan graphics pipeline-materialization lane | Executor P6 now advances past generic command-recording refusal by materializing the serialized graphics pipeline object graph first: shader fd hash revalidation, entry-name copy, push-constant layout reconstruction, vertex input state, dynamic-rendering color formats, viewport/scissor dynamic state, and Android `vkCreateGraphicsPipelines`.  Attachment image materialization and command-buffer replay still fail closed after pipeline materialization; no success or benchmark claim is promoted from this partial P6 step. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 | 2026-06-03 Vulkan graphics attachment-materialization lane | Executor P6 now materializes the serialized attachment image graph before command-buffer replay: it reuses the V5 image/image-view/sampler materializer with the V6.1 resource tables, checks color-attachment role, image-view mapping, `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT`, attachment format parity, supported layouts, and fails closed for staged `LOAD` attachments until upload/replay/writeback is implemented.  Queue submission/writeback remains non-promoting. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 | 2026-06-03 Vulkan graphics command-recording lane | Executor P6 now allocates a host graphics command buffer and records the supported V6.1 subset: dynamic rendering begin/end, graphics pipeline bind, viewport/scissor dynamic state, and push constants.  It still fails closed before queue submit/writeback and rejects vertex/index/descriptor/barrier/draw paths that are not yet materialized into host objects. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
+| 2026-06-03 Vulkan graphics vertex-buffer replay lane | Executor P6 now materializes read-only vertex buffers from V6.1 resource metadata before command recording.  It reads only the serialized vertex binding ranges from host-fd-backed memory resources, creates compact host-visible `VK_BUFFER_USAGE_VERTEX_BUFFER_BIT` buffers, records `vkCmdBindVertexBuffers`, and records unindexed `vkCmdDraw`.  Indexed draw, descriptors, barriers, queue submit, and attachment writeback remain fail-closed. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -181,7 +182,7 @@ Until P6 command-buffer execution and writeback exists, graphics evidence can
 validate producer/executor ABI understanding, pipeline materialization,
 attachment image materialization, and fail-closed behavior only.  The current
 executor can create Android graphics pipelines and materialize color attachment
-image/view objects from V6.1 metadata, and record a supported command-buffer subset, but queue submission/writeback remains
+image/view objects from V6.1 metadata, materialize read-only vertex buffers, and record a supported unindexed draw command-buffer subset, but queue submission/writeback remains
 non-promoting.  It must not be mixed with llama Q6 correctness claims,
 served-HTTP readiness, or benchmark claims.
 
