@@ -46,6 +46,7 @@ Confirmed facts:
 | 2026-06-03 Vulkan graphics vertex-buffer replay lane | Executor P6 now materializes read-only vertex buffers from V6.1 resource metadata before command recording.  It reads only the serialized vertex binding ranges from host-fd-backed memory resources, creates compact host-visible `VK_BUFFER_USAGE_VERTEX_BUFFER_BIT` buffers, records `vkCmdBindVertexBuffers`, and records unindexed `vkCmdDraw`.  Descriptors, explicit barriers, depth/stencil, and MSAA/resolve remain fail-closed. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 | 2026-06-04 Vulkan graphics queue-submit lane | Executor P6 now preserves a recorded graphics command buffer, submits it on the Android graphics queue, and waits on a fence with `PDOCKER_GPU_GRAPHICS_SUBMIT_TIMEOUT_MS`.  This proves the bridge can reach real host Vulkan execution without promoting full correctness until readback evidence exists. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 | 2026-06-04 Vulkan graphics attachment-writeback lane | Executor P6 now marks stored color attachments for writeback, transitions rendered images for host readback, copies optimal-tiled attachments through staging with `vkCmdCopyImageToBuffer`, waits for queue completion, and writes attachment memory back to the shared backing fd.  This closes the previous attachment-writeback gate for the currently supported unindexed draw subset; image descriptors, write descriptors, explicit barriers, depth/stencil, MSAA/resolve, and broader synchronization remain fail-closed. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; native build `scripts/build-native-android-ndk.sh`; APK gate `:app:assembleCompatDebug` |
+| 2026-06-04 Vulkan graphics read-only descriptor lane | Executor P6 now replays read-only buffer descriptors plus non-staged sampled-image/sampler descriptors for the supported graphics subset.  It reconstructs descriptor set layouts from serialized binding metadata, allocates/updates Android descriptor sets, binds them during command replay, validates sampled-image layouts, and transitions read-only image descriptors to shader-read layouts before draw.  Storage images, input attachments, write descriptors, staged/optimal texture upload, explicit barriers, depth/stencil, MSAA/resolve, and broader synchronization remain fail-closed. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -180,16 +181,18 @@ P0-P6 test/design scope:
   commands in order; it must not copy process-local container `Vk*` handles or
   weaken any V6.1 validation to make a frame run.
 
-P6 command-buffer execution and color-attachment writeback now exist for the
-currently supported subset.  Graphics evidence can validate producer/executor
-ABI understanding, pipeline materialization, attachment image materialization,
-read-only vertex-buffer replay, unindexed draw recording, queue submit/fence
-wait, and stored color-attachment writeback.  This is still not full Vulkan
-pass-through: image descriptors, write descriptors, explicit barriers, depth/stencil,
-MSAA/resolve, and broader synchronization remain fail-closed.  It must not be
-mixed with llama Q6 correctness claims, served-HTTP readiness, or benchmark
-claims until a dedicated correctness artifact exercises the graphics writeback
-path.
+P6 command-buffer execution, color-attachment writeback, read-only
+vertex/index buffers, and read-only buffer plus non-staged sampled-image/sampler
+descriptor replay now exist for the currently supported subset.  Graphics
+evidence can validate producer/executor ABI understanding, pipeline
+materialization, attachment image materialization, descriptor set layout/update,
+vertex/index draw recording, queue submit/fence wait, and stored color-attachment
+writeback.  This is still not full Vulkan pass-through: storage images, input
+attachments, write descriptors, staged/optimal texture upload, explicit barriers,
+depth/stencil, MSAA/resolve, and broader synchronization remain fail-closed.  It
+must not be mixed with llama Q6 correctness claims, served-HTTP readiness, or
+benchmark claims until a dedicated correctness artifact exercises the graphics
+writeback path.
 
 ## Non-Negotiable Rules
 

@@ -1185,8 +1185,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vkUpdateDescriptorSets", executor)
         self.assertIn("collect_graphics_descriptor_layout_for_layout", executor)
         self.assertIn("find_vulkan_graphics_replay_descriptor_bind", executor)
-        self.assertIn("graphics image descriptor replay is not implemented", executor)
+        self.assertIn("graphics storage/input image descriptor replay is not implemented", executor)
+        self.assertIn("unsupported graphics image descriptor layout", executor)
         self.assertIn("graphics write descriptor replay is not implemented", executor)
+        self.assertIn("VkDescriptorImageInfo image_infos", executor)
+        self.assertIn("VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER", executor)
+        self.assertIn("VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE", executor)
+        self.assertIn("VK_DESCRIPTOR_TYPE_SAMPLER", executor)
+        self.assertIn("vulkan_image_descriptor_layout_valid", executor)
+        self.assertIn("VK_ACCESS_SHADER_READ_BIT", helper)
+        self.assertIn("vkCmdPipelineBarrier(command_buffer", helper)
         self.assertIn("rc = -EOPNOTSUPP;", helper)
         run_body = executor.split("static int run_vulkan_graphics_v6_frame", 1)[1].split(
             "static int recv_vulkan_graphics_v6_header_with_fds", 1
