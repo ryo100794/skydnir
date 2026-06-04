@@ -205,6 +205,13 @@ depth/stencil, MSAA/resolve, and broader synchronization remain fail-closed.  It
 Q6 correctness claims, served-HTTP readiness, or benchmark claims until a
 dedicated correctness artifact exercises the graphics writeback path.
 
+ABI maintenance rule: `app/src/main/cpp/pdocker_gpu_abi.h` and
+`docker-proot-setup/src/gpu/pdocker_gpu_abi.h` are byte-for-byte synchronized
+contract headers.  Do not hand-edit one side only.  Any ABI change must update
+both headers in the same commit and must pass
+`test_container_and_apk_gpu_abi_headers_stay_in_sync` plus the schema hash
+contract tests before it is promoted.
+
 ## Non-Negotiable Rules
 
 - Do not modify llama.cpp.

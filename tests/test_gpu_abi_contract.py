@@ -217,6 +217,7 @@ def vulkan_dispatch_option_envs(path):
 
 class GpuAbiContractTest(unittest.TestCase):
     def test_container_and_apk_gpu_abi_headers_stay_in_sync(self):
+        self.assertEqual(CONTAINER_HEADER.read_text(), APP_HEADER.read_text())
         self.assertEqual(defines(CONTAINER_HEADER), defines(APP_HEADER))
 
     def test_gpu_abi_remains_backend_neutral(self):
