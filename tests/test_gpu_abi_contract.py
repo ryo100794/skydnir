@@ -1095,7 +1095,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("materialize_vulkan_graphics_v6_pipelines", run_body)
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-pipeline-materialize\\"', run_body)
-        self.assertIn("destroy_vulkan_graphics_replay_pipelines", run_body)
+        self.assertIn("cleanup_vulkan_graphics_v6_replay_state", run_body)
+        self.assertIn("destroy_vulkan_graphics_replay_pipelines", executor)
         self.assertLess(
             run_body.index("preflight_vulkan_graphics_v6_runtime_supported"),
             run_body.index("materialize_vulkan_graphics_v6_pipelines"),
@@ -1279,7 +1280,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-queue-submit\\"', run_body)
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-storage-buffer-writeback\\"', run_body)
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-attachment-writeback\\"', run_body)
-        self.assertIn("vkFreeCommandBuffers", run_body)
+        self.assertIn("free_vulkan_graphics_v6_replay_command_buffer", run_body)
+        self.assertIn("vkFreeCommandBuffers", executor)
         self.assertIn("writeback_vulkan_graphics_v6_storage_buffers", run_body)
         self.assertIn("writeback_vulkan_graphics_v6_attachments", run_body)
         self.assertLess(
@@ -1350,9 +1352,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "attachment table",
             "`execution_implemented=false`",
             "`vulkan-graphics-v6-replay-preflight`",
-            "graphics-capable Android",
-            "Vulkan runtime gate",
-            "replay is only implemented for validated no-op frames",
+            "supported-subset replay contract",
+            "materialize/record/submit/writeback evidence stages",
             "fail closed",
         ]:
             self.assertIn(marker, plan)

@@ -141,19 +141,20 @@ selection using the lowered effective module as the new baseline.
 
 ### Vulkan graphics V6.1 P0-P6 handoff
 
-The current graphics lane is a preflight/diagnostic contract, not a replay
-implementation.  Producer commit `9d6e724` is the current ground truth for the
-container ICD side: V6.1 frame construction reaches resource, descriptor,
+The current graphics lane is now a supported-subset replay contract, not a
+no-op-only diagnostic path.  Producer commit `9d6e724` remains the baseline
+container ICD milestone for V6.1 frame construction: resource, descriptor,
 image, image-view, sampler, shader-stage, pipeline, vertex, dynamic-state,
 command, dynamic-offset, push-metadata, and attachment table serialization.
-The Android executor validates and describes those frames, then runs a replay
-preflight gate.  Executor replay is only implemented for validated no-op frames;
-non-empty command recording still fails closed after a graphics-capable Android
-Vulkan runtime gate.  The producer also marks graphics pipelines unsupported
-when they require state that is not serialized into the V6.1 ABI yet: blend,
-depth/stencil, static viewport/scissor, primitive restart, or rasterization
-features that would require additional replay state.  Treat the describe event
-as a schema/preflight result only.
+Since that baseline, Android executor replay has advanced beyond preflight:
+validated subset frames can materialize Android Vulkan objects, record command
+buffers, submit them, and write back supported attachment and storage-buffer
+results.  The producer and executor still fail closed when a frame requires
+state outside the serialized ABI or supported replay subset, including blend,
+depth/stencil, static viewport/scissor, primitive restart, unsupported
+rasterization features, unsupported image descriptor classes, or mixed submit
+semantics.  Treat the describe event as schema evidence only; replay success
+requires the later materialize/record/submit/writeback evidence stages.
 
 P0-P6 test/design scope:
 
@@ -178,10 +179,12 @@ P0-P6 test/design scope:
 - **P5 diagnostic/preflight executor gate:** the executor must emit the
   nonterminal `vulkan-graphics-v6-describe` JSON with
   `execution_implemented=false` and table counts, then run
-  `vulkan-graphics-v6-replay-preflight`.  It may report success only for a
-  validated no-op frame; non-empty command streams must fail closed with a
-  specific unsupported reason.  A describe event alone is never graphics
-  success.
+  `vulkan-graphics-v6-replay-preflight`.  A describe event alone is never
+  graphics success.  Supported replay must continue through the explicit
+  pipeline materialize, attachment/buffer/descriptor materialize, command
+  record, queue submit, and writeback evidence stages; unsupported command or
+  resource subsets must fail closed with a specific reason before result
+  promotion.
 - **P6 command replay gate:** after P0-P5 pass, Android Vulkan replay must
   reconstruct an Android object graph from serialized IDs/ranges/fds and replay
   commands in order; it must not copy process-local container `Vk*` handles or

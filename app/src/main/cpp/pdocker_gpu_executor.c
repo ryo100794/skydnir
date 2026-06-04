@@ -19000,6 +19000,28 @@ static void destroy_vulkan_graphics_replay_descriptors(
     memset(descriptors, 0, sizeof(*descriptors));
 }
 
+static void cleanup_vulkan_graphics_v6_replay_state(
+        VkDevice device,
+        VulkanGraphicsReplayPipeline *pipelines,
+        uint32_t pipeline_count,
+        VulkanGraphicsReplayAttachments *attachments,
+        VulkanGraphicsReplayBuffers *buffers,
+        VulkanGraphicsReplayDescriptors *descriptors) {
+    destroy_vulkan_graphics_replay_descriptors(device, descriptors);
+    destroy_vulkan_graphics_replay_buffers(device, buffers);
+    destroy_vulkan_graphics_replay_attachments(device, attachments);
+    destroy_vulkan_graphics_replay_pipelines(device, pipelines, pipeline_count);
+}
+
+static void free_vulkan_graphics_v6_replay_command_buffer(
+        VkDevice device,
+        VkCommandPool command_pool,
+        VkCommandBuffer *command_buffer) {
+    if (!command_buffer || !*command_buffer) return;
+    vkFreeCommandBuffers(device, command_pool, 1, command_buffer);
+    *command_buffer = VK_NULL_HANDLE;
+}
+
 static int find_vulkan_graphics_replay_pipeline_by_layout(
         const VulkanGraphicsReplayPipeline *pipelines,
         uint32_t pipeline_count,
@@ -20156,7 +20178,9 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        cleanup_vulkan_graphics_v6_replay_state(
+            g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
+            &replay_attachments, &replay_buffers, &replay_descriptors);
         return rc;
     }
     FILE *out = json_out();
@@ -20184,8 +20208,9 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
-        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        cleanup_vulkan_graphics_v6_replay_state(
+            g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
+            &replay_attachments, &replay_buffers, &replay_descriptors);
         return rc;
     }
     out = json_out();
@@ -20213,10 +20238,9 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
-        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
-        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
-        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        cleanup_vulkan_graphics_v6_replay_state(
+            g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
+            &replay_attachments, &replay_buffers, &replay_descriptors);
         return rc;
     }
     out = json_out();
@@ -20246,10 +20270,9 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
-        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
-        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
-        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        cleanup_vulkan_graphics_v6_replay_state(
+            g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
+            &replay_attachments, &replay_buffers, &replay_descriptors);
         return rc;
     }
     out = json_out();
@@ -20281,10 +20304,9 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
-        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
-        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
-        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        cleanup_vulkan_graphics_v6_replay_state(
+            g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
+            &replay_attachments, &replay_buffers, &replay_descriptors);
         return rc;
     }
     out = json_out();
@@ -20312,14 +20334,11 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        if (replay_command_buffer) {
-            vkFreeCommandBuffers(g_vulkan_runtime.device, replay_command_pool, 1, &replay_command_buffer);
-            replay_command_buffer = VK_NULL_HANDLE;
-        }
-        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
-        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
-        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
-        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        free_vulkan_graphics_v6_replay_command_buffer(
+            g_vulkan_runtime.device, replay_command_pool, &replay_command_buffer);
+        cleanup_vulkan_graphics_v6_replay_state(
+            g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
+            &replay_attachments, &replay_buffers, &replay_descriptors);
         return rc;
     }
     out = json_out();
@@ -20333,10 +20352,8 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
-    if (replay_command_buffer) {
-        vkFreeCommandBuffers(g_vulkan_runtime.device, replay_command_pool, 1, &replay_command_buffer);
-        replay_command_buffer = VK_NULL_HANDLE;
-    }
+    free_vulkan_graphics_v6_replay_command_buffer(
+        g_vulkan_runtime.device, replay_command_pool, &replay_command_buffer);
 
     uint32_t storage_buffer_writeback_count = 0;
     uint64_t storage_buffer_writeback_bytes = 0;
@@ -20354,10 +20371,9 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
-        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
-        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
-        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        cleanup_vulkan_graphics_v6_replay_state(
+            g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
+            &replay_attachments, &replay_buffers, &replay_descriptors);
         return rc;
     }
     out = json_out();
@@ -20386,10 +20402,9 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
                 strerror(-rc));
         fflush(out);
-        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
-        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
-        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
-        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        cleanup_vulkan_graphics_v6_replay_state(
+            g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
+            &replay_attachments, &replay_buffers, &replay_descriptors);
         return rc;
     }
     out = json_out();
@@ -20403,10 +20418,9 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
-    destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
-    destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
-    destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
-    destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+    cleanup_vulkan_graphics_v6_replay_state(
+        g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count,
+        &replay_attachments, &replay_buffers, &replay_descriptors);
     out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
