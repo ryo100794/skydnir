@@ -1011,7 +1011,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "describe_vulkan_graphics_v6_frame(json_out(), &view);",
             "preflight_vulkan_graphics_v6_replay_supported",
             "vulkan-graphics-v6-replay-preflight",
-            "graphics descriptor replay is not implemented",
+            "graphics storage/input image descriptor replay is not implemented",
+            "graphics write descriptor replay is not implemented",
             "graphics shader specialization replay is not implemented",
             "materialize_vulkan_graphics_v6_pipelines",
             "vulkan-graphics-v6-pipeline-materialize",
@@ -1188,6 +1189,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("graphics storage/input image descriptor replay is not implemented", executor)
         self.assertIn("unsupported graphics image descriptor layout", executor)
         self.assertIn("graphics write descriptor replay is not implemented", executor)
+        self.assertNotIn("graphics descriptor replay is not implemented", executor)
         self.assertIn("VkDescriptorImageInfo image_infos", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE", executor)

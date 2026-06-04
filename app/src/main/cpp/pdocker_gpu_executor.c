@@ -17498,12 +17498,6 @@ static int preflight_vulkan_graphics_v6_replay_supported(
         if (reason_out) *reason_out = reason;
         return -EPROTO;
     }
-    if (header->descriptor_count != 0) {
-        reason = "graphics descriptor replay is not implemented";
-        if (reason_out) *reason_out = reason;
-        return -EOPNOTSUPP;
-    }
-
     int rendering_active = 0;
     int pipeline_bound = 0;
     for (uint32_t i = 0; i < header->command_count; ++i) {
