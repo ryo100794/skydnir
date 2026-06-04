@@ -322,6 +322,14 @@ evidence proves the real behavior or the limitation remains visible.
     `region_conservative`, and must distinguish `dirty_pages_observed` from
     `dirty_pages_written`.
 
+17. **Docker archive/build parity gaps** `[P1 next]`: keep the Docker-shaped
+    `/build` tar upload and `/containers/{id}/archive` tar exchange, but track
+    remaining non-BuildKit Docker API and Dockerfile semantics as implementation
+    work: archive PUT options/status/metadata, compressed archive/context
+    bodies, Dockerfile `COPY --from`, `COPY --chown`, `COPY --chmod`, `ADD`
+    tar/URL behavior, `.dockerignore` parity, and same-container device
+    `docker cp` proof. Host-only checks remain regression evidence.
+
 ### Next Queue Generated 2026-05-04
 
 - [doing] Cross-project incomplete implementation audit:
@@ -1348,6 +1356,124 @@ Acceptance:
 - `scripts/verify-dockerfile-standard.py` passes.
 - Unknown Dockerfile instructions fail the build.
 - direct runtime never creates fake `RUN` layers.
+
+
+### Docker API Archive/Build Parity TODO
+
+Status: **protocol shape implemented; Docker semantic parity incomplete**.
+
+Scope of this section: do not include deliberate non-goals such as BuildKit,
+buildx, cgroups, namespaces, bridge networking, or exact kernel overlayfs
+inode parity. Track only Docker Engine API and standard Dockerfile behavior
+that Skydnir intends to support or must fail explicitly.
+
+Current compatible wire shape:
+
+- `POST /build` receives a tar build context with a Dockerfile, matching the
+  Docker Engine legacy build API shape.
+- `HEAD/GET/PUT /containers/{id}/archive` implements the Docker archive API
+  route used by `docker cp`: HEAD returns `X-Docker-Container-Path-Stat`, GET
+  streams tar, and PUT accepts tar content.
+- Dockerfile `COPY` and `ADD` are executed after the build context is extracted;
+  they do not need to call the container archive API per instruction. The gaps
+  below are semantic gaps, not a protocol-routing requirement.
+
+Implementation TODO:
+
+1. `PUT /containers/{id}/archive` query options:
+   - implement `noOverwriteDirNonDir`, including file-over-directory and
+     directory-over-file rejection cases;
+   - implement `copyUIDGID`, or reject it with a Docker-shaped unsupported
+     parameter error until uid/gid mapping is implemented;
+   - add API tests for default behavior, each option enabled, malformed option
+     values, and option combinations.
+2. Archive body compression:
+   - verify identity, gzip, bzip2, and xz request bodies for archive PUT;
+   - verify identity, gzip, bzip2, and xz build-context bodies for `POST /build`;
+   - record unsupported compression errors with deterministic HTTP status and
+     JSON body.
+3. Archive API status and error body parity:
+   - compare Docker status codes for missing container, missing path, target is
+     file, target is read-only, permission denied, malformed tar, and traversal
+     rejection;
+   - return Docker-shaped JSON errors instead of leaking Python exception text;
+   - add tests for partial body, short read, invalid chunked body, and tar header
+     errors.
+4. `X-Docker-Container-Path-Stat` parity:
+   - compare `name`, `size`, `mode`, `mtime`, and `linkTarget` against Docker
+     for regular files, directories, symlinks, root `/`, and trailing-slash
+     paths;
+   - ensure HEAD and GET return identical stat metadata for the same path;
+   - keep whiteouted lower paths invisible in both HEAD and GET.
+5. Archive GET tar layout parity:
+   - compare tar member names and root entry behavior for file copy,
+     directory copy, directory with trailing slash, symlink source, and root `/`;
+   - test lower-only, upper-only, upper-over-lower, whiteouted, and opaque-like
+     directory views;
+   - document any intentionally partial sparse-file/device-node behavior in the
+     compatibility matrix rather than silently claiming full parity.
+6. Archive PUT safety and publication:
+   - keep absolute paths, `..`, reserved whiteout markers, escaping symlinks,
+     and escaping hardlinks fail-closed;
+   - add ENOSPC, EACCES, tar-bomb, huge PAX header, duplicate member, and
+     malformed hardlink negative corpus;
+   - stage extraction so daemon/helper kill during archive PUT cannot leave a
+     partially published upperdir view, or record the limitation as a hard
+     planned gap until fixed.
+7. Archive metadata policy:
+   - compare mode, mtime, uid/gid, symlink, hardlink, and `user.*` xattr behavior
+     with Docker for supported filesystems;
+   - decide and document Android-specific uid/gid/xattr limitations;
+   - add connected-device evidence because host tar/xattr tests are not enough
+     for APK filesystem behavior.
+8. Dockerfile `COPY --from` / multi-stage:
+   - parse and store `FROM ... AS <name>` stage roots;
+   - support `COPY --from=<stage-name|stage-index> src... dest` from previous
+     stage filesystems;
+   - keep external-image `COPY --from=<image-ref>` as explicit unsupported until
+     that import/pull path is implemented;
+   - add fixtures for named stages, numeric stages, missing stages, directory
+     copies, symlink sources, and traversal rejection.
+9. Dockerfile `COPY` and `ADD` metadata flags:
+   - implement `--chown=user:group`, numeric uid/gid, passwd/group lookup from
+     the build rootfs, and invalid-user errors;
+   - implement `--chmod=<octal>` for files and directories;
+   - stop silently stripping `--chown`, `--chmod`, and `--link`; unsupported
+     flags must fail explicitly until implemented;
+   - snapshot ownership/mode changes into produced layer metadata.
+10. Dockerfile `COPY` path semantics:
+    - match Docker trailing-slash, multiple-source, wildcard ordering,
+      directory-merge, file/dir conflict, missing-source, hidden-file,
+      empty-directory, symlink, and hardlink behavior for the supported subset;
+    - add upstream Docker differential fixtures for `COPY file dir/`,
+      `COPY dir /dst`, `COPY dir/ /dst/`, `COPY a b /dst/`, wildcard copies,
+      hidden files, empty directories, symlinks, and hardlinks.
+11. Dockerfile `ADD` standard behavior:
+    - implement local tar auto-extraction, or fail explicitly when a local tar
+      source would require extraction semantics;
+    - implement URL source behavior, or fail explicitly with a Dockerfile error;
+    - reject traversal inside auto-extracted local tars before writing to the
+      build rootfs.
+12. `.dockerignore` parity:
+    - cover anchored patterns, `**`, negation ordering, escaped spaces,
+      comments, directory-only patterns, basename matching, trailing slashes,
+      and Dockerfile-specific ignore file precedence if adopted;
+    - keep Kotlin client filtering and backend Python filtering consistent so UI
+      builds and Docker CLI builds include the same context files.
+13. Build context tar corpus:
+    - keep regular files, directories, symlinks, executable bits, mtimes, long
+      paths, PAX `path`/`linkpath`, and `.dockerignore` covered;
+    - add connected-device byte corpus for Android-created tar entries;
+    - add upstream Docker differential fixtures that feed the same context to
+      Docker and Skydnir and compare resulting filesystem contents and metadata.
+14. Promotion rule:
+    - host-only archive/build gates are regression evidence only;
+    - promote `docker cp` only after same Engine container ID device evidence
+      proves host-to-container copy, container-to-host copy, archive HEAD/GET/PUT,
+      byte/sha256 equality, metadata policy, symlink/hardlink policy, xattr
+      behavior, whiteout rejection, and escape negatives;
+    - promote Dockerfile `COPY`/`ADD` parity only after both connected-device
+      build corpus and upstream Docker differential corpus pass.
 
 ## P0: No Fake Service Ports
 
