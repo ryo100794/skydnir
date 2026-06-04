@@ -17868,7 +17868,8 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                             return -EOPNOTSUPP;
                         }
                     }
-                    if (descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) {
+                    if ((descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) &&
+                        descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
                         reason = "graphics write descriptor replay is not implemented";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
@@ -18116,9 +18117,6 @@ static int collect_graphics_descriptor_layout_for_layout(
                 descriptor->descriptor_set < command->descriptor_first_set) {
                 return -EPROTO;
             }
-            if (descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) {
-                return -EOPNOTSUPP;
-            }
             VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
             if (vulkan_dispatch_descriptor_type_from_api(descriptor->descriptor_type,
                                                          &descriptor_type) != 0 &&
@@ -18128,6 +18126,10 @@ static int collect_graphics_descriptor_layout_for_layout(
             }
             if (descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
                 descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
+                return -EOPNOTSUPP;
+            }
+            if ((descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) &&
+                descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
                 return -EOPNOTSUPP;
             }
             if (vulkan_descriptor_type_requires_image_view(descriptor_type) &&
@@ -18681,6 +18683,9 @@ typedef struct VulkanGraphicsReplayBuffer {
     uint32_t resource_index;
     uint64_t upload_base;
     uint64_t upload_end;
+    int writeback_needed;
+    uint64_t writeback_base;
+    uint64_t writeback_end;
     VkBufferUsageFlags usage;
     VulkanVectorBuffer buffer;
 } VulkanGraphicsReplayBuffer;
@@ -18769,6 +18774,40 @@ static int add_vulkan_graphics_replay_buffer_range(
     return 0;
 }
 
+static int mark_vulkan_graphics_replay_buffer_writeback_range(
+        const VulkanGraphicsV6FrameView *view,
+        VulkanGraphicsReplayBuffers *buffers,
+        uint32_t resource_index,
+        uint64_t offset,
+        uint64_t size) {
+    if (!view || !view->header || !buffers ||
+        resource_index >= view->header->resource_count ||
+        size == 0 || size > (uint64_t)SIZE_MAX) {
+        return -EINVAL;
+    }
+    const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
+        &view->resources[resource_index];
+    if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER ||
+        !u64_range_within_size(offset, size, buffer->size)) {
+        return -EPROTO;
+    }
+    uint64_t end = 0;
+    if (checked_u64_add3(offset, size, 0, &end) != 0) return -EOVERFLOW;
+    int index = find_vulkan_graphics_replay_buffer(buffers, resource_index);
+    if (index < 0) return index;
+    VulkanGraphicsReplayBuffer *dst = &buffers->buffers[(uint32_t)index];
+    if (offset < dst->upload_base || end > dst->upload_end) return -ERANGE;
+    if (!dst->writeback_needed) {
+        dst->writeback_base = offset;
+        dst->writeback_end = end;
+        dst->writeback_needed = 1;
+    } else {
+        if (offset < dst->writeback_base) dst->writeback_base = offset;
+        if (end > dst->writeback_end) dst->writeback_end = end;
+    }
+    return 0;
+}
+
 static int materialize_vulkan_graphics_v6_buffers(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -18809,7 +18848,8 @@ static int materialize_vulkan_graphics_v6_buffers(
                     destroy_vulkan_graphics_replay_buffers(rt->device, out);
                     return type_rc;
                 }
-                if (descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) {
+                if ((descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) &&
+                    descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
                     destroy_vulkan_graphics_replay_buffers(rt->device, out);
                     return -EOPNOTSUPP;
                 }
@@ -18846,6 +18886,15 @@ static int materialize_vulkan_graphics_v6_buffers(
                 if (rc != 0) {
                     destroy_vulkan_graphics_replay_buffers(rt->device, out);
                     return rc;
+                }
+                if (descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) {
+                    rc = mark_vulkan_graphics_replay_buffer_writeback_range(
+                        view, out, descriptor->resource_index,
+                        effective_offset, range);
+                    if (rc != 0) {
+                        destroy_vulkan_graphics_replay_buffers(rt->device, out);
+                        return rc;
+                    }
                 }
             }
         } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) {
@@ -18972,6 +19021,104 @@ static const VulkanGraphicsReplayDescriptorBind *find_vulkan_graphics_replay_des
     return NULL;
 }
 
+static int record_vulkan_graphics_v6_buffer_writeback_barriers(
+        VkCommandBuffer command_buffer,
+        const VulkanGraphicsReplayBuffers *buffers) {
+    if (!command_buffer || !buffers) return -EINVAL;
+    VkBufferMemoryBarrier barriers[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS];
+    uint32_t barrier_count = 0;
+    memset(barriers, 0, sizeof(barriers));
+    for (uint32_t i = 0; i < buffers->buffer_count; ++i) {
+        const VulkanGraphicsReplayBuffer *src = &buffers->buffers[i];
+        if (!src->writeback_needed) continue;
+        if (!src->buffer.buffer ||
+            src->writeback_end <= src->writeback_base ||
+            src->writeback_base < src->upload_base ||
+            src->writeback_end > src->upload_end) {
+            return -EPROTO;
+        }
+        if (barrier_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_BUFFERS) return -E2BIG;
+        barriers[barrier_count++] = (VkBufferMemoryBarrier){
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = src->buffer.buffer,
+            .offset = (VkDeviceSize)(src->writeback_base - src->upload_base),
+            .size = (VkDeviceSize)(src->writeback_end - src->writeback_base),
+        };
+    }
+    if (barrier_count) {
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT,
+                             0,
+                             0, NULL,
+                             barrier_count, barriers,
+                             0, NULL);
+    }
+    return 0;
+}
+
+static int writeback_vulkan_graphics_v6_storage_buffers(
+        const VulkanGraphicsV6FrameView *view,
+        const VulkanGraphicsReplayBuffers *buffers,
+        uint32_t *out_writeback_count,
+        uint64_t *out_writeback_bytes) {
+    if (!view || !view->header || !buffers) return -EINVAL;
+    uint32_t writeback_count = 0;
+    uint64_t writeback_bytes = 0;
+    for (uint32_t i = 0; i < buffers->buffer_count; ++i) {
+        const VulkanGraphicsReplayBuffer *src = &buffers->buffers[i];
+        if (!src->writeback_needed) continue;
+        if (src->resource_index >= view->header->resource_count ||
+            !src->buffer.map ||
+            src->writeback_end <= src->writeback_base ||
+            src->writeback_base < src->upload_base ||
+            src->writeback_end > src->upload_end) {
+            return -EPROTO;
+        }
+        const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
+            &view->resources[src->resource_index];
+        if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER ||
+            buffer->parent_resource_index >= view->header->resource_count) {
+            return -EPROTO;
+        }
+        const PdockerGpuVulkanDispatchV5ResourceEntry *memory =
+            &view->resources[buffer->parent_resource_index];
+        if (memory->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY ||
+            !(memory->resource_flags & PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED) ||
+            memory->fd_index >= view->passed_fd_count ||
+            view->passed_fds[memory->fd_index] < 0) {
+            return -EPROTO;
+        }
+        const uint64_t bytes_u64 = src->writeback_end - src->writeback_base;
+        if (bytes_u64 > (uint64_t)SIZE_MAX) return -EOVERFLOW;
+        uint64_t fd_offset_u64 = 0;
+        off_t fd_offset = 0;
+        if (checked_u64_add3(memory->external_offset, buffer->memory_offset,
+                             src->writeback_base, &fd_offset_u64) != 0 ||
+            checked_u64_to_off_t(fd_offset_u64, &fd_offset) != 0) {
+            return -EOVERFLOW;
+        }
+        const unsigned char *ptr =
+            (const unsigned char *)src->buffer.map +
+            (size_t)(src->writeback_base - src->upload_base);
+        if (write_fd_exact(view->passed_fds[memory->fd_index],
+                           ptr, (size_t)bytes_u64, fd_offset) != 0) {
+            return -EIO;
+        }
+        writeback_count++;
+        if (UINT64_MAX - writeback_bytes < bytes_u64) return -EOVERFLOW;
+        writeback_bytes += bytes_u64;
+    }
+    if (out_writeback_count) *out_writeback_count = writeback_count;
+    if (out_writeback_bytes) *out_writeback_bytes = writeback_bytes;
+    return 0;
+}
+
 static int materialize_vulkan_graphics_v6_descriptors(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -19015,7 +19162,10 @@ static int materialize_vulkan_graphics_v6_descriptors(
                     descriptor->descriptor_type, &descriptor_type) != 0) {
                 return rc;
             }
-            if (descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) return -EOPNOTSUPP;
+            if ((descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) &&
+                descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+                return -EOPNOTSUPP;
+            }
             if (vulkan_descriptor_type_requires_image_view(descriptor_type) &&
                 !vulkan_image_descriptor_layout_valid(
                     descriptor_type, (VkImageLayout)descriptor->image_layout)) {
@@ -19888,6 +20038,8 @@ static int record_vulkan_graphics_v6_command_buffer(
                 goto cleanup;
         }
     }
+    rc = record_vulkan_graphics_v6_buffer_writeback_barriers(command_buffer, buffers);
+    if (rc != 0) goto cleanup;
     rc = record_vulkan_graphics_v6_attachment_writeback_commands(command_buffer, attachments);
     if (rc != 0) goto cleanup;
     vrc = vkEndCommandBuffer(command_buffer);
@@ -20186,6 +20338,42 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         replay_command_buffer = VK_NULL_HANDLE;
     }
 
+    uint32_t storage_buffer_writeback_count = 0;
+    uint64_t storage_buffer_writeback_bytes = 0;
+    rc = writeback_vulkan_graphics_v6_storage_buffers(
+        view, &replay_buffers,
+        &storage_buffer_writeback_count, &storage_buffer_writeback_bytes);
+    if (rc != 0) {
+        out = json_out();
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"stage\":\"vulkan-graphics-v6-storage-buffer-writeback\",\"valid\":false,"
+                "\"execution_implemented\":false,\"error\":\"%s\"}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                strerror(-rc));
+        fflush(out);
+        destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
+        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
+        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
+        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        return rc;
+    }
+    out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"vulkan-graphics-v6-storage-buffer-writeback\",\"valid\":true,"
+            "\"execution_implemented\":true,\"buffer_count\":%u,"
+            "\"bytes\":%llu,\"submit_id\":%llu}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            storage_buffer_writeback_count,
+            (unsigned long long)storage_buffer_writeback_bytes,
+            (unsigned long long)view->header->submit_id);
+    fflush(out);
+
     rc = writeback_vulkan_graphics_v6_attachments(&replay_attachments);
     if (rc != 0) {
         out = json_out();
@@ -20215,6 +20403,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
+    destroy_vulkan_graphics_replay_descriptors(g_vulkan_runtime.device, &replay_descriptors);
     destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
     destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
     destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);

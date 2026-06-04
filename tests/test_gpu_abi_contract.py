@@ -1165,12 +1165,17 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         for marker in [
             "add_vulkan_graphics_replay_buffer_range",
+            "mark_vulkan_graphics_replay_buffer_writeback_range",
+            "writeback_needed",
+            "writeback_base",
+            "writeback_end",
             "PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED",
             "create_vulkan_buffer_with_usage",
             "VK_BUFFER_USAGE_VERTEX_BUFFER_BIT",
             "VK_BUFFER_USAGE_INDEX_BUFFER_BIT",
             "vulkan_graphics_index_stride",
             "read_fd_exact",
+            "write_fd_exact",
             "checked_u64_to_off_t",
             "destroy_vulkan_graphics_replay_buffers",
         ]:
@@ -1218,6 +1223,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("graphics storage/input image descriptor replay is not implemented", executor)
         self.assertIn("unsupported graphics image descriptor layout", executor)
         self.assertIn("graphics write descriptor replay is not implemented", executor)
+        self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER", executor)
+        self.assertIn("record_vulkan_graphics_v6_buffer_writeback_barriers", executor)
+        self.assertIn("writeback_vulkan_graphics_v6_storage_buffers", executor)
+        self.assertIn("vulkan-graphics-v6-storage-buffer-writeback", executor)
+        self.assertIn("VK_ACCESS_SHADER_WRITE_BIT", executor)
+        self.assertIn("VK_ACCESS_HOST_READ_BIT", executor)
         self.assertNotIn("graphics descriptor replay is not implemented", executor)
         self.assertIn("VkDescriptorImageInfo image_infos", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER", executor)
@@ -1266,11 +1277,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "static int recv_vulkan_graphics_v6_header_with_fds", 1
         )[0]
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-queue-submit\\"', run_body)
+        self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-storage-buffer-writeback\\"', run_body)
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-attachment-writeback\\"', run_body)
         self.assertIn("vkFreeCommandBuffers", run_body)
+        self.assertIn("writeback_vulkan_graphics_v6_storage_buffers", run_body)
         self.assertIn("writeback_vulkan_graphics_v6_attachments", run_body)
         self.assertLess(
             run_body.index("submit_vulkan_graphics_v6_command_buffer"),
+            run_body.index("writeback_vulkan_graphics_v6_storage_buffers"),
+        )
+        self.assertLess(
+            run_body.index("writeback_vulkan_graphics_v6_storage_buffers"),
             run_body.index("writeback_vulkan_graphics_v6_attachments"),
         )
         self.assertLess(
