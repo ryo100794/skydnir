@@ -17855,9 +17855,8 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                             if (reason_out) *reason_out = reason;
                             return -EOPNOTSUPP;
                         }
-                        if (descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
-                            descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
-                            reason = "graphics storage/input image descriptor replay is not implemented";
+                        if (descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
+                            reason = "graphics input attachment descriptor replay is not implemented";
                             if (reason_out) *reason_out = reason;
                             return -EOPNOTSUPP;
                         }
@@ -17869,7 +17868,8 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         }
                     }
                     if ((descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) &&
-                        descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+                        descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER &&
+                        descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
                         reason = "graphics write descriptor replay is not implemented";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
@@ -18124,12 +18124,12 @@ static int collect_graphics_descriptor_layout_for_layout(
                                                                &descriptor_type) != 0) {
                 return -EOPNOTSUPP;
             }
-            if (descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
-                descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
+            if (descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
                 return -EOPNOTSUPP;
             }
             if ((descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) &&
-                descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+                descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER &&
+                descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
                 return -EOPNOTSUPP;
             }
             if (vulkan_descriptor_type_requires_image_view(descriptor_type) &&
@@ -18545,7 +18545,7 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
         if (post_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
         post_barriers[post_barrier_count++] = (VkImageMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT,
             .dstAccessMask = image->requires_staging
                 ? VK_ACCESS_TRANSFER_READ_BIT
                 : VK_ACCESS_HOST_READ_BIT,
@@ -18570,7 +18570,9 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
     }
     if (post_barrier_count) {
         vkCmdPipelineBarrier(command_buffer,
-                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                 VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT,
                              0,
                              0, NULL,
@@ -19165,13 +19167,14 @@ static int materialize_vulkan_graphics_v6_descriptors(
             return -EPROTO;
         }
         uint32_t max_set = command->descriptor_first_set;
-        VkDescriptorPoolSize pool_sizes[5];
+        VkDescriptorPoolSize pool_sizes[6];
         uint32_t pool_size_count = 0;
         uint32_t descriptor_pool_storage_count = 0;
         uint32_t descriptor_pool_uniform_count = 0;
         uint32_t descriptor_pool_sampler_count = 0;
         uint32_t descriptor_pool_combined_image_sampler_count = 0;
         uint32_t descriptor_pool_sampled_image_count = 0;
+        uint32_t descriptor_pool_storage_image_count = 0;
         for (uint32_t d = 0; d < command->descriptor_count; ++d) {
             const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
                 &view->descriptors[command->first_descriptor + d];
@@ -19208,6 +19211,9 @@ static int materialize_vulkan_graphics_v6_descriptors(
                     break;
                 case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
                     descriptor_pool_sampled_image_count++;
+                    break;
+                case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+                    descriptor_pool_storage_image_count++;
                     break;
                 default:
                     return -EOPNOTSUPP;
@@ -19251,6 +19257,12 @@ static int materialize_vulkan_graphics_v6_descriptors(
             pool_sizes[pool_size_count++] = (VkDescriptorPoolSize){
                 .type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
                 .descriptorCount = descriptor_pool_sampled_image_count,
+            };
+        }
+        if (descriptor_pool_storage_image_count) {
+            pool_sizes[pool_size_count++] = (VkDescriptorPoolSize){
+                .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                .descriptorCount = descriptor_pool_storage_image_count,
             };
         }
         if (pool_size_count == 0) return -EPROTO;
@@ -19336,8 +19348,7 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 };
                 writes[d].pBufferInfo = &infos[d];
             } else {
-                if (descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
-                    descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
+                if (descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
                     return -EOPNOTSUPP;
                 }
                 if (vulkan_descriptor_type_requires_image_view(descriptor_type) &&
@@ -19385,6 +19396,9 @@ static int materialize_vulkan_graphics_v6_descriptors(
                     }
                     image->descriptor_layout = (VkImageLayout)descriptor->image_layout;
                     image->descriptor_layout_seen = 1;
+                    if (descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+                        image->writeback_needed = 1;
+                    }
                     image_infos[d].imageView = view_obj->view;
                     image_infos[d].imageLayout = (VkImageLayout)descriptor->image_layout;
                 }
@@ -19927,8 +19941,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                             ? VK_ACCESS_TRANSFER_WRITE_BIT
                             : (image->current_layout == VK_IMAGE_LAYOUT_PREINITIALIZED
                                 ? VK_ACCESS_HOST_WRITE_BIT
-                                : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
-                        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+                                : (VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT)),
+                        .dstAccessMask = descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                            ? (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
+                            : VK_ACCESS_SHADER_READ_BIT,
                         .oldLayout = image->current_layout,
                         .newLayout = (VkImageLayout)descriptor->image_layout,
                         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

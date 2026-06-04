@@ -1041,7 +1041,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "describe_vulkan_graphics_v6_frame(json_out(), &view);",
             "preflight_vulkan_graphics_v6_replay_supported",
             "vulkan-graphics-v6-replay-preflight",
-            "graphics storage/input image descriptor replay is not implemented",
+            "graphics input attachment descriptor replay is not implemented",
             "graphics write descriptor replay is not implemented",
             "graphics shader specialization replay is not implemented",
             "materialize_vulkan_graphics_v6_pipelines",
@@ -1222,10 +1222,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vkUpdateDescriptorSets", executor)
         self.assertIn("collect_graphics_descriptor_layout_for_layout", executor)
         self.assertIn("find_vulkan_graphics_replay_descriptor_bind", executor)
-        self.assertIn("graphics storage/input image descriptor replay is not implemented", executor)
+        self.assertIn("graphics input attachment descriptor replay is not implemented", executor)
         self.assertIn("unsupported graphics image descriptor layout", executor)
         self.assertIn("graphics write descriptor replay is not implemented", executor)
         self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER", executor)
+        self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", executor)
+        self.assertIn("descriptor_pool_storage_image_count", executor)
+        self.assertIn(".type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", executor)
+        self.assertIn("image->writeback_needed = 1", executor)
+        self.assertIn("VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT", executor)
         self.assertIn("record_vulkan_graphics_v6_buffer_writeback_barriers", executor)
         self.assertIn("writeback_vulkan_graphics_v6_storage_buffers", executor)
         self.assertIn("vulkan-graphics-v6-storage-buffer-writeback", executor)
