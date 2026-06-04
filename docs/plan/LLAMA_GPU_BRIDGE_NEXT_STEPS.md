@@ -212,7 +212,10 @@ ABI maintenance rule: `app/src/main/cpp/pdocker_gpu_abi.h` and
 contract headers.  Do not hand-edit one side only.  Any ABI change must update
 both headers in the same commit and must pass
 `test_container_and_apk_gpu_abi_headers_stay_in_sync` plus the schema hash
-contract tests before it is promoted.
+contract tests before it is promoted.  V6.2 is reserved for an append-only
+minor extension such as graphics shader specialization metadata; V6.2 must not
+be emitted or accepted until the producer, executor, schema hashes, and tests
+carry the new tables explicitly.
 
 ## Non-Negotiable Rules
 

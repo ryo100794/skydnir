@@ -1377,6 +1377,22 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, describe_body)
 
+    def test_vulkan_graphics_v62_minor_is_reserved_not_accepted(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR 2u", abi)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR 2u", container_abi)
+        self.assertIn("V6.2 is", abi)
+        validator = executor.split("static int validate_vulkan_graphics_v6_header_prefix", 1)[1].split(
+            "if (header->frame_size < header->header_size", 1
+        )[0]
+        self.assertNotIn("PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR", validator)
+        self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR", validator)
+        self.assertIn("header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR;", icd)
+        self.assertNotIn("header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR;", icd)
+
     def test_vulkan_graphics_v61_metadata_extension_is_fail_closed_validated(self):
         executor = GPU_EXECUTOR.read_text()
         header_validator = executor.split("static int validate_vulkan_graphics_v6_header", 1)[1].split(

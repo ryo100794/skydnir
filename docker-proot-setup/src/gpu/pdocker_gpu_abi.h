@@ -527,15 +527,17 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 /*
  * V6 graphics submit ABI foundation.
  *
- * V5/V5.1 remains the compute-dispatch ABI.  V6 is reserved for ordered
- * graphics command streams that can carry pipeline state, render targets,
- * dynamic state, vertex/index bindings, and direct draw commands without
- * overloading the compute dispatch header.
+ * V5/V5.1 remains the compute-dispatch ABI.  V6.0 is the base ordered
+ * graphics command stream.  V6.1 is an append-only header extension for
+ * dynamic offsets, push metadata, and explicit barrier tables.  V6.2 is
+ * reserved for the next append-only extension; V6.0/V6.1 structs and schema
+ * hashes must not be changed retroactively.
  */
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC "PDGPUG6"
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ABI_MAJOR 6u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ABI_MINOR 0u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR 1u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR 2u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
