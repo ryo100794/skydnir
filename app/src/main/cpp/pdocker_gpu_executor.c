@@ -18213,8 +18213,13 @@ static int record_vulkan_graphics_v6_command_buffer(
         const VulkanGraphicsReplayPipeline *pipelines,
         uint32_t pipeline_count,
         const VulkanGraphicsReplayAttachments *attachments,
-        const VulkanGraphicsReplayBuffers *buffers) {
-    if (!rt || !view || !view->header || !pipelines || !attachments || !buffers) return -EINVAL;
+        const VulkanGraphicsReplayBuffers *buffers,
+        VkCommandPool *out_command_pool,
+        VkCommandBuffer *out_command_buffer) {
+    if (!rt || !view || !view->header || !pipelines || !attachments || !buffers ||
+        !out_command_pool || !out_command_buffer) return -EINVAL;
+    *out_command_pool = VK_NULL_HANDLE;
+    *out_command_buffer = VK_NULL_HANDLE;
     VkCommandPool command_pool = rt->graphics_command_pool ? rt->graphics_command_pool : rt->command_pool;
     if (!command_pool) return -ENODEV;
     VkCommandBuffer command_buffer = VK_NULL_HANDLE;
@@ -18408,9 +18413,47 @@ static int record_vulkan_graphics_v6_command_buffer(
         }
     }
     vrc = vkEndCommandBuffer(command_buffer);
-    if (vrc != VK_SUCCESS) rc = -EIO;
+    if (vrc != VK_SUCCESS) {
+        rc = -EIO;
+        goto cleanup;
+    }
+    *out_command_pool = command_pool;
+    *out_command_buffer = command_buffer;
+    command_buffer = VK_NULL_HANDLE;
 cleanup:
     if (command_buffer) vkFreeCommandBuffers(rt->device, command_pool, 1, &command_buffer);
+    return rc;
+}
+
+static int submit_vulkan_graphics_v6_command_buffer(
+        VulkanRuntime *rt,
+        VkCommandBuffer command_buffer) {
+    if (!rt || !command_buffer || !rt->device || !rt->graphics_queue) return -EINVAL;
+    VkFence fence = VK_NULL_HANDLE;
+    VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkResult vrc = vkCreateFence(rt->device, &fci, NULL, &fence);
+    if (vrc != VK_SUCCESS) return -EIO;
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &command_buffer,
+    };
+    int rc = 0;
+    vrc = vkQueueSubmit(rt->graphics_queue, 1, &submit, fence);
+    if (vrc != VK_SUCCESS) {
+        rc = -EIO;
+        goto cleanup;
+    }
+    const uint64_t timeout_ns =
+        env_timeout_ns("PDOCKER_GPU_GRAPHICS_SUBMIT_TIMEOUT_MS", 30000, 1000, 600000);
+    vrc = vkWaitForFences(rt->device, 1, &fence, VK_TRUE, timeout_ns);
+    if (vrc == VK_TIMEOUT) {
+        rc = -ETIMEDOUT;
+        goto cleanup;
+    }
+    if (vrc != VK_SUCCESS) rc = -EIO;
+cleanup:
+    if (fence) vkDestroyFence(rt->device, fence, NULL);
     return rc;
 }
 
@@ -18461,6 +18504,8 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     VulkanGraphicsReplayPipeline replay_pipelines[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
     VulkanGraphicsReplayAttachments replay_attachments;
     VulkanGraphicsReplayBuffers replay_buffers;
+    VkCommandPool replay_command_pool = VK_NULL_HANDLE;
+    VkCommandBuffer replay_command_buffer = VK_NULL_HANDLE;
     uint32_t replay_pipeline_count = 0;
     memset(replay_pipelines, 0, sizeof(replay_pipelines));
     memset(&replay_attachments, 0, sizeof(replay_attachments));
@@ -18556,7 +18601,8 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
 
     rc = record_vulkan_graphics_v6_command_buffer(
         &g_vulkan_runtime, view, replay_pipelines,
-        replay_pipeline_count, &replay_attachments, &replay_buffers);
+        replay_pipeline_count, &replay_attachments, &replay_buffers,
+        &replay_command_pool, &replay_command_buffer);
     if (rc != 0) {
         out = json_out();
         fprintf(out,
@@ -18586,6 +18632,42 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
+    rc = submit_vulkan_graphics_v6_command_buffer(&g_vulkan_runtime, replay_command_buffer);
+    if (rc != 0) {
+        out = json_out();
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"stage\":\"vulkan-graphics-v6-queue-submit\",\"valid\":false,"
+                "\"execution_implemented\":false,\"error\":\"%s\"}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                strerror(-rc));
+        fflush(out);
+        if (replay_command_buffer) {
+            vkFreeCommandBuffers(g_vulkan_runtime.device, replay_command_pool, 1, &replay_command_buffer);
+            replay_command_buffer = VK_NULL_HANDLE;
+        }
+        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
+        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
+        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        return rc;
+    }
+    out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"vulkan-graphics-v6-queue-submit\",\"valid\":true,"
+            "\"execution_implemented\":true,\"submit_id\":%llu}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            (unsigned long long)view->header->submit_id);
+    fflush(out);
+
+    if (replay_command_buffer) {
+        vkFreeCommandBuffers(g_vulkan_runtime.device, replay_command_pool, 1, &replay_command_buffer);
+        replay_command_buffer = VK_NULL_HANDLE;
+    }
     destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
     destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
     destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
@@ -18595,7 +18677,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
             "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":false,"
             "\"execution_implemented\":false,"
-            "\"error\":\"graphics queue submit/writeback is not implemented yet\"}\n",
+            "\"error\":\"graphics attachment writeback is not implemented yet\"}\n",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
             PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION);
     fflush(out);
