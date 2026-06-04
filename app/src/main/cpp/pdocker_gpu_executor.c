@@ -18053,7 +18053,196 @@ static int materialize_vulkan_graphics_v6_attachments(
                 attachment->layout != VK_IMAGE_LAYOUT_GENERAL) {
                 return -EOPNOTSUPP;
             }
+            if (attachment->load_op != VK_ATTACHMENT_LOAD_OP_LOAD &&
+                attachment->load_op != VK_ATTACHMENT_LOAD_OP_CLEAR &&
+                attachment->load_op != VK_ATTACHMENT_LOAD_OP_DONT_CARE) {
+                return -EOPNOTSUPP;
+            }
+            if (attachment->store_op != VK_ATTACHMENT_STORE_OP_STORE &&
+                attachment->store_op != VK_ATTACHMENT_STORE_OP_DONT_CARE) {
+                return -EOPNOTSUPP;
+            }
+            if (replay_view->range.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+                replay_view->range.levelCount == 0 ||
+                replay_view->range.layerCount == 0 ||
+                replay_view->range.baseMipLevel >= image->mip_levels ||
+                replay_view->range.levelCount >
+                    image->mip_levels - replay_view->range.baseMipLevel ||
+                replay_view->range.baseArrayLayer >= image->array_layers ||
+                replay_view->range.layerCount >
+                    image->array_layers - replay_view->range.baseArrayLayer) {
+                return -EOPNOTSUPP;
+            }
+            if (image->copy_aspect_mask &&
+                image->copy_aspect_mask != replay_view->range.aspectMask) {
+                return -EOPNOTSUPP;
+            }
+            if (image->copy_level_count &&
+                (image->copy_base_mip != replay_view->range.baseMipLevel ||
+                 image->copy_level_count != replay_view->range.levelCount ||
+                 image->copy_base_layer != replay_view->range.baseArrayLayer ||
+                 image->copy_layer_count != replay_view->range.layerCount)) {
+                return -EOPNOTSUPP;
+            }
+            image->copy_aspect_mask = replay_view->range.aspectMask;
+            image->copy_base_mip = replay_view->range.baseMipLevel;
+            image->copy_level_count = replay_view->range.levelCount;
+            image->copy_base_layer = replay_view->range.baseArrayLayer;
+            image->copy_layer_count = replay_view->range.layerCount;
+            if (attachment->store_op == VK_ATTACHMENT_STORE_OP_STORE) {
+                image->writeback_needed = 1;
+            }
             image->current_layout = (VkImageLayout)view->images[image->source_index].initial_layout;
+        }
+    }
+    return 0;
+}
+
+static int record_vulkan_graphics_v6_attachment_writeback_commands(
+        VkCommandBuffer command_buffer,
+        VulkanGraphicsReplayAttachments *attachments) {
+    if (!command_buffer || !attachments) return -EINVAL;
+    VkImageMemoryBarrier post_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint32_t post_barrier_count = 0;
+    for (size_t i = 0; i < attachments->image_count; ++i) {
+        VulkanDispatchImageObject *image = &attachments->images[i];
+        if (!image->writeback_needed) continue;
+        if (!image->copy_aspect_mask || image->copy_level_count == 0 ||
+            image->copy_layer_count == 0) {
+            return -EINVAL;
+        }
+        if (post_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        post_barriers[post_barrier_count++] = (VkImageMemoryBarrier){
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = image->requires_staging
+                ? VK_ACCESS_TRANSFER_READ_BIT
+                : VK_ACCESS_HOST_READ_BIT,
+            .oldLayout = image->current_layout,
+            .newLayout = image->requires_staging
+                ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+                : image->current_layout,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = image->image,
+            .subresourceRange = {
+                .aspectMask = image->copy_aspect_mask,
+                .baseMipLevel = image->copy_base_mip,
+                .levelCount = image->copy_level_count,
+                .baseArrayLayer = image->copy_base_layer,
+                .layerCount = image->copy_layer_count,
+            },
+        };
+        if (image->requires_staging) {
+            image->current_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        }
+    }
+    if (post_barrier_count) {
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT,
+                             0,
+                             0, NULL,
+                             0, NULL,
+                             post_barrier_count, post_barriers);
+    }
+    VkBufferMemoryBarrier staging_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    uint32_t staging_barrier_count = 0;
+    for (size_t i = 0; i < attachments->image_count; ++i) {
+        VulkanDispatchImageObject *image = &attachments->images[i];
+        if (!image->writeback_needed || !image->requires_staging) continue;
+        if (!image->staging.buffer || !image->copy_aspect_mask) return -EINVAL;
+        for (uint32_t mip = image->copy_base_mip;
+             mip < image->copy_base_mip + image->copy_level_count;
+             ++mip) {
+            uint64_t buffer_offset = 0;
+            VkExtent3D mip_extent;
+            if (!vulkan_image_tight_subresource_offset(
+                    image, mip, image->copy_base_layer, &buffer_offset) ||
+                !vulkan_image_mip_extent(image, mip, &mip_extent) ||
+                buffer_offset > (uint64_t)image->staging.size) {
+                return -EINVAL;
+            }
+            VkBufferImageCopy region = {
+                .bufferOffset = (VkDeviceSize)buffer_offset,
+                .bufferRowLength = 0,
+                .bufferImageHeight = 0,
+                .imageSubresource = {
+                    .aspectMask = image->copy_aspect_mask,
+                    .mipLevel = mip,
+                    .baseArrayLayer = image->copy_base_layer,
+                    .layerCount = image->copy_layer_count,
+                },
+                .imageOffset = {0, 0, 0},
+                .imageExtent = mip_extent,
+            };
+            vkCmdCopyImageToBuffer(command_buffer,
+                                   image->image,
+                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                   image->staging.buffer,
+                                   1,
+                                   &region);
+        }
+        if (staging_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
+        staging_barriers[staging_barrier_count++] = (VkBufferMemoryBarrier){
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = image->staging.buffer,
+            .offset = 0,
+            .size = (VkDeviceSize)image->memory_size,
+        };
+    }
+    if (staging_barrier_count) {
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT,
+                             0,
+                             0, NULL,
+                             staging_barrier_count, staging_barriers,
+                             0, NULL);
+    }
+    return 0;
+}
+
+static int writeback_vulkan_graphics_v6_attachments(
+        const VulkanGraphicsReplayAttachments *attachments) {
+    if (!attachments) return -EINVAL;
+    for (size_t i = 0; i < attachments->image_count; ++i) {
+        const VulkanDispatchImageObject *image = &attachments->images[i];
+        if (!image->writeback_needed) continue;
+        if (image->memory_object_index >= attachments->memory_count) return -EINVAL;
+        const VulkanDispatchImageMemoryObject *memory =
+            &attachments->memories[image->memory_object_index];
+        if (memory->fd < 0 ||
+            image->memory_offset > (VkDeviceSize)memory->allocation_size ||
+            image->memory_size >
+                (VkDeviceSize)memory->allocation_size - image->memory_offset) {
+            return -EINVAL;
+        }
+        uint64_t fd_offset_u64 = 0;
+        off_t fd_offset = 0;
+        if (checked_u64_add3(memory->external_offset,
+                             (uint64_t)image->memory_offset,
+                             0,
+                             &fd_offset_u64) != 0 ||
+            checked_u64_to_off_t(fd_offset_u64, &fd_offset) != 0) {
+            return -EOVERFLOW;
+        }
+        const unsigned char *ptr = NULL;
+        if (image->requires_staging) {
+            if (!image->staging.map || image->staging.size < image->memory_size) {
+                return -EINVAL;
+            }
+            ptr = (const unsigned char *)image->staging.map;
+        } else {
+            if (!memory->map) return -EINVAL;
+            ptr = (const unsigned char *)memory->map + image->memory_offset;
+        }
+        if (write_fd_exact(memory->fd, ptr, (size_t)image->memory_size, fd_offset) != 0) {
+            return -EIO;
         }
     }
     return 0;
@@ -18212,7 +18401,7 @@ static int record_vulkan_graphics_v6_command_buffer(
         const VulkanGraphicsV6FrameView *view,
         const VulkanGraphicsReplayPipeline *pipelines,
         uint32_t pipeline_count,
-        const VulkanGraphicsReplayAttachments *attachments,
+        VulkanGraphicsReplayAttachments *attachments,
         const VulkanGraphicsReplayBuffers *buffers,
         VkCommandPool *out_command_pool,
         VkCommandBuffer *out_command_buffer) {
@@ -18247,8 +18436,11 @@ static int record_vulkan_graphics_v6_command_buffer(
                 if (command->attachment_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS) { rc = -E2BIG; goto cleanup; }
                 VkRenderingAttachmentInfo color_attachments[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS];
                 VkClearValue clear_values[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS];
+                VkImageMemoryBarrier pre_barriers[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS];
+                uint32_t pre_barrier_count = 0;
                 memset(color_attachments, 0, sizeof(color_attachments));
                 memset(clear_values, 0, sizeof(clear_values));
+                memset(pre_barriers, 0, sizeof(pre_barriers));
                 for (uint32_t a = 0; a < command->attachment_count; ++a) {
                     const PdockerGpuVulkanGraphicsV6AttachmentEntry *src =
                         &view->attachments[command->attachment_first + a];
@@ -18256,6 +18448,18 @@ static int record_vulkan_graphics_v6_command_buffer(
                         src->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                         src->image_view_index >= attachments->view_count ||
                         !attachments->views[src->image_view_index].view) {
+                        rc = -EPROTO;
+                        goto cleanup;
+                    }
+                    VulkanDispatchImageViewObject *replay_view =
+                        &attachments->views[src->image_view_index];
+                    if (replay_view->image_index >= attachments->image_count) {
+                        rc = -EPROTO;
+                        goto cleanup;
+                    }
+                    VulkanDispatchImageObject *image =
+                        &attachments->images[replay_view->image_index];
+                    if (!image->image) {
                         rc = -EPROTO;
                         goto cleanup;
                     }
@@ -18268,14 +18472,42 @@ static int record_vulkan_graphics_v6_command_buffer(
                         }
                         memcpy(&clear_values[a], view->frame + src->clear_value_offset, sizeof(VkClearValue));
                     }
+                    if (pre_barrier_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS) {
+                        rc = -E2BIG;
+                        goto cleanup;
+                    }
+                    pre_barriers[pre_barrier_count++] = (VkImageMemoryBarrier){
+                        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                        .srcAccessMask = image->current_layout == VK_IMAGE_LAYOUT_PREINITIALIZED
+                            ? VK_ACCESS_HOST_WRITE_BIT
+                            : 0,
+                        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                        .oldLayout = image->current_layout,
+                        .newLayout = (VkImageLayout)src->layout,
+                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                        .image = image->image,
+                        .subresourceRange = replay_view->range,
+                    };
+                    image->current_layout = (VkImageLayout)src->layout;
                     color_attachments[a] = (VkRenderingAttachmentInfo){
                         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                        .imageView = attachments->views[src->image_view_index].view,
+                        .imageView = replay_view->view,
                         .imageLayout = (VkImageLayout)src->layout,
                         .loadOp = (VkAttachmentLoadOp)src->load_op,
                         .storeOp = (VkAttachmentStoreOp)src->store_op,
                         .clearValue = clear_values[a],
                     };
+                }
+                if (pre_barrier_count) {
+                    vkCmdPipelineBarrier(command_buffer,
+                                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_HOST_BIT,
+                                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                         0,
+                                         0, NULL,
+                                         0, NULL,
+                                         pre_barrier_count, pre_barriers);
                 }
                 VkRenderingInfo rendering = {
                     .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
@@ -18412,6 +18644,8 @@ static int record_vulkan_graphics_v6_command_buffer(
                 goto cleanup;
         }
     }
+    rc = record_vulkan_graphics_v6_attachment_writeback_commands(command_buffer, attachments);
+    if (rc != 0) goto cleanup;
     vrc = vkEndCommandBuffer(command_buffer);
     if (vrc != VK_SUCCESS) {
         rc = -EIO;
@@ -18668,6 +18902,35 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         vkFreeCommandBuffers(g_vulkan_runtime.device, replay_command_pool, 1, &replay_command_buffer);
         replay_command_buffer = VK_NULL_HANDLE;
     }
+
+    rc = writeback_vulkan_graphics_v6_attachments(&replay_attachments);
+    if (rc != 0) {
+        out = json_out();
+        fprintf(out,
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"stage\":\"vulkan-graphics-v6-attachment-writeback\",\"valid\":false,"
+                "\"execution_implemented\":false,\"error\":\"%s\"}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                strerror(-rc));
+        fflush(out);
+        destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
+        destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
+        destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
+        return rc;
+    }
+    out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"vulkan-graphics-v6-attachment-writeback\",\"valid\":true,"
+            "\"execution_implemented\":true,\"submit_id\":%llu}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            (unsigned long long)view->header->submit_id);
+    fflush(out);
+
     destroy_vulkan_graphics_replay_buffers(g_vulkan_runtime.device, &replay_buffers);
     destroy_vulkan_graphics_replay_attachments(g_vulkan_runtime.device, &replay_attachments);
     destroy_vulkan_graphics_replay_pipelines(g_vulkan_runtime.device, replay_pipelines, replay_pipeline_count);
@@ -18675,13 +18938,13 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
             "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
-            "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":false,"
-            "\"execution_implemented\":false,"
-            "\"error\":\"graphics attachment writeback is not implemented yet\"}\n",
+            "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":true,"
+            "\"execution_implemented\":true,\"submit_id\":%llu}\n",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
-            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION);
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            (unsigned long long)view->header->submit_id);
     fflush(out);
-    return -EOPNOTSUPP;
+    return 0;
 }
 
 static int recv_vulkan_graphics_v6_header_with_fds(

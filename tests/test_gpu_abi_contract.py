@@ -1018,7 +1018,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "vulkan-graphics-v6-attachment-materialize",
             "materialize_vulkan_graphics_v6_buffers",
             "vulkan-graphics-v6-buffer-materialize",
-            "graphics attachment writeback is not implemented yet",
+            "record_vulkan_graphics_v6_attachment_writeback_commands",
+            "writeback_vulkan_graphics_v6_attachments",
+            "vulkan-graphics-v6-attachment-writeback",
             "run_vulkan_graphics_v6_frame",
         ]:
             self.assertIn(marker, executor)
@@ -1094,9 +1096,11 @@ class GpuAbiContractTest(unittest.TestCase):
             run_body.index("record_vulkan_graphics_v6_command_buffer"),
             run_body.index("submit_vulkan_graphics_v6_command_buffer"),
         )
+        self.assertIn("writeback_vulkan_graphics_v6_attachments", run_body)
+        self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-attachment-writeback\\"', run_body)
         self.assertLess(
             run_body.index("submit_vulkan_graphics_v6_command_buffer"),
-            run_body.index("graphics attachment writeback is not implemented yet"),
+            run_body.index("writeback_vulkan_graphics_v6_attachments"),
         )
 
     def test_vulkan_graphics_v6_executor_materializes_attachments_before_command_replay(self):
@@ -1168,9 +1172,10 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-command-record\\"', run_body)
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-queue-submit\\"', run_body)
-        self.assertIn("graphics attachment writeback is not implemented yet", run_body)
+        self.assertIn("record_vulkan_graphics_v6_attachment_writeback_commands", helper)
+        self.assertIn("writeback_vulkan_graphics_v6_attachments", run_body)
 
-    def test_vulkan_graphics_v6_executor_submits_before_writeback_gate(self):
+    def test_vulkan_graphics_v6_executor_submits_before_attachment_writeback(self):
         executor = GPU_EXECUTOR.read_text()
         helper = executor.split("static int submit_vulkan_graphics_v6_command_buffer", 1)[1].split(
             "static int run_vulkan_graphics_v6_frame", 1
@@ -1187,11 +1192,16 @@ class GpuAbiContractTest(unittest.TestCase):
             "static int recv_vulkan_graphics_v6_header_with_fds", 1
         )[0]
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-queue-submit\\"', run_body)
+        self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-attachment-writeback\\"', run_body)
         self.assertIn("vkFreeCommandBuffers", run_body)
-        self.assertIn("graphics attachment writeback is not implemented yet", run_body)
+        self.assertIn("writeback_vulkan_graphics_v6_attachments", run_body)
         self.assertLess(
             run_body.index("submit_vulkan_graphics_v6_command_buffer"),
-            run_body.index("graphics attachment writeback is not implemented yet"),
+            run_body.index("writeback_vulkan_graphics_v6_attachments"),
+        )
+        self.assertLess(
+            run_body.index("writeback_vulkan_graphics_v6_attachments"),
+            run_body.rindex('\\"stage\\":\\"vulkan-graphics-v6-replay\\"'),
         )
 
     def test_vulkan_graphics_v6_submit_validator_hardens_resource_descriptor_and_draw_refs(self):
