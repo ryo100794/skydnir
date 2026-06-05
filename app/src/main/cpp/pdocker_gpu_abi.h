@@ -544,6 +544,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR 3u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V64_ABI_MINOR 4u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR 5u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR 6u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
@@ -567,6 +568,9 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_SCHEMA_HASH 0xf601060db3fe6d70ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V65_HEADER_EXTENSION_SCHEMA_HASH 0x6ab3135cb8051e8eull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_SCHEMA_HASH 0xf2d422fe89c57221ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_HEADER_EXTENSION_SCHEMA_HASH 0x5765106119509108ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_SCHEMA_HASH 0xa2b61fe8cccf0ea6ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_SCHEMA_HASH 0x763f1cd2b92a7710ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES (8u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES 64u
@@ -583,6 +587,8 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V63_MAX_DEPTH_STENCIL_STATES PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V64_MAX_RESOLVE_ATTACHMENTS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V65_MAX_STATIC_PIPELINE_STATES PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_STATES PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_ATTACHMENTS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS 4096u
 
 
@@ -637,6 +643,36 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(reserved0, u32) \
     X(reserved1, u32)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_FIELD_COUNT 8u
+
+#define PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_LOGIC_OP_ENABLE 0x00000001u
+#define PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_CONSTANTS_PRESENT 0x00000002u
+#define PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_BLEND_ENABLE 0x00000001u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_FIELDS(X) \
+    X(pipeline_index, u32) \
+    X(flags, u32) \
+    X(logic_op, u32) \
+    X(attachment_first, u32) \
+    X(attachment_count, u32) \
+    X(blend_constant0_bits, u32) \
+    X(blend_constant1_bits, u32) \
+    X(blend_constant2_bits, u32) \
+    X(blend_constant3_bits, u32) \
+    X(reserved0, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_FIELD_COUNT 10u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_FIELDS(X) \
+    X(pipeline_index, u32) \
+    X(attachment_index, u32) \
+    X(flags, u32) \
+    X(src_color_blend_factor, u32) \
+    X(dst_color_blend_factor, u32) \
+    X(color_blend_op, u32) \
+    X(src_alpha_blend_factor, u32) \
+    X(dst_alpha_blend_factor, u32) \
+    X(alpha_blend_op, u32) \
+    X(color_write_mask, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_FIELD_COUNT 10u
 
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR 1u
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH 2u
@@ -948,6 +984,22 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(static_pipeline_state_table_hash, u64) \
     X(extension_hash, u64)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V65_HEADER_EXTENSION_FIELD_COUNT 7u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_HEADER_EXTENSION_FIELDS(X) \
+    X(color_blend_state_count, u32) \
+    X(color_blend_state_entry_size, u32) \
+    X(color_blend_state_table_offset, u64) \
+    X(color_blend_state_table_size, u64) \
+    X(color_blend_state_schema_hash, u64) \
+    X(color_blend_state_table_hash, u64) \
+    X(color_blend_attachment_count, u32) \
+    X(color_blend_attachment_entry_size, u32) \
+    X(color_blend_attachment_table_offset, u64) \
+    X(color_blend_attachment_table_size, u64) \
+    X(color_blend_attachment_schema_hash, u64) \
+    X(color_blend_attachment_table_hash, u64) \
+    X(extension_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V66_HEADER_EXTENSION_FIELD_COUNT 13u
 
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS(X) \
     X(command_type, u32) \
@@ -1261,6 +1313,32 @@ typedef struct PdockerGpuVulkanGraphicsV65FrameHeader {
     PdockerGpuVulkanGraphicsV65HeaderExtension v65;
 } PdockerGpuVulkanGraphicsV65FrameHeader;
 
+typedef struct PdockerGpuVulkanGraphicsV66HeaderExtension {
+    uint32_t color_blend_state_count;
+    uint32_t color_blend_state_entry_size;
+    uint64_t color_blend_state_table_offset;
+    uint64_t color_blend_state_table_size;
+    uint64_t color_blend_state_schema_hash;
+    uint64_t color_blend_state_table_hash;
+    uint32_t color_blend_attachment_count;
+    uint32_t color_blend_attachment_entry_size;
+    uint64_t color_blend_attachment_table_offset;
+    uint64_t color_blend_attachment_table_size;
+    uint64_t color_blend_attachment_schema_hash;
+    uint64_t color_blend_attachment_table_hash;
+    uint64_t extension_hash;
+} PdockerGpuVulkanGraphicsV66HeaderExtension;
+
+typedef struct PdockerGpuVulkanGraphicsV66FrameHeader {
+    PdockerGpuVulkanGraphicsV6FrameHeader base;
+    PdockerGpuVulkanGraphicsV61HeaderExtension v61;
+    PdockerGpuVulkanGraphicsV62HeaderExtension v62;
+    PdockerGpuVulkanGraphicsV63HeaderExtension v63;
+    PdockerGpuVulkanGraphicsV64HeaderExtension v64;
+    PdockerGpuVulkanGraphicsV65HeaderExtension v65;
+    PdockerGpuVulkanGraphicsV66HeaderExtension v66;
+} PdockerGpuVulkanGraphicsV66FrameHeader;
+
 typedef struct PdockerGpuVulkanGraphicsV62SpecializationEntry {
     uint32_t shader_stage_index;
     uint32_t constant_id;
@@ -1309,6 +1387,32 @@ typedef struct PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry {
     uint32_t reserved0;
     uint32_t reserved1;
 } PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV66ColorBlendStateEntry {
+    uint32_t pipeline_index;
+    uint32_t flags;
+    uint32_t logic_op;
+    uint32_t attachment_first;
+    uint32_t attachment_count;
+    uint32_t blend_constant0_bits;
+    uint32_t blend_constant1_bits;
+    uint32_t blend_constant2_bits;
+    uint32_t blend_constant3_bits;
+    uint32_t reserved0;
+} PdockerGpuVulkanGraphicsV66ColorBlendStateEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry {
+    uint32_t pipeline_index;
+    uint32_t attachment_index;
+    uint32_t flags;
+    uint32_t src_color_blend_factor;
+    uint32_t dst_color_blend_factor;
+    uint32_t color_blend_op;
+    uint32_t src_alpha_blend_factor;
+    uint32_t dst_alpha_blend_factor;
+    uint32_t alpha_blend_op;
+    uint32_t color_write_mask;
+} PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry;
 
 typedef struct PdockerGpuVulkanGraphicsV61DynamicOffsetEntry {
     uint32_t offset;

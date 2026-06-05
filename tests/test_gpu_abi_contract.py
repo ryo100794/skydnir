@@ -1012,12 +1012,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "pipeline->rasterizer_discard_enable = ci->pRasterizationState->rasterizerDiscardEnable",
             "pipeline->depth_bias_enable = ci->pRasterizationState->depthBiasEnable",
             "pipeline->line_width = ci->pRasterizationState->lineWidth",
-            "ci->pColorBlendState->logicOpEnable",
-            "pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_BLEND_CONSTANTS)",
-            "ci->pColorBlendState->blendConstants[0] != 0.0f",
-            "attachment->blendEnable",
-            "attachment->colorWriteMask !=",
-            "VK_COLOR_COMPONENT_R_BIT",
+            "pipeline->color_blend_logic_op_enable = cb->logicOpEnable",
+            "pipeline->color_blend_constants",
+            "memcpy(pipeline->color_blend_constants, cb->blendConstants",
+            "pipeline->color_blend_attachments[a] = cb->pAttachments[a]",
+            "pipeline->color_blend_attachment_overflow = true",
+            "pipeline->color_blend_attachments[a] = cb->pAttachments[a]",
             "ci->pViewportState->viewportCount > 0",
             "VK_DYNAMIC_STATE_VIEWPORT",
             "ci->pViewportState->scissorCount > 0",
@@ -1104,6 +1104,31 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pipeline->primitive_restart_enable = ci->pInputAssemblyState->primitiveRestartEnable", icd)
         self.assertIn("pipeline->depth_bias_constant_factor = ci->pRasterizationState->depthBiasConstantFactor", icd)
         self.assertNotIn("ci->pRasterizationState->depthClampEnable ||", icd)
+
+    def test_vulkan_graphics_v66_color_blend_state_metadata_is_append_only(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR 6u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV66FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV66ColorBlendStateEntry", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_LOGIC_OP_ENABLE", source)
+            self.assertIn("X(color_write_mask, u32)", source)
+        self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR", executor)
+        self.assertIn("sizeof(PdockerGpuVulkanGraphicsV66FrameHeader)", executor)
+        self.assertIn("header_v66->v66.color_blend_state_count", executor)
+        self.assertIn("find_vulkan_graphics_v66_color_blend_state", executor)
+        self.assertIn("logicOpEnable = logic_op_enable", executor)
+        self.assertIn("dst_attachment->colorWriteMask =", executor)
+        self.assertIn("need_v66_color_blend_state", icd)
+        self.assertIn("color_blend_states[color_blend_state_count++]", icd)
+        self.assertIn("pipeline->color_blend_logic_op_enable = cb->logicOpEnable", icd)
+        self.assertNotIn("attachment->blendEnable ||", icd)
 
     def test_vulkan_graphics_v6_describe_response_is_nonterminal(self):
         icd = VULKAN_ICD.read_text()
@@ -1629,7 +1654,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[21]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[23]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(
@@ -2049,6 +2074,21 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -2149,6 +2189,21 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV66HeaderExtension",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV66ColorBlendStateEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",

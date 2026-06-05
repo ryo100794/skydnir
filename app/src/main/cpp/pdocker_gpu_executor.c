@@ -17075,6 +17075,8 @@ static int validate_vulkan_graphics_v6_header_prefix(
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV64FrameHeader)) return -EPROTO;
     } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR) {
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV65FrameHeader)) return -EPROTO;
+    } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR) {
+        if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV66FrameHeader)) return -EPROTO;
     } else {
         return -EPROTO;
     }
@@ -17104,7 +17106,10 @@ static int validate_vulkan_graphics_v6_header(
         (const PdockerGpuVulkanGraphicsV64FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV65FrameHeader *header_v65 =
         (const PdockerGpuVulkanGraphicsV65FrameHeader *)header;
-    const int is_v65 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR;
+    const PdockerGpuVulkanGraphicsV66FrameHeader *header_v66 =
+        (const PdockerGpuVulkanGraphicsV66FrameHeader *)header;
+    const int is_v66 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR;
+    const int is_v65 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR || is_v66;
     const int is_v64 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V64_ABI_MINOR || is_v65;
     const int is_v63 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR || is_v64;
     const int is_v61 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR ||
@@ -17130,6 +17135,8 @@ static int validate_vulkan_graphics_v6_header(
         (is_v63 && header_v63->v63.depth_stencil_state_count > PDOCKER_GPU_VULKAN_GRAPHICS_V63_MAX_DEPTH_STENCIL_STATES) ||
         (is_v64 && header_v64->v64.resolve_attachment_count > PDOCKER_GPU_VULKAN_GRAPHICS_V64_MAX_RESOLVE_ATTACHMENTS) ||
         (is_v65 && header_v65->v65.static_pipeline_state_count > PDOCKER_GPU_VULKAN_GRAPHICS_V65_MAX_STATIC_PIPELINE_STATES) ||
+        (is_v66 && header_v66->v66.color_blend_state_count > PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_STATES) ||
+        (is_v66 && header_v66->v66.color_blend_attachment_count > PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_ATTACHMENTS) ||
         header->command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) {
         return -E2BIG;
     }
@@ -17192,7 +17199,14 @@ static int validate_vulkan_graphics_v6_header(
          header_v65->v65.static_pipeline_state_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_SCHEMA_HASH)) {
         return -EPROTO;
     }
-    FrameRange ranges[21] = {
+    if (is_v66 &&
+        (header_v66->v66.color_blend_state_entry_size != sizeof(PdockerGpuVulkanGraphicsV66ColorBlendStateEntry) ||
+         header_v66->v66.color_blend_state_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_SCHEMA_HASH ||
+         header_v66->v66.color_blend_attachment_entry_size != sizeof(PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry) ||
+         header_v66->v66.color_blend_attachment_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_SCHEMA_HASH)) {
+        return -EPROTO;
+    }
+    FrameRange ranges[23] = {
         {header->resource_table_offset, header->resource_table_size},
         {header->descriptor_table_offset, header->descriptor_table_size},
         {header->image_table_offset, header->image_table_size},
@@ -17223,6 +17237,10 @@ static int validate_vulkan_graphics_v6_header(
          is_v64 ? header_v64->v64.resolve_attachment_table_size : 0},
         {is_v65 ? header_v65->v65.static_pipeline_state_table_offset : 0,
          is_v65 ? header_v65->v65.static_pipeline_state_table_size : 0},
+        {is_v66 ? header_v66->v66.color_blend_state_table_offset : 0,
+         is_v66 ? header_v66->v66.color_blend_state_table_size : 0},
+        {is_v66 ? header_v66->v66.color_blend_attachment_table_offset : 0,
+         is_v66 ? header_v66->v66.color_blend_attachment_table_size : 0},
     };
     if (!table_range_valid(header->resource_table_offset, header->resource_table_size,
                            header->resource_count, header->resource_entry_size,
@@ -17316,7 +17334,22 @@ static int validate_vulkan_graphics_v6_header(
                            header->frame_size, header->header_size)) {
         return -EPROTO;
     }
-    if (!frame_ranges_do_not_overlap(ranges, is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u)))))) {
+    if (is_v66 &&
+        (!table_range_valid(header_v66->v66.color_blend_state_table_offset,
+                            header_v66->v66.color_blend_state_table_size,
+                            header_v66->v66.color_blend_state_count,
+                            header_v66->v66.color_blend_state_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV66ColorBlendStateEntry),
+                            header->frame_size, header->header_size) ||
+         !table_range_valid(header_v66->v66.color_blend_attachment_table_offset,
+                            header_v66->v66.color_blend_attachment_table_size,
+                            header_v66->v66.color_blend_attachment_count,
+                            header_v66->v66.color_blend_attachment_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry),
+                            header->frame_size, header->header_size))) {
+        return -EPROTO;
+    }
+    if (!frame_ranges_do_not_overlap(ranges, is_v66 ? 23u : (is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u))))))) {
         return -EPROTO;
     }
     return 0;
@@ -17341,6 +17374,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV63FrameHeader *header_v63;
     const PdockerGpuVulkanGraphicsV64FrameHeader *header_v64;
     const PdockerGpuVulkanGraphicsV65FrameHeader *header_v65;
+    const PdockerGpuVulkanGraphicsV66FrameHeader *header_v66;
     const int *passed_fds;
     size_t passed_fd_count;
     int is_v61;
@@ -17348,6 +17382,7 @@ typedef struct VulkanGraphicsV6FrameView {
     int is_v63;
     int is_v64;
     int is_v65;
+    int is_v66;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images;
@@ -17369,6 +17404,8 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *depth_stencil_states;
     const PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry *resolve_attachments;
     const PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry *static_pipeline_states;
+    const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *color_blend_states;
+    const PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry *color_blend_attachments;
 } VulkanGraphicsV6FrameView;
 
 static int init_vulkan_graphics_v6_frame_view(
@@ -17382,7 +17419,8 @@ static int init_vulkan_graphics_v6_frame_view(
         (const PdockerGpuVulkanGraphicsV6FrameHeader *)frame;
     int rc = validate_vulkan_graphics_v6_header(header, passed_fd_count);
     if (rc != 0) return rc;
-    const int is_v65_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR;
+    const int is_v66_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR;
+    const int is_v65_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR || is_v66_header;
     const int is_v64_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V64_ABI_MINOR || is_v65_header;
     const int is_v63_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR || is_v64_header;
     const PdockerGpuVulkanGraphicsV61FrameHeader *header_v61 =
@@ -17404,6 +17442,9 @@ static int init_vulkan_graphics_v6_frame_view(
     const PdockerGpuVulkanGraphicsV65FrameHeader *header_v65 = is_v65_header
             ? (const PdockerGpuVulkanGraphicsV65FrameHeader *)frame
             : NULL;
+    const PdockerGpuVulkanGraphicsV66FrameHeader *header_v66 = is_v66_header
+            ? (const PdockerGpuVulkanGraphicsV66FrameHeader *)frame
+            : NULL;
     view->frame = frame;
     view->header = header;
     view->header_v61 = header_v61;
@@ -17411,6 +17452,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->header_v63 = header_v63;
     view->header_v64 = header_v64;
     view->header_v65 = header_v65;
+    view->header_v66 = header_v66;
     view->passed_fds = passed_fds;
     view->passed_fd_count = passed_fd_count;
     view->is_v61 = header_v61 != NULL;
@@ -17418,6 +17460,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->is_v63 = header_v63 != NULL;
     view->is_v64 = header_v64 != NULL;
     view->is_v65 = header_v65 != NULL;
+    view->is_v66 = header_v66 != NULL;
     view->resources =
         (const PdockerGpuVulkanDispatchV5ResourceEntry *)graphics_v6_table_ptr(
             frame, header, header->resource_table_offset, header->resource_table_size);
@@ -17530,6 +17573,20 @@ static int init_vulkan_graphics_v6_frame_view(
                 frame, header, header_v65->v65.static_pipeline_state_table_offset,
                 header_v65->v65.static_pipeline_state_table_size);
         if (header_v65->v65.static_pipeline_state_count && !view->static_pipeline_states) {
+            return -EPROTO;
+        }
+    }
+    if (view->is_v66) {
+        view->color_blend_states =
+            (const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *)graphics_v6_table_ptr(
+                frame, header, header_v66->v66.color_blend_state_table_offset,
+                header_v66->v66.color_blend_state_table_size);
+        view->color_blend_attachments =
+            (const PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry *)graphics_v6_table_ptr(
+                frame, header, header_v66->v66.color_blend_attachment_table_offset,
+                header_v66->v66.color_blend_attachment_table_size);
+        if ((header_v66->v66.color_blend_state_count && !view->color_blend_states) ||
+            (header_v66->v66.color_blend_attachment_count && !view->color_blend_attachments)) {
             return -EPROTO;
         }
     }
@@ -17683,11 +17740,13 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV63FrameHeader *header_v63 = view.header_v63;
     const PdockerGpuVulkanGraphicsV64FrameHeader *header_v64 = view.header_v64;
     const PdockerGpuVulkanGraphicsV65FrameHeader *header_v65 = view.header_v65;
+    const PdockerGpuVulkanGraphicsV66FrameHeader *header_v66 = view.header_v66;
     const int is_v61 = view.is_v61;
     const int is_v62 = view.is_v62;
     const int is_v63 = view.is_v63;
     const int is_v64 = view.is_v64;
     const int is_v65 = view.is_v65;
+    const int is_v66 = view.is_v66;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources = view.resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = view.descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images = view.images;
@@ -17709,6 +17768,8 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *depth_stencil_states = view.depth_stencil_states;
     const PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry *resolve_attachments = view.resolve_attachments;
     const PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry *static_pipeline_states = view.static_pipeline_states;
+    const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *color_blend_states = view.color_blend_states;
+    const PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry *color_blend_attachments = view.color_blend_attachments;
     const size_t frame_hash_offset = offsetof(PdockerGpuVulkanGraphicsV6FrameHeader, frame_hash);
     uint64_t payload_hash = fnv1a64_update(1469598103934665603ull,
                                            frame + header->header_size,
@@ -17765,6 +17826,24 @@ static int validate_vulkan_graphics_v6_frame_content(
             (size_t)header_v65->v65.static_pipeline_state_table_size);
         if (static_pipeline_state_table_hash != header_v65->v65.static_pipeline_state_table_hash ||
             header_v65->v65.extension_hash != static_pipeline_state_table_hash) {
+            return -EPROTO;
+        }
+    }
+    if (is_v66) {
+        uint64_t color_blend_state_table_hash = fnv1a64_update(
+            1469598103934665603ull, color_blend_states,
+            (size_t)header_v66->v66.color_blend_state_table_size);
+        uint64_t color_blend_attachment_table_hash = fnv1a64_update(
+            1469598103934665603ull, color_blend_attachments,
+            (size_t)header_v66->v66.color_blend_attachment_table_size);
+        uint64_t extension_hash = 1469598103934665603ull;
+        extension_hash = fnv1a64_update(extension_hash, color_blend_states,
+                                        (size_t)header_v66->v66.color_blend_state_table_size);
+        extension_hash = fnv1a64_update(extension_hash, color_blend_attachments,
+                                        (size_t)header_v66->v66.color_blend_attachment_table_size);
+        if (color_blend_state_table_hash != header_v66->v66.color_blend_state_table_hash ||
+            color_blend_attachment_table_hash != header_v66->v66.color_blend_attachment_table_hash ||
+            extension_hash != header_v66->v66.extension_hash) {
             return -EPROTO;
         }
     }
@@ -17954,6 +18033,52 @@ static int validate_vulkan_graphics_v6_frame_content(
             if ((entry->flags & PDOCKER_GPU_GRAPHICS_V65_STATIC_LINE_WIDTH_PRESENT) == 0 &&
                 entry->line_width_bits != 0x3f800000u) {
                 return -EPROTO;
+            }
+        }
+    }
+    if (is_v66) {
+        uint8_t seen_color_blend_pipeline[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
+        uint8_t seen_color_blend_attachment[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES][16u];
+        memset(seen_color_blend_pipeline, 0, sizeof(seen_color_blend_pipeline));
+        memset(seen_color_blend_attachment, 0, sizeof(seen_color_blend_attachment));
+        const uint32_t supported_state_flags =
+            PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_LOGIC_OP_ENABLE |
+            PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_CONSTANTS_PRESENT;
+        for (uint32_t i = 0; i < header_v66->v66.color_blend_state_count; ++i) {
+            const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *entry = &color_blend_states[i];
+            if (entry->pipeline_index >= header->pipeline_count || entry->reserved0 != 0 ||
+                (entry->flags & ~supported_state_flags) != 0) return -EPROTO;
+            if (seen_color_blend_pipeline[entry->pipeline_index]) return -EPROTO;
+            seen_color_blend_pipeline[entry->pipeline_index] = 1;
+            if ((entry->flags & PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_LOGIC_OP_ENABLE) == 0 &&
+                entry->logic_op != 0) return -EPROTO;
+            if ((entry->flags & PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_CONSTANTS_PRESENT) == 0 &&
+                (entry->blend_constant0_bits != 0 || entry->blend_constant1_bits != 0 ||
+                 entry->blend_constant2_bits != 0 || entry->blend_constant3_bits != 0)) return -EPROTO;
+            if (!range_add_u32(entry->attachment_first, entry->attachment_count,
+                               header_v66->v66.color_blend_attachment_count)) return -EPROTO;
+            const PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline = &pipelines[entry->pipeline_index];
+            if (entry->attachment_count != pipeline->color_attachment_count) return -EPROTO;
+            for (uint32_t a = 0; a < entry->attachment_count; ++a) {
+                const PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry *attachment =
+                    &color_blend_attachments[entry->attachment_first + a];
+                if (attachment->pipeline_index != entry->pipeline_index ||
+                    attachment->attachment_index >= pipeline->color_attachment_count ||
+                    attachment->attachment_index >= 16u ||
+                    (attachment->flags & ~PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_BLEND_ENABLE) != 0 ||
+                    (attachment->color_write_mask & ~(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                                      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT)) != 0) {
+                    return -EPROTO;
+                }
+                if (seen_color_blend_attachment[entry->pipeline_index][attachment->attachment_index]) return -EPROTO;
+                seen_color_blend_attachment[entry->pipeline_index][attachment->attachment_index] = 1;
+                if ((attachment->flags & PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_BLEND_ENABLE) == 0 &&
+                    (attachment->src_color_blend_factor != VK_BLEND_FACTOR_ONE ||
+                     attachment->dst_color_blend_factor != VK_BLEND_FACTOR_ZERO ||
+                     attachment->color_blend_op != VK_BLEND_OP_ADD ||
+                     attachment->src_alpha_blend_factor != VK_BLEND_FACTOR_ONE ||
+                     attachment->dst_alpha_blend_factor != VK_BLEND_FACTOR_ZERO ||
+                     attachment->alpha_blend_op != VK_BLEND_OP_ADD)) return -EPROTO;
             }
         }
     }
@@ -18169,6 +18294,18 @@ static int vulkan_graphics_attachment_ops_supported(
         const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment,
         uint32_t role);
 static int vulkan_graphics_attachment_layout_supported(uint32_t role, uint32_t layout);
+static const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *
+find_vulkan_graphics_v66_color_blend_state(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t pipeline_index) {
+    if (!view || !view->is_v66 || !view->header_v66 || !view->color_blend_states) return NULL;
+    for (uint32_t i = 0; i < view->header_v66->v66.color_blend_state_count; ++i) {
+        const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *entry = &view->color_blend_states[i];
+        if (entry->pipeline_index == pipeline_index) return entry;
+    }
+    return NULL;
+}
+
 static const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *
 find_vulkan_graphics_v63_depth_stencil_state(
         const VulkanGraphicsV6FrameView *view,
@@ -18971,15 +19108,54 @@ static int materialize_vulkan_graphics_v6_pipelines(
         memset(blend_attachments, 0, sizeof(blend_attachments));
         for (uint32_t c = 0; c < src->color_attachment_count; ++c) {
             blend_attachments[c].blendEnable = VK_FALSE;
+            blend_attachments[c].srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            blend_attachments[c].dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+            blend_attachments[c].colorBlendOp = VK_BLEND_OP_ADD;
+            blend_attachments[c].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            blend_attachments[c].dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            blend_attachments[c].alphaBlendOp = VK_BLEND_OP_ADD;
             blend_attachments[c].colorWriteMask =
                 VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                 VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
         }
+        const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *color_blend_state =
+            find_vulkan_graphics_v66_color_blend_state(view, pidx);
+        float blend_constants[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        VkBool32 logic_op_enable = VK_FALSE;
+        VkLogicOp logic_op = VK_LOGIC_OP_CLEAR;
+        if (color_blend_state) {
+            logic_op_enable = (color_blend_state->flags & PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_LOGIC_OP_ENABLE)
+                ? VK_TRUE : VK_FALSE;
+            logic_op = (VkLogicOp)color_blend_state->logic_op;
+            if (logic_op_enable && !rt->enabled_features.logicOp) return -EOPNOTSUPP;
+            if (color_blend_state->flags & PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_CONSTANTS_PRESENT) {
+                blend_constants[0] = float_from_u32_bits(color_blend_state->blend_constant0_bits);
+                blend_constants[1] = float_from_u32_bits(color_blend_state->blend_constant1_bits);
+                blend_constants[2] = float_from_u32_bits(color_blend_state->blend_constant2_bits);
+                blend_constants[3] = float_from_u32_bits(color_blend_state->blend_constant3_bits);
+            }
+            for (uint32_t a = 0; a < color_blend_state->attachment_count; ++a) {
+                const PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry *attachment =
+                    &view->color_blend_attachments[color_blend_state->attachment_first + a];
+                VkPipelineColorBlendAttachmentState *dst_attachment = &blend_attachments[attachment->attachment_index];
+                dst_attachment->blendEnable =
+                    (attachment->flags & PDOCKER_GPU_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_BLEND_ENABLE) ? VK_TRUE : VK_FALSE;
+                dst_attachment->srcColorBlendFactor = (VkBlendFactor)attachment->src_color_blend_factor;
+                dst_attachment->dstColorBlendFactor = (VkBlendFactor)attachment->dst_color_blend_factor;
+                dst_attachment->colorBlendOp = (VkBlendOp)attachment->color_blend_op;
+                dst_attachment->srcAlphaBlendFactor = (VkBlendFactor)attachment->src_alpha_blend_factor;
+                dst_attachment->dstAlphaBlendFactor = (VkBlendFactor)attachment->dst_alpha_blend_factor;
+                dst_attachment->alphaBlendOp = (VkBlendOp)attachment->alpha_blend_op;
+                dst_attachment->colorWriteMask = (VkColorComponentFlags)attachment->color_write_mask;
+            }
+        }
         VkPipelineColorBlendStateCreateInfo cbsci = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-            .logicOpEnable = VK_FALSE,
+            .logicOpEnable = logic_op_enable,
+            .logicOp = logic_op,
             .attachmentCount = src->color_attachment_count,
             .pAttachments = src->color_attachment_count ? blend_attachments : NULL,
+            .blendConstants = { blend_constants[0], blend_constants[1], blend_constants[2], blend_constants[3] },
         };
         VkDynamicState dynamic_states[32];
         uint32_t dynamic_state_count = 0;
