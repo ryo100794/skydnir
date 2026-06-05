@@ -55,6 +55,7 @@ Confirmed facts:
 | 2026-06-04 Vulkan graphics writable storage-buffer descriptor lane | Executor P6 now accepts writable `VK_DESCRIPTOR_TYPE_STORAGE_BUFFER` graphics descriptors for the supported subset.  It materializes the referenced fd-backed buffer ranges as host-visible Android Vulkan storage buffers, records a shader-write to host-read barrier before queue completion, writes the changed descriptor ranges back to the shared backing fd after submit, and emits `vulkan-graphics-v6-storage-buffer-writeback` evidence.  Input attachments, depth/stencil, MSAA/resolve, copy+draw mixed submit semantics, and broader synchronization remain fail-closed. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 | 2026-06-04 Vulkan graphics storage-image descriptor lane | Executor P6 now accepts `VK_DESCRIPTOR_TYPE_STORAGE_IMAGE` descriptors for the supported graphics subset when they use `VK_IMAGE_LAYOUT_GENERAL`, a bounded color image-view range, and an fd-backed image resource.  Storage images are conservatively treated as potentially writable, transitioned with shader read/write access, copied back through the existing image writeback path after queue completion, and written to the shared backing fd.  Input attachments, depth/stencil, MSAA/resolve, copy+draw mixed submit semantics, and broader synchronization remain fail-closed. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 | 2026-06-05 Vulkan graphics copy-range refactor lane | Executor P6 now centralizes bounded color image-view range validation and copy/writeback range merging through `vulkan_graphics_merge_color_copy_range`.  This removes duplicate attachment-vs-descriptor range checks and makes writable storage-image descriptors use the same writeback range contract as stored color attachments.  This is a cleanup/refactor slice only; it does not widen the supported descriptor, depth/stencil, MSAA/resolve, or mixed-submit contract. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; native build `scripts/build-native-android-ndk.sh` |
+| 2026-06-05 Vulkan graphics V6.2 specialization metadata lane | Graphics shader specialization is no longer a generic fail-closed gap.  V6.2 adds an append-only specialization map-entry table keyed by serialized shader-stage index.  The ICD captures `VkSpecializationInfo`, appends per-stage specialization data into the existing shader-stage payload bytes, emits V6.2 only when specialization exists, and the executor validates/reconstructs `VkSpecializationInfo` before `vkCreateGraphicsPipelines`.  This preserves specialization bytes and metadata without changing V6.0/V6.1 layouts.  Broader graphics gaps such as depth/stencil, MSAA/resolve, mixed submit semantics, and unsupported descriptor classes remain fail-closed. | `app/src/main/cpp/pdocker_gpu_abi.h`; `docker-proot-setup/src/gpu/pdocker_gpu_abi.h`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; native builds `scripts/build-native-android-ndk.sh`, `scripts/build-gpu-shim.sh` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -213,10 +214,12 @@ ABI maintenance rule: `app/src/main/cpp/pdocker_gpu_abi.h` and
 contract headers.  Do not hand-edit one side only.  Any ABI change must update
 both headers in the same commit and must pass
 `test_container_and_apk_gpu_abi_headers_stay_in_sync` plus the schema hash
-contract tests before it is promoted.  V6.2 is reserved for an append-only
-minor extension such as graphics shader specialization metadata; V6.2 must not
-be emitted or accepted until the producer, executor, schema hashes, and tests
-carry the new tables explicitly.
+contract tests before it is promoted.  V6.2 is now the append-only graphics
+shader specialization metadata extension: the producer may emit V6.2 only when
+a graphics stage carries `VkSpecializationInfo`, and the executor may accept it
+only when the specialization map-entry table, table hash, per-stage payload
+hashes, and stage-index/range checks all validate.  V6.0/V6.1 structs and
+schema hashes remain frozen.
 
 ## Non-Negotiable Rules
 

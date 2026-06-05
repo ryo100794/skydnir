@@ -1043,7 +1043,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vulkan-graphics-v6-replay-preflight",
             "graphics input attachment descriptor replay is not implemented",
             "graphics write descriptor replay is not implemented",
-            "graphics shader specialization replay is not implemented",
+            "graphics shader specialization replay requires V6.2 metadata",
             "materialize_vulkan_graphics_v6_pipelines",
             "vulkan-graphics-v6-pipeline-materialize",
             "materialize_vulkan_graphics_v6_attachments",
@@ -1391,21 +1391,38 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("range->levelCount > image->mip_levels - range->baseMipLevel", bodyless)
         self.assertNotIn("replay_view->range.levelCount >", bodyless)
 
-    def test_vulkan_graphics_v62_minor_is_reserved_not_accepted(self):
+    def test_vulkan_graphics_v62_specialization_metadata_is_append_only(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
         executor = GPU_EXECUTOR.read_text()
         icd = VULKAN_ICD.read_text()
-        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR 2u", abi)
-        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR 2u", container_abi)
-        self.assertIn("V6.2 is", abi)
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR 2u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV62FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV62SpecializationEntry", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V62_SPECIALIZATION_ENTRY_SCHEMA_HASH", source)
+            self.assertIn("shader_stage_index", source)
+            self.assertIn("constant_id", source)
         validator = executor.split("static int validate_vulkan_graphics_v6_header_prefix", 1)[1].split(
             "if (header->frame_size < header->header_size", 1
         )[0]
-        self.assertNotIn("PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR", validator)
-        self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR", validator)
-        self.assertIn("header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR;", icd)
-        self.assertNotIn("header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR;", icd)
+        self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR", validator)
+        self.assertIn("sizeof(PdockerGpuVulkanGraphicsV62FrameHeader)", validator)
+        self.assertIn("header_v62->v62.specialization_entry_count", executor)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V62_SPECIALIZATION_ENTRY_SCHEMA_HASH", executor)
+        self.assertIn("collect_vulkan_graphics_v62_specialization_entries", executor)
+        self.assertIn("VkSpecializationInfo specialization_infos", executor)
+        self.assertIn(".pSpecializationInfo = specialization_info", executor)
+        self.assertIn("graphics shader specialization replay requires V6.2 metadata", executor)
+        self.assertNotIn("graphics shader specialization replay is not implemented", executor)
+        self.assertIn("graphics_stage_specialization_entries", icd)
+        self.assertIn("stage->pSpecializationInfo", icd)
+        self.assertIn("need_v62_specialization", icd)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR", icd)
+        self.assertIn("specialization_entry_table_hash", icd)
+        self.assertIn("frame + header->header_size", icd)
+        self.assertIn("cursor - header->header_size", icd)
+        self.assertNotIn("frame + sizeof(*frame_header)", icd)
 
     def test_vulkan_graphics_v61_metadata_extension_is_fail_closed_validated(self):
         executor = GPU_EXECUTOR.read_text()
@@ -1436,7 +1453,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[17]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[18]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(
