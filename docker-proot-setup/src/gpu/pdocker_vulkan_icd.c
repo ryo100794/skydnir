@@ -8838,6 +8838,19 @@ static bool render_pass_subpass_can_normalize_to_dynamic_rendering(
         const PdockerVkRenderPass *rp,
         uint32_t subpass_index);
 
+static void record_image_barrier_op(
+        VkCommandBuffer commandBuffer,
+        PdockerVkImage *image,
+        VkImageLayout oldLayout,
+        VkImageLayout newLayout,
+        VkImageSubresourceRange range,
+        VkAccessFlags2 srcAccessMask,
+        VkAccessFlags2 dstAccessMask,
+        VkPipelineStageFlags2 srcStageMask,
+        VkPipelineStageFlags2 dstStageMask,
+        uint32_t srcQueueFamilyIndex,
+        uint32_t dstQueueFamilyIndex);
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         VkDevice device,
         VkPipelineCache pipelineCache,
@@ -9079,18 +9092,6 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline(
     free((void *)pipeline);
 }
 
-static bool render_pass_attachment_has_identity_layout(
-        const PdockerVkRenderPass *rp,
-        uint32_t attachment_index,
-        VkImageLayout subpass_layout) {
-    if (!rp || attachment_index == VK_ATTACHMENT_UNUSED || attachment_index >= rp->attachment_count) {
-        return false;
-    }
-    const PdockerVkRenderPassAttachmentState *attachment = &rp->attachments[attachment_index];
-    return attachment->initial_layout == subpass_layout &&
-           attachment->final_layout == subpass_layout;
-}
-
 static void capture_render_pass_subpass_state(
         PdockerVkRenderPass *rp,
         uint32_t subpass_index,
@@ -9123,17 +9124,14 @@ static void capture_render_pass_subpass_state(
         dst->resolve_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
         if (color->attachment == VK_ATTACHMENT_UNUSED ||
             color->attachment >= rp->attachment_count ||
-            pdocker_vk_format_is_depth_stencil(rp->attachments[color->attachment].format) ||
-            !render_pass_attachment_has_identity_layout(rp, color->attachment, color->layout)) {
+            pdocker_vk_format_is_depth_stencil(rp->attachments[color->attachment].format)) {
             dst->unsupported = true;
         }
         if (resolve_attachments && resolve_attachments[i].attachment != VK_ATTACHMENT_UNUSED) {
             dst->resolve_attachments[i] = resolve_attachments[i].attachment;
             dst->resolve_layouts[i] = resolve_attachments[i].layout;
             if (resolve_attachments[i].attachment >= rp->attachment_count ||
-                pdocker_vk_format_is_depth_stencil(rp->attachments[resolve_attachments[i].attachment].format) ||
-                !render_pass_attachment_has_identity_layout(
-                    rp, resolve_attachments[i].attachment, resolve_attachments[i].layout)) {
+                pdocker_vk_format_is_depth_stencil(rp->attachments[resolve_attachments[i].attachment].format)) {
                 dst->unsupported = true;
             }
         }
@@ -9145,9 +9143,7 @@ static void capture_render_pass_subpass_state(
         dst->depth_stencil_layout = depth_stencil_attachment->layout;
         if (depth_stencil_attachment->attachment >= rp->attachment_count ||
             !pdocker_vk_format_is_depth_stencil(
-                rp->attachments[depth_stencil_attachment->attachment].format) ||
-            !render_pass_attachment_has_identity_layout(
-                rp, depth_stencil_attachment->attachment, depth_stencil_attachment->layout)) {
+                rp->attachments[depth_stencil_attachment->attachment].format)) {
             dst->unsupported = true;
         }
     } else {
@@ -9791,6 +9787,275 @@ static bool populate_render_pass_attachment_for_rendering(
     return true;
 }
 
+static VkPipelineStageFlags2 render_pass_attachment_stage_mask(bool depth_stencil) {
+    return depth_stencil
+        ? (VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT)
+        : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+}
+
+static bool render_pass_layout_is_read_only(VkImageLayout layout) {
+    switch (layout) {
+        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+        case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
+        case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:
+        case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static VkAccessFlags2 render_pass_attachment_access_mask(bool depth_stencil, bool read_only) {
+    if (depth_stencil) {
+        VkAccessFlags2 access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+        if (!read_only) access |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        return access;
+    }
+    (void)read_only;
+    return VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+}
+
+static VkAccessFlags2 render_pass_resolve_attachment_access_mask(void) {
+    return VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+}
+
+static VkPipelineStageFlags2 render_pass_layout_stage_mask(VkImageLayout layout) {
+    switch (layout) {
+        case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+            return VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+        case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+        case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:
+        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+        case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
+        case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:
+            return VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                   VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+        case VK_IMAGE_LAYOUT_GENERAL:
+            return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+            return VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        default:
+            return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    }
+}
+
+static VkPipelineStageFlags2 render_pass_begin_src_stage_mask(VkImageLayout old_layout) {
+    return old_layout == VK_IMAGE_LAYOUT_UNDEFINED
+        ? VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT
+        : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+}
+
+static VkAccessFlags2 render_pass_begin_src_access_mask(VkImageLayout old_layout) {
+    return old_layout == VK_IMAGE_LAYOUT_UNDEFINED
+        ? 0
+        : VK_ACCESS_2_MEMORY_WRITE_BIT;
+}
+
+static VkAccessFlags2 render_pass_layout_access_mask(VkImageLayout layout) {
+    switch (layout) {
+        case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+            return VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                   VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+        case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+        case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:
+            return VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                   VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+        case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
+        case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:
+            return VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+        case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+            return VK_ACCESS_2_SHADER_READ_BIT;
+        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+            return VK_ACCESS_2_TRANSFER_READ_BIT;
+        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+            return VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        case VK_IMAGE_LAYOUT_GENERAL:
+            return VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+        default:
+            return VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    }
+}
+
+static bool append_graphics_barrier_record_for_range(
+        PdockerVkCommandBuffer *cmd,
+        uint32_t image_barrier_first,
+        uint32_t image_barrier_count) {
+    if (!cmd || image_barrier_count == 0) return true;
+    PdockerVkGraphicsCommandRecord record;
+    memset(&record, 0, sizeof(record));
+    record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER;
+    record.image_barrier_op_first = image_barrier_first;
+    record.image_barrier_op_count = image_barrier_count;
+    return append_graphics_command_record(cmd, &record);
+}
+
+static bool record_render_pass_attachment_transition(
+        PdockerVkCommandBuffer *cmd,
+        PdockerVkImageView *view,
+        VkImageLayout old_layout,
+        VkImageLayout new_layout,
+        VkAccessFlags2 src_access,
+        VkAccessFlags2 dst_access,
+        VkPipelineStageFlags2 src_stage,
+        VkPipelineStageFlags2 dst_stage) {
+    if (!cmd || !view || !view->image || view->image->layout_mixed) return false;
+    if (old_layout == new_layout) return true;
+    if (cmd->image_barrier_op_count >= PDOCKER_VK_MAX_COPY_OPS) return false;
+    uint32_t before = cmd->image_barrier_op_count;
+    record_image_barrier_op((VkCommandBuffer)cmd,
+                            view->image,
+                            old_layout,
+                            new_layout,
+                            view->subresource_range,
+                            src_access,
+                            dst_access,
+                            src_stage,
+                            dst_stage,
+                            VK_QUEUE_FAMILY_IGNORED,
+                            VK_QUEUE_FAMILY_IGNORED);
+    return cmd->image_barrier_op_count == before + 1u;
+}
+
+static bool append_render_pass_begin_layout_transitions(PdockerVkCommandBuffer *cmd) {
+    if (!cmd || !cmd->active_render_pass) return false;
+    PdockerVkRenderPass *rp = cmd->active_render_pass;
+    const PdockerVkSubpassState *subpass = &rp->subpasses[0];
+    uint32_t first = cmd->image_barrier_op_count;
+    for (uint32_t c = 0; c < cmd->active_color_attachment_count; ++c) {
+        PdockerVkRenderingAttachmentState *attachment = &cmd->active_color_attachments[c];
+        uint32_t color_index = subpass->color_attachments[c];
+        if (attachment->image_view && color_index < rp->attachment_count) {
+            VkImageLayout initial_layout = rp->attachments[color_index].initial_layout;
+            if (!record_render_pass_attachment_transition(
+                    cmd, attachment->image_view,
+                    initial_layout,
+                    attachment->image_layout,
+                    render_pass_begin_src_access_mask(initial_layout),
+                    render_pass_attachment_access_mask(false, false),
+                    render_pass_begin_src_stage_mask(initial_layout),
+                    render_pass_attachment_stage_mask(false))) {
+                return false;
+            }
+        }
+        uint32_t resolve_index = subpass->resolve_attachments[c];
+        if (attachment->resolve_image_view && resolve_index < rp->attachment_count) {
+            VkImageLayout initial_layout = rp->attachments[resolve_index].initial_layout;
+            if (!record_render_pass_attachment_transition(
+                    cmd, attachment->resolve_image_view,
+                    initial_layout,
+                    attachment->resolve_image_layout,
+                    render_pass_begin_src_access_mask(initial_layout),
+                    render_pass_resolve_attachment_access_mask(),
+                    render_pass_begin_src_stage_mask(initial_layout),
+                    render_pass_attachment_stage_mask(false))) {
+                return false;
+            }
+        }
+    }
+    if (subpass->has_depth_stencil_attachment &&
+        subpass->depth_stencil_attachment < rp->attachment_count) {
+        VkImageLayout initial_layout = rp->attachments[subpass->depth_stencil_attachment].initial_layout;
+        if (cmd->active_depth_attachment.image_view &&
+            !record_render_pass_attachment_transition(
+                cmd, cmd->active_depth_attachment.image_view,
+                initial_layout,
+                cmd->active_depth_attachment.image_layout,
+                render_pass_begin_src_access_mask(initial_layout),
+                render_pass_attachment_access_mask(
+                    true, render_pass_layout_is_read_only(cmd->active_depth_attachment.image_layout)),
+                render_pass_begin_src_stage_mask(initial_layout),
+                render_pass_attachment_stage_mask(true))) {
+            return false;
+        }
+        if (cmd->active_stencil_attachment.image_view &&
+            cmd->active_stencil_attachment.image_view != cmd->active_depth_attachment.image_view &&
+            !record_render_pass_attachment_transition(
+                cmd, cmd->active_stencil_attachment.image_view,
+                initial_layout,
+                cmd->active_stencil_attachment.image_layout,
+                render_pass_begin_src_access_mask(initial_layout),
+                render_pass_attachment_access_mask(
+                    true, render_pass_layout_is_read_only(cmd->active_stencil_attachment.image_layout)),
+                render_pass_begin_src_stage_mask(initial_layout),
+                render_pass_attachment_stage_mask(true))) {
+            return false;
+        }
+    }
+    return append_graphics_barrier_record_for_range(
+        cmd, first, cmd->image_barrier_op_count - first);
+}
+
+static bool append_render_pass_end_layout_transitions(PdockerVkCommandBuffer *cmd) {
+    if (!cmd || !cmd->active_render_pass) return false;
+    PdockerVkRenderPass *rp = cmd->active_render_pass;
+    uint32_t first = cmd->image_barrier_op_count;
+    for (uint32_t c = 0; c < cmd->active_color_attachment_count; ++c) {
+        PdockerVkRenderingAttachmentState *attachment = &cmd->active_color_attachments[c];
+        const PdockerVkSubpassState *subpass = &rp->subpasses[0];
+        uint32_t color_index = subpass->color_attachments[c];
+        if (attachment->image_view && color_index < rp->attachment_count &&
+            !record_render_pass_attachment_transition(
+                cmd, attachment->image_view,
+                attachment->image_layout,
+                rp->attachments[color_index].final_layout,
+                render_pass_attachment_access_mask(false, false),
+                render_pass_layout_access_mask(rp->attachments[color_index].final_layout),
+                render_pass_attachment_stage_mask(false),
+                render_pass_layout_stage_mask(rp->attachments[color_index].final_layout))) {
+            return false;
+        }
+        uint32_t resolve_index = subpass->resolve_attachments[c];
+        if (attachment->resolve_image_view && resolve_index < rp->attachment_count &&
+            !record_render_pass_attachment_transition(
+                cmd, attachment->resolve_image_view,
+                attachment->resolve_image_layout,
+                rp->attachments[resolve_index].final_layout,
+                render_pass_resolve_attachment_access_mask(),
+                render_pass_layout_access_mask(rp->attachments[resolve_index].final_layout),
+                render_pass_attachment_stage_mask(false),
+                render_pass_layout_stage_mask(rp->attachments[resolve_index].final_layout))) {
+            return false;
+        }
+    }
+    const PdockerVkSubpassState *subpass = &rp->subpasses[0];
+    if (subpass->has_depth_stencil_attachment &&
+        subpass->depth_stencil_attachment < rp->attachment_count) {
+        VkImageLayout final_layout = rp->attachments[subpass->depth_stencil_attachment].final_layout;
+        if (cmd->active_depth_attachment.image_view &&
+            !record_render_pass_attachment_transition(
+                cmd, cmd->active_depth_attachment.image_view,
+                cmd->active_depth_attachment.image_layout,
+                final_layout,
+                render_pass_attachment_access_mask(
+                    true, render_pass_layout_is_read_only(cmd->active_depth_attachment.image_layout)),
+                render_pass_layout_access_mask(final_layout),
+                render_pass_attachment_stage_mask(true),
+                render_pass_layout_stage_mask(final_layout))) {
+            return false;
+        }
+        if (cmd->active_stencil_attachment.image_view &&
+            cmd->active_stencil_attachment.image_view != cmd->active_depth_attachment.image_view &&
+            !record_render_pass_attachment_transition(
+                cmd, cmd->active_stencil_attachment.image_view,
+                cmd->active_stencil_attachment.image_layout,
+                final_layout,
+                render_pass_attachment_access_mask(
+                    true, render_pass_layout_is_read_only(cmd->active_stencil_attachment.image_layout)),
+                render_pass_layout_access_mask(final_layout),
+                render_pass_attachment_stage_mask(true),
+                render_pass_layout_stage_mask(final_layout))) {
+            return false;
+        }
+    }
+    return append_graphics_barrier_record_for_range(
+        cmd, first, cmd->image_barrier_op_count - first);
+}
+
 static bool populate_single_subpass_render_pass_rendering_state(
         PdockerVkCommandBuffer *cmd,
         const VkRenderPassBeginInfo *begin,
@@ -9854,6 +10119,9 @@ static bool append_normalized_render_pass_begin(
         if (cmd) cmd->graphics_unsupported = true;
         return false;
     }
+    cmd->active_render_pass = begin ? (PdockerVkRenderPass *)begin->renderPass : NULL;
+    cmd->active_framebuffer = begin ? (PdockerVkFramebuffer *)begin->framebuffer : NULL;
+    if (!append_render_pass_begin_layout_transitions(cmd)) return false;
     uint32_t rendering_snapshot_index = UINT32_MAX;
     if (!append_graphics_rendering_snapshot(cmd, &rendering_snapshot_index)) return false;
     PdockerVkGraphicsCommandRecord record;
@@ -9866,8 +10134,6 @@ static bool append_normalized_render_pass_begin(
     if (!append_graphics_command_record(cmd, &record)) return false;
     cmd->dynamic_rendering_active = true;
     cmd->render_pass_active = false;
-    cmd->active_render_pass = NULL;
-    cmd->active_framebuffer = NULL;
     cmd->active_subpass = 0;
     cmd->active_subpass_contents = contents;
     return true;
@@ -9923,6 +10189,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass(VkCommandBuffer commandBuffer) {
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING;
     (void)append_graphics_command_record(cmd, &record);
+    if (cmd->dynamic_rendering_active && cmd->active_render_pass &&
+        !append_render_pass_end_layout_transitions(cmd)) {
+        cmd->graphics_unsupported = true;
+    }
     cmd->dynamic_rendering_active = false;
     cmd->render_pass_active = false;
     cmd->active_render_pass = NULL;

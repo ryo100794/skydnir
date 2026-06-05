@@ -955,10 +955,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "subpass->inputAttachmentCount",
             "subpass->preserveAttachmentCount",
             "input_attachment_count != 0 || preserve_attachment_count != 0",
-            "render_pass_attachment_has_identity_layout",
-            "!render_pass_attachment_has_identity_layout(rp, color->attachment, color->layout)",
-            "!render_pass_attachment_has_identity_layout(\n                    rp, resolve_attachments[i].attachment, resolve_attachments[i].layout)",
-            "!render_pass_attachment_has_identity_layout(\n                rp, depth_stencil_attachment->attachment, depth_stencil_attachment->layout)",
+            "append_render_pass_begin_layout_transitions",
+            "append_render_pass_end_layout_transitions",
+            "record_render_pass_attachment_transition",
+            "view->image->layout_mixed",
             "pCreateInfo->dependencyCount != 0",
             "pCreateInfo->pNext || pCreateInfo->flags != 0",
             "src->flags != 0",
@@ -994,6 +994,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->active_depth_attachment",
             "cmd->active_stencil_attachment",
             "cmd->active_rendering_layer_count = fb->layers ? fb->layers : 1;",
+            "append_render_pass_begin_layout_transitions(cmd)",
             "append_graphics_rendering_snapshot(cmd, &rendering_snapshot_index)",
             "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING;",
             "record.rendering_snapshot_index = rendering_snapshot_index;",
@@ -1004,19 +1005,46 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("append_normalized_render_pass_begin(cmd, pRenderPassBegin, contents)", begin_body)
         self.assertNotIn("record.rendering_snapshot_index = UINT32_MAX;", begin_body)
 
-    def test_vulkan_render_pass_normalization_is_fail_closed_without_implicit_layout_replay(self):
+    def test_vulkan_render_pass_normalization_synthesizes_layout_barriers(self):
         icd = VULKAN_ICD.read_text()
-        identity_body = icd.split(
-            "static bool render_pass_attachment_has_identity_layout", 1
-        )[1].split("static void capture_render_pass_subpass_state", 1)[0]
+        transition_body = icd.split(
+            "static bool record_render_pass_attachment_transition", 1
+        )[1].split("static bool append_render_pass_begin_layout_transitions", 1)[0]
+        begin_transition_body = icd.split(
+            "static bool append_render_pass_begin_layout_transitions", 1
+        )[1].split("static bool append_render_pass_end_layout_transitions", 1)[0]
+        end_transition_body = icd.split(
+            "static bool append_render_pass_end_layout_transitions", 1
+        )[1].split("static bool populate_single_subpass_render_pass_rendering_state", 1)[0]
         normalize_gate = icd.split(
             "static bool render_pass_subpass_can_normalize_to_dynamic_rendering", 1
         )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass", 1)[0]
         for marker in [
-            "attachment->initial_layout == subpass_layout",
-            "attachment->final_layout == subpass_layout",
+            "view->image->layout_mixed",
+            "record_image_barrier_op((VkCommandBuffer)cmd",
+            "VK_QUEUE_FAMILY_IGNORED",
+            "cmd->image_barrier_op_count == before + 1u",
         ]:
-            self.assertIn(marker, identity_body)
+            self.assertIn(marker, transition_body)
+        for marker in [
+            "VkImageLayout initial_layout = rp->attachments[color_index].initial_layout;",
+            "render_pass_begin_src_access_mask(initial_layout)",
+            "render_pass_begin_src_stage_mask(initial_layout)",
+            "render_pass_attachment_access_mask(false, false)",
+            "render_pass_resolve_attachment_access_mask()",
+            "attachment->resolve_image_layout",
+            "render_pass_layout_is_read_only(cmd->active_depth_attachment.image_layout)",
+            "append_graphics_barrier_record_for_range",
+        ]:
+            self.assertIn(marker, begin_transition_body)
+        for marker in [
+            "rp->attachments[color_index].final_layout",
+            "rp->attachments[resolve_index].final_layout",
+            "render_pass_resolve_attachment_access_mask()",
+            "render_pass_layout_is_read_only(cmd->active_depth_attachment.image_layout)",
+            "append_graphics_barrier_record_for_range",
+        ]:
+            self.assertIn(marker, end_transition_body)
         for marker in [
             "rp->attachment_overflow",
             "rp->subpass_overflow",
