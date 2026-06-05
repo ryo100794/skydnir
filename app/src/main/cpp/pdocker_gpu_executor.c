@@ -18420,6 +18420,39 @@ static void destroy_vulkan_graphics_replay_attachments(
     memset(attachments, 0, sizeof(*attachments));
 }
 
+static int vulkan_graphics_merge_color_copy_range(
+        VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range) {
+    if (!image || !range) return -EINVAL;
+    if (range->aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+        range->levelCount == 0 ||
+        range->layerCount == 0 ||
+        range->baseMipLevel >= image->mip_levels ||
+        range->levelCount > image->mip_levels - range->baseMipLevel ||
+        range->baseArrayLayer >= image->array_layers ||
+        range->layerCount > image->array_layers - range->baseArrayLayer) {
+        return -EOPNOTSUPP;
+    }
+    if (image->copy_aspect_mask &&
+        image->copy_aspect_mask != range->aspectMask) {
+        return -EOPNOTSUPP;
+    }
+    if (image->copy_level_count &&
+        (image->copy_base_mip != range->baseMipLevel ||
+         image->copy_level_count != range->levelCount ||
+         image->copy_base_layer != range->baseArrayLayer ||
+         image->copy_layer_count != range->layerCount)) {
+        return -EOPNOTSUPP;
+    }
+    image->copy_aspect_mask = range->aspectMask;
+    image->copy_base_mip = range->baseMipLevel;
+    image->copy_level_count = range->levelCount;
+    image->copy_base_layer = range->baseArrayLayer;
+    image->copy_layer_count = range->layerCount;
+    return 0;
+}
+
+
 static int materialize_vulkan_graphics_v6_attachments(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -18493,33 +18526,9 @@ static int materialize_vulkan_graphics_v6_attachments(
                 attachment->store_op != VK_ATTACHMENT_STORE_OP_DONT_CARE) {
                 return -EOPNOTSUPP;
             }
-            if (replay_view->range.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
-                replay_view->range.levelCount == 0 ||
-                replay_view->range.layerCount == 0 ||
-                replay_view->range.baseMipLevel >= image->mip_levels ||
-                replay_view->range.levelCount >
-                    image->mip_levels - replay_view->range.baseMipLevel ||
-                replay_view->range.baseArrayLayer >= image->array_layers ||
-                replay_view->range.layerCount >
-                    image->array_layers - replay_view->range.baseArrayLayer) {
-                return -EOPNOTSUPP;
-            }
-            if (image->copy_aspect_mask &&
-                image->copy_aspect_mask != replay_view->range.aspectMask) {
-                return -EOPNOTSUPP;
-            }
-            if (image->copy_level_count &&
-                (image->copy_base_mip != replay_view->range.baseMipLevel ||
-                 image->copy_level_count != replay_view->range.levelCount ||
-                 image->copy_base_layer != replay_view->range.baseArrayLayer ||
-                 image->copy_layer_count != replay_view->range.layerCount)) {
-                return -EOPNOTSUPP;
-            }
-            image->copy_aspect_mask = replay_view->range.aspectMask;
-            image->copy_base_mip = replay_view->range.baseMipLevel;
-            image->copy_level_count = replay_view->range.levelCount;
-            image->copy_base_layer = replay_view->range.baseArrayLayer;
-            image->copy_layer_count = replay_view->range.layerCount;
+            int range_rc = vulkan_graphics_merge_color_copy_range(
+                image, &replay_view->range);
+            if (range_rc != 0) return range_rc;
             if (attachment->store_op == VK_ATTACHMENT_STORE_OP_STORE) {
                 image->writeback_needed = 1;
             }
@@ -19369,30 +19378,11 @@ static int materialize_vulkan_graphics_v6_descriptors(
                     VkImageUsageFlags required_usage =
                         vulkan_required_usage_for_image_descriptor(descriptor_type);
                     if (required_usage && !(image->usage & required_usage)) return -EPROTO;
-                    if (image->requires_staging) {
-                        const VkImageSubresourceRange *range = &view_obj->range;
-                        if (range->aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
-                            range->levelCount == 0 ||
-                            range->layerCount == 0 ||
-                            range->baseMipLevel >= image->mip_levels ||
-                            range->levelCount > image->mip_levels - range->baseMipLevel ||
-                            range->baseArrayLayer >= image->array_layers ||
-                            range->layerCount > image->array_layers - range->baseArrayLayer) {
-                            return -EOPNOTSUPP;
-                        }
-                        if (image->copy_level_count &&
-                            (image->copy_aspect_mask != range->aspectMask ||
-                             image->copy_base_mip != range->baseMipLevel ||
-                             image->copy_level_count != range->levelCount ||
-                             image->copy_base_layer != range->baseArrayLayer ||
-                             image->copy_layer_count != range->layerCount)) {
-                            return -EOPNOTSUPP;
-                        }
-                        image->copy_aspect_mask = range->aspectMask;
-                        image->copy_base_mip = range->baseMipLevel;
-                        image->copy_level_count = range->levelCount;
-                        image->copy_base_layer = range->baseArrayLayer;
-                        image->copy_layer_count = range->layerCount;
+                    if (image->requires_staging ||
+                        descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+                        int range_rc = vulkan_graphics_merge_color_copy_range(
+                            image, &view_obj->range);
+                        if (range_rc != 0) return range_rc;
                     }
                     image->descriptor_layout = (VkImageLayout)descriptor->image_layout;
                     image->descriptor_layout_seen = 1;

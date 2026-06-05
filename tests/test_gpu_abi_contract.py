@@ -1377,6 +1377,20 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, describe_body)
 
+    def test_graphics_color_copy_range_validation_is_centralized(self):
+        source = GPU_EXECUTOR.read_text()
+        self.assertIn("vulkan_graphics_merge_color_copy_range", source)
+        self.assertIn("descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", source)
+        self.assertEqual(source.count("vulkan_graphics_merge_color_copy_range("), 3)
+        bodyless = re.sub(
+            r"static int vulkan_graphics_merge_color_copy_range\(.*?\n}\n\n",
+            "",
+            source,
+            flags=re.S,
+        )
+        self.assertNotIn("range->levelCount > image->mip_levels - range->baseMipLevel", bodyless)
+        self.assertNotIn("replay_view->range.levelCount >", bodyless)
+
     def test_vulkan_graphics_v62_minor_is_reserved_not_accepted(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
