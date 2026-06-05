@@ -2684,6 +2684,9 @@ static int collect_graphics_sampler_entry(
 static int append_graphics_attachment_entry(
         PdockerGpuVulkanGraphicsV6AttachmentEntry *attachments,
         size_t *attachment_count,
+        PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry *resolve_attachments,
+        size_t *resolve_attachment_count,
+        bool *need_v64_resolve_attachment,
         unsigned char *frame,
         size_t frame_capacity,
         size_t *cursor,
@@ -2706,10 +2709,15 @@ static int append_graphics_attachment_entry(
     if (!attachments || !attachment_count || !frame || !cursor || !src) return -EINVAL;
     if (*attachment_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS) return -E2BIG;
     if (!src->valid) return 0;
-    if (src->resolve_image_view || src->resolve_mode != VK_RESOLVE_MODE_NONE) {
+    if ((src->resolve_mode == VK_RESOLVE_MODE_NONE) != (src->resolve_image_view == NULL)) {
         return -EOPNOTSUPP;
     }
+    if (src->resolve_image_view &&
+        (!resolve_attachments || !resolve_attachment_count || !need_v64_resolve_attachment)) {
+        return -EINVAL;
+    }
     uint32_t view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+    uint32_t resolve_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
     uint64_t resource_id = 0;
     VkFormat format = VK_FORMAT_UNDEFINED;
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
@@ -2725,11 +2733,36 @@ static int append_graphics_attachment_entry(
         format = src->image_view->format;
         samples = src->image_view->image ? src->image_view->image->samples : VK_SAMPLE_COUNT_1_BIT;
     }
+    if (src->resolve_image_view) {
+        if (!src->image_view || src->resolve_image_view->format != format) return -EOPNOTSUPP;
+        if (src->image_view->image && src->image_view->image->samples == VK_SAMPLE_COUNT_1_BIT) {
+            return -EOPNOTSUPP;
+        }
+        if (src->resolve_image_view->image &&
+            src->resolve_image_view->image->samples != VK_SAMPLE_COUNT_1_BIT) {
+            return -EOPNOTSUPP;
+        }
+        if (src->resolve_image_view->subresource_range.aspectMask !=
+            src->image_view->subresource_range.aspectMask) {
+            return -EOPNOTSUPP;
+        }
+        if (*resolve_attachment_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V64_MAX_RESOLVE_ATTACHMENTS) {
+            return -E2BIG;
+        }
+        int collected_resolve_view = collect_graphics_image_view_entry(
+            image_view_entries, image_view_objects, image_view_count,
+            image_entries, image_objects, image_count,
+            resources, resource_count, memory_objects, memory_resource_indices,
+            memory_count, fds, fd_count, src->resolve_image_view, generation);
+        if (collected_resolve_view < 0) return collected_resolve_view;
+        resolve_view_index = (uint32_t)collected_resolve_view;
+    }
+    const uint32_t attachment_index = (uint32_t)*attachment_count;
     PdockerGpuVulkanGraphicsV6AttachmentEntry *entry = &attachments[(*attachment_count)++];
     memset(entry, 0, sizeof(*entry));
     entry->attachment_role = role;
     entry->image_view_index = view_index;
-    entry->resolve_image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+    entry->resolve_image_view_index = resolve_view_index;
     entry->format = format;
     entry->samples = samples;
     entry->layout = src->image_layout;
@@ -2745,6 +2778,15 @@ static int append_graphics_attachment_entry(
         entry->store_op = src->store_op;
     }
     entry->resource_id = resource_id;
+    if (src->resolve_image_view) {
+        PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry *resolve_entry =
+            &resolve_attachments[(*resolve_attachment_count)++];
+        memset(resolve_entry, 0, sizeof(*resolve_entry));
+        resolve_entry->attachment_index = attachment_index;
+        resolve_entry->resolve_mode = src->resolve_mode;
+        resolve_entry->resolve_layout = src->resolve_image_layout;
+        *need_v64_resolve_attachment = true;
+    }
     if (src->load_op == VK_ATTACHMENT_LOAD_OP_CLEAR) {
         int rc = frame_append_bytes(frame, frame_capacity, cursor,
                                     &src->clear_value, sizeof(src->clear_value),
@@ -2758,6 +2800,9 @@ static int append_graphics_attachment_entry(
 static int collect_graphics_attachment_entries(
         PdockerGpuVulkanGraphicsV6AttachmentEntry *attachments,
         size_t *attachment_count,
+        PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry *resolve_attachments,
+        size_t *resolve_attachment_count,
+        bool *need_v64_resolve_attachment,
         unsigned char *frame,
         size_t frame_capacity,
         size_t *cursor,
@@ -2780,7 +2825,8 @@ static int collect_graphics_attachment_entries(
     if (snapshot->color_attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) return -E2BIG;
     for (uint32_t i = 0; i < snapshot->color_attachment_count; ++i) {
         int rc = append_graphics_attachment_entry(
-            attachments, attachment_count, frame, frame_capacity, cursor,
+            attachments, attachment_count, resolve_attachments, resolve_attachment_count,
+            need_v64_resolve_attachment, frame, frame_capacity, cursor,
             PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR, &snapshot->color_attachments[i],
             image_entries, image_objects, image_count,
             image_view_entries, image_view_objects, image_view_count,
@@ -2789,7 +2835,8 @@ static int collect_graphics_attachment_entries(
         if (rc != 0) return rc;
     }
     int rc = append_graphics_attachment_entry(
-        attachments, attachment_count, frame, frame_capacity, cursor,
+        attachments, attachment_count, resolve_attachments, resolve_attachment_count,
+        need_v64_resolve_attachment, frame, frame_capacity, cursor,
         PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH, &snapshot->depth_attachment,
         image_entries, image_objects, image_count,
         image_view_entries, image_view_objects, image_view_count,
@@ -2797,7 +2844,8 @@ static int collect_graphics_attachment_entries(
         fds, fd_count, generation);
     if (rc != 0) return rc;
     return append_graphics_attachment_entry(
-        attachments, attachment_count, frame, frame_capacity, cursor,
+        attachments, attachment_count, resolve_attachments, resolve_attachment_count,
+        need_v64_resolve_attachment, frame, frame_capacity, cursor,
         PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL, &snapshot->stencil_attachment,
         image_entries, image_objects, image_count,
         image_view_entries, image_view_objects, image_view_count,
@@ -2995,6 +3043,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     PdockerGpuVulkanGraphicsV61BufferBarrierEntry buffer_barriers[PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS];
     PdockerGpuVulkanGraphicsV62SpecializationEntry specialization_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V62_MAX_SPECIALIZATION_ENTRIES];
     PdockerGpuVulkanGraphicsV63DepthStencilStateEntry depth_stencil_states[PDOCKER_GPU_VULKAN_GRAPHICS_V63_MAX_DEPTH_STENCIL_STATES];
+    PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry resolve_attachments[PDOCKER_GPU_VULKAN_GRAPHICS_V64_MAX_RESOLVE_ATTACHMENTS];
     int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS];
     memset(pipeline_objects, 0, sizeof(pipeline_objects));
     memset(memory_objects, 0, sizeof(memory_objects));
@@ -3023,6 +3072,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     memset(buffer_barriers, 0, sizeof(buffer_barriers));
     memset(specialization_entries, 0, sizeof(specialization_entries));
     memset(depth_stencil_states, 0, sizeof(depth_stencil_states));
+    memset(resolve_attachments, 0, sizeof(resolve_attachments));
     memset(fds, -1, sizeof(fds));
 
     unsigned char *frame = (unsigned char *)calloc(1, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES);
@@ -3030,6 +3080,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
         close(socket_fd);
         return -ENOMEM;
     }
+    PdockerGpuVulkanGraphicsV64FrameHeader *frame_header_v64 =
+        (PdockerGpuVulkanGraphicsV64FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV63FrameHeader *frame_header_v63 =
         (PdockerGpuVulkanGraphicsV63FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV62FrameHeader *frame_header_v62 =
@@ -3037,7 +3089,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     PdockerGpuVulkanGraphicsV61FrameHeader *frame_header =
         (PdockerGpuVulkanGraphicsV61FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV6FrameHeader *header = &frame_header->base;
-    size_t cursor = sizeof(*frame_header_v63);
+    size_t cursor = sizeof(*frame_header_v64);
     size_t fd_count = 0;
     size_t resource_count = 0;
     size_t descriptor_count = 0;
@@ -3060,8 +3112,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     size_t buffer_barrier_count = 0;
     size_t specialization_entry_count = 0;
     size_t depth_stencil_state_count = 0;
+    size_t resolve_attachment_count = 0;
     bool need_v62_specialization = false;
     bool need_v63_depth_stencil = false;
+    bool need_v64_resolve_attachment = false;
     uint64_t submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
     int rc = 0;
 
@@ -3291,7 +3345,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                 &cmd->graphics_rendering_ops[record->rendering_snapshot_index];
             command->attachment_first = (uint32_t)attachment_count;
             rc = collect_graphics_attachment_entries(
-                attachments, &attachment_count, frame,
+                attachments, &attachment_count, resolve_attachments,
+                &resolve_attachment_count, &need_v64_resolve_attachment, frame,
                 PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES, &cursor, snapshot,
                 image_entries, image_objects, &image_count,
                 image_view_entries, image_view_objects, &image_view_count,
@@ -3525,13 +3580,17 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     }
 
     memcpy(header->magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, 8);
-    header->header_size = need_v63_depth_stencil
-        ? sizeof(*frame_header_v63)
-        : (need_v62_specialization ? sizeof(*frame_header_v62) : sizeof(*frame_header));
+    header->header_size = need_v64_resolve_attachment
+        ? sizeof(*frame_header_v64)
+        : (need_v63_depth_stencil
+            ? sizeof(*frame_header_v63)
+            : (need_v62_specialization ? sizeof(*frame_header_v62) : sizeof(*frame_header)));
     header->abi_major = PDOCKER_GPU_VULKAN_GRAPHICS_V6_ABI_MAJOR;
-    header->abi_minor = need_v63_depth_stencil
-        ? PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR
-        : (need_v62_specialization ? PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR : PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR);
+    header->abi_minor = need_v64_resolve_attachment
+        ? PDOCKER_GPU_VULKAN_GRAPHICS_V64_ABI_MINOR
+        : (need_v63_depth_stencil
+            ? PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR
+            : (need_v62_specialization ? PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR : PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR));
     header->command = PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT;
     header->submit_id = submit_id;
     header->fd_count = (uint32_t)fd_count;
@@ -3586,15 +3645,20 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     frame_header->v61.buffer_barrier_count = (uint32_t)buffer_barrier_count;
     frame_header->v61.buffer_barrier_entry_size = sizeof(PdockerGpuVulkanGraphicsV61BufferBarrierEntry);
     frame_header->v61.buffer_barrier_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_SCHEMA_HASH;
-    if (need_v62_specialization || need_v63_depth_stencil) {
+    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment) {
         frame_header_v62->v62.specialization_entry_count = (uint32_t)specialization_entry_count;
         frame_header_v62->v62.specialization_entry_size = sizeof(PdockerGpuVulkanGraphicsV62SpecializationEntry);
         frame_header_v62->v62.specialization_entry_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V62_SPECIALIZATION_ENTRY_SCHEMA_HASH;
     }
-    if (need_v63_depth_stencil) {
+    if (need_v63_depth_stencil || need_v64_resolve_attachment) {
         frame_header_v63->v63.depth_stencil_state_count = (uint32_t)depth_stencil_state_count;
         frame_header_v63->v63.depth_stencil_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV63DepthStencilStateEntry);
         frame_header_v63->v63.depth_stencil_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V63_DEPTH_STENCIL_STATE_SCHEMA_HASH;
+    }
+    if (need_v64_resolve_attachment) {
+        frame_header_v64->v64.resolve_attachment_count = (uint32_t)resolve_attachment_count;
+        frame_header_v64->v64.resolve_attachment_entry_size = sizeof(PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry);
+        frame_header_v64->v64.resolve_attachment_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_SCHEMA_HASH;
     }
 
 #define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
@@ -3645,17 +3709,23 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     APPEND_GRAPHICS_TABLE(buffer_barriers, buffer_barrier_count, sizeof(buffer_barriers[0]),
                           frame_header->v61.buffer_barrier_table_offset,
                           frame_header->v61.buffer_barrier_table_size);
-    if (need_v62_specialization || need_v63_depth_stencil) {
+    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment) {
         APPEND_GRAPHICS_TABLE(specialization_entries, specialization_entry_count,
                               sizeof(specialization_entries[0]),
                               frame_header_v62->v62.specialization_entry_table_offset,
                               frame_header_v62->v62.specialization_entry_table_size);
     }
-    if (need_v63_depth_stencil) {
+    if (need_v63_depth_stencil || need_v64_resolve_attachment) {
         APPEND_GRAPHICS_TABLE(depth_stencil_states, depth_stencil_state_count,
                               sizeof(depth_stencil_states[0]),
                               frame_header_v63->v63.depth_stencil_state_table_offset,
                               frame_header_v63->v63.depth_stencil_state_table_size);
+    }
+    if (need_v64_resolve_attachment) {
+        APPEND_GRAPHICS_TABLE(resolve_attachments, resolve_attachment_count,
+                              sizeof(resolve_attachments[0]),
+                              frame_header_v64->v64.resolve_attachment_table_offset,
+                              frame_header_v64->v64.resolve_attachment_table_size);
     }
 #undef APPEND_GRAPHICS_TABLE
     frame_header->v61.extension_hash = 1469598103934665603ull;
@@ -3674,15 +3744,20 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
         frame_header->v61.extension_hash, buffer_barriers,
         sizeof(buffer_barriers[0]) * buffer_barrier_count);
-    if (need_v62_specialization || need_v63_depth_stencil) {
+    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment) {
         frame_header_v62->v62.specialization_entry_table_hash = fnv1a64_bytes(
             specialization_entries, sizeof(specialization_entries[0]) * specialization_entry_count);
         frame_header_v62->v62.extension_hash = frame_header_v62->v62.specialization_entry_table_hash;
     }
-    if (need_v63_depth_stencil) {
+    if (need_v63_depth_stencil || need_v64_resolve_attachment) {
         frame_header_v63->v63.depth_stencil_state_table_hash = fnv1a64_bytes(
             depth_stencil_states, sizeof(depth_stencil_states[0]) * depth_stencil_state_count);
         frame_header_v63->v63.extension_hash = frame_header_v63->v63.depth_stencil_state_table_hash;
+    }
+    if (need_v64_resolve_attachment) {
+        frame_header_v64->v64.resolve_attachment_table_hash = fnv1a64_bytes(
+            resolve_attachments, sizeof(resolve_attachments[0]) * resolve_attachment_count);
+        frame_header_v64->v64.extension_hash = frame_header_v64->v64.resolve_attachment_table_hash;
     }
     header->frame_size = cursor;
     header->payload_hash = fnv1a64_bytes(frame + header->header_size,
@@ -3690,7 +3765,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     header->frame_hash = fnv1a64_bytes(frame, cursor);
     rc = send_vulkan_graphics_v6_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
     if (rc == 0) rc = read_dispatch_response_status(
-        socket_fd, need_v63_depth_stencil ? "VULKAN_GRAPHICS_V6.3" : (need_v62_specialization ? "VULKAN_GRAPHICS_V6.2" : "VULKAN_GRAPHICS_V6.1"));
+        socket_fd, need_v64_resolve_attachment ? "VULKAN_GRAPHICS_V6.4" : (need_v63_depth_stencil ? "VULKAN_GRAPHICS_V6.3" : (need_v62_specialization ? "VULKAN_GRAPHICS_V6.2" : "VULKAN_GRAPHICS_V6.1")));
 
 cleanup:
     free(frame);

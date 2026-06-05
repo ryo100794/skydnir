@@ -532,8 +532,9 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
  * dynamic offsets, push metadata, and explicit barrier tables.  V6.2 is an
  * append-only header extension for graphics shader specialization map-entry
  * metadata.  V6.3 is an append-only header extension for serialized static
- * graphics depth/stencil pipeline state.  V6.0/V6.1 structs and schema hashes must not be changed
- * retroactively.
+ * graphics depth/stencil pipeline state.  V6.4 is an append-only header
+ * extension for dynamic-rendering resolve attachment metadata.  V6.0/V6.1
+ * structs and schema hashes must not be changed retroactively.
  */
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC "PDGPUG6"
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_ABI_MAJOR 6u
@@ -541,6 +542,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR 2u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR 3u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V64_ABI_MINOR 4u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
@@ -560,6 +562,8 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V62_SPECIALIZATION_ENTRY_SCHEMA_HASH 0x0eaa6b0ee1be40c1ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V63_HEADER_EXTENSION_SCHEMA_HASH 0x5c9c629728c861f5ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V63_DEPTH_STENCIL_STATE_SCHEMA_HASH 0x4da182d1f0ea5a83ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V64_HEADER_EXTENSION_SCHEMA_HASH 0xb8bc09c35442b3a8ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_SCHEMA_HASH 0xf601060db3fe6d70ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES (8u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES 64u
@@ -574,6 +578,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS 4096u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V62_MAX_SPECIALIZATION_ENTRIES 1024u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V63_MAX_DEPTH_STENCIL_STATES PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V64_MAX_RESOLVE_ATTACHMENTS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS 4096u
 
 
@@ -604,6 +609,13 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(max_depth_bounds_bits, u32) \
     X(reserved0, u32)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V63_DEPTH_STENCIL_STATE_FIELD_COUNT 20u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_FIELDS(X) \
+    X(attachment_index, u32) \
+    X(resolve_mode, u32) \
+    X(resolve_layout, u32) \
+    X(reserved0, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_FIELD_COUNT 4u
 
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR 1u
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH 2u
@@ -896,6 +908,16 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(size, u64)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V62_SPECIALIZATION_ENTRY_FIELD_COUNT 5u
 
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V64_HEADER_EXTENSION_FIELDS(X) \
+    X(resolve_attachment_count, u32) \
+    X(resolve_attachment_entry_size, u32) \
+    X(resolve_attachment_table_offset, u64) \
+    X(resolve_attachment_table_size, u64) \
+    X(resolve_attachment_schema_hash, u64) \
+    X(resolve_attachment_table_hash, u64) \
+    X(extension_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V64_HEADER_EXTENSION_FIELD_COUNT 7u
+
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS(X) \
     X(command_type, u32) \
     X(flags, u32) \
@@ -1171,6 +1193,24 @@ typedef struct PdockerGpuVulkanGraphicsV63FrameHeader {
     PdockerGpuVulkanGraphicsV63HeaderExtension v63;
 } PdockerGpuVulkanGraphicsV63FrameHeader;
 
+typedef struct PdockerGpuVulkanGraphicsV64HeaderExtension {
+    uint32_t resolve_attachment_count;
+    uint32_t resolve_attachment_entry_size;
+    uint64_t resolve_attachment_table_offset;
+    uint64_t resolve_attachment_table_size;
+    uint64_t resolve_attachment_schema_hash;
+    uint64_t resolve_attachment_table_hash;
+    uint64_t extension_hash;
+} PdockerGpuVulkanGraphicsV64HeaderExtension;
+
+typedef struct PdockerGpuVulkanGraphicsV64FrameHeader {
+    PdockerGpuVulkanGraphicsV6FrameHeader base;
+    PdockerGpuVulkanGraphicsV61HeaderExtension v61;
+    PdockerGpuVulkanGraphicsV62HeaderExtension v62;
+    PdockerGpuVulkanGraphicsV63HeaderExtension v63;
+    PdockerGpuVulkanGraphicsV64HeaderExtension v64;
+} PdockerGpuVulkanGraphicsV64FrameHeader;
+
 typedef struct PdockerGpuVulkanGraphicsV62SpecializationEntry {
     uint32_t shader_stage_index;
     uint32_t constant_id;
@@ -1201,6 +1241,13 @@ typedef struct PdockerGpuVulkanGraphicsV63DepthStencilStateEntry {
     uint32_t max_depth_bounds_bits;
     uint32_t reserved0;
 } PdockerGpuVulkanGraphicsV63DepthStencilStateEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry {
+    uint32_t attachment_index;
+    uint32_t resolve_mode;
+    uint32_t resolve_layout;
+    uint32_t reserved0;
+} PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry;
 
 typedef struct PdockerGpuVulkanGraphicsV61DynamicOffsetEntry {
     uint32_t offset;

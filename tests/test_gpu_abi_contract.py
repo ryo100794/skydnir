@@ -1056,6 +1056,27 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("depth_stencil_states[depth_stencil_state_count++]", icd)
         self.assertIn("pipeline->depth_compare_op = ds->depthCompareOp", icd)
 
+    def test_vulkan_graphics_v64_resolve_attachment_metadata_is_append_only(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V64_ABI_MINOR 4u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV64FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_SCHEMA_HASH", source)
+            self.assertIn("X(resolve_layout, u32)", source)
+        self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V64_ABI_MINOR", executor)
+        self.assertIn("sizeof(PdockerGpuVulkanGraphicsV64FrameHeader)", executor)
+        self.assertIn("header_v64->v64.resolve_attachment_count", executor)
+        self.assertIn("find_vulkan_graphics_v64_resolve_attachment", executor)
+        self.assertIn("info.resolveImageView = resolve_replay_view->view;", executor)
+        self.assertIn("info.resolveImageLayout = (VkImageLayout)resolve_meta->resolve_layout;", executor)
+        self.assertIn("need_v64_resolve_attachment", icd)
+        self.assertIn("resolve_entry->resolve_layout = src->resolve_image_layout;", icd)
+        self.assertNotIn("src->resolve_image_view || src->resolve_mode != VK_RESOLVE_MODE_NONE", icd)
+
     def test_vulkan_graphics_v6_describe_response_is_nonterminal(self):
         icd = VULKAN_ICD.read_text()
         response_reader = icd.split("static int read_dispatch_response_status", 1)[1].split("typedef struct {", 1)[0]
@@ -1580,7 +1601,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[19]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[20]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(
@@ -1980,6 +2001,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V64_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V64_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V64_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -2060,6 +2091,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV61BufferBarrierEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V64_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V64_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV64HeaderExtension",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
