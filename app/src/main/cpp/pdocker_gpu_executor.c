@@ -2438,6 +2438,40 @@ static uint32_t vulkan_format_bytes_per_pixel_conservative(VkFormat format) {
     }
 }
 
+static uint32_t vulkan_format_bytes_per_pixel_for_aspect(
+        VkFormat format,
+        VkImageAspectFlags aspect_mask) {
+    if (aspect_mask == VK_IMAGE_ASPECT_DEPTH_BIT) {
+        switch (format) {
+            case VK_FORMAT_D16_UNORM:
+            case VK_FORMAT_D16_UNORM_S8_UINT:
+                return 2;
+            case VK_FORMAT_X8_D24_UNORM_PACK32:
+            case VK_FORMAT_D24_UNORM_S8_UINT:
+            case VK_FORMAT_D32_SFLOAT:
+            case VK_FORMAT_D32_SFLOAT_S8_UINT:
+                return 4;
+            default:
+                return 0;
+        }
+    }
+    if (aspect_mask == VK_IMAGE_ASPECT_STENCIL_BIT) {
+        switch (format) {
+            case VK_FORMAT_S8_UINT:
+            case VK_FORMAT_D16_UNORM_S8_UINT:
+            case VK_FORMAT_D24_UNORM_S8_UINT:
+            case VK_FORMAT_D32_SFLOAT_S8_UINT:
+                return 1;
+            default:
+                return 0;
+        }
+    }
+    if (aspect_mask == VK_IMAGE_ASPECT_COLOR_BIT) {
+        return vulkan_format_bytes_per_pixel_conservative(format);
+    }
+    return 0;
+}
+
 static int vulkan_image_mip_extent(
         const VulkanDispatchImageObject *image,
         uint32_t mip_level,
@@ -2501,6 +2535,73 @@ static int vulkan_image_tight_subresource_offset(
         if (!checked_add_u64_executor(offset, mip_size, &offset)) return 0;
     }
     *out_offset = offset;
+    return 1;
+}
+
+static int vulkan_image_tight_mip_size_for_aspect(
+        const VulkanDispatchImageObject *image,
+        uint32_t mip_level,
+        VkImageAspectFlags aspect_mask,
+        uint64_t *out_size) {
+    VkExtent3D extent;
+    if (!vulkan_image_mip_extent(image, mip_level, &extent) || !out_size) return 0;
+    uint32_t bpp = vulkan_format_bytes_per_pixel_for_aspect(image->format, aspect_mask);
+    if (bpp == 0) return 0;
+    uint64_t pixels = 0;
+    if (!checked_mul_u64_executor(extent.width, extent.height, &pixels)) return 0;
+    if (!checked_mul_u64_executor(pixels, extent.depth, &pixels)) return 0;
+    if (!checked_mul_u64_executor(pixels, bpp, out_size)) return 0;
+    return 1;
+}
+
+static int vulkan_image_tight_layer_stride_for_aspect(
+        const VulkanDispatchImageObject *image,
+        VkImageAspectFlags aspect_mask,
+        uint64_t *out_stride) {
+    if (!image || !out_stride) return 0;
+    uint64_t stride = 0;
+    for (uint32_t mip = 0; mip < image->mip_levels; ++mip) {
+        uint64_t mip_size = 0;
+        if (!vulkan_image_tight_mip_size_for_aspect(image, mip, aspect_mask, &mip_size)) return 0;
+        if (!checked_add_u64_executor(stride, mip_size, &stride)) return 0;
+    }
+    *out_stride = stride;
+    return 1;
+}
+
+static int vulkan_image_tight_subresource_offset_for_aspect(
+        const VulkanDispatchImageObject *image,
+        uint32_t mip_level,
+        uint32_t array_layer,
+        VkImageAspectFlags aspect_mask,
+        uint64_t *out_offset) {
+    if (!image || !out_offset || mip_level >= image->mip_levels ||
+        array_layer >= image->array_layers) {
+        return 0;
+    }
+    uint64_t layer_stride = 0;
+    if (!vulkan_image_tight_layer_stride_for_aspect(image, aspect_mask, &layer_stride)) return 0;
+    uint64_t offset = 0;
+    if (!checked_mul_u64_executor(layer_stride, array_layer, &offset)) return 0;
+    for (uint32_t mip = 0; mip < mip_level; ++mip) {
+        uint64_t mip_size = 0;
+        if (!vulkan_image_tight_mip_size_for_aspect(image, mip, aspect_mask, &mip_size)) return 0;
+        if (!checked_add_u64_executor(offset, mip_size, &offset)) return 0;
+    }
+    *out_offset = offset;
+    return 1;
+}
+
+static int vulkan_image_tight_copy_size_for_aspect(
+        const VulkanDispatchImageObject *image,
+        uint32_t mip_level,
+        uint32_t layer_count,
+        VkImageAspectFlags aspect_mask,
+        uint64_t *out_size) {
+    if (!image || !out_size || layer_count == 0) return 0;
+    uint64_t mip_size = 0;
+    if (!vulkan_image_tight_mip_size_for_aspect(image, mip_level, aspect_mask, &mip_size)) return 0;
+    if (!checked_mul_u64_executor(mip_size, layer_count, out_size)) return 0;
     return 1;
 }
 
@@ -17409,6 +17510,14 @@ static int u64_range_within_size(uint64_t offset, uint64_t size, uint64_t limit)
     return 1;
 }
 
+static int vulkan_graphics_barrier_queue_family_replayable(
+        uint32_t src_queue_family_index,
+        uint32_t dst_queue_family_index);
+
+static uint32_t vulkan_graphics_replay_queue_family_index(
+        uint32_t src_queue_family_index,
+        uint32_t dst_queue_family_index);
+
 static int validate_vulkan_graphics_v6_frame_content(
         const unsigned char *frame,
         const int *passed_fds,
@@ -17696,8 +17805,9 @@ static int validate_vulkan_graphics_v6_frame_content(
             const PdockerGpuVulkanDispatchV5ResourceEntry *buffer = &resources[barrier->resource_index];
             if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER) return -EPROTO;
             if (!u64_range_within_size(barrier->offset, barrier->size, buffer->size)) return -ERANGE;
-            if (barrier->src_queue_family_index != VK_QUEUE_FAMILY_IGNORED ||
-                barrier->dst_queue_family_index != VK_QUEUE_FAMILY_IGNORED) return -EOPNOTSUPP;
+            if (!vulkan_graphics_barrier_queue_family_replayable(
+                    barrier->src_queue_family_index,
+                    barrier->dst_queue_family_index)) return -EOPNOTSUPP;
             if (barrier->src_access_mask > UINT32_MAX || barrier->dst_access_mask > UINT32_MAX ||
                 barrier->src_stage_mask > UINT32_MAX || barrier->dst_stage_mask > UINT32_MAX) return -EOPNOTSUPP;
         }
@@ -17715,8 +17825,9 @@ static int validate_vulkan_graphics_v6_frame_content(
                 barrier->layer_count > image->array_layers - barrier->base_array_layer) {
                 return -ERANGE;
             }
-            if (barrier->src_queue_family_index != VK_QUEUE_FAMILY_IGNORED ||
-                barrier->dst_queue_family_index != VK_QUEUE_FAMILY_IGNORED) {
+            if (!vulkan_graphics_barrier_queue_family_replayable(
+                    barrier->src_queue_family_index,
+                    barrier->dst_queue_family_index)) {
                 return -EOPNOTSUPP;
             }
             if (barrier->src_access_mask > UINT32_MAX || barrier->dst_access_mask > UINT32_MAX ||
@@ -18051,9 +18162,10 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (barrier->command_index != i) continue;
                     matched_barriers++;
                     matched_buffer_barriers++;
-                    if (barrier->src_queue_family_index != VK_QUEUE_FAMILY_IGNORED ||
-                        barrier->dst_queue_family_index != VK_QUEUE_FAMILY_IGNORED) {
-                        reason = "graphics queue-family barrier replay is not implemented";
+                    if (!vulkan_graphics_barrier_queue_family_replayable(
+                            barrier->src_queue_family_index,
+                            barrier->dst_queue_family_index)) {
+                        reason = "graphics cross-queue-family barrier replay is not implemented";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
@@ -18064,9 +18176,10 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (barrier->command_index != i) continue;
                     matched_barriers++;
                     matched_image_barriers++;
-                    if (barrier->src_queue_family_index != VK_QUEUE_FAMILY_IGNORED ||
-                        barrier->dst_queue_family_index != VK_QUEUE_FAMILY_IGNORED) {
-                        reason = "graphics queue-family barrier replay is not implemented";
+                    if (!vulkan_graphics_barrier_queue_family_replayable(
+                            barrier->src_queue_family_index,
+                            barrier->dst_queue_family_index)) {
+                        reason = "graphics cross-queue-family barrier replay is not implemented";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
@@ -18719,6 +18832,24 @@ static int vulkan_graphics_merge_attachment_copy_range(
 }
 
 
+static int vulkan_graphics_barrier_queue_family_replayable(
+        uint32_t src_queue_family_index,
+        uint32_t dst_queue_family_index) {
+    if (src_queue_family_index == VK_QUEUE_FAMILY_IGNORED &&
+        dst_queue_family_index == VK_QUEUE_FAMILY_IGNORED) {
+        return 1;
+    }
+    return src_queue_family_index == dst_queue_family_index;
+}
+
+static uint32_t vulkan_graphics_replay_queue_family_index(
+        uint32_t src_queue_family_index,
+        uint32_t dst_queue_family_index) {
+    (void)src_queue_family_index;
+    (void)dst_queue_family_index;
+    return VK_QUEUE_FAMILY_IGNORED;
+}
+
 static int vulkan_graphics_attachment_ops_supported(
         const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment,
         uint32_t role) {
@@ -18955,11 +19086,17 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
              mip < image->copy_base_mip + image->copy_level_count;
              ++mip) {
             uint64_t buffer_offset = 0;
+            uint64_t copy_size = 0;
             VkExtent3D mip_extent;
-            if (!vulkan_image_tight_subresource_offset(
-                    image, mip, image->copy_base_layer, &buffer_offset) ||
+            if (!vulkan_image_tight_subresource_offset_for_aspect(
+                    image, mip, image->copy_base_layer,
+                    image->copy_aspect_mask, &buffer_offset) ||
+                !vulkan_image_tight_copy_size_for_aspect(
+                    image, mip, image->copy_layer_count,
+                    image->copy_aspect_mask, &copy_size) ||
                 !vulkan_image_mip_extent(image, mip, &mip_extent) ||
-                buffer_offset > (uint64_t)image->staging.size) {
+                buffer_offset > (uint64_t)image->staging.size ||
+                copy_size > (uint64_t)image->staging.size - buffer_offset) {
                 return -EINVAL;
             }
             VkBufferImageCopy region = {
@@ -20409,8 +20546,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
                         .srcAccessMask = (VkAccessFlags)barrier->src_access_mask,
                         .dstAccessMask = (VkAccessFlags)barrier->dst_access_mask,
-                        .srcQueueFamilyIndex = barrier->src_queue_family_index,
-                        .dstQueueFamilyIndex = barrier->dst_queue_family_index,
+                        .srcQueueFamilyIndex = vulkan_graphics_replay_queue_family_index(
+                            barrier->src_queue_family_index, barrier->dst_queue_family_index),
+                        .dstQueueFamilyIndex = vulkan_graphics_replay_queue_family_index(
+                            barrier->src_queue_family_index, barrier->dst_queue_family_index),
                         .buffer = replay_buffer->buffer.buffer,
                         .offset = (VkDeviceSize)(barrier->offset - replay_buffer->upload_base),
                         .size = (VkDeviceSize)barrier->size,
@@ -20433,8 +20572,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                         .dstAccessMask = (VkAccessFlags)barrier->dst_access_mask,
                         .oldLayout = (VkImageLayout)barrier->old_layout,
                         .newLayout = (VkImageLayout)barrier->new_layout,
-                        .srcQueueFamilyIndex = barrier->src_queue_family_index,
-                        .dstQueueFamilyIndex = barrier->dst_queue_family_index,
+                        .srcQueueFamilyIndex = vulkan_graphics_replay_queue_family_index(
+                            barrier->src_queue_family_index, barrier->dst_queue_family_index),
+                        .dstQueueFamilyIndex = vulkan_graphics_replay_queue_family_index(
+                            barrier->src_queue_family_index, barrier->dst_queue_family_index),
                         .image = attachments->images[barrier->image_index].image,
                         .subresourceRange = {
                             .aspectMask = (VkImageAspectFlags)barrier->aspect_mask,

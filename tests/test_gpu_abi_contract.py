@@ -1274,6 +1274,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_graphics_attachment_required_usage", executor)
         self.assertIn("vulkan_graphics_merge_attachment_copy_range", executor)
         self.assertIn("vulkan_graphics_attachment_writeback_access_mask", executor)
+        self.assertIn("vulkan_format_bytes_per_pixel_for_aspect", executor)
+        self.assertIn("vulkan_image_tight_subresource_offset_for_aspect", executor)
+        self.assertIn("vulkan_image_tight_copy_size_for_aspect", executor)
         self.assertIn("VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT", executor)
         self.assertIn("VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT", executor)
         self.assertIn("VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT", executor)
@@ -1434,6 +1437,29 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("range->levelCount > image->mip_levels - range->baseMipLevel", bodyless)
         self.assertNotIn("replay_view->range.levelCount >", bodyless)
 
+    def test_vulkan_graphics_depth_stencil_writeback_bounds_are_aspect_aware(self):
+        source = GPU_EXECUTOR.read_text()
+        bpp_helper = source.split(
+            "static uint32_t vulkan_format_bytes_per_pixel_for_aspect", 1
+        )[1].split("static int vulkan_image_mip_extent", 1)[0]
+        writeback = source.split(
+            "static int record_vulkan_graphics_v6_attachment_writeback_commands", 1
+        )[1].split("static int writeback_vulkan_graphics_v6_attachments", 1)[0]
+        for marker in [
+            "VK_FORMAT_D16_UNORM",
+            "VK_FORMAT_D32_SFLOAT",
+            "VK_FORMAT_S8_UINT",
+            "VK_FORMAT_D24_UNORM_S8_UINT",
+            "VK_FORMAT_D32_SFLOAT_S8_UINT",
+        ]:
+            self.assertIn(marker, bpp_helper)
+        self.assertIn("aspect_mask == VK_IMAGE_ASPECT_DEPTH_BIT", bpp_helper)
+        self.assertIn("aspect_mask == VK_IMAGE_ASPECT_STENCIL_BIT", bpp_helper)
+        self.assertIn("vulkan_image_tight_subresource_offset_for_aspect", writeback)
+        self.assertIn("vulkan_image_tight_copy_size_for_aspect", writeback)
+        self.assertIn("copy_size > (uint64_t)image->staging.size - buffer_offset", writeback)
+        self.assertIn("image->copy_aspect_mask, &copy_size", writeback)
+
     def test_vulkan_graphics_v62_specialization_metadata_is_append_only(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
@@ -1528,7 +1554,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "commands[barrier->command_index].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER",
             "barrier->resource_index >= header->resource_count",
             "barrier->src_access_mask > UINT32_MAX",
-            "barrier->src_queue_family_index != VK_QUEUE_FAMILY_IGNORED",
+            "vulkan_graphics_barrier_queue_family_replayable",
             "descriptor->dynamic_offset != 0",
             "dynamic_descriptor_count != command->dynamic_offset_count",
             "push_hash = fnv1a64_update(1469598103934665603ull",
@@ -1551,7 +1577,38 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerGpuVulkanGraphicsV61ImageBarrierEntry", executor)
         self.assertIn("vkCmdPipelineBarrier(command_buffer", recorder)
         self.assertIn("attachments->images[barrier->image_index].current_layout", recorder)
+        self.assertIn("vulkan_graphics_barrier_queue_family_replayable", preflight)
+        self.assertIn("graphics cross-queue-family barrier replay is not implemented", preflight)
+        self.assertIn("vulkan_graphics_replay_queue_family_index", recorder)
         self.assertNotIn("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:\n                rc = -EOPNOTSUPP", recorder)
+
+    def test_vulkan_graphics_queue_family_barrier_is_safely_normalized(self):
+        executor = GPU_EXECUTOR.read_text()
+        helper = executor.split(
+            "static int vulkan_graphics_barrier_queue_family_replayable", 2
+        )[2].split("static uint32_t vulkan_graphics_replay_queue_family_index", 1)[0]
+        normalizer = executor.split(
+            "static uint32_t vulkan_graphics_replay_queue_family_index", 2
+        )[2].split("static int vulkan_graphics_attachment_ops_supported", 1)[0]
+        validator = executor.split(
+            "static int validate_vulkan_graphics_v6_frame_content", 1
+        )[1].split("static uint64_t vulkan_graphics_descriptor_signature_hash", 1)[0]
+        preflight = executor.split(
+            "static int preflight_vulkan_graphics_v6_replay_supported", 1
+        )[1].split("static int preflight_vulkan_graphics_v6_runtime_supported", 1)[0]
+        recorder = executor.split(
+            "static int record_vulkan_graphics_v6_command_buffer", 1
+        )[1].split("static int submit_vulkan_graphics_v6_command_buffer", 1)[0]
+        self.assertIn("src_queue_family_index == VK_QUEUE_FAMILY_IGNORED", helper)
+        self.assertIn("dst_queue_family_index == VK_QUEUE_FAMILY_IGNORED", helper)
+        self.assertIn("return src_queue_family_index == dst_queue_family_index", helper)
+        self.assertIn("return VK_QUEUE_FAMILY_IGNORED", normalizer)
+        self.assertIn("vulkan_graphics_barrier_queue_family_replayable", validator)
+        self.assertIn("vulkan_graphics_barrier_queue_family_replayable", preflight)
+        self.assertIn("graphics cross-queue-family barrier replay is not implemented", preflight)
+        self.assertEqual(recorder.count("vulkan_graphics_replay_queue_family_index("), 4)
+        self.assertNotIn(".srcQueueFamilyIndex = barrier->src_queue_family_index", recorder)
+        self.assertNotIn(".dstQueueFamilyIndex = barrier->dst_queue_family_index", recorder)
 
     def test_vulkan_icd_serializes_graphics_image_barriers(self):
         icd = VULKAN_ICD.read_text()
