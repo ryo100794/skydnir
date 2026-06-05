@@ -17753,6 +17753,10 @@ static int validate_vulkan_graphics_v6_frame_content(
 }
 
 static int vulkan_graphics_index_stride(uint32_t index_type, uint64_t *out_stride);
+static int vulkan_graphics_attachment_ops_supported(
+        const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment,
+        uint32_t role);
+static int vulkan_graphics_attachment_layout_supported(uint32_t role, uint32_t layout);
 
 static int preflight_vulkan_graphics_v6_replay_supported(
         const VulkanGraphicsV6FrameView *view,
@@ -17799,8 +17803,10 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 for (uint32_t a = 0; a < command->attachment_count; ++a) {
                     const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
                         &view->attachments[command->attachment_first + a];
-                    if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR) {
-                        reason = "depth/stencil graphics replay is not implemented";
+                    if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
+                        attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH &&
+                        attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL) {
+                        reason = "unsupported graphics attachment role";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
@@ -17811,13 +17817,19 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         return -EOPNOTSUPP;
                     }
                     if (attachment->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
-                        reason = "null color attachment replay is not supported";
+                        reason = "null graphics attachment replay is not supported";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
-                    if (attachment->layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
-                        attachment->layout != VK_IMAGE_LAYOUT_GENERAL) {
-                        reason = "unsupported color attachment layout";
+                    if (!vulkan_graphics_attachment_layout_supported(attachment->attachment_role, attachment->layout)) {
+                        reason = "unsupported graphics attachment layout";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                    if (vulkan_graphics_attachment_ops_supported(attachment, attachment->attachment_role) != 0) {
+                        reason = attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR
+                            ? "unsupported color attachment load/store op"
+                            : "depth/stencil attachment store/writeback is not implemented";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
@@ -17841,9 +17853,8 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 }
                 const PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline =
                     &view->pipelines[command->pipeline_index];
-                if (pipeline->dynamic_rendering_depth_format != VK_FORMAT_UNDEFINED ||
-                    pipeline->dynamic_rendering_stencil_format != VK_FORMAT_UNDEFINED) {
-                    reason = "depth/stencil graphics pipeline replay is not implemented";
+                if (pipeline->depth_stencil_flags != 0) {
+                    reason = "enabled depth/stencil state replay is not implemented";
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
@@ -18269,8 +18280,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
         if (src->shader_stage_count == 0 ||
             src->shader_stage_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES ||
             src->color_attachment_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS ||
-            src->dynamic_rendering_depth_format != VK_FORMAT_UNDEFINED ||
-            src->dynamic_rendering_stencil_format != VK_FORMAT_UNDEFINED) {
+            src->depth_stencil_flags != 0) {
             return -EOPNOTSUPP;
         }
         VulkanGraphicsReplayPipeline *dst = &out_pipelines[pidx];
@@ -18485,8 +18495,14 @@ static int materialize_vulkan_graphics_v6_pipelines(
             .viewMask = src->dynamic_rendering_view_mask,
             .colorAttachmentCount = src->color_attachment_count,
             .pColorAttachmentFormats = src->color_attachment_count ? color_formats : NULL,
-            .depthAttachmentFormat = VK_FORMAT_UNDEFINED,
-            .stencilAttachmentFormat = VK_FORMAT_UNDEFINED,
+            .depthAttachmentFormat = (VkFormat)src->dynamic_rendering_depth_format,
+            .stencilAttachmentFormat = (VkFormat)src->dynamic_rendering_stencil_format,
+        };
+        VkPipelineDepthStencilStateCreateInfo dssci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            .depthTestEnable = VK_FALSE,
+            .depthWriteEnable = VK_FALSE,
+            .stencilTestEnable = VK_FALSE,
         };
         VkGraphicsPipelineCreateInfo gpci = {
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
@@ -18499,6 +18515,8 @@ static int materialize_vulkan_graphics_v6_pipelines(
             .pRasterizationState = &rsci,
             .pMultisampleState = &msci,
             .pColorBlendState = &cbsci,
+            .pDepthStencilState = (src->dynamic_rendering_depth_format != VK_FORMAT_UNDEFINED ||
+                src->dynamic_rendering_stencil_format != VK_FORMAT_UNDEFINED) ? &dssci : NULL,
             .pDynamicState = &dsci,
             .layout = dst->layout,
             .renderPass = VK_NULL_HANDLE,
@@ -18567,6 +18585,93 @@ static int vulkan_graphics_merge_color_copy_range(
 }
 
 
+static int vulkan_graphics_attachment_ops_supported(
+        const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment,
+        uint32_t role) {
+    if (!attachment) return -EINVAL;
+    const uint32_t load_op = role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+        ? attachment->stencil_load_op
+        : attachment->load_op;
+    const uint32_t store_op = role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+        ? attachment->stencil_store_op
+        : attachment->store_op;
+    if (load_op != VK_ATTACHMENT_LOAD_OP_LOAD &&
+        load_op != VK_ATTACHMENT_LOAD_OP_CLEAR &&
+        load_op != VK_ATTACHMENT_LOAD_OP_DONT_CARE) {
+        return -EOPNOTSUPP;
+    }
+    if (store_op != VK_ATTACHMENT_STORE_OP_STORE &&
+        store_op != VK_ATTACHMENT_STORE_OP_DONT_CARE) {
+        return -EOPNOTSUPP;
+    }
+    if (role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
+        store_op == VK_ATTACHMENT_STORE_OP_STORE) {
+        return -EOPNOTSUPP;
+    }
+    return 0;
+}
+
+static int vulkan_graphics_attachment_layout_supported(uint32_t role, uint32_t layout) {
+    switch (role) {
+        case PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR:
+            return layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_GENERAL ||
+                   layout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+        case PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH:
+            return layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_GENERAL ||
+                   layout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+        case PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL:
+            return layout == VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_GENERAL ||
+                   layout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+        default:
+            return 0;
+    }
+}
+
+static VkImageUsageFlags vulkan_graphics_attachment_required_usage(uint32_t role) {
+    return role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR
+        ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+        : VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+}
+
+static VkAccessFlags vulkan_graphics_attachment_access_mask(uint32_t role) {
+    return role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR
+        ? (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+        : (VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+}
+
+static VkPipelineStageFlags vulkan_graphics_attachment_stage_mask(uint32_t role) {
+    return role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR
+        ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+        : (VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
+}
+
+static int vulkan_graphics_attachment_range_supported(
+        const VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range,
+        uint32_t role) {
+    if (!image || !range) return -EINVAL;
+    VkImageAspectFlags required = role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR
+        ? VK_IMAGE_ASPECT_COLOR_BIT
+        : (role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH
+            ? VK_IMAGE_ASPECT_DEPTH_BIT
+            : VK_IMAGE_ASPECT_STENCIL_BIT);
+    if (range->aspectMask != required ||
+        range->levelCount == 0 ||
+        range->layerCount == 0 ||
+        range->baseMipLevel >= image->mip_levels ||
+        range->levelCount > image->mip_levels - range->baseMipLevel ||
+        range->baseArrayLayer >= image->array_layers ||
+        range->layerCount > image->array_layers - range->baseArrayLayer) {
+        return -EOPNOTSUPP;
+    }
+    return 0;
+}
+
 static int materialize_vulkan_graphics_v6_attachments(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -18608,7 +18713,9 @@ static int materialize_vulkan_graphics_v6_attachments(
         for (uint32_t a = 0; a < command->attachment_count; ++a) {
             const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
                 &view->attachments[command->attachment_first + a];
-            if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR ||
+            if ((attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
+                 attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH &&
+                 attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL) ||
                 attachment->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                 attachment->image_view_index >= out->view_count) {
                 return -EPROTO;
@@ -18617,33 +18724,35 @@ static int materialize_vulkan_graphics_v6_attachments(
                 &out->views[attachment->image_view_index];
             if (!replay_view->view || replay_view->image_index >= out->image_count) return -EPROTO;
             VulkanDispatchImageObject *image = &out->images[replay_view->image_index];
-            if (!image->image || !(image->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) {
+            VkImageUsageFlags required_usage =
+                vulkan_graphics_attachment_required_usage(attachment->attachment_role);
+            if (!image->image || !(image->usage & required_usage)) {
                 return -EOPNOTSUPP;
             }
             if (attachment->format != VK_FORMAT_UNDEFINED &&
                 image->format != (VkFormat)attachment->format) {
                 return -EPROTO;
             }
-            if (attachment->load_op == VK_ATTACHMENT_LOAD_OP_LOAD && image->requires_staging) {
+            uint32_t effective_load_op = attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+                ? attachment->stencil_load_op
+                : attachment->load_op;
+            uint32_t effective_store_op = attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+                ? attachment->stencil_store_op
+                : attachment->store_op;
+            if (effective_load_op == VK_ATTACHMENT_LOAD_OP_LOAD && image->requires_staging) {
                 return -EOPNOTSUPP;
             }
-            if (attachment->layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
-                attachment->layout != VK_IMAGE_LAYOUT_GENERAL) {
+            if (!vulkan_graphics_attachment_layout_supported(attachment->attachment_role, attachment->layout) ||
+                vulkan_graphics_attachment_ops_supported(attachment, attachment->attachment_role) != 0) {
                 return -EOPNOTSUPP;
             }
-            if (attachment->load_op != VK_ATTACHMENT_LOAD_OP_LOAD &&
-                attachment->load_op != VK_ATTACHMENT_LOAD_OP_CLEAR &&
-                attachment->load_op != VK_ATTACHMENT_LOAD_OP_DONT_CARE) {
-                return -EOPNOTSUPP;
-            }
-            if (attachment->store_op != VK_ATTACHMENT_STORE_OP_STORE &&
-                attachment->store_op != VK_ATTACHMENT_STORE_OP_DONT_CARE) {
-                return -EOPNOTSUPP;
-            }
-            int range_rc = vulkan_graphics_merge_color_copy_range(
-                image, &replay_view->range);
+            int range_rc = attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR
+                ? vulkan_graphics_merge_color_copy_range(image, &replay_view->range)
+                : vulkan_graphics_attachment_range_supported(
+                    image, &replay_view->range, attachment->attachment_role);
             if (range_rc != 0) return range_rc;
-            if (attachment->store_op == VK_ATTACHMENT_STORE_OP_STORE) {
+            if (attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
+                effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {
                 image->writeback_needed = 1;
             }
             image->current_layout = (VkImageLayout)view->images[image->source_index].initial_layout;
@@ -19685,18 +19794,31 @@ static int record_vulkan_graphics_v6_command_buffer(
         const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[ci];
         switch (command->command_type) {
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING: {
-                if (command->attachment_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS) { rc = -E2BIG; goto cleanup; }
+                if (command->attachment_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS) {
+                    rc = -E2BIG;
+                    goto cleanup;
+                }
                 VkRenderingAttachmentInfo color_attachments[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS];
-                VkClearValue clear_values[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS];
-                VkImageMemoryBarrier pre_barriers[PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS];
+                VkRenderingAttachmentInfo depth_attachment;
+                VkRenderingAttachmentInfo stencil_attachment;
+                VkRenderingAttachmentInfo *depth_attachment_ptr = NULL;
+                VkRenderingAttachmentInfo *stencil_attachment_ptr = NULL;
+                VkClearValue clear_values[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS];
+                VkImageMemoryBarrier pre_barriers[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS];
+                uint32_t color_attachment_count = 0;
                 uint32_t pre_barrier_count = 0;
+                VkPipelineStageFlags dst_stage_mask = 0;
                 memset(color_attachments, 0, sizeof(color_attachments));
+                memset(&depth_attachment, 0, sizeof(depth_attachment));
+                memset(&stencil_attachment, 0, sizeof(stencil_attachment));
                 memset(clear_values, 0, sizeof(clear_values));
                 memset(pre_barriers, 0, sizeof(pre_barriers));
                 for (uint32_t a = 0; a < command->attachment_count; ++a) {
                     const PdockerGpuVulkanGraphicsV6AttachmentEntry *src =
                         &view->attachments[command->attachment_first + a];
-                    if (src->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR ||
+                    if ((src->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
+                         src->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH &&
+                         src->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL) ||
                         src->image_view_index == PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
                         src->image_view_index >= attachments->view_count ||
                         !attachments->views[src->image_view_index].view) {
@@ -19715,6 +19837,11 @@ static int record_vulkan_graphics_v6_command_buffer(
                         rc = -EPROTO;
                         goto cleanup;
                     }
+                    if (vulkan_graphics_attachment_ops_supported(src, src->attachment_role) != 0 ||
+                        !vulkan_graphics_attachment_layout_supported(src->attachment_role, src->layout)) {
+                        rc = -EOPNOTSUPP;
+                        goto cleanup;
+                    }
                     if (src->clear_value_size) {
                         if (src->clear_value_size != sizeof(VkClearValue) ||
                             !payload_range_valid(src->clear_value_offset, src->clear_value_size,
@@ -19724,7 +19851,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                         }
                         memcpy(&clear_values[a], view->frame + src->clear_value_offset, sizeof(VkClearValue));
                     }
-                    if (pre_barrier_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS) {
+                    if (pre_barrier_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS) {
                         rc = -E2BIG;
                         goto cleanup;
                     }
@@ -19733,8 +19860,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                         .srcAccessMask = image->current_layout == VK_IMAGE_LAYOUT_PREINITIALIZED
                             ? VK_ACCESS_HOST_WRITE_BIT
                             : 0,
-                        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                        .dstAccessMask = vulkan_graphics_attachment_access_mask(src->attachment_role),
                         .oldLayout = image->current_layout,
                         .newLayout = (VkImageLayout)src->layout,
                         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -19742,20 +19868,40 @@ static int record_vulkan_graphics_v6_command_buffer(
                         .image = image->image,
                         .subresourceRange = replay_view->range,
                     };
+                    dst_stage_mask |= vulkan_graphics_attachment_stage_mask(src->attachment_role);
                     image->current_layout = (VkImageLayout)src->layout;
-                    color_attachments[a] = (VkRenderingAttachmentInfo){
+                    VkRenderingAttachmentInfo info = {
                         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                         .imageView = replay_view->view,
                         .imageLayout = (VkImageLayout)src->layout,
-                        .loadOp = (VkAttachmentLoadOp)src->load_op,
-                        .storeOp = (VkAttachmentStoreOp)src->store_op,
+                        .loadOp = (VkAttachmentLoadOp)(src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+                            ? src->stencil_load_op
+                            : src->load_op),
+                        .storeOp = (VkAttachmentStoreOp)(src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL
+                            ? src->stencil_store_op
+                            : src->store_op),
                         .clearValue = clear_values[a],
                     };
+                    if (src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR) {
+                        if (color_attachment_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS) {
+                            rc = -E2BIG;
+                            goto cleanup;
+                        }
+                        color_attachments[color_attachment_count++] = info;
+                    } else if (src->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH) {
+                        if (depth_attachment_ptr) { rc = -EPROTO; goto cleanup; }
+                        depth_attachment = info;
+                        depth_attachment_ptr = &depth_attachment;
+                    } else {
+                        if (stencil_attachment_ptr) { rc = -EPROTO; goto cleanup; }
+                        stencil_attachment = info;
+                        stencil_attachment_ptr = &stencil_attachment;
+                    }
                 }
                 if (pre_barrier_count) {
                     vkCmdPipelineBarrier(command_buffer,
                                          VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_HOST_BIT,
-                                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                         dst_stage_mask ? dst_stage_mask : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                                          0,
                                          0, NULL,
                                          0, NULL,
@@ -19769,8 +19915,10 @@ static int record_vulkan_graphics_v6_command_buffer(
                     },
                     .layerCount = command->rendering_layer_count ? command->rendering_layer_count : 1u,
                     .viewMask = command->rendering_view_mask,
-                    .colorAttachmentCount = command->attachment_count,
-                    .pColorAttachments = command->attachment_count ? color_attachments : NULL,
+                    .colorAttachmentCount = color_attachment_count,
+                    .pColorAttachments = color_attachment_count ? color_attachments : NULL,
+                    .pDepthAttachment = depth_attachment_ptr,
+                    .pStencilAttachment = stencil_attachment_ptr,
                 };
                 rt->cmd_begin_rendering(command_buffer, &rendering);
                 break;

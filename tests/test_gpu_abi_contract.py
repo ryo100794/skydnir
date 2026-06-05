@@ -1146,7 +1146,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_graphics_v6_executor_materializes_attachments_before_command_replay(self):
         executor = GPU_EXECUTOR.read_text()
-        helper = executor.split("static int materialize_vulkan_graphics_v6_attachments", 1)[1].split(
+        helper = executor.split("static int vulkan_graphics_attachment_ops_supported", 1)[1].split(
             "static int run_vulkan_graphics_v6_frame", 1
         )[0]
         for marker in [
@@ -1246,6 +1246,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_DESCRIPTOR_TYPE_SAMPLER", executor)
         self.assertIn("vulkan_image_descriptor_layout_valid", executor)
         self.assertIn("record_vulkan_graphics_v6_staged_image_uploads", executor)
+        self.assertIn("vulkan_graphics_attachment_layout_supported", executor)
+        self.assertIn("vulkan_graphics_attachment_required_usage", executor)
+        self.assertIn("depth/stencil attachment store/writeback is not implemented", executor)
+        self.assertIn(".pDepthAttachment = depth_attachment_ptr", executor)
+        self.assertIn(".pStencilAttachment = stencil_attachment_ptr", executor)
+        self.assertIn("VkPipelineDepthStencilStateCreateInfo dssci", executor)
+        self.assertIn(".pDepthStencilState =", executor)
+        self.assertNotIn("depth/stencil graphics replay is not implemented", executor)
+        self.assertNotIn("depth/stencil graphics pipeline replay is not implemented", executor)
         self.assertIn("vkCmdCopyBufferToImage", executor)
         self.assertIn("VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL", executor)
         self.assertIn("command->instance_count, command->first_vertex", executor)
@@ -1389,6 +1398,12 @@ class GpuAbiContractTest(unittest.TestCase):
             r"static int vulkan_graphics_merge_color_copy_range\(.*?\n}\n\n",
             "",
             source,
+            flags=re.S,
+        )
+        bodyless = re.sub(
+            r"static int vulkan_graphics_attachment_range_supported\(.*?\n}\n\n",
+            "",
+            bodyless,
             flags=re.S,
         )
         self.assertNotIn("range->levelCount > image->mip_levels - range->baseMipLevel", bodyless)
