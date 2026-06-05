@@ -17077,6 +17077,8 @@ static int validate_vulkan_graphics_v6_header_prefix(
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV65FrameHeader)) return -EPROTO;
     } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR) {
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV66FrameHeader)) return -EPROTO;
+    } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR) {
+        if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV67FrameHeader)) return -EPROTO;
     } else {
         return -EPROTO;
     }
@@ -17108,7 +17110,10 @@ static int validate_vulkan_graphics_v6_header(
         (const PdockerGpuVulkanGraphicsV65FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV66FrameHeader *header_v66 =
         (const PdockerGpuVulkanGraphicsV66FrameHeader *)header;
-    const int is_v66 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR;
+    const PdockerGpuVulkanGraphicsV67FrameHeader *header_v67 =
+        (const PdockerGpuVulkanGraphicsV67FrameHeader *)header;
+    const int is_v67 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR;
+    const int is_v66 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR || is_v67;
     const int is_v65 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR || is_v66;
     const int is_v64 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V64_ABI_MINOR || is_v65;
     const int is_v63 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR || is_v64;
@@ -17137,6 +17142,9 @@ static int validate_vulkan_graphics_v6_header(
         (is_v65 && header_v65->v65.static_pipeline_state_count > PDOCKER_GPU_VULKAN_GRAPHICS_V65_MAX_STATIC_PIPELINE_STATES) ||
         (is_v66 && header_v66->v66.color_blend_state_count > PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_STATES) ||
         (is_v66 && header_v66->v66.color_blend_attachment_count > PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_ATTACHMENTS) ||
+        (is_v67 && header_v67->v67.viewport_scissor_state_count > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORT_SCISSOR_STATES) ||
+        (is_v67 && header_v67->v67.viewport_count > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS) ||
+        (is_v67 && header_v67->v67.scissor_count > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS) ||
         header->command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) {
         return -E2BIG;
     }
@@ -17206,7 +17214,16 @@ static int validate_vulkan_graphics_v6_header(
          header_v66->v66.color_blend_attachment_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_SCHEMA_HASH)) {
         return -EPROTO;
     }
-    FrameRange ranges[23] = {
+    if (is_v67 &&
+        (header_v67->v67.viewport_scissor_state_entry_size != sizeof(PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry) ||
+         header_v67->v67.viewport_scissor_state_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCISSOR_STATE_SCHEMA_HASH ||
+         header_v67->v67.viewport_entry_size != sizeof(PdockerGpuVulkanGraphicsV67ViewportEntry) ||
+         header_v67->v67.viewport_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCHEMA_HASH ||
+         header_v67->v67.scissor_entry_size != sizeof(PdockerGpuVulkanGraphicsV67ScissorEntry) ||
+         header_v67->v67.scissor_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_SCHEMA_HASH)) {
+        return -EPROTO;
+    }
+    FrameRange ranges[26] = {
         {header->resource_table_offset, header->resource_table_size},
         {header->descriptor_table_offset, header->descriptor_table_size},
         {header->image_table_offset, header->image_table_size},
@@ -17241,6 +17258,12 @@ static int validate_vulkan_graphics_v6_header(
          is_v66 ? header_v66->v66.color_blend_state_table_size : 0},
         {is_v66 ? header_v66->v66.color_blend_attachment_table_offset : 0,
          is_v66 ? header_v66->v66.color_blend_attachment_table_size : 0},
+        {is_v67 ? header_v67->v67.viewport_scissor_state_table_offset : 0,
+         is_v67 ? header_v67->v67.viewport_scissor_state_table_size : 0},
+        {is_v67 ? header_v67->v67.viewport_table_offset : 0,
+         is_v67 ? header_v67->v67.viewport_table_size : 0},
+        {is_v67 ? header_v67->v67.scissor_table_offset : 0,
+         is_v67 ? header_v67->v67.scissor_table_size : 0},
     };
     if (!table_range_valid(header->resource_table_offset, header->resource_table_size,
                            header->resource_count, header->resource_entry_size,
@@ -17349,7 +17372,28 @@ static int validate_vulkan_graphics_v6_header(
                             header->frame_size, header->header_size))) {
         return -EPROTO;
     }
-    if (!frame_ranges_do_not_overlap(ranges, is_v66 ? 23u : (is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u))))))) {
+    if (is_v67 &&
+        (!table_range_valid(header_v67->v67.viewport_scissor_state_table_offset,
+                            header_v67->v67.viewport_scissor_state_table_size,
+                            header_v67->v67.viewport_scissor_state_count,
+                            header_v67->v67.viewport_scissor_state_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry),
+                            header->frame_size, header->header_size) ||
+         !table_range_valid(header_v67->v67.viewport_table_offset,
+                            header_v67->v67.viewport_table_size,
+                            header_v67->v67.viewport_count,
+                            header_v67->v67.viewport_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV67ViewportEntry),
+                            header->frame_size, header->header_size) ||
+         !table_range_valid(header_v67->v67.scissor_table_offset,
+                            header_v67->v67.scissor_table_size,
+                            header_v67->v67.scissor_count,
+                            header_v67->v67.scissor_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV67ScissorEntry),
+                            header->frame_size, header->header_size))) {
+        return -EPROTO;
+    }
+    if (!frame_ranges_do_not_overlap(ranges, is_v67 ? 26u : (is_v66 ? 23u : (is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u)))))))) {
         return -EPROTO;
     }
     return 0;
@@ -17375,6 +17419,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV64FrameHeader *header_v64;
     const PdockerGpuVulkanGraphicsV65FrameHeader *header_v65;
     const PdockerGpuVulkanGraphicsV66FrameHeader *header_v66;
+    const PdockerGpuVulkanGraphicsV67FrameHeader *header_v67;
     const int *passed_fds;
     size_t passed_fd_count;
     int is_v61;
@@ -17383,6 +17428,7 @@ typedef struct VulkanGraphicsV6FrameView {
     int is_v64;
     int is_v65;
     int is_v66;
+    int is_v67;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images;
@@ -17406,6 +17452,9 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry *static_pipeline_states;
     const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *color_blend_states;
     const PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry *color_blend_attachments;
+    const PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry *viewport_scissor_states;
+    const PdockerGpuVulkanGraphicsV67ViewportEntry *viewport_entries;
+    const PdockerGpuVulkanGraphicsV67ScissorEntry *scissor_entries;
 } VulkanGraphicsV6FrameView;
 
 static int init_vulkan_graphics_v6_frame_view(
@@ -17419,7 +17468,8 @@ static int init_vulkan_graphics_v6_frame_view(
         (const PdockerGpuVulkanGraphicsV6FrameHeader *)frame;
     int rc = validate_vulkan_graphics_v6_header(header, passed_fd_count);
     if (rc != 0) return rc;
-    const int is_v66_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR;
+    const int is_v67_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR;
+    const int is_v66_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR || is_v67_header;
     const int is_v65_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR || is_v66_header;
     const int is_v64_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V64_ABI_MINOR || is_v65_header;
     const int is_v63_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR || is_v64_header;
@@ -17445,6 +17495,9 @@ static int init_vulkan_graphics_v6_frame_view(
     const PdockerGpuVulkanGraphicsV66FrameHeader *header_v66 = is_v66_header
             ? (const PdockerGpuVulkanGraphicsV66FrameHeader *)frame
             : NULL;
+    const PdockerGpuVulkanGraphicsV67FrameHeader *header_v67 = is_v67_header
+            ? (const PdockerGpuVulkanGraphicsV67FrameHeader *)frame
+            : NULL;
     view->frame = frame;
     view->header = header;
     view->header_v61 = header_v61;
@@ -17453,6 +17506,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->header_v64 = header_v64;
     view->header_v65 = header_v65;
     view->header_v66 = header_v66;
+    view->header_v67 = header_v67;
     view->passed_fds = passed_fds;
     view->passed_fd_count = passed_fd_count;
     view->is_v61 = header_v61 != NULL;
@@ -17461,6 +17515,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->is_v64 = header_v64 != NULL;
     view->is_v65 = header_v65 != NULL;
     view->is_v66 = header_v66 != NULL;
+    view->is_v67 = header_v67 != NULL;
     view->resources =
         (const PdockerGpuVulkanDispatchV5ResourceEntry *)graphics_v6_table_ptr(
             frame, header, header->resource_table_offset, header->resource_table_size);
@@ -17587,6 +17642,25 @@ static int init_vulkan_graphics_v6_frame_view(
                 header_v66->v66.color_blend_attachment_table_size);
         if ((header_v66->v66.color_blend_state_count && !view->color_blend_states) ||
             (header_v66->v66.color_blend_attachment_count && !view->color_blend_attachments)) {
+            return -EPROTO;
+        }
+    }
+    if (view->is_v67) {
+        view->viewport_scissor_states =
+            (const PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry *)graphics_v6_table_ptr(
+                frame, header, header_v67->v67.viewport_scissor_state_table_offset,
+                header_v67->v67.viewport_scissor_state_table_size);
+        view->viewport_entries =
+            (const PdockerGpuVulkanGraphicsV67ViewportEntry *)graphics_v6_table_ptr(
+                frame, header, header_v67->v67.viewport_table_offset,
+                header_v67->v67.viewport_table_size);
+        view->scissor_entries =
+            (const PdockerGpuVulkanGraphicsV67ScissorEntry *)graphics_v6_table_ptr(
+                frame, header, header_v67->v67.scissor_table_offset,
+                header_v67->v67.scissor_table_size);
+        if ((header_v67->v67.viewport_scissor_state_count && !view->viewport_scissor_states) ||
+            (header_v67->v67.viewport_count && !view->viewport_entries) ||
+            (header_v67->v67.scissor_count && !view->scissor_entries)) {
             return -EPROTO;
         }
     }
@@ -17741,12 +17815,14 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV64FrameHeader *header_v64 = view.header_v64;
     const PdockerGpuVulkanGraphicsV65FrameHeader *header_v65 = view.header_v65;
     const PdockerGpuVulkanGraphicsV66FrameHeader *header_v66 = view.header_v66;
+    const PdockerGpuVulkanGraphicsV67FrameHeader *header_v67 = view.header_v67;
     const int is_v61 = view.is_v61;
     const int is_v62 = view.is_v62;
     const int is_v63 = view.is_v63;
     const int is_v64 = view.is_v64;
     const int is_v65 = view.is_v65;
     const int is_v66 = view.is_v66;
+    const int is_v67 = view.is_v67;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources = view.resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = view.descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images = view.images;
@@ -17770,6 +17846,9 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry *static_pipeline_states = view.static_pipeline_states;
     const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *color_blend_states = view.color_blend_states;
     const PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry *color_blend_attachments = view.color_blend_attachments;
+    const PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry *viewport_scissor_states = view.viewport_scissor_states;
+    const PdockerGpuVulkanGraphicsV67ViewportEntry *viewport_entries = view.viewport_entries;
+    const PdockerGpuVulkanGraphicsV67ScissorEntry *scissor_entries = view.scissor_entries;
     const size_t frame_hash_offset = offsetof(PdockerGpuVulkanGraphicsV6FrameHeader, frame_hash);
     uint64_t payload_hash = fnv1a64_update(1469598103934665603ull,
                                            frame + header->header_size,
@@ -17844,6 +17923,30 @@ static int validate_vulkan_graphics_v6_frame_content(
         if (color_blend_state_table_hash != header_v66->v66.color_blend_state_table_hash ||
             color_blend_attachment_table_hash != header_v66->v66.color_blend_attachment_table_hash ||
             extension_hash != header_v66->v66.extension_hash) {
+            return -EPROTO;
+        }
+    }
+    if (is_v67) {
+        uint64_t viewport_scissor_state_table_hash = fnv1a64_update(
+            1469598103934665603ull, viewport_scissor_states,
+            (size_t)header_v67->v67.viewport_scissor_state_table_size);
+        uint64_t viewport_table_hash = fnv1a64_update(
+            1469598103934665603ull, viewport_entries,
+            (size_t)header_v67->v67.viewport_table_size);
+        uint64_t scissor_table_hash = fnv1a64_update(
+            1469598103934665603ull, scissor_entries,
+            (size_t)header_v67->v67.scissor_table_size);
+        uint64_t extension_hash = 1469598103934665603ull;
+        extension_hash = fnv1a64_update(extension_hash, viewport_scissor_states,
+                                        (size_t)header_v67->v67.viewport_scissor_state_table_size);
+        extension_hash = fnv1a64_update(extension_hash, viewport_entries,
+                                        (size_t)header_v67->v67.viewport_table_size);
+        extension_hash = fnv1a64_update(extension_hash, scissor_entries,
+                                        (size_t)header_v67->v67.scissor_table_size);
+        if (viewport_scissor_state_table_hash != header_v67->v67.viewport_scissor_state_table_hash ||
+            viewport_table_hash != header_v67->v67.viewport_table_hash ||
+            scissor_table_hash != header_v67->v67.scissor_table_hash ||
+            extension_hash != header_v67->v67.extension_hash) {
             return -EPROTO;
         }
     }
@@ -18082,6 +18185,52 @@ static int validate_vulkan_graphics_v6_frame_content(
             }
         }
     }
+    if (is_v67) {
+        uint8_t seen_viewport_scissor_pipeline[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
+        memset(seen_viewport_scissor_pipeline, 0, sizeof(seen_viewport_scissor_pipeline));
+        const uint32_t supported_flags =
+            PDOCKER_GPU_GRAPHICS_V67_VIEWPORT_STATIC_PRESENT |
+            PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT;
+        for (uint32_t i = 0; i < header_v67->v67.viewport_scissor_state_count; ++i) {
+            const PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry *entry = &viewport_scissor_states[i];
+            if (entry->pipeline_index >= header->pipeline_count || entry->reserved0 != 0 || entry->reserved1 != 0 ||
+                (entry->flags & ~supported_flags) != 0) return -EPROTO;
+            if (seen_viewport_scissor_pipeline[entry->pipeline_index]) return -EPROTO;
+            seen_viewport_scissor_pipeline[entry->pipeline_index] = 1;
+            if (entry->viewport_count > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE ||
+                entry->scissor_count > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS_PER_PIPELINE) return -E2BIG;
+            if (entry->flags & PDOCKER_GPU_GRAPHICS_V67_VIEWPORT_STATIC_PRESENT) {
+                if (entry->viewport_count == 0 ||
+                    !range_add_u32(entry->viewport_static_first, entry->viewport_count,
+                                   header_v67->v67.viewport_count)) return -EPROTO;
+                uint8_t seen_viewport[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE];
+                memset(seen_viewport, 0, sizeof(seen_viewport));
+                for (uint32_t v = 0; v < entry->viewport_count; ++v) {
+                    const PdockerGpuVulkanGraphicsV67ViewportEntry *vp = &viewport_entries[entry->viewport_static_first + v];
+                    if (vp->pipeline_index != entry->pipeline_index || vp->viewport_index >= entry->viewport_count) return -EPROTO;
+                    if (seen_viewport[vp->viewport_index]) return -EPROTO;
+                    seen_viewport[vp->viewport_index] = 1;
+                }
+            } else if (entry->viewport_static_first != PDOCKER_GPU_GRAPHICS_V67_INDEX_NONE) {
+                return -EPROTO;
+            }
+            if (entry->flags & PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT) {
+                if (entry->scissor_count == 0 ||
+                    !range_add_u32(entry->scissor_static_first, entry->scissor_count,
+                                   header_v67->v67.scissor_count)) return -EPROTO;
+                uint8_t seen_scissor[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS_PER_PIPELINE];
+                memset(seen_scissor, 0, sizeof(seen_scissor));
+                for (uint32_t v = 0; v < entry->scissor_count; ++v) {
+                    const PdockerGpuVulkanGraphicsV67ScissorEntry *sc = &scissor_entries[entry->scissor_static_first + v];
+                    if (sc->pipeline_index != entry->pipeline_index || sc->scissor_index >= entry->scissor_count) return -EPROTO;
+                    if (seen_scissor[sc->scissor_index]) return -EPROTO;
+                    seen_scissor[sc->scissor_index] = 1;
+                }
+            } else if (entry->scissor_static_first != PDOCKER_GPU_GRAPHICS_V67_INDEX_NONE) {
+                return -EPROTO;
+            }
+        }
+    }
     for (uint32_t i = 0; i < header->pipeline_count; ++i) {
         const PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline = &pipelines[i];
         if (!range_add_u32(pipeline->shader_stage_first, pipeline->shader_stage_count, header->shader_stage_count) ||
@@ -18301,6 +18450,18 @@ find_vulkan_graphics_v66_color_blend_state(
     if (!view || !view->is_v66 || !view->header_v66 || !view->color_blend_states) return NULL;
     for (uint32_t i = 0; i < view->header_v66->v66.color_blend_state_count; ++i) {
         const PdockerGpuVulkanGraphicsV66ColorBlendStateEntry *entry = &view->color_blend_states[i];
+        if (entry->pipeline_index == pipeline_index) return entry;
+    }
+    return NULL;
+}
+
+static const PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry *
+find_vulkan_graphics_v67_viewport_scissor_state(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t pipeline_index) {
+    if (!view || !view->is_v67 || !view->header_v67 || !view->viewport_scissor_states) return NULL;
+    for (uint32_t i = 0; i < view->header_v67->v67.viewport_scissor_state_count; ++i) {
+        const PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry *entry = &view->viewport_scissor_states[i];
         if (entry->pipeline_index == pipeline_index) return entry;
     }
     return NULL;
@@ -19071,10 +19232,61 @@ static int materialize_vulkan_graphics_v6_pipelines(
             .primitiveRestartEnable =
                 (static_flags & PDOCKER_GPU_GRAPHICS_V65_STATIC_PRIMITIVE_RESTART_ENABLE) ? VK_TRUE : VK_FALSE,
         };
+        const PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry *viewport_scissor_state =
+            find_vulkan_graphics_v67_viewport_scissor_state(view, pidx);
+        const uint64_t viewport_dynamic_bit = vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT);
+        const uint64_t scissor_dynamic_bit = vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR);
+        const int dynamic_viewport = (src->dynamic_state_mask & viewport_dynamic_bit) != 0;
+        const int dynamic_scissor = (src->dynamic_state_mask & scissor_dynamic_bit) != 0;
+        VkViewport static_viewports[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE];
+        VkRect2D static_scissors[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS_PER_PIPELINE];
+        memset(static_viewports, 0, sizeof(static_viewports));
+        memset(static_scissors, 0, sizeof(static_scissors));
+        uint32_t viewport_count = viewport_scissor_state ? viewport_scissor_state->viewport_count : 1u;
+        uint32_t scissor_count = viewport_scissor_state ? viewport_scissor_state->scissor_count : 1u;
+        if (viewport_count == 0 || scissor_count == 0 ||
+            viewport_count > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE ||
+            scissor_count > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS_PER_PIPELINE) {
+            return -EPROTO;
+        }
+        if (!dynamic_viewport) {
+            if (!viewport_scissor_state ||
+                (viewport_scissor_state->flags & PDOCKER_GPU_GRAPHICS_V67_VIEWPORT_STATIC_PRESENT) == 0) {
+                return -EOPNOTSUPP;
+            }
+            for (uint32_t v = 0; v < viewport_count; ++v) {
+                const PdockerGpuVulkanGraphicsV67ViewportEntry *src_viewport =
+                    &view->viewport_entries[viewport_scissor_state->viewport_static_first + v];
+                static_viewports[src_viewport->viewport_index] = (VkViewport){
+                    .x = float_from_u32_bits(src_viewport->x_bits),
+                    .y = float_from_u32_bits(src_viewport->y_bits),
+                    .width = float_from_u32_bits(src_viewport->width_bits),
+                    .height = float_from_u32_bits(src_viewport->height_bits),
+                    .minDepth = float_from_u32_bits(src_viewport->min_depth_bits),
+                    .maxDepth = float_from_u32_bits(src_viewport->max_depth_bits),
+                };
+            }
+        }
+        if (!dynamic_scissor) {
+            if (!viewport_scissor_state ||
+                (viewport_scissor_state->flags & PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT) == 0) {
+                return -EOPNOTSUPP;
+            }
+            for (uint32_t v = 0; v < scissor_count; ++v) {
+                const PdockerGpuVulkanGraphicsV67ScissorEntry *src_scissor =
+                    &view->scissor_entries[viewport_scissor_state->scissor_static_first + v];
+                static_scissors[src_scissor->scissor_index] = (VkRect2D){
+                    .offset = { src_scissor->offset_x, src_scissor->offset_y },
+                    .extent = { src_scissor->extent_width, src_scissor->extent_height },
+                };
+            }
+        }
         VkPipelineViewportStateCreateInfo vpsci = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-            .viewportCount = 1,
-            .scissorCount = 1,
+            .viewportCount = viewport_count,
+            .pViewports = dynamic_viewport ? NULL : static_viewports,
+            .scissorCount = scissor_count,
+            .pScissors = dynamic_scissor ? NULL : static_scissors,
         };
         VkPipelineRasterizationStateCreateInfo rsci = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
@@ -19200,10 +19412,6 @@ static int materialize_vulkan_graphics_v6_pipelines(
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_STENCIL_OP);
 #undef ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT
-        if ((src->dynamic_state_mask & vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT)) == 0 ||
-            (src->dynamic_state_mask & vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR)) == 0) {
-            return -EOPNOTSUPP;
-        }
         VkPipelineDynamicStateCreateInfo dsci = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
             .dynamicStateCount = dynamic_state_count,

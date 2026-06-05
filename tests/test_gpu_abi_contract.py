@@ -999,7 +999,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, executor)
             self.assertIn(marker, icd)
 
-    def test_vulkan_graphics_pipeline_unserialized_state_fails_closed(self):
+    def test_vulkan_graphics_pipeline_static_viewport_scissor_is_serialized(self):
         icd = VULKAN_ICD.read_text()
         body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline", 1
@@ -1018,16 +1018,20 @@ class GpuAbiContractTest(unittest.TestCase):
             "pipeline->color_blend_attachments[a] = cb->pAttachments[a]",
             "pipeline->color_blend_attachment_overflow = true",
             "pipeline->color_blend_attachments[a] = cb->pAttachments[a]",
-            "ci->pViewportState->viewportCount > 0",
+            "pipeline->viewport_count = vs->viewportCount",
+            "pipeline->scissor_count = vs->scissorCount",
+            "pipeline->static_viewports[v] = vs->pViewports[v]",
+            "pipeline->static_scissors[v] = vs->pScissors[v]",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS_PER_PIPELINE",
             "VK_DYNAMIC_STATE_VIEWPORT",
-            "ci->pViewportState->scissorCount > 0",
             "VK_DYNAMIC_STATE_SCISSOR",
         ]:
             self.assertIn(marker, body)
 
         self.assertLess(
             body.index("uint64_t captured_dynamic_state_mask = 0;"),
-            body.index("ci->pViewportState->viewportCount > 0"),
+            body.index("pipeline->viewport_count = vs->viewportCount"),
         )
         self.assertEqual(body.count("pipeline->dynamic_state_mask = captured_dynamic_state_mask;"), 1)
 
@@ -1625,6 +1629,30 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cursor - header->header_size", icd)
         self.assertNotIn("frame + sizeof(*frame_header)", icd)
 
+    def test_vulkan_graphics_v67_static_viewport_scissor_metadata_is_append_only(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR 7u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV67FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV67ViewportEntry", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV67ScissorEntry", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCISSOR_STATE_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V67_VIEWPORT_STATIC_PRESENT", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT", source)
+        self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR", executor)
+        self.assertIn("sizeof(PdockerGpuVulkanGraphicsV67FrameHeader)", executor)
+        self.assertIn("FrameRange ranges[26]", executor)
+        self.assertIn("find_vulkan_graphics_v67_viewport_scissor_state", executor)
+        self.assertIn(".pViewports = dynamic_viewport ? NULL : static_viewports", executor)
+        self.assertIn(".pScissors = dynamic_scissor ? NULL : static_scissors", executor)
+        self.assertIn("need_v67_viewport_scissor_state", icd)
+        self.assertIn("VULKAN_GRAPHICS_V6.7", icd)
+        self.assertIn("viewport_scissor_state_table_hash", icd)
+
     def test_vulkan_graphics_v61_metadata_extension_is_fail_closed_validated(self):
         executor = GPU_EXECUTOR.read_text()
         header_validator = executor.split("static int validate_vulkan_graphics_v6_header", 1)[1].split(
@@ -1654,7 +1682,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[23]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[26]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(
@@ -2089,6 +2117,26 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCISSOR_STATE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCISSOR_STATE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCISSOR_STATE_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -2204,6 +2252,26 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV67HeaderExtension",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCISSOR_STATE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCISSOR_STATE_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV67ViewportEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV67ScissorEntry",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",

@@ -29,6 +29,8 @@ record to say that the artifact is promotable.
 | Performance profiles | `syscall-usecase-profile-latest.json`, `syscall-usecase-profile-syscall-latest.json`, `path-micro-profile-latest.json`, `path-micro-profile-latest.md`, `path-micro-profile-cached-latest.json`, `path-micro-profile-cached-latest.md`, `gpu-bridge-bench-latest.json`, `gpu-host-native-latest.json`, `gpu-host-container-comparison-latest.json` | [`DIRECT_SYSCALL_COVERAGE.md`](DIRECT_SYSCALL_COVERAGE.md), [`LLAMA_BENCHMARKS.md`](LLAMA_BENCHMARKS.md), [`STORAGE_METRICS.md`](STORAGE_METRICS.md) |
 | Native / release hygiene | `native-payloads-latest.json`, `android-blas-cmake-build-latest.json`, `android-blas-cmake-build-latest.log` | [`../release/RELEASE_READINESS.md`](../release/RELEASE_READINESS.md), [`../build/NATIVE_BUILD_ENVIRONMENT.md`](../build/NATIVE_BUILD_ENVIRONMENT.md) |
 
+Additional Llama/GPU diagnostic latest evidence owned by the same runbook remains non-promoting unless the runbook gate explicitly promotes it: `llama-gpu-ngl1-q6-latest-event-join-adb46015-20260531T073827Z.json`, `llama-gpu-ngl1-q6-latest-event-join-adb46015-20260531T073827Z-plan-verdict.json`, `llama-gpu-ngl1-q6-latest-event-join-adb46015-20260531T073827Z-artifacts`, `llama-gpu-q6-debug-alias-guard-verdict-latest.json`, `llama-gpu-q6-debug-alias-marker-verdict-latest.json`, `llama-gpu-q6-debug-alias-skip-nontarget-verdict-latest.json`, `llama-gpu-readiness-192_168_179_21_36763-latest.json`, and `q6-stage-trace-static-analysis-latest.json`.
+
 ## Rules For New Evidence
 
 1. Prefer immutable run directories under `docs/test/runs/<run-id>/` for test

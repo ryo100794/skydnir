@@ -360,6 +360,12 @@ struct PdockerVkPipeline {
     float color_blend_constants[4];
     VkPipelineColorBlendAttachmentState color_blend_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     bool color_blend_attachment_overflow;
+    uint32_t viewport_count;
+    uint32_t scissor_count;
+    VkViewport static_viewports[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE];
+    VkRect2D static_scissors[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS_PER_PIPELINE];
+    bool viewport_state_overflow;
+    bool scissor_state_overflow;
     bool dynamic_rendering_pipeline;
     bool dynamic_rendering_format_overflow;
     uint32_t dynamic_rendering_view_mask;
@@ -3060,6 +3066,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry static_pipeline_states[PDOCKER_GPU_VULKAN_GRAPHICS_V65_MAX_STATIC_PIPELINE_STATES];
     PdockerGpuVulkanGraphicsV66ColorBlendStateEntry color_blend_states[PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_STATES];
     PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry color_blend_attachments[PDOCKER_GPU_VULKAN_GRAPHICS_V66_MAX_COLOR_BLEND_ATTACHMENTS];
+    PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry viewport_scissor_states[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORT_SCISSOR_STATES];
+    PdockerGpuVulkanGraphicsV67ViewportEntry viewport_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS];
+    PdockerGpuVulkanGraphicsV67ScissorEntry scissor_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS];
     int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS];
     memset(pipeline_objects, 0, sizeof(pipeline_objects));
     memset(memory_objects, 0, sizeof(memory_objects));
@@ -3092,6 +3101,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     memset(static_pipeline_states, 0, sizeof(static_pipeline_states));
     memset(color_blend_states, 0, sizeof(color_blend_states));
     memset(color_blend_attachments, 0, sizeof(color_blend_attachments));
+    memset(viewport_scissor_states, 0, sizeof(viewport_scissor_states));
+    memset(viewport_entries, 0, sizeof(viewport_entries));
+    memset(scissor_entries, 0, sizeof(scissor_entries));
     memset(fds, -1, sizeof(fds));
 
     unsigned char *frame = (unsigned char *)calloc(1, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES);
@@ -3099,6 +3111,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
         close(socket_fd);
         return -ENOMEM;
     }
+    PdockerGpuVulkanGraphicsV67FrameHeader *frame_header_v67 =
+        (PdockerGpuVulkanGraphicsV67FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV66FrameHeader *frame_header_v66 =
         (PdockerGpuVulkanGraphicsV66FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV65FrameHeader *frame_header_v65 =
@@ -3139,11 +3153,15 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     size_t static_pipeline_state_count = 0;
     size_t color_blend_state_count = 0;
     size_t color_blend_attachment_count = 0;
+    size_t viewport_scissor_state_count = 0;
+    size_t viewport_entry_count = 0;
+    size_t scissor_entry_count = 0;
     bool need_v62_specialization = false;
     bool need_v63_depth_stencil = false;
     bool need_v64_resolve_attachment = false;
     bool need_v65_static_pipeline_state = false;
     bool need_v66_color_blend_state = false;
+    bool need_v67_viewport_scissor_state = false;
     uint64_t submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
     int rc = 0;
 
@@ -3301,6 +3319,71 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                 dst->color_write_mask = src->colorWriteMask;
             }
             need_v66_color_blend_state = true;
+        }
+        const bool viewport_dynamic =
+            (pipeline->dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT)) != 0;
+        const bool scissor_dynamic =
+            (pipeline->dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR)) != 0;
+        const bool need_viewport_scissor_state =
+            (pipeline->viewport_count > 0 && !viewport_dynamic) ||
+            (pipeline->scissor_count > 0 && !scissor_dynamic) ||
+            (viewport_dynamic && pipeline->viewport_count != 1u) ||
+            (scissor_dynamic && pipeline->scissor_count != 1u);
+        if (need_viewport_scissor_state) {
+            if (viewport_scissor_state_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORT_SCISSOR_STATES) {
+                rc = -E2BIG;
+                goto cleanup;
+            }
+            uint32_t viewport_first = PDOCKER_GPU_GRAPHICS_V67_INDEX_NONE;
+            uint32_t scissor_first = PDOCKER_GPU_GRAPHICS_V67_INDEX_NONE;
+            uint32_t viewport_flags = 0;
+            if (pipeline->viewport_count > 0 && !viewport_dynamic) {
+                if (viewport_entry_count + pipeline->viewport_count > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS) {
+                    rc = -E2BIG;
+                    goto cleanup;
+                }
+                viewport_first = (uint32_t)viewport_entry_count;
+                viewport_flags |= PDOCKER_GPU_GRAPHICS_V67_VIEWPORT_STATIC_PRESENT;
+                for (uint32_t v = 0; v < pipeline->viewport_count; ++v) {
+                    const VkViewport *src = &pipeline->static_viewports[v];
+                    PdockerGpuVulkanGraphicsV67ViewportEntry *dst = &viewport_entries[viewport_entry_count++];
+                    dst->pipeline_index = (uint32_t)pipeline_count;
+                    dst->viewport_index = v;
+                    dst->x_bits = float_bits_u32(src->x);
+                    dst->y_bits = float_bits_u32(src->y);
+                    dst->width_bits = float_bits_u32(src->width);
+                    dst->height_bits = float_bits_u32(src->height);
+                    dst->min_depth_bits = float_bits_u32(src->minDepth);
+                    dst->max_depth_bits = float_bits_u32(src->maxDepth);
+                }
+            }
+            if (pipeline->scissor_count > 0 && !scissor_dynamic) {
+                if (scissor_entry_count + pipeline->scissor_count > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS) {
+                    rc = -E2BIG;
+                    goto cleanup;
+                }
+                scissor_first = (uint32_t)scissor_entry_count;
+                viewport_flags |= PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT;
+                for (uint32_t v = 0; v < pipeline->scissor_count; ++v) {
+                    const VkRect2D *src = &pipeline->static_scissors[v];
+                    PdockerGpuVulkanGraphicsV67ScissorEntry *dst = &scissor_entries[scissor_entry_count++];
+                    dst->pipeline_index = (uint32_t)pipeline_count;
+                    dst->scissor_index = v;
+                    dst->offset_x = src->offset.x;
+                    dst->offset_y = src->offset.y;
+                    dst->extent_width = src->extent.width;
+                    dst->extent_height = src->extent.height;
+                }
+            }
+            PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry *vs =
+                &viewport_scissor_states[viewport_scissor_state_count++];
+            vs->pipeline_index = (uint32_t)pipeline_count;
+            vs->flags = viewport_flags;
+            vs->viewport_static_first = viewport_first;
+            vs->viewport_count = pipeline->viewport_count;
+            vs->scissor_static_first = scissor_first;
+            vs->scissor_count = pipeline->scissor_count;
+            need_v67_viewport_scissor_state = true;
         }
         uint32_t *color_formats = &pipeline_entry->color_attachment_format0;
         for (uint32_t c = 0; c < PDOCKER_VK_MAX_STORAGE_BUFFERS; ++c) {
@@ -3698,25 +3781,30 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     }
 
     memcpy(header->magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, 8);
-    header->header_size = need_v66_color_blend_state
-        ? sizeof(*frame_header_v66)
-        : (need_v65_static_pipeline_state
+    header->header_size = need_v67_viewport_scissor_state
+        ? sizeof(*frame_header_v67)
+        : (need_v66_color_blend_state
+            ? sizeof(*frame_header_v66)
+            : (need_v65_static_pipeline_state
             ? sizeof(*frame_header_v65)
-            : (need_v64_resolve_attachment
-                ? sizeof(*frame_header_v64)
-                : (need_v63_depth_stencil
-                    ? sizeof(*frame_header_v63)
-                    : (need_v62_specialization ? sizeof(*frame_header_v62) : sizeof(*frame_header)))));
+                : (need_v64_resolve_attachment
+                    ? sizeof(*frame_header_v64)
+                    : (need_v63_depth_stencil
+                        ? sizeof(*frame_header_v63)
+                        : (need_v62_specialization ? sizeof(*frame_header_v62) : sizeof(*frame_header))))));
     header->abi_major = PDOCKER_GPU_VULKAN_GRAPHICS_V6_ABI_MAJOR;
-    header->abi_minor = need_v66_color_blend_state
-        ? PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR
-        : (need_v65_static_pipeline_state
+    header->abi_minor = need_v67_viewport_scissor_state
+        ? PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR
+        : (need_v66_color_blend_state
+            ? PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR
+            : (need_v65_static_pipeline_state
             ? PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR
-            : (need_v64_resolve_attachment
-                ? PDOCKER_GPU_VULKAN_GRAPHICS_V64_ABI_MINOR
-                : (need_v63_depth_stencil
-                    ? PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR
-                    : (need_v62_specialization ? PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR : PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR))));
+                : (need_v64_resolve_attachment
+                    ? PDOCKER_GPU_VULKAN_GRAPHICS_V64_ABI_MINOR
+                    : (need_v63_depth_stencil
+                        ? PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR
+                        : (need_v62_specialization ? PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR : PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR)))));
+    cursor = need_v67_viewport_scissor_state ? sizeof(*frame_header_v67) : sizeof(*frame_header_v66);
     header->command = PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT;
     header->submit_id = submit_id;
     header->fd_count = (uint32_t)fd_count;
@@ -3771,33 +3859,44 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     frame_header->v61.buffer_barrier_count = (uint32_t)buffer_barrier_count;
     frame_header->v61.buffer_barrier_entry_size = sizeof(PdockerGpuVulkanGraphicsV61BufferBarrierEntry);
     frame_header->v61.buffer_barrier_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_SCHEMA_HASH;
-    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         frame_header_v62->v62.specialization_entry_count = (uint32_t)specialization_entry_count;
         frame_header_v62->v62.specialization_entry_size = sizeof(PdockerGpuVulkanGraphicsV62SpecializationEntry);
         frame_header_v62->v62.specialization_entry_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V62_SPECIALIZATION_ENTRY_SCHEMA_HASH;
     }
-    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         frame_header_v63->v63.depth_stencil_state_count = (uint32_t)depth_stencil_state_count;
         frame_header_v63->v63.depth_stencil_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV63DepthStencilStateEntry);
         frame_header_v63->v63.depth_stencil_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V63_DEPTH_STENCIL_STATE_SCHEMA_HASH;
     }
-    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         frame_header_v64->v64.resolve_attachment_count = (uint32_t)resolve_attachment_count;
         frame_header_v64->v64.resolve_attachment_entry_size = sizeof(PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry);
         frame_header_v64->v64.resolve_attachment_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_SCHEMA_HASH;
     }
-    if (need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         frame_header_v65->v65.static_pipeline_state_count = (uint32_t)static_pipeline_state_count;
         frame_header_v65->v65.static_pipeline_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry);
         frame_header_v65->v65.static_pipeline_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_SCHEMA_HASH;
     }
-    if (need_v66_color_blend_state) {
+    if (need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         frame_header_v66->v66.color_blend_state_count = (uint32_t)color_blend_state_count;
         frame_header_v66->v66.color_blend_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV66ColorBlendStateEntry);
         frame_header_v66->v66.color_blend_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_SCHEMA_HASH;
         frame_header_v66->v66.color_blend_attachment_count = (uint32_t)color_blend_attachment_count;
         frame_header_v66->v66.color_blend_attachment_entry_size = sizeof(PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry);
         frame_header_v66->v66.color_blend_attachment_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_SCHEMA_HASH;
+    }
+    if (need_v67_viewport_scissor_state) {
+        frame_header_v67->v67.viewport_scissor_state_count = (uint32_t)viewport_scissor_state_count;
+        frame_header_v67->v67.viewport_scissor_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry);
+        frame_header_v67->v67.viewport_scissor_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCISSOR_STATE_SCHEMA_HASH;
+        frame_header_v67->v67.viewport_count = (uint32_t)viewport_entry_count;
+        frame_header_v67->v67.viewport_entry_size = sizeof(PdockerGpuVulkanGraphicsV67ViewportEntry);
+        frame_header_v67->v67.viewport_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCHEMA_HASH;
+        frame_header_v67->v67.scissor_count = (uint32_t)scissor_entry_count;
+        frame_header_v67->v67.scissor_entry_size = sizeof(PdockerGpuVulkanGraphicsV67ScissorEntry);
+        frame_header_v67->v67.scissor_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_SCHEMA_HASH;
     }
 
 #define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
@@ -3848,31 +3947,31 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     APPEND_GRAPHICS_TABLE(buffer_barriers, buffer_barrier_count, sizeof(buffer_barriers[0]),
                           frame_header->v61.buffer_barrier_table_offset,
                           frame_header->v61.buffer_barrier_table_size);
-    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         APPEND_GRAPHICS_TABLE(specialization_entries, specialization_entry_count,
                               sizeof(specialization_entries[0]),
                               frame_header_v62->v62.specialization_entry_table_offset,
                               frame_header_v62->v62.specialization_entry_table_size);
     }
-    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         APPEND_GRAPHICS_TABLE(depth_stencil_states, depth_stencil_state_count,
                               sizeof(depth_stencil_states[0]),
                               frame_header_v63->v63.depth_stencil_state_table_offset,
                               frame_header_v63->v63.depth_stencil_state_table_size);
     }
-    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         APPEND_GRAPHICS_TABLE(resolve_attachments, resolve_attachment_count,
                               sizeof(resolve_attachments[0]),
                               frame_header_v64->v64.resolve_attachment_table_offset,
                               frame_header_v64->v64.resolve_attachment_table_size);
     }
-    if (need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         APPEND_GRAPHICS_TABLE(static_pipeline_states, static_pipeline_state_count,
                               sizeof(static_pipeline_states[0]),
                               frame_header_v65->v65.static_pipeline_state_table_offset,
                               frame_header_v65->v65.static_pipeline_state_table_size);
     }
-    if (need_v66_color_blend_state) {
+    if (need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         APPEND_GRAPHICS_TABLE(color_blend_states, color_blend_state_count,
                               sizeof(color_blend_states[0]),
                               frame_header_v66->v66.color_blend_state_table_offset,
@@ -3881,6 +3980,20 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                               sizeof(color_blend_attachments[0]),
                               frame_header_v66->v66.color_blend_attachment_table_offset,
                               frame_header_v66->v66.color_blend_attachment_table_size);
+    }
+    if (need_v67_viewport_scissor_state) {
+        APPEND_GRAPHICS_TABLE(viewport_scissor_states, viewport_scissor_state_count,
+                              sizeof(viewport_scissor_states[0]),
+                              frame_header_v67->v67.viewport_scissor_state_table_offset,
+                              frame_header_v67->v67.viewport_scissor_state_table_size);
+        APPEND_GRAPHICS_TABLE(viewport_entries, viewport_entry_count,
+                              sizeof(viewport_entries[0]),
+                              frame_header_v67->v67.viewport_table_offset,
+                              frame_header_v67->v67.viewport_table_size);
+        APPEND_GRAPHICS_TABLE(scissor_entries, scissor_entry_count,
+                              sizeof(scissor_entries[0]),
+                              frame_header_v67->v67.scissor_table_offset,
+                              frame_header_v67->v67.scissor_table_size);
     }
 #undef APPEND_GRAPHICS_TABLE
     frame_header->v61.extension_hash = 1469598103934665603ull;
@@ -3899,27 +4012,27 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
         frame_header->v61.extension_hash, buffer_barriers,
         sizeof(buffer_barriers[0]) * buffer_barrier_count);
-    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         frame_header_v62->v62.specialization_entry_table_hash = fnv1a64_bytes(
             specialization_entries, sizeof(specialization_entries[0]) * specialization_entry_count);
         frame_header_v62->v62.extension_hash = frame_header_v62->v62.specialization_entry_table_hash;
     }
-    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         frame_header_v63->v63.depth_stencil_state_table_hash = fnv1a64_bytes(
             depth_stencil_states, sizeof(depth_stencil_states[0]) * depth_stencil_state_count);
         frame_header_v63->v63.extension_hash = frame_header_v63->v63.depth_stencil_state_table_hash;
     }
-    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         frame_header_v64->v64.resolve_attachment_table_hash = fnv1a64_bytes(
             resolve_attachments, sizeof(resolve_attachments[0]) * resolve_attachment_count);
         frame_header_v64->v64.extension_hash = frame_header_v64->v64.resolve_attachment_table_hash;
     }
-    if (need_v65_static_pipeline_state || need_v66_color_blend_state) {
+    if (need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         frame_header_v65->v65.static_pipeline_state_table_hash = fnv1a64_bytes(
             static_pipeline_states, sizeof(static_pipeline_states[0]) * static_pipeline_state_count);
         frame_header_v65->v65.extension_hash = frame_header_v65->v65.static_pipeline_state_table_hash;
     }
-    if (need_v66_color_blend_state) {
+    if (need_v66_color_blend_state || need_v67_viewport_scissor_state) {
         frame_header_v66->v66.color_blend_state_table_hash = fnv1a64_bytes(
             color_blend_states, sizeof(color_blend_states[0]) * color_blend_state_count);
         frame_header_v66->v66.color_blend_attachment_table_hash = fnv1a64_bytes(
@@ -3932,13 +4045,36 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
             frame_header_v66->v66.extension_hash, color_blend_attachments,
             sizeof(color_blend_attachments[0]) * color_blend_attachment_count);
     }
+    if (need_v67_viewport_scissor_state) {
+        frame_header_v67->v67.viewport_scissor_state_table_hash = fnv1a64_bytes(
+            viewport_scissor_states, sizeof(viewport_scissor_states[0]) * viewport_scissor_state_count);
+        frame_header_v67->v67.viewport_table_hash = fnv1a64_bytes(
+            viewport_entries, sizeof(viewport_entries[0]) * viewport_entry_count);
+        frame_header_v67->v67.scissor_table_hash = fnv1a64_bytes(
+            scissor_entries, sizeof(scissor_entries[0]) * scissor_entry_count);
+        frame_header_v67->v67.extension_hash = 1469598103934665603ull;
+        frame_header_v67->v67.extension_hash = fnv1a64_update_bytes(
+            frame_header_v67->v67.extension_hash, viewport_scissor_states,
+            sizeof(viewport_scissor_states[0]) * viewport_scissor_state_count);
+        frame_header_v67->v67.extension_hash = fnv1a64_update_bytes(
+            frame_header_v67->v67.extension_hash, viewport_entries,
+            sizeof(viewport_entries[0]) * viewport_entry_count);
+        frame_header_v67->v67.extension_hash = fnv1a64_update_bytes(
+            frame_header_v67->v67.extension_hash, scissor_entries,
+            sizeof(scissor_entries[0]) * scissor_entry_count);
+    }
     header->frame_size = cursor;
     header->payload_hash = fnv1a64_bytes(frame + header->header_size,
                                          cursor - header->header_size);
     header->frame_hash = fnv1a64_bytes(frame, cursor);
     rc = send_vulkan_graphics_v6_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
     if (rc == 0) rc = read_dispatch_response_status(
-        socket_fd, need_v66_color_blend_state ? "VULKAN_GRAPHICS_V6.6" : (need_v65_static_pipeline_state ? "VULKAN_GRAPHICS_V6.5" : (need_v64_resolve_attachment ? "VULKAN_GRAPHICS_V6.4" : (need_v63_depth_stencil ? "VULKAN_GRAPHICS_V6.3" : (need_v62_specialization ? "VULKAN_GRAPHICS_V6.2" : "VULKAN_GRAPHICS_V6.1")))));
+        socket_fd, need_v67_viewport_scissor_state ? "VULKAN_GRAPHICS_V6.7" :
+        (need_v66_color_blend_state ? "VULKAN_GRAPHICS_V6.6" :
+        (need_v65_static_pipeline_state ? "VULKAN_GRAPHICS_V6.5" :
+        (need_v64_resolve_attachment ? "VULKAN_GRAPHICS_V6.4" :
+        (need_v63_depth_stencil ? "VULKAN_GRAPHICS_V6.3" :
+        (need_v62_specialization ? "VULKAN_GRAPHICS_V6.2" : "VULKAN_GRAPHICS_V6.1"))))));
 
 cleanup:
     free(frame);
@@ -8772,13 +8908,42 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             pipeline->max_depth_bounds = ds->maxDepthBounds;
         }
         if (ci->pViewportState) {
-            if (ci->pViewportState->viewportCount > 0 &&
-                !(captured_dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT))) {
+            const VkPipelineViewportStateCreateInfo *vs = ci->pViewportState;
+            const bool viewport_dynamic =
+                (captured_dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT)) != 0;
+            const bool scissor_dynamic =
+                (captured_dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR)) != 0;
+            pipeline->viewport_count = vs->viewportCount;
+            pipeline->scissor_count = vs->scissorCount;
+            if (vs->viewportCount > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE) {
+                pipeline->viewport_state_overflow = true;
                 pipeline->graphics_unsupported = true;
             }
-            if (ci->pViewportState->scissorCount > 0 &&
-                !(captured_dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR))) {
+            if (vs->scissorCount > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS_PER_PIPELINE) {
+                pipeline->scissor_state_overflow = true;
                 pipeline->graphics_unsupported = true;
+            }
+            uint32_t viewport_capture_count = clamp_u32(vs->viewportCount,
+                PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE);
+            uint32_t scissor_capture_count = clamp_u32(vs->scissorCount,
+                PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS_PER_PIPELINE);
+            if (!viewport_dynamic && viewport_capture_count > 0) {
+                if (!vs->pViewports) {
+                    pipeline->graphics_unsupported = true;
+                } else {
+                    for (uint32_t v = 0; v < viewport_capture_count; ++v) {
+                        pipeline->static_viewports[v] = vs->pViewports[v];
+                    }
+                }
+            }
+            if (!scissor_dynamic && scissor_capture_count > 0) {
+                if (!vs->pScissors) {
+                    pipeline->graphics_unsupported = true;
+                } else {
+                    for (uint32_t v = 0; v < scissor_capture_count; ++v) {
+                        pipeline->static_scissors[v] = vs->pScissors[v];
+                    }
+                }
             }
         }
         for (const VkBaseInStructure *chain = (const VkBaseInStructure *)ci->pNext;

@@ -235,10 +235,24 @@ def main() -> int:
     require("runtime installs glibc Vulkan ICD for containers", "libpdockervulkanicd.so" in runtime_src and "pdocker-vulkan-icd.so" in runtime_src and "PDOCKER_VULKAN_ICD_HOST_PATH" in pdockerd_bridge_src and "PDOCKER_VULKAN_ICD_KIND" in pdockerd_bridge_src and "PDOCKER_VULKAN_ICD" in pdockerd_src and "/usr/local/lib/pdocker-vulkan-icd.so" in pdockerd_src)
     require("vulkan icd bridge has reusable smoke test", "VK_ICD_FILENAMES" in vulkan_smoke_src and "vkQueueSubmit" in vulkan_smoke_src and "PDOCKER_GPU_QUEUE_SOCKET" in vulkan_smoke_src)
     require("vulkan icd exposes maintenance4 large-buffer diagnostics", "VkPhysicalDeviceMaintenance4Features" in vulkan_icd_src and "maintenance4 = VK_TRUE" in vulkan_icd_src and "create-buffer size=" in vulkan_icd_src and "buffer-requirements size=" in vulkan_icd_src and "minStorageBufferOffsetAlignment = 16" in vulkan_icd_src)
-    require("vulkan icd descriptor limits match bridge capacity", "maxPerStageDescriptorStorageBuffers = PDOCKER_VK_MAX_STORAGE_BUFFERS" in vulkan_icd_src and "maxDescriptorSetStorageBuffers = PDOCKER_VK_MAX_STORAGE_BUFFERS" in vulkan_icd_src)
+    require(
+        "vulkan icd descriptor limits do not exceed bridge capacity",
+        "maxPerStageDescriptorStorageBuffers" in vulkan_icd_src
+        and "maxDescriptorSetStorageBuffers" in vulkan_icd_src
+        and "caps->limits.maxPerStageDescriptorStorageBuffers < PDOCKER_VK_MAX_STORAGE_BUFFERS" in vulkan_icd_src
+        and "caps->limits.maxDescriptorSetStorageBuffers < PDOCKER_VK_MAX_STORAGE_BUFFERS" in vulkan_icd_src
+        and ": PDOCKER_VK_MAX_STORAGE_BUFFERS" in vulkan_icd_src,
+    )
     descriptor_size_src = vulkan_icd_src.split("static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding) {", 1)[1].split("\n}", 1)[0]
     require("vulkan descriptor VK_WHOLE_SIZE is clamped to VkBuffer not allocation tail", "descriptor ranges are scoped to the VkBuffer" in descriptor_size_src and "available_in_buffer = binding->buffer->size - (size_t)binding->offset" in descriptor_size_src and "if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;" in descriptor_size_src and "buffer_available(binding->buffer, binding->offset)" not in descriptor_size_src)
-    require("vulkan icd tracks descriptor arrays copies and dynamic offsets", "dstArrayElement + j" in vulkan_icd_src and "descriptorCopyCount" in vulkan_icd_src and "VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC" in vulkan_icd_src and "pDynamicOffsets[dynamic_index]" in vulkan_icd_src and "set_snapshot" in vulkan_icd_src)
+    require(
+        "vulkan icd tracks descriptor arrays copies and dynamic offsets",
+        "descriptor_linear_slot" in vulkan_icd_src
+        and "descriptorCopyCount" in vulkan_icd_src
+        and "VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC" in vulkan_icd_src
+        and "pDynamicOffsets[dynamic_index]" in vulkan_icd_src
+        and "set_snapshot" in vulkan_icd_src,
+    )
     require("vulkan icd advertises fragile features conservatively", "PDOCKER_VULKAN_ENABLE_INT64" in vulkan_icd_src and "PDOCKER_VULKAN_ENABLE_SUBGROUP_ARITHMETIC" in vulkan_icd_src and "PDOCKER_VULKAN_ENABLE_16BIT_STORAGE" in vulkan_icd_src and "shaderInt64 must be opt-in" in vulkan_llama_init_src and "BASIC only" in vulkan_llama_init_src)
     require("vulkan icd lets transfer-only submits complete and forwards compute", "has_dispatch" in vulkan_icd_src and "queue-submit transfer-only command buffer" in vulkan_icd_src and "send_generic_vulkan_dispatch" in vulkan_icd_src and "VULKAN_DISPATCH_V4" in vulkan_icd_src and "VULKAN_DISPATCH_V4" in gpu_executor_src and "VULKAN_DISPATCH_V1" in gpu_executor_src)
     require("vulkan icd replays all recorded command-buffer dispatches", "PDOCKER_VK_MAX_DISPATCH_OPS" in vulkan_icd_src and "PDOCKER_VK_MAX_COMMAND_OPS" in vulkan_icd_src and "PdockerVkDispatchOp dispatch_ops[PDOCKER_VK_MAX_DISPATCH_OPS]" in vulkan_icd_src and "PdockerVkCommandOp command_ops[PDOCKER_VK_MAX_COMMAND_OPS]" in vulkan_icd_src and "send_generic_vulkan_dispatch_op" in vulkan_icd_src and "for (uint32_t op_index = 0; op_index < cmd->dispatch_op_count; ++op_index)" in vulkan_icd_src and "for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index)" in vulkan_icd_src and "execute_recorded_fill_op(op)" in vulkan_icd_src and "execute_recorded_update_op(op)" in vulkan_icd_src and "queue-submit replayed ordered ops=%u dispatches=%u" in vulkan_icd_src)
