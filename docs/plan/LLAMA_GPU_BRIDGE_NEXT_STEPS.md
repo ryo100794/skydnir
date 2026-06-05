@@ -56,6 +56,7 @@ Confirmed facts:
 | 2026-06-04 Vulkan graphics storage-image descriptor lane | Executor P6 now accepts `VK_DESCRIPTOR_TYPE_STORAGE_IMAGE` descriptors for the supported graphics subset when they use `VK_IMAGE_LAYOUT_GENERAL`, a bounded color image-view range, and an fd-backed image resource.  Storage images are conservatively treated as potentially writable, transitioned with shader read/write access, copied back through the existing image writeback path after queue completion, and written to the shared backing fd.  Input attachments, depth/stencil, MSAA/resolve, copy+draw mixed submit semantics, and broader synchronization remain fail-closed. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract` |
 | 2026-06-05 Vulkan graphics copy-range refactor lane | Executor P6 now centralizes bounded color image-view range validation and copy/writeback range merging through `vulkan_graphics_merge_color_copy_range`.  This removes duplicate attachment-vs-descriptor range checks and makes writable storage-image descriptors use the same writeback range contract as stored color attachments.  This is a cleanup/refactor slice only; it does not widen the supported descriptor, depth/stencil, MSAA/resolve, or mixed-submit contract. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; native build `scripts/build-native-android-ndk.sh` |
 | 2026-06-05 Vulkan graphics V6.2 specialization metadata lane | Graphics shader specialization is no longer a generic fail-closed gap.  V6.2 adds an append-only specialization map-entry table keyed by serialized shader-stage index.  The ICD captures `VkSpecializationInfo`, appends per-stage specialization data into the existing shader-stage payload bytes, emits V6.2 only when specialization exists, and the executor validates/reconstructs `VkSpecializationInfo` before `vkCreateGraphicsPipelines`.  This preserves specialization bytes and metadata without changing V6.0/V6.1 layouts.  Broader graphics gaps such as depth/stencil, MSAA/resolve, mixed submit semantics, and unsupported descriptor classes remain fail-closed. | `app/src/main/cpp/pdocker_gpu_abi.h`; `docker-proot-setup/src/gpu/pdocker_gpu_abi.h`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; native builds `scripts/build-native-android-ndk.sh`, `scripts/build-gpu-shim.sh` |
+| 2026-06-05 Vulkan graphics input-attachment descriptor lane | Input attachments are no longer an unsupported descriptor class for the supported graphics replay subset.  The executor now treats `VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT` as an image-view-only descriptor, validates read-only/general input layouts, includes input attachments in descriptor-set layouts and pools, skips unnecessary buffer materialization, and updates Android descriptor sets with the serialized image view and layout.  This only widens descriptor replay; depth/stencil input attachments, MSAA/resolve, mixed submit semantics, and broader synchronization still remain fail-closed. | `app/src/main/cpp/pdocker_gpu_executor.c`; host test `tests.test_gpu_abi_contract`; native build `scripts/build-native-android-ndk.sh` |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -203,9 +204,11 @@ materialization, attachment image materialization, descriptor set layout/update,
 staged sampled-image upload, vertex/index draw recording, queue submit/fence
 wait, and stored color-attachment writeback.  This is still not full Vulkan
 pass-through: writable storage-buffer descriptors are supported for the current
-subset, including writable storage-buffer and storage-image descriptors, but input
-attachments, copy+draw mixed submit semantics, depth/stencil, MSAA/resolve, and
-broader synchronization remain fail-closed.  It must not be mixed with llama
+subset, including writable storage-buffer and storage-image descriptors;
+input-attachment descriptors are also replayed when they are image-view-only and
+use a validated read-only/general input layout.  Copy+draw mixed submit
+semantics, depth/stencil, MSAA/resolve, and broader synchronization remain
+fail-closed.  It must not be mixed with llama
 Q6 correctness claims, served-HTTP readiness, or benchmark claims until a
 dedicated correctness artifact exercises the graphics writeback path.
 

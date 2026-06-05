@@ -941,7 +941,9 @@ static int vulkan_image_descriptor_layout_valid(
         case VK_DESCRIPTOR_TYPE_SAMPLER:
             return 1;
         case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-            return 0;
+            return layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ||
+                   layout == VK_IMAGE_LAYOUT_GENERAL ||
+                   layout == VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
         default:
             return 0;
     }
@@ -17934,11 +17936,6 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                             if (reason_out) *reason_out = reason;
                             return -EOPNOTSUPP;
                         }
-                        if (descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
-                            reason = "graphics input attachment descriptor replay is not implemented";
-                            if (reason_out) *reason_out = reason;
-                            return -EOPNOTSUPP;
-                        }
                         if (!vulkan_image_descriptor_layout_valid(
                                 descriptor_type, (VkImageLayout)descriptor->image_layout)) {
                             reason = "unsupported graphics image descriptor layout";
@@ -18201,9 +18198,6 @@ static int collect_graphics_descriptor_layout_for_layout(
                                                          &descriptor_type) != 0 &&
                 vulkan_dispatch_image_descriptor_type_from_api(descriptor->descriptor_type,
                                                                &descriptor_type) != 0) {
-                return -EOPNOTSUPP;
-            }
-            if (descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
                 return -EOPNOTSUPP;
             }
             if ((descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) &&
@@ -18969,11 +18963,10 @@ static int materialize_vulkan_graphics_v6_buffers(
                 if (type_rc != 0) {
                     if (vulkan_dispatch_image_descriptor_type_from_api(
                             descriptor->descriptor_type, &descriptor_type) == 0 &&
-                        descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE &&
-                        descriptor_type != VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT &&
                         vulkan_image_descriptor_layout_valid(
                             descriptor_type, (VkImageLayout)descriptor->image_layout) &&
-                        !(descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE)) {
+                        (!(descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) ||
+                         descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)) {
                         continue;
                     }
                     destroy_vulkan_graphics_replay_buffers(rt->device, out);
@@ -19296,7 +19289,7 @@ static int materialize_vulkan_graphics_v6_descriptors(
             return -EPROTO;
         }
         uint32_t max_set = command->descriptor_first_set;
-        VkDescriptorPoolSize pool_sizes[6];
+        VkDescriptorPoolSize pool_sizes[7];
         uint32_t pool_size_count = 0;
         uint32_t descriptor_pool_storage_count = 0;
         uint32_t descriptor_pool_uniform_count = 0;
@@ -19304,6 +19297,7 @@ static int materialize_vulkan_graphics_v6_descriptors(
         uint32_t descriptor_pool_combined_image_sampler_count = 0;
         uint32_t descriptor_pool_sampled_image_count = 0;
         uint32_t descriptor_pool_storage_image_count = 0;
+        uint32_t descriptor_pool_input_attachment_count = 0;
         for (uint32_t d = 0; d < command->descriptor_count; ++d) {
             const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
                 &view->descriptors[command->first_descriptor + d];
@@ -19343,6 +19337,9 @@ static int materialize_vulkan_graphics_v6_descriptors(
                     break;
                 case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
                     descriptor_pool_storage_image_count++;
+                    break;
+                case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+                    descriptor_pool_input_attachment_count++;
                     break;
                 default:
                     return -EOPNOTSUPP;
@@ -19392,6 +19389,12 @@ static int materialize_vulkan_graphics_v6_descriptors(
             pool_sizes[pool_size_count++] = (VkDescriptorPoolSize){
                 .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                 .descriptorCount = descriptor_pool_storage_image_count,
+            };
+        }
+        if (descriptor_pool_input_attachment_count) {
+            pool_sizes[pool_size_count++] = (VkDescriptorPoolSize){
+                .type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+                .descriptorCount = descriptor_pool_input_attachment_count,
             };
         }
         if (pool_size_count == 0) return -EPROTO;
@@ -19477,9 +19480,6 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 };
                 writes[d].pBufferInfo = &infos[d];
             } else {
-                if (descriptor_type == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
-                    return -EOPNOTSUPP;
-                }
                 if (vulkan_descriptor_type_requires_image_view(descriptor_type) &&
                     !vulkan_image_descriptor_layout_valid(
                         descriptor_type, (VkImageLayout)descriptor->image_layout)) {
