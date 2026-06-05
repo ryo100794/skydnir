@@ -871,6 +871,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "record_graphics_dynamic_state_bytes",
             "VK_DYNAMIC_STATE_VIEWPORT",
             "VK_DYNAMIC_STATE_SCISSOR",
+            "pipeline->depth_stencil_flags =",
+            "PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE",
+            "pipeline->front_stencil_state = ds->front",
+            "pipeline->back_stencil_state = ds->back",
             "VK_DYNAMIC_STATE_LINE_WIDTH",
             "VK_DYNAMIC_STATE_CULL_MODE",
             "VK_DYNAMIC_STATE_FRONT_FACE",
@@ -957,10 +961,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "attachment->blendEnable",
             "attachment->colorWriteMask !=",
             "VK_COLOR_COMPONENT_R_BIT",
-            "ci->pDepthStencilState->depthTestEnable",
-            "ci->pDepthStencilState->depthWriteEnable",
-            "ci->pDepthStencilState->depthBoundsTestEnable",
-            "ci->pDepthStencilState->stencilTestEnable",
             "ci->pViewportState->viewportCount > 0",
             "VK_DYNAMIC_STATE_VIEWPORT",
             "ci->pViewportState->scissorCount > 0",
@@ -973,6 +973,30 @@ class GpuAbiContractTest(unittest.TestCase):
             body.index("ci->pViewportState->viewportCount > 0"),
         )
         self.assertEqual(body.count("pipeline->dynamic_state_mask = captured_dynamic_state_mask;"), 1)
+
+    def test_vulkan_graphics_v63_depth_stencil_state_metadata_is_append_only(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR 3u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV63FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV63DepthStencilStateEntry", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V63_DEPTH_STENCIL_STATE_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE", source)
+        self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR", executor)
+        self.assertIn("sizeof(PdockerGpuVulkanGraphicsV63FrameHeader)", executor)
+        self.assertIn("header_v63->v63.depth_stencil_state_count", executor)
+        self.assertIn("find_vulkan_graphics_v63_depth_stencil_state", executor)
+        self.assertIn("populate_vulkan_graphics_depth_stencil_state", executor)
+        self.assertIn("depth_stencil_state_table_hash", executor)
+        self.assertIn("enabled depth/stencil state replay requires V6.3 metadata", executor)
+        self.assertNotIn("enabled depth/stencil state replay is not implemented", executor)
+        self.assertIn("need_v63_depth_stencil", icd)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR", icd)
+        self.assertIn("depth_stencil_states[depth_stencil_state_count++]", icd)
+        self.assertIn("pipeline->depth_compare_op = ds->depthCompareOp", icd)
 
     def test_vulkan_graphics_v6_describe_response_is_nonterminal(self):
         icd = VULKAN_ICD.read_text()
@@ -1471,7 +1495,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[18]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[19]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(

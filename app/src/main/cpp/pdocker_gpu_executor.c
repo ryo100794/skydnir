@@ -16900,6 +16900,8 @@ static int validate_vulkan_graphics_v6_header_prefix(
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV61FrameHeader)) return -EPROTO;
     } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR) {
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV62FrameHeader)) return -EPROTO;
+    } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR) {
+        if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV63FrameHeader)) return -EPROTO;
     } else {
         return -EPROTO;
     }
@@ -16923,9 +16925,12 @@ static int validate_vulkan_graphics_v6_header(
         (const PdockerGpuVulkanGraphicsV61FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV62FrameHeader *header_v62 =
         (const PdockerGpuVulkanGraphicsV62FrameHeader *)header;
+    const PdockerGpuVulkanGraphicsV63FrameHeader *header_v63 =
+        (const PdockerGpuVulkanGraphicsV63FrameHeader *)header;
+    const int is_v63 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR;
     const int is_v61 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR ||
-        header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR;
-    const int is_v62 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR;
+        header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR || is_v63;
+    const int is_v62 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR || is_v63;
     if (header->resource_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
         header->descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
         header->image_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES ||
@@ -16943,6 +16948,7 @@ static int validate_vulkan_graphics_v6_header(
         (is_v61 && header_v61->v61.memory_barrier_count > PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_MEMORY_BARRIERS) ||
         (is_v61 && header_v61->v61.buffer_barrier_count > PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS) ||
         (is_v62 && header_v62->v62.specialization_entry_count > PDOCKER_GPU_VULKAN_GRAPHICS_V62_MAX_SPECIALIZATION_ENTRIES) ||
+        (is_v63 && header_v63->v63.depth_stencil_state_count > PDOCKER_GPU_VULKAN_GRAPHICS_V63_MAX_DEPTH_STENCIL_STATES) ||
         header->command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) {
         return -E2BIG;
     }
@@ -16990,7 +16996,12 @@ static int validate_vulkan_graphics_v6_header(
          header_v62->v62.specialization_entry_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V62_SPECIALIZATION_ENTRY_SCHEMA_HASH)) {
         return -EPROTO;
     }
-    FrameRange ranges[18] = {
+    if (is_v63 &&
+        (header_v63->v63.depth_stencil_state_entry_size != sizeof(PdockerGpuVulkanGraphicsV63DepthStencilStateEntry) ||
+         header_v63->v63.depth_stencil_state_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V63_DEPTH_STENCIL_STATE_SCHEMA_HASH)) {
+        return -EPROTO;
+    }
+    FrameRange ranges[19] = {
         {header->resource_table_offset, header->resource_table_size},
         {header->descriptor_table_offset, header->descriptor_table_size},
         {header->image_table_offset, header->image_table_size},
@@ -17015,6 +17026,8 @@ static int validate_vulkan_graphics_v6_header(
          is_v61 ? header_v61->v61.buffer_barrier_table_size : 0},
         {is_v62 ? header_v62->v62.specialization_entry_table_offset : 0,
          is_v62 ? header_v62->v62.specialization_entry_table_size : 0},
+        {is_v63 ? header_v63->v63.depth_stencil_state_table_offset : 0,
+         is_v63 ? header_v63->v63.depth_stencil_state_table_size : 0},
     };
     if (!table_range_valid(header->resource_table_offset, header->resource_table_size,
                            header->resource_count, header->resource_entry_size,
@@ -17081,7 +17094,16 @@ static int validate_vulkan_graphics_v6_header(
                            header->frame_size, header->header_size)) {
         return -EPROTO;
     }
-    if (!frame_ranges_do_not_overlap(ranges, is_v62 ? 18u : (is_v61 ? 17u : 12u))) {
+    if (is_v63 &&
+        !table_range_valid(header_v63->v63.depth_stencil_state_table_offset,
+                           header_v63->v63.depth_stencil_state_table_size,
+                           header_v63->v63.depth_stencil_state_count,
+                           header_v63->v63.depth_stencil_state_entry_size,
+                           __alignof__(PdockerGpuVulkanGraphicsV63DepthStencilStateEntry),
+                           header->frame_size, header->header_size)) {
+        return -EPROTO;
+    }
+    if (!frame_ranges_do_not_overlap(ranges, is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u)))) {
         return -EPROTO;
     }
     return 0;
@@ -17103,10 +17125,12 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV6FrameHeader *header;
     const PdockerGpuVulkanGraphicsV61FrameHeader *header_v61;
     const PdockerGpuVulkanGraphicsV62FrameHeader *header_v62;
+    const PdockerGpuVulkanGraphicsV63FrameHeader *header_v63;
     const int *passed_fds;
     size_t passed_fd_count;
     int is_v61;
     int is_v62;
+    int is_v63;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images;
@@ -17125,6 +17149,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV61MemoryBarrierEntry *memory_barriers;
     const PdockerGpuVulkanGraphicsV61BufferBarrierEntry *buffer_barriers;
     const PdockerGpuVulkanGraphicsV62SpecializationEntry *specialization_entries;
+    const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *depth_stencil_states;
 } VulkanGraphicsV6FrameView;
 
 static int init_vulkan_graphics_v6_frame_view(
@@ -17138,23 +17163,30 @@ static int init_vulkan_graphics_v6_frame_view(
         (const PdockerGpuVulkanGraphicsV6FrameHeader *)frame;
     int rc = validate_vulkan_graphics_v6_header(header, passed_fd_count);
     if (rc != 0) return rc;
+    const int is_v63_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR;
     const PdockerGpuVulkanGraphicsV61FrameHeader *header_v61 =
         (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V61_ABI_MINOR ||
-         header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR)
+         header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR ||
+         is_v63_header)
             ? (const PdockerGpuVulkanGraphicsV61FrameHeader *)frame
             : NULL;
     const PdockerGpuVulkanGraphicsV62FrameHeader *header_v62 =
-        header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR
+        (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V62_ABI_MINOR || is_v63_header)
             ? (const PdockerGpuVulkanGraphicsV62FrameHeader *)frame
+            : NULL;
+    const PdockerGpuVulkanGraphicsV63FrameHeader *header_v63 = is_v63_header
+            ? (const PdockerGpuVulkanGraphicsV63FrameHeader *)frame
             : NULL;
     view->frame = frame;
     view->header = header;
     view->header_v61 = header_v61;
     view->header_v62 = header_v62;
+    view->header_v63 = header_v63;
     view->passed_fds = passed_fds;
     view->passed_fd_count = passed_fd_count;
     view->is_v61 = header_v61 != NULL;
     view->is_v62 = header_v62 != NULL;
+    view->is_v63 = header_v63 != NULL;
     view->resources =
         (const PdockerGpuVulkanDispatchV5ResourceEntry *)graphics_v6_table_ptr(
             frame, header, header->resource_table_offset, header->resource_table_size);
@@ -17240,6 +17272,15 @@ static int init_vulkan_graphics_v6_frame_view(
                 frame, header, header_v62->v62.specialization_entry_table_offset,
                 header_v62->v62.specialization_entry_table_size);
         if (header_v62->v62.specialization_entry_count && !view->specialization_entries) {
+            return -EPROTO;
+        }
+    }
+    if (view->is_v63) {
+        view->depth_stencil_states =
+            (const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *)graphics_v6_table_ptr(
+                frame, header, header_v63->v63.depth_stencil_state_table_offset,
+                header_v63->v63.depth_stencil_state_table_size);
+        if (header_v63->v63.depth_stencil_state_count && !view->depth_stencil_states) {
             return -EPROTO;
         }
     }
@@ -17380,8 +17421,10 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV6FrameHeader *header = view.header;
     const PdockerGpuVulkanGraphicsV61FrameHeader *header_v61 = view.header_v61;
     const PdockerGpuVulkanGraphicsV62FrameHeader *header_v62 = view.header_v62;
+    const PdockerGpuVulkanGraphicsV63FrameHeader *header_v63 = view.header_v63;
     const int is_v61 = view.is_v61;
     const int is_v62 = view.is_v62;
+    const int is_v63 = view.is_v63;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources = view.resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = view.descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images = view.images;
@@ -17400,6 +17443,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV61MemoryBarrierEntry *memory_barriers = view.memory_barriers;
     const PdockerGpuVulkanGraphicsV61BufferBarrierEntry *buffer_barriers = view.buffer_barriers;
     const PdockerGpuVulkanGraphicsV62SpecializationEntry *specialization_entries = view.specialization_entries;
+    const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *depth_stencil_states = view.depth_stencil_states;
     const size_t frame_hash_offset = offsetof(PdockerGpuVulkanGraphicsV6FrameHeader, frame_hash);
     uint64_t payload_hash = fnv1a64_update(1469598103934665603ull,
                                            frame + header->header_size,
@@ -17429,6 +17473,15 @@ static int validate_vulkan_graphics_v6_frame_content(
             (size_t)header_v62->v62.specialization_entry_table_size);
         if (specialization_table_hash != header_v62->v62.specialization_entry_table_hash ||
             header_v62->v62.extension_hash != specialization_table_hash) {
+            return -EPROTO;
+        }
+    }
+    if (is_v63) {
+        uint64_t depth_stencil_table_hash = fnv1a64_update(
+            1469598103934665603ull, depth_stencil_states,
+            (size_t)header_v63->v63.depth_stencil_state_table_size);
+        if (depth_stencil_table_hash != header_v63->v63.depth_stencil_state_table_hash ||
+            header_v63->v63.extension_hash != depth_stencil_table_hash) {
             return -EPROTO;
         }
     }
@@ -17545,6 +17598,19 @@ static int validate_vulkan_graphics_v6_frame_content(
             if (entry->size == 0 || !u64_range_within_size(entry->offset, entry->size, stage->specialization_size)) {
                 return -ERANGE;
             }
+        }
+    }
+    if (is_v63) {
+        for (uint32_t i = 0; i < header_v63->v63.depth_stencil_state_count; ++i) {
+            const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *entry = &depth_stencil_states[i];
+            if (entry->pipeline_index >= header->pipeline_count || entry->reserved0 != 0) return -EPROTO;
+            if (entry->flags & ~(PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE |
+                                 PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_WRITE_ENABLE |
+                                 PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_BOUNDS_TEST_ENABLE |
+                                 PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_STENCIL_TEST_ENABLE)) {
+                return -EOPNOTSUPP;
+            }
+            if (pipelines[entry->pipeline_index].depth_stencil_flags != entry->flags) return -EPROTO;
         }
     }
     for (uint32_t i = 0; i < header->pipeline_count; ++i) {
@@ -17757,6 +17823,10 @@ static int vulkan_graphics_attachment_ops_supported(
         const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment,
         uint32_t role);
 static int vulkan_graphics_attachment_layout_supported(uint32_t role, uint32_t layout);
+static const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *
+find_vulkan_graphics_v63_depth_stencil_state(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t pipeline_index);
 
 static int preflight_vulkan_graphics_v6_replay_supported(
         const VulkanGraphicsV6FrameView *view,
@@ -17853,8 +17923,9 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 }
                 const PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline =
                     &view->pipelines[command->pipeline_index];
-                if (pipeline->depth_stencil_flags != 0) {
-                    reason = "enabled depth/stencil state replay is not implemented";
+                if (pipeline->depth_stencil_flags != 0 &&
+                    !find_vulkan_graphics_v63_depth_stencil_state(view, command->pipeline_index)) {
+                    reason = "enabled depth/stencil state replay requires V6.3 metadata";
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
@@ -18266,6 +18337,56 @@ static uint32_t collect_vulkan_graphics_v62_specialization_entries(
     return count;
 }
 
+static const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *
+find_vulkan_graphics_v63_depth_stencil_state(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t pipeline_index) {
+    if (!view || !view->is_v63 || !view->header_v63 || !view->depth_stencil_states) return NULL;
+    for (uint32_t i = 0; i < view->header_v63->v63.depth_stencil_state_count; ++i) {
+        const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *entry =
+            &view->depth_stencil_states[i];
+        if (entry->pipeline_index == pipeline_index) return entry;
+    }
+    return NULL;
+}
+
+static void populate_vulkan_graphics_depth_stencil_state(
+        const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *src,
+        VkPipelineDepthStencilStateCreateInfo *dst) {
+    memset(dst, 0, sizeof(*dst));
+    dst->sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    if (!src) return;
+    dst->depthTestEnable =
+        (src->flags & PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE) ? VK_TRUE : VK_FALSE;
+    dst->depthWriteEnable =
+        (src->flags & PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_WRITE_ENABLE) ? VK_TRUE : VK_FALSE;
+    dst->depthCompareOp = (VkCompareOp)src->depth_compare_op;
+    dst->depthBoundsTestEnable =
+        (src->flags & PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_BOUNDS_TEST_ENABLE) ? VK_TRUE : VK_FALSE;
+    dst->stencilTestEnable =
+        (src->flags & PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_STENCIL_TEST_ENABLE) ? VK_TRUE : VK_FALSE;
+    dst->front = (VkStencilOpState){
+        .failOp = (VkStencilOp)src->front_fail_op,
+        .passOp = (VkStencilOp)src->front_pass_op,
+        .depthFailOp = (VkStencilOp)src->front_depth_fail_op,
+        .compareOp = (VkCompareOp)src->front_compare_op,
+        .compareMask = src->front_compare_mask,
+        .writeMask = src->front_write_mask,
+        .reference = src->front_reference,
+    };
+    dst->back = (VkStencilOpState){
+        .failOp = (VkStencilOp)src->back_fail_op,
+        .passOp = (VkStencilOp)src->back_pass_op,
+        .depthFailOp = (VkStencilOp)src->back_depth_fail_op,
+        .compareOp = (VkCompareOp)src->back_compare_op,
+        .compareMask = src->back_compare_mask,
+        .writeMask = src->back_write_mask,
+        .reference = src->back_reference,
+    };
+    dst->minDepthBounds = float_from_u32_bits(src->min_depth_bounds_bits);
+    dst->maxDepthBounds = float_from_u32_bits(src->max_depth_bounds_bits);
+}
+
 static int materialize_vulkan_graphics_v6_pipelines(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -18279,8 +18400,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
         const PdockerGpuVulkanGraphicsV6PipelineEntry *src = &view->pipelines[pidx];
         if (src->shader_stage_count == 0 ||
             src->shader_stage_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES ||
-            src->color_attachment_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS ||
-            src->depth_stencil_flags != 0) {
+            src->color_attachment_count > PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS) {
             return -EOPNOTSUPP;
         }
         VulkanGraphicsReplayPipeline *dst = &out_pipelines[pidx];
@@ -18498,12 +18618,11 @@ static int materialize_vulkan_graphics_v6_pipelines(
             .depthAttachmentFormat = (VkFormat)src->dynamic_rendering_depth_format,
             .stencilAttachmentFormat = (VkFormat)src->dynamic_rendering_stencil_format,
         };
-        VkPipelineDepthStencilStateCreateInfo dssci = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-            .depthTestEnable = VK_FALSE,
-            .depthWriteEnable = VK_FALSE,
-            .stencilTestEnable = VK_FALSE,
-        };
+        const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *depth_stencil_state =
+            find_vulkan_graphics_v63_depth_stencil_state(view, pidx);
+        if (src->depth_stencil_flags != 0 && !depth_stencil_state) return -EOPNOTSUPP;
+        VkPipelineDepthStencilStateCreateInfo dssci;
+        populate_vulkan_graphics_depth_stencil_state(depth_stencil_state, &dssci);
         VkGraphicsPipelineCreateInfo gpci = {
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
             .pNext = &rendering,
@@ -18515,7 +18634,8 @@ static int materialize_vulkan_graphics_v6_pipelines(
             .pRasterizationState = &rsci,
             .pMultisampleState = &msci,
             .pColorBlendState = &cbsci,
-            .pDepthStencilState = (src->dynamic_rendering_depth_format != VK_FORMAT_UNDEFINED ||
+            .pDepthStencilState = (src->depth_stencil_flags != 0 ||
+                src->dynamic_rendering_depth_format != VK_FORMAT_UNDEFINED ||
                 src->dynamic_rendering_stencil_format != VK_FORMAT_UNDEFINED) ? &dssci : NULL,
             .pDynamicState = &dsci,
             .layout = dst->layout,
