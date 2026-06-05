@@ -5314,6 +5314,9 @@ static int run_command(int argc, char **argv) {
         "lib/aarch64-linux-gnu/ld-linux-aarch64.so.1",
         "lib/ld-linux-aarch64.so.1",
         "lib64/ld-linux-aarch64.so.1",
+        "lib/ld-musl-aarch64.so.1",
+        "lib64/ld-musl-aarch64.so.1",
+        "usr/lib/ld-musl-aarch64.so.1",
         NULL,
     };
     for (int i = 0; ld_candidates[i]; ++i) {
