@@ -5301,12 +5301,20 @@ static int run_command(int argc, char **argv) {
         char *slash = strrchr(helper_dir, '/');
         if (slash) {
             *slash = '\0';
-            if (((snprintf(ldpath, sizeof(ldpath), "%s/pdocker-ld-linux-aarch64", helper_dir) < (int)sizeof(ldpath) &&
-                  access(ldpath, X_OK) == 0) ||
-                 (snprintf(ldpath, sizeof(ldpath), "%s/libpdocker-ld-linux-aarch64.so", helper_dir) < (int)sizeof(ldpath) &&
-                  access(ldpath, X_OK) == 0))) {
-                loader = ldpath;
-                goto loader_found;
+            const char *helper_ld_candidates[] = {
+                "skydnir-ld-musl-aarch64",
+                "libskydnirldmusl.so",
+                "libskydnir-ld-musl-aarch64.so",
+                "pdocker-ld-linux-aarch64",
+                "libpdocker-ld-linux-aarch64.so",
+                NULL,
+            };
+            for (int i = 0; helper_ld_candidates[i]; ++i) {
+                if (snprintf(ldpath, sizeof(ldpath), "%s/%s", helper_dir, helper_ld_candidates[i]) < (int)sizeof(ldpath) &&
+                    access(ldpath, X_OK) == 0) {
+                    loader = ldpath;
+                    goto loader_found;
+                }
             }
         }
     }
