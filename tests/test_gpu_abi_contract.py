@@ -929,6 +929,137 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, icd)
         self.assertNotIn("ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME", icd)
 
+    def test_vulkan_render_pass_captures_subpass_attachment_refs(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "typedef struct {\n    uint32_t color_attachment_count;",
+            "uint32_t color_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "VkImageLayout color_layouts[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "uint32_t resolve_attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "VkImageLayout resolve_layouts[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "bool has_depth_stencil_attachment;",
+            "uint32_t depth_stencil_attachment;",
+            "VkImageLayout depth_stencil_layout;",
+            "PdockerVkSubpassState subpasses[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
+            "bool subpass_overflow;",
+            "capture_render_pass_subpass_state(",
+            "capture_render_pass_subpass_state2(",
+            "src->pColorAttachments",
+            "src->pResolveAttachments",
+            "src->pDepthStencilAttachment",
+            "src->inputAttachmentCount",
+            "src->preserveAttachmentCount",
+            "subpass->pColorAttachments",
+            "subpass->pResolveAttachments",
+            "subpass->pDepthStencilAttachment",
+            "subpass->inputAttachmentCount",
+            "subpass->preserveAttachmentCount",
+            "input_attachment_count != 0 || preserve_attachment_count != 0",
+            "render_pass_attachment_has_identity_layout",
+            "!render_pass_attachment_has_identity_layout(rp, color->attachment, color->layout)",
+            "!render_pass_attachment_has_identity_layout(\n                    rp, resolve_attachments[i].attachment, resolve_attachments[i].layout)",
+            "!render_pass_attachment_has_identity_layout(\n                rp, depth_stencil_attachment->attachment, depth_stencil_attachment->layout)",
+            "pCreateInfo->dependencyCount != 0",
+            "pCreateInfo->pNext || pCreateInfo->flags != 0",
+            "src->flags != 0",
+            "subpass->pNext != NULL || subpass->flags != 0 || subpass->viewMask != 0",
+            "subpass->pColorAttachments[i].pNext",
+            "subpass->pColorAttachments[i].aspectMask != 0",
+            "subpass->pResolveAttachments[i].pNext",
+            "subpass->pResolveAttachments[i].aspectMask != 0",
+            "subpass->pDepthStencilAttachment->pNext",
+            "subpass->pDepthStencilAttachment->aspectMask != 0",
+            "pCreateInfo->correlatedViewMaskCount != 0",
+            "src->pNext || src->flags != 0",
+            "dst->unsupported = true;",
+            "pdocker_vk_format_is_depth_stencil",
+        ]:
+            self.assertIn(marker, icd)
+
+    def test_vulkan_begin_render_pass_normalizes_single_subpass_to_dynamic_rendering(self):
+        icd = VULKAN_ICD.read_text()
+        normalize_body = icd.split(
+            "static bool populate_single_subpass_render_pass_rendering_state", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass", 1)[0]
+        begin_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1)[0]
+        for marker in [
+            "populate_single_subpass_render_pass_rendering_state",
+            "contents != VK_SUBPASS_CONTENTS_INLINE",
+            "cmd->active_color_attachment_count = subpass->color_attachment_count;",
+            "cmd->active_color_attachments[c]",
+            "cmd->active_color_attachments[c].resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;",
+            "cmd->active_color_attachments[c].resolve_image_layout = subpass->resolve_layouts[c];",
+            "cmd->active_depth_attachment",
+            "cmd->active_stencil_attachment",
+            "cmd->active_rendering_layer_count = fb->layers ? fb->layers : 1;",
+            "append_graphics_rendering_snapshot(cmd, &rendering_snapshot_index)",
+            "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING;",
+            "record.rendering_snapshot_index = rendering_snapshot_index;",
+            "cmd->dynamic_rendering_active = true;",
+            "cmd->render_pass_active = false;",
+        ]:
+            self.assertIn(marker, normalize_body)
+        self.assertIn("append_normalized_render_pass_begin(cmd, pRenderPassBegin, contents)", begin_body)
+        self.assertNotIn("record.rendering_snapshot_index = UINT32_MAX;", begin_body)
+
+    def test_vulkan_render_pass_normalization_is_fail_closed_without_implicit_layout_replay(self):
+        icd = VULKAN_ICD.read_text()
+        identity_body = icd.split(
+            "static bool render_pass_attachment_has_identity_layout", 1
+        )[1].split("static void capture_render_pass_subpass_state", 1)[0]
+        normalize_gate = icd.split(
+            "static bool render_pass_subpass_can_normalize_to_dynamic_rendering", 1
+        )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass", 1)[0]
+        for marker in [
+            "attachment->initial_layout == subpass_layout",
+            "attachment->final_layout == subpass_layout",
+        ]:
+            self.assertIn(marker, identity_body)
+        for marker in [
+            "rp->attachment_overflow",
+            "rp->subpass_overflow",
+            "rp->subpass_count != 1",
+            "return !subpass->unsupported;",
+        ]:
+            self.assertIn(marker, normalize_gate)
+
+    def test_vulkan_next_subpass_remains_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        next_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass", 1)[0]
+        for marker in [
+            "cmd->active_subpass += 1;",
+            "cmd->active_subpass_contents = contents;",
+            "cmd->graphics_unsupported = true;",
+        ]:
+            self.assertIn(marker, next_body)
+        self.assertIn("vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);", icd)
+
+    def test_vulkan_render_pass_pipeline_formats_are_completed_from_attachment_refs(self):
+        icd = VULKAN_ICD.read_text()
+        pipeline_body = icd.split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline", 1)[0]
+        for marker in [
+            "if (!pipeline->dynamic_rendering_pipeline && pipeline->render_pass) {",
+            "render_pass_subpass_can_normalize_to_dynamic_rendering(rp, ci->subpass)",
+            "pipeline->dynamic_rendering_pipeline = true;",
+            "pipeline->dynamic_rendering_view_mask = 0;",
+            "pipeline->dynamic_rendering_color_attachment_count = subpass->color_attachment_count;",
+            "uint32_t attachment = subpass->color_attachments[c];",
+            "pipeline->dynamic_rendering_color_formats[c] =",
+            "rp->attachments[attachment].format",
+            "VkFormat ds_format = rp->attachments[subpass->depth_stencil_attachment].format;",
+            "pipeline->dynamic_rendering_depth_format =",
+            "pdocker_vk_format_has_depth(ds_format) ? ds_format : VK_FORMAT_UNDEFINED;",
+            "pipeline->dynamic_rendering_stencil_format =",
+            "pdocker_vk_format_has_stencil(ds_format) ? ds_format : VK_FORMAT_UNDEFINED;",
+        ]:
+            self.assertIn(marker, pipeline_body)
+
 
     def test_vulkan_graphics_executor_replays_dynamic_states(self):
         executor = GPU_EXECUTOR.read_text()
