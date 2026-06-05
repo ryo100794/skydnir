@@ -19498,12 +19498,11 @@ static VkImageAspectFlags vulkan_graphics_attachment_aspect_mask(uint32_t role) 
     }
 }
 
-static int vulkan_graphics_merge_attachment_copy_range(
+static int vulkan_graphics_merge_image_copy_range_for_aspect(
         VulkanDispatchImageObject *image,
         const VkImageSubresourceRange *range,
-        uint32_t role) {
+        VkImageAspectFlags required) {
     if (!image || !range) return -EINVAL;
-    VkImageAspectFlags required = vulkan_graphics_attachment_aspect_mask(role);
     if (!required ||
         range->aspectMask != required ||
         range->levelCount == 0 ||
@@ -19531,6 +19530,23 @@ static int vulkan_graphics_merge_attachment_copy_range(
     image->copy_base_layer = range->baseArrayLayer;
     image->copy_layer_count = range->layerCount;
     return 0;
+}
+
+static int vulkan_graphics_merge_attachment_copy_range(
+        VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range,
+        uint32_t role) {
+    return vulkan_graphics_merge_image_copy_range_for_aspect(
+        image, range, vulkan_graphics_attachment_aspect_mask(role));
+}
+
+static int vulkan_graphics_merge_descriptor_image_copy_range(
+        VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range,
+        VkDescriptorType descriptor_type) {
+    if (descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) return -EOPNOTSUPP;
+    return vulkan_graphics_merge_image_copy_range_for_aspect(
+        image, range, VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 
@@ -20425,7 +20441,8 @@ static int materialize_vulkan_graphics_v6_descriptors(
                 return rc;
             }
             if ((descriptor->access_flags & PDOCKER_GPU_V5_ACCESS_WRITE) &&
-                descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+                descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER &&
+                descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
                 return -EOPNOTSUPP;
             }
             if (vulkan_descriptor_type_requires_image_view(descriptor_type) &&
@@ -20614,9 +20631,8 @@ static int materialize_vulkan_graphics_v6_descriptors(
                     if (required_usage && !(image->usage & required_usage)) return -EPROTO;
                     if (image->requires_staging ||
                         descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                        int range_rc = vulkan_graphics_merge_attachment_copy_range(
-                            image, &view_obj->range,
-                            PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR);
+                        int range_rc = vulkan_graphics_merge_descriptor_image_copy_range(
+                            image, &view_obj->range, descriptor_type);
                         if (range_rc != 0) return range_rc;
                     }
                     image->descriptor_layout = (VkImageLayout)descriptor->image_layout;

@@ -1559,11 +1559,16 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_graphics_attachment_copy_range_validation_is_centralized(self):
         source = GPU_EXECUTOR.read_text()
+        self.assertIn("vulkan_graphics_merge_image_copy_range_for_aspect", source)
         self.assertIn("vulkan_graphics_merge_attachment_copy_range", source)
+        self.assertIn("vulkan_graphics_merge_descriptor_image_copy_range", source)
         self.assertIn("descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", source)
-        self.assertEqual(source.count("vulkan_graphics_merge_attachment_copy_range("), 3)
+        self.assertIn("VK_IMAGE_ASPECT_COLOR_BIT", source)
+        self.assertEqual(source.count("vulkan_graphics_merge_image_copy_range_for_aspect("), 3)
+        self.assertEqual(source.count("vulkan_graphics_merge_attachment_copy_range("), 2)
+        self.assertEqual(source.count("vulkan_graphics_merge_descriptor_image_copy_range("), 2)
         bodyless = re.sub(
-            r"static int vulkan_graphics_merge_attachment_copy_range\(.*?\n}\n\n",
+            r"static int vulkan_graphics_merge_image_copy_range_for_aspect\(.*?\n}\n\n",
             "",
             source,
             flags=re.S,
@@ -1933,6 +1938,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("writes[write_count].pImageInfo = &image_infos[write_count];", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER", executor)
         self.assertIn("VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", executor)
+
+    def test_graphics_storage_image_write_descriptor_is_not_rejected_at_materialize(self):
+        executor = GPU_EXECUTOR.read_text()
+        preflight_body = executor.split(
+            "static int preflight_vulkan_graphics_v6_replay_supported", 1
+        )[1].split("static int collect_graphics_descriptor_layout_for_layout", 1)[0]
+        materialize_body = executor.split(
+            "static int materialize_vulkan_graphics_v6_descriptors", 1
+        )[1].split("static int record_vulkan_graphics_v6_staged_image_uploads", 1)[0]
+
+        for body in [preflight_body, materialize_body]:
+            self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER", body)
+            self.assertIn("descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", body)
+        self.assertIn("graphics write descriptor replay is not implemented", preflight_body)
+        self.assertIn("image->writeback_needed = 1", materialize_body)
+        self.assertIn("vulkan_required_usage_for_image_descriptor(descriptor_type)", materialize_body)
+        self.assertIn("descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", materialize_body)
 
     def test_vulkan_dispatch_v5_descriptor_arrays_drive_executor_layout_pool_write_and_cache(self):
         executor = GPU_EXECUTOR.read_text()
