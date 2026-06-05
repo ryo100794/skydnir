@@ -879,6 +879,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_DYNAMIC_STATE_CULL_MODE",
             "VK_DYNAMIC_STATE_FRONT_FACE",
             "VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY",
+            "VK_DYNAMIC_STATE_DEPTH_BIAS",
+            "VK_DYNAMIC_STATE_BLEND_CONSTANTS",
+            "VK_DYNAMIC_STATE_DEPTH_BOUNDS",
+            "VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK",
+            "VK_DYNAMIC_STATE_STENCIL_WRITE_MASK",
+            "VK_DYNAMIC_STATE_STENCIL_REFERENCE",
+            "VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE",
+            "VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE",
+            "VK_DYNAMIC_STATE_DEPTH_COMPARE_OP",
+            "VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE",
+            "VK_DYNAMIC_STATE_STENCIL_OP",
             "pipeline->vertex_bindings[b]",
             "pipeline->vertex_attributes[a]",
             "pipeline->dynamic_state_mask",
@@ -919,7 +930,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("ADD_DEVICE_EXTENSION(VK_KHR_SWAPCHAIN_EXTENSION_NAME", icd)
 
 
-    def test_vulkan_graphics_executor_replays_non_depth_dynamic_states(self):
+    def test_vulkan_graphics_executor_replays_dynamic_states(self):
         executor = GPU_EXECUTOR.read_text()
         for marker in [
             "VkPhysicalDeviceExtendedDynamicStateFeaturesEXT physical_extended_dynamic_state",
@@ -927,20 +938,66 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd_set_cull_mode",
             "cmd_set_front_face",
             "cmd_set_primitive_topology",
+            "cmd_set_depth_test_enable",
+            "cmd_set_depth_write_enable",
+            "cmd_set_depth_compare_op",
+            "cmd_set_stencil_test_enable",
+            "cmd_set_stencil_op",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_CULL_MODE)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_FRONT_FACE)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BIAS)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_BLEND_CONSTANTS)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BOUNDS)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_WRITE_MASK)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_REFERENCE)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_COMPARE_OP)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_OP)",
             "sizeof(VkCullModeFlags)",
             "sizeof(VkFrontFace)",
             "sizeof(VkPrimitiveTopology)",
+            "sizeof(float) * 3u",
+            "sizeof(float) * 4u",
+            "sizeof(uint32_t) * 5u",
             "vkCmdSetLineWidth(command_buffer, line_width);",
+            "vkCmdSetDepthBias(command_buffer",
+            "vkCmdSetBlendConstants(command_buffer",
+            "vkCmdSetDepthBounds(command_buffer",
+            "vkCmdSetStencilCompareMask(command_buffer",
+            "vkCmdSetStencilWriteMask(command_buffer",
+            "vkCmdSetStencilReference(command_buffer",
             "rt->cmd_set_cull_mode(command_buffer, value);",
             "rt->cmd_set_front_face(command_buffer, value);",
             "rt->cmd_set_primitive_topology(command_buffer, value);",
+            "rt->cmd_set_depth_test_enable(command_buffer, value);",
+            "rt->cmd_set_depth_write_enable(command_buffer, value);",
+            "rt->cmd_set_depth_compare_op(command_buffer, value);",
+            "rt->cmd_set_stencil_test_enable(command_buffer, value);",
+            "rt->cmd_set_stencil_op(command_buffer",
+            "vulkan_graphics_stencil_face_mask_supported",
         ]:
             self.assertIn(marker, executor)
         self.assertNotIn("only viewport/scissor dynamic state replay is implemented first", executor)
         self.assertNotIn("VkDynamicState dynamic_states[2]", executor)
+
+    def test_vulkan_graphics_dynamic_state_bit_mapping_matches_icd(self):
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        states = [
+            "VIEWPORT", "SCISSOR", "LINE_WIDTH", "CULL_MODE", "FRONT_FACE",
+            "PRIMITIVE_TOPOLOGY", "DEPTH_BIAS", "BLEND_CONSTANTS",
+            "DEPTH_BOUNDS", "STENCIL_COMPARE_MASK", "STENCIL_WRITE_MASK",
+            "STENCIL_REFERENCE", "DEPTH_TEST_ENABLE", "DEPTH_WRITE_ENABLE",
+            "DEPTH_COMPARE_OP", "STENCIL_TEST_ENABLE", "STENCIL_OP",
+        ]
+        for bit, name in enumerate(states):
+            marker = f"case VK_DYNAMIC_STATE_{name}: return {bit}u;"
+            self.assertIn(marker, executor)
+            self.assertIn(marker, icd)
 
     def test_vulkan_graphics_pipeline_unserialized_state_fails_closed(self):
         icd = VULKAN_ICD.read_text()
@@ -957,6 +1014,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "ci->pRasterizationState->lineWidth != 1.0f",
             "pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LINE_WIDTH)",
             "ci->pColorBlendState->logicOpEnable",
+            "pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_BLEND_CONSTANTS)",
             "ci->pColorBlendState->blendConstants[0] != 0.0f",
             "attachment->blendEnable",
             "attachment->colorWriteMask !=",

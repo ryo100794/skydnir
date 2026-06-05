@@ -120,6 +120,17 @@ static uint32_t pdocker_vk_graphics_dynamic_state_bit_index(VkDynamicState state
         case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
         case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;
         case VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY: return 5u;
+        case VK_DYNAMIC_STATE_DEPTH_BIAS: return 6u;
+        case VK_DYNAMIC_STATE_BLEND_CONSTANTS: return 7u;
+        case VK_DYNAMIC_STATE_DEPTH_BOUNDS: return 8u;
+        case VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK: return 9u;
+        case VK_DYNAMIC_STATE_STENCIL_WRITE_MASK: return 10u;
+        case VK_DYNAMIC_STATE_STENCIL_REFERENCE: return 11u;
+        case VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE: return 12u;
+        case VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE: return 13u;
+        case VK_DYNAMIC_STATE_DEPTH_COMPARE_OP: return 14u;
+        case VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE: return 15u;
+        case VK_DYNAMIC_STATE_STENCIL_OP: return 16u;
         default: return UINT32_MAX;
     }
 }
@@ -8485,10 +8496,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             : 0;
         if (ci->pColorBlendState) {
             if (ci->pColorBlendState->logicOpEnable ||
-                ci->pColorBlendState->blendConstants[0] != 0.0f ||
-                ci->pColorBlendState->blendConstants[1] != 0.0f ||
-                ci->pColorBlendState->blendConstants[2] != 0.0f ||
-                ci->pColorBlendState->blendConstants[3] != 0.0f) {
+                (!(captured_dynamic_state_mask &
+                   pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_BLEND_CONSTANTS)) &&
+                 (ci->pColorBlendState->blendConstants[0] != 0.0f ||
+                  ci->pColorBlendState->blendConstants[1] != 0.0f ||
+                  ci->pColorBlendState->blendConstants[2] != 0.0f ||
+                  ci->pColorBlendState->blendConstants[3] != 0.0f))) {
                 pipeline->graphics_unsupported = true;
             }
             for (uint32_t a = 0; a < ci->pColorBlendState->attachmentCount; ++a) {
