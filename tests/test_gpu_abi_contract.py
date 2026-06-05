@@ -1007,12 +1007,11 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "uint64_t captured_dynamic_state_mask = 0;",
             "pipeline->dynamic_state_mask = captured_dynamic_state_mask;",
-            "ci->pInputAssemblyState->primitiveRestartEnable",
-            "ci->pRasterizationState->depthClampEnable",
-            "ci->pRasterizationState->rasterizerDiscardEnable",
-            "ci->pRasterizationState->depthBiasEnable",
-            "ci->pRasterizationState->lineWidth != 1.0f",
-            "pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LINE_WIDTH)",
+            "pipeline->primitive_restart_enable = ci->pInputAssemblyState->primitiveRestartEnable",
+            "pipeline->depth_clamp_enable = ci->pRasterizationState->depthClampEnable",
+            "pipeline->rasterizer_discard_enable = ci->pRasterizationState->rasterizerDiscardEnable",
+            "pipeline->depth_bias_enable = ci->pRasterizationState->depthBiasEnable",
+            "pipeline->line_width = ci->pRasterizationState->lineWidth",
             "ci->pColorBlendState->logicOpEnable",
             "pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_BLEND_CONSTANTS)",
             "ci->pColorBlendState->blendConstants[0] != 0.0f",
@@ -1076,6 +1075,35 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("need_v64_resolve_attachment", icd)
         self.assertIn("resolve_entry->resolve_layout = src->resolve_image_layout;", icd)
         self.assertNotIn("src->resolve_image_view || src->resolve_mode != VK_RESOLVE_MODE_NONE", icd)
+
+    def test_vulkan_graphics_v65_static_pipeline_state_metadata_is_append_only(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR 5u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV65FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V65_STATIC_PRIMITIVE_RESTART_ENABLE", source)
+            self.assertIn("X(depth_bias_constant_factor_bits, u32)", source)
+            self.assertIn("X(line_width_bits, u32)", source)
+        self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR", executor)
+        self.assertIn("sizeof(PdockerGpuVulkanGraphicsV65FrameHeader)", executor)
+        self.assertIn("header_v65->v65.static_pipeline_state_count", executor)
+        self.assertIn("find_vulkan_graphics_v65_static_pipeline_state", executor)
+        self.assertIn("primitiveRestartEnable =", executor)
+        self.assertIn("depthClampEnable =", executor)
+        self.assertIn("rasterizerDiscardEnable =", executor)
+        self.assertIn("depthBiasEnable =", executor)
+        self.assertIn("float_from_u32_bits(static_state->depth_bias_constant_factor_bits)", executor)
+        self.assertIn("float_from_u32_bits(static_state->line_width_bits)", executor)
+        self.assertIn("need_v65_static_pipeline_state", icd)
+        self.assertIn("static_pipeline_states[static_pipeline_state_count++]", icd)
+        self.assertIn("pipeline->primitive_restart_enable = ci->pInputAssemblyState->primitiveRestartEnable", icd)
+        self.assertIn("pipeline->depth_bias_constant_factor = ci->pRasterizationState->depthBiasConstantFactor", icd)
+        self.assertNotIn("ci->pRasterizationState->depthClampEnable ||", icd)
 
     def test_vulkan_graphics_v6_describe_response_is_nonterminal(self):
         icd = VULKAN_ICD.read_text()
@@ -1601,7 +1629,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[20]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[21]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(
@@ -2011,6 +2039,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V65_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V65_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V65_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -2101,6 +2139,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V65_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V65_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV65HeaderExtension",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
