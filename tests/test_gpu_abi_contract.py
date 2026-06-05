@@ -1272,7 +1272,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record_vulkan_graphics_v6_staged_image_uploads", executor)
         self.assertIn("vulkan_graphics_attachment_layout_supported", executor)
         self.assertIn("vulkan_graphics_attachment_required_usage", executor)
-        self.assertIn("depth/stencil attachment store/writeback is not implemented", executor)
+        self.assertIn("vulkan_graphics_merge_attachment_copy_range", executor)
+        self.assertIn("vulkan_graphics_attachment_writeback_access_mask", executor)
+        self.assertIn("VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT", executor)
+        self.assertIn("VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT", executor)
+        self.assertIn("VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT", executor)
+        self.assertNotIn("depth/stencil attachment store/writeback is not implemented", executor)
         self.assertIn(".pDepthAttachment = depth_attachment_ptr", executor)
         self.assertIn(".pStencilAttachment = stencil_attachment_ptr", executor)
         self.assertIn("VkPipelineDepthStencilStateCreateInfo dssci", executor)
@@ -1413,23 +1418,19 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, describe_body)
 
-    def test_graphics_color_copy_range_validation_is_centralized(self):
+    def test_graphics_attachment_copy_range_validation_is_centralized(self):
         source = GPU_EXECUTOR.read_text()
-        self.assertIn("vulkan_graphics_merge_color_copy_range", source)
+        self.assertIn("vulkan_graphics_merge_attachment_copy_range", source)
         self.assertIn("descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", source)
-        self.assertEqual(source.count("vulkan_graphics_merge_color_copy_range("), 3)
+        self.assertEqual(source.count("vulkan_graphics_merge_attachment_copy_range("), 3)
         bodyless = re.sub(
-            r"static int vulkan_graphics_merge_color_copy_range\(.*?\n}\n\n",
+            r"static int vulkan_graphics_merge_attachment_copy_range\(.*?\n}\n\n",
             "",
             source,
             flags=re.S,
         )
-        bodyless = re.sub(
-            r"static int vulkan_graphics_attachment_range_supported\(.*?\n}\n\n",
-            "",
-            bodyless,
-            flags=re.S,
-        )
+        self.assertNotIn("vulkan_graphics_merge_color_copy_range", source)
+        self.assertNotIn("vulkan_graphics_attachment_range_supported", source)
         self.assertNotIn("range->levelCount > image->mip_levels - range->baseMipLevel", bodyless)
         self.assertNotIn("replay_view->range.levelCount >", bodyless)
 

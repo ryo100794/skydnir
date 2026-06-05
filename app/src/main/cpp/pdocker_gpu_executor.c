@@ -17897,9 +17897,7 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         return -EOPNOTSUPP;
                     }
                     if (vulkan_graphics_attachment_ops_supported(attachment, attachment->attachment_role) != 0) {
-                        reason = attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR
-                            ? "unsupported color attachment load/store op"
-                            : "depth/stencil attachment store/writeback is not implemented";
+                        reason = "unsupported graphics attachment load/store op";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
@@ -18672,11 +18670,27 @@ static void destroy_vulkan_graphics_replay_attachments(
     memset(attachments, 0, sizeof(*attachments));
 }
 
-static int vulkan_graphics_merge_color_copy_range(
+static VkImageAspectFlags vulkan_graphics_attachment_aspect_mask(uint32_t role) {
+    switch (role) {
+        case PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR:
+            return VK_IMAGE_ASPECT_COLOR_BIT;
+        case PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH:
+            return VK_IMAGE_ASPECT_DEPTH_BIT;
+        case PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL:
+            return VK_IMAGE_ASPECT_STENCIL_BIT;
+        default:
+            return 0;
+    }
+}
+
+static int vulkan_graphics_merge_attachment_copy_range(
         VulkanDispatchImageObject *image,
-        const VkImageSubresourceRange *range) {
+        const VkImageSubresourceRange *range,
+        uint32_t role) {
     if (!image || !range) return -EINVAL;
-    if (range->aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
+    VkImageAspectFlags required = vulkan_graphics_attachment_aspect_mask(role);
+    if (!required ||
+        range->aspectMask != required ||
         range->levelCount == 0 ||
         range->layerCount == 0 ||
         range->baseMipLevel >= image->mip_levels ||
@@ -18686,7 +18700,7 @@ static int vulkan_graphics_merge_color_copy_range(
         return -EOPNOTSUPP;
     }
     if (image->copy_aspect_mask &&
-        image->copy_aspect_mask != range->aspectMask) {
+        image->copy_aspect_mask != required) {
         return -EOPNOTSUPP;
     }
     if (image->copy_level_count &&
@@ -18696,7 +18710,7 @@ static int vulkan_graphics_merge_color_copy_range(
          image->copy_layer_count != range->layerCount)) {
         return -EOPNOTSUPP;
     }
-    image->copy_aspect_mask = range->aspectMask;
+    image->copy_aspect_mask = required;
     image->copy_base_mip = range->baseMipLevel;
     image->copy_level_count = range->levelCount;
     image->copy_base_layer = range->baseArrayLayer;
@@ -18722,10 +18736,6 @@ static int vulkan_graphics_attachment_ops_supported(
     }
     if (store_op != VK_ATTACHMENT_STORE_OP_STORE &&
         store_op != VK_ATTACHMENT_STORE_OP_DONT_CARE) {
-        return -EOPNOTSUPP;
-    }
-    if (role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
-        store_op == VK_ATTACHMENT_STORE_OP_STORE) {
         return -EOPNOTSUPP;
     }
     return 0;
@@ -18770,26 +18780,30 @@ static VkPipelineStageFlags vulkan_graphics_attachment_stage_mask(uint32_t role)
         : (VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
 }
 
-static int vulkan_graphics_attachment_range_supported(
-        const VulkanDispatchImageObject *image,
-        const VkImageSubresourceRange *range,
-        uint32_t role) {
-    if (!image || !range) return -EINVAL;
-    VkImageAspectFlags required = role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR
-        ? VK_IMAGE_ASPECT_COLOR_BIT
-        : (role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH
-            ? VK_IMAGE_ASPECT_DEPTH_BIT
-            : VK_IMAGE_ASPECT_STENCIL_BIT);
-    if (range->aspectMask != required ||
-        range->levelCount == 0 ||
-        range->layerCount == 0 ||
-        range->baseMipLevel >= image->mip_levels ||
-        range->levelCount > image->mip_levels - range->baseMipLevel ||
-        range->baseArrayLayer >= image->array_layers ||
-        range->layerCount > image->array_layers - range->baseArrayLayer) {
-        return -EOPNOTSUPP;
+static VkAccessFlags vulkan_graphics_attachment_writeback_access_mask(
+        VkImageAspectFlags aspect_mask) {
+    VkAccessFlags access = VK_ACCESS_SHADER_WRITE_BIT;
+    if (aspect_mask & VK_IMAGE_ASPECT_COLOR_BIT) {
+        access |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     }
-    return 0;
+    if (aspect_mask & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
+        access |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    }
+    return access;
+}
+
+static VkPipelineStageFlags vulkan_graphics_attachment_writeback_stage_mask(
+        VkImageAspectFlags aspect_mask) {
+    VkPipelineStageFlags stages =
+        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    if (aspect_mask & VK_IMAGE_ASPECT_COLOR_BIT) {
+        stages |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    }
+    if (aspect_mask & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) {
+        stages |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                  VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    }
+    return stages;
 }
 
 static int materialize_vulkan_graphics_v6_attachments(
@@ -18866,13 +18880,10 @@ static int materialize_vulkan_graphics_v6_attachments(
                 vulkan_graphics_attachment_ops_supported(attachment, attachment->attachment_role) != 0) {
                 return -EOPNOTSUPP;
             }
-            int range_rc = attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR
-                ? vulkan_graphics_merge_color_copy_range(image, &replay_view->range)
-                : vulkan_graphics_attachment_range_supported(
-                    image, &replay_view->range, attachment->attachment_role);
+            int range_rc = vulkan_graphics_merge_attachment_copy_range(
+                image, &replay_view->range, attachment->attachment_role);
             if (range_rc != 0) return range_rc;
-            if (attachment->attachment_role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
-                effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {
+            if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {
                 image->writeback_needed = 1;
             }
             image->current_layout = (VkImageLayout)view->images[image->source_index].initial_layout;
@@ -18887,6 +18898,7 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
     if (!command_buffer || !attachments) return -EINVAL;
     VkImageMemoryBarrier post_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t post_barrier_count = 0;
+    VkPipelineStageFlags post_src_stages = 0;
     for (size_t i = 0; i < attachments->image_count; ++i) {
         VulkanDispatchImageObject *image = &attachments->images[i];
         if (!image->writeback_needed) continue;
@@ -18897,7 +18909,8 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
         if (post_barrier_count >= PDOCKER_GPU_MAX_VULKAN_BINDINGS) return -E2BIG;
         post_barriers[post_barrier_count++] = (VkImageMemoryBarrier){
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .srcAccessMask =
+                vulkan_graphics_attachment_writeback_access_mask(image->copy_aspect_mask),
             .dstAccessMask = image->requires_staging
                 ? VK_ACCESS_TRANSFER_READ_BIT
                 : VK_ACCESS_HOST_READ_BIT,
@@ -18916,15 +18929,16 @@ static int record_vulkan_graphics_v6_attachment_writeback_commands(
                 .layerCount = image->copy_layer_count,
             },
         };
+        post_src_stages |=
+            vulkan_graphics_attachment_writeback_stage_mask(image->copy_aspect_mask);
         if (image->requires_staging) {
             image->current_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         }
     }
     if (post_barrier_count) {
+        if (!post_src_stages) post_src_stages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
         vkCmdPipelineBarrier(command_buffer,
-                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                                 VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
-                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             post_src_stages,
                              VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT,
                              0,
                              0, NULL,
@@ -19729,8 +19743,9 @@ static int materialize_vulkan_graphics_v6_descriptors(
                     if (required_usage && !(image->usage & required_usage)) return -EPROTO;
                     if (image->requires_staging ||
                         descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                        int range_rc = vulkan_graphics_merge_color_copy_range(
-                            image, &view_obj->range);
+                        int range_rc = vulkan_graphics_merge_attachment_copy_range(
+                            image, &view_obj->range,
+                            PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR);
                         if (range_rc != 0) return range_rc;
                     }
                     image->descriptor_layout = (VkImageLayout)descriptor->image_layout;
