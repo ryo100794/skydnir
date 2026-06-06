@@ -49,7 +49,7 @@ class _ConnectProxyHandler(socketserver.BaseRequestHandler):
                 client.sendall(b"HTTP/1.1 400 Bad Request\r\n\r\n")
                 return
             try:
-                upstream = socket.create_connection((host, int(port)), timeout=30)
+                upstream = _connect_upstream(host, int(port), timeout=10)
             except (socket.gaierror, OSError) as e:
                 msg = f"HTTP/1.1 502 Bad Gateway\r\n\r\n{e}".encode()
                 client.sendall(msg)
@@ -61,6 +61,22 @@ class _ConnectProxyHandler(socketserver.BaseRequestHandler):
         finally:
             try: client.close()
             except Exception: pass
+
+
+def _connect_upstream(host: str, port: int, timeout: int = 10) -> socket.socket:
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    infos.sort(key=lambda item: 0 if item[0] == socket.AF_INET else 1)
+    errors: list[str] = []
+    for family, socktype, proto, _, sockaddr in infos:
+        sock = socket.socket(family, socktype, proto)
+        try:
+            sock.settimeout(timeout)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as exc:
+            errors.append(f"{sockaddr}: {exc}")
+            sock.close()
+    raise OSError("; ".join(errors) or f"could not connect to {host}:{port}")
 
 
 def _pipe(a: socket.socket, b: socket.socket) -> None:
