@@ -1397,6 +1397,29 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, executor)
         self.assertNotIn("if (color_formats[c] == VK_FORMAT_UNDEFINED) return -EPROTO;", executor)
 
+    def test_vulkan_secondary_command_buffers_are_index_rebased_not_unconditionally_rejected(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("VkCommandBufferLevel level;", icd)
+        self.assertIn("cmd->level = pAllocateInfo->level;", icd)
+        self.assertIn("append_secondary_command_buffer", icd)
+        self.assertIn("command_buffer_has_room_for_secondary", icd)
+        self.assertIn("update_payloads[PDOCKER_VK_MAX_COMMAND_OPS]", icd)
+        self.assertIn("op.payload = update_payloads[i];", icd)
+        self.assertIn("record.rendering_snapshot_index += rendering_base;", icd)
+        self.assertIn("record.descriptor_bind_snapshot_index += descriptor_bind_base;", icd)
+        self.assertIn("record.dynamic_state_index += dynamic_state_base;", icd)
+        self.assertIn("record.draw_snapshot_index += graphics_draw_base;", icd)
+        self.assertIn("record.push_op_index += push_op_base;", icd)
+        self.assertIn("record.memory_barrier_op_first += memory_barrier_base;", icd)
+        self.assertIn("record.first_dynamic_offset += dynamic_offset_base;", icd)
+        self.assertIn("op.index += dispatch_base;", icd)
+        self.assertIn("op.index += graphics_draw_base;", icd)
+        execute_body = icd[icd.index("VKAPI_ATTR void VKAPI_CALL vkCmdExecuteCommands"):]
+        execute_body = execute_body[:execute_body.index("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets")]
+        self.assertIn("secondary->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY", execute_body)
+        self.assertIn("!append_secondary_command_buffer(cmd, secondary)", execute_body)
+        self.assertNotIn("cmd->graphics_unsupported = true;\n}", execute_body)
+
     def test_vulkan_graphics_v6_describe_response_is_nonterminal(self):
         icd = VULKAN_ICD.read_text()
         response_reader = icd.split("static int read_dispatch_response_status", 1)[1].split("typedef struct {", 1)[0]

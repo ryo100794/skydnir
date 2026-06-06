@@ -815,6 +815,7 @@ typedef struct {
     VkClearValue active_clear_values[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     uint32_t active_clear_value_count;
     bool graphics_unsupported;
+    VkCommandBufferLevel level;
     PdockerVkVertexBindingState vertex_bindings[PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS];
     uint32_t vertex_binding_count;
     PdockerVkBuffer *index_buffer;
@@ -1006,6 +1007,227 @@ static bool append_command_op(PdockerVkCommandBuffer *cmd, const PdockerVkComman
         return false;
     }
     cmd->command_ops[cmd->command_op_count++] = *op;
+    return true;
+}
+
+static bool command_buffer_has_room_for_secondary(
+        const PdockerVkCommandBuffer *dst,
+        const PdockerVkCommandBuffer *src) {
+    return dst && src &&
+        src->copy_op_count <= PDOCKER_VK_MAX_COPY_OPS - dst->copy_op_count &&
+        src->image_copy_op_count <= PDOCKER_VK_MAX_COPY_OPS - dst->image_copy_op_count &&
+        src->image_to_image_copy_op_count <= PDOCKER_VK_MAX_COPY_OPS - dst->image_to_image_copy_op_count &&
+        src->image_clear_op_count <= PDOCKER_VK_MAX_COPY_OPS - dst->image_clear_op_count &&
+        src->image_resolve_op_count <= PDOCKER_VK_MAX_COPY_OPS - dst->image_resolve_op_count &&
+        src->image_blit_op_count <= PDOCKER_VK_MAX_COPY_OPS - dst->image_blit_op_count &&
+        src->depth_stencil_clear_op_count <= PDOCKER_VK_MAX_COPY_OPS - dst->depth_stencil_clear_op_count &&
+        src->memory_barrier_op_count <= PDOCKER_VK_MAX_COPY_OPS - dst->memory_barrier_op_count &&
+        src->buffer_barrier_op_count <= PDOCKER_VK_MAX_COPY_OPS - dst->buffer_barrier_op_count &&
+        src->image_barrier_op_count <= PDOCKER_VK_MAX_COPY_OPS - dst->image_barrier_op_count &&
+        src->dispatch_op_count <= PDOCKER_VK_MAX_DISPATCH_OPS - dst->dispatch_op_count &&
+        src->command_op_count <= PDOCKER_VK_MAX_COMMAND_OPS - dst->command_op_count &&
+        src->graphics_draw_op_count <= PDOCKER_VK_MAX_GRAPHICS_DRAW_OPS - dst->graphics_draw_op_count &&
+        src->graphics_descriptor_bind_op_count <= PDOCKER_VK_MAX_GRAPHICS_DESCRIPTOR_BIND_OPS - dst->graphics_descriptor_bind_op_count &&
+        src->graphics_rendering_op_count <= PDOCKER_VK_MAX_GRAPHICS_RENDERING_OPS - dst->graphics_rendering_op_count &&
+        src->graphics_command_op_count <= PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS - dst->graphics_command_op_count &&
+        src->graphics_dynamic_offset_count <= PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_OFFSETS - dst->graphics_dynamic_offset_count &&
+        src->dynamic_state_count <= PDOCKER_VK_MAX_GRAPHICS_DYNAMIC_STATES - dst->dynamic_state_count &&
+        src->push_constant_op_count <= PDOCKER_VK_MAX_PUSH_CONSTANT_OPS - dst->push_constant_op_count;
+}
+
+static bool append_secondary_command_buffer(
+        PdockerVkCommandBuffer *dst,
+        const PdockerVkCommandBuffer *src) {
+    if (!command_buffer_has_room_for_secondary(dst, src)) return false;
+    if (src->graphics_unsupported || src->unsupported_descriptor_set_layout ||
+        src->dynamic_rendering_active || src->render_pass_active) {
+        return false;
+    }
+
+    uint32_t copy_base = dst->copy_op_count;
+    uint32_t image_copy_base = dst->image_copy_op_count;
+    uint32_t image_to_image_copy_base = dst->image_to_image_copy_op_count;
+    uint32_t image_clear_base = dst->image_clear_op_count;
+    uint32_t image_resolve_base = dst->image_resolve_op_count;
+    uint32_t image_blit_base = dst->image_blit_op_count;
+    uint32_t depth_stencil_clear_base = dst->depth_stencil_clear_op_count;
+    uint32_t memory_barrier_base = dst->memory_barrier_op_count;
+    uint32_t buffer_barrier_base = dst->buffer_barrier_op_count;
+    uint32_t image_barrier_base = dst->image_barrier_op_count;
+    uint32_t dispatch_base = dst->dispatch_op_count;
+    uint32_t graphics_draw_base = dst->graphics_draw_op_count;
+    uint32_t descriptor_bind_base = dst->graphics_descriptor_bind_op_count;
+    uint32_t rendering_base = dst->graphics_rendering_op_count;
+    uint32_t dynamic_state_base = dst->dynamic_state_count;
+    uint32_t dynamic_offset_base = dst->graphics_dynamic_offset_count;
+    uint32_t push_op_base = dst->push_constant_op_count;
+
+    void *update_payloads[PDOCKER_VK_MAX_COMMAND_OPS];
+    memset(update_payloads, 0, sizeof(update_payloads));
+    for (uint32_t i = 0; i < src->command_op_count; ++i) {
+        const PdockerVkCommandOp *op = &src->command_ops[i];
+        if (op->type != PDOCKER_VK_COMMAND_UPDATE || op->size == 0 || !op->payload) continue;
+        if (op->size > (VkDeviceSize)SIZE_MAX) {
+            for (uint32_t j = 0; j < i; ++j) free(update_payloads[j]);
+            return false;
+        }
+        update_payloads[i] = malloc((size_t)op->size);
+        if (!update_payloads[i]) {
+            for (uint32_t j = 0; j < i; ++j) free(update_payloads[j]);
+            return false;
+        }
+        memcpy(update_payloads[i], op->payload, (size_t)op->size);
+    }
+
+    memcpy(dst->copy_ops + dst->copy_op_count, src->copy_ops,
+           sizeof(src->copy_ops[0]) * src->copy_op_count);
+    dst->copy_op_count += src->copy_op_count;
+    memcpy(dst->image_copy_ops + dst->image_copy_op_count, src->image_copy_ops,
+           sizeof(src->image_copy_ops[0]) * src->image_copy_op_count);
+    dst->image_copy_op_count += src->image_copy_op_count;
+    memcpy(dst->image_to_image_copy_ops + dst->image_to_image_copy_op_count, src->image_to_image_copy_ops,
+           sizeof(src->image_to_image_copy_ops[0]) * src->image_to_image_copy_op_count);
+    dst->image_to_image_copy_op_count += src->image_to_image_copy_op_count;
+    memcpy(dst->image_clear_ops + dst->image_clear_op_count, src->image_clear_ops,
+           sizeof(src->image_clear_ops[0]) * src->image_clear_op_count);
+    dst->image_clear_op_count += src->image_clear_op_count;
+    memcpy(dst->image_resolve_ops + dst->image_resolve_op_count, src->image_resolve_ops,
+           sizeof(src->image_resolve_ops[0]) * src->image_resolve_op_count);
+    dst->image_resolve_op_count += src->image_resolve_op_count;
+    memcpy(dst->image_blit_ops + dst->image_blit_op_count, src->image_blit_ops,
+           sizeof(src->image_blit_ops[0]) * src->image_blit_op_count);
+    dst->image_blit_op_count += src->image_blit_op_count;
+    memcpy(dst->depth_stencil_clear_ops + dst->depth_stencil_clear_op_count, src->depth_stencil_clear_ops,
+           sizeof(src->depth_stencil_clear_ops[0]) * src->depth_stencil_clear_op_count);
+    dst->depth_stencil_clear_op_count += src->depth_stencil_clear_op_count;
+    memcpy(dst->memory_barrier_ops + dst->memory_barrier_op_count, src->memory_barrier_ops,
+           sizeof(src->memory_barrier_ops[0]) * src->memory_barrier_op_count);
+    dst->memory_barrier_op_count += src->memory_barrier_op_count;
+    memcpy(dst->buffer_barrier_ops + dst->buffer_barrier_op_count, src->buffer_barrier_ops,
+           sizeof(src->buffer_barrier_ops[0]) * src->buffer_barrier_op_count);
+    dst->buffer_barrier_op_count += src->buffer_barrier_op_count;
+    memcpy(dst->image_barrier_ops + dst->image_barrier_op_count, src->image_barrier_ops,
+           sizeof(src->image_barrier_ops[0]) * src->image_barrier_op_count);
+    dst->image_barrier_op_count += src->image_barrier_op_count;
+    memcpy(dst->dispatch_ops + dst->dispatch_op_count, src->dispatch_ops,
+           sizeof(src->dispatch_ops[0]) * src->dispatch_op_count);
+    dst->dispatch_op_count += src->dispatch_op_count;
+    memcpy(dst->graphics_draw_ops + dst->graphics_draw_op_count, src->graphics_draw_ops,
+           sizeof(src->graphics_draw_ops[0]) * src->graphics_draw_op_count);
+    dst->graphics_draw_op_count += src->graphics_draw_op_count;
+    memcpy(dst->graphics_descriptor_bind_ops + dst->graphics_descriptor_bind_op_count,
+           src->graphics_descriptor_bind_ops,
+           sizeof(src->graphics_descriptor_bind_ops[0]) * src->graphics_descriptor_bind_op_count);
+    dst->graphics_descriptor_bind_op_count += src->graphics_descriptor_bind_op_count;
+    memcpy(dst->graphics_rendering_ops + dst->graphics_rendering_op_count, src->graphics_rendering_ops,
+           sizeof(src->graphics_rendering_ops[0]) * src->graphics_rendering_op_count);
+    dst->graphics_rendering_op_count += src->graphics_rendering_op_count;
+    memcpy(dst->dynamic_states + dst->dynamic_state_count, src->dynamic_states,
+           sizeof(src->dynamic_states[0]) * src->dynamic_state_count);
+    dst->dynamic_state_count += src->dynamic_state_count;
+    memcpy(dst->graphics_dynamic_offsets + dst->graphics_dynamic_offset_count, src->graphics_dynamic_offsets,
+           sizeof(src->graphics_dynamic_offsets[0]) * src->graphics_dynamic_offset_count);
+    dst->graphics_dynamic_offset_count += src->graphics_dynamic_offset_count;
+    memcpy(dst->push_constant_ops + dst->push_constant_op_count, src->push_constant_ops,
+           sizeof(src->push_constant_ops[0]) * src->push_constant_op_count);
+    dst->push_constant_op_count += src->push_constant_op_count;
+
+    for (uint32_t i = 0; i < src->graphics_command_op_count; ++i) {
+        PdockerVkGraphicsCommandRecord record = src->graphics_command_ops[i];
+        switch (record.command_type) {
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING:
+                record.rendering_snapshot_index += rendering_base;
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS:
+                record.descriptor_bind_snapshot_index += descriptor_bind_base;
+                record.first_dynamic_offset += dynamic_offset_base;
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE:
+                record.dynamic_state_index += dynamic_state_base;
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS:
+                record.push_op_index += push_op_base;
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:
+                record.memory_barrier_op_first += memory_barrier_base;
+                record.buffer_barrier_op_first += buffer_barrier_base;
+                record.image_barrier_op_first += image_barrier_base;
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
+                record.draw_snapshot_index += graphics_draw_base;
+                break;
+            default:
+                break;
+        }
+        dst->graphics_command_ops[dst->graphics_command_op_count++] = record;
+    }
+
+    for (uint32_t i = 0; i < src->command_op_count; ++i) {
+        PdockerVkCommandOp op = src->command_ops[i];
+        switch (op.type) {
+            case PDOCKER_VK_COMMAND_COPY:
+                op.index += copy_base;
+                break;
+            case PDOCKER_VK_COMMAND_DISPATCH:
+                op.index += dispatch_base;
+                break;
+            case PDOCKER_VK_COMMAND_IMAGE_COPY:
+                op.index += image_copy_base;
+                break;
+            case PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY:
+                op.index += image_to_image_copy_base;
+                break;
+            case PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE:
+                op.index += image_clear_base;
+                break;
+            case PDOCKER_VK_COMMAND_RESOLVE_IMAGE:
+                op.index += image_resolve_base;
+                break;
+            case PDOCKER_VK_COMMAND_BLIT_IMAGE:
+                op.index += image_blit_base;
+                break;
+            case PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:
+                op.index += depth_stencil_clear_base;
+                break;
+            case PDOCKER_VK_COMMAND_IMAGE_BARRIER:
+                op.index += image_barrier_base;
+                break;
+            case PDOCKER_VK_COMMAND_GRAPHICS_DRAW:
+                op.index += graphics_draw_base;
+                break;
+            case PDOCKER_VK_COMMAND_UPDATE:
+                op.payload = update_payloads[i];
+                update_payloads[i] = NULL;
+                break;
+            default:
+                break;
+        }
+        dst->command_ops[dst->command_op_count++] = op;
+    }
+
+    memcpy(dst->vertex_bindings, src->vertex_bindings, sizeof(dst->vertex_bindings));
+    dst->vertex_binding_count = src->vertex_binding_count;
+    dst->vertex_buffer_bound = src->vertex_buffer_bound;
+    if (src->index_buffer_bound) {
+        dst->index_buffer = src->index_buffer;
+        dst->index_offset = src->index_offset;
+        dst->index_type = src->index_type;
+        dst->index_buffer_bound = true;
+    }
+    if (src->push_constant_size > 0) {
+        memcpy(dst->push_constants, src->push_constants, sizeof(dst->push_constants));
+        dst->push_constant_size = src->push_constant_size;
+    }
+    if (src->has_dispatch) {
+        dst->dispatch_x = src->dispatch_x;
+        dst->dispatch_y = src->dispatch_y;
+        dst->dispatch_z = src->dispatch_z;
+        dst->has_dispatch = true;
+    }
+    if (src->pipeline) dst->pipeline = src->pipeline;
+    if (src->compute_pipeline) dst->compute_pipeline = src->compute_pipeline;
+    if (src->graphics_pipeline) dst->graphics_pipeline = src->graphics_pipeline;
     return true;
 }
 
@@ -9750,6 +9972,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(
         PdockerVkCommandBuffer *cmd = pdocker_alloc_handle(sizeof(*cmd));
         if (!cmd) return VK_ERROR_OUT_OF_HOST_MEMORY;
         set_loader_magic_value(cmd);
+        cmd->level = pAllocateInfo->level;
         pCommandBuffers[i] = (VkCommandBuffer)cmd;
     }
     return VK_SUCCESS;
@@ -10983,18 +11206,19 @@ VKAPI_ATTR void VKAPI_CALL vkCmdExecuteCommands(
         uint32_t commandBufferCount,
         const VkCommandBuffer *pCommandBuffers) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    if (!cmd) return;
+    if (!cmd || commandBufferCount == 0) return;
+    if (cmd->level != VK_COMMAND_BUFFER_LEVEL_PRIMARY || !pCommandBuffers) {
+        cmd->graphics_unsupported = true;
+        return;
+    }
     for (uint32_t i = 0; i < commandBufferCount; ++i) {
-        PdockerVkCommandBuffer *secondary = pCommandBuffers
-            ? (PdockerVkCommandBuffer *)pCommandBuffers[i]
-            : NULL;
-        if (!secondary || secondary->graphics_unsupported ||
-                secondary->unsupported_descriptor_set_layout) {
+        PdockerVkCommandBuffer *secondary = (PdockerVkCommandBuffer *)pCommandBuffers[i];
+        if (!secondary || secondary->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY ||
+            !append_secondary_command_buffer(cmd, secondary)) {
             cmd->graphics_unsupported = true;
             return;
         }
     }
-    cmd->graphics_unsupported = true;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
