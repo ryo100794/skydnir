@@ -12661,6 +12661,127 @@ static void complete_submit_semaphores(const VkSubmitInfo *submit) {
     }
 }
 
+static bool command_op_is_graphics_frame_op(PdockerVkCommandOpType type) {
+    return type == PDOCKER_VK_COMMAND_GRAPHICS_DRAW ||
+           type == PDOCKER_VK_COMMAND_IMAGE_BARRIER ||
+           type == PDOCKER_VK_COMMAND_BARRIER;
+}
+
+static bool command_op_is_host_transfer_or_layout_op(PdockerVkCommandOpType type) {
+    switch (type) {
+        case PDOCKER_VK_COMMAND_COPY:
+        case PDOCKER_VK_COMMAND_IMAGE_COPY:
+        case PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY:
+        case PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE:
+        case PDOCKER_VK_COMMAND_RESOLVE_IMAGE:
+        case PDOCKER_VK_COMMAND_BLIT_IMAGE:
+        case PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:
+        case PDOCKER_VK_COMMAND_IMAGE_BARRIER:
+        case PDOCKER_VK_COMMAND_BARRIER:
+        case PDOCKER_VK_COMMAND_FILL:
+        case PDOCKER_VK_COMMAND_UPDATE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void execute_recorded_host_transfer_or_layout_op(
+        PdockerVkCommandBuffer *cmd,
+        PdockerVkCommandOp *op,
+        PdockerVkCopyStats *stats) {
+    if (!cmd || !op) return;
+    switch (op->type) {
+        case PDOCKER_VK_COMMAND_COPY:
+            if (op->index < cmd->copy_op_count) execute_recorded_copy_op(&cmd->copy_ops[op->index], stats);
+            break;
+        case PDOCKER_VK_COMMAND_IMAGE_COPY:
+            if (op->index < cmd->image_copy_op_count) execute_recorded_image_copy_op(&cmd->image_copy_ops[op->index], stats);
+            break;
+        case PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY:
+            if (op->index < cmd->image_to_image_copy_op_count) execute_recorded_image_to_image_copy_op(&cmd->image_to_image_copy_ops[op->index], stats);
+            break;
+        case PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE:
+            if (op->index < cmd->image_clear_op_count) execute_recorded_clear_color_image_op(&cmd->image_clear_ops[op->index], stats);
+            break;
+        case PDOCKER_VK_COMMAND_RESOLVE_IMAGE:
+            if (op->index < cmd->image_resolve_op_count) execute_recorded_resolve_image_op(&cmd->image_resolve_ops[op->index], stats);
+            break;
+        case PDOCKER_VK_COMMAND_BLIT_IMAGE:
+            if (op->index < cmd->image_blit_op_count) execute_recorded_blit_image_op(&cmd->image_blit_ops[op->index], stats);
+            break;
+        case PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:
+            if (op->index < cmd->depth_stencil_clear_op_count) execute_recorded_clear_depth_stencil_image_op(&cmd->depth_stencil_clear_ops[op->index], stats);
+            break;
+        case PDOCKER_VK_COMMAND_IMAGE_BARRIER:
+            if (op->index < cmd->image_barrier_op_count) execute_recorded_image_barrier_op(&cmd->image_barrier_ops[op->index]);
+            break;
+        case PDOCKER_VK_COMMAND_BARRIER:
+            break;
+        case PDOCKER_VK_COMMAND_FILL:
+            execute_recorded_fill_op(op);
+            break;
+        case PDOCKER_VK_COMMAND_UPDATE:
+            execute_recorded_update_op(op);
+            break;
+        default:
+            break;
+    }
+}
+
+static bool graphics_mixed_submit_plan(
+        const PdockerVkCommandBuffer *cmd,
+        uint32_t *first_draw_out,
+        uint32_t *last_draw_out,
+        const char **reason_out) {
+    if (!cmd) return false;
+    uint32_t first_draw = UINT32_MAX;
+    uint32_t last_draw = 0;
+    for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
+        if (cmd->command_ops[op_index].type == PDOCKER_VK_COMMAND_GRAPHICS_DRAW) {
+            if (first_draw == UINT32_MAX) first_draw = op_index;
+            last_draw = op_index;
+        }
+    }
+    for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
+        PdockerVkCommandOpType type = cmd->command_ops[op_index].type;
+        if (command_op_is_graphics_frame_op(type)) continue;
+        if (!command_op_is_host_transfer_or_layout_op(type)) {
+            if (reason_out) *reason_out = "graphics-mixed-submit-unimplemented";
+            return false;
+        }
+        if (first_draw != UINT32_MAX && op_index > first_draw && op_index < last_draw) {
+            if (reason_out) *reason_out = "graphics-mixed-transfer-between-draws-unimplemented";
+            return false;
+        }
+    }
+    if (first_draw_out) *first_draw_out = first_draw;
+    if (last_draw_out) *last_draw_out = last_draw;
+    return true;
+}
+
+static void execute_graphics_mixed_host_side_ops(
+        PdockerVkCommandBuffer *cmd,
+        uint32_t first_draw,
+        uint32_t last_draw,
+        bool before_graphics,
+        PdockerVkCopyStats *stats) {
+    if (!cmd) return;
+    for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
+        PdockerVkCommandOp *op = &cmd->command_ops[op_index];
+        if (!command_op_is_host_transfer_or_layout_op(op->type)) continue;
+        bool run = false;
+        if (first_draw == UINT32_MAX) {
+            run = before_graphics;
+        } else if (before_graphics) {
+            run = op_index < first_draw;
+        } else {
+            run = op_index > last_draw;
+        }
+        if (run) execute_recorded_host_transfer_or_layout_op(cmd, op, stats);
+    }
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         VkQueue queue,
         uint32_t submitCount,
@@ -12695,32 +12816,38 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 return VK_ERROR_FEATURE_NOT_PRESENT;
             }
             if (cmd->graphics_command_op_count > 0) {
-                bool graphics_only_submit = true;
-                for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
-                    PdockerVkCommandOpType op_type = cmd->command_ops[op_index].type;
-                    if (op_type != PDOCKER_VK_COMMAND_GRAPHICS_DRAW &&
-                        op_type != PDOCKER_VK_COMMAND_IMAGE_BARRIER &&
-                        op_type != PDOCKER_VK_COMMAND_BARRIER) {
-                        graphics_only_submit = false;
-                        break;
-                    }
-                }
-                if (!graphics_only_submit) {
-                    trace_icd_runtime_failure("graphics-mixed-submit-unimplemented",
+                uint32_t first_graphics_draw_op = UINT32_MAX;
+                uint32_t last_graphics_draw_op = 0;
+                const char *mixed_submit_reason = NULL;
+                if (!graphics_mixed_submit_plan(cmd, &first_graphics_draw_op,
+                                                &last_graphics_draw_op,
+                                                &mixed_submit_reason)) {
+                    trace_icd_runtime_failure(mixed_submit_reason ? mixed_submit_reason :
+                                              "graphics-mixed-submit-unimplemented",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
+                PdockerVkCopyStats mixed_stats;
+                memset(&mixed_stats, 0, sizeof(mixed_stats));
+                execute_graphics_mixed_host_side_ops(cmd, first_graphics_draw_op,
+                                                     last_graphics_draw_op, true,
+                                                     &mixed_stats);
                 int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(cmd);
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                     fprintf(stderr,
-                            "pdocker-vulkan-icd: graphics V6.1 submit rc=%d\n",
-                            graphics_rc);
+                            "pdocker-vulkan-icd: graphics V6.1 mixed submit rc=%d prepost_ops=%zu bytes=%llu\n",
+                            graphics_rc,
+                            mixed_stats.op_count,
+                            (unsigned long long)mixed_stats.memmove_bytes);
                 }
                 if (graphics_rc != 0) {
                     trace_icd_runtime_failure("graphics-v6-submit-failed",
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
+                execute_graphics_mixed_host_side_ops(cmd, first_graphics_draw_op,
+                                                     last_graphics_draw_op, false,
+                                                     &mixed_stats);
                 continue;
             }
             if (cmd->command_op_count > 0) {
