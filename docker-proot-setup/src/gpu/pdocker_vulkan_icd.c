@@ -426,6 +426,11 @@ typedef struct {
     bool has_depth_stencil_attachment;
     uint32_t depth_stencil_attachment;
     VkImageLayout depth_stencil_layout;
+    bool has_depth_stencil_resolve_attachment;
+    uint32_t depth_stencil_resolve_attachment;
+    VkImageLayout depth_stencil_resolve_layout;
+    VkResolveModeFlagBits depth_resolve_mode;
+    VkResolveModeFlagBits stencil_resolve_mode;
     bool unsupported;
 } PdockerVkSubpassState;
 
@@ -9254,6 +9259,10 @@ static void capture_render_pass_subpass_state(
         dst->depth_stencil_attachment = VK_ATTACHMENT_UNUSED;
         dst->depth_stencil_layout = VK_IMAGE_LAYOUT_UNDEFINED;
     }
+    dst->depth_stencil_resolve_attachment = VK_ATTACHMENT_UNUSED;
+    dst->depth_stencil_resolve_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    dst->depth_resolve_mode = VK_RESOLVE_MODE_NONE;
+    dst->stencil_resolve_mode = VK_RESOLVE_MODE_NONE;
 }
 
 static void capture_render_pass_subpass_state2(
@@ -9273,11 +9282,22 @@ static void capture_render_pass_subpass_state2(
         }
         return;
     }
-    bool unsupported = subpass->pNext != NULL || subpass->flags != 0 || subpass->viewMask != 0;
+    bool unsupported = subpass->flags != 0 || subpass->viewMask != 0;
+    const VkSubpassDescriptionDepthStencilResolve *depth_stencil_resolve = NULL;
     for (const VkBaseInStructure *chain = (const VkBaseInStructure *)subpass->pNext;
          chain;
          chain = (const VkBaseInStructure *)chain->pNext) {
-        unsupported = true;
+        if (chain->sType == VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE) {
+            if (depth_stencil_resolve) {
+                unsupported = true;
+            }
+            depth_stencil_resolve = (const VkSubpassDescriptionDepthStencilResolve *)chain;
+            if (depth_stencil_resolve->pNext) {
+                unsupported = true;
+            }
+        } else {
+            unsupported = true;
+        }
     }
     uint32_t color_count = subpass->colorAttachmentCount;
     uint32_t copy_count = clamp_u32(color_count, PDOCKER_VK_MAX_STORAGE_BUFFERS);
@@ -9320,6 +9340,24 @@ static void capture_render_pass_subpass_state2(
         subpass->pDepthStencilAttachment ? &depth_stencil_ref : NULL,
         subpass->inputAttachmentCount,
         subpass->preserveAttachmentCount);
+    if (depth_stencil_resolve && rp && subpass_index < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+        PdockerVkSubpassState *dst = &rp->subpasses[subpass_index];
+        const VkAttachmentReference2 *resolve_ref =
+            depth_stencil_resolve->pDepthStencilResolveAttachment;
+        dst->depth_resolve_mode = depth_stencil_resolve->depthResolveMode;
+        dst->stencil_resolve_mode = depth_stencil_resolve->stencilResolveMode;
+        if (resolve_ref && resolve_ref->attachment != VK_ATTACHMENT_UNUSED) {
+            if (resolve_ref->pNext || resolve_ref->aspectMask != 0 ||
+                resolve_ref->attachment >= rp->attachment_count ||
+                !pdocker_vk_format_is_depth_stencil(
+                    rp->attachments[resolve_ref->attachment].format)) {
+                unsupported = true;
+            }
+            dst->has_depth_stencil_resolve_attachment = true;
+            dst->depth_stencil_resolve_attachment = resolve_ref->attachment;
+            dst->depth_stencil_resolve_layout = resolve_ref->layout;
+        }
+    }
     if (unsupported && rp && subpass_index < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         rp->subpasses[subpass_index].unsupported = true;
     }
@@ -10143,6 +10181,29 @@ static bool append_render_pass_begin_layout_transitions(PdockerVkCommandBuffer *
                 render_pass_attachment_stage_mask(true) | rp->begin_dependency.dst_stage_mask)) {
             return false;
         }
+        if (subpass->has_depth_stencil_resolve_attachment &&
+            subpass->depth_stencil_resolve_attachment < rp->attachment_count) {
+            VkImageLayout resolve_initial_layout =
+                rp->attachments[subpass->depth_stencil_resolve_attachment].initial_layout;
+            PdockerVkImageView *resolve_view = cmd->active_depth_attachment.resolve_image_view
+                ? cmd->active_depth_attachment.resolve_image_view
+                : cmd->active_stencil_attachment.resolve_image_view;
+            if (resolve_view && !record_render_pass_attachment_transition(
+                    cmd, resolve_view,
+                    resolve_initial_layout,
+                    subpass->depth_stencil_resolve_layout,
+                    rp->begin_dependency.seen
+                        ? render_pass_nonzero_access_mask(rp->begin_dependency.src_access_mask)
+                        : render_pass_begin_src_access_mask(resolve_initial_layout),
+                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+                        rp->begin_dependency.dst_access_mask,
+                    rp->begin_dependency.seen
+                        ? render_pass_nonzero_stage_mask(rp->begin_dependency.src_stage_mask)
+                        : render_pass_begin_src_stage_mask(resolve_initial_layout),
+                    render_pass_attachment_stage_mask(true) | rp->begin_dependency.dst_stage_mask)) {
+                return false;
+            }
+        }
     }
     return append_graphics_barrier_record_for_ranges(
         cmd, memory_first, cmd->memory_barrier_op_count - memory_first,
@@ -10218,6 +10279,24 @@ static bool append_render_pass_end_layout_transitions(PdockerVkCommandBuffer *cm
                 render_pass_layout_stage_mask(final_layout))) {
             return false;
         }
+        if (subpass->has_depth_stencil_resolve_attachment &&
+            subpass->depth_stencil_resolve_attachment < rp->attachment_count) {
+            VkImageLayout resolve_final_layout =
+                rp->attachments[subpass->depth_stencil_resolve_attachment].final_layout;
+            PdockerVkImageView *resolve_view = cmd->active_depth_attachment.resolve_image_view
+                ? cmd->active_depth_attachment.resolve_image_view
+                : cmd->active_stencil_attachment.resolve_image_view;
+            if (resolve_view && !record_render_pass_attachment_transition(
+                    cmd, resolve_view,
+                    subpass->depth_stencil_resolve_layout,
+                    resolve_final_layout,
+                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                    render_pass_layout_access_mask(resolve_final_layout),
+                    render_pass_attachment_stage_mask(true),
+                    render_pass_layout_stage_mask(resolve_final_layout))) {
+                return false;
+            }
+        }
     }
     return append_graphics_barrier_record_for_ranges(
         cmd, memory_first, cmd->memory_barrier_op_count - memory_first,
@@ -10270,6 +10349,26 @@ static bool populate_single_subpass_render_pass_rendering_state(
                 &cmd->active_stencil_attachment, rp, fb, ds_index,
                 subpass->depth_stencil_layout, begin->pClearValues, begin->clearValueCount, true)) {
             return false;
+        }
+        if (subpass->has_depth_stencil_resolve_attachment) {
+            uint32_t resolve_index = subpass->depth_stencil_resolve_attachment;
+            if (resolve_index >= fb->attachment_count || !fb->attachments[resolve_index]) return false;
+            VkFormat resolve_format = rp->attachments[resolve_index].format;
+            if (!pdocker_vk_format_is_depth_stencil(resolve_format)) return false;
+            if (cmd->active_depth_attachment.valid &&
+                subpass->depth_resolve_mode != VK_RESOLVE_MODE_NONE) {
+                cmd->active_depth_attachment.resolve_image_view = fb->attachments[resolve_index];
+                cmd->active_depth_attachment.resolve_image_layout =
+                    subpass->depth_stencil_resolve_layout;
+                cmd->active_depth_attachment.resolve_mode = subpass->depth_resolve_mode;
+            }
+            if (cmd->active_stencil_attachment.valid &&
+                subpass->stencil_resolve_mode != VK_RESOLVE_MODE_NONE) {
+                cmd->active_stencil_attachment.resolve_image_view = fb->attachments[resolve_index];
+                cmd->active_stencil_attachment.resolve_image_layout =
+                    subpass->depth_stencil_resolve_layout;
+                cmd->active_stencil_attachment.resolve_mode = subpass->stencil_resolve_mode;
+            }
         }
     }
     cmd->active_render_area = begin->renderArea;
