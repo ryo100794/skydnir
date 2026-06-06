@@ -976,6 +976,41 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
 
+    def test_vulkan_command_time_pnext_is_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        copy_body = icd.split(
+            "static bool copy_rendering_attachment_state", 1
+        )[1].split("static bool append_graphics_rendering_snapshot", 1)[0]
+        begin_rendering_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdEndRendering", 1)[0]
+        begin_render_pass_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1)[0]
+        render_pass2_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2", 1
+        )[1].split("static void record_vertex_buffer_bindings", 1)[0]
+        for marker in [
+            "if (src->pNext) return false;",
+            "if (!src) return true;",
+        ]:
+            self.assertIn(marker, copy_body)
+        for marker in [
+            "if (pRenderingInfo->pNext)",
+            "cmd->graphics_unsupported = true;",
+            "if (!copy_rendering_attachment_state(&cmd->active_color_attachments[i]",
+            "if (!copy_rendering_attachment_state(&cmd->active_depth_attachment",
+            "if (!copy_rendering_attachment_state(&cmd->active_stencil_attachment",
+        ]:
+            self.assertIn(marker, begin_rendering_body)
+        self.assertIn("if (pRenderPassBegin && pRenderPassBegin->pNext)", begin_render_pass_body)
+        for marker in [
+            "pSubpassBeginInfo && pSubpassBeginInfo->pNext",
+            "pSubpassEndInfo && pSubpassEndInfo->pNext",
+            "vkCmdNextSubpass(commandBuffer, pSubpassBeginInfo",
+        ]:
+            self.assertIn(marker, render_pass2_body)
+
     def test_vulkan_begin_render_pass_normalizes_single_subpass_to_dynamic_rendering(self):
         icd = VULKAN_ICD.read_text()
         normalize_body = icd.split(
@@ -1064,7 +1099,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->graphics_unsupported = true;",
         ]:
             self.assertIn(marker, next_body)
-        self.assertIn("vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);", icd)
+        self.assertIn("vkCmdNextSubpass(commandBuffer, pSubpassBeginInfo", icd)
 
     def test_vulkan_render_pass_pipeline_formats_are_completed_from_attachment_refs(self):
         icd = VULKAN_ICD.read_text()

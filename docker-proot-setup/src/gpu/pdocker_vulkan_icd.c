@@ -910,12 +910,13 @@ static void record_graphics_dynamic_state_bytes(
     (void)append_graphics_command_record(cmd, &record);
 }
 
-static void copy_rendering_attachment_state(
+static bool copy_rendering_attachment_state(
         PdockerVkRenderingAttachmentState *dst,
         const VkRenderingAttachmentInfo *src) {
-    if (!dst) return;
+    if (!dst) return false;
     memset(dst, 0, sizeof(*dst));
-    if (!src) return;
+    if (!src) return true;
+    if (src->pNext) return false;
     dst->image_view = (PdockerVkImageView *)src->imageView;
     dst->image_layout = src->imageLayout;
     dst->resolve_image_view = (PdockerVkImageView *)src->resolveImageView;
@@ -925,6 +926,7 @@ static void copy_rendering_attachment_state(
     dst->store_op = src->storeOp;
     dst->clear_value = src->clearValue;
     dst->valid = true;
+    return true;
 }
 
 static bool append_graphics_rendering_snapshot(PdockerVkCommandBuffer *cmd,
@@ -9703,6 +9705,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         ? pRenderingInfo->colorAttachmentCount
         : 0;
     if (pRenderingInfo) {
+        if (pRenderingInfo->pNext) {
+            cmd->graphics_unsupported = true;
+        }
         cmd->active_render_area = pRenderingInfo->renderArea;
         cmd->active_rendering_flags = pRenderingInfo->flags;
         cmd->active_rendering_layer_count = pRenderingInfo->layerCount;
@@ -9712,15 +9717,21 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
             cmd->active_color_attachment_count = PDOCKER_VK_MAX_STORAGE_BUFFERS;
         }
         for (uint32_t i = 0; i < cmd->active_color_attachment_count; ++i) {
-            copy_rendering_attachment_state(&cmd->active_color_attachments[i],
-                                            pRenderingInfo->pColorAttachments
-                                                ? &pRenderingInfo->pColorAttachments[i]
-                                                : NULL);
+            if (!copy_rendering_attachment_state(&cmd->active_color_attachments[i],
+                                                 pRenderingInfo->pColorAttachments
+                                                     ? &pRenderingInfo->pColorAttachments[i]
+                                                     : NULL)) {
+                cmd->graphics_unsupported = true;
+            }
         }
-        copy_rendering_attachment_state(&cmd->active_depth_attachment,
-                                        pRenderingInfo->pDepthAttachment);
-        copy_rendering_attachment_state(&cmd->active_stencil_attachment,
-                                        pRenderingInfo->pStencilAttachment);
+        if (!copy_rendering_attachment_state(&cmd->active_depth_attachment,
+                                             pRenderingInfo->pDepthAttachment)) {
+            cmd->graphics_unsupported = true;
+        }
+        if (!copy_rendering_attachment_state(&cmd->active_stencil_attachment,
+                                             pRenderingInfo->pStencilAttachment)) {
+            cmd->graphics_unsupported = true;
+        }
     } else {
         memset(&cmd->active_render_area, 0, sizeof(cmd->active_render_area));
         cmd->active_rendering_flags = 0;
@@ -10157,6 +10168,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass(
     for (uint32_t i = 0; pRenderPassBegin && i < cmd->active_clear_value_count; ++i) {
         cmd->active_clear_values[i] = pRenderPassBegin->pClearValues[i];
     }
+    if (pRenderPassBegin && pRenderPassBegin->pNext) {
+        cmd->graphics_unsupported = true;
+    }
     if (!append_normalized_render_pass_begin(cmd, pRenderPassBegin, contents)) {
         cmd->render_pass_active = true;
         cmd->dynamic_rendering_active = false;
@@ -10206,6 +10220,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass2(
         VkCommandBuffer commandBuffer,
         const VkRenderPassBeginInfo *pRenderPassBegin,
         const VkSubpassBeginInfo *pSubpassBeginInfo) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (cmd && pSubpassBeginInfo && pSubpassBeginInfo->pNext) {
+        cmd->graphics_unsupported = true;
+    }
     vkCmdBeginRenderPass(commandBuffer,
                          pRenderPassBegin,
                          pSubpassBeginInfo ? pSubpassBeginInfo->contents
@@ -10216,15 +10234,23 @@ VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass2(
         VkCommandBuffer commandBuffer,
         const VkSubpassBeginInfo *pSubpassBeginInfo,
         const VkSubpassEndInfo *pSubpassEndInfo) {
-    (void)pSubpassBeginInfo;
-    (void)pSubpassEndInfo;
-    vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (cmd && ((pSubpassBeginInfo && pSubpassBeginInfo->pNext) ||
+                (pSubpassEndInfo && pSubpassEndInfo->pNext))) {
+        cmd->graphics_unsupported = true;
+    }
+    vkCmdNextSubpass(commandBuffer, pSubpassBeginInfo
+                                      ? pSubpassBeginInfo->contents
+                                      : VK_SUBPASS_CONTENTS_INLINE);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass2(
         VkCommandBuffer commandBuffer,
         const VkSubpassEndInfo *pSubpassEndInfo) {
-    (void)pSubpassEndInfo;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (cmd && pSubpassEndInfo && pSubpassEndInfo->pNext) {
+        cmd->graphics_unsupported = true;
+    }
     vkCmdEndRenderPass(commandBuffer);
 }
 
