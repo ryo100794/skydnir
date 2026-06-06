@@ -1947,10 +1947,10 @@ static int syscall_emulate_success(long nr) {
 }
 
 static int syscall_emulate_errno(long nr, int *err) {
-    if ((nr >= 235 && nr <= 239) || nr == 450) {
-        /* Android app seccomp commonly blocks NUMA policy syscalls.  Container
-         * workloads such as OpenBLAS/llama.cpp should treat unavailable NUMA
-         * policy support like a kernel without NUMA support and continue. */
+    if ((nr >= 194 && nr <= 197) || (nr >= 235 && nr <= 239) || nr == 450) {
+        /* Android app seccomp commonly blocks SysV shared memory and NUMA policy
+         * syscalls. Container workloads should treat these like unavailable
+         * optional kernel facilities and continue with fallback paths. */
         if (err) *err = ENOSYS;
         return 1;
     }
@@ -2051,6 +2051,10 @@ static int install_selective_seccomp_trace_filter(void) {
     ADD_TRACE_SYSCALL(175);  /* geteuid */
     ADD_TRACE_SYSCALL(176);  /* getgid */
     ADD_TRACE_SYSCALL(177);  /* getegid */
+    ADD_ERRNO_SYSCALL(194, ENOSYS);  /* shmget */
+    ADD_ERRNO_SYSCALL(195, ENOSYS);  /* shmctl */
+    ADD_ERRNO_SYSCALL(196, ENOSYS);  /* shmat */
+    ADD_ERRNO_SYSCALL(197, ENOSYS);  /* shmdt */
     ADD_TRACE_SYSCALL(200);  /* bind: rewrite AF_UNIX socket paths. */
     ADD_TRACE_SYSCALL(203);  /* connect: rewrite AF_UNIX socket paths. */
     ADD_TRACE_SYSCALL(221);  /* execve */
