@@ -19712,9 +19712,16 @@ static int vulkan_graphics_merge_descriptor_image_copy_range(
         VulkanDispatchImageObject *image,
         const VkImageSubresourceRange *range,
         VkDescriptorType descriptor_type) {
-    if (descriptor_type != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) return -EOPNOTSUPP;
-    return vulkan_graphics_merge_image_copy_range_for_aspect(
-        image, range, VK_IMAGE_ASPECT_COLOR_BIT);
+    switch (descriptor_type) {
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+        case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+            return vulkan_graphics_merge_image_copy_range_for_aspect(
+                image, range, VK_IMAGE_ASPECT_COLOR_BIT);
+        default:
+            return -EOPNOTSUPP;
+    }
 }
 
 
@@ -19902,7 +19909,11 @@ static int materialize_vulkan_graphics_v6_attachments(
                 ? attachment->stencil_store_op
                 : attachment->store_op;
             if (effective_load_op == VK_ATTACHMENT_LOAD_OP_LOAD && image->requires_staging) {
-                return -EOPNOTSUPP;
+                int load_range_rc = vulkan_graphics_merge_attachment_copy_range(
+                    image, &replay_view->range, attachment->attachment_role);
+                if (load_range_rc != 0) return load_range_rc;
+                image->descriptor_layout = (VkImageLayout)attachment->layout;
+                image->descriptor_layout_seen = 1;
             }
             if (!vulkan_graphics_attachment_layout_supported(attachment->attachment_role, attachment->layout) ||
                 vulkan_graphics_attachment_ops_supported(attachment, attachment->attachment_role) != 0) {
@@ -21068,6 +21079,8 @@ static int record_vulkan_graphics_v6_command_buffer(
                 memset(&stencil_attachment, 0, sizeof(stencil_attachment));
                 memset(clear_values, 0, sizeof(clear_values));
                 memset(pre_barriers, 0, sizeof(pre_barriers));
+                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+                if (rc != 0) goto cleanup;
                 for (uint32_t a = 0; a < command->attachment_count; ++a) {
                     const PdockerGpuVulkanGraphicsV6AttachmentEntry *src =
                         &view->attachments[command->attachment_first + a];

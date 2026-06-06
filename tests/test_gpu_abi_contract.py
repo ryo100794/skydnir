@@ -1701,6 +1701,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_graphics_attachment_layout_supported", executor)
         self.assertIn("vulkan_graphics_attachment_required_usage", executor)
         self.assertIn("vulkan_graphics_merge_attachment_copy_range", executor)
+        self.assertIn("effective_load_op == VK_ATTACHMENT_LOAD_OP_LOAD && image->requires_staging", executor)
+        self.assertIn("image->descriptor_layout = (VkImageLayout)attachment->layout", executor)
+        self.assertIn("rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);", executor)
         self.assertIn("vulkan_graphics_attachment_writeback_access_mask", executor)
         self.assertIn("vulkan_format_bytes_per_pixel_for_aspect", executor)
         self.assertIn("vulkan_image_tight_subresource_offset_for_aspect", executor)
@@ -1854,10 +1857,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_graphics_merge_image_copy_range_for_aspect", source)
         self.assertIn("vulkan_graphics_merge_attachment_copy_range", source)
         self.assertIn("vulkan_graphics_merge_descriptor_image_copy_range", source)
-        self.assertIn("descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", source)
+        for descriptor_marker in [
+            "case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:",
+            "case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:",
+            "case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:",
+            "case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:",
+        ]:
+            self.assertIn(descriptor_marker, source)
         self.assertIn("VK_IMAGE_ASPECT_COLOR_BIT", source)
         self.assertEqual(source.count("vulkan_graphics_merge_image_copy_range_for_aspect("), 3)
-        self.assertEqual(source.count("vulkan_graphics_merge_attachment_copy_range("), 2)
+        self.assertEqual(source.count("vulkan_graphics_merge_attachment_copy_range("), 3)
         self.assertEqual(source.count("vulkan_graphics_merge_descriptor_image_copy_range("), 2)
         bodyless = re.sub(
             r"static int vulkan_graphics_merge_image_copy_range_for_aspect\(.*?\n}\n\n",
