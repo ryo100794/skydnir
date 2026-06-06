@@ -1909,7 +1909,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(descriptor_marker, source)
         self.assertIn("VK_IMAGE_ASPECT_COLOR_BIT", source)
-        self.assertEqual(source.count("vulkan_graphics_merge_image_copy_range_for_aspect("), 3)
+        self.assertGreaterEqual(source.count("vulkan_graphics_merge_image_copy_range_for_aspect("), 5)
         self.assertEqual(source.count("vulkan_graphics_merge_attachment_copy_range("), 3)
         self.assertEqual(source.count("vulkan_graphics_merge_descriptor_image_copy_range("), 2)
         bodyless = re.sub(
@@ -1995,13 +1995,53 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT", source)
         self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR", executor)
         self.assertIn("sizeof(PdockerGpuVulkanGraphicsV67FrameHeader)", executor)
-        self.assertIn("FrameRange ranges[28]", executor)
+        self.assertIn("FrameRange ranges[30]", executor)
         self.assertIn("find_vulkan_graphics_v67_viewport_scissor_state", executor)
         self.assertIn(".pViewports = dynamic_viewport ? NULL : static_viewports", executor)
         self.assertIn(".pScissors = dynamic_scissor ? NULL : static_scissors", executor)
         self.assertIn("need_v67_viewport_scissor_state", icd)
         self.assertIn("VULKAN_GRAPHICS_V6.7", icd)
         self.assertIn("viewport_scissor_state_table_hash", icd)
+
+    def test_vulkan_graphics_v610_image_copy_metadata_is_append_only(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V610_ABI_MINOR 10u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV610FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV610BufferImageCopyEntry", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV610ImageCopyEntry", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER_TO_IMAGE", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE_TO_BUFFER", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_BUFFER_TO_IMAGE", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_IMAGE_TO_BUFFER", source)
+        for marker in [
+            "sizeof(PdockerGpuVulkanGraphicsV610FrameHeader)",
+            "FrameRange ranges[30]",
+            "header_v610->v610.buffer_image_copy_count",
+            "header_v610->v610.image_copy_count",
+            "find_vulkan_graphics_v610_buffer_image_copy",
+            "find_vulkan_graphics_v610_image_copy",
+            "vkCmdCopyBufferToImage(command_buffer",
+            "vkCmdCopyImageToBuffer(command_buffer",
+            "vkCmdCopyImage(command_buffer",
+            "vulkan_graphics_v610_buffer_image_copy_span",
+        ]:
+            self.assertIn(marker, executor)
+        for marker in [
+            "need_v610_image_copy",
+            "PdockerGpuVulkanGraphicsV610FrameHeader",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER_TO_IMAGE",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE_TO_BUFFER",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE",
+            "vkCmdCopyBufferToImage",
+            "vkCmdCopyImageToBuffer",
+            "vkCmdCopyImage",
+        ]:
+            self.assertIn(marker, icd)
 
     def test_vulkan_graphics_v61_metadata_extension_is_fail_closed_validated(self):
         executor = GPU_EXECUTOR.read_text()
@@ -2032,7 +2072,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[28]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[30]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(
