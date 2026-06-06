@@ -1412,6 +1412,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record.push_op_index += push_op_base;", icd)
         self.assertIn("record.memory_barrier_op_first += memory_barrier_base;", icd)
         self.assertIn("record.first_dynamic_offset += dynamic_offset_base;", icd)
+        self.assertIn("bool inherited_rendering_active;", icd)
+        self.assertIn("command_buffer_begin_inheritance_supported", icd)
+        self.assertIn("VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO", icd)
+        self.assertIn("cmd->dynamic_rendering_active || cmd->inherited_rendering_active", icd)
+        self.assertIn("inherit->occlusionQueryEnable || inherit->queryFlags != 0", icd)
+        self.assertIn("render_pass_subpass_can_normalize_to_dynamic_rendering(rp, inherit->subpass)", icd)
         self.assertIn("op.index += dispatch_base;", icd)
         self.assertIn("op.index += graphics_draw_base;", icd)
         execute_body = icd[icd.index("VKAPI_ATTR void VKAPI_CALL vkCmdExecuteCommands"):]

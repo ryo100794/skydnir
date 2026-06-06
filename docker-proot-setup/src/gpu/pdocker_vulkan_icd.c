@@ -799,6 +799,7 @@ typedef struct {
     bool has_dispatch;
     bool unsupported_descriptor_set_layout;
     bool dynamic_rendering_active;
+    bool inherited_rendering_active;
     bool render_pass_active;
     PdockerVkRenderPass *active_render_pass;
     PdockerVkFramebuffer *active_framebuffer;
@@ -9700,6 +9701,50 @@ static bool render_pass_subpass_can_normalize_to_dynamic_rendering(
     return !subpass->unsupported;
 }
 
+static bool command_buffer_begin_inheritance_supported(
+        PdockerVkCommandBuffer *cmd,
+        const VkCommandBufferBeginInfo *begin) {
+    if (!cmd) return false;
+    cmd->inherited_rendering_active = false;
+    if (cmd->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY) return true;
+    if (!begin || !begin->pInheritanceInfo) return true;
+    const VkCommandBufferInheritanceInfo *inherit = begin->pInheritanceInfo;
+    if (inherit->occlusionQueryEnable || inherit->queryFlags != 0 ||
+        inherit->pipelineStatistics != 0) {
+        return false;
+    }
+    if (inherit->renderPass) {
+        PdockerVkRenderPass *rp = (PdockerVkRenderPass *)inherit->renderPass;
+        if (!render_pass_subpass_can_normalize_to_dynamic_rendering(rp, inherit->subpass)) {
+            return false;
+        }
+        cmd->inherited_rendering_active = true;
+    }
+    for (const VkBaseInStructure *chain = (const VkBaseInStructure *)inherit->pNext;
+         chain;
+         chain = (const VkBaseInStructure *)chain->pNext) {
+        switch (chain->sType) {
+            case VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO: {
+                const VkCommandBufferInheritanceRenderingInfo *rendering =
+                    (const VkCommandBufferInheritanceRenderingInfo *)chain;
+                if (rendering->flags != 0 || rendering->viewMask != 0 ||
+                    rendering->colorAttachmentCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
+                    return false;
+                }
+                if (rendering->colorAttachmentCount > 0 ||
+                    rendering->depthAttachmentFormat != VK_FORMAT_UNDEFINED ||
+                    rendering->stencilAttachmentFormat != VK_FORMAT_UNDEFINED) {
+                    cmd->inherited_rendering_active = true;
+                }
+                break;
+            }
+            default:
+                return false;
+        }
+    }
+    return true;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
         VkDevice device,
         const VkRenderPassCreateInfo *pCreateInfo,
@@ -10078,7 +10123,6 @@ VKAPI_ATTR void VKAPI_CALL vkFreeCommandBuffers(
 VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
         VkCommandBuffer commandBuffer,
         const VkCommandBufferBeginInfo *pBeginInfo) {
-    (void)pBeginInfo;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
     clear_recorded_command_ops(cmd);
@@ -10099,6 +10143,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     cmd->has_dispatch = false;
     cmd->unsupported_descriptor_set_layout = false;
     cmd->dynamic_rendering_active = false;
+    cmd->inherited_rendering_active = false;
     cmd->render_pass_active = false;
     cmd->active_render_pass = NULL;
     cmd->active_framebuffer = NULL;
@@ -10124,6 +10169,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     memset(cmd->dynamic_states, 0, sizeof(cmd->dynamic_states));
     cmd->dynamic_state_count = 0;
     cmd->vertex_buffer_bound = false;
+    if (!command_buffer_begin_inheritance_supported(cmd, pBeginInfo)) {
+        cmd->graphics_unsupported = true;
+    }
     return VK_SUCCESS;
 }
 
@@ -10936,7 +10984,9 @@ static void record_graphics_draw_command(
         uint32_t stride) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
-    if (!cmd->graphics_pipeline || !cmd->dynamic_rendering_active ||
+    const bool graphics_rendering_context_active =
+        cmd->dynamic_rendering_active || cmd->inherited_rendering_active;
+    if (!cmd->graphics_pipeline || !graphics_rendering_context_active ||
         cmd->render_pass_active || (indexed && !cmd->index_buffer_bound)) {
         cmd->graphics_unsupported = true;
     }
