@@ -2788,7 +2788,23 @@ static int append_graphics_attachment_entry(
         uint64_t generation) {
     if (!attachments || !attachment_count || !frame || !cursor || !src) return -EINVAL;
     if (*attachment_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS) return -E2BIG;
-    if (!src->valid) return 0;
+    if (!src->valid) {
+        if (role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR) return 0;
+        PdockerGpuVulkanGraphicsV6AttachmentEntry *entry = &attachments[(*attachment_count)++];
+        memset(entry, 0, sizeof(*entry));
+        entry->attachment_role = role;
+        entry->flags = PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT;
+        entry->image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+        entry->resolve_image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+        entry->format = VK_FORMAT_UNDEFINED;
+        entry->samples = VK_SAMPLE_COUNT_1_BIT;
+        entry->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        entry->load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        entry->store_op = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        entry->stencil_load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        entry->stencil_store_op = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        return 0;
+    }
     if ((src->resolve_mode == VK_RESOLVE_MODE_NONE) != (src->resolve_image_view == NULL)) {
         return -EOPNOTSUPP;
     }
@@ -9231,15 +9247,16 @@ static void capture_render_pass_subpass_state(
         dst->color_layouts[i] = color->layout;
         dst->resolve_attachments[i] = VK_ATTACHMENT_UNUSED;
         dst->resolve_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
-        if (color->attachment == VK_ATTACHMENT_UNUSED ||
-            color->attachment >= rp->attachment_count ||
-            pdocker_vk_format_is_depth_stencil(rp->attachments[color->attachment].format)) {
+        if (color->attachment != VK_ATTACHMENT_UNUSED &&
+            (color->attachment >= rp->attachment_count ||
+             pdocker_vk_format_is_depth_stencil(rp->attachments[color->attachment].format))) {
             dst->unsupported = true;
         }
         if (resolve_attachments && resolve_attachments[i].attachment != VK_ATTACHMENT_UNUSED) {
             dst->resolve_attachments[i] = resolve_attachments[i].attachment;
             dst->resolve_layouts[i] = resolve_attachments[i].layout;
-            if (resolve_attachments[i].attachment >= rp->attachment_count ||
+            if (color->attachment == VK_ATTACHMENT_UNUSED ||
+                resolve_attachments[i].attachment >= rp->attachment_count ||
                 pdocker_vk_format_is_depth_stencil(rp->attachments[resolve_attachments[i].attachment].format)) {
                 dst->unsupported = true;
             }
@@ -10320,11 +10337,13 @@ static bool populate_single_subpass_render_pass_rendering_state(
     memset(&cmd->active_stencil_attachment, 0, sizeof(cmd->active_stencil_attachment));
     cmd->active_color_attachment_count = subpass->color_attachment_count;
     for (uint32_t c = 0; c < subpass->color_attachment_count; ++c) {
-        if (!populate_render_pass_attachment_for_rendering(
-                &cmd->active_color_attachments[c], rp, fb,
-                subpass->color_attachments[c], subpass->color_layouts[c],
-                begin->pClearValues, begin->clearValueCount, false)) {
-            return false;
+        if (subpass->color_attachments[c] != VK_ATTACHMENT_UNUSED) {
+            if (!populate_render_pass_attachment_for_rendering(
+                    &cmd->active_color_attachments[c], rp, fb,
+                    subpass->color_attachments[c], subpass->color_layouts[c],
+                    begin->pClearValues, begin->clearValueCount, false)) {
+                return false;
+            }
         }
         if (subpass->resolve_attachments[c] != VK_ATTACHMENT_UNUSED) {
             uint32_t resolve_index = subpass->resolve_attachments[c];

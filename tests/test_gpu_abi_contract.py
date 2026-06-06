@@ -1352,6 +1352,35 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pipeline->color_blend_logic_op_enable = cb->logicOpEnable", icd)
         self.assertNotIn("attachment->blendEnable ||", icd)
 
+    def test_vulkan_graphics_unused_color_attachment_slots_are_preserved(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT", source)
+        for marker in [
+            "entry->flags = PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT;",
+            "entry->image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;",
+            "entry->format = VK_FORMAT_UNDEFINED;",
+            "entry->layout = VK_IMAGE_LAYOUT_UNDEFINED;",
+            "if (!src->valid) {",
+            "color->attachment != VK_ATTACHMENT_UNUSED",
+            "color->attachment == VK_ATTACHMENT_UNUSED ||",
+            "subpass->color_attachments[c] != VK_ATTACHMENT_UNUSED",
+        ]:
+            self.assertIn(marker, icd)
+        for marker in [
+            "attachment->flags & ~PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT",
+            "src->flags & ~PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT",
+            "invalid unused graphics color attachment slot",
+            "color_formats[c] = (VkFormat)formats[c];",
+            "imageView = VK_NULL_HANDLE",
+            "color_attachments[color_attachment_count++] = (VkRenderingAttachmentInfo)",
+        ]:
+            self.assertIn(marker, executor)
+        self.assertNotIn("if (color_formats[c] == VK_FORMAT_UNDEFINED) return -EPROTO;", executor)
+
     def test_vulkan_graphics_v6_describe_response_is_nonterminal(self):
         icd = VULKAN_ICD.read_text()
         response_reader = icd.split("static int read_dispatch_response_status", 1)[1].split("typedef struct {", 1)[0]

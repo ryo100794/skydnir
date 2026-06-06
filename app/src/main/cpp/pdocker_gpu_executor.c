@@ -18521,12 +18521,38 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 for (uint32_t a = 0; a < command->attachment_count; ++a) {
                     const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
                         &view->attachments[command->attachment_first + a];
+                    const int unused_slot =
+                        (attachment->flags & PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) != 0;
+                    if (attachment->flags & ~PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) {
+                        reason = "unsupported graphics attachment flags";
+                        if (reason_out) *reason_out = reason;
+                        return -EPROTO;
+                    }
                     if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
                         attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH &&
                         attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL) {
                         reason = "unsupported graphics attachment role";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
+                    }
+                    if (unused_slot) {
+                        if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR ||
+                            attachment->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                            attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                            attachment->format != VK_FORMAT_UNDEFINED ||
+                            attachment->samples != VK_SAMPLE_COUNT_1_BIT ||
+                            attachment->layout != VK_IMAGE_LAYOUT_UNDEFINED ||
+                            attachment->load_op != VK_ATTACHMENT_LOAD_OP_DONT_CARE ||
+                            attachment->store_op != VK_ATTACHMENT_STORE_OP_DONT_CARE ||
+                            attachment->stencil_load_op != VK_ATTACHMENT_LOAD_OP_DONT_CARE ||
+                            attachment->stencil_store_op != VK_ATTACHMENT_STORE_OP_DONT_CARE ||
+                            attachment->clear_value_size != 0 ||
+                            attachment->resource_id != 0) {
+                            reason = "invalid unused graphics color attachment slot";
+                            if (reason_out) *reason_out = reason;
+                            return -EPROTO;
+                        }
+                        continue;
                     }
                     const uint32_t attachment_index = command->attachment_first + a;
                     if (attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
@@ -19421,7 +19447,6 @@ static int materialize_vulkan_graphics_v6_pipelines(
         VkFormat color_formats[16];
         for (uint32_t c = 0; c < src->color_attachment_count; ++c) {
             color_formats[c] = (VkFormat)formats[c];
-            if (color_formats[c] == VK_FORMAT_UNDEFINED) return -EPROTO;
         }
         VkPipelineRenderingCreateInfo rendering = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
@@ -19696,6 +19721,17 @@ static int materialize_vulkan_graphics_v6_attachments(
         for (uint32_t a = 0; a < command->attachment_count; ++a) {
             const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
                 &view->attachments[command->attachment_first + a];
+            const int unused_slot =
+                (attachment->flags & PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) != 0;
+            if (attachment->flags & ~PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) return -EPROTO;
+            if (unused_slot) {
+                if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR ||
+                    attachment->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                    attachment->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+                    return -EPROTO;
+                }
+                continue;
+            }
             if ((attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
                  attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH &&
                  attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL) ||
@@ -20838,6 +20874,32 @@ static int record_vulkan_graphics_v6_command_buffer(
                 for (uint32_t a = 0; a < command->attachment_count; ++a) {
                     const PdockerGpuVulkanGraphicsV6AttachmentEntry *src =
                         &view->attachments[command->attachment_first + a];
+                    const int unused_slot =
+                        (src->flags & PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) != 0;
+                    if (src->flags & ~PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) {
+                        rc = -EPROTO;
+                        goto cleanup;
+                    }
+                    if (unused_slot) {
+                        if (src->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR ||
+                            src->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE ||
+                            src->resolve_image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE) {
+                            rc = -EPROTO;
+                            goto cleanup;
+                        }
+                        if (color_attachment_count >= PDOCKER_GPU_GRAPHICS_REPLAY_MAX_COLOR_ATTACHMENTS) {
+                            rc = -E2BIG;
+                            goto cleanup;
+                        }
+                        color_attachments[color_attachment_count++] = (VkRenderingAttachmentInfo){
+                            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                            .imageView = VK_NULL_HANDLE,
+                            .imageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                            .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                            .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                        };
+                        continue;
+                    }
                     if ((src->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
                          src->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH &&
                          src->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL) ||
