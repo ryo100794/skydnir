@@ -1419,6 +1419,98 @@ static bool pdocker_vk_format_is_depth_stencil(VkFormat format) {
            pdocker_vk_format_has_stencil(format);
 }
 
+static bool pdocker_vk_format_bridge_supported(VkFormat format) {
+    switch (format) {
+        case VK_FORMAT_R8_UNORM:
+        case VK_FORMAT_R8_SNORM:
+        case VK_FORMAT_R8_UINT:
+        case VK_FORMAT_R8_SINT:
+        case VK_FORMAT_R8G8_UNORM:
+        case VK_FORMAT_R8G8_SNORM:
+        case VK_FORMAT_R8G8_UINT:
+        case VK_FORMAT_R8G8_SINT:
+        case VK_FORMAT_R16_SFLOAT:
+        case VK_FORMAT_R16_UINT:
+        case VK_FORMAT_R16_SINT:
+        case VK_FORMAT_R8G8B8A8_UNORM:
+        case VK_FORMAT_R8G8B8A8_SNORM:
+        case VK_FORMAT_R8G8B8A8_UINT:
+        case VK_FORMAT_R8G8B8A8_SINT:
+        case VK_FORMAT_B8G8R8A8_UNORM:
+        case VK_FORMAT_R16G16_SFLOAT:
+        case VK_FORMAT_R32_SFLOAT:
+        case VK_FORMAT_R32_UINT:
+        case VK_FORMAT_R32_SINT:
+        case VK_FORMAT_R16G16B16A16_SFLOAT:
+        case VK_FORMAT_R32G32_SFLOAT:
+        case VK_FORMAT_R32G32_UINT:
+        case VK_FORMAT_R32G32_SINT:
+        case VK_FORMAT_R32G32B32A32_SFLOAT:
+        case VK_FORMAT_R32G32B32A32_UINT:
+        case VK_FORMAT_R32G32B32A32_SINT:
+        case VK_FORMAT_S8_UINT:
+        case VK_FORMAT_D16_UNORM:
+        case VK_FORMAT_D24_UNORM_S8_UINT:
+        case VK_FORMAT_D32_SFLOAT:
+        case VK_FORMAT_D32_SFLOAT_S8_UINT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static VkFormatFeatureFlags pdocker_vk_format_buffer_features(VkFormat format) {
+    if (!pdocker_vk_format_bridge_supported(format) ||
+        pdocker_vk_format_is_depth_stencil(format)) {
+        return 0;
+    }
+    return VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT;
+}
+
+static VkFormatFeatureFlags pdocker_vk_format_image_features(VkFormat format) {
+    if (!pdocker_vk_format_bridge_supported(format)) return 0;
+    VkFormatFeatureFlags features = VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+                                    VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
+                                    VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+    if (pdocker_vk_format_is_depth_stencil(format)) {
+        features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    } else {
+        features |= VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
+                    VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+    }
+    return features;
+}
+
+static bool pdocker_vk_image_usage_supported_by_format(
+        VkFormat format,
+        VkImageUsageFlags usage) {
+    if (!pdocker_vk_format_bridge_supported(format)) return false;
+    const bool depth_stencil = pdocker_vk_format_is_depth_stencil(format);
+    const VkImageUsageFlags common = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                     VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                     VK_IMAGE_USAGE_SAMPLED_BIT |
+                                     VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    const VkImageUsageFlags color = common |
+                                    VK_IMAGE_USAGE_STORAGE_BIT |
+                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    const VkImageUsageFlags ds = common |
+                                 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    const VkImageUsageFlags supported = depth_stencil ? ds : color;
+    return usage != 0 && (usage & ~supported) == 0;
+}
+
+static uint32_t pdocker_vk_image_max_mip_levels(VkExtent3D extent) {
+    uint32_t max_dim = extent.width;
+    if (extent.height > max_dim) max_dim = extent.height;
+    if (extent.depth > max_dim) max_dim = extent.depth;
+    uint32_t levels = 1;
+    while (max_dim > 1) {
+        max_dim >>= 1;
+        ++levels;
+    }
+    return levels;
+}
+
 static uint8_t clear_unorm8(float v) {
     if (v <= 0.0f) return 0;
     if (v >= 1.0f) return 255;
@@ -7730,6 +7822,25 @@ static void fill_physical_device_properties(VkPhysicalDeviceProperties *pPropert
                 : transport_max_storage_range)
             : transport_max_storage_range;
     pProperties->limits.maxMemoryAllocationCount = 4096;
+    pProperties->limits.maxImageDimension1D = 4096;
+    pProperties->limits.maxImageDimension2D = 4096;
+    pProperties->limits.maxImageDimension3D = 256;
+    pProperties->limits.maxImageDimensionCube = 4096;
+    pProperties->limits.maxImageArrayLayers = 256;
+    pProperties->limits.maxFramebufferWidth = 4096;
+    pProperties->limits.maxFramebufferHeight = 4096;
+    pProperties->limits.maxFramebufferLayers = 256;
+    pProperties->limits.framebufferColorSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    pProperties->limits.framebufferDepthSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    pProperties->limits.framebufferStencilSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    pProperties->limits.framebufferNoAttachmentsSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    pProperties->limits.sampledImageColorSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    pProperties->limits.sampledImageIntegerSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    pProperties->limits.sampledImageDepthSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    pProperties->limits.sampledImageStencilSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    pProperties->limits.storageImageSampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    pProperties->limits.maxSampleMaskWords = 1;
+    pProperties->limits.maxColorAttachments = 8;
     pProperties->limits.maxBoundDescriptorSets =
         caps && caps->limits.maxBoundDescriptorSets &&
         caps->limits.maxBoundDescriptorSets < PDOCKER_VK_MAX_DESCRIPTOR_SETS
@@ -8375,9 +8486,12 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(
         VkFormat format,
         VkFormatProperties *pFormatProperties) {
     (void)physicalDevice;
-    (void)format;
     if (!pFormatProperties) return;
     memset(pFormatProperties, 0, sizeof(*pFormatProperties));
+    if (!pdocker_vk_format_bridge_supported(format)) return;
+    pFormatProperties->bufferFeatures = pdocker_vk_format_buffer_features(format);
+    pFormatProperties->linearTilingFeatures = 0;
+    pFormatProperties->optimalTilingFeatures = pdocker_vk_format_image_features(format);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
@@ -8389,14 +8503,48 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
         VkImageCreateFlags flags,
         VkImageFormatProperties *pImageFormatProperties) {
     (void)physicalDevice;
-    (void)format;
-    (void)type;
-    (void)tiling;
-    (void)usage;
-    (void)flags;
     if (!pImageFormatProperties) return VK_ERROR_FORMAT_NOT_SUPPORTED;
     memset(pImageFormatProperties, 0, sizeof(*pImageFormatProperties));
-    return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    if (!pdocker_vk_format_bridge_supported(format) ||
+        !pdocker_vk_image_usage_supported_by_format(format, usage)) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    if (tiling != VK_IMAGE_TILING_OPTIMAL) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    if (type != VK_IMAGE_TYPE_1D && type != VK_IMAGE_TYPE_2D && type != VK_IMAGE_TYPE_3D) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    const VkImageCreateFlags unsupported_sparse_flags = VK_IMAGE_CREATE_SPARSE_BINDING_BIT |
+                                                          VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT |
+                                                          VK_IMAGE_CREATE_SPARSE_ALIASED_BIT;
+    if (flags & unsupported_sparse_flags) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    const VkImageCreateFlags supported_flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT |
+                                               VK_IMAGE_CREATE_ALIAS_BIT |
+                                               VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    if (flags & ~supported_flags) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    if ((flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) && type != VK_IMAGE_TYPE_2D) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    VkExtent3D max_extent = {4096u, 4096u, 1u};
+    uint32_t max_layers = 256u;
+    if (type == VK_IMAGE_TYPE_1D) {
+        max_extent = (VkExtent3D){4096u, 1u, 1u};
+    } else if (type == VK_IMAGE_TYPE_3D) {
+        max_extent = (VkExtent3D){256u, 256u, 256u};
+        max_layers = 1u;
+    }
+    pImageFormatProperties->maxExtent = max_extent;
+    pImageFormatProperties->maxMipLevels = pdocker_vk_image_max_mip_levels(max_extent);
+    pImageFormatProperties->maxArrayLayers = max_layers;
+    pImageFormatProperties->sampleCounts = VK_SAMPLE_COUNT_1_BIT;
+    VkDeviceSize max_buffer = pdocker_vulkan_max_buffer_size();
+    VkDeviceSize heap = pdocker_vulkan_heap_size();
+    VkDeviceSize max_resource = max_buffer < heap ? max_buffer : heap;
+    const VkDeviceSize vulkan_min_resource_size = (VkDeviceSize)1u << 31;
+    if (max_resource < vulkan_min_resource_size) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    }
+    pImageFormatProperties->maxResourceSize = max_resource;
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceSparseImageFormatProperties(

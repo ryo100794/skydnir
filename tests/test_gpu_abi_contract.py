@@ -3761,6 +3761,47 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("V5.1 frame required but disabled for this dispatch", icd)
         self.assertIn("because PDOCKER_VULKAN_ALIAS_COPIES is active", icd)
 
+    def test_vulkan_icd_advertises_conservative_image_format_properties(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "pdocker_vk_format_bridge_supported",
+            "pdocker_vk_format_image_features",
+            "pdocker_vk_image_usage_supported_by_format",
+            "pdocker_vk_image_max_mip_levels",
+            "pFormatProperties->linearTilingFeatures = 0;",
+            "pFormatProperties->optimalTilingFeatures = pdocker_vk_format_image_features(format);",
+            "VK_FORMAT_FEATURE_TRANSFER_SRC_BIT",
+            "VK_FORMAT_FEATURE_TRANSFER_DST_BIT",
+            "VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT",
+            "VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT",
+            "VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT",
+            "VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT",
+            "if (tiling != VK_IMAGE_TILING_OPTIMAL) return VK_ERROR_FORMAT_NOT_SUPPORTED;",
+            "VK_IMAGE_CREATE_SPARSE_BINDING_BIT",
+            "flags & ~supported_flags",
+            "VK_SAMPLE_COUNT_1_BIT",
+            "maxImageDimension2D = 4096",
+            "maxImageDimension3D = 256",
+            "maxImageArrayLayers = 256",
+            "sampledImageColorSampleCounts = VK_SAMPLE_COUNT_1_BIT",
+            "storageImageSampleCounts = VK_SAMPLE_COUNT_1_BIT",
+            "maxSampleMaskWords = 1",
+            "vulkan_min_resource_size",
+            "max_resource < vulkan_min_resource_size",
+            "vkGetPhysicalDeviceSparseImageFormatProperties",
+            "*pPropertyCount = 0;",
+        ]:
+            self.assertIn(marker, icd)
+        format_props = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties", 1)[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties", 1)[0]
+        image_props = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceSparseImageFormatProperties", 1)[0]
+        self.assertNotIn("(void)format;", format_props)
+        self.assertNotIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;\n}", image_props)
+        self.assertNotIn("VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT", format_props)
+        self.assertNotIn("VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT", format_props)
+        self.assertIn("VK_FORMAT_D32_SFLOAT", icd)
+        self.assertIn("VK_FORMAT_D32_SFLOAT_S8_UINT", icd)
+        self.assertNotIn("case VK_FORMAT_D16_UNORM_S8_UINT:\n            return true;", icd)
+
     def test_vulkan_icd_records_buffer_image_copy_commands_before_dispatch(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("PdockerVkImageCopyOp image_copy_ops[PDOCKER_VK_MAX_COPY_OPS];", icd)
