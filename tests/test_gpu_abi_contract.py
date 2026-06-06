@@ -1995,7 +1995,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT", source)
         self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR", executor)
         self.assertIn("sizeof(PdockerGpuVulkanGraphicsV67FrameHeader)", executor)
-        self.assertIn("FrameRange ranges[30]", executor)
+        self.assertIn("FrameRange ranges[33]", executor)
         self.assertIn("find_vulkan_graphics_v67_viewport_scissor_state", executor)
         self.assertIn(".pViewports = dynamic_viewport ? NULL : static_viewports", executor)
         self.assertIn(".pScissors = dynamic_scissor ? NULL : static_scissors", executor)
@@ -2020,7 +2020,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_IMAGE_TO_BUFFER", source)
         for marker in [
             "sizeof(PdockerGpuVulkanGraphicsV610FrameHeader)",
-            "FrameRange ranges[30]",
+            "FrameRange ranges[33]",
             "header_v610->v610.buffer_image_copy_count",
             "header_v610->v610.image_copy_count",
             "find_vulkan_graphics_v610_buffer_image_copy",
@@ -2040,6 +2040,100 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdCopyBufferToImage",
             "vkCmdCopyImageToBuffer",
             "vkCmdCopyImage",
+        ]:
+            self.assertIn(marker, icd)
+
+    def test_vulkan_graphics_v611_fill_update_buffer_metadata_is_append_only(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_ABI_MINOR 11u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV611FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV611HeaderExtension", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV611FillBufferEntry", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV611UpdateBufferEntry", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_HEADER_EXTENSION_FIELDS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_FILL_BUFFER_FIELDS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_FIELDS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_HEADER_EXTENSION_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_FILL_BUFFER_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_FILL_BUFFERS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_UPDATE_BUFFERS", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_FILL_BUFFER", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER", source)
+        for marker in [
+            "sizeof(PdockerGpuVulkanGraphicsV611FrameHeader)",
+            "PdockerGpuVulkanGraphicsV611FrameHeader",
+            "header_v611->v611.fill_buffer_count",
+            "header_v611->v611.update_buffer_count",
+            "PdockerGpuVulkanGraphicsV611FillBufferEntry *fill_buffers",
+            "PdockerGpuVulkanGraphicsV611UpdateBufferEntry *update_buffers",
+            "find_vulkan_graphics_v611_fill_buffer",
+            "find_vulkan_graphics_v611_update_buffer",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_FILL_BUFFER",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER",
+            "VK_BUFFER_USAGE_TRANSFER_DST_BIT",
+            "VK_ACCESS_TRANSFER_WRITE_BIT",
+            "VK_PIPELINE_STAGE_TRANSFER_BIT",
+            "vkCmdFillBuffer(command_buffer",
+            "vkCmdUpdateBuffer(command_buffer",
+            "mark_vulkan_graphics_replay_buffer_writeback_range",
+        ]:
+            self.assertIn(marker, executor)
+        for marker in [
+            "PDOCKER_VK_COMMAND_FILL",
+            "PDOCKER_VK_COMMAND_UPDATE",
+            "vkCmdFillBuffer",
+            "vkCmdUpdateBuffer",
+            "need_v611_buffer_write",
+            "pre_need_v611_buffer_write",
+            "APPEND_INTERLEAVED_GRAPHICS_BUFFER_COPIES",
+            "type != PDOCKER_VK_COMMAND_FILL",
+            "type != PDOCKER_VK_COMMAND_UPDATE",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_FILL_BUFFER",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER",
+            "execute_recorded_fill_op(op)",
+            "execute_recorded_update_op(op)",
+        ]:
+            self.assertIn(marker, icd)
+
+    def test_vulkan_graphics_v611_buffer_write_metadata_is_append_only(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_ABI_MINOR 11u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV611FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV611FillBufferEntry", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV611UpdateBufferEntry", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_FILL_BUFFER", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_UPDATE_BUFFER_BYTES 65536u", source)
+        for marker in [
+            "sizeof(PdockerGpuVulkanGraphicsV611FrameHeader)",
+            "FrameRange ranges[33]",
+            "header_v611->v611.fill_buffer_count",
+            "header_v611->v611.update_buffer_count",
+            "find_vulkan_graphics_v611_fill_buffer",
+            "find_vulkan_graphics_v611_update_buffer",
+            "vkCmdFillBuffer(command_buffer",
+            "vkCmdUpdateBuffer(command_buffer",
+            "VK_ACCESS_TRANSFER_WRITE_BIT",
+            "VK_PIPELINE_STAGE_TRANSFER_BIT",
+        ]:
+            self.assertIn(marker, executor)
+        for marker in [
+            "need_v611_buffer_write",
+            "PdockerGpuVulkanGraphicsV611FrameHeader",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_FILL_BUFFER",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER",
+            "vkCmdFillBuffer",
+            "vkCmdUpdateBuffer",
+            "pre_need_v611_buffer_write",
         ]:
             self.assertIn(marker, icd)
 
@@ -2072,7 +2166,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[30]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[33]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(
@@ -2555,6 +2649,21 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_FILL_BUFFER_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_FILL_BUFFER_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_FILL_BUFFER_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -2721,6 +2830,21 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV68IndirectDrawEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV611HeaderExtension",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_FILL_BUFFER_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_FILL_BUFFER_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV611FillBufferEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV611UpdateBufferEntry",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",

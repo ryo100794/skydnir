@@ -76,6 +76,7 @@ Confirmed facts:
 | 2026-06-06 Vulkan graphics bounded mixed-submit lane | The producer ICD no longer rejects every submit that mixes transfer/layout commands with graphics replay.  It now statically plans the command-op order, executes host-side transfer/layout operations before the first graphics draw and after the last graphics draw, then submits the serialized graphics frame in between.  Transfers interleaved between graphics draws, dispatch+graphics mixing, and broader synchronization remain fail-closed so command ordering is not guessed. | `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; host test `tests.test_gpu_abi_contract` |
 | 2026-06-06 Vulkan graphics V6.9 interleaved buffer-copy lane | Graphics frames now have an append-only V6.9 metadata lane for command-ordered `vkCmdCopyBuffer` operations interleaved between draws.  The producer records each graphics command's original command-op sequence, serializes safe interleaved buffer-copy commands into the graphics command stream, and keeps other interleaved transfer/image/dispatch cases fail-closed.  The Android executor validates one command-indexed buffer-copy metadata entry per copy command, materializes source/destination buffer ranges with transfer usage, records `vkCmdCopyBuffer` in order, and writes back the destination range.  Broader mixed submit semantics, image copies, dispatch+graphics mixing, and full Vulkan synchronization remain fail-closed. | `app/src/main/cpp/pdocker_gpu_abi.h`; `docker-proot-setup/src/gpu/pdocker_gpu_abi.h`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; native builds `scripts/build-native-android-ndk.sh`, `scripts/build-gpu-shim.sh`; APK gates `:app:verifyPackagedPayloadFresh :app:assembleCompatDebug`; payload check `scripts/verify-native-payloads.py` |
 | 2026-06-06 Vulkan graphics V6.10 interleaved image-copy lane | Graphics frames now have an append-only V6.10 metadata lane for command-ordered `vkCmdCopyBufferToImage`, `vkCmdCopyImageToBuffer`, and `vkCmdCopyImage` operations interleaved between draws.  The producer serializes core `VkBufferImageCopy`/`VkImageCopy` fields with explicit ABI direction constants, keeps unsupported aspects and copy2 pNext semantics fail-closed, and the Android executor validates one command-indexed metadata entry per copy command, materializes buffer/image transfer ranges, replays the matching Vulkan copy call in order, and writes back transfer-written destinations.  First-lane coverage is intentionally bounded to color-aspect fd-backed images; depth/stencil, multiplanar/compressed images, broader image-layout synchronization, dispatch+graphics mixing, and full Vulkan synchronization remain fail-closed. | `app/src/main/cpp/pdocker_gpu_abi.h`; `docker-proot-setup/src/gpu/pdocker_gpu_abi.h`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; native builds `scripts/build-native-android-ndk.sh`, `scripts/build-gpu-shim.sh`; pending APK gates `:app:verifyPackagedPayloadFresh :app:assembleCompatDebug`; pending payload check `scripts/verify-native-payloads.py` |
+| 2026-06-06 Vulkan graphics V6.11 interleaved fill/update-buffer lane | Graphics frames now have an append-only V6.11 metadata lane for command-ordered `vkCmdFillBuffer` and `vkCmdUpdateBuffer` operations interleaved between draws.  The producer serializes command-indexed fill/update metadata instead of treating draw-between fill/update as host-only fail-closed: fill entries carry destination buffer resource, offset, size, and 32-bit pattern; update entries carry destination buffer resource, offset, size, payload range, and payload hash.  The Android executor validates one metadata entry per command, materializes destination buffers with `VK_BUFFER_USAGE_TRANSFER_DST_BIT`, records `vkCmdFillBuffer`/`vkCmdUpdateBuffer` in command order, includes transfer-write source stage/access in writeback barriers, and marks destination ranges for writeback.  The first lane remains bounded to fd-backed buffers, 4-byte-aligned offsets/sizes, `vkCmdUpdateBuffer` payloads no larger than 65536 bytes, no active rendering scope, no dispatch+graphics mixing, and no guessed synchronization beyond serialized barriers plus transfer-write writeback. | `app/src/main/cpp/pdocker_gpu_abi.h`; `docker-proot-setup/src/gpu/pdocker_gpu_abi.h`; `docker-proot-setup/src/gpu/pdocker_vulkan_icd.c`; `app/src/main/cpp/pdocker_gpu_executor.c`; host tests `tests.test_gpu_abi_contract tests.test_llama_gpu_env_parity`; native builds `scripts/build-native-android-ndk.sh`, `scripts/build-gpu-shim.sh`; pending APK gates `:app:verifyPackagedPayloadFresh :app:assembleCompatDebug`; pending payload check `scripts/verify-native-payloads.py`; no llama.cpp changes |
 
 Do not claim GPU inference correctness or performance for `ngl>=1` from served
 HTTP alone.  The latest promoted correctness evidence is the commit `ac40e49`
@@ -236,12 +237,20 @@ ABI maintenance rule: `app/src/main/cpp/pdocker_gpu_abi.h` and
 contract headers.  Do not hand-edit one side only.  Any ABI change must update
 both headers in the same commit and must pass
 `test_container_and_apk_gpu_abi_headers_stay_in_sync` plus the schema hash
-contract tests before it is promoted.  V6.2 is now the append-only graphics
-shader specialization metadata extension: the producer may emit V6.2 only when
-a graphics stage carries `VkSpecializationInfo`, and the executor may accept it
-only when the specialization map-entry table, table hash, per-stage payload
-hashes, and stage-index/range checks all validate.  V6.0/V6.1 structs and
-schema hashes remain frozen.
+contract tests before it is promoted.  V6.11 must be append-only on top of
+V6.10: add a `PdockerGpuVulkanGraphicsV611FrameHeader` that embeds the prior
+header/extensions, add separate header-extension/table schema hashes for
+buffer-fill and buffer-update metadata, and allocate new command IDs after
+`PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE`.  Do not reinterpret any V6.0-V6.10
+fields.  The fill/update lane should keep spec-sensitive validation explicit:
+4-byte alignment and size multiples for both commands, `vkCmdUpdateBuffer`
+payload size no larger than 65536 bytes, bounded payload range/hash checks, and
+transfer-write writeback barriers before host fd writeback.  V6.2 is now the
+append-only graphics shader specialization metadata extension: the producer may
+emit V6.2 only when a graphics stage carries `VkSpecializationInfo`, and the
+executor may accept it only when the specialization map-entry table, table hash,
+per-stage payload hashes, and stage-index/range checks all validate.  V6.0/V6.1
+structs and schema hashes remain frozen.
 
 ## Non-Negotiable Rules
 
