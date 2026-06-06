@@ -550,6 +550,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V69_ABI_MINOR 9u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V610_ABI_MINOR 10u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V611_ABI_MINOR 11u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V612_ABI_MINOR 12u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
@@ -590,6 +591,8 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V611_HEADER_EXTENSION_SCHEMA_HASH 0x93cb79f20953cc17ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V611_FILL_BUFFER_SCHEMA_HASH 0xc1f23a447ec9ea61ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_SCHEMA_HASH 0x53e9386aec8278afull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V612_HEADER_EXTENSION_SCHEMA_HASH 0x482efa60b13164b1ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V612_CLEAR_COLOR_IMAGE_SCHEMA_HASH 0x4264b293962f7a49ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES (8u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES 64u
@@ -621,6 +624,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_FILL_BUFFERS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_UPDATE_BUFFERS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_UPDATE_BUFFER_BYTES 65536u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V612_MAX_CLEAR_COLOR_IMAGES PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 
 
 #define PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE 0x00000001u
@@ -889,6 +893,35 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(payload_hash, u64)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_FIELD_COUNT 8u
 
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V612_HEADER_EXTENSION_FIELDS(X) \
+    X(clear_color_image_count, u32) \
+    X(clear_color_image_entry_size, u32) \
+    X(clear_color_image_table_offset, u64) \
+    X(clear_color_image_table_size, u64) \
+    X(clear_color_image_schema_hash, u64) \
+    X(clear_color_image_table_hash, u64) \
+    X(extension_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V612_HEADER_EXTENSION_FIELD_COUNT 7u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V612_CLEAR_COLOR_IMAGE_FIELDS(X) \
+    X(command_index, u32) \
+    X(image_index, u32) \
+    X(image_layout, u32) \
+    X(aspect_mask, u32) \
+    X(base_mip_level, u32) \
+    X(level_count, u32) \
+    X(base_array_layer, u32) \
+    X(layer_count, u32) \
+    X(color_uint32_0, u32) \
+    X(color_uint32_1, u32) \
+    X(color_uint32_2, u32) \
+    X(color_uint32_3, u32) \
+    X(reserved0, u32) \
+    X(reserved1, u32) \
+    X(reserved2, u32) \
+    X(reserved3, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V612_CLEAR_COLOR_IMAGE_FIELD_COUNT 16u
+
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR 1u
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH 2u
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL 3u
@@ -912,6 +945,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE 15u
 #define PDOCKER_GPU_GRAPHICS_V6_COMMAND_FILL_BUFFER 16u
 #define PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER 17u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_COLOR_IMAGE 18u
 #define PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_BUFFER_TO_IMAGE 1u
 #define PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_IMAGE_TO_BUFFER 2u
 
@@ -1727,6 +1761,32 @@ typedef struct PdockerGpuVulkanGraphicsV611FrameHeader {
     PdockerGpuVulkanGraphicsV611HeaderExtension v611;
 } PdockerGpuVulkanGraphicsV611FrameHeader;
 
+typedef struct PdockerGpuVulkanGraphicsV612HeaderExtension {
+    uint32_t clear_color_image_count;
+    uint32_t clear_color_image_entry_size;
+    uint64_t clear_color_image_table_offset;
+    uint64_t clear_color_image_table_size;
+    uint64_t clear_color_image_schema_hash;
+    uint64_t clear_color_image_table_hash;
+    uint64_t extension_hash;
+} PdockerGpuVulkanGraphicsV612HeaderExtension;
+
+typedef struct PdockerGpuVulkanGraphicsV612FrameHeader {
+    PdockerGpuVulkanGraphicsV6FrameHeader base;
+    PdockerGpuVulkanGraphicsV61HeaderExtension v61;
+    PdockerGpuVulkanGraphicsV62HeaderExtension v62;
+    PdockerGpuVulkanGraphicsV63HeaderExtension v63;
+    PdockerGpuVulkanGraphicsV64HeaderExtension v64;
+    PdockerGpuVulkanGraphicsV65HeaderExtension v65;
+    PdockerGpuVulkanGraphicsV66HeaderExtension v66;
+    PdockerGpuVulkanGraphicsV67HeaderExtension v67;
+    PdockerGpuVulkanGraphicsV68HeaderExtension v68;
+    PdockerGpuVulkanGraphicsV69HeaderExtension v69;
+    PdockerGpuVulkanGraphicsV610HeaderExtension v610;
+    PdockerGpuVulkanGraphicsV611HeaderExtension v611;
+    PdockerGpuVulkanGraphicsV612HeaderExtension v612;
+} PdockerGpuVulkanGraphicsV612FrameHeader;
+
 typedef struct PdockerGpuVulkanGraphicsV62SpecializationEntry {
     uint32_t shader_stage_index;
     uint32_t constant_id;
@@ -1924,6 +1984,25 @@ typedef struct PdockerGpuVulkanGraphicsV611UpdateBufferEntry {
     uint64_t payload_offset;
     uint64_t payload_hash;
 } PdockerGpuVulkanGraphicsV611UpdateBufferEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV612ClearColorImageEntry {
+    uint32_t command_index;
+    uint32_t image_index;
+    uint32_t image_layout;
+    uint32_t aspect_mask;
+    uint32_t base_mip_level;
+    uint32_t level_count;
+    uint32_t base_array_layer;
+    uint32_t layer_count;
+    uint32_t color_uint32_0;
+    uint32_t color_uint32_1;
+    uint32_t color_uint32_2;
+    uint32_t color_uint32_3;
+    uint32_t reserved0;
+    uint32_t reserved1;
+    uint32_t reserved2;
+    uint32_t reserved3;
+} PdockerGpuVulkanGraphicsV612ClearColorImageEntry;
 
 typedef struct PdockerGpuVulkanGraphicsV61DynamicOffsetEntry {
     uint32_t offset;
