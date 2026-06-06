@@ -1352,6 +1352,22 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pipeline->color_blend_logic_op_enable = cb->logicOpEnable", icd)
         self.assertNotIn("attachment->blendEnable ||", icd)
 
+    def test_vulkan_graphics_dynamic_rendering_unsupported_state_is_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "pRenderingInfo->flags != 0 || pRenderingInfo->viewMask != 0",
+            "if (rendering->viewMask != 0)",
+            "pipeline->graphics_unsupported = true;",
+        ]:
+            self.assertIn(marker, icd)
+        for marker in [
+            "dynamic rendering flags are not supported",
+            "dynamic rendering multiview is not supported",
+            "if (src->dynamic_rendering_view_mask != 0) return -EOPNOTSUPP;",
+        ]:
+            self.assertIn(marker, executor)
+
     def test_vulkan_graphics_unused_color_attachment_slots_are_preserved(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()

@@ -18518,6 +18518,16 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
+                if (command->flags != 0) {
+                    reason = "dynamic rendering flags are not supported";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                if (command->rendering_view_mask != 0) {
+                    reason = "dynamic rendering multiview is not supported";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
                 for (uint32_t a = 0; a < command->attachment_count; ++a) {
                     const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
                         &view->attachments[command->attachment_first + a];
@@ -19448,6 +19458,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
         for (uint32_t c = 0; c < src->color_attachment_count; ++c) {
             color_formats[c] = (VkFormat)formats[c];
         }
+        if (src->dynamic_rendering_view_mask != 0) return -EOPNOTSUPP;
         VkPipelineRenderingCreateInfo rendering = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
             .viewMask = src->dynamic_rendering_view_mask,

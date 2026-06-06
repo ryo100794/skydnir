@@ -9140,6 +9140,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
                     (const VkPipelineRenderingCreateInfo *)chain;
                 pipeline->dynamic_rendering_pipeline = true;
                 pipeline->dynamic_rendering_view_mask = rendering->viewMask;
+                if (rendering->viewMask != 0) {
+                    pipeline->graphics_unsupported = true;
+                }
                 pipeline->dynamic_rendering_color_attachment_count =
                     clamp_u32(rendering->colorAttachmentCount, PDOCKER_VK_MAX_STORAGE_BUFFERS);
                 if (rendering->colorAttachmentCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
@@ -9870,6 +9873,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         : 0;
     if (pRenderingInfo) {
         if (pRenderingInfo->pNext) {
+            cmd->graphics_unsupported = true;
+        }
+        if (pRenderingInfo->flags != 0 || pRenderingInfo->viewMask != 0) {
             cmd->graphics_unsupported = true;
         }
         cmd->active_render_area = pRenderingInfo->renderArea;
