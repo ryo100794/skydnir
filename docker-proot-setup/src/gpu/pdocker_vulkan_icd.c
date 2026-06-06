@@ -169,6 +169,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_BUFFER_DEVICE_ADDRESS        (1ull << 11)
 #define PDOCKER_VK_FEATURE_VULKAN_MEMORY_MODEL          (1ull << 12)
 #define PDOCKER_VK_FEATURE_MAINTENANCE_4                (1ull << 13)
+#define PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8             (1ull << 14)
 
 struct PdockerVkMemory {
     size_t size;
@@ -6895,12 +6896,14 @@ typedef struct {
     VkPhysicalDevice16BitStorageFeatures storage16;
     VkPhysicalDevice8BitStorageFeatures storage8;
     VkPhysicalDeviceShaderFloat16Int8Features float16_int8;
+    VkPhysicalDeviceIndexTypeUint8FeaturesEXT index_type_uint8;
     VkPhysicalDeviceSubgroupProperties subgroup;
     bool ext_16bit_storage;
     bool ext_8bit_storage;
     bool ext_shader_float16_int8;
     bool ext_storage_buffer_storage_class;
     bool ext_extended_dynamic_state;
+    bool ext_index_type_uint8;
 } PdockerVkAdvertisedCaps;
 
 static const char *json_find_value(const char *json, const char *key) {
@@ -6998,6 +7001,7 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "storagePushConstant8", &caps->storage8.storagePushConstant8);
     json_read_u32(json, "shaderFloat16", &caps->float16_int8.shaderFloat16);
     json_read_u32(json, "shaderInt8", &caps->float16_int8.shaderInt8);
+    json_read_u32(json, "indexTypeUint8", &caps->index_type_uint8.indexTypeUint8);
     json_read_u32(json, "subgroupSize", &caps->subgroup.subgroupSize);
     json_read_u32(json, "supportedStages", &caps->subgroup.supportedStages);
     json_read_u32(json, "supportedOperations", &caps->subgroup.supportedOperations);
@@ -7007,6 +7011,7 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "VK_KHR_shader_float16_int8", &value)) caps->ext_shader_float16_int8 = value != 0;
     if (json_read_u32(json, "VK_KHR_storage_buffer_storage_class", &value)) caps->ext_storage_buffer_storage_class = value != 0;
     if (json_read_u32(json, "VK_EXT_extended_dynamic_state", &value)) caps->ext_extended_dynamic_state = value != 0;
+    if (json_read_u32(json, "VK_EXT_index_type_uint8", &value)) caps->ext_index_type_uint8 = value != 0;
     return caps->api_version != 0;
 }
 
@@ -7099,7 +7104,7 @@ static void trace_executor_advertisement_caps_once(void) {
         fprintf(stderr,
                 "pdocker-vulkan-icd: executor advertisement caps shadow: "
                 "api=0x%08x device=\"%s\" vendor=0x%04x device_id=0x%04x "
-                "type=%u storage16=%u storage8=%u int8=%u subgroup={size:%u,ops:0x%x}\n",
+                "type=%u storage16=%u storage8=%u int8=%u indexTypeUint8=%u subgroup={size:%u,ops:0x%x}\n",
                 caps->api_version,
                 caps->device_name,
                 caps->vendor_id,
@@ -7108,6 +7113,7 @@ static void trace_executor_advertisement_caps_once(void) {
                 caps->storage16.storageBuffer16BitAccess,
                 caps->storage8.storageBuffer8BitAccess,
                 caps->float16_int8.shaderInt8,
+                caps->index_type_uint8.indexTypeUint8,
                 caps->subgroup.subgroupSize,
                 caps->subgroup.supportedOperations);
     } else {
@@ -7445,6 +7451,15 @@ static void fill_pnext_features(void *pNext) {
                 break;
             }
 #endif
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
+                VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
+                p->indexTypeUint8 = (caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8)
+                    ? VK_TRUE
+                    : VK_FALSE;
+                break;
+            }
+#endif
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 VkPhysicalDeviceMaintenance4Features *p = (VkPhysicalDeviceMaintenance4Features *)node;
@@ -7526,6 +7541,13 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->shaderInt8) mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
                 break;
             }
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
+                const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
+                if (p->indexTypeUint8) mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
+                break;
+            }
+#endif
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 const VkPhysicalDeviceMaintenance4Features *p = (const VkPhysicalDeviceMaintenance4Features *)node;
@@ -7579,6 +7601,9 @@ static uint64_t advertised_feature_mask(void) {
         }
         if (!storage8_disabled && caps->float16_int8.shaderInt8) {
             mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
+        }
+        if (caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8) {
+            mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
         }
     } else {
         if (advertised_storage16()) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
@@ -7670,6 +7695,15 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
                         p->shaderInt8);
                 break;
             }
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
+                const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: create-device index_type_uint8_features={indexTypeUint8:%u}\n",
+                        p->indexTypeUint8);
+                break;
+            }
+#endif
             default:
                 fprintf(stderr, "pdocker-vulkan-icd: create-device pnext sType=%d\n", (int)header.sType);
                 break;
@@ -8537,6 +8571,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
                              VK_EXT_EXTENDED_DYNAMIC_STATE_SPEC_VERSION);
     }
 #endif
+#ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
+    if (caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8) {
+        ADD_DEVICE_EXTENSION(VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME,
+                             VK_EXT_INDEX_TYPE_UINT8_SPEC_VERSION);
+    }
+#endif
 #undef ADD_DEVICE_EXTENSION
     copy_extension_properties(available, available_count, pPropertyCount, pProperties);
     return VK_SUCCESS;
@@ -8563,6 +8603,16 @@ static bool device_extension_advertised_name(const char *name) {
     if (strcmp(name, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME) == 0) return true;
     if (strcmp(name, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) == 0) return true;
     if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) return true;
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
+    if (strcmp(name, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) == 0) {
+        return !caps || caps->ext_extended_dynamic_state;
+    }
+#endif
+#ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
+    if (strcmp(name, VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME) == 0) {
+        return caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8;
+    }
+#endif
     return false;
 }
 

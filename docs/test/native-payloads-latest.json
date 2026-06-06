@@ -50,13 +50,13 @@
       },
       {
         "entry": "lib/arm64-v8a/libpdockerdirect.so",
-        "sha256": "643fb28ecf5e075c327fbd403bb03b52389f15c25b98d78c21df45fcbea53301",
-        "size": 117128
+        "sha256": "ef93db878e27e69a607557d9c2fdeb2a4e727d908449057047d74cefc9d1f08e",
+        "size": 117368
       },
       {
         "entry": "lib/arm64-v8a/libpdockergpuexecutor.so",
-        "sha256": "33548803a2b5727af0f222b2c83a48e35c5555b114befe728c837418a6325b44",
-        "size": 348488
+        "sha256": "c6327fc33ab10e1bbd34bfcca078e9398bcfbcb4d92e38a7c2b121cd09408ae0",
+        "size": 348800
       },
       {
         "entry": "lib/arm64-v8a/libpdockergpushim.so",
@@ -80,8 +80,8 @@
       },
       {
         "entry": "lib/arm64-v8a/libpdockervulkanicd.so",
-        "sha256": "1b14454681b04f37eff3e050acb7649e3bed0466f036f263255f69e92a89862c",
-        "size": 282792
+        "sha256": "c1077107647d0e2ae1d8d6533f060e23c16f3b01e718a70c4460e3074279868e",
+        "size": 282816
       }
     ],
     "policy": "arm64-only"
@@ -108,28 +108,28 @@
     {
       "abi": "arm64-v8a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockerdirect.so: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /system/bin/linker64, BuildID[sha1]=e4c601deb636325a9791a9d3b3bfd2bdbd40898b, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockerdirect.so: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /system/bin/linker64, BuildID[sha1]=2d74adf9c52bdddcb5b2705650397b561c17a80b, not stripped",
       "has_android_linker": true,
       "has_glibc_loader": false,
       "name": "libpdockerdirect.so",
       "path": "app/src/main/jniLibs/arm64-v8a/libpdockerdirect.so",
       "readelf_header_has_machine": true,
       "role": "android-bionic",
-      "sha256": "643fb28ecf5e075c327fbd403bb03b52389f15c25b98d78c21df45fcbea53301",
-      "size": 117128
+      "sha256": "ef93db878e27e69a607557d9c2fdeb2a4e727d908449057047d74cefc9d1f08e",
+      "size": 117368
     },
     {
       "abi": "arm64-v8a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockergpuexecutor.so: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /system/bin/linker64, BuildID[sha1]=6d03e07fd35b0c1b7f3294cf24d9650fa4d6d1f6, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockergpuexecutor.so: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /system/bin/linker64, BuildID[sha1]=4d927334d6df0a282776472e22117d2c51f03591, not stripped",
       "has_android_linker": true,
       "has_glibc_loader": false,
       "name": "libpdockergpuexecutor.so",
       "path": "app/src/main/jniLibs/arm64-v8a/libpdockergpuexecutor.so",
       "readelf_header_has_machine": true,
       "role": "android-bionic",
-      "sha256": "33548803a2b5727af0f222b2c83a48e35c5555b114befe728c837418a6325b44",
-      "size": 348488
+      "sha256": "c6327fc33ab10e1bbd34bfcca078e9398bcfbcb4d92e38a7c2b121cd09408ae0",
+      "size": 348800
     },
     {
       "abi": "arm64-v8a",
@@ -173,15 +173,15 @@
     {
       "abi": "armeabi-v7a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockergpuexecutor.so: ELF 32-bit LSB pie executable, ARM, EABI5 version 1 (SYSV), dynamically linked, interpreter /system/bin/linker, BuildID[sha1]=11fb58d84b91c2ad21737c5e0bc70183610ce0fd, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockergpuexecutor.so: ELF 32-bit LSB pie executable, ARM, EABI5 version 1 (SYSV), dynamically linked, interpreter /system/bin/linker, BuildID[sha1]=7f4530894c586c65acc9bb9403dd5601bc9bc6d5, not stripped",
       "has_android_linker": true,
       "has_glibc_loader": false,
       "name": "libpdockergpuexecutor.so",
       "path": "app/src/main/jniLibs/armeabi-v7a/libpdockergpuexecutor.so",
       "readelf_header_has_machine": true,
       "role": "android-bionic",
-      "sha256": "fbbfeb4a7a6a68cce7eb3252fdd08e87bdd7f9eed4d179b9d4e1688c667009d4",
-      "size": 420284
+      "sha256": "4c60b5fa4a9fa173de4b9c557b68991b164d8715de8b16e4d53b0702b55ed5ac",
+      "size": 420592
     },
     {
       "abi": "armeabi-v7a",
@@ -212,15 +212,15 @@
     {
       "abi": "arm64-v8a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so: ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, BuildID[sha1]=adb4cfcfbc17c5785284a1ebfa7fca07e79774de, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so: ELF 64-bit LSB shared object, ARM aarch64, version 1 (SYSV), dynamically linked, BuildID[sha1]=654b3c33f4a09675cf84edb0d9a4731ebca85224, not stripped",
       "has_android_linker": false,
       "has_glibc_loader": false,
       "name": "libpdockervulkanicd.so",
       "path": "app/src/main/jniLibs/arm64-v8a/libpdockervulkanicd.so",
       "readelf_header_has_machine": true,
       "role": "linux-glibc-container",
-      "sha256": "1b14454681b04f37eff3e050acb7649e3bed0466f036f263255f69e92a89862c",
-      "size": 282792
+      "sha256": "c1077107647d0e2ae1d8d6533f060e23c16f3b01e718a70c4460e3074279868e",
+      "size": 282816
     },
     {
       "abi": "arm64-v8a",
@@ -251,14 +251,14 @@
     {
       "abi": "armeabi-v7a",
       "exists": true,
-      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so: ELF 32-bit LSB shared object, ARM, EABI5 version 1 (SYSV), dynamically linked, BuildID[sha1]=c55c7fb25f4b3a5e5475ede174a058cfa4cde57b, not stripped",
+      "file": "/root/tl/pdocker-android/app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so: ELF 32-bit LSB shared object, ARM, EABI5 version 1 (SYSV), dynamically linked, BuildID[sha1]=0b3af2ca7e9db15317e4f0ff7ca5c7e62b67af8b, not stripped",
       "has_android_linker": false,
       "has_glibc_loader": false,
       "name": "libpdockervulkanicd.so",
       "path": "app/src/main/jniLibs/armeabi-v7a/libpdockervulkanicd.so",
       "readelf_header_has_machine": true,
       "role": "linux-glibc-container-experimental",
-      "sha256": "56271d8c43a6f22f519817ccbfbb184f446c1fdb2be412e9cd0f4cf4aa03283f",
+      "sha256": "59d9f475e08ce3178b0a495cd74f07e17aec2991109335388fc103edb88aa6e9",
       "size": 219964
     },
     {

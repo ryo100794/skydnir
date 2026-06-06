@@ -1226,6 +1226,7 @@ typedef struct {
     VkPhysicalDeviceShaderFloat16Int8Features physical_float16_int8;
     VkPhysicalDeviceDynamicRenderingFeatures physical_dynamic_rendering;
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT physical_extended_dynamic_state;
+    VkPhysicalDeviceIndexTypeUint8FeaturesEXT physical_index_type_uint8;
     VkPhysicalDeviceFeatures enabled_features;
     VkPhysicalDeviceVulkan11Features enabled_vulkan11;
     VkPhysicalDeviceVulkan12Features enabled_vulkan12;
@@ -1234,6 +1235,7 @@ typedef struct {
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
     VkPhysicalDeviceDynamicRenderingFeatures enabled_dynamic_rendering;
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT enabled_extended_dynamic_state;
+    VkPhysicalDeviceIndexTypeUint8FeaturesEXT enabled_index_type_uint8;
     uint32_t enabled_extension_count;
     uint8_t enabled_ext_16bit_storage;
     uint8_t enabled_ext_8bit_storage;
@@ -1241,6 +1243,7 @@ typedef struct {
     uint8_t enabled_ext_storage_buffer_storage_class;
     uint8_t enabled_ext_dynamic_rendering;
     uint8_t enabled_ext_extended_dynamic_state;
+    uint8_t enabled_ext_index_type_uint8;
     uint8_t enabled_chain_compat_feature_structs;
     uint8_t graphics_ready;
     PFN_vkCmdBeginRenderingKHR cmd_begin_rendering;
@@ -1637,7 +1640,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
             "shaderInt64=%u "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
-            "float16=%u int8=%u "
+            "float16=%u int8=%u indexTypeUint8=%u "
             "core11_storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "core12_storage8={ssbo:%u,ubo_ssbo:%u,push:%u,float16:%u,int8:%u} "
             "subgroup={size:%u,stages:0x%x,ops:0x%x} "
@@ -1658,6 +1661,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
             rt->physical_storage8.storagePushConstant8,
             rt->physical_float16_int8.shaderFloat16,
             rt->physical_float16_int8.shaderInt8,
+            rt->physical_index_type_uint8.indexTypeUint8,
             rt->physical_vulkan11.storageBuffer16BitAccess,
             rt->physical_vulkan11.uniformAndStorageBuffer16BitAccess,
             rt->physical_vulkan11.storagePushConstant16,
@@ -1684,12 +1688,13 @@ static void log_vulkan_enabled_feature_trace(
         const VkPhysicalDeviceVulkan12Features *vulkan12,
         const VkPhysicalDevice16BitStorageFeatures *storage16,
         const VkPhysicalDevice8BitStorageFeatures *storage8,
-        const VkPhysicalDeviceShaderFloat16Int8Features *float16_int8) {
+        const VkPhysicalDeviceShaderFloat16Int8Features *float16_int8,
+        const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *index_type_uint8) {
     fprintf(stderr,
             "pdocker-gpu-executor: Android Vulkan enabled features build_marker=%s shaderInt64=%u "
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
-            "float16=%u int8=%u "
+            "float16=%u int8=%u indexTypeUint8=%u "
             "core11_storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "core12_storage8={ssbo:%u,ubo_ssbo:%u,push:%u,float16:%u,int8:%u}\n",
             PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
@@ -1703,6 +1708,7 @@ static void log_vulkan_enabled_feature_trace(
             storage8 ? storage8->storagePushConstant8 : 0,
             float16_int8 ? float16_int8->shaderFloat16 : 0,
             float16_int8 ? float16_int8->shaderInt8 : 0,
+            index_type_uint8 ? index_type_uint8->indexTypeUint8 : 0,
             vulkan11 ? vulkan11->storageBuffer16BitAccess : 0,
             vulkan11 ? vulkan11->uniformAndStorageBuffer16BitAccess : 0,
             vulkan11 ? vulkan11->storagePushConstant16 : 0,
@@ -1736,6 +1742,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"core12_shaderFloat16\":%u,"
             "\"core12_shaderInt8\":%u,"
             "\"extendedDynamicState\":%u,"
+            "\"indexTypeUint8\":%u,"
             "\"extension_count\":%u,"
             "\"chain_compat_feature_structs\":%u,"
             "\"extensions\":{"
@@ -1743,7 +1750,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"VK_KHR_8bit_storage\":%u,"
             "\"VK_KHR_shader_float16_int8\":%u,"
             "\"VK_KHR_storage_buffer_storage_class\":%u,"
-            "\"VK_EXT_extended_dynamic_state\":%u}}",
+            "\"VK_EXT_extended_dynamic_state\":%u,"
+            "\"VK_EXT_index_type_uint8\":%u}}",
             rt ? rt->enabled_features.shaderInt64 : 0,
             rt ? rt->enabled_storage16.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_storage16.uniformAndStorageBuffer16BitAccess : 0,
@@ -1762,13 +1770,15 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_vulkan12.shaderFloat16 : 0,
             rt ? rt->enabled_vulkan12.shaderInt8 : 0,
             rt ? rt->enabled_extended_dynamic_state.extendedDynamicState : 0,
+            rt ? rt->enabled_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->enabled_extension_count : 0,
             rt ? rt->enabled_chain_compat_feature_structs : 0,
             rt ? rt->enabled_ext_16bit_storage : 0,
             rt ? rt->enabled_ext_8bit_storage : 0,
             rt ? rt->enabled_ext_shader_float16_int8 : 0,
             rt ? rt->enabled_ext_storage_buffer_storage_class : 0,
-            rt ? rt->enabled_ext_extended_dynamic_state : 0);
+            rt ? rt->enabled_ext_extended_dynamic_state : 0,
+            rt ? rt->enabled_ext_index_type_uint8 : 0);
 }
 
 static void log_spirv_trace(
@@ -10663,6 +10673,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     memset(&rt->physical_float16_int8, 0, sizeof(rt->physical_float16_int8));
     memset(&rt->physical_dynamic_rendering, 0, sizeof(rt->physical_dynamic_rendering));
     memset(&rt->physical_extended_dynamic_state, 0, sizeof(rt->physical_extended_dynamic_state));
+    memset(&rt->physical_index_type_uint8, 0, sizeof(rt->physical_index_type_uint8));
     memset(&rt->subgroup_properties, 0, sizeof(rt->subgroup_properties));
     rt->physical_vulkan11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     rt->physical_vulkan12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -10671,6 +10682,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->physical_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
     rt->physical_dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
     rt->physical_extended_dynamic_state.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
+    rt->physical_index_type_uint8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT;
     rt->subgroup_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
     PFN_vkGetPhysicalDeviceFeatures2 get_features2 =
         (PFN_vkGetPhysicalDeviceFeatures2)vkGetInstanceProcAddr(rt->instance, "vkGetPhysicalDeviceFeatures2");
@@ -10688,6 +10700,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_storage8.pNext = &rt->physical_float16_int8;
         rt->physical_float16_int8.pNext = &rt->physical_dynamic_rendering;
         rt->physical_dynamic_rendering.pNext = &rt->physical_extended_dynamic_state;
+        rt->physical_extended_dynamic_state.pNext = &rt->physical_index_type_uint8;
         get_features2(rt->physical_device, &features2);
         rt->physical_features = features2.features;
         rt->physical_vulkan11.pNext = NULL;
@@ -10697,6 +10710,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_float16_int8.pNext = NULL;
         rt->physical_dynamic_rendering.pNext = NULL;
         rt->physical_extended_dynamic_state.pNext = NULL;
+        rt->physical_index_type_uint8.pNext = NULL;
     }
     PFN_vkGetPhysicalDeviceProperties2 get_properties2 =
         (PFN_vkGetPhysicalDeviceProperties2)vkGetInstanceProcAddr(rt->instance, "vkGetPhysicalDeviceProperties2");
@@ -10763,6 +10777,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
     VkPhysicalDeviceDynamicRenderingFeatures enabled_dynamic_rendering;
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT enabled_extended_dynamic_state;
+    VkPhysicalDeviceIndexTypeUint8FeaturesEXT enabled_index_type_uint8;
     memset(&enabled_vulkan11, 0, sizeof(enabled_vulkan11));
     memset(&enabled_vulkan12, 0, sizeof(enabled_vulkan12));
     memset(&enabled_storage16, 0, sizeof(enabled_storage16));
@@ -10770,6 +10785,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     memset(&enabled_float16_int8, 0, sizeof(enabled_float16_int8));
     memset(&enabled_dynamic_rendering, 0, sizeof(enabled_dynamic_rendering));
     memset(&enabled_extended_dynamic_state, 0, sizeof(enabled_extended_dynamic_state));
+    memset(&enabled_index_type_uint8, 0, sizeof(enabled_index_type_uint8));
     enabled_vulkan11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     enabled_vulkan11.storageBuffer16BitAccess =
         rt->physical_vulkan11.storageBuffer16BitAccess || rt->physical_storage16.storageBuffer16BitAccess;
@@ -10802,8 +10818,10 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
     enabled_dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
     enabled_extended_dynamic_state.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
+    enabled_index_type_uint8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT;
     enabled_dynamic_rendering.dynamicRendering = rt->physical_dynamic_rendering.dynamicRendering;
     enabled_extended_dynamic_state.extendedDynamicState = rt->physical_extended_dynamic_state.extendedDynamicState;
+    enabled_index_type_uint8.indexTypeUint8 = rt->physical_index_type_uint8.indexTypeUint8;
     enabled_float16_int8.shaderFloat16 = rt->physical_float16_int8.shaderFloat16;
     enabled_float16_int8.shaderInt8 = rt->physical_float16_int8.shaderInt8;
     void *device_features_pnext = NULL;
@@ -10849,6 +10867,14 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         enabled_extended_dynamic_state.pNext = device_features_pnext;
         device_features_pnext = &enabled_extended_dynamic_state;
     }
+    const int index_type_uint8_available =
+        enabled_index_type_uint8.indexTypeUint8 &&
+        vulkan_device_extension_supported(rt->physical_device,
+                                          VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME);
+    if (index_type_uint8_available) {
+        enabled_index_type_uint8.pNext = device_features_pnext;
+        device_features_pnext = &enabled_index_type_uint8;
+    }
     const int chain_compat_feature_structs =
         env_truthy("PDOCKER_GPU_CHAIN_COMPAT_FEATURE_STRUCTS", 1);
     if ((rt->api_version < VK_API_VERSION_1_2 || chain_compat_feature_structs) &&
@@ -10871,7 +10897,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         enabled_storage16.pNext = device_features_pnext;
         device_features_pnext = &enabled_storage16;
     }
-    const char *enabled_extensions[12];
+    const char *enabled_extensions[16];
     uint32_t enabled_extension_count = 0;
     memset(enabled_extensions, 0, sizeof(enabled_extensions));
     if (enabled_storage16.storageBuffer16BitAccess ||
@@ -10936,6 +10962,17 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
             extended_dynamic_state_available &&
             enabled_extension_count > extended_dynamic_state_before;
     }
+    const uint32_t index_type_uint8_before = enabled_extension_count;
+    if (enabled_index_type_uint8.indexTypeUint8) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME);
+        rt->enabled_ext_index_type_uint8 =
+            index_type_uint8_available &&
+            enabled_extension_count > index_type_uint8_before;
+    }
     rt->enabled_features = enabled_features;
     rt->enabled_vulkan11 = enabled_vulkan11;
     rt->enabled_vulkan12 = enabled_vulkan12;
@@ -10944,6 +10981,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->enabled_float16_int8 = enabled_float16_int8;
     rt->enabled_dynamic_rendering = enabled_dynamic_rendering;
     rt->enabled_extended_dynamic_state = enabled_extended_dynamic_state;
+    rt->enabled_index_type_uint8 = enabled_index_type_uint8;
     rt->enabled_vulkan11.pNext = NULL;
     rt->enabled_vulkan12.pNext = NULL;
     rt->enabled_storage16.pNext = NULL;
@@ -10951,6 +10989,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->enabled_float16_int8.pNext = NULL;
     rt->enabled_dynamic_rendering.pNext = NULL;
     rt->enabled_extended_dynamic_state.pNext = NULL;
+    rt->enabled_index_type_uint8.pNext = NULL;
     rt->enabled_extension_count = enabled_extension_count;
     rt->enabled_chain_compat_feature_structs = (uint8_t)chain_compat_feature_structs;
     VkDeviceCreateInfo dci = {
@@ -10964,7 +11003,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     };
     stage = "create-device";
     log_vulkan_enabled_feature_trace(&enabled_features, &enabled_vulkan11, &enabled_vulkan12,
-                                     &enabled_storage16, &enabled_storage8, &enabled_float16_int8);
+                                     &enabled_storage16, &enabled_storage8, &enabled_float16_int8,
+                                     &enabled_index_type_uint8);
     rc = vkCreateDevice(rt->physical_device, &dci, NULL, &rt->device);
     if (rc != VK_SUCCESS) goto fail;
     vkGetDeviceQueue(rt->device, rt->queue_family, 0, &rt->queue);
@@ -15558,7 +15598,8 @@ cleanup:
                 "\"uniformAndStorageBuffer8BitAccess\":%u,"
                 "\"storagePushConstant8\":%u,"
                 "\"shaderFloat16\":%u,"
-                "\"shaderInt8\":%u},",
+                "\"shaderInt8\":%u,"
+                "\"indexTypeUint8\":%u},",
                 rt ? rt->physical_features.shaderInt64 : 0,
                 rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
                 rt ? rt->physical_storage16.uniformAndStorageBuffer16BitAccess : 0,
@@ -15567,7 +15608,8 @@ cleanup:
                 rt ? rt->physical_storage8.uniformAndStorageBuffer8BitAccess : 0,
                 rt ? rt->physical_storage8.storagePushConstant8 : 0,
                 rt ? rt->physical_float16_int8.shaderFloat16 : 0,
-                rt ? rt->physical_float16_int8.shaderInt8 : 0);
+                rt ? rt->physical_float16_int8.shaderInt8 : 0,
+                rt ? rt->physical_index_type_uint8.indexTypeUint8 : 0);
         write_android_vulkan_enabled_features_report(json_out(), rt);
         fprintf(json_out(), "}\n");
         fflush(json_out());
@@ -15752,6 +15794,7 @@ static void print_capabilities(const char *transport) {
             "\"uniformAndStorageBuffer8BitAccess\":%u,"
             "\"storagePushConstant8\":%u,"
             "\"shaderFloat16\":%u,\"shaderInt8\":%u,"
+            "\"indexTypeUint8\":%u,"
             "\"subgroupSize\":%u,"
             "\"subgroupStages\":%u,"
             "\"subgroupOperations\":%u},",
@@ -15789,6 +15832,7 @@ static void print_capabilities(const char *transport) {
             rt ? rt->physical_storage8.storagePushConstant8 : 0,
             rt ? rt->physical_float16_int8.shaderFloat16 : 0,
             rt ? rt->physical_float16_int8.shaderInt8 : 0,
+            rt ? rt->physical_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->subgroup_properties.subgroupSize : 0,
             rt ? rt->subgroup_properties.supportedStages : 0,
             rt ? rt->subgroup_properties.supportedOperations : 0);
@@ -15871,6 +15915,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             "\"float16_int8\":{"
             "\"shaderFloat16\":%u,"
             "\"shaderInt8\":%u},"
+            "\"indexTypeUint8\":%u,"
             "\"extendedDynamicState\":%u},",
             rt ? rt->physical_features.shaderInt64 : 0,
             rt ? rt->physical_storage16.storageBuffer16BitAccess : 0,
@@ -15882,6 +15927,7 @@ static void print_vulkan_advertisement_caps(const char *transport) {
             rt ? rt->physical_storage8.storagePushConstant8 : 0,
             rt ? rt->physical_float16_int8.shaderFloat16 : 0,
             rt ? rt->physical_float16_int8.shaderInt8 : 0,
+            rt ? rt->physical_index_type_uint8.indexTypeUint8 : 0,
             rt ? rt->physical_extended_dynamic_state.extendedDynamicState : 0);
     fprintf(out,
             "\"subgroup\":{"
@@ -20169,9 +20215,24 @@ static int vulkan_graphics_index_stride(uint32_t index_type, uint64_t *out_strid
         case VK_INDEX_TYPE_UINT32:
             *out_stride = 4;
             return 0;
+        case VK_INDEX_TYPE_UINT8_EXT:
+            *out_stride = 1;
+            return 0;
         default:
             return -EOPNOTSUPP;
     }
+}
+
+
+static int vulkan_graphics_index_type_supported_by_runtime(
+        const VulkanRuntime *rt,
+        uint32_t index_type) {
+    if ((VkIndexType)index_type == VK_INDEX_TYPE_UINT8_EXT) {
+        return rt && rt->enabled_index_type_uint8.indexTypeUint8 && rt->enabled_ext_index_type_uint8
+            ? 0
+            : -EOPNOTSUPP;
+    }
+    return 0;
 }
 
 static int add_vulkan_graphics_replay_buffer_range(
@@ -21578,6 +21639,8 @@ static int record_vulkan_graphics_v6_command_buffer(
                 uint64_t index_stride = 0;
                 rc = vulkan_graphics_index_stride(command->index_type, &index_stride);
                 if (rc != 0) goto cleanup;
+                rc = vulkan_graphics_index_type_supported_by_runtime(rt, command->index_type);
+                if (rc != 0) goto cleanup;
                 (void)index_stride;
                 int buffer_index = find_vulkan_graphics_replay_buffer(
                     buffers, command->index_buffer_resource_index);
@@ -21610,6 +21673,8 @@ static int record_vulkan_graphics_v6_command_buffer(
                 uint64_t draw_range_offset = 0;
                 uint64_t draw_range_end = 0;
                 rc = vulkan_graphics_index_stride(command->index_type, &index_stride);
+                if (rc != 0) goto cleanup;
+                rc = vulkan_graphics_index_type_supported_by_runtime(rt, command->index_type);
                 if (rc != 0) goto cleanup;
                 if (!checked_mul_u64_executor(command->first_index, index_stride, &first_index_bytes) ||
                     !checked_mul_u64_executor(command->index_count, index_stride, &index_span) ||

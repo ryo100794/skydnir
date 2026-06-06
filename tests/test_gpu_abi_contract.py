@@ -1612,6 +1612,47 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, helper)
 
+    def test_vulkan_graphics_executor_supports_uint8_indices_when_driver_advertises_it(self):
+        executor = GPU_EXECUTOR.read_text()
+        for marker in [
+            "VkPhysicalDeviceIndexTypeUint8FeaturesEXT physical_index_type_uint8",
+            "VkPhysicalDeviceIndexTypeUint8FeaturesEXT enabled_index_type_uint8",
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT",
+            "VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME",
+            "rt->physical_extended_dynamic_state.pNext = &rt->physical_index_type_uint8",
+            "enabled_index_type_uint8.pNext = device_features_pnext",
+            "rt->enabled_ext_index_type_uint8",
+            "case VK_INDEX_TYPE_UINT8_EXT:",
+            "*out_stride = 1",
+            "vulkan_graphics_index_type_supported_by_runtime",
+            "enabled_index_type_uint8.indexTypeUint8 && rt->enabled_ext_index_type_uint8",
+            "rc = vulkan_graphics_index_type_supported_by_runtime(rt, command->index_type);",
+            'indexTypeUint8',
+            'VK_EXT_index_type_uint8',
+        ]:
+            self.assertIn(marker, executor)
+
+    def test_vulkan_icd_advertises_uint8_indices_only_from_executor_caps(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8",
+            "VkPhysicalDeviceIndexTypeUint8FeaturesEXT index_type_uint8",
+            "ext_index_type_uint8",
+            "json_read_u32(json, \"indexTypeUint8\", &caps->index_type_uint8.indexTypeUint8)",
+            "json_read_u32(json, \"VK_EXT_index_type_uint8\", &value)",
+            "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT",
+            "p->indexTypeUint8 = (caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8)",
+            "VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME",
+            "caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8",
+            "mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8",
+        ]:
+            self.assertIn(marker, icd)
+        extension_body = icd.split("vkEnumerateDeviceExtensionProperties", 1)[1].split(
+            "#undef ADD_DEVICE_EXTENSION", 1
+        )[0]
+        self.assertIn("VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME", extension_body)
+        self.assertIn("caps->ext_index_type_uint8", extension_body)
+
     def test_vulkan_graphics_v6_executor_materializes_vertex_buffers_before_command_record(self):
         executor = GPU_EXECUTOR.read_text()
         helper = executor.split("typedef struct VulkanGraphicsReplayBuffer", 1)[1].split(
