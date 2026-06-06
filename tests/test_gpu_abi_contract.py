@@ -1936,7 +1936,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT", source)
         self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR", executor)
         self.assertIn("sizeof(PdockerGpuVulkanGraphicsV67FrameHeader)", executor)
-        self.assertIn("FrameRange ranges[26]", executor)
+        self.assertIn("FrameRange ranges[27]", executor)
         self.assertIn("find_vulkan_graphics_v67_viewport_scissor_state", executor)
         self.assertIn(".pViewports = dynamic_viewport ? NULL : static_viewports", executor)
         self.assertIn(".pScissors = dynamic_scissor ? NULL : static_scissors", executor)
@@ -1973,7 +1973,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[26]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[27]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(
@@ -2445,6 +2445,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V68_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V68_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V68_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -2458,6 +2468,27 @@ class GpuAbiContractTest(unittest.TestCase):
                     )
                     self.assertEqual(len(fields), count)
                     self.assertEqual(declared_hash, computed_hash)
+
+    def test_vulkan_graphics_v68_indirect_draw_metadata_is_append_only(self):
+        app = APP_HEADER.read_text()
+        container = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        for source in (app, container):
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V68_ABI_MINOR 8u", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V68_HEADER_EXTENSION_FIELDS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_FIELDS", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV68FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV68IndirectDrawEntry", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V68_INDIRECT_DRAW_COUNT_BUFFER_PRESENT", source)
+        self.assertIn("PdockerGpuVulkanGraphicsV68IndirectDrawEntry indirect_draws", icd)
+        self.assertIn("need_v68_indirect_draw", icd)
+        self.assertIn("collect_graphics_buffer_resource", icd)
+        self.assertIn("draw->indirect", icd)
+        self.assertIn("vkCmdDrawIndirect", executor)
+        self.assertIn("vkCmdDrawIndexedIndirect", executor)
+        self.assertIn("find_vulkan_graphics_v68_indirect_draw", executor)
+        self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V68_ABI_MINOR", executor)
 
     def test_vulkan_graphics_v6_field_macros_match_packed_structs(self):
         schemas = [
@@ -2580,6 +2611,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_FIELD_COUNT",
                 "PdockerGpuVulkanGraphicsV67ScissorEntry",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V68_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V68_HEADER_EXTENSION_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV68HeaderExtension",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_FIELD_COUNT",
+                "PdockerGpuVulkanGraphicsV68IndirectDrawEntry",
             ),
             (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",

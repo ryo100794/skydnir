@@ -546,6 +546,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V65_ABI_MINOR 5u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V66_ABI_MINOR 6u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR 7u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V68_ABI_MINOR 8u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
@@ -576,6 +577,8 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCISSOR_STATE_SCHEMA_HASH 0xa76b96bdcf2c00eaull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCHEMA_HASH 0x1b32b902609358a7ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_SCHEMA_HASH 0x57b0da55f6a9871aull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V68_HEADER_EXTENSION_SCHEMA_HASH 0x7d182f8a521ce006ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_SCHEMA_HASH 0x0c0f27c9d746a371ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES (8u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES 64u
@@ -600,6 +603,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS_PER_PIPELINE 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS 4096u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V68_MAX_INDIRECT_DRAWS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 
 
 #define PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE 0x00000001u
@@ -661,6 +665,8 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_GRAPHICS_V67_VIEWPORT_STATIC_PRESENT 0x00000001u
 #define PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT 0x00000002u
 #define PDOCKER_GPU_GRAPHICS_V67_INDEX_NONE 0xffffffffu
+#define PDOCKER_GPU_GRAPHICS_V68_INDEX_NONE 0xffffffffu
+#define PDOCKER_GPU_GRAPHICS_V68_INDIRECT_DRAW_COUNT_BUFFER_PRESENT 0x00000001u
 
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_FIELDS(X) \
     X(pipeline_index, u32) \
@@ -720,6 +726,27 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(reserved0, u32) \
     X(reserved1, u32)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_FIELD_COUNT 8u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V68_HEADER_EXTENSION_FIELDS(X) \
+    X(indirect_draw_count, u32) \
+    X(indirect_draw_entry_size, u32) \
+    X(indirect_draw_table_offset, u64) \
+    X(indirect_draw_table_size, u64) \
+    X(indirect_draw_schema_hash, u64) \
+    X(indirect_draw_table_hash, u64) \
+    X(extension_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V68_HEADER_EXTENSION_FIELD_COUNT 7u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_FIELDS(X) \
+    X(command_index, u32) \
+    X(flags, u32) \
+    X(indirect_resource_index, u32) \
+    X(count_resource_index, u32) \
+    X(indirect_offset, u64) \
+    X(count_offset, u64) \
+    X(draw_count, u32) \
+    X(stride, u32)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_FIELD_COUNT 8u
 
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR 1u
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH 2u
@@ -1442,6 +1469,28 @@ typedef struct PdockerGpuVulkanGraphicsV67FrameHeader {
     PdockerGpuVulkanGraphicsV67HeaderExtension v67;
 } PdockerGpuVulkanGraphicsV67FrameHeader;
 
+typedef struct PdockerGpuVulkanGraphicsV68HeaderExtension {
+    uint32_t indirect_draw_count;
+    uint32_t indirect_draw_entry_size;
+    uint64_t indirect_draw_table_offset;
+    uint64_t indirect_draw_table_size;
+    uint64_t indirect_draw_schema_hash;
+    uint64_t indirect_draw_table_hash;
+    uint64_t extension_hash;
+} PdockerGpuVulkanGraphicsV68HeaderExtension;
+
+typedef struct PdockerGpuVulkanGraphicsV68FrameHeader {
+    PdockerGpuVulkanGraphicsV6FrameHeader base;
+    PdockerGpuVulkanGraphicsV61HeaderExtension v61;
+    PdockerGpuVulkanGraphicsV62HeaderExtension v62;
+    PdockerGpuVulkanGraphicsV63HeaderExtension v63;
+    PdockerGpuVulkanGraphicsV64HeaderExtension v64;
+    PdockerGpuVulkanGraphicsV65HeaderExtension v65;
+    PdockerGpuVulkanGraphicsV66HeaderExtension v66;
+    PdockerGpuVulkanGraphicsV67HeaderExtension v67;
+    PdockerGpuVulkanGraphicsV68HeaderExtension v68;
+} PdockerGpuVulkanGraphicsV68FrameHeader;
+
 typedef struct PdockerGpuVulkanGraphicsV62SpecializationEntry {
     uint32_t shader_stage_index;
     uint32_t constant_id;
@@ -1549,6 +1598,17 @@ typedef struct PdockerGpuVulkanGraphicsV67ScissorEntry {
     uint32_t reserved0;
     uint32_t reserved1;
 } PdockerGpuVulkanGraphicsV67ScissorEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV68IndirectDrawEntry {
+    uint32_t command_index;
+    uint32_t flags;
+    uint32_t indirect_resource_index;
+    uint32_t count_resource_index;
+    uint64_t indirect_offset;
+    uint64_t count_offset;
+    uint32_t draw_count;
+    uint32_t stride;
+} PdockerGpuVulkanGraphicsV68IndirectDrawEntry;
 
 typedef struct PdockerGpuVulkanGraphicsV61DynamicOffsetEntry {
     uint32_t offset;
