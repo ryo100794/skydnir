@@ -1995,7 +1995,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT", source)
         self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR", executor)
         self.assertIn("sizeof(PdockerGpuVulkanGraphicsV67FrameHeader)", executor)
-        self.assertIn("FrameRange ranges[27]", executor)
+        self.assertIn("FrameRange ranges[28]", executor)
         self.assertIn("find_vulkan_graphics_v67_viewport_scissor_state", executor)
         self.assertIn(".pViewports = dynamic_viewport ? NULL : static_viewports", executor)
         self.assertIn(".pScissors = dynamic_scissor ? NULL : static_scissors", executor)
@@ -2032,7 +2032,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[27]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[28]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(
@@ -4281,6 +4281,37 @@ class GpuAbiContractTest(unittest.TestCase):
             "object-graph coordinate fidelity",
         ]:
             self.assertIn(marker, source)
+
+    def test_vulkan_graphics_v69_buffer_copy_mixed_submit(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        abi = APP_HEADER.read_text() + "\n" + CONTAINER_HEADER.read_text()
+        for marker in [
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V69_ABI_MINOR",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V69_BUFFER_COPY_SCHEMA_HASH",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER",
+            "PdockerGpuVulkanGraphicsV69BufferCopyEntry",
+        ]:
+            self.assertIn(marker, abi)
+        for marker in [
+            "command_op_sequence",
+            "APPEND_INTERLEAVED_GRAPHICS_BUFFER_COPIES",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER",
+            "buffer_copies[buffer_copy_count++]",
+            "graphics-mixed-transfer-between-draws-unimplemented",
+            "type != PDOCKER_VK_COMMAND_COPY",
+        ]:
+            self.assertIn(marker, icd)
+        for marker in [
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V69_ABI_MINOR",
+            "PdockerGpuVulkanGraphicsV69FrameHeader",
+            "find_vulkan_graphics_v69_buffer_copy",
+            "vkCmdCopyBuffer(command_buffer, src_buffer->buffer.buffer",
+            "VK_BUFFER_USAGE_TRANSFER_SRC_BIT",
+            "VK_BUFFER_USAGE_TRANSFER_DST_BIT",
+            "mark_vulkan_graphics_replay_buffer_writeback_range",
+        ]:
+            self.assertIn(marker, executor)
 
     def test_vulkan_icd_supports_bounded_transfer_graphics_mixed_submit(self):
         icd = VULKAN_ICD.read_text()
