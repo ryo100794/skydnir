@@ -959,7 +959,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "append_render_pass_end_layout_transitions",
             "record_render_pass_attachment_transition",
             "view->image->layout_mixed",
-            "pCreateInfo->dependencyCount != 0",
+            "capture_render_pass_dependencies(",
+            "capture_render_pass_dependencies2(",
+            "capture_single_subpass_dependency",
+            "VK_SUBPASS_EXTERNAL && dst_subpass == 0",
+            "src_subpass == 0 && dst_subpass == VK_SUBPASS_EXTERNAL",
             "pCreateInfo->pNext || pCreateInfo->flags != 0",
             "src->flags != 0",
             "subpass->pNext != NULL || subpass->flags != 0 || subpass->viewMask != 0",
@@ -1069,7 +1073,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "render_pass_resolve_attachment_access_mask()",
             "attachment->resolve_image_layout",
             "render_pass_layout_is_read_only(cmd->active_depth_attachment.image_layout)",
-            "append_graphics_barrier_record_for_range",
+            "rp->begin_dependency.seen",
+            "record_memory_barrier_op((VkCommandBuffer)cmd",
+            "append_graphics_barrier_record_for_ranges",
         ]:
             self.assertIn(marker, begin_transition_body)
         for marker in [
@@ -1077,7 +1083,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "rp->attachments[resolve_index].final_layout",
             "render_pass_resolve_attachment_access_mask()",
             "render_pass_layout_is_read_only(cmd->active_depth_attachment.image_layout)",
-            "append_graphics_barrier_record_for_range",
+            "rp->end_dependency.seen",
+            "record_memory_barrier_op((VkCommandBuffer)cmd",
+            "append_graphics_barrier_record_for_ranges",
         ]:
             self.assertIn(marker, end_transition_body)
         for marker in [

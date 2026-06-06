@@ -430,6 +430,14 @@ typedef struct {
 } PdockerVkSubpassState;
 
 typedef struct {
+    bool seen;
+    VkPipelineStageFlags2 src_stage_mask;
+    VkAccessFlags2 src_access_mask;
+    VkPipelineStageFlags2 dst_stage_mask;
+    VkAccessFlags2 dst_access_mask;
+} PdockerVkSubpassDependencyState;
+
+typedef struct {
     PdockerVkImageView *image_view;
     VkImageLayout image_layout;
     PdockerVkImageView *resolve_image_view;
@@ -446,6 +454,8 @@ struct PdockerVkRenderPass {
     uint32_t subpass_count;
     PdockerVkRenderPassAttachmentState attachments[PDOCKER_VK_MAX_STORAGE_BUFFERS];
     PdockerVkSubpassState subpasses[PDOCKER_VK_MAX_STORAGE_BUFFERS];
+    PdockerVkSubpassDependencyState begin_dependency;
+    PdockerVkSubpassDependencyState end_dependency;
     bool attachment_overflow;
     bool subpass_overflow;
     uint64_t generation;
@@ -8836,6 +8846,98 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(
     return VK_SUCCESS;
 }
 
+
+static void record_memory_barrier_op(
+        VkCommandBuffer commandBuffer,
+        VkAccessFlags2 srcAccessMask,
+        VkAccessFlags2 dstAccessMask,
+        VkPipelineStageFlags2 srcStageMask,
+        VkPipelineStageFlags2 dstStageMask);
+
+static void merge_render_pass_dependency_state(
+        PdockerVkSubpassDependencyState *dst,
+        VkPipelineStageFlags2 src_stage_mask,
+        VkAccessFlags2 src_access_mask,
+        VkPipelineStageFlags2 dst_stage_mask,
+        VkAccessFlags2 dst_access_mask) {
+    if (!dst) return;
+    dst->seen = true;
+    dst->src_stage_mask |= src_stage_mask;
+    dst->src_access_mask |= src_access_mask;
+    dst->dst_stage_mask |= dst_stage_mask;
+    dst->dst_access_mask |= dst_access_mask;
+}
+
+static bool capture_single_subpass_dependency(
+        PdockerVkRenderPass *rp,
+        uint32_t src_subpass,
+        uint32_t dst_subpass,
+        VkPipelineStageFlags2 src_stage_mask,
+        VkAccessFlags2 src_access_mask,
+        VkPipelineStageFlags2 dst_stage_mask,
+        VkAccessFlags2 dst_access_mask,
+        VkDependencyFlags dependency_flags) {
+    if (!rp) return false;
+    const VkDependencyFlags supported_flags = VK_DEPENDENCY_BY_REGION_BIT;
+    if ((dependency_flags & ~supported_flags) != 0) return false;
+    if (src_subpass == VK_SUBPASS_EXTERNAL && dst_subpass == 0) {
+        merge_render_pass_dependency_state(&rp->begin_dependency,
+                                           src_stage_mask, src_access_mask,
+                                           dst_stage_mask, dst_access_mask);
+        return true;
+    }
+    if (src_subpass == 0 && dst_subpass == VK_SUBPASS_EXTERNAL) {
+        merge_render_pass_dependency_state(&rp->end_dependency,
+                                           src_stage_mask, src_access_mask,
+                                           dst_stage_mask, dst_access_mask);
+        return true;
+    }
+    return false;
+}
+
+static void capture_render_pass_dependencies(
+        PdockerVkRenderPass *rp,
+        uint32_t dependency_count,
+        const VkSubpassDependency *dependencies) {
+    for (uint32_t i = 0; rp && dependencies && i < dependency_count; ++i) {
+        const VkSubpassDependency *dep = &dependencies[i];
+        if (!capture_single_subpass_dependency(
+                rp, dep->srcSubpass, dep->dstSubpass,
+                (VkPipelineStageFlags2)dep->srcStageMask,
+                (VkAccessFlags2)dep->srcAccessMask,
+                (VkPipelineStageFlags2)dep->dstStageMask,
+                (VkAccessFlags2)dep->dstAccessMask,
+                dep->dependencyFlags)) {
+            rp->subpass_overflow = true;
+        }
+    }
+    if (rp && dependency_count > 0 && !dependencies) {
+        rp->subpass_overflow = true;
+    }
+}
+
+static void capture_render_pass_dependencies2(
+        PdockerVkRenderPass *rp,
+        uint32_t dependency_count,
+        const VkSubpassDependency2 *dependencies) {
+    for (uint32_t i = 0; rp && dependencies && i < dependency_count; ++i) {
+        const VkSubpassDependency2 *dep = &dependencies[i];
+        if (dep->pNext || dep->viewOffset != 0 ||
+            !capture_single_subpass_dependency(
+                rp, dep->srcSubpass, dep->dstSubpass,
+                (VkPipelineStageFlags2)dep->srcStageMask,
+                (VkAccessFlags2)dep->srcAccessMask,
+                (VkPipelineStageFlags2)dep->dstStageMask,
+                (VkAccessFlags2)dep->dstAccessMask,
+                dep->dependencyFlags)) {
+            rp->subpass_overflow = true;
+        }
+    }
+    if (rp && dependency_count > 0 && !dependencies) {
+        rp->subpass_overflow = true;
+    }
+}
+
 static bool render_pass_subpass_can_normalize_to_dynamic_rendering(
         const PdockerVkRenderPass *rp,
         uint32_t subpass_index);
@@ -9247,7 +9349,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
     if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
     rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
     rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
-    if (pCreateInfo && (pCreateInfo->pNext || pCreateInfo->flags != 0 || pCreateInfo->dependencyCount != 0)) {
+    if (pCreateInfo && (pCreateInfo->pNext || pCreateInfo->flags != 0)) {
         rp->subpass_overflow = true;
     }
     if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
@@ -9290,6 +9392,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
             src ? src->preserveAttachmentCount : 0);
         if (!src || src->flags != 0) rp->subpasses[sp].unsupported = true;
     }
+    if (pCreateInfo) {
+        capture_render_pass_dependencies(
+            rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
+    }
     rp->generation = next_vulkan_object_generation();
     *pRenderPass = (VkRenderPass)rp;
     return VK_SUCCESS;
@@ -9308,7 +9414,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
     rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
     rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
     if (pCreateInfo && (pCreateInfo->pNext || pCreateInfo->flags != 0 ||
-                        pCreateInfo->dependencyCount != 0 ||
                         pCreateInfo->correlatedViewMaskCount != 0)) {
         rp->subpass_overflow = true;
     }
@@ -9343,6 +9448,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
     for (uint32_t sp = 0; pCreateInfo && sp < captured_subpasses; ++sp) {
         capture_render_pass_subpass_state2(
             rp, sp, pCreateInfo->pSubpasses ? &pCreateInfo->pSubpasses[sp] : NULL);
+    }
+    if (pCreateInfo) {
+        capture_render_pass_dependencies2(
+            rp, pCreateInfo->dependencyCount, pCreateInfo->pDependencies);
     }
     rp->generation = next_vulkan_object_generation();
     *pRenderPass = (VkRenderPass)rp;
@@ -9865,6 +9974,14 @@ static VkAccessFlags2 render_pass_begin_src_access_mask(VkImageLayout old_layout
         : VK_ACCESS_2_MEMORY_WRITE_BIT;
 }
 
+static VkPipelineStageFlags2 render_pass_nonzero_stage_mask(VkPipelineStageFlags2 mask) {
+    return mask ? mask : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+}
+
+static VkAccessFlags2 render_pass_nonzero_access_mask(VkAccessFlags2 mask) {
+    return mask ? mask : (VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+}
+
 static VkAccessFlags2 render_pass_layout_access_mask(VkImageLayout layout) {
     switch (layout) {
         case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
@@ -9892,14 +10009,18 @@ static VkAccessFlags2 render_pass_layout_access_mask(VkImageLayout layout) {
     }
 }
 
-static bool append_graphics_barrier_record_for_range(
+static bool append_graphics_barrier_record_for_ranges(
         PdockerVkCommandBuffer *cmd,
+        uint32_t memory_barrier_first,
+        uint32_t memory_barrier_count,
         uint32_t image_barrier_first,
         uint32_t image_barrier_count) {
-    if (!cmd || image_barrier_count == 0) return true;
+    if (!cmd || (memory_barrier_count == 0 && image_barrier_count == 0)) return true;
     PdockerVkGraphicsCommandRecord record;
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER;
+    record.memory_barrier_op_first = memory_barrier_first;
+    record.memory_barrier_op_count = memory_barrier_count;
     record.image_barrier_op_first = image_barrier_first;
     record.image_barrier_op_count = image_barrier_count;
     return append_graphics_command_record(cmd, &record);
@@ -9936,6 +10057,14 @@ static bool append_render_pass_begin_layout_transitions(PdockerVkCommandBuffer *
     if (!cmd || !cmd->active_render_pass) return false;
     PdockerVkRenderPass *rp = cmd->active_render_pass;
     const PdockerVkSubpassState *subpass = &rp->subpasses[0];
+    uint32_t memory_first = cmd->memory_barrier_op_count;
+    if (rp->begin_dependency.seen) {
+        record_memory_barrier_op((VkCommandBuffer)cmd,
+                                 render_pass_nonzero_access_mask(rp->begin_dependency.src_access_mask),
+                                 render_pass_nonzero_access_mask(rp->begin_dependency.dst_access_mask),
+                                 render_pass_nonzero_stage_mask(rp->begin_dependency.src_stage_mask),
+                                 render_pass_nonzero_stage_mask(rp->begin_dependency.dst_stage_mask));
+    }
     uint32_t first = cmd->image_barrier_op_count;
     for (uint32_t c = 0; c < cmd->active_color_attachment_count; ++c) {
         PdockerVkRenderingAttachmentState *attachment = &cmd->active_color_attachments[c];
@@ -9946,10 +10075,14 @@ static bool append_render_pass_begin_layout_transitions(PdockerVkCommandBuffer *
                     cmd, attachment->image_view,
                     initial_layout,
                     attachment->image_layout,
-                    render_pass_begin_src_access_mask(initial_layout),
-                    render_pass_attachment_access_mask(false, false),
-                    render_pass_begin_src_stage_mask(initial_layout),
-                    render_pass_attachment_stage_mask(false))) {
+                    rp->begin_dependency.seen
+                        ? render_pass_nonzero_access_mask(rp->begin_dependency.src_access_mask)
+                        : render_pass_begin_src_access_mask(initial_layout),
+                    render_pass_attachment_access_mask(false, false) | rp->begin_dependency.dst_access_mask,
+                    rp->begin_dependency.seen
+                        ? render_pass_nonzero_stage_mask(rp->begin_dependency.src_stage_mask)
+                        : render_pass_begin_src_stage_mask(initial_layout),
+                    render_pass_attachment_stage_mask(false) | rp->begin_dependency.dst_stage_mask)) {
                 return false;
             }
         }
@@ -9960,10 +10093,14 @@ static bool append_render_pass_begin_layout_transitions(PdockerVkCommandBuffer *
                     cmd, attachment->resolve_image_view,
                     initial_layout,
                     attachment->resolve_image_layout,
-                    render_pass_begin_src_access_mask(initial_layout),
-                    render_pass_resolve_attachment_access_mask(),
-                    render_pass_begin_src_stage_mask(initial_layout),
-                    render_pass_attachment_stage_mask(false))) {
+                    rp->begin_dependency.seen
+                        ? render_pass_nonzero_access_mask(rp->begin_dependency.src_access_mask)
+                        : render_pass_begin_src_access_mask(initial_layout),
+                    render_pass_resolve_attachment_access_mask() | rp->begin_dependency.dst_access_mask,
+                    rp->begin_dependency.seen
+                        ? render_pass_nonzero_stage_mask(rp->begin_dependency.src_stage_mask)
+                        : render_pass_begin_src_stage_mask(initial_layout),
+                    render_pass_attachment_stage_mask(false) | rp->begin_dependency.dst_stage_mask)) {
                 return false;
             }
         }
@@ -9976,11 +10113,16 @@ static bool append_render_pass_begin_layout_transitions(PdockerVkCommandBuffer *
                 cmd, cmd->active_depth_attachment.image_view,
                 initial_layout,
                 cmd->active_depth_attachment.image_layout,
-                render_pass_begin_src_access_mask(initial_layout),
+                rp->begin_dependency.seen
+                    ? render_pass_nonzero_access_mask(rp->begin_dependency.src_access_mask)
+                    : render_pass_begin_src_access_mask(initial_layout),
                 render_pass_attachment_access_mask(
-                    true, render_pass_layout_is_read_only(cmd->active_depth_attachment.image_layout)),
-                render_pass_begin_src_stage_mask(initial_layout),
-                render_pass_attachment_stage_mask(true))) {
+                    true, render_pass_layout_is_read_only(cmd->active_depth_attachment.image_layout)) |
+                    rp->begin_dependency.dst_access_mask,
+                rp->begin_dependency.seen
+                    ? render_pass_nonzero_stage_mask(rp->begin_dependency.src_stage_mask)
+                    : render_pass_begin_src_stage_mask(initial_layout),
+                render_pass_attachment_stage_mask(true) | rp->begin_dependency.dst_stage_mask)) {
             return false;
         }
         if (cmd->active_stencil_attachment.image_view &&
@@ -9989,21 +10131,35 @@ static bool append_render_pass_begin_layout_transitions(PdockerVkCommandBuffer *
                 cmd, cmd->active_stencil_attachment.image_view,
                 initial_layout,
                 cmd->active_stencil_attachment.image_layout,
-                render_pass_begin_src_access_mask(initial_layout),
+                rp->begin_dependency.seen
+                    ? render_pass_nonzero_access_mask(rp->begin_dependency.src_access_mask)
+                    : render_pass_begin_src_access_mask(initial_layout),
                 render_pass_attachment_access_mask(
-                    true, render_pass_layout_is_read_only(cmd->active_stencil_attachment.image_layout)),
-                render_pass_begin_src_stage_mask(initial_layout),
-                render_pass_attachment_stage_mask(true))) {
+                    true, render_pass_layout_is_read_only(cmd->active_stencil_attachment.image_layout)) |
+                    rp->begin_dependency.dst_access_mask,
+                rp->begin_dependency.seen
+                    ? render_pass_nonzero_stage_mask(rp->begin_dependency.src_stage_mask)
+                    : render_pass_begin_src_stage_mask(initial_layout),
+                render_pass_attachment_stage_mask(true) | rp->begin_dependency.dst_stage_mask)) {
             return false;
         }
     }
-    return append_graphics_barrier_record_for_range(
-        cmd, first, cmd->image_barrier_op_count - first);
+    return append_graphics_barrier_record_for_ranges(
+        cmd, memory_first, cmd->memory_barrier_op_count - memory_first,
+        first, cmd->image_barrier_op_count - first);
 }
 
 static bool append_render_pass_end_layout_transitions(PdockerVkCommandBuffer *cmd) {
     if (!cmd || !cmd->active_render_pass) return false;
     PdockerVkRenderPass *rp = cmd->active_render_pass;
+    uint32_t memory_first = cmd->memory_barrier_op_count;
+    if (rp->end_dependency.seen) {
+        record_memory_barrier_op((VkCommandBuffer)cmd,
+                                 render_pass_nonzero_access_mask(rp->end_dependency.src_access_mask),
+                                 render_pass_nonzero_access_mask(rp->end_dependency.dst_access_mask),
+                                 render_pass_nonzero_stage_mask(rp->end_dependency.src_stage_mask),
+                                 render_pass_nonzero_stage_mask(rp->end_dependency.dst_stage_mask));
+    }
     uint32_t first = cmd->image_barrier_op_count;
     for (uint32_t c = 0; c < cmd->active_color_attachment_count; ++c) {
         PdockerVkRenderingAttachmentState *attachment = &cmd->active_color_attachments[c];
@@ -10063,8 +10219,9 @@ static bool append_render_pass_end_layout_transitions(PdockerVkCommandBuffer *cm
             return false;
         }
     }
-    return append_graphics_barrier_record_for_range(
-        cmd, first, cmd->image_barrier_op_count - first);
+    return append_graphics_barrier_record_for_ranges(
+        cmd, memory_first, cmd->memory_barrier_op_count - memory_first,
+        first, cmd->image_barrier_op_count - first);
 }
 
 static bool populate_single_subpass_render_pass_rendering_state(
