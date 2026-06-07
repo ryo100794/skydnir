@@ -21,23 +21,23 @@ Current TODO counters:
 
 | State | Count |
 |---|---:|
-| done | 66 |
-| doing | 20 |
+| done | 69 |
+| doing | 21 |
 | next | 33 |
 | blocked | 0 |
 
 ## Timeline
 
-### Now: 2026-06-06 to 2026-06-09
+### Now: 2026-06-07 to 2026-06-10
 
 Keep the UI compose path truthful and visible while closing regressions that block demos.
 
+- **TermPort Skydnir payload build ownership**: TermPort now carries the Skydnir native sources it needs and wires Gradle `preBuild` through a local `buildSkydnirNative` task plus daemon...
 - Cross-project incomplete implementation audit: `docs/plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md` now tracks unfinished, partial, temporary, or insufficiently verified work across...
 - Execution timeline and delegated task control: `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged gates, current agent assignments, merge checklists, and...
 - [#4](https://github.com/ryo100794/skydnir/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the Skydnir Vulkan/OpenCL bridge from discovery and model-buffer...
-- [#6](https://github.com/ryo100794/skydnir/issues/6) Service truth same-container-ID device gate: the listener health and ID/label truth work are one gate. Probe default workspace `18080`...
 
-### Next: 2026-06-10 to 2026-06-16
+### Next: 2026-06-11 to 2026-06-17
 
 Turn the remaining high-value TODOs into repeatable device checks and public artifacts.
 
@@ -45,7 +45,7 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 - Mobile-resource residency constraints for MoE: keep a concise design note with device RAM/headroom, thermal, storage bandwidth, SAF/app-private backing, cache eviction, and correctness...
 - [#8](https://github.com/ryo100794/skydnir/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built native...
 
-### Then: 2026-06-17 to 2026-06-27
+### Then: 2026-06-18 to 2026-06-28
 
 Use benchmark evidence to harden compatibility and publish tester-ready releases.
 

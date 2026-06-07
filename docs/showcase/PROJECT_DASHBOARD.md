@@ -22,8 +22,8 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 | Signal | Value |
 |---|---:|
 | Project-library templates | 6 |
-| TODO done entries | 66 |
-| TODO doing entries | 20 |
+| TODO done entries | 69 |
+| TODO doing entries | 21 |
 | TODO next entries | 33 |
 | Compatibility audit PASS | 69 |
 | Compatibility audit FAIL | 0 |
@@ -43,6 +43,7 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 
 | State | Item |
 |---|---|
+| doing | **TermPort Skydnir payload build ownership**: TermPort now carries the Skydnir native sources it needs and wires Gradle `preBuild` through a local `buildSkydnirNative` task plus daemon... |
 | doing | Cross-project incomplete implementation audit: `docs/plan/INCOMPLETE_IMPLEMENTATION_AUDIT_20260513.md` now tracks unfinished, partial, temporary, or insufficiently verified work across... |
 | doing | Execution timeline and delegated task control: `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged gates, current agent assignments, merge checklists, and... |
 | doing | [#4](https://github.com/ryo100794/skydnir/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the Skydnir Vulkan/OpenCL bridge from discovery and model-buffer... |
@@ -52,7 +53,6 @@ Vulkan/OpenCL GPU bridging for llama.cpp-class workloads.
 | next | [#4](https://github.com/ryo100794/skydnir/issues/4) llama GPU performance workflow after Vulkan clamp: keep CPU fallback hiding Vulkan devices, force Vulkan only for measured GPU attempts... |
 | next | [#4](https://github.com/ryo100794/skydnir/issues/4) MoE-aware out-of-core LLM execution and GPU residency layer: start this work in parallel with dense llama GPU correctness instead of... |
 | next | Mobile-resource residency constraints for MoE: keep a concise design note with device RAM/headroom, thermal, storage bandwidth, SAF/app-private backing, cache eviction, and correctness... |
-| doing | [#7](https://github.com/ryo100794/skydnir/issues/7) Android storage metrics verification: add device smoke/manual coverage that layer, image-view, container-private, total, and free-space... |
 
 ## Timeline
 
