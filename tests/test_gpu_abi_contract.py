@@ -920,9 +920,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "api_dynamic_offsets[binding_count] = binding->dynamic_offset;",
             "descriptors[i].dynamic_offset = (uint64_t)api_dynamic_offsets[i];",
             "slot->offset = slot->base_offset + slot->dynamic_offset;",
-            "slot->range == VK_WHOLE_SIZE",
+            "if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;",
+            "VK_WHOLE_SIZE is evaluated after applying the",
+            "validate_descriptor_transport_shape() derive the",
             "UINT64_MAX - slot->base_offset",
-            "dynamic descriptor with VK_WHOLE_SIZE is unsupported",
             "graphics-command-unimplemented",
             "VK_ERROR_EXTENSION_NOT_PRESENT",
             "pProperties->apiVersion > VK_API_VERSION_1_2",
@@ -4540,6 +4541,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;", source)
         descriptor_size = source.split("static size_t descriptor_binding_size(const PdockerVkDescriptorBinding *binding) {", 1)[1].split("\n}", 1)[0]
         self.assertNotIn("buffer_available(binding->buffer, binding->offset)", descriptor_size)
+
+    def test_vulkan_dynamic_whole_size_descriptor_uses_effective_vkbuffer_tail(self):
+        source = VULKAN_ICD.read_text()
+        self.assertIn("VK_WHOLE_SIZE is evaluated after applying the", source)
+        self.assertIn("slot->dynamic_offset = pDynamicOffsets[dynamic_index];", source)
+        self.assertIn("slot->offset = slot->base_offset + slot->dynamic_offset;", source)
+        self.assertIn("if (binding->range == VK_WHOLE_SIZE) return available_in_buffer;", source)
+        bind_body = source.split("VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(", 1)[0]
+        self.assertNotIn("dynamic descriptor with VK_WHOLE_SIZE is unsupported", bind_body)
 
     def test_strict_passthrough_preserves_vkbuffer_coordinate_space(self):
         source = GPU_EXECUTOR.read_text() + "\n" + VULKAN_ICD.read_text()

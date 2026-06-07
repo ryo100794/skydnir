@@ -12303,20 +12303,6 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                                     array_element);
                         }
                     }
-                    if (slot->range == VK_WHOLE_SIZE &&
-                        dynamic_index < dynamicOffsetCount && pDynamicOffsets &&
-                        pDynamicOffsets[dynamic_index] != 0) {
-                        cmd->unsupported_descriptor_set_layout = true;
-                        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-                            fprintf(stderr,
-                                    "pdocker-vulkan-icd: dynamic descriptor with VK_WHOLE_SIZE is unsupported set=%u binding=%u array=%u dyn_index=%u add=%u\n",
-                                    target_set,
-                                    binding,
-                                    array_element,
-                                    dynamic_index,
-                                    pDynamicOffsets[dynamic_index]);
-                        }
-                    }
                     if (dynamic_index < dynamicOffsetCount && pDynamicOffsets) {
                         if ((VkDeviceSize)pDynamicOffsets[dynamic_index] >
                             (VkDeviceSize)(UINT64_MAX - slot->base_offset)) {
@@ -12331,6 +12317,15 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(
                                         pDynamicOffsets[dynamic_index]);
                             }
                         } else {
+                            /*
+                             * VK_WHOLE_SIZE is evaluated after applying the
+                             * dynamic offset.  Keep slot->range unchanged so
+                             * descriptor_binding_size() and
+                             * validate_descriptor_transport_shape() derive the
+                             * effective range from the remaining VkBuffer
+                             * coordinate space instead of from the backing
+                             * allocation tail.
+                             */
                             slot->dynamic_offset = pDynamicOffsets[dynamic_index];
                             slot->offset = slot->base_offset + slot->dynamic_offset;
                         }
