@@ -3647,7 +3647,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                 pre_need_v616_clear_attachments = true;
             }
             if (cmd->graphics_command_ops[gi].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL ||
-                cmd->graphics_command_ops[gi].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP) {
+                cmd->graphics_command_ops[gi].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP ||
+                cmd->graphics_command_ops[gi].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY ||
+                cmd->graphics_command_ops[gi].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY) {
                 pre_need_v617_query = true;
             }
             if (pre_need_v616_clear_attachments && pre_need_v617_query) {
@@ -3671,7 +3673,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
             if (type == PDOCKER_VK_COMMAND_BLIT_IMAGE) {
                 pre_need_v615_blit_image = true;
             }
-            if (type == PDOCKER_VK_COMMAND_QUERY_RESET || type == PDOCKER_VK_COMMAND_QUERY_TIMESTAMP) {
+            if (type == PDOCKER_VK_COMMAND_QUERY_BEGIN || type == PDOCKER_VK_COMMAND_QUERY_END ||
+                type == PDOCKER_VK_COMMAND_QUERY_RESET || type == PDOCKER_VK_COMMAND_QUERY_TIMESTAMP) {
                 pre_need_v617_query = true;
             }
             if ((pre_need_v611_buffer_write && pre_need_v612_clear_color &&
@@ -5007,7 +5010,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                 dst->layer_count = src->layer_count;
             }
             need_v616_clear_attachments = true;
-        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL ||
+        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY ||
+                   record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY ||
+                   record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL ||
                    record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP) {
             if (record->command_op_sequence >= cmd->command_op_count ||
                 query_command_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS) {
@@ -5015,16 +5020,21 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                 goto cleanup;
             }
             const PdockerVkCommandOp *op = &cmd->command_ops[record->command_op_sequence];
+            const bool is_begin = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY;
+            const bool is_end = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY;
             const bool is_reset = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL;
-            if ((is_reset && op->type != PDOCKER_VK_COMMAND_QUERY_RESET) ||
-                (!is_reset && op->type != PDOCKER_VK_COMMAND_QUERY_TIMESTAMP) ||
+            const bool is_timestamp = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP;
+            if ((is_begin && op->type != PDOCKER_VK_COMMAND_QUERY_BEGIN) ||
+                (is_end && op->type != PDOCKER_VK_COMMAND_QUERY_END) ||
+                (is_reset && op->type != PDOCKER_VK_COMMAND_QUERY_RESET) ||
+                (is_timestamp && op->type != PDOCKER_VK_COMMAND_QUERY_TIMESTAMP) ||
                 !op->query_pool || op->query_pool->result_fd < 0 ||
                 !op->query_pool->result_entries ||
                 !query_range_valid(op->query_pool, op->query_index, op->query_count)) {
                 rc = -EPROTO;
                 goto cleanup;
             }
-            if (!is_reset && op->query_count != 1) {
+            if ((is_begin || is_end || is_timestamp) && op->query_count != 1) {
                 rc = -EPROTO;
                 goto cleanup;
             }
@@ -5046,9 +5056,15 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
             PdockerGpuVulkanGraphicsV617QueryCommandEntry *query =
                 &query_commands[query_command_count++];
             query->command_index = (uint32_t)command_count;
-            query->op = is_reset
-                ? PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_RESET
-                : PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_WRITE_TIMESTAMP;
+            if (is_begin) {
+                query->op = PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_BEGIN;
+            } else if (is_end) {
+                query->op = PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_END;
+            } else if (is_reset) {
+                query->op = PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_RESET;
+            } else {
+                query->op = PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_WRITE_TIMESTAMP;
+            }
             query->query_pool_id = op->query_pool->pool_id;
             query->first_query = op->query_index;
             query->query_count = op->query_count;
@@ -14110,6 +14126,8 @@ static bool command_op_is_graphics_frame_op(PdockerVkCommandOpType type) {
     return type == PDOCKER_VK_COMMAND_GRAPHICS_DRAW ||
            type == PDOCKER_VK_COMMAND_IMAGE_BARRIER ||
            type == PDOCKER_VK_COMMAND_BARRIER ||
+           type == PDOCKER_VK_COMMAND_QUERY_BEGIN ||
+           type == PDOCKER_VK_COMMAND_QUERY_END ||
            type == PDOCKER_VK_COMMAND_QUERY_RESET ||
            type == PDOCKER_VK_COMMAND_QUERY_TIMESTAMP;
 }
@@ -15045,12 +15063,26 @@ static void record_query_command(
     op.query_index = firstQuery;
     op.query_count = queryCount;
     op.query_stage_mask = stageMask;
-    if (type == PDOCKER_VK_COMMAND_QUERY_RESET || type == PDOCKER_VK_COMMAND_QUERY_TIMESTAMP) {
+    if (type == PDOCKER_VK_COMMAND_QUERY_BEGIN || type == PDOCKER_VK_COMMAND_QUERY_END ||
+        type == PDOCKER_VK_COMMAND_QUERY_RESET || type == PDOCKER_VK_COMMAND_QUERY_TIMESTAMP) {
         PdockerVkGraphicsCommandRecord record;
         memset(&record, 0, sizeof(record));
-        record.command_type = type == PDOCKER_VK_COMMAND_QUERY_RESET
-            ? PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL
-            : PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP;
+        switch (type) {
+            case PDOCKER_VK_COMMAND_QUERY_BEGIN:
+                record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY;
+                break;
+            case PDOCKER_VK_COMMAND_QUERY_END:
+                record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY;
+                break;
+            case PDOCKER_VK_COMMAND_QUERY_RESET:
+                record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL;
+                break;
+            case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:
+                record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP;
+                break;
+            default:
+                return;
+        }
         if (!append_graphics_command_record(cmd, &record)) return;
     }
     (void)append_command_op(cmd, &op);
@@ -15067,7 +15099,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
         pCreateInfo->queryCount > PDOCKER_VK_MAX_QUERY_COUNT) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
-    if (pCreateInfo->queryType != VK_QUERY_TYPE_TIMESTAMP) {
+    if (pCreateInfo->queryType != VK_QUERY_TYPE_TIMESTAMP &&
+        pCreateInfo->queryType != VK_QUERY_TYPE_OCCLUSION) {
         trace_icd_runtime_failure("query-type-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
         return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -15129,13 +15162,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginQuery(
         VkQueryPool queryPool,
         uint32_t query,
         VkQueryControlFlags flags) {
-    (void)flags;
     record_query_command(commandBuffer,
                          PDOCKER_VK_COMMAND_QUERY_BEGIN,
                          queryPool,
                          query,
                          1,
-                         0);
+                         (VkPipelineStageFlags2)flags);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdEndQuery(

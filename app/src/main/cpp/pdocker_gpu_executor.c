@@ -19316,6 +19316,8 @@ static int validate_vulkan_graphics_v6_frame_content(
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY:
                 break;
             default:
                 return -EPROTO;
@@ -19379,7 +19381,9 @@ static int validate_vulkan_graphics_v6_frame_content(
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BLIT_IMAGE && !is_v615) return -EPROTO;
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS && !is_v616) return -EPROTO;
         if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL ||
-             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP) && !is_v617) return -EPROTO;
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP ||
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY ||
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY) && !is_v617) return -EPROTO;
         if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER_TO_IMAGE ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE_TO_BUFFER ||
@@ -19400,7 +19404,9 @@ static int validate_vulkan_graphics_v6_frame_content(
              command->attachment_count != 0 || command->dynamic_state_count != 0 ||
              command->push_size != 0 || command->index_buffer_resource_index != UINT32_MAX)) return -EPROTO;
         if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL ||
-             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP) &&
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP ||
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY ||
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY) &&
             (command->pipeline_index != UINT32_MAX || command->first_descriptor != 0 ||
              command->descriptor_count != 0 || command->vertex_binding_count != 0 ||
              command->attachment_count != 0 || command->dynamic_state_count != 0 ||
@@ -19700,6 +19706,10 @@ static int validate_vulkan_graphics_v6_frame_content(
                 if (command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL) return -EPROTO;
             } else if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_WRITE_TIMESTAMP) {
                 if (command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP || entry->query_count != 1) return -EPROTO;
+            } else if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_BEGIN) {
+                if (command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY || entry->query_count != 1) return -EPROTO;
+            } else if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_END) {
+                if (command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY || entry->query_count != 1) return -EPROTO;
             } else {
                 return -EPROTO;
             }
@@ -19710,7 +19720,9 @@ static int validate_vulkan_graphics_v6_frame_content(
         }
         for (uint32_t i = 0; i < header->command_count; ++i) {
             if ((commands[i].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL ||
-                 commands[i].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP) &&
+                 commands[i].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP ||
+                 commands[i].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY ||
+                 commands[i].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY) &&
                 !seen_query_command[i]) return -EPROTO;
         }
     }
@@ -20291,6 +20303,8 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY:
                 if (!find_vulkan_graphics_v617_query_command(view, i)) {
                     reason = "graphics query command requires V6.17 metadata";
                     if (reason_out) *reason_out = reason;
@@ -21920,6 +21934,7 @@ typedef struct VulkanGraphicsReplayQueryPool {
     uint32_t result_fd_index;
     uint32_t result_stride;
     uint32_t query_count;
+    VkQueryType query_type;
     VkQueryPool pool;
 } VulkanGraphicsReplayQueryPool;
 
@@ -21982,9 +21997,24 @@ static int materialize_vulkan_graphics_v617_queries(
             pool->query_pool_id = entry->query_pool_id;
             pool->result_fd_index = entry->result_fd_index;
             pool->result_stride = entry->result_stride;
+            pool->query_type = VK_QUERY_TYPE_MAX_ENUM;
         } else {
             pool = &queries->pools[(uint32_t)found];
             if (pool->result_stride != entry->result_stride) return -EPROTO;
+        }
+        VkQueryType entry_type = VK_QUERY_TYPE_MAX_ENUM;
+        if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_WRITE_TIMESTAMP) {
+            entry_type = VK_QUERY_TYPE_TIMESTAMP;
+        } else if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_BEGIN ||
+                   entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_END) {
+            entry_type = VK_QUERY_TYPE_OCCLUSION;
+        }
+        if (entry_type != VK_QUERY_TYPE_MAX_ENUM) {
+            if (pool->query_type == VK_QUERY_TYPE_MAX_ENUM) {
+                pool->query_type = entry_type;
+            } else if (pool->query_type != entry_type) {
+                return -EPROTO;
+            }
         }
         uint64_t needed = (uint64_t)entry->first_query + (uint64_t)entry->query_count;
         if (needed > UINT32_MAX || needed > PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS) return -E2BIG;
@@ -21993,9 +22023,10 @@ static int materialize_vulkan_graphics_v617_queries(
     for (uint32_t i = 0; i < queries->pool_count; ++i) {
         VulkanGraphicsReplayQueryPool *pool = &queries->pools[i];
         if (pool->query_count == 0) return -EPROTO;
+        if (pool->query_type == VK_QUERY_TYPE_MAX_ENUM) pool->query_type = VK_QUERY_TYPE_TIMESTAMP;
         VkQueryPoolCreateInfo info = {
             .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-            .queryType = VK_QUERY_TYPE_TIMESTAMP,
+            .queryType = pool->query_type,
             .queryCount = pool->query_count,
         };
         VkResult vrc = vkCreateQueryPool(rt->device, &info, NULL, &pool->pool);
@@ -22026,7 +22057,8 @@ static int writeback_vulkan_graphics_v617_query_results(
             PdockerGpuVulkanGraphicsV617QueryResultEntry result;
             memset(&result, 0, sizeof(result));
             uint32_t query = entry->first_query + q;
-            if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_WRITE_TIMESTAMP) {
+            if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_WRITE_TIMESTAMP ||
+                entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_END) {
                 uint64_t value = 0;
                 VkResult vrc = vkGetQueryPoolResults(rt->device, pool->pool, query, 1,
                                                      sizeof(value), &value, sizeof(value),
@@ -22034,7 +22066,8 @@ static int writeback_vulkan_graphics_v617_query_results(
                 result.value = value;
                 result.available = vrc == VK_SUCCESS ? 1u : 0u;
                 result.status = (uint32_t)vrc;
-            } else if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_RESET) {
+            } else if (entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_RESET ||
+                       entry->op == PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_BEGIN) {
                 result.value = 0;
                 result.available = 0;
                 result.status = 0;
@@ -23912,7 +23945,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL:
-            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP: {
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY: {
                 const PdockerGpuVulkanGraphicsV617QueryCommandEntry *query =
                     find_vulkan_graphics_v617_query_command(view, ci);
                 if (!query || query->result_fd_index >= view->passed_fd_count) { rc = -EPROTO; goto cleanup; }
@@ -23925,7 +23960,12 @@ static int record_vulkan_graphics_v6_command_buffer(
                     rc = -EPROTO;
                     goto cleanup;
                 }
-                if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL) {
+                if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY) {
+                    vkCmdBeginQuery(command_buffer, pool->pool, query->first_query,
+                                    (VkQueryControlFlags)(query->stage_mask & 0xffffffffu));
+                } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY) {
+                    vkCmdEndQuery(command_buffer, pool->pool, query->first_query);
+                } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL) {
                     vkCmdResetQueryPool(command_buffer, pool->pool, query->first_query, query->query_count);
                 } else {
                     VkPipelineStageFlagBits stage = query->stage_mask

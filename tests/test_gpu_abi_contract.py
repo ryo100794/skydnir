@@ -4228,6 +4228,10 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V617_QUERY_RESULT_SCHEMA_HASH", source)
             self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL", source)
             self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_BEGIN", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_END", source)
             self.assertIn("query_pool_id", source)
             self.assertIn("result_fd_index", source)
         for marker in [
@@ -4244,9 +4248,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "VulkanGraphicsReplayQueries",
             "materialize_vulkan_graphics_v617_queries",
             "vkCreateQueryPool",
+            "vkCmdBeginQuery",
+            "vkCmdEndQuery",
             "vkCmdResetQueryPool",
             "vkCmdWriteTimestamp",
             "vkGetQueryPoolResults",
+            "VK_QUERY_TYPE_OCCLUSION",
             "vulkan-graphics-v6-query-writeback",
         ]:
             self.assertIn(marker, executor)
@@ -4265,6 +4272,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "pool->result_fd",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY",
         ]:
             self.assertIn(marker, icd)
 
@@ -4294,6 +4303,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(f"MAP_PROC({name});", icd)
         self.assertIn('MAP_ALIAS("vkCmdWriteTimestamp2KHR", vkCmdWriteTimestamp2);', icd)
         self.assertIn("VK_QUERY_TYPE_TIMESTAMP", icd)
+        self.assertIn("VK_QUERY_TYPE_OCCLUSION", icd)
         self.assertIn("query-type-unsupported", icd)
         self.assertIn("VK_QUERY_RESULT_64_BIT", icd)
         self.assertIn("VK_QUERY_RESULT_WITH_AVAILABILITY_BIT", icd)
