@@ -1640,6 +1640,29 @@ static int host_path_is_under_prefix(const char *prefix, const char *path) {
            (path[prefix_len] == '\0' || path[prefix_len] == '/');
 }
 
+static int bind_host_to_guest_path(const char *host_path, char *out, size_t out_len) {
+    int best = -1;
+    size_t best_len = 0;
+    for (int i = 0; i < g_bind_map_count; ++i) {
+        if (!host_path_is_under_prefix(g_bind_maps[i].host, host_path)) continue;
+        size_t len = strlen(g_bind_maps[i].host);
+        if (len >= best_len) {
+            best = i;
+            best_len = len;
+        }
+    }
+    if (best < 0) return 0;
+    const char *suffix = host_path + strlen(g_bind_maps[best].host);
+    if (!suffix[0]) {
+        if (snprintf(out, out_len, "%s", g_bind_maps[best].guest) >= (int)out_len) return -ENAMETOOLONG;
+    } else if (strcmp(g_bind_maps[best].guest, "/") == 0) {
+        if (snprintf(out, out_len, "%s", suffix) >= (int)out_len) return -ENAMETOOLONG;
+    } else {
+        if (snprintf(out, out_len, "%s%s", g_bind_maps[best].guest, suffix) >= (int)out_len) return -ENAMETOOLONG;
+    }
+    return 1;
+}
+
 static int host_path_is_under_bind_host(const char *path) {
     for (int i = 0; i < g_bind_map_count; ++i) {
         if (host_path_is_under_prefix(g_bind_maps[i].host, path)) return 1;
@@ -4087,8 +4110,28 @@ static int rewrite_execve_arg(pid_t pid, struct user_pt_regs *regs, TraceeState 
     if (strcmp(original, loader) == 0) {
         return 0;
     }
-    if (strncmp(original, rootfs, strlen(rootfs)) == 0) {
+    char guest_override[PATH_MAX];
+    guest_override[0] = '\0';
+    int bind_guest_rc = bind_host_to_guest_path(original, guest_override, sizeof(guest_override));
+    if (bind_guest_rc < 0) {
+        fprintf(stderr, "pdocker-direct-trace: pid=%d execve bind guest path too long: %s\n",
+                (int)pid, original);
+        return 0;
+    }
+    if (bind_guest_rc > 0) {
         snprintf(target, sizeof(target), "%s", original);
+    } else if (strncmp(original, rootfs, strlen(rootfs)) == 0) {
+        snprintf(target, sizeof(target), "%s", original);
+    } else if (original[0] != '/') {
+        int validate_rc = validate_relative_tracee_path(pid, AT_FDCWD, original, rootfs,
+                                                        target, sizeof(target), 1);
+        if (validate_rc < 0) {
+            if (g_trace_exec) {
+                fprintf(stderr, "pdocker-direct-exec: pid=%d relative exec unsafe %s: %s\n",
+                        (int)pid, original, strerror(-validate_rc));
+            }
+            return 0;
+        }
     } else if (should_rewrite_path(rootfs, original)) {
         if (snprintf(target, sizeof(target), "%s%s", rootfs, original) >= (int)sizeof(target)) {
             fprintf(stderr, "pdocker-direct-trace: pid=%d execve target too long: %s\n",
@@ -4198,7 +4241,11 @@ static int rewrite_execve_arg(pid_t pid, struct user_pt_regs *regs, TraceeState 
         read_tracee_string(pid, old_arg_ptrs[0], old_argv0, sizeof(old_argv0));
     }
     char original_guest[PATH_MAX];
-    guest_exec_path(rootfs, original, original_guest, sizeof(original_guest));
+    if (guest_override[0]) {
+        snprintf(original_guest, sizeof(original_guest), "%s", guest_override);
+    } else {
+        guest_exec_path(rootfs, original, original_guest, sizeof(original_guest));
+    }
     const char *argv0_value = old_argv0[0] ? old_argv0 : original_guest;
     if (is_script && program_argv0[0]) argv0_value = program_argv0;
 
@@ -5429,11 +5476,20 @@ loader_found:
     char shell[PATH_MAX];
     char shell_argv0[PATH_MAX];
     char shell_arg[PATH_MAX];
+    char script_guest[PATH_MAX];
     const char *program = target;
     int has_shell_arg = 0;
     shell_argv0[0] = '\0';
     shell_arg[0] = '\0';
+    script_guest[0] = '\0';
     if (is_script) {
+        int bind_guest_rc = bind_host_to_guest_path(target, script_guest, sizeof(script_guest));
+        if (bind_guest_rc < 0) {
+            fprintf(stderr, "pdocker-direct-executor: script guest path too long: %s\n", target);
+            free(env_items);
+            return 126;
+        }
+        if (bind_guest_rc == 0) guest_exec_path(rootfs, target, script_guest, sizeof(script_guest));
         char interp[PATH_MAX];
         char interp_arg[PATH_MAX];
         if (parse_shebang(target, interp, sizeof(interp), interp_arg, sizeof(interp_arg)) == 0 &&
@@ -5476,7 +5532,7 @@ loader_found:
         }
         nargv[n++] = (char *)program;
         if (is_script && has_shell_arg) nargv[n++] = shell_arg;
-        if (is_script) nargv[n++] = target;
+        if (is_script) nargv[n++] = script_guest[0] ? script_guest : target;
     }
     for (int i = command_index + 1; i < argc; ++i) nargv[n++] = argv[i];
     nargv[n] = NULL;

@@ -1999,3 +1999,24 @@ Heavy tests, run before major runtime changes:
 
 Never mark a temporary workaround as complete unless the acceptance check for
 the real behavior passes.
+
+## P1: Direct Exec Bind-Mounted Shebang Paths
+
+Status: **fix mirrored from TermPort integration; needs upstream device smoke**.
+
+Facts from the TermPort port:
+
+- Running a bind-mounted script as the initial command, for example `./gradlew`,
+  could pass the Android host path for the script into the guest interpreter.
+  `/bin/sh` then failed to open the script even though the file existed through
+  the bind mount.
+- Child `execve` of relative scripts had the same class of risk because the
+  exec target could be relative to a host cwd under a bind mount.
+- The TermPort integration fixed this by reversing bind host paths back to
+  guest paths for initial script invocation and traced `execve` rewrites, and
+  verified `./gradlew --version` inside the Skydnir Ubuntu rootfs on device.
+
+Acceptance:
+
+- Android smoke covers a bind-mounted script launched as `./script` and via a
+  child process, and the guest interpreter receives the guest-visible path.
