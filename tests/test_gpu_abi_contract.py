@@ -2308,6 +2308,33 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
 
+    def test_vulkan_graphics_v616_clear_attachments_abi_is_append_only(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_ABI_MINOR 16u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV616FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV616HeaderExtension", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV616ClearAttachmentEntry", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV616ClearRectEntry", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_HEADER_EXTENSION_FIELDS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_CLEAR_ATTACHMENTS_COMMAND_FIELDS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_CLEAR_ATTACHMENT_FIELDS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_CLEAR_RECT_FIELDS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_HEADER_EXTENSION_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_CLEAR_ATTACHMENTS_COMMAND_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_CLEAR_ATTACHMENT_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_CLEAR_RECT_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_ATTACHMENTS_COMMANDS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_ATTACHMENTS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_RECTS", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS", source)
+            self.assertIn("clear_attachment_first", source)
+            self.assertIn("color_attachment", source)
+            self.assertIn("rect_extent_width", source)
+
+
     def test_vulkan_graphics_v611_buffer_write_metadata_is_append_only(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
