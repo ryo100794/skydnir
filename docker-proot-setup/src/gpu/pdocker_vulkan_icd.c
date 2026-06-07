@@ -405,9 +405,13 @@ struct PdockerVkEvent {
 struct PdockerVkQueryPool {
     VkQueryType type;
     uint32_t query_count;
+    uint64_t pool_id;
+    int result_fd;
+    size_t result_size;
     uint64_t *values;
     uint8_t *available;
     uint8_t *active;
+    PdockerGpuVulkanGraphicsV617QueryResultEntry *result_entries;
 };
 
 typedef struct {
@@ -871,6 +875,7 @@ static PdockerVkMemory *g_guarded_memories[PDOCKER_VK_MAX_GUARDED_MEMORIES];
 static struct sigaction g_previous_sigsegv;
 static bool g_guarded_sigsegv_installed;
 static uint64_t g_vulkan_object_generation;
+static uint64_t g_vulkan_query_pool_generation;
 
 static bool trace_allocations(void);
 static void execute_recorded_query_op(PdockerVkCommandOp *op);
@@ -905,6 +910,10 @@ static bool vulkan_v5_object_transport_enabled(void) {
 
 static uint64_t next_vulkan_object_generation(void) {
     return __sync_add_and_fetch(&g_vulkan_object_generation, 1);
+}
+
+static uint64_t next_vulkan_query_pool_id(void) {
+    return __sync_add_and_fetch(&g_vulkan_query_pool_generation, 1);
 }
 
 static uint32_t clamp_u32(uint32_t value, uint32_t limit) {
@@ -14876,6 +14885,11 @@ static void reset_query_range(
         pool->values[q] = 0;
         pool->available[q] = 0;
         pool->active[q] = 0;
+        if (pool->result_entries) {
+            pool->result_entries[q].value = 0;
+            pool->result_entries[q].available = 0;
+            pool->result_entries[q].status = 0;
+        }
     }
 }
 
@@ -14894,6 +14908,11 @@ static void execute_recorded_query_op(PdockerVkCommandOp *op) {
             pool->active[op->query_index] = 0;
             pool->values[op->query_index] = monotonic_ns();
             pool->available[op->query_index] = 1;
+            if (pool->result_entries) {
+                pool->result_entries[op->query_index].value = pool->values[op->query_index];
+                pool->result_entries[op->query_index].available = 1;
+                pool->result_entries[op->query_index].status = VK_SUCCESS;
+            }
             break;
         case PDOCKER_VK_COMMAND_QUERY_RESET:
             reset_query_range(pool, op->query_index, op->query_count);
@@ -14903,6 +14922,11 @@ static void execute_recorded_query_op(PdockerVkCommandOp *op) {
             pool->values[op->query_index] = monotonic_ns();
             pool->available[op->query_index] = 1;
             pool->active[op->query_index] = 0;
+            if (pool->result_entries) {
+                pool->result_entries[op->query_index].value = pool->values[op->query_index];
+                pool->result_entries[op->query_index].available = 1;
+                pool->result_entries[op->query_index].status = VK_SUCCESS;
+            }
             break;
         default:
             break;
@@ -14949,13 +14973,31 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
     if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
     pool->type = pCreateInfo->queryType;
     pool->query_count = pCreateInfo->queryCount;
+    pool->pool_id = next_vulkan_query_pool_id();
+    pool->result_fd = -1;
+    pool->result_size = (size_t)pool->query_count * sizeof(PdockerGpuVulkanGraphicsV617QueryResultEntry);
     pool->values = calloc(pool->query_count, sizeof(pool->values[0]));
     pool->available = calloc(pool->query_count, sizeof(pool->available[0]));
     pool->active = calloc(pool->query_count, sizeof(pool->active[0]));
-    if (!pool->values || !pool->available || !pool->active) {
+    if (pool->result_size && pool->result_size / sizeof(PdockerGpuVulkanGraphicsV617QueryResultEntry) == pool->query_count) {
+        pool->result_fd = create_shared_fd(pool->result_size);
+        if (pool->result_fd >= 0) {
+            void *mapped = mmap(NULL, pool->result_size, PROT_READ | PROT_WRITE, MAP_SHARED, pool->result_fd, 0);
+            if (mapped != MAP_FAILED) {
+                pool->result_entries = (PdockerGpuVulkanGraphicsV617QueryResultEntry *)mapped;
+                memset(pool->result_entries, 0, pool->result_size);
+            } else {
+                close(pool->result_fd);
+                pool->result_fd = -1;
+            }
+        }
+    }
+    if (!pool->values || !pool->available || !pool->active || !pool->result_entries) {
         free(pool->values);
         free(pool->available);
         free(pool->active);
+        if (pool->result_entries) munmap(pool->result_entries, pool->result_size);
+        if (pool->result_fd >= 0) close(pool->result_fd);
         free(pool);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
@@ -14974,6 +15016,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyQueryPool(
     free(pool->values);
     free(pool->available);
     free(pool->active);
+    if (pool->result_entries) munmap(pool->result_entries, pool->result_size);
+    if (pool->result_fd >= 0) close(pool->result_fd);
     free(pool);
 }
 
@@ -15091,10 +15135,20 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetQueryPoolResults(
             return VK_INCOMPLETE;
         }
         uint32_t q = firstQuery + i;
+        if (pool->result_entries && pool->result_entries[q].available) {
+            pool->values[q] = pool->result_entries[q].value;
+            pool->available[q] = 1;
+            pool->active[q] = 0;
+        }
         if (!pool->available[q] && wait) {
             pool->values[q] = monotonic_ns();
             pool->available[q] = 1;
             pool->active[q] = 0;
+            if (pool->result_entries) {
+                pool->result_entries[q].value = pool->values[q];
+                pool->result_entries[q].available = 1;
+                pool->result_entries[q].status = VK_SUCCESS;
+            }
         }
         if (!pool->available[q] && !partial) {
             rc = VK_NOT_READY;
