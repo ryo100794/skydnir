@@ -17163,6 +17163,8 @@ static int validate_vulkan_graphics_v6_header_prefix(
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV614FrameHeader)) return -EPROTO;
     } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V615_ABI_MINOR) {
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV615FrameHeader)) return -EPROTO;
+    } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V616_ABI_MINOR) {
+        if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV616FrameHeader)) return -EPROTO;
     } else {
         return -EPROTO;
     }
@@ -17212,7 +17214,10 @@ static int validate_vulkan_graphics_v6_header(
         (const PdockerGpuVulkanGraphicsV614FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV615FrameHeader *header_v615 =
         (const PdockerGpuVulkanGraphicsV615FrameHeader *)header;
-    const int is_v615 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V615_ABI_MINOR;
+    const PdockerGpuVulkanGraphicsV616FrameHeader *header_v616 =
+        (const PdockerGpuVulkanGraphicsV616FrameHeader *)header;
+    const int is_v616 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V616_ABI_MINOR;
+    const int is_v615 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V615_ABI_MINOR || is_v616;
     const int is_v614 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V614_ABI_MINOR || is_v615;
     const int is_v613 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V613_ABI_MINOR || is_v614;
     const int is_v612 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V612_ABI_MINOR || is_v613;
@@ -17263,6 +17268,9 @@ static int validate_vulkan_graphics_v6_header(
         (is_v613 && header_v613->v613.clear_depth_stencil_image_count > PDOCKER_GPU_VULKAN_GRAPHICS_V613_MAX_CLEAR_DEPTH_STENCIL_IMAGES) ||
         (is_v614 && header_v614->v614.resolve_image_count > PDOCKER_GPU_VULKAN_GRAPHICS_V614_MAX_RESOLVE_IMAGES) ||
         (is_v615 && header_v615->v615.blit_image_count > PDOCKER_GPU_VULKAN_GRAPHICS_V615_MAX_BLIT_IMAGES) ||
+        (is_v616 && header_v616->v616.clear_attachments_command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_ATTACHMENTS_COMMANDS) ||
+        (is_v616 && header_v616->v616.clear_attachment_count > PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_ATTACHMENTS) ||
+        (is_v616 && header_v616->v616.clear_rect_count > PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_RECTS) ||
         header->command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) {
         return -E2BIG;
     }
@@ -17385,7 +17393,16 @@ static int validate_vulkan_graphics_v6_header(
          header_v615->v615.blit_image_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V615_BLIT_IMAGE_SCHEMA_HASH)) {
         return -EPROTO;
     }
-    FrameRange ranges[37] = {
+    if (is_v616 &&
+        (header_v616->v616.clear_attachments_command_entry_size != sizeof(PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry) ||
+         header_v616->v616.clear_attachments_command_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V616_CLEAR_ATTACHMENTS_COMMAND_SCHEMA_HASH ||
+         header_v616->v616.clear_attachment_entry_size != sizeof(PdockerGpuVulkanGraphicsV616ClearAttachmentEntry) ||
+         header_v616->v616.clear_attachment_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V616_CLEAR_ATTACHMENT_SCHEMA_HASH ||
+         header_v616->v616.clear_rect_entry_size != sizeof(PdockerGpuVulkanGraphicsV616ClearRectEntry) ||
+         header_v616->v616.clear_rect_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V616_CLEAR_RECT_SCHEMA_HASH)) {
+        return -EPROTO;
+    }
+    FrameRange ranges[40] = {
         {header->resource_table_offset, header->resource_table_size},
         {header->descriptor_table_offset, header->descriptor_table_size},
         {header->image_table_offset, header->image_table_size},
@@ -17448,6 +17465,12 @@ static int validate_vulkan_graphics_v6_header(
          is_v614 ? header_v614->v614.resolve_image_table_size : 0},
         {is_v615 ? header_v615->v615.blit_image_table_offset : 0,
          is_v615 ? header_v615->v615.blit_image_table_size : 0},
+        {is_v616 ? header_v616->v616.clear_attachments_command_table_offset : 0,
+         is_v616 ? header_v616->v616.clear_attachments_command_table_size : 0},
+        {is_v616 ? header_v616->v616.clear_attachment_table_offset : 0,
+         is_v616 ? header_v616->v616.clear_attachment_table_size : 0},
+        {is_v616 ? header_v616->v616.clear_rect_table_offset : 0,
+         is_v616 ? header_v616->v616.clear_rect_table_size : 0},
     };
     if (!table_range_valid(header->resource_table_offset, header->resource_table_size,
                            header->resource_count, header->resource_entry_size,
@@ -17664,7 +17687,28 @@ static int validate_vulkan_graphics_v6_header(
                            header->frame_size, header->header_size)) {
         return -EPROTO;
     }
-    if (!frame_ranges_do_not_overlap(ranges, is_v615 ? 37u : (is_v614 ? 36u : (is_v613 ? 35u : (is_v612 ? 34u : (is_v611 ? 33u : (is_v610 ? 30u : (is_v69 ? 28u : (is_v68 ? 27u : (is_v67 ? 26u : (is_v66 ? 23u : (is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u)))))))))))))))) {
+    if (is_v616 &&
+        (!table_range_valid(header_v616->v616.clear_attachments_command_table_offset,
+                            header_v616->v616.clear_attachments_command_table_size,
+                            header_v616->v616.clear_attachments_command_count,
+                            header_v616->v616.clear_attachments_command_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry),
+                            header->frame_size, header->header_size) ||
+         !table_range_valid(header_v616->v616.clear_attachment_table_offset,
+                            header_v616->v616.clear_attachment_table_size,
+                            header_v616->v616.clear_attachment_count,
+                            header_v616->v616.clear_attachment_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV616ClearAttachmentEntry),
+                            header->frame_size, header->header_size) ||
+         !table_range_valid(header_v616->v616.clear_rect_table_offset,
+                            header_v616->v616.clear_rect_table_size,
+                            header_v616->v616.clear_rect_count,
+                            header_v616->v616.clear_rect_entry_size,
+                            __alignof__(PdockerGpuVulkanGraphicsV616ClearRectEntry),
+                            header->frame_size, header->header_size))) {
+        return -EPROTO;
+    }
+    if (!frame_ranges_do_not_overlap(ranges, is_v616 ? 40u : (is_v615 ? 37u : (is_v614 ? 36u : (is_v613 ? 35u : (is_v612 ? 34u : (is_v611 ? 33u : (is_v610 ? 30u : (is_v69 ? 28u : (is_v68 ? 27u : (is_v67 ? 26u : (is_v66 ? 23u : (is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u))))))))))))))))) {
         return -EPROTO;
     }
     return 0;
@@ -17699,6 +17743,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV613FrameHeader *header_v613;
     const PdockerGpuVulkanGraphicsV614FrameHeader *header_v614;
     const PdockerGpuVulkanGraphicsV615FrameHeader *header_v615;
+    const PdockerGpuVulkanGraphicsV616FrameHeader *header_v616;
     const int *passed_fds;
     size_t passed_fd_count;
     int is_v61;
@@ -17716,6 +17761,7 @@ typedef struct VulkanGraphicsV6FrameView {
     int is_v613;
     int is_v614;
     int is_v615;
+    int is_v616;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images;
@@ -17752,6 +17798,9 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *clear_depth_stencil_images;
     const PdockerGpuVulkanGraphicsV614ResolveImageEntry *resolve_images;
     const PdockerGpuVulkanGraphicsV615BlitImageEntry *blit_images;
+    const PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry *clear_attachment_commands;
+    const PdockerGpuVulkanGraphicsV616ClearAttachmentEntry *clear_attachments;
+    const PdockerGpuVulkanGraphicsV616ClearRectEntry *clear_rects;
 } VulkanGraphicsV6FrameView;
 
 static int init_vulkan_graphics_v6_frame_view(
@@ -17765,7 +17814,8 @@ static int init_vulkan_graphics_v6_frame_view(
         (const PdockerGpuVulkanGraphicsV6FrameHeader *)frame;
     int rc = validate_vulkan_graphics_v6_header(header, passed_fd_count);
     if (rc != 0) return rc;
-    const int is_v615_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V615_ABI_MINOR;
+    const int is_v616_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V616_ABI_MINOR;
+    const int is_v615_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V615_ABI_MINOR || is_v616_header;
     const int is_v614_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V614_ABI_MINOR || is_v615_header;
     const int is_v613_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V613_ABI_MINOR || is_v614_header;
     const int is_v612_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V612_ABI_MINOR || is_v613_header;
@@ -17827,6 +17877,9 @@ static int init_vulkan_graphics_v6_frame_view(
     const PdockerGpuVulkanGraphicsV615FrameHeader *header_v615 = is_v615_header
             ? (const PdockerGpuVulkanGraphicsV615FrameHeader *)frame
             : NULL;
+    const PdockerGpuVulkanGraphicsV616FrameHeader *header_v616 = is_v616_header
+            ? (const PdockerGpuVulkanGraphicsV616FrameHeader *)frame
+            : NULL;
     view->frame = frame;
     view->header = header;
     view->header_v61 = header_v61;
@@ -17844,6 +17897,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->header_v613 = header_v613;
     view->header_v614 = header_v614;
     view->header_v615 = header_v615;
+    view->header_v616 = header_v616;
     view->passed_fds = passed_fds;
     view->passed_fd_count = passed_fd_count;
     view->is_v61 = header_v61 != NULL;
@@ -17861,6 +17915,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->is_v613 = header_v613 != NULL;
     view->is_v614 = header_v614 != NULL;
     view->is_v615 = header_v615 != NULL;
+    view->is_v616 = header_v616 != NULL;
     view->resources =
         (const PdockerGpuVulkanDispatchV5ResourceEntry *)graphics_v6_table_ptr(
             frame, header, header->resource_table_offset, header->resource_table_size);
@@ -18088,6 +18143,25 @@ static int init_vulkan_graphics_v6_frame_view(
                 frame, header, header_v615->v615.blit_image_table_offset,
                 header_v615->v615.blit_image_table_size);
         if (header_v615->v615.blit_image_count && !view->blit_images) {
+            return -EPROTO;
+        }
+    }
+    if (view->is_v616) {
+        view->clear_attachment_commands =
+            (const PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry *)graphics_v6_table_ptr(
+                frame, header, header_v616->v616.clear_attachments_command_table_offset,
+                header_v616->v616.clear_attachments_command_table_size);
+        view->clear_attachments =
+            (const PdockerGpuVulkanGraphicsV616ClearAttachmentEntry *)graphics_v6_table_ptr(
+                frame, header, header_v616->v616.clear_attachment_table_offset,
+                header_v616->v616.clear_attachment_table_size);
+        view->clear_rects =
+            (const PdockerGpuVulkanGraphicsV616ClearRectEntry *)graphics_v6_table_ptr(
+                frame, header, header_v616->v616.clear_rect_table_offset,
+                header_v616->v616.clear_rect_table_size);
+        if ((header_v616->v616.clear_attachments_command_count && !view->clear_attachment_commands) ||
+            (header_v616->v616.clear_attachment_count && !view->clear_attachments) ||
+            (header_v616->v616.clear_rect_count && !view->clear_rects)) {
             return -EPROTO;
         }
     }
@@ -18359,6 +18433,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV613FrameHeader *header_v613 = view.header_v613;
     const PdockerGpuVulkanGraphicsV614FrameHeader *header_v614 = view.header_v614;
     const PdockerGpuVulkanGraphicsV615FrameHeader *header_v615 = view.header_v615;
+    const PdockerGpuVulkanGraphicsV616FrameHeader *header_v616 = view.header_v616;
     const int is_v61 = view.is_v61;
     const int is_v62 = view.is_v62;
     const int is_v63 = view.is_v63;
@@ -18373,6 +18448,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const int is_v613 = view.is_v613;
     const int is_v614 = view.is_v614;
     const int is_v615 = view.is_v615;
+    const int is_v616 = view.is_v616;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources = view.resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = view.descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images = view.images;
@@ -18408,6 +18484,9 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *clear_depth_stencil_images = view.clear_depth_stencil_images;
     const PdockerGpuVulkanGraphicsV614ResolveImageEntry *resolve_images = view.resolve_images;
     const PdockerGpuVulkanGraphicsV615BlitImageEntry *blit_images = view.blit_images;
+    const PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry *clear_attachment_commands = view.clear_attachment_commands;
+    const PdockerGpuVulkanGraphicsV616ClearAttachmentEntry *clear_attachments = view.clear_attachments;
+    const PdockerGpuVulkanGraphicsV616ClearRectEntry *clear_rects = view.clear_rects;
     const size_t frame_hash_offset = offsetof(PdockerGpuVulkanGraphicsV6FrameHeader, frame_hash);
     uint64_t payload_hash = fnv1a64_update(1469598103934665603ull,
                                            frame + header->header_size,
@@ -18728,6 +18807,30 @@ static int validate_vulkan_graphics_v6_frame_content(
             (size_t)header_v615->v615.blit_image_table_size);
         if (blit_image_table_hash != header_v615->v615.blit_image_table_hash ||
             header_v615->v615.extension_hash != blit_image_table_hash) {
+            return -EPROTO;
+        }
+    }
+    if (is_v616) {
+        uint64_t clear_command_table_hash = fnv1a64_update(
+            1469598103934665603ull, clear_attachment_commands,
+            (size_t)header_v616->v616.clear_attachments_command_table_size);
+        uint64_t clear_attachment_table_hash = fnv1a64_update(
+            1469598103934665603ull, clear_attachments,
+            (size_t)header_v616->v616.clear_attachment_table_size);
+        uint64_t clear_rect_table_hash = fnv1a64_update(
+            1469598103934665603ull, clear_rects,
+            (size_t)header_v616->v616.clear_rect_table_size);
+        uint64_t extension_hash = 1469598103934665603ull;
+        extension_hash = fnv1a64_update(extension_hash, clear_attachment_commands,
+                                        (size_t)header_v616->v616.clear_attachments_command_table_size);
+        extension_hash = fnv1a64_update(extension_hash, clear_attachments,
+                                        (size_t)header_v616->v616.clear_attachment_table_size);
+        extension_hash = fnv1a64_update(extension_hash, clear_rects,
+                                        (size_t)header_v616->v616.clear_rect_table_size);
+        if (clear_command_table_hash != header_v616->v616.clear_attachments_command_table_hash ||
+            clear_attachment_table_hash != header_v616->v616.clear_attachment_table_hash ||
+            clear_rect_table_hash != header_v616->v616.clear_rect_table_hash ||
+            extension_hash != header_v616->v616.extension_hash) {
             return -EPROTO;
         }
     }
@@ -19151,6 +19254,7 @@ static int validate_vulkan_graphics_v6_frame_content(
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESOLVE_IMAGE:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BLIT_IMAGE:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS:
                 break;
             default:
                 return -EPROTO;
@@ -19212,6 +19316,7 @@ static int validate_vulkan_graphics_v6_frame_content(
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE && !is_v613) return -EPROTO;
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESOLVE_IMAGE && !is_v614) return -EPROTO;
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BLIT_IMAGE && !is_v615) return -EPROTO;
+        if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS && !is_v616) return -EPROTO;
         if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER_TO_IMAGE ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE_TO_BUFFER ||
@@ -19226,6 +19331,11 @@ static int validate_vulkan_graphics_v6_frame_content(
              command->descriptor_count != 0 || command->vertex_binding_count != 0 ||
              command->attachment_count != 0 || command->dynamic_state_count != 0 ||
              command->push_size != 0)) return -EPROTO;
+        if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS &&
+            (command->pipeline_index != UINT32_MAX || command->first_descriptor != 0 ||
+             command->descriptor_count != 0 || command->vertex_binding_count != 0 ||
+             command->attachment_count != 0 || command->dynamic_state_count != 0 ||
+             command->push_size != 0 || command->index_buffer_resource_index != UINT32_MAX)) return -EPROTO;
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW &&
             command->index_buffer_resource_index != UINT32_MAX) return -EPROTO;
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) {
@@ -19452,6 +19562,57 @@ static int validate_vulkan_graphics_v6_frame_content(
                 !seen_blit_command[i]) return -EPROTO;
         }
     }
+    if (is_v616) {
+        uint8_t seen_clear_attachments_command[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS];
+        memset(seen_clear_attachments_command, 0, sizeof(seen_clear_attachments_command));
+        for (uint32_t m = 0; m < header_v616->v616.clear_attachments_command_count; ++m) {
+            const PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry *entry =
+                &clear_attachment_commands[m];
+            if (entry->command_index >= header->command_count ||
+                seen_clear_attachments_command[entry->command_index] ||
+                entry->reserved0 != 0 || entry->reserved1 != 0 || entry->reserved2 != 0 ||
+                entry->clear_attachment_count == 0 || entry->clear_rect_count == 0 ||
+                !range_add_u32(entry->clear_attachment_first, entry->clear_attachment_count,
+                               header_v616->v616.clear_attachment_count) ||
+                !range_add_u32(entry->clear_rect_first, entry->clear_rect_count,
+                               header_v616->v616.clear_rect_count) ||
+                commands[entry->command_index].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS) {
+                return -EPROTO;
+            }
+            seen_clear_attachments_command[entry->command_index] = 1;
+            for (uint32_t ai = 0; ai < entry->clear_attachment_count; ++ai) {
+                const PdockerGpuVulkanGraphicsV616ClearAttachmentEntry *attachment =
+                    &clear_attachments[entry->clear_attachment_first + ai];
+                const VkImageAspectFlags aspect = (VkImageAspectFlags)attachment->aspect_mask;
+                const VkImageAspectFlags supported =
+                    VK_IMAGE_ASPECT_COLOR_BIT | VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+                const int has_color = (aspect & VK_IMAGE_ASPECT_COLOR_BIT) != 0;
+                const int has_depth = (aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
+                const int has_stencil = (aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+                if (attachment->reserved0 != 0 || attachment->reserved1 != 0 ||
+                    attachment->reserved2 != 0 || attachment->reserved3 != 0 ||
+                    aspect == 0 || (aspect & ~supported) != 0 ||
+                    (has_color && (has_depth || has_stencil))) {
+                    return -EPROTO;
+                }
+                if (has_color && attachment->color_attachment == UINT32_MAX) return -EPROTO;
+                if (!has_color && attachment->color_attachment != UINT32_MAX) return -EPROTO;
+            }
+            for (uint32_t ri = 0; ri < entry->clear_rect_count; ++ri) {
+                const PdockerGpuVulkanGraphicsV616ClearRectEntry *rect =
+                    &clear_rects[entry->clear_rect_first + ri];
+                if (rect->reserved0 != 0 || rect->reserved1 != 0 ||
+                    rect->rect_extent_width == 0 || rect->rect_extent_height == 0 ||
+                    rect->layer_count == 0) {
+                    return -EPROTO;
+                }
+            }
+        }
+        for (uint32_t i = 0; i < header->command_count; ++i) {
+            if (commands[i].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS &&
+                !seen_clear_attachments_command[i]) return -EPROTO;
+        }
+    }
     if (is_v68) {
         uint8_t seen_indirect_command[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS];
         memset(seen_indirect_command, 0, sizeof(seen_indirect_command));
@@ -19650,6 +19811,124 @@ find_vulkan_graphics_v615_blit_image(
     return NULL;
 }
 
+static const PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry *
+find_vulkan_graphics_v616_clear_attachments(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t command_index) {
+    if (!view || !view->is_v616 || !view->header_v616 || !view->clear_attachment_commands) return NULL;
+    for (uint32_t i = 0; i < view->header_v616->v616.clear_attachments_command_count; ++i) {
+        const PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry *entry =
+            &view->clear_attachment_commands[i];
+        if (entry->command_index == command_index) return entry;
+    }
+    return NULL;
+}
+
+static int vulkan_graphics_v616_rect_inside_render_area(
+        const PdockerGpuVulkanGraphicsV616ClearRectEntry *rect,
+        const PdockerGpuVulkanGraphicsV6CommandEntry *rendering) {
+    if (!rect || !rendering || rect->rect_extent_width == 0 ||
+        rect->rect_extent_height == 0) {
+        return 0;
+    }
+    int64_t rx0 = (int64_t)rect->rect_offset_x;
+    int64_t ry0 = (int64_t)rect->rect_offset_y;
+    int64_t rx1 = rx0 + (int64_t)rect->rect_extent_width;
+    int64_t ry1 = ry0 + (int64_t)rect->rect_extent_height;
+    int64_t ax0 = (int64_t)rendering->render_area_offset_x;
+    int64_t ay0 = (int64_t)rendering->render_area_offset_y;
+    int64_t ax1 = ax0 + (int64_t)rendering->render_area_extent_width;
+    int64_t ay1 = ay0 + (int64_t)rendering->render_area_extent_height;
+    return rx0 >= ax0 && ry0 >= ay0 && rx1 <= ax1 && ry1 <= ay1;
+}
+
+static int vulkan_graphics_v616_color_slot_is_clearable(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV6CommandEntry *rendering,
+        uint32_t color_attachment) {
+    if (!view || !rendering || !view->attachments) return 0;
+    uint32_t color_slot = 0;
+    for (uint32_t a = 0; a < rendering->attachment_count; ++a) {
+        const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
+            &view->attachments[rendering->attachment_first + a];
+        if (attachment->attachment_role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR) {
+            continue;
+        }
+        if (color_slot == color_attachment) {
+            return (attachment->flags & PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) == 0 &&
+                   attachment->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+        }
+        ++color_slot;
+    }
+    return 0;
+}
+
+static int vulkan_graphics_v616_depth_stencil_target_is_clearable(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV6CommandEntry *rendering,
+        uint32_t role) {
+    if (!view || !rendering || !view->attachments) return 0;
+    for (uint32_t a = 0; a < rendering->attachment_count; ++a) {
+        const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
+            &view->attachments[rendering->attachment_first + a];
+        if (attachment->attachment_role == role) {
+            return (attachment->flags & PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_UNUSED_SLOT) == 0 &&
+                   attachment->image_view_index != PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
+        }
+    }
+    return 0;
+}
+
+static int vulkan_graphics_v616_clear_attachments_match_rendering(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry *clear,
+        const PdockerGpuVulkanGraphicsV6CommandEntry *rendering) {
+    if (!view || !clear || !rendering || !view->header_v616 ||
+        !view->clear_attachments || !view->clear_rects ||
+        !range_add_u32(clear->clear_attachment_first, clear->clear_attachment_count,
+                       view->header_v616->v616.clear_attachment_count) ||
+        !range_add_u32(clear->clear_rect_first, clear->clear_rect_count,
+                       view->header_v616->v616.clear_rect_count) ||
+        !range_add_u32(rendering->attachment_first, rendering->attachment_count,
+                       view->header->attachment_count)) {
+        return -EPROTO;
+    }
+    for (uint32_t ai = 0; ai < clear->clear_attachment_count; ++ai) {
+        const PdockerGpuVulkanGraphicsV616ClearAttachmentEntry *attachment =
+            &view->clear_attachments[clear->clear_attachment_first + ai];
+        const VkImageAspectFlags aspect = (VkImageAspectFlags)attachment->aspect_mask;
+        if ((aspect & VK_IMAGE_ASPECT_COLOR_BIT) != 0) {
+            if (!vulkan_graphics_v616_color_slot_is_clearable(
+                    view, rendering, attachment->color_attachment)) {
+                return -EPROTO;
+            }
+        }
+        if ((aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0 &&
+            !vulkan_graphics_v616_depth_stencil_target_is_clearable(
+                view, rendering, PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH)) {
+            return -EPROTO;
+        }
+        if ((aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0 &&
+            !vulkan_graphics_v616_depth_stencil_target_is_clearable(
+                view, rendering, PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL)) {
+            return -EPROTO;
+        }
+    }
+    const uint32_t layer_count = rendering->rendering_layer_count
+        ? rendering->rendering_layer_count
+        : 1u;
+    for (uint32_t ri = 0; ri < clear->clear_rect_count; ++ri) {
+        const PdockerGpuVulkanGraphicsV616ClearRectEntry *rect =
+            &view->clear_rects[clear->clear_rect_first + ri];
+        if (!vulkan_graphics_v616_rect_inside_render_area(rect, rendering) ||
+            rect->base_array_layer > layer_count ||
+            rect->layer_count > layer_count - rect->base_array_layer) {
+            return -ERANGE;
+        }
+    }
+    return 0;
+}
+
 static const PdockerGpuVulkanGraphicsV63DepthStencilStateEntry *
 find_vulkan_graphics_v63_depth_stencil_state(
         const VulkanGraphicsV6FrameView *view,
@@ -19687,6 +19966,8 @@ static int preflight_vulkan_graphics_v6_replay_supported(
     }
     int rendering_active = 0;
     int pipeline_bound = 0;
+    int rc = 0;
+    const PdockerGpuVulkanGraphicsV6CommandEntry *active_rendering_command = NULL;
     for (uint32_t i = 0; i < header->command_count; ++i) {
         const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[i];
         switch (command->command_type) {
@@ -19778,6 +20059,7 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     }
                 }
                 rendering_active = 1;
+                active_rendering_command = command;
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING:
                 if (!rendering_active) {
@@ -19786,6 +20068,7 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     return -EPROTO;
                 }
                 rendering_active = 0;
+                active_rendering_command = NULL;
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE:
                 if (command->pipeline_index == UINT32_MAX ||
@@ -19882,6 +20165,27 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     reason = "unsupported graphics index type";
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
+                }
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS:
+                if (!rendering_active) {
+                    reason = "clear attachments outside dynamic rendering";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                const PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry *clear =
+                    find_vulkan_graphics_v616_clear_attachments(view, i);
+                if (!clear) {
+                    reason = "graphics clear attachments requires V6.16 metadata";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                rc = vulkan_graphics_v616_clear_attachments_match_rendering(
+                    view, clear, active_rendering_command);
+                if (rc != 0) {
+                    reason = "graphics clear attachments do not match active rendering";
+                    if (reason_out) *reason_out = reason;
+                    return rc;
                 }
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS:
@@ -23357,6 +23661,62 @@ static int record_vulkan_graphics_v6_command_buffer(
                                             1,
                                             &range);
                 image->current_layout = (VkImageLayout)clear->image_layout;
+                break;
+            }
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS: {
+                const PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry *clear =
+                    find_vulkan_graphics_v616_clear_attachments(view, ci);
+                if (!clear || !view->clear_attachments || !view->clear_rects ||
+                    !range_add_u32(clear->clear_attachment_first, clear->clear_attachment_count,
+                                   view->header_v616->v616.clear_attachment_count) ||
+                    !range_add_u32(clear->clear_rect_first, clear->clear_rect_count,
+                                   view->header_v616->v616.clear_rect_count)) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                VkClearAttachment *vk_attachments =
+                    (VkClearAttachment *)calloc(clear->clear_attachment_count, sizeof(*vk_attachments));
+                VkClearRect *vk_rects =
+                    (VkClearRect *)calloc(clear->clear_rect_count, sizeof(*vk_rects));
+                if (!vk_attachments || !vk_rects) {
+                    free(vk_attachments);
+                    free(vk_rects);
+                    rc = -ENOMEM;
+                    goto cleanup;
+                }
+                for (uint32_t ai = 0; ai < clear->clear_attachment_count; ++ai) {
+                    const PdockerGpuVulkanGraphicsV616ClearAttachmentEntry *src =
+                        &view->clear_attachments[clear->clear_attachment_first + ai];
+                    VkClearAttachment *dst = &vk_attachments[ai];
+                    memset(dst, 0, sizeof(*dst));
+                    dst->aspectMask = (VkImageAspectFlags)src->aspect_mask;
+                    dst->colorAttachment = src->color_attachment;
+                    dst->clearValue.color.uint32[0] = src->color_uint32_0;
+                    dst->clearValue.color.uint32[1] = src->color_uint32_1;
+                    dst->clearValue.color.uint32[2] = src->color_uint32_2;
+                    dst->clearValue.color.uint32[3] = src->color_uint32_3;
+                    memcpy(&dst->clearValue.depthStencil.depth,
+                           &src->depth_bits,
+                           sizeof(dst->clearValue.depthStencil.depth));
+                    dst->clearValue.depthStencil.stencil = src->stencil;
+                }
+                for (uint32_t ri = 0; ri < clear->clear_rect_count; ++ri) {
+                    const PdockerGpuVulkanGraphicsV616ClearRectEntry *src =
+                        &view->clear_rects[clear->clear_rect_first + ri];
+                    vk_rects[ri].rect.offset.x = src->rect_offset_x;
+                    vk_rects[ri].rect.offset.y = src->rect_offset_y;
+                    vk_rects[ri].rect.extent.width = src->rect_extent_width;
+                    vk_rects[ri].rect.extent.height = src->rect_extent_height;
+                    vk_rects[ri].baseArrayLayer = src->base_array_layer;
+                    vk_rects[ri].layerCount = src->layer_count;
+                }
+                vkCmdClearAttachments(command_buffer,
+                                      clear->clear_attachment_count,
+                                      vk_attachments,
+                                      clear->clear_rect_count,
+                                      vk_rects);
+                free(vk_attachments);
+                free(vk_rects);
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER_TO_IMAGE:
