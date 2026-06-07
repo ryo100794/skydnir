@@ -12959,7 +12959,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
         const VkImageMemoryBarrier *pImageMemoryBarriers) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (cmd) {
-        if (dependencyFlags != 0) {
+        if ((dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
             cmd->graphics_unsupported = true;
         }
         uint32_t memory_barrier_first = cmd->memory_barrier_op_count;
@@ -13007,6 +13007,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(
             PdockerVkGraphicsCommandRecord record;
             memset(&record, 0, sizeof(record));
             record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER;
+            record.flags = dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT;
             record.memory_barrier_op_first = memory_barrier_first;
             record.memory_barrier_op_count = memory_barrier_count;
             record.buffer_barrier_op_first = buffer_barrier_first;
@@ -14383,7 +14384,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         const VkDependencyInfo *pDependencyInfo) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
-    if (pDependencyInfo && pDependencyInfo->dependencyFlags != 0) {
+    VkDependencyFlags dependency_flags = pDependencyInfo ? pDependencyInfo->dependencyFlags : 0;
+    if ((dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
         cmd->graphics_unsupported = true;
     }
     uint32_t memory_barrier_first = cmd->memory_barrier_op_count;
@@ -14437,6 +14439,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         PdockerVkGraphicsCommandRecord record;
         memset(&record, 0, sizeof(record));
         record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER;
+        record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT;
         record.memory_barrier_op_first = memory_barrier_first;
         record.memory_barrier_op_count = memory_barrier_count;
         record.buffer_barrier_op_first = buffer_barrier_first;

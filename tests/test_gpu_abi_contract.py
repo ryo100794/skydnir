@@ -2461,6 +2461,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertEqual(recorder.count("vulkan_graphics_replay_queue_family_index("), 4)
         self.assertNotIn(".srcQueueFamilyIndex = barrier->src_queue_family_index", recorder)
         self.assertNotIn(".dstQueueFamilyIndex = barrier->dst_queue_family_index", recorder)
+        self.assertIn("command->flags & VK_DEPENDENCY_BY_REGION_BIT", executor)
+        self.assertIn("graphics barrier dependency flags are not supported", executor)
 
     def test_vulkan_icd_serializes_graphics_image_barriers(self):
         icd = VULKAN_ICD.read_text()
@@ -2475,8 +2477,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record_memory_barrier_op(commandBuffer", icd)
         self.assertIn("record_buffer_barrier_op(commandBuffer", icd)
         self.assertIn("record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER", icd)
-        self.assertIn("dependencyFlags != 0", icd)
-        self.assertIn("pDependencyInfo && pDependencyInfo->dependencyFlags != 0", icd)
+        self.assertIn("dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT", icd)
+        self.assertIn("dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT", icd)
+        self.assertIn("record.flags = dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT", icd)
+        self.assertIn("record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT", icd)
         self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", icd)
         self.assertIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", icd)
         self.assertNotIn("eventCount > 1", icd)
@@ -4207,14 +4211,17 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("pImageMemoryBarriers && i < imageMemoryBarrierCount", barrier_body)
         self.assertIn("record_image_barrier_op(commandBuffer", barrier_body)
-        self.assertIn("dependencyFlags != 0", barrier_body)
+        self.assertIn("dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT", barrier_body)
+        self.assertIn("record.flags = dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT", barrier_body)
         barrier2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1
         )[0]
         self.assertIn("pDependencyInfo->pImageMemoryBarriers", barrier2_body)
         self.assertIn("const VkImageMemoryBarrier2 *b", barrier2_body)
         self.assertIn("record_image_barrier_op(commandBuffer", barrier2_body)
-        self.assertIn("pDependencyInfo && pDependencyInfo->dependencyFlags != 0", barrier2_body)
+        self.assertIn("VkDependencyFlags dependency_flags", barrier2_body)
+        self.assertIn("dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT", barrier2_body)
+        self.assertIn("record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT", barrier2_body)
         self.assertNotIn("vkCmdPipelineBarrier(commandBuffer", barrier2_body)
         self.assertIn("execute_recorded_image_barrier_op(", icd)
         for field in [

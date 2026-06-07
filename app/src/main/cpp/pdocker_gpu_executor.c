@@ -20024,6 +20024,11 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 }
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER: {
+                if ((command->flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
+                    reason = "graphics barrier dependency flags are not supported";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
                 uint32_t matched_barriers = 0;
                 uint32_t matched_memory_barriers = 0;
                 uint32_t matched_buffer_barriers = 0;
@@ -23620,7 +23625,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                 vkCmdPipelineBarrier(command_buffer,
                                      src_stages,
                                      dst_stages,
-                                     0,
+                                     command->flags & VK_DEPENDENCY_BY_REGION_BIT,
                                      memory_barrier_count, memory_barriers_to_record,
                                      buffer_barrier_count, buffer_barriers_to_record,
                                      image_barrier_count, image_barriers_to_record);
