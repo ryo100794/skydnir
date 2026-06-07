@@ -2197,6 +2197,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "normalize_image_subresource_range",
             "VK_REMAINING_MIP_LEVELS",
             "VK_REMAINING_ARRAY_LAYERS",
+            "split_aspects__",
+            "clear_aspect_count__",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS - clear_aspect_count__",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V613_MAX_CLEAR_DEPTH_STENCIL_IMAGES - clear_aspect_count__",
         ]:
             self.assertIn(marker, icd)
 

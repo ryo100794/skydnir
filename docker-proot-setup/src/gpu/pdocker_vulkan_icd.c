@@ -4159,19 +4159,23 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                 continue; \
             } \
             if (op__->type == PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE) { \
-                if (op__->index >= cmd->depth_stencil_clear_op_count || \
-                    command_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS || \
-                    clear_depth_stencil_image_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V613_MAX_CLEAR_DEPTH_STENCIL_IMAGES) { \
+                if (op__->index >= cmd->depth_stencil_clear_op_count) { \
                     rc = -E2BIG; \
                     goto cleanup; \
                 } \
                 const PdockerVkDepthStencilClearOp *clear__ = &cmd->depth_stencil_clear_ops[op__->index]; \
                 const VkImageAspectFlags ds_aspects__ = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT; \
+                VkImageAspectFlags split_aspects__[2]; \
+                uint32_t clear_aspect_count__ = 0; \
+                if (clear__->range.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) { \
+                    split_aspects__[clear_aspect_count__++] = VK_IMAGE_ASPECT_DEPTH_BIT; \
+                } \
+                if (clear__->range.aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) { \
+                    split_aspects__[clear_aspect_count__++] = VK_IMAGE_ASPECT_STENCIL_BIT; \
+                } \
                 if (!clear__->image || !clear__->image->memory || \
-                    clear__->range.aspectMask == 0 || \
+                    clear_aspect_count__ == 0 || \
                     (clear__->range.aspectMask & ~ds_aspects__) != 0 || \
-                    (clear__->range.aspectMask != VK_IMAGE_ASPECT_DEPTH_BIT && \
-                     clear__->range.aspectMask != VK_IMAGE_ASPECT_STENCIL_BIT) || \
                     ((clear__->range.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) && \
                      !pdocker_vk_format_has_depth(clear__->image->format)) || \
                     ((clear__->range.aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) && \
@@ -4185,31 +4189,38 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                     rc = -EOPNOTSUPP; \
                     goto cleanup; \
                 } \
+                if (command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS - clear_aspect_count__ || \
+                    clear_depth_stencil_image_count > PDOCKER_GPU_VULKAN_GRAPHICS_V613_MAX_CLEAR_DEPTH_STENCIL_IMAGES - clear_aspect_count__) { \
+                    rc = -E2BIG; \
+                    goto cleanup; \
+                } \
                 int image_index__ = collect_graphics_image_entry( \
                     image_entries, image_objects, &image_count, resources, &resource_count, \
                     memory_objects, memory_resource_indices, &memory_count, fds, &fd_count, \
                     clear__->image, submit_id); \
                 if (image_index__ < 0) { rc = image_index__; goto cleanup; } \
-                PdockerGpuVulkanGraphicsV6CommandEntry *clear_command__ = &commands[command_count]; \
-                clear_command__->command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE; \
-                clear_command__->pipeline_index = UINT32_MAX; \
-                clear_command__->descriptor_first_set = UINT32_MAX; \
-                clear_command__->index_buffer_resource_index = UINT32_MAX; \
-                PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *clear_entry__ = &clear_depth_stencil_images[clear_depth_stencil_image_count++]; \
                 uint32_t depth_bits__ = 0; \
                 memcpy(&depth_bits__, &clear__->value.depth, sizeof(depth_bits__)); \
-                clear_entry__->command_index = (uint32_t)command_count; \
-                clear_entry__->image_index = (uint32_t)image_index__; \
-                clear_entry__->image_layout = (uint32_t)clear__->image_layout; \
-                clear_entry__->aspect_mask = (uint32_t)clear__->range.aspectMask; \
-                clear_entry__->base_mip_level = clear__->range.baseMipLevel; \
-                clear_entry__->level_count = clear__->range.levelCount; \
-                clear_entry__->base_array_layer = clear__->range.baseArrayLayer; \
-                clear_entry__->layer_count = clear__->range.layerCount; \
-                clear_entry__->depth_bits = depth_bits__; \
-                clear_entry__->stencil = clear__->value.stencil; \
+                for (uint32_t clear_aspect_i__ = 0; clear_aspect_i__ < clear_aspect_count__; ++clear_aspect_i__) { \
+                    PdockerGpuVulkanGraphicsV6CommandEntry *clear_command__ = &commands[command_count]; \
+                    clear_command__->command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE; \
+                    clear_command__->pipeline_index = UINT32_MAX; \
+                    clear_command__->descriptor_first_set = UINT32_MAX; \
+                    clear_command__->index_buffer_resource_index = UINT32_MAX; \
+                    PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *clear_entry__ = &clear_depth_stencil_images[clear_depth_stencil_image_count++]; \
+                    clear_entry__->command_index = (uint32_t)command_count; \
+                    clear_entry__->image_index = (uint32_t)image_index__; \
+                    clear_entry__->image_layout = (uint32_t)clear__->image_layout; \
+                    clear_entry__->aspect_mask = (uint32_t)split_aspects__[clear_aspect_i__]; \
+                    clear_entry__->base_mip_level = clear__->range.baseMipLevel; \
+                    clear_entry__->level_count = clear__->range.levelCount; \
+                    clear_entry__->base_array_layer = clear__->range.baseArrayLayer; \
+                    clear_entry__->layer_count = clear__->range.layerCount; \
+                    clear_entry__->depth_bits = depth_bits__; \
+                    clear_entry__->stencil = clear__->value.stencil; \
+                    command_count++; \
+                } \
                 need_v613_clear_depth_stencil = true; \
-                command_count++; \
                 continue; \
             } \
             if (op__->type == PDOCKER_VK_COMMAND_IMAGE_COPY) { \
