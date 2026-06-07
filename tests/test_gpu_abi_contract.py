@@ -1432,13 +1432,20 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_graphics_v6_describe_response_is_nonterminal(self):
         icd = VULKAN_ICD.read_text()
+        response_helpers = icd.split("static bool dispatch_response_is_graphics_transport", 1)[1].split("typedef struct {", 1)[0]
         response_reader = icd.split("static int read_dispatch_response_status", 1)[1].split("typedef struct {", 1)[0]
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-describe\\"', response_reader)
-        self.assertIn("saw_nonterminal = true;", response_reader)
-        self.assertLess(
-            response_reader.index('\\"stage\\":\\"vulkan-graphics-v6-describe\\"'),
-            response_reader.index('\\"valid\\":true'),
-        )
+        self.assertIn("dispatch_response_is_graphics_transport", response_helpers)
+        self.assertIn("dispatch_response_is_graphics_terminal_success", response_helpers)
+        self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-replay\\"', response_helpers)
+        self.assertIn('\\"execution_implemented\\":true', response_helpers)
+        graphics_branch = response_reader.split("if (graphics_transport)", 1)[1].split(
+            "if (strstr(line, \"\\\"stage\\\":\\\"vulkan-graphics-v6-describe\\\"\") != NULL)", 1
+        )[0]
+        self.assertIn('\\"valid\\":false', graphics_branch)
+        self.assertIn("dispatch_response_is_graphics_terminal_success(line)", graphics_branch)
+        self.assertIn("saw_nonterminal = true;", graphics_branch)
+        self.assertIn("continue;", graphics_branch)
         self.assertIn("rc = saw_nonterminal ? -EPROTO : -EIO;", response_reader)
 
     def test_vulkan_dispatch_v5_socket_path_is_magic_framed_not_line_framed(self):

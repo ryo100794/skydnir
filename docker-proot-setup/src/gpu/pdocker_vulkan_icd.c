@@ -2129,6 +2129,17 @@ static int write_exact_fd(int fd, const void *data, size_t size) {
     return 0;
 }
 
+static bool dispatch_response_is_graphics_transport(const char *transport_name) {
+    return transport_name && strstr(transport_name, "VULKAN_GRAPHICS_V6") != NULL;
+}
+
+static bool dispatch_response_is_graphics_terminal_success(const char *line) {
+    return line &&
+           strstr(line, "\"stage\":\"vulkan-graphics-v6-replay\"") != NULL &&
+           strstr(line, "\"valid\":true") != NULL &&
+           strstr(line, "\"execution_implemented\":true") != NULL;
+}
+
 static int read_dispatch_response_status(int socket_fd, const char *transport_name) {
     const size_t max_response = 1024 * 1024;
     char stack_line[16384];
@@ -2137,6 +2148,7 @@ static int read_dispatch_response_status(int socket_fd, const char *transport_na
     size_t line_cap = sizeof(stack_line);
     size_t total_read = 0;
     bool saw_nonterminal = false;
+    bool graphics_transport = dispatch_response_is_graphics_transport(transport_name);
     int rc = -EIO;
 
     for (unsigned line_index = 0; line_index < 16 && total_read < max_response; ++line_index) {
@@ -2189,6 +2201,18 @@ static int read_dispatch_response_status(int socket_fd, const char *transport_na
                     transport_name ? transport_name : "generic",
                     line);
             if (line[line_off - 1] != '\n') fprintf(stderr, "\n");
+        }
+        if (graphics_transport) {
+            if (strstr(line, "\"valid\":false") != NULL) {
+                rc = -EIO;
+                break;
+            }
+            if (dispatch_response_is_graphics_terminal_success(line)) {
+                rc = 0;
+                break;
+            }
+            saw_nonterminal = true;
+            continue;
         }
         if (strstr(line, "\"stage\":\"vulkan-graphics-v6-describe\"") != NULL) {
             saw_nonterminal = true;
