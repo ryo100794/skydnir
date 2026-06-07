@@ -2141,6 +2141,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "PdockerGpuVulkanGraphicsV612ClearColorImageEntry",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_COLOR_IMAGE",
             "execute_recorded_clear_color_image_op",
+            "normalize_image_subresource_range",
+            "VK_REMAINING_MIP_LEVELS",
+            "VK_REMAINING_ARRAY_LAYERS",
         ]:
             self.assertIn(marker, icd)
 
@@ -2191,6 +2194,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_IMAGE_ASPECT_DEPTH_BIT",
             "VK_IMAGE_ASPECT_STENCIL_BIT",
             "memcpy(&depth_bits__",
+            "normalize_image_subresource_range",
+            "VK_REMAINING_MIP_LEVELS",
+            "VK_REMAINING_ARRAY_LAYERS",
         ]:
             self.assertIn(marker, icd)
 

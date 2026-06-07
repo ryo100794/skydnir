@@ -12511,6 +12511,31 @@ static bool image_subresource_range_is_whole_image(
            layers == image->array_layers;
 }
 
+static bool normalize_image_subresource_range(
+        const PdockerVkImage *image,
+        const VkImageSubresourceRange *range,
+        VkImageSubresourceRange *out) {
+    if (!image || !range || !out) return false;
+    *out = *range;
+    if (out->baseMipLevel >= image->mip_levels ||
+        out->baseArrayLayer >= image->array_layers) {
+        return false;
+    }
+    if (out->levelCount == VK_REMAINING_MIP_LEVELS) {
+        out->levelCount = image->mip_levels - out->baseMipLevel;
+    }
+    if (out->layerCount == VK_REMAINING_ARRAY_LAYERS) {
+        out->layerCount = image->array_layers - out->baseArrayLayer;
+    }
+    if (out->levelCount == 0 ||
+        out->levelCount > image->mip_levels - out->baseMipLevel ||
+        out->layerCount == 0 ||
+        out->layerCount > image->array_layers - out->baseArrayLayer) {
+        return false;
+    }
+    return true;
+}
+
 static void trace_image_layout_mismatch(
         const char *stage,
         const PdockerVkImage *image,
@@ -12959,7 +12984,10 @@ static void record_clear_color_image_op(PdockerVkCommandBuffer *cmd,
     op->image = image;
     op->image_layout = image_layout;
     op->color = *color;
-    op->range = *range;
+    VkImageSubresourceRange normalized_range;
+    op->range = normalize_image_subresource_range(image, range, &normalized_range)
+        ? normalized_range
+        : *range;
     PdockerVkCommandOp command_op;
     memset(&command_op, 0, sizeof(command_op));
     command_op.type = PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE;
@@ -12969,10 +12997,10 @@ static void record_clear_color_image_op(PdockerVkCommandBuffer *cmd,
         fprintf(stderr,
                 "pdocker-vulkan-icd: record-clear-color-image image_req=%llu base_mip=%u levels=%u base_layer=%u layers=%u color_u32=%08x,%08x,%08x,%08x\n",
                 (unsigned long long)image->requirements_size,
-                range->baseMipLevel,
-                range->levelCount,
-                range->baseArrayLayer,
-                range->layerCount,
+                op->range.baseMipLevel,
+                op->range.levelCount,
+                op->range.baseArrayLayer,
+                op->range.layerCount,
                 color->uint32[0],
                 color->uint32[1],
                 color->uint32[2],
@@ -13146,7 +13174,10 @@ static void record_clear_depth_stencil_image_op(PdockerVkCommandBuffer *cmd,
     op->image = image;
     op->image_layout = image_layout;
     op->value = *value;
-    op->range = *range;
+    VkImageSubresourceRange normalized_range;
+    op->range = normalize_image_subresource_range(image, range, &normalized_range)
+        ? normalized_range
+        : *range;
     PdockerVkCommandOp command_op;
     memset(&command_op, 0, sizeof(command_op));
     command_op.type = PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE;
@@ -13156,11 +13187,11 @@ static void record_clear_depth_stencil_image_op(PdockerVkCommandBuffer *cmd,
         fprintf(stderr,
                 "pdocker-vulkan-icd: record-clear-depth-stencil-image image_req=%llu base_mip=%u levels=%u base_layer=%u layers=%u aspect=0x%x depth=%f stencil=%u\n",
                 (unsigned long long)image->requirements_size,
-                range->baseMipLevel,
-                range->levelCount,
-                range->baseArrayLayer,
-                range->layerCount,
-                (unsigned)range->aspectMask,
+                op->range.baseMipLevel,
+                op->range.levelCount,
+                op->range.baseArrayLayer,
+                op->range.layerCount,
+                (unsigned)op->range.aspectMask,
                 value->depth,
                 value->stencil);
     }
