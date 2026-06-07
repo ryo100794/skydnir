@@ -2093,8 +2093,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "pre_need_v611_buffer_write",
             "VULKAN_GRAPHICS_V6.11",
             "APPEND_INTERLEAVED_GRAPHICS_BUFFER_COPIES",
-            "type != PDOCKER_VK_COMMAND_FILL",
-            "type != PDOCKER_VK_COMMAND_UPDATE",
+            "command_op_is_graphics_interleavable_transfer_op",
+            "case PDOCKER_VK_COMMAND_FILL:",
+            "case PDOCKER_VK_COMMAND_UPDATE:",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_FILL_BUFFER",
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER",
             "execute_recorded_fill_op(op)",
@@ -2476,12 +2477,19 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER", icd)
         self.assertIn("dependencyFlags != 0", icd)
         self.assertIn("pDependencyInfo && pDependencyInfo->dependencyFlags != 0", icd)
-        self.assertIn("eventCount > 1", icd)
+        self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", icd)
+        self.assertIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", icd)
+        self.assertNotIn("eventCount > 1", icd)
         self.assertIn("command_op_is_graphics_frame_op", icd)
         self.assertIn("type == PDOCKER_VK_COMMAND_IMAGE_BARRIER", icd)
         self.assertIn("sizeof(image_barriers[0]) * image_barrier_count", icd)
         self.assertIn("sizeof(memory_barriers[0]) * memory_barrier_count", icd)
         self.assertIn("sizeof(buffer_barriers[0]) * buffer_barrier_count", icd)
+        clear_body = icd.split("static void clear_recorded_command_ops", 1)[1].split(
+            "static bool append_command_op", 1
+        )[0]
+        self.assertIn("cmd->memory_barrier_op_count = 0;", clear_body)
+        self.assertIn("cmd->buffer_barrier_op_count = 0;", clear_body)
 
     def test_vulkan_dispatch_v5_1_object_header_is_full_frame_validated(self):
         executor = GPU_EXECUTOR.read_text()
@@ -4083,6 +4091,15 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(name, icd)
             self.assertIn(f"MAP_PROC({name});", icd)
+        host_body = icd.split("static bool command_op_is_host_transfer_or_layout_op", 1)[1].split(
+            "static void execute_recorded_host_transfer_or_layout_op", 1
+        )[0]
+        self.assertIn("case PDOCKER_VK_COMMAND_EVENT:", host_body)
+        replay_body = icd.split("static void execute_recorded_host_transfer_or_layout_op", 1)[1].split(
+            "static bool graphics_mixed_submit_plan", 1
+        )[0]
+        self.assertIn("case PDOCKER_VK_COMMAND_EVENT:", replay_body)
+        self.assertIn("op->event->signaled = op->event_signaled", replay_body)
 
     def test_vulkan_icd_supports_synchronization2_submit_and_barrier_api(self):
         icd = VULKAN_ICD.read_text()
@@ -4104,6 +4121,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VkDependencyInfo", icd)
         self.assertIn("free_submit_info_arrays", icd)
         self.assertIn("vkQueueSubmit(queue, submitCount, legacy_submits, fence)", icd)
+        set_event2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2", 1
+        )[0]
+        self.assertIn("dependency_info_has_recorded_barriers(pDependencyInfo)", set_event2_body)
+        self.assertIn("cmd->graphics_unsupported = true", set_event2_body)
+        self.assertNotIn("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)", set_event2_body)
+        wait_events2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2", 1)[1].split(
+            "static bool query_range_valid", 1
+        )[0]
+        self.assertIn("eventCount > 0 && (!pEvents || !pDependencyInfos)", wait_events2_body)
+        self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", wait_events2_body)
+        self.assertIn("if (!pEvents[i])", wait_events2_body)
+        self.assertIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
+        self.assertNotIn("eventCount > 1", wait_events2_body)
 
     def test_vulkan_icd_supports_query_pool_and_timestamp_api(self):
         icd = VULKAN_ICD.read_text()
@@ -4141,6 +4172,20 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("timestampComputeAndGraphics = VK_TRUE;", icd)
         self.assertIn("timestampPeriod = 1.0f;", icd)
         self.assertIn("timestampValidBits = 64;", icd)
+        host_body = icd.split("static bool command_op_is_host_transfer_or_layout_op", 1)[1].split(
+            "static void execute_recorded_host_transfer_or_layout_op", 1
+        )[0]
+        replay_body = icd.split("static void execute_recorded_host_transfer_or_layout_op", 1)[1].split(
+            "static bool graphics_mixed_submit_plan", 1
+        )[0]
+        for marker in [
+            "case PDOCKER_VK_COMMAND_QUERY_BEGIN:",
+            "case PDOCKER_VK_COMMAND_QUERY_END:",
+            "case PDOCKER_VK_COMMAND_QUERY_RESET:",
+            "case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:",
+        ]:
+            self.assertIn(marker, host_body)
+            self.assertIn(marker, replay_body)
 
     def test_vulkan_icd_tracks_image_layout_barriers_and_transfer_layouts(self):
         icd = VULKAN_ICD.read_text()
@@ -4720,7 +4765,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER",
             "buffer_copies[buffer_copy_count++]",
             "graphics-mixed-transfer-between-draws-unimplemented",
-            "type != PDOCKER_VK_COMMAND_COPY",
+            "command_op_is_graphics_interleavable_transfer_op",
+            "case PDOCKER_VK_COMMAND_COPY:",
         ]:
             self.assertIn(marker, icd)
         for marker in [
@@ -4742,8 +4788,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "command_op_is_host_transfer_or_layout_op",
             "execute_recorded_host_transfer_or_layout_op",
             "execute_graphics_mixed_host_side_ops",
-            "first_graphics_draw_op",
-            "last_graphics_draw_op",
+            "first_graphics_gpu_op",
+            "last_graphics_gpu_op",
             "graphics-mixed-transfer-between-draws-unimplemented",
             "graphics V6.1 mixed submit rc=%d prepost_ops=%zu bytes=%llu",
             "execute_recorded_copy_op(&cmd->copy_ops[op->index], stats)",
@@ -4756,12 +4802,26 @@ class GpuAbiContractTest(unittest.TestCase):
         plan_body = icd.split("static bool graphics_mixed_submit_plan", 1)[1].split(
             "static void execute_graphics_mixed_host_side_ops", 1
         )[0]
-        between_draw_guard = plan_body.split("graphics-mixed-transfer-between-draws-unimplemented", 1)[0]
+        self.assertIn("command_op_is_graphics_interleavable_transfer_op", icd)
+        self.assertIn("cmd->graphics_command_ops[record_index].command_op_sequence", plan_body)
+        self.assertIn("graphics-mixed-host-op-inside-gpu-frame-unimplemented", plan_body)
+        interleavable_body = icd.split("static bool command_op_is_graphics_interleavable_transfer_op", 1)[1].split(
+            "static bool graphics_mixed_submit_plan", 1
+        )[0]
         for allowed in [
-            "type != PDOCKER_VK_COMMAND_BLIT_IMAGE",
-            "type != PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE",
+            "case PDOCKER_VK_COMMAND_COPY:",
+            "case PDOCKER_VK_COMMAND_BLIT_IMAGE:",
+            "case PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:",
         ]:
-            self.assertIn(allowed, between_draw_guard)
+            self.assertIn(allowed, interleavable_body)
+        for host_side_only in [
+            "case PDOCKER_VK_COMMAND_EVENT:",
+            "case PDOCKER_VK_COMMAND_QUERY_BEGIN:",
+            "case PDOCKER_VK_COMMAND_QUERY_END:",
+            "case PDOCKER_VK_COMMAND_QUERY_RESET:",
+            "case PDOCKER_VK_COMMAND_QUERY_TIMESTAMP:",
+        ]:
+            self.assertNotIn(host_side_only, interleavable_body)
         submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
         )[0]
@@ -4770,12 +4830,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (cmd->command_op_count > 0)", 1
         )[0]
         self.assertLess(
-            mixed_body.index("execute_graphics_mixed_host_side_ops(cmd, first_graphics_draw_op"),
+            mixed_body.index("execute_graphics_mixed_host_side_ops(cmd, first_graphics_gpu_op"),
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(cmd)"),
         )
         self.assertLess(
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(cmd)"),
-            mixed_body.rindex("execute_graphics_mixed_host_side_ops(cmd, first_graphics_draw_op"),
+            mixed_body.rindex("execute_graphics_mixed_host_side_ops(cmd, first_graphics_gpu_op"),
         )
 
     def test_vulkan_command_buffer_replays_all_recorded_dispatches(self):
