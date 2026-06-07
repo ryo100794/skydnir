@@ -4240,6 +4240,14 @@ class GpuAbiContractTest(unittest.TestCase):
             "query_command_schema_hash",
             "query_result_schema_hash",
             "view->query_commands",
+            "find_vulkan_graphics_v617_query_command",
+            "VulkanGraphicsReplayQueries",
+            "materialize_vulkan_graphics_v617_queries",
+            "vkCreateQueryPool",
+            "vkCmdResetQueryPool",
+            "vkCmdWriteTimestamp",
+            "vkGetQueryPoolResults",
+            "vulkan-graphics-v6-query-writeback",
         ]:
             self.assertIn(marker, executor)
         for marker in [
@@ -4251,6 +4259,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "mmap(NULL, pool->result_size",
             "pool->result_entries[q].available",
             "munmap(pool->result_entries",
+            "need_v617_query",
+            "query_command_table_hash",
+            "result_fd_index",
+            "pool->result_fd",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP",
         ]:
             self.assertIn(marker, icd)
 
