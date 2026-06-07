@@ -2470,7 +2470,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "extension_hash = fnv1a64_update(extension_hash, buffer_barriers",
             "commands[barrier->command_index].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER",
             "barrier->resource_index >= header->resource_count",
-            "barrier->src_access_mask > UINT32_MAX",
+            "barrier->src_stage_mask == 0",
             "vulkan_graphics_barrier_queue_family_replayable",
             "descriptor->dynamic_offset != 0",
             "dynamic_descriptor_count != command->dynamic_offset_count",
@@ -2492,7 +2492,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("graphics barrier batch exceeds replay stack limit", preflight)
         self.assertIn("matched_memory_barriers > PDOCKER_GPU_MAX_VULKAN_BINDINGS", preflight)
         self.assertIn("PdockerGpuVulkanGraphicsV61ImageBarrierEntry", executor)
-        self.assertIn("vkCmdPipelineBarrier(command_buffer", recorder)
+        self.assertIn("PFN_vkCmdPipelineBarrier2 cmd_pipeline_barrier2", executor)
+        self.assertIn("rt->cmd_pipeline_barrier2(command_buffer, &dependency)", recorder)
+        self.assertIn("VkMemoryBarrier2 memory_barriers_to_record", recorder)
+        self.assertIn("VkBufferMemoryBarrier2 buffer_barriers_to_record", recorder)
+        self.assertIn("VkImageMemoryBarrier2 image_barriers_to_record", recorder)
+        self.assertIn("srcStageMask = (VkPipelineStageFlags2)barrier->src_stage_mask", recorder)
+        self.assertNotIn("vkCmdPipelineBarrier(command_buffer,\n                                     src_stages", recorder)
         self.assertIn("attachments->images[barrier->image_index].current_layout", recorder)
         self.assertIn("vulkan_graphics_barrier_queue_family_replayable", preflight)
         self.assertIn("graphics cross-queue-family barrier replay is not implemented", preflight)
