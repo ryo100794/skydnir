@@ -602,7 +602,8 @@ typedef enum {
     PDOCKER_VK_COMMAND_QUERY_RESET = 15,
     PDOCKER_VK_COMMAND_QUERY_TIMESTAMP = 16,
     PDOCKER_VK_COMMAND_IMAGE_BARRIER = 17,
-    PDOCKER_VK_COMMAND_GRAPHICS_DRAW = 18,
+    PDOCKER_VK_COMMAND_EVENT_WAIT = 18,
+    PDOCKER_VK_COMMAND_GRAPHICS_DRAW = 19,
 } PdockerVkCommandOpType;
 
 typedef struct {
@@ -13995,6 +13996,7 @@ static bool command_op_is_host_transfer_or_layout_op(PdockerVkCommandOpType type
         case PDOCKER_VK_COMMAND_BLIT_IMAGE:
         case PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:
         case PDOCKER_VK_COMMAND_EVENT:
+        case PDOCKER_VK_COMMAND_EVENT_WAIT:
         case PDOCKER_VK_COMMAND_QUERY_BEGIN:
         case PDOCKER_VK_COMMAND_QUERY_END:
         case PDOCKER_VK_COMMAND_QUERY_RESET:
@@ -14009,11 +14011,23 @@ static bool command_op_is_host_transfer_or_layout_op(PdockerVkCommandOpType type
     }
 }
 
-static void execute_recorded_host_transfer_or_layout_op(
+static VkResult execute_recorded_event_wait_op(const PdockerVkCommandOp *op) {
+    if (!op || !op->event) {
+        trace_icd_runtime_failure("event-wait-invalid", VK_ERROR_INITIALIZATION_FAILED);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (!op->event->signaled) {
+        trace_icd_runtime_failure("event-wait-unsignaled", VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    return VK_SUCCESS;
+}
+
+static VkResult execute_recorded_host_transfer_or_layout_op(
         PdockerVkCommandBuffer *cmd,
         PdockerVkCommandOp *op,
         PdockerVkCopyStats *stats) {
-    if (!cmd || !op) return;
+    if (!cmd || !op) return VK_SUCCESS;
     switch (op->type) {
         case PDOCKER_VK_COMMAND_COPY:
             if (op->index < cmd->copy_op_count) execute_recorded_copy_op(&cmd->copy_ops[op->index], stats);
@@ -14039,6 +14053,11 @@ static void execute_recorded_host_transfer_or_layout_op(
         case PDOCKER_VK_COMMAND_EVENT:
             if (op->event) op->event->signaled = op->event_signaled;
             break;
+        case PDOCKER_VK_COMMAND_EVENT_WAIT: {
+            VkResult wait_rc = execute_recorded_event_wait_op(op);
+            if (wait_rc != VK_SUCCESS) return wait_rc;
+            break;
+        }
         case PDOCKER_VK_COMMAND_QUERY_BEGIN:
         case PDOCKER_VK_COMMAND_QUERY_END:
         case PDOCKER_VK_COMMAND_QUERY_RESET:
@@ -14059,6 +14078,7 @@ static void execute_recorded_host_transfer_or_layout_op(
         default:
             break;
     }
+    return VK_SUCCESS;
 }
 
 static bool command_op_is_graphics_interleavable_transfer_op(PdockerVkCommandOpType type) {
@@ -14125,13 +14145,13 @@ static bool graphics_mixed_submit_plan(
     return true;
 }
 
-static void execute_graphics_mixed_host_side_ops(
+static VkResult execute_graphics_mixed_host_side_ops(
         PdockerVkCommandBuffer *cmd,
         uint32_t first_draw,
         uint32_t last_draw,
         bool before_graphics,
         PdockerVkCopyStats *stats) {
-    if (!cmd) return;
+    if (!cmd) return VK_SUCCESS;
     for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
         PdockerVkCommandOp *op = &cmd->command_ops[op_index];
         if (!command_op_is_host_transfer_or_layout_op(op->type)) continue;
@@ -14143,8 +14163,12 @@ static void execute_graphics_mixed_host_side_ops(
         } else {
             run = op_index > last_draw;
         }
-        if (run) execute_recorded_host_transfer_or_layout_op(cmd, op, stats);
+        if (run) {
+            VkResult rc = execute_recorded_host_transfer_or_layout_op(cmd, op, stats);
+            if (rc != VK_SUCCESS) return rc;
+        }
     }
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
@@ -14194,9 +14218,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 }
                 PdockerVkCopyStats mixed_stats;
                 memset(&mixed_stats, 0, sizeof(mixed_stats));
-                execute_graphics_mixed_host_side_ops(cmd, first_graphics_gpu_op,
-                                                     last_graphics_gpu_op, true,
-                                                     &mixed_stats);
+                VkResult mixed_host_rc = execute_graphics_mixed_host_side_ops(
+                    cmd, first_graphics_gpu_op, last_graphics_gpu_op, true, &mixed_stats);
+                if (mixed_host_rc != VK_SUCCESS) return mixed_host_rc;
                 int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(cmd);
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                     fprintf(stderr,
@@ -14210,9 +14234,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
-                execute_graphics_mixed_host_side_ops(cmd, first_graphics_gpu_op,
-                                                     last_graphics_gpu_op, false,
-                                                     &mixed_stats);
+                mixed_host_rc = execute_graphics_mixed_host_side_ops(
+                    cmd, first_graphics_gpu_op, last_graphics_gpu_op, false, &mixed_stats);
+                if (mixed_host_rc != VK_SUCCESS) return mixed_host_rc;
                 continue;
             }
             if (cmd->command_op_count > 0) {
@@ -14266,6 +14290,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                         case PDOCKER_VK_COMMAND_EVENT:
                             if (op->event) op->event->signaled = op->event_signaled;
                             break;
+                        case PDOCKER_VK_COMMAND_EVENT_WAIT: {
+                            VkResult wait_rc = execute_recorded_event_wait_op(op);
+                            if (wait_rc != VK_SUCCESS) return wait_rc;
+                            break;
+                        }
                         case PDOCKER_VK_COMMAND_IMAGE_BARRIER:
                             if (op->index < cmd->image_barrier_op_count) {
                                 execute_recorded_image_barrier_op(
@@ -14615,6 +14644,20 @@ static void record_event_command(VkCommandBuffer commandBuffer,
     (void)append_command_op(cmd, &op);
 }
 
+static void record_event_wait_command(VkCommandBuffer commandBuffer, VkEvent event) {
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    PdockerVkEvent *e = (PdockerVkEvent *)event;
+    if (!cmd || !e) {
+        if (cmd) cmd->graphics_unsupported = true;
+        return;
+    }
+    PdockerVkCommandOp op;
+    memset(&op, 0, sizeof(op));
+    op.type = PDOCKER_VK_COMMAND_EVENT_WAIT;
+    op.event = e;
+    (void)append_command_op(cmd, &op);
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent(
         VkCommandBuffer commandBuffer,
         VkEvent event,
@@ -14643,8 +14686,18 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
         const VkBufferMemoryBarrier *pBufferMemoryBarriers,
         uint32_t imageMemoryBarrierCount,
         const VkImageMemoryBarrier *pImageMemoryBarriers) {
-    (void)eventCount;
-    (void)pEvents;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (eventCount > 0 && !pEvents) {
+        if (cmd) cmd->graphics_unsupported = true;
+        return;
+    }
+    for (uint32_t i = 0; i < eventCount; ++i) {
+        if (!pEvents[i]) {
+            if (cmd) cmd->graphics_unsupported = true;
+            return;
+        }
+        record_event_wait_command(commandBuffer, pEvents[i]);
+    }
     vkCmdPipelineBarrier(commandBuffer,
                          srcStageMask,
                          dstStageMask,
@@ -14765,7 +14818,6 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
         uint32_t eventCount,
         const VkEvent *pEvents,
         const VkDependencyInfo *pDependencyInfos) {
-    (void)pEvents;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (eventCount > 0 && (!pEvents || !pDependencyInfos)) {
         if (cmd) cmd->graphics_unsupported = true;
@@ -14776,6 +14828,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
             if (cmd) cmd->graphics_unsupported = true;
             return;
         }
+        record_event_wait_command(commandBuffer, pEvents[i]);
         vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i]);
     }
 }

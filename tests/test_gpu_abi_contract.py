@@ -4154,14 +4154,19 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(name, icd)
             self.assertIn(f"MAP_PROC({name});", icd)
         host_body = icd.split("static bool command_op_is_host_transfer_or_layout_op", 1)[1].split(
-            "static void execute_recorded_host_transfer_or_layout_op", 1
+            "static VkResult execute_recorded_host_transfer_or_layout_op", 1
         )[0]
         self.assertIn("case PDOCKER_VK_COMMAND_EVENT:", host_body)
-        replay_body = icd.split("static void execute_recorded_host_transfer_or_layout_op", 1)[1].split(
+        self.assertIn("case PDOCKER_VK_COMMAND_EVENT_WAIT:", host_body)
+        replay_body = icd.split("static VkResult execute_recorded_host_transfer_or_layout_op", 1)[1].split(
             "static bool graphics_mixed_submit_plan", 1
         )[0]
         self.assertIn("case PDOCKER_VK_COMMAND_EVENT:", replay_body)
+        self.assertIn("case PDOCKER_VK_COMMAND_EVENT_WAIT:", replay_body)
         self.assertIn("op->event->signaled = op->event_signaled", replay_body)
+        self.assertIn("execute_recorded_event_wait_op(op)", replay_body)
+        self.assertIn("record_event_wait_command(commandBuffer, pEvents[i])", icd)
+        self.assertIn("event-wait-unsignaled", icd)
 
     def test_vulkan_icd_supports_synchronization2_submit_and_barrier_api(self):
         icd = VULKAN_ICD.read_text()
@@ -4235,9 +4240,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("timestampPeriod = 1.0f;", icd)
         self.assertIn("timestampValidBits = 64;", icd)
         host_body = icd.split("static bool command_op_is_host_transfer_or_layout_op", 1)[1].split(
-            "static void execute_recorded_host_transfer_or_layout_op", 1
+            "static VkResult execute_recorded_host_transfer_or_layout_op", 1
         )[0]
-        replay_body = icd.split("static void execute_recorded_host_transfer_or_layout_op", 1)[1].split(
+        replay_body = icd.split("static VkResult execute_recorded_host_transfer_or_layout_op", 1)[1].split(
             "static bool graphics_mixed_submit_plan", 1
         )[0]
         for marker in [
@@ -4881,6 +4886,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(allowed, interleavable_body)
         for host_side_only in [
             "case PDOCKER_VK_COMMAND_EVENT:",
+            "case PDOCKER_VK_COMMAND_EVENT_WAIT:",
             "case PDOCKER_VK_COMMAND_QUERY_BEGIN:",
             "case PDOCKER_VK_COMMAND_QUERY_END:",
             "case PDOCKER_VK_COMMAND_QUERY_RESET:",
@@ -4895,12 +4901,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (cmd->command_op_count > 0)", 1
         )[0]
         self.assertLess(
-            mixed_body.index("execute_graphics_mixed_host_side_ops(cmd, first_graphics_gpu_op"),
+            mixed_body.index("execute_graphics_mixed_host_side_ops("),
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(cmd)"),
         )
         self.assertLess(
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(cmd)"),
-            mixed_body.rindex("execute_graphics_mixed_host_side_ops(cmd, first_graphics_gpu_op"),
+            mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
         )
 
     def test_vulkan_command_buffer_replays_all_recorded_dispatches(self):
