@@ -1995,7 +1995,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V67_SCISSOR_STATIC_PRESENT", source)
         self.assertIn("header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V67_ABI_MINOR", executor)
         self.assertIn("sizeof(PdockerGpuVulkanGraphicsV67FrameHeader)", executor)
-        self.assertIn("FrameRange ranges[34]", executor)
+        self.assertIn("FrameRange ranges[35]", executor)
         self.assertIn("find_vulkan_graphics_v67_viewport_scissor_state", executor)
         self.assertIn(".pViewports = dynamic_viewport ? NULL : static_viewports", executor)
         self.assertIn(".pScissors = dynamic_scissor ? NULL : static_scissors", executor)
@@ -2020,7 +2020,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_IMAGE_TO_BUFFER", source)
         for marker in [
             "sizeof(PdockerGpuVulkanGraphicsV610FrameHeader)",
-            "FrameRange ranges[34]",
+            "FrameRange ranges[35]",
             "header_v610->v610.buffer_image_copy_count",
             "header_v610->v610.image_copy_count",
             "find_vulkan_graphics_v610_buffer_image_copy",
@@ -2119,7 +2119,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_COLOR_IMAGE", source)
         for marker in [
             "sizeof(PdockerGpuVulkanGraphicsV612FrameHeader)",
-            "FrameRange ranges[34]",
+            "FrameRange ranges[35]",
             "header_v612->v612.clear_color_image_count",
             "PdockerGpuVulkanGraphicsV612ClearColorImageEntry *clear_color_images",
             "find_vulkan_graphics_v612_clear_color_image",
@@ -2144,6 +2144,56 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
 
+    def test_vulkan_graphics_v613_clear_depth_stencil_image_metadata_is_append_only(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V613_ABI_MINOR 13u", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV613FrameHeader", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV613HeaderExtension", source)
+            self.assertIn("PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V613_HEADER_EXTENSION_FIELDS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V613_CLEAR_DEPTH_STENCIL_IMAGE_FIELDS", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V613_HEADER_EXTENSION_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V613_CLEAR_DEPTH_STENCIL_IMAGE_SCHEMA_HASH", source)
+            self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V613_MAX_CLEAR_DEPTH_STENCIL_IMAGES", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE", source)
+            self.assertIn("depth_bits", source)
+            self.assertIn("stencil", source)
+        for marker in [
+            "sizeof(PdockerGpuVulkanGraphicsV613FrameHeader)",
+            "FrameRange ranges[35]",
+            "header_v613->v613.clear_depth_stencil_image_count",
+            "PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *clear_depth_stencil_images",
+            "find_vulkan_graphics_v613_clear_depth_stencil_image",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE",
+            "VK_IMAGE_USAGE_TRANSFER_DST_BIT",
+            "VK_ACCESS_TRANSFER_WRITE_BIT",
+            "VK_PIPELINE_STAGE_TRANSFER_BIT",
+            "vkCmdClearDepthStencilImage(command_buffer",
+            "clear depth stencil image inside dynamic rendering is not supported",
+            "graphics clear depth stencil image requires V6.13 metadata",
+            "clear->aspect_mask",
+        ]:
+            self.assertIn(marker, executor)
+        for marker in [
+            "PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE",
+            "vkCmdClearDepthStencilImage",
+            "need_v613_clear_depth_stencil",
+            "pre_need_v613_clear_depth_stencil",
+            "VULKAN_GRAPHICS_V6.13",
+            "PdockerGpuVulkanGraphicsV613FrameHeader",
+            "PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE",
+            "execute_recorded_clear_depth_stencil_image_op",
+            "VK_IMAGE_ASPECT_DEPTH_BIT",
+            "VK_IMAGE_ASPECT_STENCIL_BIT",
+            "memcpy(&depth_bits__",
+        ]:
+            self.assertIn(marker, icd)
+
     def test_vulkan_graphics_v611_buffer_write_metadata_is_append_only(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
@@ -2159,7 +2209,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_UPDATE_BUFFER_BYTES 65536u", source)
         for marker in [
             "sizeof(PdockerGpuVulkanGraphicsV611FrameHeader)",
-            "FrameRange ranges[34]",
+            "FrameRange ranges[35]",
             "header_v611->v611.fill_buffer_count",
             "header_v611->v611.update_buffer_count",
             "find_vulkan_graphics_v611_fill_buffer",
@@ -2210,7 +2260,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_VULKAN_GRAPHICS_V61_MAX_BUFFER_BARRIERS",
         ]:
             self.assertIn(marker, header_validator)
-        range_body = header_validator.split("FrameRange ranges[34]", 1)[1].split(
+        range_body = header_validator.split("FrameRange ranges[35]", 1)[1].split(
             "table_range_valid(header->resource_table_offset", 1
         )[0]
         self.assertLess(

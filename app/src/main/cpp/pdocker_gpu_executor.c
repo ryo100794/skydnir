@@ -17157,6 +17157,8 @@ static int validate_vulkan_graphics_v6_header_prefix(
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV611FrameHeader)) return -EPROTO;
     } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V612_ABI_MINOR) {
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV612FrameHeader)) return -EPROTO;
+    } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V613_ABI_MINOR) {
+        if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV613FrameHeader)) return -EPROTO;
     } else {
         return -EPROTO;
     }
@@ -17200,7 +17202,10 @@ static int validate_vulkan_graphics_v6_header(
         (const PdockerGpuVulkanGraphicsV611FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV612FrameHeader *header_v612 =
         (const PdockerGpuVulkanGraphicsV612FrameHeader *)header;
-    const int is_v612 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V612_ABI_MINOR;
+    const PdockerGpuVulkanGraphicsV613FrameHeader *header_v613 =
+        (const PdockerGpuVulkanGraphicsV613FrameHeader *)header;
+    const int is_v613 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V613_ABI_MINOR;
+    const int is_v612 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V612_ABI_MINOR || is_v613;
     const int is_v611 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V611_ABI_MINOR || is_v612;
     const int is_v610 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V610_ABI_MINOR || is_v611;
     const int is_v69 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V69_ABI_MINOR || is_v610;
@@ -17245,6 +17250,7 @@ static int validate_vulkan_graphics_v6_header(
         (is_v611 && header_v611->v611.fill_buffer_count > PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_FILL_BUFFERS) ||
         (is_v611 && header_v611->v611.update_buffer_count > PDOCKER_GPU_VULKAN_GRAPHICS_V611_MAX_UPDATE_BUFFERS) ||
         (is_v612 && header_v612->v612.clear_color_image_count > PDOCKER_GPU_VULKAN_GRAPHICS_V612_MAX_CLEAR_COLOR_IMAGES) ||
+        (is_v613 && header_v613->v613.clear_depth_stencil_image_count > PDOCKER_GPU_VULKAN_GRAPHICS_V613_MAX_CLEAR_DEPTH_STENCIL_IMAGES) ||
         header->command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) {
         return -E2BIG;
     }
@@ -17352,7 +17358,12 @@ static int validate_vulkan_graphics_v6_header(
          header_v612->v612.clear_color_image_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V612_CLEAR_COLOR_IMAGE_SCHEMA_HASH)) {
         return -EPROTO;
     }
-    FrameRange ranges[34] = {
+    if (is_v613 &&
+        (header_v613->v613.clear_depth_stencil_image_entry_size != sizeof(PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry) ||
+         header_v613->v613.clear_depth_stencil_image_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V613_CLEAR_DEPTH_STENCIL_IMAGE_SCHEMA_HASH)) {
+        return -EPROTO;
+    }
+    FrameRange ranges[35] = {
         {header->resource_table_offset, header->resource_table_size},
         {header->descriptor_table_offset, header->descriptor_table_size},
         {header->image_table_offset, header->image_table_size},
@@ -17409,6 +17420,8 @@ static int validate_vulkan_graphics_v6_header(
          is_v611 ? header_v611->v611.update_payload_data_size : 0},
         {is_v612 ? header_v612->v612.clear_color_image_table_offset : 0,
          is_v612 ? header_v612->v612.clear_color_image_table_size : 0},
+        {is_v613 ? header_v613->v613.clear_depth_stencil_image_table_offset : 0,
+         is_v613 ? header_v613->v613.clear_depth_stencil_image_table_size : 0},
     };
     if (!table_range_valid(header->resource_table_offset, header->resource_table_size,
                            header->resource_count, header->resource_entry_size,
@@ -17598,7 +17611,16 @@ static int validate_vulkan_graphics_v6_header(
                            header->frame_size, header->header_size)) {
         return -EPROTO;
     }
-    if (!frame_ranges_do_not_overlap(ranges, is_v612 ? 34u : (is_v611 ? 33u : (is_v610 ? 30u : (is_v69 ? 28u : (is_v68 ? 27u : (is_v67 ? 26u : (is_v66 ? 23u : (is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u))))))))))))) {
+    if (is_v613 &&
+        !table_range_valid(header_v613->v613.clear_depth_stencil_image_table_offset,
+                           header_v613->v613.clear_depth_stencil_image_table_size,
+                           header_v613->v613.clear_depth_stencil_image_count,
+                           header_v613->v613.clear_depth_stencil_image_entry_size,
+                           __alignof__(PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry),
+                           header->frame_size, header->header_size)) {
+        return -EPROTO;
+    }
+    if (!frame_ranges_do_not_overlap(ranges, is_v613 ? 35u : (is_v612 ? 34u : (is_v611 ? 33u : (is_v610 ? 30u : (is_v69 ? 28u : (is_v68 ? 27u : (is_v67 ? 26u : (is_v66 ? 23u : (is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u)))))))))))))) {
         return -EPROTO;
     }
     return 0;
@@ -17630,6 +17652,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV610FrameHeader *header_v610;
     const PdockerGpuVulkanGraphicsV611FrameHeader *header_v611;
     const PdockerGpuVulkanGraphicsV612FrameHeader *header_v612;
+    const PdockerGpuVulkanGraphicsV613FrameHeader *header_v613;
     const int *passed_fds;
     size_t passed_fd_count;
     int is_v61;
@@ -17644,6 +17667,7 @@ typedef struct VulkanGraphicsV6FrameView {
     int is_v610;
     int is_v611;
     int is_v612;
+    int is_v613;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images;
@@ -17677,6 +17701,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV611FillBufferEntry *fill_buffers;
     const PdockerGpuVulkanGraphicsV611UpdateBufferEntry *update_buffers;
     const PdockerGpuVulkanGraphicsV612ClearColorImageEntry *clear_color_images;
+    const PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *clear_depth_stencil_images;
 } VulkanGraphicsV6FrameView;
 
 static int init_vulkan_graphics_v6_frame_view(
@@ -17690,7 +17715,8 @@ static int init_vulkan_graphics_v6_frame_view(
         (const PdockerGpuVulkanGraphicsV6FrameHeader *)frame;
     int rc = validate_vulkan_graphics_v6_header(header, passed_fd_count);
     if (rc != 0) return rc;
-    const int is_v612_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V612_ABI_MINOR;
+    const int is_v613_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V613_ABI_MINOR;
+    const int is_v612_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V612_ABI_MINOR || is_v613_header;
     const int is_v611_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V611_ABI_MINOR || is_v612_header;
     const int is_v610_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V610_ABI_MINOR || is_v611_header;
     const int is_v69_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V69_ABI_MINOR || is_v610_header;
@@ -17740,6 +17766,9 @@ static int init_vulkan_graphics_v6_frame_view(
     const PdockerGpuVulkanGraphicsV612FrameHeader *header_v612 = is_v612_header
             ? (const PdockerGpuVulkanGraphicsV612FrameHeader *)frame
             : NULL;
+    const PdockerGpuVulkanGraphicsV613FrameHeader *header_v613 = is_v613_header
+            ? (const PdockerGpuVulkanGraphicsV613FrameHeader *)frame
+            : NULL;
     view->frame = frame;
     view->header = header;
     view->header_v61 = header_v61;
@@ -17754,6 +17783,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->header_v610 = header_v610;
     view->header_v611 = header_v611;
     view->header_v612 = header_v612;
+    view->header_v613 = header_v613;
     view->passed_fds = passed_fds;
     view->passed_fd_count = passed_fd_count;
     view->is_v61 = header_v61 != NULL;
@@ -17768,6 +17798,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->is_v610 = header_v610 != NULL;
     view->is_v611 = header_v611 != NULL;
     view->is_v612 = header_v612 != NULL;
+    view->is_v613 = header_v613 != NULL;
     view->resources =
         (const PdockerGpuVulkanDispatchV5ResourceEntry *)graphics_v6_table_ptr(
             frame, header, header->resource_table_offset, header->resource_table_size);
@@ -17968,6 +17999,15 @@ static int init_vulkan_graphics_v6_frame_view(
                 frame, header, header_v612->v612.clear_color_image_table_offset,
                 header_v612->v612.clear_color_image_table_size);
         if (header_v612->v612.clear_color_image_count && !view->clear_color_images) {
+            return -EPROTO;
+        }
+    }
+    if (view->is_v613) {
+        view->clear_depth_stencil_images =
+            (const PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *)graphics_v6_table_ptr(
+                frame, header, header_v613->v613.clear_depth_stencil_image_table_offset,
+                header_v613->v613.clear_depth_stencil_image_table_size);
+        if (header_v613->v613.clear_depth_stencil_image_count && !view->clear_depth_stencil_images) {
             return -EPROTO;
         }
     }
@@ -18200,6 +18240,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV610FrameHeader *header_v610 = view.header_v610;
     const PdockerGpuVulkanGraphicsV611FrameHeader *header_v611 = view.header_v611;
     const PdockerGpuVulkanGraphicsV612FrameHeader *header_v612 = view.header_v612;
+    const PdockerGpuVulkanGraphicsV613FrameHeader *header_v613 = view.header_v613;
     const int is_v61 = view.is_v61;
     const int is_v62 = view.is_v62;
     const int is_v63 = view.is_v63;
@@ -18211,6 +18252,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const int is_v610 = view.is_v610;
     const int is_v611 = view.is_v611;
     const int is_v612 = view.is_v612;
+    const int is_v613 = view.is_v613;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources = view.resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = view.descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images = view.images;
@@ -18243,6 +18285,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV611FillBufferEntry *fill_buffers = view.fill_buffers;
     const PdockerGpuVulkanGraphicsV611UpdateBufferEntry *update_buffers = view.update_buffers;
     const PdockerGpuVulkanGraphicsV612ClearColorImageEntry *clear_color_images = view.clear_color_images;
+    const PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *clear_depth_stencil_images = view.clear_depth_stencil_images;
     const size_t frame_hash_offset = offsetof(PdockerGpuVulkanGraphicsV6FrameHeader, frame_hash);
     uint64_t payload_hash = fnv1a64_update(1469598103934665603ull,
                                            frame + header->header_size,
@@ -18427,6 +18470,43 @@ static int validate_vulkan_graphics_v6_frame_content(
                 !seen_clear_command[i]) return -EPROTO;
         }
     }
+    if (is_v613) {
+        uint8_t seen_clear_ds_command[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS];
+        memset(seen_clear_ds_command, 0, sizeof(seen_clear_ds_command));
+        for (uint32_t m = 0; m < header_v613->v613.clear_depth_stencil_image_count; ++m) {
+            const PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *entry = &clear_depth_stencil_images[m];
+            const VkImageAspectFlags ds_aspects = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            if (entry->command_index >= header->command_count ||
+                seen_clear_ds_command[entry->command_index] ||
+                entry->reserved0 != 0 || entry->reserved1 != 0 ||
+                entry->reserved2 != 0 || entry->reserved3 != 0 ||
+                entry->reserved4 != 0 || entry->reserved5 != 0 ||
+                entry->image_index >= header->image_count ||
+                entry->aspect_mask == 0 ||
+                (entry->aspect_mask & ~ds_aspects) != 0 ||
+                (entry->aspect_mask != VK_IMAGE_ASPECT_DEPTH_BIT &&
+                 entry->aspect_mask != VK_IMAGE_ASPECT_STENCIL_BIT) ||
+                entry->level_count == 0 || entry->layer_count == 0 ||
+                commands[entry->command_index].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE) {
+                return -EPROTO;
+            }
+            seen_clear_ds_command[entry->command_index] = 1;
+            const PdockerGpuVulkanDispatchV5ImageEntry *image = &images[entry->image_index];
+            if (!(image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
+                vulkan_format_bytes_per_pixel_for_aspect((VkFormat)image->format,
+                                                         (VkImageAspectFlags)entry->aspect_mask) == 0 ||
+                entry->base_mip_level >= image->mip_levels ||
+                entry->level_count > image->mip_levels - entry->base_mip_level ||
+                entry->base_array_layer >= image->array_layers ||
+                entry->layer_count > image->array_layers - entry->base_array_layer) {
+                return -ERANGE;
+            }
+        }
+        for (uint32_t i = 0; i < header->command_count; ++i) {
+            if (commands[i].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE &&
+                !seen_clear_ds_command[i]) return -EPROTO;
+        }
+    }
     if (is_v68) {
         uint64_t indirect_draw_table_hash = fnv1a64_update(
             1469598103934665603ull, indirect_draws,
@@ -18499,6 +18579,15 @@ static int validate_vulkan_graphics_v6_frame_content(
             (size_t)header_v612->v612.clear_color_image_table_size);
         if (clear_table_hash != header_v612->v612.clear_color_image_table_hash ||
             header_v612->v612.extension_hash != clear_table_hash) {
+            return -EPROTO;
+        }
+    }
+    if (is_v613) {
+        uint64_t clear_ds_table_hash = fnv1a64_update(
+            1469598103934665603ull, clear_depth_stencil_images,
+            (size_t)header_v613->v613.clear_depth_stencil_image_table_size);
+        if (clear_ds_table_hash != header_v613->v613.clear_depth_stencil_image_table_hash ||
+            header_v613->v613.extension_hash != clear_ds_table_hash) {
             return -EPROTO;
         }
     }
@@ -18916,6 +19005,7 @@ static int validate_vulkan_graphics_v6_frame_content(
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_FILL_BUFFER:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_COLOR_IMAGE:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:
                 break;
             default:
                 return -EPROTO;
@@ -18970,13 +19060,15 @@ static int validate_vulkan_graphics_v6_frame_content(
         if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_FILL_BUFFER ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER) && !is_v611) return -EPROTO;
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_COLOR_IMAGE && !is_v612) return -EPROTO;
+        if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE && !is_v613) return -EPROTO;
         if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER_TO_IMAGE ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE_TO_BUFFER ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_FILL_BUFFER ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER ||
-             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_COLOR_IMAGE) &&
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_COLOR_IMAGE ||
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE) &&
             (command->pipeline_index != UINT32_MAX || command->first_descriptor != 0 ||
              command->descriptor_count != 0 || command->vertex_binding_count != 0 ||
              command->attachment_count != 0 || command->dynamic_state_count != 0 ||
@@ -19279,6 +19371,18 @@ find_vulkan_graphics_v612_clear_color_image(
     if (!view || !view->is_v612 || !view->header_v612 || !view->clear_color_images) return NULL;
     for (uint32_t i = 0; i < view->header_v612->v612.clear_color_image_count; ++i) {
         const PdockerGpuVulkanGraphicsV612ClearColorImageEntry *entry = &view->clear_color_images[i];
+        if (entry->command_index == command_index) return entry;
+    }
+    return NULL;
+}
+
+static const PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *
+find_vulkan_graphics_v613_clear_depth_stencil_image(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t command_index) {
+    if (!view || !view->is_v613 || !view->header_v613 || !view->clear_depth_stencil_images) return NULL;
+    for (uint32_t i = 0; i < view->header_v613->v613.clear_depth_stencil_image_count; ++i) {
+        const PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *entry = &view->clear_depth_stencil_images[i];
         if (entry->command_index == command_index) return entry;
     }
     return NULL;
@@ -19617,6 +19721,18 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 }
                 if (!find_vulkan_graphics_v612_clear_color_image(view, i)) {
                     reason = "graphics clear color image requires V6.12 metadata";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:
+                if (rendering_active) {
+                    reason = "clear depth stencil image inside dynamic rendering is not supported";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                if (!find_vulkan_graphics_v613_clear_depth_stencil_image(view, i)) {
+                    reason = "graphics clear depth stencil image requires V6.13 metadata";
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
                 }
@@ -20791,6 +20907,30 @@ static int materialize_vulkan_graphics_v6_attachments(
             };
             int range_rc = vulkan_graphics_merge_image_copy_range_for_aspect(
                 image, &range, VK_IMAGE_ASPECT_COLOR_BIT);
+            if (range_rc != 0) return range_rc;
+            image->writeback_needed = 1;
+            image->current_layout = (VkImageLayout)clear->image_layout;
+        }
+    }
+    if (view->is_v613 && view->header_v613) {
+        for (uint32_t i = 0; i < view->header_v613->v613.clear_depth_stencil_image_count; ++i) {
+            const PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *clear = &view->clear_depth_stencil_images[i];
+            if (clear->image_index >= out->image_count) return -EPROTO;
+            VulkanDispatchImageObject *image = &out->images[clear->image_index];
+            if (!image->image || !(image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) return -EOPNOTSUPP;
+            if (vulkan_format_bytes_per_pixel_for_aspect(
+                    image->format, (VkImageAspectFlags)clear->aspect_mask) == 0) {
+                return -EOPNOTSUPP;
+            }
+            VkImageSubresourceRange range = {
+                .aspectMask = (VkImageAspectFlags)clear->aspect_mask,
+                .baseMipLevel = clear->base_mip_level,
+                .levelCount = clear->level_count,
+                .baseArrayLayer = clear->base_array_layer,
+                .layerCount = clear->layer_count,
+            };
+            int range_rc = vulkan_graphics_merge_image_copy_range_for_aspect(
+                image, &range, (VkImageAspectFlags)clear->aspect_mask);
             if (range_rc != 0) return range_rc;
             image->writeback_needed = 1;
             image->current_layout = (VkImageLayout)clear->image_layout;
@@ -22817,6 +22957,40 @@ static int record_vulkan_graphics_v6_command_buffer(
                                      &color,
                                      1,
                                      &range);
+                image->current_layout = (VkImageLayout)clear->image_layout;
+                break;
+            }
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE: {
+                const PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry *clear =
+                    find_vulkan_graphics_v613_clear_depth_stencil_image(view, ci);
+                if (!clear || clear->image_index >= attachments->image_count) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                VulkanDispatchImageObject *image = &attachments->images[clear->image_index];
+                if (!image->image) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+                if (rc != 0) goto cleanup;
+                VkClearDepthStencilValue value;
+                memset(&value, 0, sizeof(value));
+                memcpy(&value.depth, &clear->depth_bits, sizeof(value.depth));
+                value.stencil = clear->stencil;
+                VkImageSubresourceRange range = {
+                    .aspectMask = (VkImageAspectFlags)clear->aspect_mask,
+                    .baseMipLevel = clear->base_mip_level,
+                    .levelCount = clear->level_count,
+                    .baseArrayLayer = clear->base_array_layer,
+                    .layerCount = clear->layer_count,
+                };
+                vkCmdClearDepthStencilImage(command_buffer,
+                                            image->image,
+                                            (VkImageLayout)clear->image_layout,
+                                            &value,
+                                            1,
+                                            &range);
                 image->current_layout = (VkImageLayout)clear->image_layout;
                 break;
             }
