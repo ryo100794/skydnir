@@ -4753,6 +4753,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "execute_recorded_update_op(op)",
         ]:
             self.assertIn(marker, icd)
+        plan_body = icd.split("static bool graphics_mixed_submit_plan", 1)[1].split(
+            "static void execute_graphics_mixed_host_side_ops", 1
+        )[0]
+        between_draw_guard = plan_body.split("graphics-mixed-transfer-between-draws-unimplemented", 1)[0]
+        for allowed in [
+            "type != PDOCKER_VK_COMMAND_BLIT_IMAGE",
+            "type != PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE",
+        ]:
+            self.assertIn(allowed, between_draw_guard)
         submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
         )[0]

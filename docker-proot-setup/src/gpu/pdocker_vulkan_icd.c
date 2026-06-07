@@ -13793,6 +13793,8 @@ static bool graphics_mixed_submit_plan(
             type != PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY &&
             type != PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE &&
             type != PDOCKER_VK_COMMAND_RESOLVE_IMAGE &&
+            type != PDOCKER_VK_COMMAND_BLIT_IMAGE &&
+            type != PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE &&
             type != PDOCKER_VK_COMMAND_FILL &&
             type != PDOCKER_VK_COMMAND_UPDATE) {
             if (reason_out) *reason_out = "graphics-mixed-transfer-between-draws-unimplemented";
