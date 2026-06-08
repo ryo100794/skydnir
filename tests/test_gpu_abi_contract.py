@@ -4725,6 +4725,59 @@ class GpuAbiContractTest(unittest.TestCase):
             icd.index("send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count)"),
         )
 
+    def test_vulkan_fence_lifecycle_is_executor_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+
+        for marker in [
+            "handle_vulkan_fence_command",
+            "VULKAN_FENCE_CREATE",
+            "VULKAN_FENCE_RESET",
+            "VULKAN_FENCE_STATUS",
+            "VULKAN_FENCE_WAIT",
+            "VULKAN_FENCE_DESTROY",
+            "print_vulkan_fence_result",
+            "collect_executor_fences_from_command",
+            "find_executor_submit_fence_entry",
+            "allocate_executor_submit_fence_entry",
+            "vkCreateFence(rt->device, &create_info, NULL, &entry->fence)",
+            "create_info.flags = initial_signaled ? VK_FENCE_CREATE_SIGNALED_BIT : 0;",
+            "vkResetFences(rt->device, fence_count, fences)",
+            "vkGetFenceStatus(rt->device, entry->fence)",
+            "vkWaitForFences(rt->device, fence_count, fences, wait_all ? VK_TRUE : VK_FALSE, timeout_ns)",
+            "vkDestroyFence(rt->device, entry->fence, NULL)",
+            "strncmp(cmd, \"VULKAN_FENCE_\", 13) == 0",
+        ]:
+            self.assertIn(marker, executor)
+
+        for marker in [
+            "bool executor_tracked;",
+            "send_executor_text_command",
+            "send_executor_fence_create",
+            "send_executor_fence_destroy",
+            "send_executor_fence_reset",
+            "send_executor_fence_status",
+            "send_executor_fence_wait",
+            "VULKAN_FENCE_CREATE %llu %u",
+            "VULKAN_FENCE_RESET %u",
+            "VULKAN_FENCE_STATUS %llu",
+            "VULKAN_FENCE_WAIT %u %llu %u",
+            "VULKAN_FENCE_DESTROY %llu",
+            "bridge_available()",
+            "send_executor_fence_create(fence, initial_signaled)",
+            "send_executor_fence_destroy(f)",
+            "send_executor_fence_reset(fenceCount, pFences)",
+            "send_executor_fence_status(f, &result)",
+            "send_executor_fence_wait(fenceCount, pFences, waitAll, timeout, &result)",
+        ]:
+            self.assertIn(marker, icd)
+
+        fence_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
+        )[0]
+        self.assertIn("if (f && f->executor_tracked)", fence_body)
+        self.assertNotIn("return (!f || f->signaled) ? VK_SUCCESS : VK_NOT_READY;", fence_body.split("if (f && f->executor_tracked)", 1)[0])
+
     def test_vulkan_icd_supports_query_pool_and_timestamp_api(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("struct PdockerVkQueryPool", icd)

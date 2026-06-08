@@ -393,6 +393,7 @@ struct PdockerVkPipeline {
 
 struct PdockerVkFence {
     bool signaled;
+    bool executor_tracked;
     uint64_t fence_id;
 };
 
@@ -2166,6 +2167,182 @@ static int write_exact_fd(int fd, const void *data, size_t size) {
         off += (size_t)n;
     }
     return 0;
+}
+
+
+static int parse_executor_json_result(const char *line, int fallback) {
+    if (!line) return fallback;
+    const char *p = strstr(line, "\"result\":");
+    if (!p) return fallback;
+    p += strlen("\"result\":");
+    char *end = NULL;
+    long value = strtol(p, &end, 10);
+    if (end == p) return fallback;
+    return (int)value;
+}
+
+static int send_executor_text_command(
+        const char *command,
+        int *out_result,
+        bool *out_signaled) {
+    if (!command || !command[0]) return -EINVAL;
+    if (out_result) *out_result = VK_ERROR_UNKNOWN;
+    if (out_signaled) *out_signaled = false;
+    int socket_fd = connect_queue();
+    if (socket_fd < 0) return socket_fd;
+    int rc = 0;
+    int write_rc = write_exact_fd(socket_fd, command, strlen(command));
+    if (write_rc != 0) {
+        rc = write_rc;
+    } else {
+        char line[4096];
+        size_t off = 0;
+        while (off + 1 < sizeof(line)) {
+            char ch;
+            ssize_t r = read(socket_fd, &ch, 1);
+            if (r <= 0) break;
+            line[off++] = ch;
+            if (ch == '\n') break;
+        }
+        line[off] = '\0';
+        if (getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr, "pdocker-vulkan-icd: executor response: %s", line);
+            if (off == 0 || line[off - 1] != '\n') fprintf(stderr, "\n");
+        }
+        if (strstr(line, "\"valid\":true") == NULL) {
+            rc = -EIO;
+        } else {
+            if (out_result) *out_result = parse_executor_json_result(line, VK_SUCCESS);
+            if (out_signaled) *out_signaled = strstr(line, "\"signaled\":true") != NULL;
+        }
+    }
+    close(socket_fd);
+    return rc;
+}
+
+static int send_executor_fence_create(PdockerVkFence *fence, uint32_t initial_signaled) {
+    if (!fence || fence->fence_id == 0) return -EINVAL;
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "VULKAN_FENCE_CREATE %llu %u\n",
+             (unsigned long long)fence->fence_id, initial_signaled ? 1u : 0u);
+    int result = VK_ERROR_UNKNOWN;
+    bool signaled = false;
+    int rc = send_executor_text_command(cmd, &result, &signaled);
+    if (rc == 0 && result == VK_SUCCESS) {
+        fence->executor_tracked = true;
+        fence->signaled = signaled;
+    }
+    return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
+}
+
+static int send_executor_fence_destroy(PdockerVkFence *fence) {
+    if (!fence || !fence->executor_tracked || fence->fence_id == 0) return 0;
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "VULKAN_FENCE_DESTROY %llu\n", (unsigned long long)fence->fence_id);
+    int result = VK_ERROR_UNKNOWN;
+    int rc = send_executor_text_command(cmd, &result, NULL);
+    fence->executor_tracked = false;
+    return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
+}
+
+static int append_fence_ids(char *cmd, size_t cap, size_t *off, uint32_t fenceCount, const VkFence *pFences) {
+    for (uint32_t i = 0; i < fenceCount; ++i) {
+        const PdockerVkFence *fence = (const PdockerVkFence *)pFences[i];
+        if (!fence || fence->fence_id == 0) return -EINVAL;
+        int n = snprintf(cmd + *off, cap - *off, " %llu", (unsigned long long)fence->fence_id);
+        if (n <= 0 || (size_t)n >= cap - *off) return -E2BIG;
+        *off += (size_t)n;
+    }
+    if (*off + 2 > cap) return -E2BIG;
+    cmd[(*off)++] = '\n';
+    cmd[*off] = '\0';
+    return 0;
+}
+
+static int send_executor_fence_reset(uint32_t fenceCount, const VkFence *pFences) {
+    if (fenceCount == 0) return 0;
+    size_t cap = 64u + (size_t)fenceCount * 24u;
+    char *cmd = (char *)calloc(1, cap);
+    if (!cmd) return -ENOMEM;
+    size_t off = (size_t)snprintf(cmd, cap, "VULKAN_FENCE_RESET %u", fenceCount);
+    int rc = (off >= cap) ? -E2BIG : append_fence_ids(cmd, cap, &off, fenceCount, pFences);
+    int result = VK_ERROR_UNKNOWN;
+    if (rc == 0) rc = send_executor_text_command(cmd, &result, NULL);
+    if (rc == 0 && result == VK_SUCCESS) {
+        for (uint32_t i = 0; i < fenceCount; ++i) {
+            PdockerVkFence *fence = (PdockerVkFence *)pFences[i];
+            if (fence) fence->signaled = false;
+        }
+    } else if (rc == 0) {
+        rc = -EIO;
+    }
+    free(cmd);
+    return rc;
+}
+
+static int send_executor_fence_status(PdockerVkFence *fence, VkResult *out_result) {
+    if (!fence || !fence->executor_tracked || fence->fence_id == 0) {
+        if (out_result) *out_result = (!fence || fence->signaled) ? VK_SUCCESS : VK_NOT_READY;
+        return 0;
+    }
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "VULKAN_FENCE_STATUS %llu\n", (unsigned long long)fence->fence_id);
+    int result = VK_ERROR_UNKNOWN;
+    bool signaled = false;
+    int rc = send_executor_text_command(cmd, &result, &signaled);
+    if (rc == 0) {
+        fence->signaled = signaled;
+        if (out_result) *out_result = (VkResult)result;
+    }
+    return rc;
+}
+
+static int send_executor_fence_wait(
+        uint32_t fenceCount,
+        const VkFence *pFences,
+        VkBool32 waitAll,
+        uint64_t timeout,
+        VkResult *out_result) {
+    if (fenceCount == 0) {
+        if (out_result) *out_result = VK_SUCCESS;
+        return 0;
+    }
+    for (uint32_t i = 0; i < fenceCount; ++i) {
+        const PdockerVkFence *fence = (const PdockerVkFence *)pFences[i];
+        if (!fence || !fence->executor_tracked) return -ENOENT;
+    }
+    size_t cap = 96u + (size_t)fenceCount * 24u;
+    char *cmd = (char *)calloc(1, cap);
+    if (!cmd) return -ENOMEM;
+    size_t off = (size_t)snprintf(cmd, cap, "VULKAN_FENCE_WAIT %u %llu %u",
+                                  waitAll ? 1u : 0u,
+                                  (unsigned long long)timeout,
+                                  fenceCount);
+    int rc = (off >= cap) ? -E2BIG : append_fence_ids(cmd, cap, &off, fenceCount, pFences);
+    int result = VK_ERROR_UNKNOWN;
+    bool signaled = false;
+    if (rc == 0) rc = send_executor_text_command(cmd, &result, &signaled);
+    if (rc == 0) {
+        if (result == VK_SUCCESS) {
+            if (waitAll) {
+                for (uint32_t i = 0; i < fenceCount; ++i) {
+                    PdockerVkFence *fence = (PdockerVkFence *)pFences[i];
+                    if (fence) fence->signaled = true;
+                }
+            } else if (signaled) {
+                for (uint32_t i = 0; i < fenceCount; ++i) {
+                    PdockerVkFence *fence = (PdockerVkFence *)pFences[i];
+                    VkResult status = VK_NOT_READY;
+                    if (fence && send_executor_fence_status(fence, &status) == 0 && status == VK_SUCCESS) {
+                        fence->signaled = true;
+                    }
+                }
+            }
+        }
+        if (out_result) *out_result = (VkResult)result;
+    }
+    free(cmd);
+    return rc;
 }
 
 static bool dispatch_response_is_graphics_transport(const char *transport_name) {
@@ -16205,8 +16382,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
     if (!pFence) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkFence *fence = pdocker_alloc_handle(sizeof(*fence));
     if (!fence) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    memset(fence, 0, sizeof(*fence));
     fence->signaled = pCreateInfo && (pCreateInfo->flags & VK_FENCE_CREATE_SIGNALED_BIT);
     fence->fence_id = next_vulkan_object_generation();
+    if (bridge_available()) {
+        uint32_t initial_signaled = fence->signaled ? 1u : 0u;
+        if (send_executor_fence_create(fence, initial_signaled) != 0) {
+            free(fence);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+    }
     *pFence = (VkFence)fence;
     return VK_SUCCESS;
 }
@@ -16217,6 +16402,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyFence(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
+    PdockerVkFence *f = (PdockerVkFence *)fence;
+    if (f) (void)send_executor_fence_destroy(f);
     free((void *)fence);
 }
 
@@ -16225,6 +16412,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(
         uint32_t fenceCount,
         const VkFence *pFences) {
     (void)device;
+    if (fenceCount > 0 && !pFences) return VK_ERROR_INITIALIZATION_FAILED;
+    if (bridge_available()) {
+        int rc = send_executor_fence_reset(fenceCount, pFences);
+        if (rc != 0) return VK_ERROR_DEVICE_LOST;
+        return VK_SUCCESS;
+    }
     for (uint32_t i = 0; i < fenceCount; ++i) {
         PdockerVkFence *fence = (PdockerVkFence *)pFences[i];
         if (fence) fence->signaled = false;
@@ -16235,6 +16428,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(
 VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus(VkDevice device, VkFence fence) {
     (void)device;
     PdockerVkFence *f = (PdockerVkFence *)fence;
+    if (f && f->executor_tracked) {
+        VkResult result = VK_ERROR_UNKNOWN;
+        if (send_executor_fence_status(f, &result) == 0) return result;
+        return VK_ERROR_DEVICE_LOST;
+    }
     return (!f || f->signaled) ? VK_SUCCESS : VK_NOT_READY;
 }
 
@@ -16246,6 +16444,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
         uint64_t timeout) {
     (void)device;
     if (fenceCount > 0 && !pFences) return VK_ERROR_INITIALIZATION_FAILED;
+    if (bridge_available()) {
+        VkResult result = VK_ERROR_UNKNOWN;
+        int rc = send_executor_fence_wait(fenceCount, pFences, waitAll, timeout, &result);
+        if (rc == 0) return result;
+    }
     uint64_t start_ns = monotonic_ns();
     do {
         if (fences_wait_satisfied(fenceCount, pFences, waitAll)) return VK_SUCCESS;

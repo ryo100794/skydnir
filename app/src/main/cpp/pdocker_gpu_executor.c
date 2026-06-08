@@ -24841,6 +24841,187 @@ static int resolve_executor_submit_sync_fence(
     return 0;
 }
 
+
+static void print_vulkan_fence_result(const char *stage, VkResult result, int signaled) {
+    FILE *out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"%s\",\"valid\":true,\"result\":%d,\"signaled\":%s}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            stage ? stage : "vulkan-fence", (int)result, signaled ? "true" : "false");
+    fflush(out);
+}
+
+static int parse_u64_token(const char **cursor, uint64_t *out) {
+    if (!cursor || !*cursor || !out) return -EINVAL;
+    while (**cursor == ' ') (*cursor)++;
+    if (!**cursor) return -EINVAL;
+    char *end = NULL;
+    unsigned long long value = strtoull(*cursor, &end, 10);
+    if (end == *cursor) return -EINVAL;
+    *out = (uint64_t)value;
+    *cursor = end;
+    return 0;
+}
+
+static int parse_u32_token(const char **cursor, uint32_t *out) {
+    uint64_t value = 0;
+    int rc = parse_u64_token(cursor, &value);
+    if (rc != 0) return rc;
+    if (value > UINT32_MAX) return -ERANGE;
+    *out = (uint32_t)value;
+    return 0;
+}
+
+static int collect_executor_fences_from_command(
+        VulkanRuntime *rt,
+        const char **cursor,
+        uint32_t fence_count,
+        VkFence *fences,
+        VulkanExecutorSubmitFenceEntry **entries) {
+    if (!rt || !cursor || !fences || !entries || fence_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+        return -EINVAL;
+    }
+    for (uint32_t i = 0; i < fence_count; ++i) {
+        uint64_t id = 0;
+        int rc = parse_u64_token(cursor, &id);
+        if (rc != 0 || id == 0) return rc ? rc : -EINVAL;
+        VulkanExecutorSubmitFenceEntry *entry = find_executor_submit_fence_entry(id);
+        if (!entry || !entry->fence) return -ENOENT;
+        entries[i] = entry;
+        fences[i] = entry->fence;
+    }
+    return 0;
+}
+
+static int handle_vulkan_fence_command(const char *cmd) {
+    if (!cmd) return -EINVAL;
+    if (init_vulkan_runtime(&g_vulkan_runtime) != 0 || !g_vulkan_runtime.device) {
+        json_fail("vulkan-fence", "Vulkan runtime unavailable");
+        return -ENODEV;
+    }
+    VulkanRuntime *rt = &g_vulkan_runtime;
+    if (strncmp(cmd, "VULKAN_FENCE_CREATE ", 20) == 0) {
+        const char *cursor = cmd + 20;
+        uint64_t id = 0;
+        uint32_t initial_signaled = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || parse_u32_token(&cursor, &initial_signaled) != 0 || id == 0) {
+            json_fail("vulkan-fence-create", "invalid fence create command");
+            return -EINVAL;
+        }
+        VulkanExecutorSubmitFenceEntry *entry = find_executor_submit_fence_entry(id);
+        if (!entry) entry = allocate_executor_submit_fence_entry(id);
+        if (!entry) {
+            json_fail("vulkan-fence-create", "fence registry full");
+            return -E2BIG;
+        }
+        if (!entry->fence) {
+            VkFenceCreateInfo create_info;
+            memset(&create_info, 0, sizeof(create_info));
+            create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+            create_info.flags = initial_signaled ? VK_FENCE_CREATE_SIGNALED_BIT : 0;
+            VkResult vrc = vkCreateFence(rt->device, &create_info, NULL, &entry->fence);
+            if (vrc != VK_SUCCESS) {
+                memset(entry, 0, sizeof(*entry));
+                print_vulkan_fence_result("vulkan-fence-create", vrc, 0);
+                return -EIO;
+            }
+        }
+        entry->signaled = initial_signaled ? 1u : 0u;
+        print_vulkan_fence_result("vulkan-fence-create", VK_SUCCESS, entry->signaled);
+        return 0;
+    }
+    if (strncmp(cmd, "VULKAN_FENCE_DESTROY ", 21) == 0) {
+        const char *cursor = cmd + 21;
+        uint64_t id = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || id == 0) {
+            json_fail("vulkan-fence-destroy", "invalid fence destroy command");
+            return -EINVAL;
+        }
+        VulkanExecutorSubmitFenceEntry *entry = find_executor_submit_fence_entry(id);
+        if (entry && entry->fence) vkDestroyFence(rt->device, entry->fence, NULL);
+        if (entry) memset(entry, 0, sizeof(*entry));
+        print_vulkan_fence_result("vulkan-fence-destroy", VK_SUCCESS, 0);
+        return 0;
+    }
+    if (strncmp(cmd, "VULKAN_FENCE_STATUS ", 20) == 0) {
+        const char *cursor = cmd + 20;
+        uint64_t id = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || id == 0) {
+            json_fail("vulkan-fence-status", "invalid fence status command");
+            return -EINVAL;
+        }
+        VulkanExecutorSubmitFenceEntry *entry = find_executor_submit_fence_entry(id);
+        if (!entry || !entry->fence) {
+            json_fail("vulkan-fence-status", "unknown fence");
+            return -ENOENT;
+        }
+        VkResult vrc = vkGetFenceStatus(rt->device, entry->fence);
+        entry->signaled = (vrc == VK_SUCCESS) ? 1u : 0u;
+        print_vulkan_fence_result("vulkan-fence-status", vrc, entry->signaled);
+        return 0;
+    }
+    if (strncmp(cmd, "VULKAN_FENCE_RESET ", 19) == 0) {
+        const char *cursor = cmd + 19;
+        uint32_t fence_count = 0;
+        if (parse_u32_token(&cursor, &fence_count) != 0 || fence_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+            json_fail("vulkan-fence-reset", "invalid fence reset command");
+            return -EINVAL;
+        }
+        VkFence fences[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        VulkanExecutorSubmitFenceEntry *entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        memset(fences, 0, sizeof(fences));
+        memset(entries, 0, sizeof(entries));
+        int rc = collect_executor_fences_from_command(rt, &cursor, fence_count, fences, entries);
+        if (rc != 0) {
+            json_fail("vulkan-fence-reset", "unknown fence");
+            return rc;
+        }
+        VkResult vrc = vkResetFences(rt->device, fence_count, fences);
+        if (vrc == VK_SUCCESS) {
+            for (uint32_t i = 0; i < fence_count; ++i) entries[i]->signaled = 0;
+        }
+        print_vulkan_fence_result("vulkan-fence-reset", vrc, 0);
+        return vrc == VK_SUCCESS ? 0 : -EIO;
+    }
+    if (strncmp(cmd, "VULKAN_FENCE_WAIT ", 18) == 0) {
+        const char *cursor = cmd + 18;
+        uint32_t wait_all = 0;
+        uint64_t timeout_ns = 0;
+        uint32_t fence_count = 0;
+        if (parse_u32_token(&cursor, &wait_all) != 0 ||
+            parse_u64_token(&cursor, &timeout_ns) != 0 ||
+            parse_u32_token(&cursor, &fence_count) != 0 ||
+            fence_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+            json_fail("vulkan-fence-wait", "invalid fence wait command");
+            return -EINVAL;
+        }
+        VkFence fences[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        VulkanExecutorSubmitFenceEntry *entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        memset(fences, 0, sizeof(fences));
+        memset(entries, 0, sizeof(entries));
+        int rc = collect_executor_fences_from_command(rt, &cursor, fence_count, fences, entries);
+        if (rc != 0) {
+            json_fail("vulkan-fence-wait", "unknown fence");
+            return rc;
+        }
+        VkResult vrc = vkWaitForFences(rt->device, fence_count, fences, wait_all ? VK_TRUE : VK_FALSE, timeout_ns);
+        int any_signaled = 0;
+        if (vrc == VK_SUCCESS) {
+            for (uint32_t i = 0; i < fence_count; ++i) {
+                VkResult src = vkGetFenceStatus(rt->device, fences[i]);
+                entries[i]->signaled = (src == VK_SUCCESS) ? 1u : 0u;
+                any_signaled = any_signaled || entries[i]->signaled;
+            }
+        }
+        print_vulkan_fence_result("vulkan-fence-wait", vrc, any_signaled);
+        return (vrc == VK_SUCCESS || vrc == VK_TIMEOUT) ? 0 : -EIO;
+    }
+    return -EINVAL;
+}
+
 static int submit_vulkan_graphics_v6_command_buffer(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -25826,6 +26007,8 @@ static int serve_socket(const char *path) {
                     (void)run_vector_add_3fd(passed_fds[0], passed_fds[1], passed_fds[2], n, GPU_API_AUTO);
                     passed_fds[0] = passed_fds[1] = passed_fds[2] = -1;
                 }
+            } else if (strncmp(cmd, "VULKAN_FENCE_", 13) == 0) {
+                (void)handle_vulkan_fence_command(cmd);
             } else if (strncmp(cmd, "VULKAN_DISPATCH_V2 ", 19) == 0 ||
                        strncmp(cmd, "VULKAN_DISPATCH_V3 ", 19) == 0 ||
                        strncmp(cmd, "VULKAN_DISPATCH_V4 ", 19) == 0) {
