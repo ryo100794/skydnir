@@ -3977,8 +3977,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
         )[0]
         self.assertNotIn("(void)fence;", submit_body)
-        self.assertIn("validate_submit_wait_semaphores(&pSubmits[i])", submit_body)
-        self.assertIn("complete_submit_semaphores(&pSubmits[i]);", submit_body)
+        self.assertIn("submit_timeline_info_from_pnext(pSubmits[i].pNext", submit_body)
+        self.assertIn("submit-pnext-unsupported", submit_body)
+        self.assertIn("validate_submit_wait_semaphores(&pSubmits[i], timeline_submit)", submit_body)
+        self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit);", submit_body)
         self.assertIn("submit_fence->signaled = false;", submit_body)
         self.assertIn("submit_fence) submit_fence->signaled = true;", submit_body)
         create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore", 1)[1].split(
@@ -4007,6 +4009,24 @@ class GpuAbiContractTest(unittest.TestCase):
             'MAP_ALIAS("vkSignalSemaphoreKHR", vkSignalSemaphore)',
         ]:
             self.assertIn(marker, icd)
+        submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1
+        )[0]
+        for marker in [
+            "VkTimelineSemaphoreSubmitInfo",
+            "submit_timeline_info_from_pnext",
+            "VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO",
+            "validate_submit_timeline_info",
+            "submit_timeline_wait_value",
+            "submit_timeline_signal_value",
+            "submit_timeline_wait_value(timeline, i)",
+            "submit_timeline_signal_value(timeline, i)",
+            "submit-pnext-unsupported",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn("submit_timeline_info_from_pnext(pSubmits[i].pNext", submit_body)
+        self.assertIn("validate_submit_wait_semaphores(&pSubmits[i], timeline_submit)", submit_body)
+        self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit)", submit_body)
         queue_submit2_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
         )[0]

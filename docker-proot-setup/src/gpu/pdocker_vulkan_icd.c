@@ -14479,13 +14479,105 @@ static void semaphore_complete_signal(PdockerVkSemaphore *sem, uint64_t value) {
     sem->signaled = true;
 }
 
-static VkResult validate_submit_wait_semaphores(const VkSubmitInfo *submit) {
+static const VkTimelineSemaphoreSubmitInfo *submit_timeline_info_from_pnext(
+        const void *pNext,
+        bool *unsupported_pnext) {
+    if (unsupported_pnext) *unsupported_pnext = false;
+    const VkTimelineSemaphoreSubmitInfo *timeline = NULL;
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+            case VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO:
+                if (timeline) {
+                    if (unsupported_pnext) *unsupported_pnext = true;
+                    return NULL;
+                }
+                timeline = (const VkTimelineSemaphoreSubmitInfo *)node;
+                break;
+            default:
+                if (unsupported_pnext) *unsupported_pnext = true;
+                return NULL;
+        }
+        node = header.pNext;
+    }
+    return timeline;
+}
+
+static bool submit_uses_timeline_wait(const VkSubmitInfo *submit) {
+    if (!submit || !submit->pWaitSemaphores) return false;
+    for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = (PdockerVkSemaphore *)submit->pWaitSemaphores[i];
+        if (sem && sem->timeline) return true;
+    }
+    return false;
+}
+
+static bool submit_uses_timeline_signal(const VkSubmitInfo *submit) {
+    if (!submit || !submit->pSignalSemaphores) return false;
+    for (uint32_t i = 0; i < submit->signalSemaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = (PdockerVkSemaphore *)submit->pSignalSemaphores[i];
+        if (sem && sem->timeline) return true;
+    }
+    return false;
+}
+
+static VkResult validate_submit_timeline_info(
+        const VkSubmitInfo *submit,
+        const VkTimelineSemaphoreSubmitInfo *timeline) {
     if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!timeline) {
+        return (submit_uses_timeline_wait(submit) || submit_uses_timeline_signal(submit))
+            ? VK_ERROR_FEATURE_NOT_PRESENT
+            : VK_SUCCESS;
+    }
+    if (timeline->waitSemaphoreValueCount != 0 &&
+        timeline->waitSemaphoreValueCount != submit->waitSemaphoreCount) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (timeline->signalSemaphoreValueCount != 0 &&
+        timeline->signalSemaphoreValueCount != submit->signalSemaphoreCount) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (timeline->waitSemaphoreValueCount && !timeline->pWaitSemaphoreValues) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (timeline->signalSemaphoreValueCount && !timeline->pSignalSemaphoreValues) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    if (submit_uses_timeline_wait(submit) &&
+        timeline->waitSemaphoreValueCount != submit->waitSemaphoreCount) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (submit_uses_timeline_signal(submit) &&
+        timeline->signalSemaphoreValueCount != submit->signalSemaphoreCount) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    return VK_SUCCESS;
+}
+
+static uint64_t submit_timeline_wait_value(
+        const VkTimelineSemaphoreSubmitInfo *timeline,
+        uint32_t index) {
+    return timeline && timeline->pWaitSemaphoreValues ? timeline->pWaitSemaphoreValues[index] : 0;
+}
+
+static uint64_t submit_timeline_signal_value(
+        const VkTimelineSemaphoreSubmitInfo *timeline,
+        uint32_t index) {
+    return timeline && timeline->pSignalSemaphoreValues ? timeline->pSignalSemaphoreValues[index] : 0;
+}
+
+static VkResult validate_submit_wait_semaphores(
+        const VkSubmitInfo *submit,
+        const VkTimelineSemaphoreSubmitInfo *timeline) {
+    if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult timeline_rc = validate_submit_timeline_info(submit, timeline);
+    if (timeline_rc != VK_SUCCESS) return timeline_rc;
     for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pWaitSemaphores
             ? (PdockerVkSemaphore *)submit->pWaitSemaphores[i]
             : NULL;
-        uint64_t required_value = sem && sem->timeline ? 0 : 0;
+        uint64_t required_value = sem && sem->timeline ? submit_timeline_wait_value(timeline, i) : 0;
         if (!semaphore_wait_satisfied(sem, required_value)) {
             trace_icd_runtime_failure("semaphore-wait-unsignaled",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
@@ -14495,7 +14587,9 @@ static VkResult validate_submit_wait_semaphores(const VkSubmitInfo *submit) {
     return VK_SUCCESS;
 }
 
-static void complete_submit_semaphores(const VkSubmitInfo *submit) {
+static void complete_submit_semaphores(
+        const VkSubmitInfo *submit,
+        const VkTimelineSemaphoreSubmitInfo *timeline) {
     if (!submit) return;
     for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pWaitSemaphores
@@ -14507,7 +14601,7 @@ static void complete_submit_semaphores(const VkSubmitInfo *submit) {
         PdockerVkSemaphore *sem = submit->pSignalSemaphores
             ? (PdockerVkSemaphore *)submit->pSignalSemaphores[i]
             : NULL;
-        semaphore_complete_signal(sem, sem && sem->timeline ? sem->value + 1 : 0);
+        semaphore_complete_signal(sem, sem && sem->timeline ? submit_timeline_signal_value(timeline, i) : 0);
     }
 }
 
@@ -14749,7 +14843,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
     if (submit_fence) submit_fence->signaled = false;
     for (uint32_t i = 0; i < submitCount; ++i) {
         if (!pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
-        VkResult semaphore_rc = validate_submit_wait_semaphores(&pSubmits[i]);
+        bool unsupported_submit_pnext = false;
+        const VkTimelineSemaphoreSubmitInfo *timeline_submit =
+            submit_timeline_info_from_pnext(pSubmits[i].pNext, &unsupported_submit_pnext);
+        if (unsupported_submit_pnext) {
+            trace_icd_runtime_failure("submit-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+        VkResult semaphore_rc = validate_submit_wait_semaphores(&pSubmits[i], timeline_submit);
         if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
         for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; ++j) {
             PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)pSubmits[i].pCommandBuffers[j];
@@ -15044,7 +15145,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             int rc = send_vector_add_3fd(n, a->memory->fd, b->memory->fd, out->memory->fd);
             if (rc != 0) return VK_ERROR_DEVICE_LOST;
         }
-        complete_submit_semaphores(&pSubmits[i]);
+        complete_submit_semaphores(&pSubmits[i], timeline_submit);
     }
     if (submit_fence) submit_fence->signaled = true;
     return VK_SUCCESS;
