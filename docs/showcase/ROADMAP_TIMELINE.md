@@ -28,7 +28,7 @@ Current TODO counters:
 
 ## Timeline
 
-### Now: 2026-06-07 to 2026-06-10
+### Now: 2026-06-08 to 2026-06-11
 
 Keep the UI compose path truthful and visible while closing regressions that block demos.
 
@@ -37,7 +37,7 @@ Keep the UI compose path truthful and visible while closing regressions that blo
 - Execution timeline and delegated task control: `docs/plan/EXECUTION_TIMELINE_20260513.md` converts the audit into staged gates, current agent assignments, merge checklists, and...
 - [#4](https://github.com/ryo100794/skydnir/issues/4) llama GPU bridge ABI: keep llama.cpp unmodified while expanding the Skydnir Vulkan/OpenCL bridge from discovery and model-buffer...
 
-### Next: 2026-06-11 to 2026-06-17
+### Next: 2026-06-12 to 2026-06-18
 
 Turn the remaining high-value TODOs into repeatable device checks and public artifacts.
 
@@ -45,7 +45,7 @@ Turn the remaining high-value TODOs into repeatable device checks and public art
 - Mobile-resource residency constraints for MoE: keep a concise design note with device RAM/headroom, thermal, storage bandwidth, SAF/app-private backing, cache eviction, and correctness...
 - [#8](https://github.com/ryo100794/skydnir/issues/8) Reproducible release/F-Droid readiness: turn the local build wrapper into a broader pinned CI/release process with source-built native...
 
-### Then: 2026-06-18 to 2026-06-28
+### Then: 2026-06-19 to 2026-06-29
 
 Use benchmark evidence to harden compatibility and publish tester-ready releases.
 
