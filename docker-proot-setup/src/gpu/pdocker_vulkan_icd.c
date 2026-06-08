@@ -14679,6 +14679,65 @@ static bool collect_legacy_submit_sync_entries(
     return true;
 }
 
+
+static bool collect_submit2_submit_sync_entries(
+        const VkSubmitInfo2 *submit,
+        VkFence fence,
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
+        size_t *entry_count) {
+    if (entry_count) *entry_count = 0;
+    if (!submit || !entries || !entry_count) return false;
+    for (uint32_t i = 0; i < submit->waitSemaphoreInfoCount; ++i) {
+        const VkSemaphoreSubmitInfo *info = submit->pWaitSemaphoreInfos
+            ? &submit->pWaitSemaphoreInfos[i]
+            : NULL;
+        PdockerVkSemaphore *sem = info ? (PdockerVkSemaphore *)info->semaphore : NULL;
+        uint64_t value = sem && sem->timeline ? info->value : 0;
+        uint64_t stage_mask = info ? (uint64_t)info->stageMask : 0;
+        if (!append_submit_sync_entry(entries, entry_count,
+                                      PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT,
+                                      sem, value, stage_mask, NULL)) {
+            return false;
+        }
+    }
+    for (uint32_t i = 0; i < submit->signalSemaphoreInfoCount; ++i) {
+        const VkSemaphoreSubmitInfo *info = submit->pSignalSemaphoreInfos
+            ? &submit->pSignalSemaphoreInfos[i]
+            : NULL;
+        PdockerVkSemaphore *sem = info ? (PdockerVkSemaphore *)info->semaphore : NULL;
+        uint64_t value = sem && sem->timeline ? info->value : 0;
+        uint64_t stage_mask = info ? (uint64_t)info->stageMask : 0;
+        if (!append_submit_sync_entry(entries, entry_count,
+                                      PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL,
+                                      sem, value, stage_mask, NULL)) {
+            return false;
+        }
+    }
+    PdockerVkFence *submit_fence = (PdockerVkFence *)fence;
+    if (submit_fence &&
+        !append_submit_sync_entry(entries, entry_count,
+                                  PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE,
+                                  NULL, 0, 0, submit_fence)) {
+        return false;
+    }
+    return true;
+}
+
+static _Thread_local const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *g_submit_sync_override_entries;
+static _Thread_local size_t g_submit_sync_override_count;
+
+static void set_submit_sync_override(
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
+        size_t count) {
+    g_submit_sync_override_entries = entries;
+    g_submit_sync_override_count = count;
+}
+
+static void clear_submit_sync_override(void) {
+    g_submit_sync_override_entries = NULL;
+    g_submit_sync_override_count = 0;
+}
+
 static const VkTimelineSemaphoreSubmitInfo *submit_timeline_info_from_pnext(
         const void *pNext,
         bool *unsupported_pnext) {
@@ -15093,8 +15152,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
         PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
         size_t submit_sync_count = 0;
-        if (!collect_legacy_submit_sync_entries(&pSubmits[i], timeline_submit, fence,
-                                                submit_sync_entries, &submit_sync_count)) {
+        if (g_submit_sync_override_entries) {
+            if (g_submit_sync_override_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+                trace_icd_runtime_failure("submit-sync-metadata-overflow", VK_ERROR_FEATURE_NOT_PRESENT);
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+            }
+            memcpy(submit_sync_entries, g_submit_sync_override_entries,
+                   g_submit_sync_override_count * sizeof(submit_sync_entries[0]));
+            submit_sync_count = g_submit_sync_override_count;
+        } else if (!collect_legacy_submit_sync_entries(&pSubmits[i], timeline_submit, fence,
+                                                       submit_sync_entries, &submit_sync_count)) {
             trace_icd_runtime_failure("submit-sync-metadata-overflow", VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
@@ -15435,6 +15502,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         rc = validate_submit2_signal_semaphores(src);
         if (rc != VK_SUCCESS) return rc;
 
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit2_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        size_t submit2_sync_count = 0;
+        VkFence submit2_fence = (i + 1u == submitCount) ? fence : VK_NULL_HANDLE;
+        if (!collect_submit2_submit_sync_entries(src, submit2_fence,
+                                                 submit2_sync_entries, &submit2_sync_count)) {
+            trace_icd_runtime_failure("submit2-sync-metadata-overflow", VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+
         VkSubmitInfo legacy_submit;
         memset(&legacy_submit, 0, sizeof(legacy_submit));
         legacy_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -15448,7 +15524,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
             }
             legacy_submit.pCommandBuffers = cmds;
         }
+        set_submit_sync_override(submit2_sync_entries, submit2_sync_count);
         rc = vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE);
+        clear_submit_sync_override();
         free(cmds);
         if (rc != VK_SUCCESS) return rc;
         complete_submit2_semaphores(src);

@@ -4096,6 +4096,11 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, icd)
         self.assertIn("uint64_t required_value = sem && sem->timeline ? info->value : 0;", icd)
         self.assertIn("src->pSignalSemaphoreInfos", queue_submit2_body)
+        self.assertIn("collect_submit2_submit_sync_entries(src, submit2_fence", queue_submit2_body)
+        self.assertIn("set_submit_sync_override(submit2_sync_entries, submit2_sync_count);", queue_submit2_body)
+        self.assertIn("clear_submit_sync_override();", queue_submit2_body)
+        self.assertLess(queue_submit2_body.index("set_submit_sync_override(submit2_sync_entries, submit2_sync_count);"), queue_submit2_body.index("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)"))
+        self.assertLess(queue_submit2_body.index("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)"), queue_submit2_body.index("clear_submit_sync_override();"))
         self.assertNotIn("dst->waitSemaphoreCount = src->waitSemaphoreInfoCount", queue_submit2_body)
         self.assertNotIn("dst->signalSemaphoreCount = src->signalSemaphoreInfoCount", queue_submit2_body)
         self.assertIn("sem->timeline) return sem->value >= value;", icd)
@@ -4408,7 +4413,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("free_submit_info_arrays", icd)
         self.assertIn("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)", icd)
         self.assertIn("complete_submit2_semaphores(src)", icd)
-        self.assertLess(icd.index("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)"), icd.index("complete_submit2_semaphores(src)"))
+        self.assertIn("collect_submit2_submit_sync_entries(src, submit2_fence", icd)
+        self.assertIn("set_submit_sync_override(submit2_sync_entries, submit2_sync_count);", icd)
+        self.assertIn("clear_submit_sync_override();", icd)
+        self.assertLess(icd.index("set_submit_sync_override(submit2_sync_entries, submit2_sync_count);"), icd.index("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)"))
+        self.assertLess(icd.index("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)"), icd.index("clear_submit_sync_override();"))
+        self.assertLess(icd.index("clear_submit_sync_override();"), icd.index("complete_submit2_semaphores(src)"))
         self.assertIn("submit2-flags-unsupported", icd)
         set_event2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2", 1
@@ -4644,12 +4654,19 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "append_submit_sync_entry",
             "collect_legacy_submit_sync_entries",
+            "collect_submit2_submit_sync_entries",
+            "set_submit_sync_override",
+            "clear_submit_sync_override",
+            "g_submit_sync_override_entries",
+            "submit2-sync-metadata-overflow",
             "submit_timeline_info_from_pnext",
             "submit_timeline_wait_value",
             "submit_timeline_signal_value",
             "validate_submit_wait_semaphores",
             "PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS]",
             "collect_legacy_submit_sync_entries(&pSubmits[i], timeline_submit, fence",
+            "if (g_submit_sync_override_entries)",
+            "memcpy(submit_sync_entries, g_submit_sync_override_entries",
             "send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count)",
             "submit-sync-metadata-overflow",
             "VULKAN_GRAPHICS_V6.19",
@@ -4661,6 +4678,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "frame_header_v619->v619.extension_hash = frame_header_v619->v619.submit_sync_table_hash;",
             "entry->sync_type = sync_type;",
             "entry->stage_mask = stage_mask;",
+            "uint64_t stage_mask = info ? (uint64_t)info->stageMask : 0;",
+            "VkFence submit2_fence = (i + 1u == submitCount) ? fence : VK_NULL_HANDLE;",
             "entry->semaphore_id = sem->semaphore_id;",
             "entry->fence_id = fence->fence_id;",
             "PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT",
