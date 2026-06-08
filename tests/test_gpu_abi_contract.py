@@ -4092,6 +4092,35 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("if (!sem || sem->timeline) return;", icd)
         self.assertIn("if (sem->value < value) sem->value = value;", icd)
 
+    def test_vulkan_wait_apis_honor_timeout_contract(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "pdocker_vk_wait_deadline_expired",
+            "pdocker_vk_wait_poll_sleep",
+            "fences_wait_satisfied",
+            "timeline_semaphore_wait_satisfied",
+            "nanosleep(&ts, &ts)",
+            "return VK_TIMEOUT;",
+            "semaphore-wait-pnext-unsupported",
+        ]:
+            self.assertIn(marker, icd)
+        fence_wait_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1)[1].split(
+            "static bool semaphore_create_info_parse_pnext", 1
+        )[0]
+        self.assertIn("if (fences_wait_satisfied(fenceCount, pFences, waitAll)) return VK_SUCCESS;", fence_wait_body)
+        self.assertIn("pdocker_vk_wait_deadline_expired(start_ns, timeout)", fence_wait_body)
+        self.assertIn("pdocker_vk_wait_poll_sleep(start_ns, timeout);", fence_wait_body)
+        self.assertNotIn("return VK_NOT_READY", fence_wait_body)
+        semaphore_wait_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkSignalSemaphore", 1
+        )[0]
+        self.assertIn("if (timeline_semaphore_wait_satisfied(pWaitInfo)) return VK_SUCCESS;", semaphore_wait_body)
+        self.assertIn("pdocker_vk_wait_deadline_expired(start_ns, timeout)", semaphore_wait_body)
+        self.assertIn("pdocker_vk_wait_poll_sleep(start_ns, timeout);", semaphore_wait_body)
+        self.assertIn("return VK_ERROR_FEATURE_NOT_PRESENT;", semaphore_wait_body)
+        self.assertNotIn("VK_NOT_READY", semaphore_wait_body)
+
+
     def test_vulkan_create_device_validates_advertised_extensions_and_features(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("device_extension_advertised_name", icd)

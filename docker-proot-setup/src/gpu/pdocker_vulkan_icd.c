@@ -14507,6 +14507,63 @@ static void semaphore_complete_signal(PdockerVkSemaphore *sem, uint64_t value) {
     sem->signaled = true;
 }
 
+static bool pdocker_vk_wait_deadline_expired(uint64_t start_ns, uint64_t timeout_ns) {
+    if (timeout_ns == UINT64_MAX) return false;
+    uint64_t now = monotonic_ns();
+    return now >= start_ns && now - start_ns >= timeout_ns;
+}
+
+static void pdocker_vk_wait_poll_sleep(uint64_t start_ns, uint64_t timeout_ns) {
+    if (timeout_ns == 0) return;
+    uint64_t sleep_ns = 1000000ull;
+    if (timeout_ns != UINT64_MAX) {
+        uint64_t now = monotonic_ns();
+        if (now >= start_ns) {
+            uint64_t elapsed = now - start_ns;
+            if (elapsed >= timeout_ns) return;
+            uint64_t remaining = timeout_ns - elapsed;
+            if (remaining < sleep_ns) sleep_ns = remaining;
+        }
+    }
+    struct timespec ts;
+    ts.tv_sec = (time_t)(sleep_ns / 1000000000ull);
+    ts.tv_nsec = (long)(sleep_ns % 1000000000ull);
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {
+    }
+}
+
+static bool fences_wait_satisfied(
+        uint32_t fenceCount,
+        const VkFence *pFences,
+        VkBool32 waitAll) {
+    if (fenceCount == 0) return true;
+    bool any = false;
+    for (uint32_t i = 0; i < fenceCount; ++i) {
+        PdockerVkFence *fence = (PdockerVkFence *)pFences[i];
+        bool signaled = !fence || fence->signaled;
+        any = any || signaled;
+        if (waitAll && !signaled) return false;
+    }
+    return waitAll ? true : any;
+}
+
+static bool timeline_semaphore_wait_satisfied(const VkSemaphoreWaitInfo *pWaitInfo) {
+    if (!pWaitInfo) return false;
+    bool wait_any = (pWaitInfo->flags & VK_SEMAPHORE_WAIT_ANY_BIT) != 0;
+    if (pWaitInfo->semaphoreCount == 0) return true;
+    bool any = false;
+    for (uint32_t i = 0; i < pWaitInfo->semaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = pWaitInfo->pSemaphores
+            ? (PdockerVkSemaphore *)pWaitInfo->pSemaphores[i]
+            : NULL;
+        uint64_t value = pWaitInfo->pValues ? pWaitInfo->pValues[i] : 0;
+        bool ready = sem && sem->timeline && sem->value >= value;
+        any = any || ready;
+        if (!wait_any && !ready) return false;
+    }
+    return wait_any ? any : true;
+}
+
 static const VkTimelineSemaphoreSubmitInfo *submit_timeline_info_from_pnext(
         const void *pNext,
         bool *unsupported_pnext) {
@@ -15987,15 +16044,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
         VkBool32 waitAll,
         uint64_t timeout) {
     (void)device;
-    (void)timeout;
-    bool any = false;
-    for (uint32_t i = 0; i < fenceCount; ++i) {
-        PdockerVkFence *fence = (PdockerVkFence *)pFences[i];
-        bool signaled = !fence || fence->signaled;
-        any = any || signaled;
-        if (waitAll && !signaled) return VK_NOT_READY;
-    }
-    return (!waitAll && fenceCount > 0 && !any) ? VK_NOT_READY : VK_SUCCESS;
+    if (fenceCount > 0 && !pFences) return VK_ERROR_INITIALIZATION_FAILED;
+    uint64_t start_ns = monotonic_ns();
+    do {
+        if (fences_wait_satisfied(fenceCount, pFences, waitAll)) return VK_SUCCESS;
+        if (timeout == 0 || pdocker_vk_wait_deadline_expired(start_ns, timeout)) return VK_TIMEOUT;
+        pdocker_vk_wait_poll_sleep(start_ns, timeout);
+    } while (true);
 }
 
 static bool semaphore_create_info_parse_pnext(const void *pNext, bool *timeline, uint64_t *initial_value) {
@@ -16071,20 +16126,20 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores(
         uint64_t timeout) {
     (void)device;
     if (!pWaitInfo) return VK_ERROR_INITIALIZATION_FAILED;
-    bool wait_any = (pWaitInfo->flags & VK_SEMAPHORE_WAIT_ANY_BIT) != 0;
-    bool any = false;
-    for (uint32_t i = 0; i < pWaitInfo->semaphoreCount; ++i) {
-        PdockerVkSemaphore *sem = pWaitInfo->pSemaphores
-            ? (PdockerVkSemaphore *)pWaitInfo->pSemaphores[i]
-            : NULL;
-        uint64_t value = pWaitInfo->pValues ? pWaitInfo->pValues[i] : 0;
-        bool ready = sem && sem->timeline && sem->value >= value;
-        any = any || ready;
-        if (!wait_any && !ready) return timeout == 0 ? VK_TIMEOUT : VK_NOT_READY;
+    if (pWaitInfo->pNext) {
+        trace_icd_runtime_failure("semaphore-wait-pnext-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
     }
-    return (wait_any && pWaitInfo->semaphoreCount > 0 && !any)
-        ? (timeout == 0 ? VK_TIMEOUT : VK_NOT_READY)
-        : VK_SUCCESS;
+    if (pWaitInfo->semaphoreCount > 0 && (!pWaitInfo->pSemaphores || !pWaitInfo->pValues)) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    uint64_t start_ns = monotonic_ns();
+    do {
+        if (timeline_semaphore_wait_satisfied(pWaitInfo)) return VK_SUCCESS;
+        if (timeout == 0 || pdocker_vk_wait_deadline_expired(start_ns, timeout)) return VK_TIMEOUT;
+        pdocker_vk_wait_poll_sleep(start_ns, timeout);
+    } while (true);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkSignalSemaphore(
