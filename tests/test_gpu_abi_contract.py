@@ -3913,6 +3913,12 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("validate_bound_descriptor_layouts_before_dispatch(cmd);", dispatch_body)
         self.assertIn("op->push_constant_op_count = cmd->push_constant_op_count;", dispatch_body)
+        self.assertIn("VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect", dispatch_body)
+        self.assertIn("op->dispatch_indirect = true;", dispatch_body)
+        self.assertIn("MAP_PROC(vkCmdDispatchIndirect);", icd)
+        self.assertIn("resolve_vulkan_dispatch_group_counts", icd)
+        self.assertIn("dispatch_indirect_offset % 4u", icd)
+        self.assertIn("generic dispatch rejected: indirect group counts", icd)
         push_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[1].split(
             "static bool image_subresource_range_is_whole_image", 1
         )[0]
