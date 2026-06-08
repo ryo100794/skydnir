@@ -3875,6 +3875,7 @@ class GpuAbiContractTest(unittest.TestCase):
 
     def test_vulkan_pipeline_layout_drives_descriptor_layout_and_dynamic_offsets(self):
         icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
         self.assertIn("uint32_t set_layout_count;", icd)
         self.assertIn("set_layouts[PDOCKER_VK_MAX_DESCRIPTOR_SETS]", icd)
         self.assertIn("bool unsupported_set_layout_count;", icd)
@@ -3913,12 +3914,21 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("validate_bound_descriptor_layouts_before_dispatch(cmd);", dispatch_body)
         self.assertIn("op->push_constant_op_count = cmd->push_constant_op_count;", dispatch_body)
+        self.assertIn("VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBase", dispatch_body)
+        self.assertIn("op->base_group_x = baseGroupX;", dispatch_body)
+        self.assertIn('MAP_ALIAS("vkCmdDispatchBaseKHR", vkCmdDispatchBaseKHR);', icd)
+        self.assertIn("base_group_x=%u base_group_y=%u base_group_z=%u", icd)
+        dispatch_send_body = icd.split("static int send_generic_vulkan_dispatch_op", 1)[1].split("static int send_generic_vulkan_dispatch(", 1)[0]
+        self.assertLess(dispatch_send_body.index("api_buffer_ids[i]"), dispatch_send_body.index("base_group_x=%u"))
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect", dispatch_body)
         self.assertIn("op->dispatch_indirect = true;", dispatch_body)
         self.assertIn("MAP_PROC(vkCmdDispatchIndirect);", icd)
         self.assertIn("resolve_vulkan_dispatch_group_counts", icd)
         self.assertIn("dispatch_indirect_offset % 4u", icd)
         self.assertIn("generic dispatch rejected: indirect group counts", icd)
+        self.assertIn("base_group_x", executor)
+        self.assertIn("cmd_dispatch_base", executor)
+        self.assertIn("vkCmdDispatchBase is unavailable", executor)
         push_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[1].split(
             "static bool image_subresource_range_is_whole_image", 1
         )[0]

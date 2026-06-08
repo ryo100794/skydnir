@@ -1123,6 +1123,10 @@ typedef struct {
     int disable_subgroup_arithmetic;
     int has_requested_feature_mask;
     uint64_t requested_feature_mask;
+    int has_base_group;
+    uint32_t base_group_x;
+    uint32_t base_group_y;
+    uint32_t base_group_z;
     int has_receive_evidence;
     PdockerReceiveEvidence receive_evidence;
     PdockerSenderReconcileEvidence sender_reconcile;
@@ -1258,6 +1262,7 @@ typedef struct {
     PFN_vkCmdSetStencilOpEXT cmd_set_stencil_op;
     PFN_vkCmdDrawIndirectCount cmd_draw_indirect_count;
     PFN_vkCmdDrawIndexedIndirectCount cmd_draw_indexed_indirect_count;
+    PFN_vkCmdDispatchBase cmd_dispatch_base;
     PFN_vkCmdPipelineBarrier2 cmd_pipeline_barrier2;
     VkPhysicalDeviceSubgroupProperties subgroup_properties;
     double init_ms;
@@ -1789,7 +1794,10 @@ static void log_spirv_trace(
         size_t push_size,
         uint32_t gx,
         uint32_t gy,
-        uint32_t gz) {
+        uint32_t gz,
+        uint32_t base_x,
+        uint32_t base_y,
+        uint32_t base_z) {
     if (!summary) return;
     fprintf(stderr,
             "pdocker-gpu-executor: SPIR-V trace valid=%u truncated=%u hash=0x%016llx "
@@ -1797,7 +1805,7 @@ static void log_spirv_trace(
             "op_classes={mem:%u,arith:%u,ctrl:%u,barrier:%u} "
             "bound=%u local_size=%u,%u,%u local_size_id=%u,%u,%u "
             "local_size_spec_id=%u,%u,%u "
-            "dispatch=%u,%u,%u push=%zu bindings=%zu caps=",
+            "dispatch=%u,%u,%u base=%u,%u,%u push=%zu bindings=%zu caps=",
             summary->valid,
             summary->truncated,
             (unsigned long long)summary->hash,
@@ -1822,6 +1830,9 @@ static void log_spirv_trace(
             gx,
             gy,
             gz,
+            base_x,
+            base_y,
+            base_z,
             push_size,
             binding_count);
     for (uint32_t i = 0; i < summary->capability_count; ++i) {
@@ -3837,6 +3848,37 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
         return 0;
     }
 
+    if (strncmp(token, "base_group_x=", 13) == 0 ||
+        strncmp(token, "base_x=", 7) == 0) {
+        const char *value = strchr(token, '=');
+        uint64_t parsed = 0;
+        if (!value || parse_u64_token_value(value + 1, &parsed) != 0 ||
+            parsed > UINT32_MAX) return -1;
+        options->has_base_group = 1;
+        options->base_group_x = (uint32_t)parsed;
+        return 0;
+    }
+    if (strncmp(token, "base_group_y=", 13) == 0 ||
+        strncmp(token, "base_y=", 7) == 0) {
+        const char *value = strchr(token, '=');
+        uint64_t parsed = 0;
+        if (!value || parse_u64_token_value(value + 1, &parsed) != 0 ||
+            parsed > UINT32_MAX) return -1;
+        options->has_base_group = 1;
+        options->base_group_y = (uint32_t)parsed;
+        return 0;
+    }
+    if (strncmp(token, "base_group_z=", 13) == 0 ||
+        strncmp(token, "base_z=", 7) == 0) {
+        const char *value = strchr(token, '=');
+        uint64_t parsed = 0;
+        if (!value || parse_u64_token_value(value + 1, &parsed) != 0 ||
+            parsed > UINT32_MAX) return -1;
+        options->has_base_group = 1;
+        options->base_group_z = (uint32_t)parsed;
+        return 0;
+    }
+
     if (strncmp(token, "requested_feature_mask=", 23) == 0) {
         const char *value = token + 23;
         char *end = NULL;
@@ -4199,11 +4241,20 @@ static uint64_t reconcile_descriptor_hash(
     return hash;
 }
 
-static uint64_t reconcile_dispatch_hash(uint32_t gx, uint32_t gy, uint32_t gz) {
+static uint64_t reconcile_dispatch_hash(
+        uint32_t gx,
+        uint32_t gy,
+        uint32_t gz,
+        uint32_t base_x,
+        uint32_t base_y,
+        uint32_t base_z) {
     uint64_t hash = 1469598103934665603ull;
     hash = fnv1a64_update(hash, &gx, sizeof(gx));
     hash = fnv1a64_update(hash, &gy, sizeof(gy));
     hash = fnv1a64_update(hash, &gz, sizeof(gz));
+    hash = fnv1a64_update(hash, &base_x, sizeof(base_x));
+    hash = fnv1a64_update(hash, &base_y, sizeof(base_y));
+    hash = fnv1a64_update(hash, &base_z, sizeof(base_z));
     return hash;
 }
 
@@ -4226,6 +4277,9 @@ static int strict_reconciliation_has_mismatch(
         uint32_t gx,
         uint32_t gy,
         uint32_t gz,
+        uint32_t base_x,
+        uint32_t base_y,
+        uint32_t base_z,
         const char **field_name) {
     if (!options || !strict_vulkan_reconciliation_requested(options)) return 0;
     const PdockerSenderReconcileEvidence *sender = &options->sender_reconcile;
@@ -4263,7 +4317,7 @@ static int strict_reconciliation_has_mismatch(
         return 1;
     }
     if (sender->has_dispatch_hash &&
-        sender->dispatch_hash != reconcile_dispatch_hash(gx, gy, gz)) {
+        sender->dispatch_hash != reconcile_dispatch_hash(gx, gy, gz, base_x, base_y, base_z)) {
         if (field_name) *field_name = "dispatch_hash";
         return 1;
     }
@@ -4284,6 +4338,9 @@ static int strict_reconciliation_has_required_transport_match(
         uint32_t gx,
         uint32_t gy,
         uint32_t gz,
+        uint32_t base_x,
+        uint32_t base_y,
+        uint32_t base_z,
         const char **field_name) {
     if (!options || !strict_vulkan_reconciliation_requested(options)) {
         if (field_name) *field_name = "strict_reconciliation";
@@ -4329,7 +4386,7 @@ static int strict_reconciliation_has_required_transport_match(
         return 0;
     }
     if (!sender->has_dispatch_hash ||
-        sender->dispatch_hash != reconcile_dispatch_hash(gx, gy, gz)) {
+        sender->dispatch_hash != reconcile_dispatch_hash(gx, gy, gz, base_x, base_y, base_z)) {
         if (field_name) *field_name = "dispatch_hash";
         return 0;
     }
@@ -4351,7 +4408,10 @@ static void write_vulkan_reconciliation_report(
         size_t push_size,
         uint32_t gx,
         uint32_t gy,
-        uint32_t gz) {
+        uint32_t gz,
+        uint32_t base_x,
+        uint32_t base_y,
+        uint32_t base_z) {
     const PdockerReceiveEvidence *rx =
         options && options->has_receive_evidence ? &options->receive_evidence : NULL;
     const PdockerSenderReconcileEvidence *sender =
@@ -4363,7 +4423,7 @@ static void write_vulkan_reconciliation_report(
         specialization_count,
         specialization_data,
         specialization_data_size);
-    const uint64_t dispatch_hash = reconcile_dispatch_hash(gx, gy, gz);
+    const uint64_t dispatch_hash = reconcile_dispatch_hash(gx, gy, gz, base_x, base_y, base_z);
     fprintf(out,
             "\"reconciliation\":{"
             "\"receive\":{"
@@ -11014,6 +11074,12 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     } else if (rt->graphics_queue_family != UINT32_MAX) {
         vkGetDeviceQueue(rt->device, rt->graphics_queue_family, 0, &rt->graphics_queue);
     }
+    rt->cmd_dispatch_base =
+        (PFN_vkCmdDispatchBase)vkGetDeviceProcAddr(rt->device, "vkCmdDispatchBase");
+    if (!rt->cmd_dispatch_base) {
+        rt->cmd_dispatch_base =
+            (PFN_vkCmdDispatchBase)vkGetDeviceProcAddr(rt->device, "vkCmdDispatchBaseKHR");
+    }
     rt->cmd_pipeline_barrier2 =
         (PFN_vkCmdPipelineBarrier2)vkGetDeviceProcAddr(rt->device, "vkCmdPipelineBarrier2");
     if (!rt->cmd_pipeline_barrier2) {
@@ -11916,7 +11982,10 @@ static int run_vulkan_dispatch_fd(
         size_t push_size,
         uint32_t gx,
         uint32_t gy,
-        uint32_t gz) {
+        uint32_t gz,
+        uint32_t base_x,
+        uint32_t base_y,
+        uint32_t base_z) {
     if (shader_fd < 0 || !buffer_fds || !bindings ||
         (binding_count == 0 && image_descriptor_count == 0) ||
         binding_count > PDOCKER_GPU_MAX_VULKAN_BINDINGS || shader_size == 0 ||
@@ -12501,6 +12570,7 @@ static int run_vulkan_dispatch_fd(
                 push,
                 push_size,
                 gx, gy, gz,
+                base_x, base_y, base_z,
                 &normalization_fail_field)) {
             fprintf(stderr,
                     "pdocker-gpu-executor: strict duplicate descriptor normalization "
@@ -12556,6 +12626,7 @@ static int run_vulkan_dispatch_fd(
             push,
             push_size,
             gx, gy, gz,
+            base_x, base_y, base_z,
             &strict_reconciliation_field)) {
         fprintf(stderr,
                 "pdocker-gpu-executor: strict reconciliation mismatch field=%s dispatch_id=%llu\n",
@@ -14084,7 +14155,18 @@ static int run_vulkan_dispatch_fd(
                              image_pre_barrier_count, image_pre_barriers);
     }
     if (push_size) vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, (uint32_t)push_size, push);
-    vkCmdDispatch(command_buffer, gx ? gx : 1, gy ? gy : 1, gz ? gz : 1);
+    if (base_x || base_y || base_z) {
+        if (!rt->cmd_dispatch_base) {
+            json_fail("vulkan-dispatch", "vkCmdDispatchBase is unavailable");
+            ret = 64;
+            goto cleanup;
+        }
+        rt->cmd_dispatch_base(command_buffer,
+                              base_x, base_y, base_z,
+                              gx ? gx : 1, gy ? gy : 1, gz ? gz : 1);
+    } else {
+        vkCmdDispatch(command_buffer, gx ? gx : 1, gy ? gy : 1, gz ? gz : 1);
+    }
     VkBufferMemoryBarrier post_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     uint32_t post_barrier_count = 0;
     for (size_t i = 0; i < binding_count && post_barrier_count < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) {
@@ -15021,7 +15103,7 @@ static int run_vulkan_dispatch_fd(
                                             specialization_data,
                                             specialization_data_size,
                                             push, push_size,
-                                            gx, gy, gz);
+                                            gx, gy, gz, base_x, base_y, base_z);
         fprintf(json_out(), ",");
         write_vulkan_binding_compact_report(json_out(), bindings, binding_count,
                                             buffer_fds,
@@ -15300,7 +15382,7 @@ static int run_vulkan_dispatch_fd(
                                         specialization_data,
                                         specialization_data_size,
                                         push, push_size,
-                                        gx, gy, gz);
+                                        gx, gy, gz, base_x, base_y, base_z);
     if (cpu_oracle_requested) {
         /*
          * Keep oracle evidence available in the normal compact event stream.
@@ -15400,7 +15482,8 @@ cleanup:
         fprintf(stderr, "pdocker-gpu-executor: generic Vulkan dispatch failed stage=%s rc=%d\n", fail_stage, rc);
         log_vulkan_feature_trace(rt);
         if (have_spirv_summary) {
-            log_spirv_trace(&spirv_summary, bindings, binding_count, push_size, gx, gy, gz);
+            log_spirv_trace(&spirv_summary, bindings, binding_count, push_size,
+                            gx, gy, gz, base_x, base_y, base_z);
         }
         dump_failed_spirv_if_requested(fail_stage, shader_code, shader_size, spirv_summary.hash);
         uint64_t resolved_spec0 = 0;
@@ -15560,7 +15643,7 @@ cleanup:
                                             specialization_data,
                                             specialization_data_size,
                                             push, push_size,
-                                            gx, gy, gz);
+                                            gx, gy, gz, base_x, base_y, base_z);
         fprintf(json_out(), ",");
         write_vulkan_binding_report(json_out(), bindings, binding_count,
                                     active_bindings,
@@ -25165,7 +25248,7 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
         specialization_data, (size_t)header.specialization_data_size,
         &options,
         push, (size_t)header.push_size,
-        header.gx, header.gy, header.gz);
+        header.gx, header.gy, header.gz, 0, 0, 0);
 cleanup:
     free(frame);
     for (size_t i = 0; i < passed_fd_count && i < PDOCKER_GPU_MAX_PASSED_FDS; ++i) {
@@ -25576,7 +25659,10 @@ static int serve_socket(const char *path) {
                                                  specializations, specialization_count,
                                                  specialization_data, specialization_data_size,
                                                  &options,
-                                                 push, push_size, gx, gy, gz);
+                                                 push, push_size, gx, gy, gz,
+                                                 options.has_base_group ? options.base_group_x : 0,
+                                                 options.has_base_group ? options.base_group_y : 0,
+                                                 options.has_base_group ? options.base_group_z : 0);
                 }
             } else if (strncmp(cmd, "VULKAN_DISPATCH_V1 ", 19) == 0) {
                 char *save = NULL;
@@ -25630,7 +25716,7 @@ static int serve_socket(const char *path) {
                                                  shader_size, "main",
                                                  NULL, 0, NULL, 0,
                                                  NULL,
-                                                 push, push_size, gx, gy, gz);
+                                                 push, push_size, gx, gy, gz, 0, 0, 0);
                 }
             } else {
                 json_fail("command", "unknown command");
