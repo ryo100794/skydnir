@@ -395,6 +395,22 @@
   ],
   "coverage": [
     {
+      "id": "direct.compat.blocked-ipc-and-socket-errno",
+      "tier": "fast-static",
+      "areas": [
+        "syscall_errno_parity"
+      ],
+      "syscalls": [
+        "shmget",
+        "shmctl",
+        "shmat",
+        "socket"
+      ],
+      "contract": "Android-blocked compatibility syscalls that are deliberately handled at the seccomp boundary return deterministic ENOSYS instead of falling through with host-dependent behavior.",
+      "fast_check": "Static verifier checks ADD_ERRNO_SYSCALL coverage for blocked IPC/socket entries.",
+      "heavy_case": "android.direct.syscall-errno-parity"
+    },
+    {
       "id": "direct.path.xattr-rootfs-rewrite",
       "tier": "fast-static",
       "areas": [

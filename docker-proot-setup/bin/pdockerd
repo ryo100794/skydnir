@@ -46,6 +46,7 @@ import stat as stat_mod
 import subprocess
 import sys
 import tarfile
+import tempfile
 import threading
 import time
 import traceback
@@ -1493,7 +1494,30 @@ def _copy_no_xattr(src, dst):
     files, so the standard copy2 path raises EACCES on every file copy.
     We still preserve the byte content + mode bits + mtime, which is all
     pdockerd needs for layer/container rootfs cloning."""
-    shutil.copyfile(src, dst, follow_symlinks=False)
+    tmp = None
+    try:
+        parent = os.path.dirname(dst)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(prefix=".copy-", dir=parent)
+        else:
+            fd, tmp = tempfile.mkstemp(prefix=".copy-")
+        with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
+            while True:
+                chunk = inp.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(tmp, dst)
+        tmp = None
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
     try:
         st = os.lstat(src)
         os.chmod(dst, st.st_mode & 0o7777)

@@ -15,12 +15,17 @@ or closes.
 
 ### TermPort F-Droid Native Payload Preparation 2026-06-06
 
-- [doing] **TermPort Skydnir payload build ownership**: TermPort now carries the Skydnir native sources it needs and wires Gradle `preBuild` through a local `buildSkydnirNative` task plus daemon asset sync, instead of relying only on manually staged APK payloads.
+- [doing] **TermPort Skydnir payload build ownership**: TermPort now carries the Skydnir native sources it needs and wires Gradle `preBuild` through a local `buildSkydnirNative` task plus daemon asset sync, instead of relying only on manually staged APK payloads. Acceptance: `scripts/verify-native-rebuild-release.sh` dry-run and `scripts/verify-native-payloads.py` freshness verifier remain green for both normal and no-crane packaging modes.
 - [done] **glibc-host-only generation path**: Android/Bionic executors are built from this glibc host environment with host `clang`, the Android NDK sysroot, compiler-rt, and the `aarch64-linux-android` target triple. This follows the existing Skydnir build note in `scripts/build-native-android-ndk.sh`: the build is host-side and does not use Termux or device-local compiler tools.
 - [done] **container-facing glibc payloads**: COW, GPU shim, Vulkan ICD, and OpenCL ICD are generated in the same glibc host environment from vendored C sources before APK packaging.
 - [done] **F-Droid no-crane staging mode**: TermPort has `SKYDNIR_FDROID_NO_CRANE=1` to omit the prebuilt image-pull helper from packaging. Normal development builds can still stage it until a source-built replacement is available.
 - [planned] **remaining F-Droid blocker: image-pull helper provenance**: replace the prebuilt image-pull helper with a reproducible source build or keep it excluded for F-Droid builds and document the resulting feature limit.
 - [planned] **remaining F-Droid blocker: glibc loader provenance**: Ubuntu/glibc direct execution currently needs an executable loader payload in Android native library storage. For F-Droid submission, define a reproducible source/provenance path for that loader instead of treating an extracted rootfs loader as a permanent packaged artifact.
+
+
+### TermPort Container Rootfs Copy Safety 2026-06-08
+
+- [done] **Android app-data rootfs clone copy safety**: TermPort device evidence showed a created project container exiting with SIGBUS and a container-only zero-byte `usr/lib/aarch64-linux-gnu/libc.so`, while the source image rootfs and layer trees retained valid file sizes. The Android fallback clone path now avoids `shutil.copyfile()` and writes via an explicit temporary file, read/write loop, fsync, and atomic replace so failed copies do not publish zero-byte regular files. TermPort carries the same fix in its vendored daemon copy.
 
 ### Branding and Rename Track
 
