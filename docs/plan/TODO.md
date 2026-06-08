@@ -2020,3 +2020,21 @@ Acceptance:
 
 - Android smoke covers a bind-mounted script launched as `./script` and via a
   child process, and the guest interpreter receives the guest-visible path.
+
+## P1: ARM32 Runtime Promotion Notes From TermPort
+
+Status: **TermPort packages ARM32 evidence payloads; process execution remains unpromoted**.
+
+Facts from the TermPort port:
+
+- TermPort now builds `armeabi-v7a` Android helper payloads and armhf glibc-facing shim payloads from source during APK builds.
+- The ARM32 direct executor is an explicit unsupported-ABI stub: probe reports the helper is present, but `process-exec=0`; container process execution is not represented as working.
+- ARM32 glibc `libcow` needed its `*64` wrapper symbols limited to LP64 builds because armhf glibc aliases those names and otherwise produces duplicate assembler symbols.
+- TermPort passes the selected platform into the daemon so ARM32 devices report `linux/arm/v7` instead of the default `linux/arm64`.
+- The bundled image fetch helper remains arm64-only in TermPort; ARM32 image pull/export needs a source-built replacement before runtime promotion.
+
+Acceptance before promoting ARM32 beyond packaging:
+
+- Port direct execution to 32-bit ARM register/syscall handling and validate `docker run`/`compose up` on an ARM32 device.
+- Build or replace the image fetch helper from source for ARM32.
+- Add Android smoke coverage proving `/version`, `/info`, image pull, build, run, exec, and compose paths on `linux/arm/v7`.
