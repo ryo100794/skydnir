@@ -4031,7 +4031,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
         )[0]
         self.assertIn("validate_submit2_wait_semaphores(src)", queue_submit2_body)
+        self.assertIn("validate_submit2_command_buffers(src)", queue_submit2_body)
+        self.assertIn("validate_submit2_signal_semaphores(src)", queue_submit2_body)
         self.assertIn("complete_submit2_semaphores(&pSubmits[i])", queue_submit2_body)
+        for marker in [
+            "submit2-pnext-unsupported",
+            "submit2-wait-pnext-unsupported",
+            "submit2-command-pnext-unsupported",
+            "submit2-signal-pnext-unsupported",
+            "info->pNext",
+        ]:
+            self.assertIn(marker, icd)
         self.assertIn("uint64_t required_value = sem && sem->timeline ? info->value : 0;", icd)
         self.assertIn("src->pSignalSemaphoreInfos", queue_submit2_body)
         self.assertNotIn("dst->waitSemaphoreCount = src->waitSemaphoreInfoCount", queue_submit2_body)

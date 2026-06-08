@@ -14607,12 +14607,51 @@ static void complete_submit_semaphores(
 
 static VkResult validate_submit2_wait_semaphores(const VkSubmitInfo2 *submit) {
     if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
+    if (submit->pNext) {
+        trace_icd_runtime_failure("submit2-pnext-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     for (uint32_t i = 0; i < submit->waitSemaphoreInfoCount; ++i) {
         const VkSemaphoreSubmitInfo *info = submit->pWaitSemaphoreInfos ? &submit->pWaitSemaphoreInfos[i] : NULL;
+        if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+        if (info->pNext) {
+            trace_icd_runtime_failure("submit2-wait-pnext-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
         PdockerVkSemaphore *sem = info ? (PdockerVkSemaphore *)info->semaphore : NULL;
         uint64_t required_value = sem && sem->timeline ? info->value : 0;
         if (!semaphore_wait_satisfied(sem, required_value)) {
             trace_icd_runtime_failure("semaphore2-wait-unsignaled",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+    }
+    return VK_SUCCESS;
+}
+
+static VkResult validate_submit2_signal_semaphores(const VkSubmitInfo2 *submit) {
+    if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t i = 0; i < submit->signalSemaphoreInfoCount; ++i) {
+        const VkSemaphoreSubmitInfo *info = submit->pSignalSemaphoreInfos ? &submit->pSignalSemaphoreInfos[i] : NULL;
+        if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+        if (info->pNext) {
+            trace_icd_runtime_failure("submit2-signal-pnext-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+    }
+    return VK_SUCCESS;
+}
+
+static VkResult validate_submit2_command_buffers(const VkSubmitInfo2 *submit) {
+    if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t i = 0; i < submit->commandBufferInfoCount; ++i) {
+        const VkCommandBufferSubmitInfo *info = submit->pCommandBufferInfos ? &submit->pCommandBufferInfos[i] : NULL;
+        if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+        if (info->pNext) {
+            trace_icd_runtime_failure("submit2-command-pnext-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
@@ -15187,10 +15226,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
             rc = VK_ERROR_INITIALIZATION_FAILED;
             break;
         }
+        rc = validate_submit2_command_buffers(src);
+        if (rc != VK_SUCCESS) break;
         if (src->signalSemaphoreInfoCount > 0 && !src->pSignalSemaphoreInfos) {
             rc = VK_ERROR_INITIALIZATION_FAILED;
             break;
         }
+        rc = validate_submit2_signal_semaphores(src);
+        if (rc != VK_SUCCESS) break;
         if (src->commandBufferInfoCount > 0) {
             VkCommandBuffer *cmds = calloc(src->commandBufferInfoCount, sizeof(*cmds));
             if (!cmds) {
