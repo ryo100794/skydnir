@@ -1264,6 +1264,9 @@ typedef struct {
     PFN_vkCmdDrawIndexedIndirectCount cmd_draw_indexed_indirect_count;
     PFN_vkCmdDispatchBase cmd_dispatch_base;
     PFN_vkCmdPipelineBarrier2 cmd_pipeline_barrier2;
+    PFN_vkGetSemaphoreCounterValue get_semaphore_counter_value;
+    PFN_vkWaitSemaphores wait_semaphores;
+    PFN_vkSignalSemaphore signal_semaphore;
     VkPhysicalDeviceSubgroupProperties subgroup_properties;
     double init_ms;
 } VulkanRuntime;
@@ -11096,6 +11099,24 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     if (!rt->cmd_pipeline_barrier2) {
         rt->cmd_pipeline_barrier2 =
             (PFN_vkCmdPipelineBarrier2)vkGetDeviceProcAddr(rt->device, "vkCmdPipelineBarrier2KHR");
+    }
+    rt->get_semaphore_counter_value =
+        (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(rt->device, "vkGetSemaphoreCounterValue");
+    if (!rt->get_semaphore_counter_value) {
+        rt->get_semaphore_counter_value =
+            (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(rt->device, "vkGetSemaphoreCounterValueKHR");
+    }
+    rt->wait_semaphores =
+        (PFN_vkWaitSemaphores)vkGetDeviceProcAddr(rt->device, "vkWaitSemaphores");
+    if (!rt->wait_semaphores) {
+        rt->wait_semaphores =
+            (PFN_vkWaitSemaphores)vkGetDeviceProcAddr(rt->device, "vkWaitSemaphoresKHR");
+    }
+    rt->signal_semaphore =
+        (PFN_vkSignalSemaphore)vkGetDeviceProcAddr(rt->device, "vkSignalSemaphore");
+    if (!rt->signal_semaphore) {
+        rt->signal_semaphore =
+            (PFN_vkSignalSemaphore)vkGetDeviceProcAddr(rt->device, "vkSignalSemaphoreKHR");
     }
     rt->cmd_begin_rendering =
         (PFN_vkCmdBeginRenderingKHR)vkGetDeviceProcAddr(rt->device, "vkCmdBeginRenderingKHR");
@@ -24896,6 +24917,198 @@ static int collect_executor_fences_from_command(
     return 0;
 }
 
+
+static void print_vulkan_semaphore_result(const char *stage, VkResult result, uint64_t value) {
+    FILE *out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"%s\",\"valid\":true,\"result\":%d,\"value\":%llu}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            stage ? stage : "vulkan-semaphore", (int)result, (unsigned long long)value);
+    fflush(out);
+}
+
+static int handle_vulkan_semaphore_command(const char *cmd) {
+    if (!cmd) return -EINVAL;
+    if (init_vulkan_runtime(&g_vulkan_runtime) != 0 || !g_vulkan_runtime.device) {
+        json_fail("vulkan-semaphore", "Vulkan runtime unavailable");
+        return -ENODEV;
+    }
+    VulkanRuntime *rt = &g_vulkan_runtime;
+    if (strncmp(cmd, "VULKAN_SEMAPHORE_CREATE ", 24) == 0) {
+        const char *cursor = cmd + 24;
+        uint64_t id = 0;
+        uint32_t timeline = 0;
+        uint64_t initial_value = 0;
+        if (parse_u64_token(&cursor, &id) != 0 ||
+            parse_u32_token(&cursor, &timeline) != 0 ||
+            parse_u64_token(&cursor, &initial_value) != 0 || id == 0) {
+            json_fail("vulkan-semaphore-create", "invalid semaphore create command");
+            return -EINVAL;
+        }
+        if (timeline && !rt->enabled_vulkan12.timelineSemaphore) {
+            print_vulkan_semaphore_result("vulkan-semaphore-create", VK_ERROR_FEATURE_NOT_PRESENT, 0);
+            return -EOPNOTSUPP;
+        }
+        VulkanExecutorSubmitSyncEntry *entry = find_executor_submit_sync_entry(id);
+        if (!entry) entry = allocate_executor_submit_sync_entry(id);
+        if (!entry) {
+            json_fail("vulkan-semaphore-create", "semaphore registry full");
+            return -E2BIG;
+        }
+        if (entry->semaphore && (uint8_t)timeline != entry->timeline) {
+            json_fail("vulkan-semaphore-create", "semaphore type mismatch");
+            return -EPROTO;
+        }
+        if (!entry->semaphore) {
+            entry->timeline = timeline ? 1u : 0u;
+            VkSemaphoreTypeCreateInfo type_info;
+            memset(&type_info, 0, sizeof(type_info));
+            type_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+            type_info.semaphoreType = timeline ? VK_SEMAPHORE_TYPE_TIMELINE : VK_SEMAPHORE_TYPE_BINARY;
+            type_info.initialValue = timeline ? initial_value : 0;
+            VkSemaphoreCreateInfo create_info;
+            memset(&create_info, 0, sizeof(create_info));
+            create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+            create_info.pNext = timeline ? &type_info : NULL;
+            VkResult vrc = vkCreateSemaphore(rt->device, &create_info, NULL, &entry->semaphore);
+            if (vrc != VK_SUCCESS) {
+                memset(entry, 0, sizeof(*entry));
+                print_vulkan_semaphore_result("vulkan-semaphore-create", vrc, 0);
+                return -EIO;
+            }
+            entry->last_value = timeline ? initial_value : 0;
+        }
+        print_vulkan_semaphore_result("vulkan-semaphore-create", VK_SUCCESS, entry->last_value);
+        return 0;
+    }
+    if (strncmp(cmd, "VULKAN_SEMAPHORE_DESTROY ", 25) == 0) {
+        const char *cursor = cmd + 25;
+        uint64_t id = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || id == 0) {
+            json_fail("vulkan-semaphore-destroy", "invalid semaphore destroy command");
+            return -EINVAL;
+        }
+        VulkanExecutorSubmitSyncEntry *entry = find_executor_submit_sync_entry(id);
+        if (entry && entry->semaphore) vkDestroySemaphore(rt->device, entry->semaphore, NULL);
+        if (entry) memset(entry, 0, sizeof(*entry));
+        print_vulkan_semaphore_result("vulkan-semaphore-destroy", VK_SUCCESS, 0);
+        return 0;
+    }
+    if (strncmp(cmd, "VULKAN_SEMAPHORE_COUNTER ", 25) == 0) {
+        const char *cursor = cmd + 25;
+        uint64_t id = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || id == 0) {
+            json_fail("vulkan-semaphore-counter", "invalid semaphore counter command");
+            return -EINVAL;
+        }
+        VulkanExecutorSubmitSyncEntry *entry = find_executor_submit_sync_entry(id);
+        if (!entry || !entry->semaphore || !entry->timeline) {
+            print_vulkan_semaphore_result("vulkan-semaphore-counter", VK_ERROR_FEATURE_NOT_PRESENT, 0);
+            return 0;
+        }
+        uint64_t value = 0;
+        if (!rt->get_semaphore_counter_value) {
+            print_vulkan_semaphore_result("vulkan-semaphore-counter", VK_ERROR_FEATURE_NOT_PRESENT, 0);
+            return 0;
+        }
+        VkResult vrc = rt->get_semaphore_counter_value(rt->device, entry->semaphore, &value);
+        if (vrc == VK_SUCCESS) entry->last_value = value;
+        print_vulkan_semaphore_result("vulkan-semaphore-counter", vrc, value);
+        return 0;
+    }
+    if (strncmp(cmd, "VULKAN_SEMAPHORE_SIGNAL ", 24) == 0) {
+        const char *cursor = cmd + 24;
+        uint64_t id = 0;
+        uint64_t value = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || parse_u64_token(&cursor, &value) != 0 || id == 0) {
+            json_fail("vulkan-semaphore-signal", "invalid semaphore signal command");
+            return -EINVAL;
+        }
+        VulkanExecutorSubmitSyncEntry *entry = find_executor_submit_sync_entry(id);
+        if (!entry || !entry->semaphore || !entry->timeline) {
+            print_vulkan_semaphore_result("vulkan-semaphore-signal", VK_ERROR_FEATURE_NOT_PRESENT, 0);
+            return 0;
+        }
+        VkSemaphoreSignalInfo info;
+        memset(&info, 0, sizeof(info));
+        info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
+        info.semaphore = entry->semaphore;
+        info.value = value;
+        if (!rt->signal_semaphore) {
+            print_vulkan_semaphore_result("vulkan-semaphore-signal", VK_ERROR_FEATURE_NOT_PRESENT, 0);
+            return 0;
+        }
+        VkResult vrc = rt->signal_semaphore(rt->device, &info);
+        if (vrc == VK_SUCCESS) entry->last_value = value;
+        print_vulkan_semaphore_result("vulkan-semaphore-signal", vrc, entry->last_value);
+        return vrc == VK_SUCCESS ? 0 : -EIO;
+    }
+    if (strncmp(cmd, "VULKAN_SEMAPHORE_WAIT ", 22) == 0) {
+        const char *cursor = cmd + 22;
+        uint32_t wait_any = 0;
+        uint64_t timeout_ns = 0;
+        uint32_t semaphore_count = 0;
+        if (parse_u32_token(&cursor, &wait_any) != 0 ||
+            parse_u64_token(&cursor, &timeout_ns) != 0 ||
+            parse_u32_token(&cursor, &semaphore_count) != 0 ||
+            semaphore_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+            json_fail("vulkan-semaphore-wait", "invalid semaphore wait command");
+            return -EINVAL;
+        }
+        VkSemaphore semaphores[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        uint64_t values[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        VulkanExecutorSubmitSyncEntry *entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        memset(semaphores, 0, sizeof(semaphores));
+        memset(values, 0, sizeof(values));
+        memset(entries, 0, sizeof(entries));
+        for (uint32_t i = 0; i < semaphore_count; ++i) {
+            uint64_t id = 0;
+            uint64_t value = 0;
+            if (parse_u64_token(&cursor, &id) != 0 || parse_u64_token(&cursor, &value) != 0 || id == 0) {
+                json_fail("vulkan-semaphore-wait", "invalid semaphore wait pair");
+                return -EINVAL;
+            }
+            VulkanExecutorSubmitSyncEntry *entry = find_executor_submit_sync_entry(id);
+            if (!entry || !entry->semaphore || !entry->timeline) {
+                json_fail("vulkan-semaphore-wait", "unknown timeline semaphore");
+                return -ENOENT;
+            }
+            entries[i] = entry;
+            semaphores[i] = entry->semaphore;
+            values[i] = value;
+        }
+        VkSemaphoreWaitInfo info;
+        memset(&info, 0, sizeof(info));
+        info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+        info.flags = wait_any ? VK_SEMAPHORE_WAIT_ANY_BIT : 0;
+        info.semaphoreCount = semaphore_count;
+        info.pSemaphores = semaphore_count ? semaphores : NULL;
+        info.pValues = semaphore_count ? values : NULL;
+        if (!rt->wait_semaphores || !rt->get_semaphore_counter_value) {
+            print_vulkan_semaphore_result("vulkan-semaphore-wait", VK_ERROR_FEATURE_NOT_PRESENT, 0);
+            return 0;
+        }
+        VkResult vrc = rt->wait_semaphores(rt->device, &info, timeout_ns);
+        uint64_t max_value = 0;
+        if (vrc == VK_SUCCESS) {
+            for (uint32_t i = 0; i < semaphore_count; ++i) {
+                uint64_t observed = 0;
+                VkResult src = rt->get_semaphore_counter_value(rt->device, semaphores[i], &observed);
+                if (src == VK_SUCCESS) {
+                    entries[i]->last_value = observed;
+                    if (max_value < observed) max_value = observed;
+                }
+            }
+        }
+        print_vulkan_semaphore_result("vulkan-semaphore-wait", vrc, max_value);
+        return (vrc == VK_SUCCESS || vrc == VK_TIMEOUT) ? 0 : -EIO;
+    }
+    return -EINVAL;
+}
+
 static int handle_vulkan_fence_command(const char *cmd) {
     if (!cmd) return -EINVAL;
     if (init_vulkan_runtime(&g_vulkan_runtime) != 0 || !g_vulkan_runtime.device) {
@@ -26007,6 +26220,8 @@ static int serve_socket(const char *path) {
                     (void)run_vector_add_3fd(passed_fds[0], passed_fds[1], passed_fds[2], n, GPU_API_AUTO);
                     passed_fds[0] = passed_fds[1] = passed_fds[2] = -1;
                 }
+            } else if (strncmp(cmd, "VULKAN_SEMAPHORE_", 17) == 0) {
+                (void)handle_vulkan_semaphore_command(cmd);
             } else if (strncmp(cmd, "VULKAN_FENCE_", 13) == 0) {
                 (void)handle_vulkan_fence_command(cmd);
             } else if (strncmp(cmd, "VULKAN_DISPATCH_V2 ", 19) == 0 ||

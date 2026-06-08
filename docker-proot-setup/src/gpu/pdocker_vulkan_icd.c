@@ -400,6 +400,7 @@ struct PdockerVkFence {
 typedef struct PdockerVkSemaphore {
     bool signaled;
     bool timeline;
+    bool executor_tracked;
     uint64_t value;
     uint64_t semaphore_id;
 } PdockerVkSemaphore;
@@ -2181,13 +2182,28 @@ static int parse_executor_json_result(const char *line, int fallback) {
     return (int)value;
 }
 
+static uint64_t parse_executor_json_u64_key(const char *line, const char *key, uint64_t fallback) {
+    if (!line || !key) return fallback;
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
+    const char *p = strstr(line, pattern);
+    if (!p) return fallback;
+    p += strlen(pattern);
+    char *end = NULL;
+    unsigned long long value = strtoull(p, &end, 10);
+    if (end == p) return fallback;
+    return (uint64_t)value;
+}
+
 static int send_executor_text_command(
         const char *command,
         int *out_result,
-        bool *out_signaled) {
+        bool *out_signaled,
+        uint64_t *out_value) {
     if (!command || !command[0]) return -EINVAL;
     if (out_result) *out_result = VK_ERROR_UNKNOWN;
     if (out_signaled) *out_signaled = false;
+    if (out_value) *out_value = 0;
     int socket_fd = connect_queue();
     if (socket_fd < 0) return socket_fd;
     int rc = 0;
@@ -2214,9 +2230,121 @@ static int send_executor_text_command(
         } else {
             if (out_result) *out_result = parse_executor_json_result(line, VK_SUCCESS);
             if (out_signaled) *out_signaled = strstr(line, "\"signaled\":true") != NULL;
+            if (out_value) *out_value = parse_executor_json_u64_key(line, "value", 0);
         }
     }
     close(socket_fd);
+    return rc;
+}
+
+
+static int send_executor_semaphore_create(PdockerVkSemaphore *sem) {
+    if (!sem || sem->semaphore_id == 0) return -EINVAL;
+    char cmd[160];
+    snprintf(cmd, sizeof(cmd), "VULKAN_SEMAPHORE_CREATE %llu %u %llu\n",
+             (unsigned long long)sem->semaphore_id,
+             sem->timeline ? 1u : 0u,
+             (unsigned long long)sem->value);
+    int result = VK_ERROR_UNKNOWN;
+    uint64_t value = 0;
+    int rc = send_executor_text_command(cmd, &result, NULL, &value);
+    if (rc == 0 && result == VK_SUCCESS) {
+        sem->executor_tracked = true;
+        if (sem->timeline) sem->value = value;
+        sem->signaled = sem->timeline ? (sem->value > 0) : false;
+    }
+    return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
+}
+
+static int send_executor_semaphore_destroy(PdockerVkSemaphore *sem) {
+    if (!sem || !sem->executor_tracked || sem->semaphore_id == 0) return 0;
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "VULKAN_SEMAPHORE_DESTROY %llu\n", (unsigned long long)sem->semaphore_id);
+    int result = VK_ERROR_UNKNOWN;
+    int rc = send_executor_text_command(cmd, &result, NULL, NULL);
+    sem->executor_tracked = false;
+    return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
+}
+
+static int send_executor_semaphore_counter(PdockerVkSemaphore *sem, uint64_t *out_value, VkResult *out_result) {
+    if (!sem || !sem->executor_tracked || sem->semaphore_id == 0) {
+        if (out_value) *out_value = sem ? sem->value : 0;
+        if (out_result) *out_result = sem && sem->timeline ? VK_SUCCESS : VK_ERROR_FEATURE_NOT_PRESENT;
+        return 0;
+    }
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "VULKAN_SEMAPHORE_COUNTER %llu\n", (unsigned long long)sem->semaphore_id);
+    int result = VK_ERROR_UNKNOWN;
+    uint64_t value = 0;
+    int rc = send_executor_text_command(cmd, &result, NULL, &value);
+    if (rc == 0) {
+        if (result == VK_SUCCESS) sem->value = value;
+        if (out_value) *out_value = value;
+        if (out_result) *out_result = (VkResult)result;
+    }
+    return rc;
+}
+
+static int send_executor_semaphore_signal(PdockerVkSemaphore *sem, uint64_t value, VkResult *out_result) {
+    if (!sem || !sem->executor_tracked || sem->semaphore_id == 0) return -ENOENT;
+    char cmd[160];
+    snprintf(cmd, sizeof(cmd), "VULKAN_SEMAPHORE_SIGNAL %llu %llu\n",
+             (unsigned long long)sem->semaphore_id,
+             (unsigned long long)value);
+    int result = VK_ERROR_UNKNOWN;
+    uint64_t observed = 0;
+    int rc = send_executor_text_command(cmd, &result, NULL, &observed);
+    if (rc == 0) {
+        if (result == VK_SUCCESS) {
+            sem->value = observed;
+            sem->signaled = sem->timeline ? (sem->value > 0) : true;
+        }
+        if (out_result) *out_result = (VkResult)result;
+    }
+    return rc;
+}
+
+static int append_semaphore_wait_pairs(char *cmd, size_t cap, size_t *off, const VkSemaphoreWaitInfo *pWaitInfo) {
+    if (!cmd || !off || !pWaitInfo) return -EINVAL;
+    for (uint32_t i = 0; i < pWaitInfo->semaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = pWaitInfo->pSemaphores ? (PdockerVkSemaphore *)pWaitInfo->pSemaphores[i] : NULL;
+        uint64_t value = pWaitInfo->pValues ? pWaitInfo->pValues[i] : 0;
+        if (!sem || !sem->executor_tracked || !sem->timeline || sem->semaphore_id == 0) return -EINVAL;
+        int n = snprintf(cmd + *off, cap - *off, " %llu %llu",
+                         (unsigned long long)sem->semaphore_id,
+                         (unsigned long long)value);
+        if (n <= 0 || (size_t)n >= cap - *off) return -E2BIG;
+        *off += (size_t)n;
+    }
+    if (*off + 2 > cap) return -E2BIG;
+    cmd[(*off)++] = '\n';
+    cmd[*off] = '\0';
+    return 0;
+}
+
+static int send_executor_semaphore_wait(const VkSemaphoreWaitInfo *pWaitInfo, uint64_t timeout, VkResult *out_result) {
+    if (!pWaitInfo) return -EINVAL;
+    size_t cap = 96u + (size_t)pWaitInfo->semaphoreCount * 48u;
+    char *cmd = (char *)calloc(1, cap);
+    if (!cmd) return -ENOMEM;
+    uint32_t wait_any = (pWaitInfo->flags & VK_SEMAPHORE_WAIT_ANY_BIT) ? 1u : 0u;
+    size_t off = (size_t)snprintf(cmd, cap, "VULKAN_SEMAPHORE_WAIT %u %llu %u",
+                                  wait_any,
+                                  (unsigned long long)timeout,
+                                  pWaitInfo->semaphoreCount);
+    int rc = (off >= cap) ? -E2BIG : append_semaphore_wait_pairs(cmd, cap, &off, pWaitInfo);
+    int result = VK_ERROR_UNKNOWN;
+    if (rc == 0) rc = send_executor_text_command(cmd, &result, NULL, NULL);
+    if (rc == 0) {
+        if (result == VK_SUCCESS) {
+            for (uint32_t i = 0; i < pWaitInfo->semaphoreCount; ++i) {
+                PdockerVkSemaphore *sem = (PdockerVkSemaphore *)pWaitInfo->pSemaphores[i];
+                if (sem && sem->timeline && sem->value < pWaitInfo->pValues[i]) sem->value = pWaitInfo->pValues[i];
+            }
+        }
+        if (out_result) *out_result = (VkResult)result;
+    }
+    free(cmd);
     return rc;
 }
 
@@ -2227,7 +2355,7 @@ static int send_executor_fence_create(PdockerVkFence *fence, uint32_t initial_si
              (unsigned long long)fence->fence_id, initial_signaled ? 1u : 0u);
     int result = VK_ERROR_UNKNOWN;
     bool signaled = false;
-    int rc = send_executor_text_command(cmd, &result, &signaled);
+    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
     if (rc == 0 && result == VK_SUCCESS) {
         fence->executor_tracked = true;
         fence->signaled = signaled;
@@ -2240,7 +2368,7 @@ static int send_executor_fence_destroy(PdockerVkFence *fence) {
     char cmd[128];
     snprintf(cmd, sizeof(cmd), "VULKAN_FENCE_DESTROY %llu\n", (unsigned long long)fence->fence_id);
     int result = VK_ERROR_UNKNOWN;
-    int rc = send_executor_text_command(cmd, &result, NULL);
+    int rc = send_executor_text_command(cmd, &result, NULL, NULL);
     fence->executor_tracked = false;
     return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
 }
@@ -2267,7 +2395,7 @@ static int send_executor_fence_reset(uint32_t fenceCount, const VkFence *pFences
     size_t off = (size_t)snprintf(cmd, cap, "VULKAN_FENCE_RESET %u", fenceCount);
     int rc = (off >= cap) ? -E2BIG : append_fence_ids(cmd, cap, &off, fenceCount, pFences);
     int result = VK_ERROR_UNKNOWN;
-    if (rc == 0) rc = send_executor_text_command(cmd, &result, NULL);
+    if (rc == 0) rc = send_executor_text_command(cmd, &result, NULL, NULL);
     if (rc == 0 && result == VK_SUCCESS) {
         for (uint32_t i = 0; i < fenceCount; ++i) {
             PdockerVkFence *fence = (PdockerVkFence *)pFences[i];
@@ -2289,7 +2417,7 @@ static int send_executor_fence_status(PdockerVkFence *fence, VkResult *out_resul
     snprintf(cmd, sizeof(cmd), "VULKAN_FENCE_STATUS %llu\n", (unsigned long long)fence->fence_id);
     int result = VK_ERROR_UNKNOWN;
     bool signaled = false;
-    int rc = send_executor_text_command(cmd, &result, &signaled);
+    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
     if (rc == 0) {
         fence->signaled = signaled;
         if (out_result) *out_result = (VkResult)result;
@@ -2321,7 +2449,7 @@ static int send_executor_fence_wait(
     int rc = (off >= cap) ? -E2BIG : append_fence_ids(cmd, cap, &off, fenceCount, pFences);
     int result = VK_ERROR_UNKNOWN;
     bool signaled = false;
-    if (rc == 0) rc = send_executor_text_command(cmd, &result, &signaled);
+    if (rc == 0) rc = send_executor_text_command(cmd, &result, &signaled, NULL);
     if (rc == 0) {
         if (result == VK_SUCCESS) {
             if (waitAll) {
@@ -16498,10 +16626,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
     }
     PdockerVkSemaphore *sem = pdocker_alloc_handle(sizeof(*sem));
     if (!sem) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    memset(sem, 0, sizeof(*sem));
     sem->timeline = timeline;
     sem->value = initial_value;
     sem->signaled = timeline ? (initial_value > 0) : false;
     sem->semaphore_id = next_vulkan_object_generation();
+    if (bridge_available()) {
+        if (send_executor_semaphore_create(sem) != 0) {
+            free(sem);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+    }
     *pSemaphore = (VkSemaphore)sem;
     return VK_SUCCESS;
 }
@@ -16512,6 +16647,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySemaphore(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
+    PdockerVkSemaphore *sem = (PdockerVkSemaphore *)semaphore;
+    if (sem) (void)send_executor_semaphore_destroy(sem);
     free((void *)semaphore);
 }
 VKAPI_ATTR VkResult VKAPI_CALL vkGetSemaphoreCounterValue(
@@ -16521,6 +16658,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetSemaphoreCounterValue(
     (void)device;
     PdockerVkSemaphore *sem = (PdockerVkSemaphore *)semaphore;
     if (!sem || !pValue || !sem->timeline) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (sem->executor_tracked) {
+        VkResult result = VK_ERROR_UNKNOWN;
+        uint64_t value = 0;
+        if (send_executor_semaphore_counter(sem, &value, &result) == 0) {
+            if (result == VK_SUCCESS) *pValue = value;
+            return result;
+        }
+        return VK_ERROR_DEVICE_LOST;
+    }
     *pValue = sem->value;
     return VK_SUCCESS;
 }
@@ -16539,6 +16685,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores(
     if (pWaitInfo->semaphoreCount > 0 && (!pWaitInfo->pSemaphores || !pWaitInfo->pValues)) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    bool executor_waitable = bridge_available();
+    for (uint32_t i = 0; executor_waitable && i < pWaitInfo->semaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = (PdockerVkSemaphore *)pWaitInfo->pSemaphores[i];
+        executor_waitable = sem && sem->executor_tracked && sem->timeline;
+    }
+    if (executor_waitable) {
+        VkResult result = VK_ERROR_UNKNOWN;
+        if (send_executor_semaphore_wait(pWaitInfo, timeout, &result) == 0) return result;
+        return VK_ERROR_DEVICE_LOST;
+    }
     uint64_t start_ns = monotonic_ns();
     do {
         if (timeline_semaphore_wait_satisfied(pWaitInfo)) return VK_SUCCESS;
@@ -16554,6 +16710,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkSignalSemaphore(
     if (!pSignalInfo) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkSemaphore *sem = (PdockerVkSemaphore *)pSignalInfo->semaphore;
     if (!sem || !sem->timeline) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (sem->executor_tracked) {
+        VkResult result = VK_ERROR_UNKNOWN;
+        if (send_executor_semaphore_signal(sem, pSignalInfo->value, &result) == 0) return result;
+        return VK_ERROR_DEVICE_LOST;
+    }
     semaphore_complete_signal(sem, pSignalInfo->value);
     return VK_SUCCESS;
 }

@@ -4725,6 +4725,65 @@ class GpuAbiContractTest(unittest.TestCase):
             icd.index("send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count)"),
         )
 
+    def test_vulkan_semaphore_lifecycle_is_executor_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+
+        for marker in [
+            "handle_vulkan_semaphore_command",
+            "VULKAN_SEMAPHORE_CREATE",
+            "VULKAN_SEMAPHORE_DESTROY",
+            "VULKAN_SEMAPHORE_COUNTER",
+            "VULKAN_SEMAPHORE_SIGNAL",
+            "VULKAN_SEMAPHORE_WAIT",
+            "print_vulkan_semaphore_result",
+            "find_executor_submit_sync_entry",
+            "allocate_executor_submit_sync_entry",
+            "vkCreateSemaphore(rt->device, &create_info, NULL, &entry->semaphore)",
+            "type_info.initialValue = timeline ? initial_value : 0;",
+            "vkDestroySemaphore(rt->device, entry->semaphore, NULL)",
+            "rt->get_semaphore_counter_value(rt->device, entry->semaphore, &value)",
+            "rt->signal_semaphore(rt->device, &info)",
+            "rt->wait_semaphores(rt->device, &info, timeout_ns)",
+            "vkGetDeviceProcAddr(rt->device, \"vkGetSemaphoreCounterValue\")",
+            "vkGetDeviceProcAddr(rt->device, \"vkWaitSemaphores\")",
+            "vkGetDeviceProcAddr(rt->device, \"vkSignalSemaphore\")",
+            "strncmp(cmd, \"VULKAN_SEMAPHORE_\", 17) == 0",
+        ]:
+            self.assertIn(marker, executor)
+
+        for marker in [
+            "bool executor_tracked;",
+            "send_executor_semaphore_create",
+            "send_executor_semaphore_destroy",
+            "send_executor_semaphore_counter",
+            "send_executor_semaphore_signal",
+            "send_executor_semaphore_wait",
+            "append_semaphore_wait_pairs",
+            "VULKAN_SEMAPHORE_CREATE %llu %u %llu",
+            "VULKAN_SEMAPHORE_DESTROY %llu",
+            "VULKAN_SEMAPHORE_COUNTER %llu",
+            "VULKAN_SEMAPHORE_SIGNAL %llu %llu",
+            "VULKAN_SEMAPHORE_WAIT %u %llu %u",
+            "parse_executor_json_u64_key",
+            "send_executor_semaphore_create(sem)",
+            "send_executor_semaphore_destroy(sem)",
+            "send_executor_semaphore_counter(sem, &value, &result)",
+            "send_executor_semaphore_wait(pWaitInfo, timeout, &result)",
+            "send_executor_semaphore_signal(sem, pSignalInfo->value, &result)",
+        ]:
+            self.assertIn(marker, icd)
+
+        create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroySemaphore", 1
+        )[0]
+        self.assertIn("bridge_available()", create_body)
+        self.assertIn("send_executor_semaphore_create(sem)", create_body)
+        wait_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkSignalSemaphore", 1
+        )[0]
+        self.assertIn("executor_waitable = sem && sem->executor_tracked && sem->timeline;", wait_body)
+
     def test_vulkan_fence_lifecycle_is_executor_backed(self):
         executor = GPU_EXECUTOR.read_text()
         icd = VULKAN_ICD.read_text()
