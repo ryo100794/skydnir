@@ -9421,6 +9421,10 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceSparseImageFormatProperties(
     *pPropertyCount = 0;
 }
 
+static VkQueueFlags pdocker_vk_advertised_queue_flags(void) {
+    return VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(
         VkPhysicalDevice physicalDevice,
         uint32_t *pQueueFamilyPropertyCount,
@@ -9433,7 +9437,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(
     }
     if (*pQueueFamilyPropertyCount >= 1) {
         memset(&pQueueFamilyProperties[0], 0, sizeof(pQueueFamilyProperties[0]));
-        pQueueFamilyProperties[0].queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
+        pQueueFamilyProperties[0].queueFlags = pdocker_vk_advertised_queue_flags();
         pQueueFamilyProperties[0].queueCount = 2;
         pQueueFamilyProperties[0].timestampValidBits = 64;
         pQueueFamilyProperties[0].minImageTransferGranularity.width = 1;
@@ -9455,7 +9459,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2(
     }
     if (*pQueueFamilyPropertyCount >= 1) {
         memset(&pQueueFamilyProperties[0].queueFamilyProperties, 0, sizeof(pQueueFamilyProperties[0].queueFamilyProperties));
-        pQueueFamilyProperties[0].queueFamilyProperties.queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
+        pQueueFamilyProperties[0].queueFamilyProperties.queueFlags = pdocker_vk_advertised_queue_flags();
         pQueueFamilyProperties[0].queueFamilyProperties.queueCount = 2;
         pQueueFamilyProperties[0].queueFamilyProperties.timestampValidBits = 64;
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.width = 1;

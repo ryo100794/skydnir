@@ -3963,6 +3963,23 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cmd->graphics_unsupported = true;", push_body)
 
 
+
+    def test_vulkan_queue_family_advertises_graphics_for_graphics_passthrough(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("pdocker_vk_advertised_queue_flags", icd)
+        self.assertIn("VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT", icd)
+        qf_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2", 1
+        )[0]
+        qf2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties", 1
+        )[0]
+        self.assertIn("queueFlags = pdocker_vk_advertised_queue_flags();", qf_body)
+        self.assertIn("queueFlags = pdocker_vk_advertised_queue_flags();", qf2_body)
+        self.assertNotIn("queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT", qf_body)
+        self.assertNotIn("queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT", qf2_body)
+
+
     def test_vulkan_command_recording_overflow_fails_closed(self):
         icd = VULKAN_ICD.read_text()
         for marker in [
