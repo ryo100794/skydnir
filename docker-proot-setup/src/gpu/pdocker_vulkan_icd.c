@@ -15146,11 +15146,39 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
                          pImageMemoryBarriers);
 }
 
+static bool dependency_info_has_unsupported_pnext(const VkDependencyInfo *info) {
+    if (!info) return false;
+    if (info->pNext) return true;
+    if (info->memoryBarrierCount && !info->pMemoryBarriers) return true;
+    if (info->pMemoryBarriers) {
+        for (uint32_t i = 0; i < info->memoryBarrierCount; ++i) {
+            if (info->pMemoryBarriers[i].pNext) return true;
+        }
+    }
+    if (info->bufferMemoryBarrierCount && !info->pBufferMemoryBarriers) return true;
+    if (info->pBufferMemoryBarriers) {
+        for (uint32_t i = 0; i < info->bufferMemoryBarrierCount; ++i) {
+            if (info->pBufferMemoryBarriers[i].pNext) return true;
+        }
+    }
+    if (info->imageMemoryBarrierCount && !info->pImageMemoryBarriers) return true;
+    if (info->pImageMemoryBarriers) {
+        for (uint32_t i = 0; i < info->imageMemoryBarrierCount; ++i) {
+            if (info->pImageMemoryBarriers[i].pNext) return true;
+        }
+    }
+    return false;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
         VkCommandBuffer commandBuffer,
         const VkDependencyInfo *pDependencyInfo) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd) return;
+    if (dependency_info_has_unsupported_pnext(pDependencyInfo)) {
+        cmd->graphics_unsupported = true;
+        return;
+    }
     VkDependencyFlags dependency_flags = pDependencyInfo ? pDependencyInfo->dependencyFlags : 0;
     if ((dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT) != 0) {
         cmd->graphics_unsupported = true;
@@ -15233,7 +15261,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         VkEvent event,
         const VkDependencyInfo *pDependencyInfo) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    if (pDependencyInfo && pDependencyInfo->pNext) {
+    if (dependency_info_has_unsupported_pnext(pDependencyInfo)) {
         if (cmd) cmd->graphics_unsupported = true;
         return;
     }

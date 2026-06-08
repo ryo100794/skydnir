@@ -4240,7 +4240,7 @@ class GpuAbiContractTest(unittest.TestCase):
         set_event2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2", 1
         )[0]
-        self.assertIn("pDependencyInfo && pDependencyInfo->pNext", set_event2_body)
+        self.assertIn("dependency_info_has_unsupported_pnext(pDependencyInfo)", set_event2_body)
         self.assertIn("cmd->graphics_unsupported = true", set_event2_body)
         self.assertIn("dependency_info_has_supported_barrier_payload(pDependencyInfo)", set_event2_body)
         self.assertIn("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)", set_event2_body)
@@ -4414,6 +4414,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pDependencyInfo->pImageMemoryBarriers", barrier2_body)
         self.assertIn("const VkImageMemoryBarrier2 *b", barrier2_body)
         self.assertIn("record_image_barrier_op(commandBuffer", barrier2_body)
+        self.assertIn("dependency_info_has_unsupported_pnext", icd)
+        self.assertIn("if (info->pNext) return true;", icd)
+        self.assertIn("info->memoryBarrierCount && !info->pMemoryBarriers", icd)
+        self.assertIn("info->bufferMemoryBarrierCount && !info->pBufferMemoryBarriers", icd)
+        self.assertIn("info->imageMemoryBarrierCount && !info->pImageMemoryBarriers", icd)
+        self.assertIn("info->pMemoryBarriers[i].pNext", icd)
+        self.assertIn("info->pBufferMemoryBarriers[i].pNext", icd)
+        self.assertIn("info->pImageMemoryBarriers[i].pNext", icd)
+        self.assertIn("dependency_info_has_unsupported_pnext(pDependencyInfo)", barrier2_body)
+        self.assertIn("cmd->graphics_unsupported = true;", barrier2_body)
+        self.assertLess(barrier2_body.index("dependency_info_has_unsupported_pnext(pDependencyInfo)"), barrier2_body.index("VkDependencyFlags dependency_flags"))
         self.assertIn("VkDependencyFlags dependency_flags", barrier2_body)
         self.assertIn("dependency_flags & ~VK_DEPENDENCY_BY_REGION_BIT", barrier2_body)
         self.assertIn("record.flags = dependency_flags & VK_DEPENDENCY_BY_REGION_BIT", barrier2_body)
