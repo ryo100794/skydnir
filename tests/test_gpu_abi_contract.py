@@ -3849,6 +3849,30 @@ class GpuAbiContractTest(unittest.TestCase):
 
 
 
+    def test_vulkan_descriptor_copy_is_typed_and_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        update_body = icd.split(
+            "VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets", 1
+        )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[0]
+        for marker in [
+            "static bool descriptor_copy_slot_compatible",
+            "descriptor_slot_object_matches_type",
+            "src_type != dst_type",
+            "slot->descriptor_type != type",
+            "descriptor_type_requires_image_view(type) && !slot->image_view",
+            "descriptor_type_requires_sampler(type) && !slot->sampler",
+            "slot->dynamic == descriptor_type_is_dynamic(type)",
+            "slot->buffer && !slot->image_view && !slot->sampler",
+        ]:
+            self.assertIn(marker, icd)
+        self.assertIn("descriptor copy type/object mismatch", update_body)
+        self.assertIn("dst->unsupported_descriptor_type = true;", update_body)
+        self.assertIn("descriptor_copy_slot_compatible(src, src_binding, src_array", update_body)
+        self.assertLess(
+            update_body.index("descriptor_copy_slot_compatible(src, src_binding, src_array"),
+            update_body.index("dst->storage_buffers[dst_binding][dst_array] ="),
+        )
+
     def test_vulkan_v4_transport_supports_uniform_buffer_descriptor_type(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER", icd)

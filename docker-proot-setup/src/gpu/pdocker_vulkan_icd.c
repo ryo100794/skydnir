@@ -10259,6 +10259,44 @@ static bool descriptor_type_is_dynamic(VkDescriptorType type) {
            type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
 }
 
+static bool descriptor_slot_object_matches_type(
+        const PdockerVkDescriptorBinding *slot,
+        VkDescriptorType type) {
+    if (!slot || slot->descriptor_type != type) return false;
+    if (descriptor_type_supported_by_v4_transport(type)) {
+        return slot->buffer && !slot->image_view && !slot->sampler &&
+               slot->dynamic == descriptor_type_is_dynamic(type);
+    }
+    if (descriptor_type_supported_by_v5_object_transport(type)) {
+        if (slot->buffer) return false;
+        if (descriptor_type_requires_image_view(type) && !slot->image_view) return false;
+        if (descriptor_type_requires_sampler(type) && !slot->sampler) return false;
+        return true;
+    }
+    return false;
+}
+
+static bool descriptor_copy_slot_compatible(
+        const PdockerVkDescriptorSet *src,
+        uint32_t src_binding,
+        uint32_t src_array,
+        const PdockerVkDescriptorSet *dst,
+        uint32_t dst_binding,
+        uint32_t dst_array,
+        VkDescriptorType *type_out) {
+    (void)dst_array;
+    if (!src || !dst || !src->layout || !dst->layout) return false;
+    if (src_binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS ||
+        dst_binding >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return false;
+    VkDescriptorType src_type = src->layout->storage_binding_types[src_binding];
+    VkDescriptorType dst_type = dst->layout->storage_binding_types[dst_binding];
+    if (src_type != dst_type) return false;
+    const PdockerVkDescriptorBinding *slot = &src->storage_buffers[src_binding][src_array];
+    if (!descriptor_slot_object_matches_type(slot, src_type)) return false;
+    if (type_out) *type_out = src_type;
+    return true;
+}
+
 static bool descriptor_set_layout_compatible(
         const PdockerVkDescriptorSetLayout *expected,
         const PdockerVkDescriptorSetLayout *actual) {
@@ -10599,6 +10637,7 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
             continue;
         }
         bool descriptor_copy_valid = true;
+        bool descriptor_copy_type_valid = true;
         for (uint32_t j = 0; j < c->descriptorCount; ++j) {
             uint32_t src_binding = 0;
             uint32_t src_array = 0;
@@ -10611,11 +10650,27 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(
                 descriptor_copy_valid = false;
                 break;
             }
+            if (!descriptor_copy_slot_compatible(src, src_binding, src_array,
+                                                 dst, dst_binding, dst_array, NULL)) {
+                descriptor_copy_type_valid = false;
+                break;
+            }
         }
         if (!descriptor_copy_valid) {
             dst->unsupported_descriptor_array = true;
             fprintf(stderr,
                     "pdocker-vulkan-icd: descriptor linear copy src_binding=%u src_array=%u dst_binding=%u dst_array=%u count=%u exceeds transport/layout shape\n",
+                    c->srcBinding,
+                    c->srcArrayElement,
+                    c->dstBinding,
+                    c->dstArrayElement,
+                    c->descriptorCount);
+            continue;
+        }
+        if (!descriptor_copy_type_valid) {
+            dst->unsupported_descriptor_type = true;
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: descriptor copy type/object mismatch src_binding=%u src_array=%u dst_binding=%u dst_array=%u count=%u\n",
                     c->srcBinding,
                     c->srcArrayElement,
                     c->dstBinding,
