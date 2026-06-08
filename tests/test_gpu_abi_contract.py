@@ -7776,6 +7776,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps->limits.maxComputeSharedMemorySize", properties_body)
         self.assertIn("caps->limits.maxStorageBufferRange < transport_max_storage_range", properties_body)
         self.assertIn("caps->limits.maxBoundDescriptorSets < PDOCKER_VK_MAX_DESCRIPTOR_SETS", properties_body)
+        self.assertIn("pdocker_vk_max_per_set_descriptors", icd)
+        self.assertIn("PDOCKER_VK_MAX_STORAGE_BUFFERS * PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS", icd)
+        self.assertNotIn("maxPerSetDescriptors = 1024", icd)
+        self.assertIn("p->maxPerSetDescriptors = pdocker_vk_max_per_set_descriptors();", icd)
         pnext_body = icd.split("static void fill_pnext_features", 1)[1].split(
             "static uint64_t feature_mask_from_base_features", 1
         )[0]

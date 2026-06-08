@@ -8750,13 +8750,17 @@ static uint32_t advertised_subgroup_size(void) {
     return 32;
 }
 
+static uint32_t pdocker_vk_max_per_set_descriptors(void) {
+    return PDOCKER_VK_MAX_STORAGE_BUFFERS * PDOCKER_VK_MAX_DESCRIPTOR_ARRAY_ELEMENTS;
+}
+
 static void fill_pnext_properties(void *pNext) {
     for (void *node = pNext; node;) {
         PdockerVkStructHeader header = read_vk_struct_header(node);
         switch (header.sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES: {
                 VkPhysicalDeviceMaintenance3Properties *p = (VkPhysicalDeviceMaintenance3Properties *)node;
-                p->maxPerSetDescriptors = 1024;
+                p->maxPerSetDescriptors = pdocker_vk_max_per_set_descriptors();
                 p->maxMemoryAllocationSize = pdocker_vulkan_max_buffer_size();
                 break;
             }
@@ -8794,7 +8798,7 @@ static void fill_pnext_properties(void *pNext) {
                 p->subgroupQuadOperationsInAllStages = VK_FALSE;
                 p->maxMultiviewViewCount = 1;
                 p->maxMultiviewInstanceIndex = 1;
-                p->maxPerSetDescriptors = 1024;
+                p->maxPerSetDescriptors = pdocker_vk_max_per_set_descriptors();
                 p->maxMemoryAllocationSize = pdocker_vulkan_max_buffer_size();
                 break;
             }
