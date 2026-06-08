@@ -3962,6 +3962,31 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op->value_hash = fnv1a64_bytes(pValues, size);", push_body)
         self.assertIn("cmd->graphics_unsupported = true;", push_body)
 
+
+    def test_vulkan_command_recording_overflow_fails_closed(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "bool recording_failed;",
+            "const char *recording_failure_reason;",
+            "command_buffer_mark_recording_failed",
+            "command-op-record-overflow",
+            "graphics-command-record-overflow",
+            "cmd->recording_failed = false;",
+            "cmd->recording_failure_reason = NULL;",
+        ]:
+            self.assertIn(marker, icd)
+        end_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkEndCommandBuffer", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandBuffer", 1
+        )[0]
+        self.assertIn("cmd->recording_failed", end_body)
+        self.assertIn("trace_icd_runtime_failure", end_body)
+        submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1
+        )[0]
+        self.assertIn("cmd->recording_failed", submit_body)
+        self.assertIn("command-recording-failed", submit_body)
+
+
     def test_vulkan_binary_semaphores_are_not_noop_in_v4_submit(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("typedef struct PdockerVkSemaphore", icd)

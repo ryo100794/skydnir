@@ -848,6 +848,8 @@ typedef struct {
     uint32_t push_constant_op_count;
     bool has_dispatch;
     bool unsupported_descriptor_set_layout;
+    bool recording_failed;
+    const char *recording_failure_reason;
     bool dynamic_rendering_active;
     bool inherited_rendering_active;
     bool render_pass_active;
@@ -947,12 +949,19 @@ static void safe_copy_cstr(char *dst, size_t dst_size, const char *src) {
     snprintf(dst, dst_size, "%s", src);
 }
 
+static void command_buffer_mark_recording_failed(PdockerVkCommandBuffer *cmd, const char *reason) {
+    if (!cmd) return;
+    cmd->recording_failed = true;
+    cmd->recording_failure_reason = reason ? reason : "command-recording-failed";
+}
+
 static bool append_graphics_command_record(
         PdockerVkCommandBuffer *cmd,
         const PdockerVkGraphicsCommandRecord *record) {
     if (!cmd || !record) return false;
     if (cmd->graphics_command_op_count >= PDOCKER_VK_MAX_GRAPHICS_COMMAND_OPS) {
         cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "graphics-command-record-overflow");
         return false;
     }
     PdockerVkGraphicsCommandRecord stored = *record;
@@ -1065,6 +1074,7 @@ static void clear_recorded_command_ops(PdockerVkCommandBuffer *cmd) {
 static bool append_command_op(PdockerVkCommandBuffer *cmd, const PdockerVkCommandOp *op) {
     if (!cmd || !op) return false;
     if (cmd->command_op_count >= PDOCKER_VK_MAX_COMMAND_OPS) {
+        command_buffer_mark_recording_failed(cmd, "command-op-record-overflow");
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
             fprintf(stderr,
                     "pdocker-vulkan-icd: command buffer op list full max=%u type=%u\n",
@@ -11771,6 +11781,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
     cmd->dispatch_x = 0;
     cmd->dispatch_y = 0;
     cmd->dispatch_z = 0;
+    cmd->recording_failed = false;
+    cmd->recording_failure_reason = NULL;
     memset(cmd->push_constants, 0, sizeof(cmd->push_constants));
     cmd->push_constant_size = 0;
     cmd->has_dispatch = false;
@@ -11809,7 +11821,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkEndCommandBuffer(VkCommandBuffer commandBuffer) {
-    return commandBuffer ? VK_SUCCESS : VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
+    if (cmd->recording_failed) {
+        trace_icd_runtime_failure(cmd->recording_failure_reason ? cmd->recording_failure_reason :
+                                  "command-recording-failed",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkResetCommandBuffer(
@@ -14894,6 +14914,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; ++j) {
             PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)pSubmits[i].pCommandBuffers[j];
             if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
+            if (cmd->recording_failed) {
+                trace_icd_runtime_failure(cmd->recording_failure_reason ? cmd->recording_failure_reason :
+                                          "command-recording-failed",
+                                          VK_ERROR_FEATURE_NOT_PRESENT);
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+            }
             if (cmd->unsupported_descriptor_set_layout) {
                 trace_icd_runtime_failure("descriptor-set-index-out-of-range",
                                           VK_ERROR_FEATURE_NOT_PRESENT);
