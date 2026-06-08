@@ -407,6 +407,8 @@ typedef struct PdockerVkSemaphore {
 
 struct PdockerVkEvent {
     bool signaled;
+    bool executor_tracked;
+    uint64_t event_id;
 };
 
 struct PdockerVkQueryPool {
@@ -2237,6 +2239,76 @@ static int send_executor_text_command(
     return rc;
 }
 
+
+
+static int send_executor_event_create(PdockerVkEvent *event) {
+    if (!event || event->event_id == 0) return -EINVAL;
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "VULKAN_EVENT_CREATE %llu\n", (unsigned long long)event->event_id);
+    int result = VK_ERROR_UNKNOWN;
+    bool signaled = false;
+    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
+    if (rc == 0 && result == VK_SUCCESS) {
+        event->executor_tracked = true;
+        event->signaled = signaled;
+    }
+    return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
+}
+
+static int send_executor_event_destroy(PdockerVkEvent *event) {
+    if (!event || !event->executor_tracked || event->event_id == 0) return 0;
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "VULKAN_EVENT_DESTROY %llu\n", (unsigned long long)event->event_id);
+    int result = VK_ERROR_UNKNOWN;
+    int rc = send_executor_text_command(cmd, &result, NULL, NULL);
+    event->executor_tracked = false;
+    return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
+}
+
+static int send_executor_event_status(PdockerVkEvent *event, VkResult *out_result) {
+    if (!event || !event->executor_tracked || event->event_id == 0) {
+        if (out_result) *out_result = event && event->signaled ? VK_EVENT_SET : VK_EVENT_RESET;
+        return 0;
+    }
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "VULKAN_EVENT_STATUS %llu\n", (unsigned long long)event->event_id);
+    int result = VK_ERROR_UNKNOWN;
+    bool signaled = false;
+    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
+    if (rc == 0) {
+        event->signaled = signaled;
+        if (out_result) *out_result = (VkResult)result;
+    }
+    return rc;
+}
+
+static int send_executor_event_set(PdockerVkEvent *event, VkResult *out_result) {
+    if (!event || !event->executor_tracked || event->event_id == 0) return -ENOENT;
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "VULKAN_EVENT_SET %llu\n", (unsigned long long)event->event_id);
+    int result = VK_ERROR_UNKNOWN;
+    bool signaled = false;
+    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
+    if (rc == 0) {
+        event->signaled = signaled;
+        if (out_result) *out_result = (VkResult)result;
+    }
+    return rc;
+}
+
+static int send_executor_event_reset(PdockerVkEvent *event, VkResult *out_result) {
+    if (!event || !event->executor_tracked || event->event_id == 0) return -ENOENT;
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "VULKAN_EVENT_RESET %llu\n", (unsigned long long)event->event_id);
+    int result = VK_ERROR_UNKNOWN;
+    bool signaled = false;
+    int rc = send_executor_text_command(cmd, &result, &signaled, NULL);
+    if (rc == 0) {
+        event->signaled = signaled;
+        if (out_result) *out_result = (VkResult)result;
+    }
+    return rc;
+}
 
 static int send_executor_semaphore_create(PdockerVkSemaphore *sem) {
     if (!sem || sem->semaphore_id == 0) return -EINVAL;
@@ -15856,12 +15928,20 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateEvent(
         const VkAllocationCallbacks *pAllocator,
         VkEvent *pEvent) {
     (void)device;
-    (void)pCreateInfo;
     (void)pAllocator;
     if (!pEvent) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pCreateInfo && pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     PdockerVkEvent *event = pdocker_alloc_handle(sizeof(*event));
     if (!event) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    memset(event, 0, sizeof(*event));
     event->signaled = false;
+    event->event_id = next_vulkan_object_generation();
+    if (bridge_available()) {
+        if (send_executor_event_create(event) != 0) {
+            free(event);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+    }
     *pEvent = (VkEvent)event;
     return VK_SUCCESS;
 }
@@ -15872,6 +15952,8 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyEvent(
         const VkAllocationCallbacks *pAllocator) {
     (void)device;
     (void)pAllocator;
+    PdockerVkEvent *e = (PdockerVkEvent *)event;
+    if (e) (void)send_executor_event_destroy(e);
     free((void *)event);
 }
 
@@ -15881,6 +15963,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetEventStatus(
     (void)device;
     PdockerVkEvent *e = (PdockerVkEvent *)event;
     if (!e) return VK_EVENT_RESET;
+    if (e->executor_tracked) {
+        VkResult result = VK_EVENT_RESET;
+        if (send_executor_event_status(e, &result) == 0) return result;
+        return VK_ERROR_DEVICE_LOST;
+    }
     return e->signaled ? VK_EVENT_SET : VK_EVENT_RESET;
 }
 
@@ -15890,6 +15977,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkSetEvent(
     (void)device;
     PdockerVkEvent *e = (PdockerVkEvent *)event;
     if (!e) return VK_ERROR_INITIALIZATION_FAILED;
+    if (e->executor_tracked) {
+        VkResult result = VK_ERROR_UNKNOWN;
+        if (send_executor_event_set(e, &result) == 0) return result;
+        return VK_ERROR_DEVICE_LOST;
+    }
     e->signaled = true;
     return VK_SUCCESS;
 }
@@ -15900,6 +15992,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetEvent(
     (void)device;
     PdockerVkEvent *e = (PdockerVkEvent *)event;
     if (!e) return VK_ERROR_INITIALIZATION_FAILED;
+    if (e->executor_tracked) {
+        VkResult result = VK_ERROR_UNKNOWN;
+        if (send_executor_event_reset(e, &result) == 0) return result;
+        return VK_ERROR_DEVICE_LOST;
+    }
     e->signaled = false;
     return VK_SUCCESS;
 }

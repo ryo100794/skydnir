@@ -24744,8 +24744,18 @@ typedef struct {
     VkFence fence;
 } VulkanExecutorSubmitFenceEntry;
 
+#define PDOCKER_GPU_EXECUTOR_EVENT_REGISTRY_SLOTS 128u
+
+typedef struct {
+    uint8_t used;
+    uint8_t signaled;
+    uint64_t id;
+    VkEvent event;
+} VulkanExecutorEventEntry;
+
 static VulkanExecutorSubmitSyncEntry g_submit_sync_registry[PDOCKER_GPU_EXECUTOR_SUBMIT_SYNC_REGISTRY_SLOTS];
 static VulkanExecutorSubmitFenceEntry g_submit_fence_registry[PDOCKER_GPU_EXECUTOR_SUBMIT_FENCE_REGISTRY_SLOTS];
+static VulkanExecutorEventEntry g_event_registry[PDOCKER_GPU_EXECUTOR_EVENT_REGISTRY_SLOTS];
 
 static VulkanExecutorSubmitSyncEntry *find_executor_submit_sync_entry(uint64_t id) {
     if (id == 0) return NULL;
@@ -24807,6 +24817,30 @@ static int resolve_executor_submit_sync_semaphore(
     return 0;
 }
 
+
+
+static VulkanExecutorEventEntry *find_executor_event_entry(uint64_t id) {
+    if (id == 0) return NULL;
+    for (uint32_t i = 0; i < PDOCKER_GPU_EXECUTOR_EVENT_REGISTRY_SLOTS; ++i) {
+        if (g_event_registry[i].used && g_event_registry[i].id == id) {
+            return &g_event_registry[i];
+        }
+    }
+    return NULL;
+}
+
+static VulkanExecutorEventEntry *allocate_executor_event_entry(uint64_t id) {
+    if (id == 0) return NULL;
+    for (uint32_t i = 0; i < PDOCKER_GPU_EXECUTOR_EVENT_REGISTRY_SLOTS; ++i) {
+        if (!g_event_registry[i].used) {
+            memset(&g_event_registry[i], 0, sizeof(g_event_registry[i]));
+            g_event_registry[i].used = 1;
+            g_event_registry[i].id = id;
+            return &g_event_registry[i];
+        }
+    }
+    return NULL;
+}
 
 static VulkanExecutorSubmitFenceEntry *find_executor_submit_fence_entry(uint64_t id) {
     if (id == 0) return NULL;
@@ -24917,6 +24951,121 @@ static int collect_executor_fences_from_command(
     return 0;
 }
 
+
+
+static void print_vulkan_event_result(const char *stage, VkResult result, int signaled) {
+    FILE *out = json_out();
+    fprintf(out,
+            "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"stage\":\"%s\",\"valid\":true,\"result\":%d,\"signaled\":%s}\n",
+            PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+            PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+            stage ? stage : "vulkan-event", (int)result, signaled ? "true" : "false");
+    fflush(out);
+}
+
+static int handle_vulkan_event_command(const char *cmd) {
+    if (!cmd) return -EINVAL;
+    if (init_vulkan_runtime(&g_vulkan_runtime) != 0 || !g_vulkan_runtime.device) {
+        json_fail("vulkan-event", "Vulkan runtime unavailable");
+        return -ENODEV;
+    }
+    VulkanRuntime *rt = &g_vulkan_runtime;
+    if (strncmp(cmd, "VULKAN_EVENT_CREATE ", 20) == 0) {
+        const char *cursor = cmd + 20;
+        uint64_t id = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || id == 0) {
+            json_fail("vulkan-event-create", "invalid event create command");
+            return -EINVAL;
+        }
+        VulkanExecutorEventEntry *entry = find_executor_event_entry(id);
+        if (!entry) entry = allocate_executor_event_entry(id);
+        if (!entry) {
+            json_fail("vulkan-event-create", "event registry full");
+            return -E2BIG;
+        }
+        if (!entry->event) {
+            VkEventCreateInfo create_info;
+            memset(&create_info, 0, sizeof(create_info));
+            create_info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+            VkResult vrc = vkCreateEvent(rt->device, &create_info, NULL, &entry->event);
+            if (vrc != VK_SUCCESS) {
+                memset(entry, 0, sizeof(*entry));
+                print_vulkan_event_result("vulkan-event-create", vrc, 0);
+                return -EIO;
+            }
+            entry->signaled = 0;
+        }
+        print_vulkan_event_result("vulkan-event-create", VK_SUCCESS, entry->signaled);
+        return 0;
+    }
+    if (strncmp(cmd, "VULKAN_EVENT_DESTROY ", 21) == 0) {
+        const char *cursor = cmd + 21;
+        uint64_t id = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || id == 0) {
+            json_fail("vulkan-event-destroy", "invalid event destroy command");
+            return -EINVAL;
+        }
+        VulkanExecutorEventEntry *entry = find_executor_event_entry(id);
+        if (entry && entry->event) vkDestroyEvent(rt->device, entry->event, NULL);
+        if (entry) memset(entry, 0, sizeof(*entry));
+        print_vulkan_event_result("vulkan-event-destroy", VK_SUCCESS, 0);
+        return 0;
+    }
+    if (strncmp(cmd, "VULKAN_EVENT_STATUS ", 20) == 0) {
+        const char *cursor = cmd + 20;
+        uint64_t id = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || id == 0) {
+            json_fail("vulkan-event-status", "invalid event status command");
+            return -EINVAL;
+        }
+        VulkanExecutorEventEntry *entry = find_executor_event_entry(id);
+        if (!entry || !entry->event) {
+            json_fail("vulkan-event-status", "unknown event");
+            return -ENOENT;
+        }
+        VkResult vrc = vkGetEventStatus(rt->device, entry->event);
+        entry->signaled = (vrc == VK_EVENT_SET) ? 1u : 0u;
+        print_vulkan_event_result("vulkan-event-status", vrc, entry->signaled);
+        return 0;
+    }
+    if (strncmp(cmd, "VULKAN_EVENT_SET ", 17) == 0) {
+        const char *cursor = cmd + 17;
+        uint64_t id = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || id == 0) {
+            json_fail("vulkan-event-set", "invalid event set command");
+            return -EINVAL;
+        }
+        VulkanExecutorEventEntry *entry = find_executor_event_entry(id);
+        if (!entry || !entry->event) {
+            json_fail("vulkan-event-set", "unknown event");
+            return -ENOENT;
+        }
+        VkResult vrc = vkSetEvent(rt->device, entry->event);
+        if (vrc == VK_SUCCESS) entry->signaled = 1u;
+        print_vulkan_event_result("vulkan-event-set", vrc, entry->signaled);
+        return vrc == VK_SUCCESS ? 0 : -EIO;
+    }
+    if (strncmp(cmd, "VULKAN_EVENT_RESET ", 19) == 0) {
+        const char *cursor = cmd + 19;
+        uint64_t id = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || id == 0) {
+            json_fail("vulkan-event-reset", "invalid event reset command");
+            return -EINVAL;
+        }
+        VulkanExecutorEventEntry *entry = find_executor_event_entry(id);
+        if (!entry || !entry->event) {
+            json_fail("vulkan-event-reset", "unknown event");
+            return -ENOENT;
+        }
+        VkResult vrc = vkResetEvent(rt->device, entry->event);
+        if (vrc == VK_SUCCESS) entry->signaled = 0u;
+        print_vulkan_event_result("vulkan-event-reset", vrc, entry->signaled);
+        return vrc == VK_SUCCESS ? 0 : -EIO;
+    }
+    return -EINVAL;
+}
 
 static void print_vulkan_semaphore_result(const char *stage, VkResult result, uint64_t value) {
     FILE *out = json_out();
@@ -26220,6 +26369,8 @@ static int serve_socket(const char *path) {
                     (void)run_vector_add_3fd(passed_fds[0], passed_fds[1], passed_fds[2], n, GPU_API_AUTO);
                     passed_fds[0] = passed_fds[1] = passed_fds[2] = -1;
                 }
+            } else if (strncmp(cmd, "VULKAN_EVENT_", 13) == 0) {
+                (void)handle_vulkan_event_command(cmd);
             } else if (strncmp(cmd, "VULKAN_SEMAPHORE_", 17) == 0) {
                 (void)handle_vulkan_semaphore_command(cmd);
             } else if (strncmp(cmd, "VULKAN_FENCE_", 13) == 0) {

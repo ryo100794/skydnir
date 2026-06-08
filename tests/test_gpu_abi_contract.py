@@ -4392,6 +4392,59 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record_event_wait_command(commandBuffer, pEvents[i])", icd)
         self.assertIn("event-wait-unsignaled", icd)
 
+    def test_vulkan_event_lifecycle_is_executor_backed(self):
+        executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
+
+        for marker in [
+            "PDOCKER_GPU_EXECUTOR_EVENT_REGISTRY_SLOTS 128u",
+            "VulkanExecutorEventEntry g_event_registry",
+            "find_executor_event_entry",
+            "allocate_executor_event_entry",
+            "handle_vulkan_event_command",
+            "VULKAN_EVENT_CREATE",
+            "VULKAN_EVENT_DESTROY",
+            "VULKAN_EVENT_STATUS",
+            "VULKAN_EVENT_SET",
+            "VULKAN_EVENT_RESET",
+            "print_vulkan_event_result",
+            "vkCreateEvent(rt->device, &create_info, NULL, &entry->event)",
+            "vkDestroyEvent(rt->device, entry->event, NULL)",
+            "vkGetEventStatus(rt->device, entry->event)",
+            "vkSetEvent(rt->device, entry->event)",
+            "vkResetEvent(rt->device, entry->event)",
+            "strncmp(cmd, \"VULKAN_EVENT_\", 13) == 0",
+        ]:
+            self.assertIn(marker, executor)
+
+        for marker in [
+            "bool executor_tracked;",
+            "uint64_t event_id;",
+            "send_executor_event_create",
+            "send_executor_event_destroy",
+            "send_executor_event_status",
+            "send_executor_event_set",
+            "send_executor_event_reset",
+            "VULKAN_EVENT_CREATE %llu",
+            "VULKAN_EVENT_DESTROY %llu",
+            "VULKAN_EVENT_STATUS %llu",
+            "VULKAN_EVENT_SET %llu",
+            "VULKAN_EVENT_RESET %llu",
+            "event->event_id = next_vulkan_object_generation();",
+            "send_executor_event_create(event)",
+            "send_executor_event_destroy(e)",
+            "send_executor_event_status(e, &result)",
+            "send_executor_event_set(e, &result)",
+            "send_executor_event_reset(e, &result)",
+        ]:
+            self.assertIn(marker, icd)
+
+        status_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkGetEventStatus", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkSetEvent", 1
+        )[0]
+        self.assertIn("if (e->executor_tracked)", status_body)
+        self.assertLess(status_body.index("send_executor_event_status(e, &result)"), status_body.index("return e->signaled ? VK_EVENT_SET : VK_EVENT_RESET;"))
+
     def test_vulkan_icd_supports_synchronization2_submit_and_barrier_api(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME", icd)
