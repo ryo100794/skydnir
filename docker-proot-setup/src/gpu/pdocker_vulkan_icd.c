@@ -15190,17 +15190,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
     return VK_SUCCESS;
 }
 
-static void free_submit_info_arrays(VkSubmitInfo *submits, uint32_t submitCount) {
-    if (!submits) return;
-    for (uint32_t i = 0; i < submitCount; ++i) {
-        free((void *)submits[i].pWaitSemaphores);
-        free((void *)submits[i].pWaitDstStageMask);
-        free((void *)submits[i].pCommandBuffers);
-        free((void *)submits[i].pSignalSemaphores);
-    }
-    free(submits);
-}
-
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         VkQueue queue,
         uint32_t submitCount,
@@ -15208,54 +15197,51 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         VkFence fence) {
     if (submitCount == 0) return vkQueueSubmit(queue, 0, NULL, fence);
     if (!pSubmits) return VK_ERROR_INITIALIZATION_FAILED;
-    VkSubmitInfo *legacy_submits = calloc(submitCount, sizeof(*legacy_submits));
-    if (!legacy_submits) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    VkResult rc = VK_SUCCESS;
+    PdockerVkFence *submit_fence = (PdockerVkFence *)fence;
+    if (submit_fence) submit_fence->signaled = false;
     for (uint32_t i = 0; i < submitCount; ++i) {
         const VkSubmitInfo2 *src = &pSubmits[i];
-        VkSubmitInfo *dst = &legacy_submits[i];
-        dst->sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        dst->commandBufferCount = src->commandBufferInfoCount;
-        if (src->waitSemaphoreInfoCount > 0 && !src->pWaitSemaphoreInfos) {
-            rc = VK_ERROR_INITIALIZATION_FAILED;
-            break;
+        if (src->flags != 0) {
+            trace_icd_runtime_failure("submit2-flags-unsupported",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        rc = validate_submit2_wait_semaphores(src);
-        if (rc != VK_SUCCESS) break;
+        if (src->waitSemaphoreInfoCount > 0 && !src->pWaitSemaphoreInfos) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        VkResult rc = validate_submit2_wait_semaphores(src);
+        if (rc != VK_SUCCESS) return rc;
         if (src->commandBufferInfoCount > 0 && !src->pCommandBufferInfos) {
-            rc = VK_ERROR_INITIALIZATION_FAILED;
-            break;
+            return VK_ERROR_INITIALIZATION_FAILED;
         }
         rc = validate_submit2_command_buffers(src);
-        if (rc != VK_SUCCESS) break;
+        if (rc != VK_SUCCESS) return rc;
         if (src->signalSemaphoreInfoCount > 0 && !src->pSignalSemaphoreInfos) {
-            rc = VK_ERROR_INITIALIZATION_FAILED;
-            break;
+            return VK_ERROR_INITIALIZATION_FAILED;
         }
         rc = validate_submit2_signal_semaphores(src);
-        if (rc != VK_SUCCESS) break;
+        if (rc != VK_SUCCESS) return rc;
+
+        VkSubmitInfo legacy_submit;
+        memset(&legacy_submit, 0, sizeof(legacy_submit));
+        legacy_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        legacy_submit.commandBufferCount = src->commandBufferInfoCount;
+        VkCommandBuffer *cmds = NULL;
         if (src->commandBufferInfoCount > 0) {
-            VkCommandBuffer *cmds = calloc(src->commandBufferInfoCount, sizeof(*cmds));
-            if (!cmds) {
-                rc = VK_ERROR_OUT_OF_HOST_MEMORY;
-                break;
-            }
+            cmds = calloc(src->commandBufferInfoCount, sizeof(*cmds));
+            if (!cmds) return VK_ERROR_OUT_OF_HOST_MEMORY;
             for (uint32_t j = 0; j < src->commandBufferInfoCount; ++j) {
                 cmds[j] = src->pCommandBufferInfos[j].commandBuffer;
             }
-            dst->pCommandBuffers = cmds;
+            legacy_submit.pCommandBuffers = cmds;
         }
+        rc = vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE);
+        free(cmds);
+        if (rc != VK_SUCCESS) return rc;
+        complete_submit2_semaphores(src);
     }
-    if (rc == VK_SUCCESS) {
-        rc = vkQueueSubmit(queue, submitCount, legacy_submits, fence);
-        if (rc == VK_SUCCESS) {
-            for (uint32_t i = 0; i < submitCount; ++i) {
-                complete_submit2_semaphores(&pSubmits[i]);
-            }
-        }
-    }
-    free_submit_info_arrays(legacy_submits, submitCount);
-    return rc;
+    if (submit_fence) submit_fence->signaled = true;
+    return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {

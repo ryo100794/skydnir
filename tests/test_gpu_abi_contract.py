@@ -4033,7 +4033,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("validate_submit2_wait_semaphores(src)", queue_submit2_body)
         self.assertIn("validate_submit2_command_buffers(src)", queue_submit2_body)
         self.assertIn("validate_submit2_signal_semaphores(src)", queue_submit2_body)
-        self.assertIn("complete_submit2_semaphores(&pSubmits[i])", queue_submit2_body)
+        self.assertIn("complete_submit2_semaphores(src)", queue_submit2_body)
         for marker in [
             "submit2-pnext-unsupported",
             "submit2-wait-pnext-unsupported",
@@ -4324,8 +4324,11 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(f'MAP_ALIAS("{name}KHR", {name});', icd)
         self.assertIn("VkSubmitInfo2", icd)
         self.assertIn("VkDependencyInfo", icd)
-        self.assertIn("free_submit_info_arrays", icd)
-        self.assertIn("vkQueueSubmit(queue, submitCount, legacy_submits, fence)", icd)
+        self.assertNotIn("free_submit_info_arrays", icd)
+        self.assertIn("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)", icd)
+        self.assertIn("complete_submit2_semaphores(src)", icd)
+        self.assertLess(icd.index("vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE)"), icd.index("complete_submit2_semaphores(src)"))
+        self.assertIn("submit2-flags-unsupported", icd)
         set_event2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2", 1
         )[0]
