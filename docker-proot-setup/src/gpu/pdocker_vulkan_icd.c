@@ -15221,12 +15221,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2(
     (void)append_command_op(cmd, &op);
 }
 
-static bool dependency_info_has_recorded_barriers(const VkDependencyInfo *info) {
+static bool dependency_info_has_supported_barrier_payload(const VkDependencyInfo *info) {
     return info && (info->dependencyFlags != 0 ||
                     info->memoryBarrierCount != 0 ||
                     info->bufferMemoryBarrierCount != 0 ||
-                    info->imageMemoryBarrierCount != 0 ||
-                    info->pNext != NULL);
+                    info->imageMemoryBarrierCount != 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
@@ -15234,9 +15233,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         VkEvent event,
         const VkDependencyInfo *pDependencyInfo) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
-    if (dependency_info_has_recorded_barriers(pDependencyInfo)) {
+    if (pDependencyInfo && pDependencyInfo->pNext) {
         if (cmd) cmd->graphics_unsupported = true;
         return;
+    }
+    if (dependency_info_has_supported_barrier_payload(pDependencyInfo)) {
+        vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo);
     }
     record_event_command(commandBuffer, event, true);
 }

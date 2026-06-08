@@ -4240,9 +4240,11 @@ class GpuAbiContractTest(unittest.TestCase):
         set_event2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2", 1
         )[0]
-        self.assertIn("dependency_info_has_recorded_barriers(pDependencyInfo)", set_event2_body)
+        self.assertIn("pDependencyInfo && pDependencyInfo->pNext", set_event2_body)
         self.assertIn("cmd->graphics_unsupported = true", set_event2_body)
-        self.assertNotIn("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)", set_event2_body)
+        self.assertIn("dependency_info_has_supported_barrier_payload(pDependencyInfo)", set_event2_body)
+        self.assertIn("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)", set_event2_body)
+        self.assertLess(set_event2_body.index("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)"), set_event2_body.index("record_event_command(commandBuffer, event, true)"))
         wait_events2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2", 1)[1].split(
             "static bool query_range_valid", 1
         )[0]
