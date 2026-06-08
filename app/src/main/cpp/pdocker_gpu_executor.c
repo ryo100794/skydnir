@@ -10867,6 +10867,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_vulkan12.shaderFloat16 || rt->physical_float16_int8.shaderFloat16;
     enabled_vulkan12.shaderInt8 =
         rt->physical_vulkan12.shaderInt8 || rt->physical_float16_int8.shaderInt8;
+    enabled_vulkan12.timelineSemaphore = rt->physical_vulkan12.timelineSemaphore;
     enabled_storage16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
     enabled_storage16.storageBuffer16BitAccess = rt->physical_storage16.storageBuffer16BitAccess;
     enabled_storage16.uniformAndStorageBuffer16BitAccess = rt->physical_storage16.uniformAndStorageBuffer16BitAccess;
@@ -10899,7 +10900,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
          enabled_vulkan12.uniformAndStorageBuffer8BitAccess ||
          enabled_vulkan12.storagePushConstant8 ||
          enabled_vulkan12.shaderFloat16 ||
-         enabled_vulkan12.shaderInt8)) {
+         enabled_vulkan12.shaderInt8 ||
+         enabled_vulkan12.timelineSemaphore)) {
         enabled_vulkan12.pNext = device_features_pnext;
         device_features_pnext = &enabled_vulkan12;
     }
@@ -11005,6 +11007,15 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
             (rt->api_version >= VK_API_VERSION_1_3 ||
              enabled_extension_count > dynamic_rendering_before);
     }
+#ifdef VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
+    if (enabled_vulkan12.timelineSemaphore && rt->api_version < VK_API_VERSION_1_2) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+    }
+#endif
     const uint32_t storage_class_before = enabled_extension_count;
     append_vulkan_device_extension(rt->physical_device,
                                    enabled_extensions,
@@ -24693,36 +24704,173 @@ cleanup:
     return rc;
 }
 
+#define PDOCKER_GPU_EXECUTOR_SUBMIT_SYNC_REGISTRY_SLOTS 128u
+
+typedef struct {
+    uint8_t used;
+    uint8_t timeline;
+    uint64_t id;
+    uint64_t last_value;
+    VkSemaphore semaphore;
+} VulkanExecutorSubmitSyncEntry;
+
+static VulkanExecutorSubmitSyncEntry g_submit_sync_registry[PDOCKER_GPU_EXECUTOR_SUBMIT_SYNC_REGISTRY_SLOTS];
+
+static VulkanExecutorSubmitSyncEntry *find_executor_submit_sync_entry(uint64_t id) {
+    if (id == 0) return NULL;
+    for (uint32_t i = 0; i < PDOCKER_GPU_EXECUTOR_SUBMIT_SYNC_REGISTRY_SLOTS; ++i) {
+        if (g_submit_sync_registry[i].used && g_submit_sync_registry[i].id == id) {
+            return &g_submit_sync_registry[i];
+        }
+    }
+    return NULL;
+}
+
+static VulkanExecutorSubmitSyncEntry *allocate_executor_submit_sync_entry(uint64_t id) {
+    if (id == 0) return NULL;
+    for (uint32_t i = 0; i < PDOCKER_GPU_EXECUTOR_SUBMIT_SYNC_REGISTRY_SLOTS; ++i) {
+        if (!g_submit_sync_registry[i].used) {
+            memset(&g_submit_sync_registry[i], 0, sizeof(g_submit_sync_registry[i]));
+            g_submit_sync_registry[i].used = 1;
+            g_submit_sync_registry[i].id = id;
+            return &g_submit_sync_registry[i];
+        }
+    }
+    return NULL;
+}
+
+static int resolve_executor_submit_sync_semaphore(
+        VulkanRuntime *rt,
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync,
+        int create_if_missing,
+        VkSemaphore *out) {
+    if (!rt || !sync || !out || sync->semaphore_id == 0) return -EINVAL;
+    *out = VK_NULL_HANDLE;
+    const int timeline = (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) != 0;
+    VulkanExecutorSubmitSyncEntry *entry = find_executor_submit_sync_entry(sync->semaphore_id);
+    if (entry) {
+        if ((int)entry->timeline != timeline) return -EPROTO;
+        *out = entry->semaphore;
+        return *out ? 0 : -EPROTO;
+    }
+    if (!create_if_missing) return -ENOENT;
+    if (timeline && !rt->enabled_vulkan12.timelineSemaphore) return -EOPNOTSUPP;
+    entry = allocate_executor_submit_sync_entry(sync->semaphore_id);
+    if (!entry) return -E2BIG;
+    entry->timeline = (uint8_t)timeline;
+    VkSemaphoreTypeCreateInfo type_info;
+    memset(&type_info, 0, sizeof(type_info));
+    type_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    type_info.semaphoreType = timeline ? VK_SEMAPHORE_TYPE_TIMELINE : VK_SEMAPHORE_TYPE_BINARY;
+    type_info.initialValue = 0;
+    VkSemaphoreCreateInfo create_info;
+    memset(&create_info, 0, sizeof(create_info));
+    create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    create_info.pNext = timeline ? &type_info : NULL;
+    VkResult vrc = vkCreateSemaphore(rt->device, &create_info, NULL, &entry->semaphore);
+    if (vrc != VK_SUCCESS) {
+        memset(entry, 0, sizeof(*entry));
+        return -EIO;
+    }
+    *out = entry->semaphore;
+    return 0;
+}
+
 static int submit_vulkan_graphics_v6_command_buffer(
         VulkanRuntime *rt,
+        const VulkanGraphicsV6FrameView *view,
         VkCommandBuffer command_buffer) {
-    if (!rt || !command_buffer || !rt->device || !rt->graphics_queue) return -EINVAL;
+    if (!rt || !view || !view->header || !command_buffer || !rt->device || !rt->graphics_queue) return -EINVAL;
     VkFence fence = VK_NULL_HANDLE;
     VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VkResult vrc = vkCreateFence(rt->device, &fci, NULL, &fence);
     if (vrc != VK_SUCCESS) return -EIO;
+    VkSemaphore wait_semaphores[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    VkSemaphore signal_semaphores[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    VkPipelineStageFlags wait_stages[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    uint64_t wait_values[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    uint64_t signal_values[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    uint32_t wait_count = 0;
+    uint32_t signal_count = 0;
+    int timeline_used = 0;
+    memset(wait_semaphores, 0, sizeof(wait_semaphores));
+    memset(signal_semaphores, 0, sizeof(signal_semaphores));
+    memset(wait_stages, 0, sizeof(wait_stages));
+    memset(wait_values, 0, sizeof(wait_values));
+    memset(signal_values, 0, sizeof(signal_values));
+    if (view->is_v619 && view->header_v619 && view->submit_syncs) {
+        for (uint32_t i = 0; i < view->header_v619->v619.submit_sync_count; ++i) {
+            const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync = &view->submit_syncs[i];
+            if (sync->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT) {
+                if (wait_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+                    vrc = VK_ERROR_TOO_MANY_OBJECTS;
+                    goto submit_fail;
+                }
+                int rc = resolve_executor_submit_sync_semaphore(rt, sync, 0, &wait_semaphores[wait_count]);
+                if (rc != 0) { vrc = VK_ERROR_FEATURE_NOT_PRESENT; goto submit_fail; }
+                wait_stages[wait_count] = sync->stage_mask
+                    ? (VkPipelineStageFlags)sync->stage_mask
+                    : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+                wait_values[wait_count] = sync->value;
+                if (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) timeline_used = 1;
+                wait_count++;
+            } else if (sync->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL) {
+                if (signal_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+                    vrc = VK_ERROR_TOO_MANY_OBJECTS;
+                    goto submit_fail;
+                }
+                int rc = resolve_executor_submit_sync_semaphore(rt, sync, 1, &signal_semaphores[signal_count]);
+                if (rc != 0) { vrc = VK_ERROR_FEATURE_NOT_PRESENT; goto submit_fail; }
+                signal_values[signal_count] = sync->value;
+                if (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) timeline_used = 1;
+                signal_count++;
+            }
+        }
+    }
+    VkTimelineSemaphoreSubmitInfo timeline_info;
+    memset(&timeline_info, 0, sizeof(timeline_info));
+    timeline_info.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    timeline_info.waitSemaphoreValueCount = wait_count;
+    timeline_info.pWaitSemaphoreValues = wait_count ? wait_values : NULL;
+    timeline_info.signalSemaphoreValueCount = signal_count;
+    timeline_info.pSignalSemaphoreValues = signal_count ? signal_values : NULL;
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = timeline_used ? &timeline_info : NULL,
+        .waitSemaphoreCount = wait_count,
+        .pWaitSemaphores = wait_count ? wait_semaphores : NULL,
+        .pWaitDstStageMask = wait_count ? wait_stages : NULL,
         .commandBufferCount = 1,
         .pCommandBuffers = &command_buffer,
+        .signalSemaphoreCount = signal_count,
+        .pSignalSemaphores = signal_count ? signal_semaphores : NULL,
     };
-    int rc = 0;
     vrc = vkQueueSubmit(rt->graphics_queue, 1, &submit, fence);
-    if (vrc != VK_SUCCESS) {
-        rc = -EIO;
-        goto cleanup;
-    }
+    if (vrc != VK_SUCCESS) goto submit_fail;
     const uint64_t timeout_ns =
         env_timeout_ns("PDOCKER_GPU_GRAPHICS_SUBMIT_TIMEOUT_MS", 30000, 1000, 600000);
     vrc = vkWaitForFences(rt->device, 1, &fence, VK_TRUE, timeout_ns);
     if (vrc == VK_TIMEOUT) {
-        rc = -ETIMEDOUT;
-        goto cleanup;
+        if (fence) vkDestroyFence(rt->device, fence, NULL);
+        return -ETIMEDOUT;
     }
-    if (vrc != VK_SUCCESS) rc = -EIO;
-cleanup:
+    if (vrc != VK_SUCCESS) {
+        if (fence) vkDestroyFence(rt->device, fence, NULL);
+        return -EIO;
+    }
+    if (view->is_v619 && view->header_v619 && view->submit_syncs) {
+        for (uint32_t i = 0; i < view->header_v619->v619.submit_sync_count; ++i) {
+            const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync = &view->submit_syncs[i];
+            if (sync->sync_type != PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL) continue;
+            VulkanExecutorSubmitSyncEntry *entry = find_executor_submit_sync_entry(sync->semaphore_id);
+            if (entry && entry->timeline && entry->last_value < sync->value) entry->last_value = sync->value;
+        }
+    }
     if (fence) vkDestroyFence(rt->device, fence, NULL);
-    return rc;
+    return 0;
+submit_fail:
+    if (fence) vkDestroyFence(rt->device, fence, NULL);
+    return vrc == VK_ERROR_TOO_MANY_OBJECTS ? -E2BIG : -EIO;
 }
 
 static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
@@ -24976,7 +25124,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
-    rc = submit_vulkan_graphics_v6_command_buffer(&g_vulkan_runtime, replay_command_buffer);
+    rc = submit_vulkan_graphics_v6_command_buffer(&g_vulkan_runtime, view, replay_command_buffer);
     if (rc != 0) {
         out = json_out();
         fprintf(out,
