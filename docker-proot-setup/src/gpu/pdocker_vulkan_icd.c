@@ -393,12 +393,14 @@ struct PdockerVkPipeline {
 
 struct PdockerVkFence {
     bool signaled;
+    uint64_t fence_id;
 };
 
 typedef struct PdockerVkSemaphore {
     bool signaled;
     bool timeline;
     uint64_t value;
+    uint64_t semaphore_id;
 } PdockerVkSemaphore;
 
 struct PdockerVkEvent {
@@ -3552,7 +3554,10 @@ static int collect_graphics_descriptor_entries(
     return 0;
 }
 
-static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer *cmd) {
+static int send_recorded_vulkan_graphics_v6_1_frame(
+        const PdockerVkCommandBuffer *cmd,
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
+        size_t submit_sync_count) {
     if (!cmd || cmd->graphics_command_op_count == 0) {
         return send_empty_vulkan_graphics_v6_1_validation_frame();
     }
@@ -3608,6 +3613,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     PdockerGpuVulkanGraphicsV616ClearRectEntry clear_rects[PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_RECTS];
     PdockerGpuVulkanGraphicsV617QueryCommandEntry query_commands[PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS];
     PdockerGpuVulkanGraphicsV618CopyQueryResultEntry copy_query_results[PDOCKER_GPU_VULKAN_GRAPHICS_V618_MAX_COPY_QUERY_RESULTS];
+    PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_syncs[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS];
     memset(pipeline_objects, 0, sizeof(pipeline_objects));
     memset(memory_objects, 0, sizeof(memory_objects));
@@ -3658,6 +3664,18 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     memset(clear_rects, 0, sizeof(clear_rects));
     memset(query_commands, 0, sizeof(query_commands));
     memset(copy_query_results, 0, sizeof(copy_query_results));
+    memset(submit_syncs, 0, sizeof(submit_syncs));
+    if (submit_sync_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+        close(socket_fd);
+        return -E2BIG;
+    }
+    if (submit_sync_count > 0 && !submit_sync_entries) {
+        close(socket_fd);
+        return -EINVAL;
+    }
+    if (submit_sync_count > 0) {
+        memcpy(submit_syncs, submit_sync_entries, submit_sync_count * sizeof(submit_syncs[0]));
+    }
     memset(fds, -1, sizeof(fds));
 
     bool pre_need_v611_buffer_write = false;
@@ -3668,6 +3686,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     bool pre_need_v616_clear_attachments = false;
     bool pre_need_v617_query = false;
     bool pre_need_v618_copy_query = false;
+    const bool need_v619_submit_sync = submit_sync_count > 0;
     {
         for (uint32_t gi = 0; gi < cmd->graphics_command_op_count; ++gi) {
             if (cmd->graphics_command_ops[gi].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS) {
@@ -3683,7 +3702,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                 pre_need_v617_query = true;
                 pre_need_v618_copy_query = true;
             }
-            if (pre_need_v616_clear_attachments && pre_need_v617_query && pre_need_v618_copy_query) {
+            if ((pre_need_v616_clear_attachments && pre_need_v617_query && pre_need_v618_copy_query) || need_v619_submit_sync) {
                 break;
             }
         }
@@ -3725,6 +3744,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
         close(socket_fd);
         return -ENOMEM;
     }
+    PdockerGpuVulkanGraphicsV619FrameHeader *frame_header_v619 =
+        (PdockerGpuVulkanGraphicsV619FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV618FrameHeader *frame_header_v618 =
         (PdockerGpuVulkanGraphicsV618FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV617FrameHeader *frame_header_v617 =
@@ -5256,7 +5277,10 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
 #undef APPEND_INTERLEAVED_GRAPHICS_BUFFER_COPIES
 
     memcpy(header->magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, 8);
-    if (need_v618_copy_query) {
+    if (need_v619_submit_sync) {
+        header->header_size = sizeof(*frame_header_v619);
+        header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR;
+    } else if (need_v618_copy_query) {
         header->header_size = sizeof(*frame_header_v618);
         header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V618_ABI_MINOR;
     } else if (need_v617_query) {
@@ -5315,7 +5339,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     if (!need_v611_buffer_write && !need_v612_clear_color &&
         !need_v613_clear_depth_stencil && !need_v614_resolve_image &&
         !need_v615_blit_image && !need_v616_clear_attachments &&
-        !need_v617_query && !need_v618_copy_query) {
+        !need_v617_query && !need_v618_copy_query && !need_v619_submit_sync) {
         cursor = header->header_size;
     }
     header->command = PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT;
@@ -5372,27 +5396,27 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     frame_header->v61.buffer_barrier_count = (uint32_t)buffer_barrier_count;
     frame_header->v61.buffer_barrier_entry_size = sizeof(PdockerGpuVulkanGraphicsV61BufferBarrierEntry);
     frame_header->v61.buffer_barrier_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V61_BUFFER_BARRIER_SCHEMA_HASH;
-    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v62->v62.specialization_entry_count = (uint32_t)specialization_entry_count;
         frame_header_v62->v62.specialization_entry_size = sizeof(PdockerGpuVulkanGraphicsV62SpecializationEntry);
         frame_header_v62->v62.specialization_entry_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V62_SPECIALIZATION_ENTRY_SCHEMA_HASH;
     }
-    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v63->v63.depth_stencil_state_count = (uint32_t)depth_stencil_state_count;
         frame_header_v63->v63.depth_stencil_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV63DepthStencilStateEntry);
         frame_header_v63->v63.depth_stencil_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V63_DEPTH_STENCIL_STATE_SCHEMA_HASH;
     }
-    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v64->v64.resolve_attachment_count = (uint32_t)resolve_attachment_count;
         frame_header_v64->v64.resolve_attachment_entry_size = sizeof(PdockerGpuVulkanGraphicsV64ResolveAttachmentEntry);
         frame_header_v64->v64.resolve_attachment_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V64_RESOLVE_ATTACHMENT_SCHEMA_HASH;
     }
-    if (need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v65->v65.static_pipeline_state_count = (uint32_t)static_pipeline_state_count;
         frame_header_v65->v65.static_pipeline_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV65StaticPipelineStateEntry);
         frame_header_v65->v65.static_pipeline_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V65_STATIC_PIPELINE_STATE_SCHEMA_HASH;
     }
-    if (need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v66->v66.color_blend_state_count = (uint32_t)color_blend_state_count;
         frame_header_v66->v66.color_blend_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV66ColorBlendStateEntry);
         frame_header_v66->v66.color_blend_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_STATE_SCHEMA_HASH;
@@ -5400,7 +5424,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
         frame_header_v66->v66.color_blend_attachment_entry_size = sizeof(PdockerGpuVulkanGraphicsV66ColorBlendAttachmentEntry);
         frame_header_v66->v66.color_blend_attachment_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V66_COLOR_BLEND_ATTACHMENT_SCHEMA_HASH;
     }
-    if (need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v67->v67.viewport_scissor_state_count = (uint32_t)viewport_scissor_state_count;
         frame_header_v67->v67.viewport_scissor_state_entry_size = sizeof(PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry);
         frame_header_v67->v67.viewport_scissor_state_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V67_VIEWPORT_SCISSOR_STATE_SCHEMA_HASH;
@@ -5411,17 +5435,17 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
         frame_header_v67->v67.scissor_entry_size = sizeof(PdockerGpuVulkanGraphicsV67ScissorEntry);
         frame_header_v67->v67.scissor_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V67_SCISSOR_SCHEMA_HASH;
     }
-    if (need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v68->v68.indirect_draw_count = (uint32_t)indirect_draw_count;
         frame_header_v68->v68.indirect_draw_entry_size = sizeof(PdockerGpuVulkanGraphicsV68IndirectDrawEntry);
         frame_header_v68->v68.indirect_draw_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V68_INDIRECT_DRAW_SCHEMA_HASH;
     }
-    if (need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v69->v69.buffer_copy_count = (uint32_t)buffer_copy_count;
         frame_header_v69->v69.buffer_copy_entry_size = sizeof(PdockerGpuVulkanGraphicsV69BufferCopyEntry);
         frame_header_v69->v69.buffer_copy_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V69_BUFFER_COPY_SCHEMA_HASH;
     }
-    if (need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v610->v610.buffer_image_copy_count = (uint32_t)buffer_image_copy_count;
         frame_header_v610->v610.buffer_image_copy_entry_size = sizeof(PdockerGpuVulkanGraphicsV610BufferImageCopyEntry);
         frame_header_v610->v610.buffer_image_copy_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V610_BUFFER_IMAGE_COPY_SCHEMA_HASH;
@@ -5429,7 +5453,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
         frame_header_v610->v610.image_copy_entry_size = sizeof(PdockerGpuVulkanGraphicsV610ImageCopyEntry);
         frame_header_v610->v610.image_copy_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V610_IMAGE_COPY_SCHEMA_HASH;
     }
-    if (need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v611->v611.fill_buffer_count = (uint32_t)fill_buffer_count;
         frame_header_v611->v611.fill_buffer_entry_size = sizeof(PdockerGpuVulkanGraphicsV611FillBufferEntry);
         frame_header_v611->v611.fill_buffer_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V611_FILL_BUFFER_SCHEMA_HASH;
@@ -5442,27 +5466,27 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
             ? fnv1a64_bytes(frame + update_payload_data_offset, (size_t)update_payload_data_size)
             : 1469598103934665603ull;
     }
-    if (need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v612->v612.clear_color_image_count = (uint32_t)clear_color_image_count;
         frame_header_v612->v612.clear_color_image_entry_size = sizeof(PdockerGpuVulkanGraphicsV612ClearColorImageEntry);
         frame_header_v612->v612.clear_color_image_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V612_CLEAR_COLOR_IMAGE_SCHEMA_HASH;
     }
-    if (need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v613->v613.clear_depth_stencil_image_count = (uint32_t)clear_depth_stencil_image_count;
         frame_header_v613->v613.clear_depth_stencil_image_entry_size = sizeof(PdockerGpuVulkanGraphicsV613ClearDepthStencilImageEntry);
         frame_header_v613->v613.clear_depth_stencil_image_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V613_CLEAR_DEPTH_STENCIL_IMAGE_SCHEMA_HASH;
     }
-    if (need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v614->v614.resolve_image_count = (uint32_t)resolve_image_count;
         frame_header_v614->v614.resolve_image_entry_size = sizeof(PdockerGpuVulkanGraphicsV614ResolveImageEntry);
         frame_header_v614->v614.resolve_image_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V614_RESOLVE_IMAGE_SCHEMA_HASH;
     }
-    if (need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v615->v615.blit_image_count = (uint32_t)blit_image_count;
         frame_header_v615->v615.blit_image_entry_size = sizeof(PdockerGpuVulkanGraphicsV615BlitImageEntry);
         frame_header_v615->v615.blit_image_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V615_BLIT_IMAGE_SCHEMA_HASH;
     }
-    if (need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v616->v616.clear_attachments_command_count = (uint32_t)clear_attachments_command_count;
         frame_header_v616->v616.clear_attachments_command_entry_size = sizeof(PdockerGpuVulkanGraphicsV616ClearAttachmentsCommandEntry);
         frame_header_v616->v616.clear_attachments_command_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V616_CLEAR_ATTACHMENTS_COMMAND_SCHEMA_HASH;
@@ -5473,17 +5497,22 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
         frame_header_v616->v616.clear_rect_entry_size = sizeof(PdockerGpuVulkanGraphicsV616ClearRectEntry);
         frame_header_v616->v616.clear_rect_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V616_CLEAR_RECT_SCHEMA_HASH;
     }
-    if (need_v617_query) {
+    if (need_v617_query || need_v619_submit_sync) {
         frame_header_v617->v617.query_command_count = (uint32_t)query_command_count;
         frame_header_v617->v617.query_command_entry_size = sizeof(PdockerGpuVulkanGraphicsV617QueryCommandEntry);
         frame_header_v617->v617.query_command_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V617_QUERY_COMMAND_SCHEMA_HASH;
         frame_header_v617->v617.query_result_entry_size = sizeof(PdockerGpuVulkanGraphicsV617QueryResultEntry);
         frame_header_v617->v617.query_result_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V617_QUERY_RESULT_SCHEMA_HASH;
     }
-    if (need_v618_copy_query) {
+    if (need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v618->v618.copy_query_result_count = (uint32_t)copy_query_result_count;
         frame_header_v618->v618.copy_query_result_entry_size = sizeof(PdockerGpuVulkanGraphicsV618CopyQueryResultEntry);
         frame_header_v618->v618.copy_query_result_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V618_COPY_QUERY_RESULT_SCHEMA_HASH;
+    }
+    if (need_v619_submit_sync) {
+        frame_header_v619->v619.submit_sync_count = (uint32_t)submit_sync_count;
+        frame_header_v619->v619.submit_sync_entry_size = sizeof(PdockerGpuVulkanGraphicsV619SubmitSyncEntry);
+        frame_header_v619->v619.submit_sync_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V619_SUBMIT_SYNC_SCHEMA_HASH;
     }
 
 #define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
@@ -5534,31 +5563,31 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     APPEND_GRAPHICS_TABLE(buffer_barriers, buffer_barrier_count, sizeof(buffer_barriers[0]),
                           frame_header->v61.buffer_barrier_table_offset,
                           frame_header->v61.buffer_barrier_table_size);
-    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(specialization_entries, specialization_entry_count,
                               sizeof(specialization_entries[0]),
                               frame_header_v62->v62.specialization_entry_table_offset,
                               frame_header_v62->v62.specialization_entry_table_size);
     }
-    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(depth_stencil_states, depth_stencil_state_count,
                               sizeof(depth_stencil_states[0]),
                               frame_header_v63->v63.depth_stencil_state_table_offset,
                               frame_header_v63->v63.depth_stencil_state_table_size);
     }
-    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(resolve_attachments, resolve_attachment_count,
                               sizeof(resolve_attachments[0]),
                               frame_header_v64->v64.resolve_attachment_table_offset,
                               frame_header_v64->v64.resolve_attachment_table_size);
     }
-    if (need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(static_pipeline_states, static_pipeline_state_count,
                               sizeof(static_pipeline_states[0]),
                               frame_header_v65->v65.static_pipeline_state_table_offset,
                               frame_header_v65->v65.static_pipeline_state_table_size);
     }
-    if (need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(color_blend_states, color_blend_state_count,
                               sizeof(color_blend_states[0]),
                               frame_header_v66->v66.color_blend_state_table_offset,
@@ -5568,7 +5597,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                               frame_header_v66->v66.color_blend_attachment_table_offset,
                               frame_header_v66->v66.color_blend_attachment_table_size);
     }
-    if (need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(viewport_scissor_states, viewport_scissor_state_count,
                               sizeof(viewport_scissor_states[0]),
                               frame_header_v67->v67.viewport_scissor_state_table_offset,
@@ -5582,19 +5611,19 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                               frame_header_v67->v67.scissor_table_offset,
                               frame_header_v67->v67.scissor_table_size);
     }
-    if (need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(indirect_draws, indirect_draw_count,
                               sizeof(indirect_draws[0]),
                               frame_header_v68->v68.indirect_draw_table_offset,
                               frame_header_v68->v68.indirect_draw_table_size);
     }
-    if (need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(buffer_copies, buffer_copy_count,
                               sizeof(buffer_copies[0]),
                               frame_header_v69->v69.buffer_copy_table_offset,
                               frame_header_v69->v69.buffer_copy_table_size);
     }
-    if (need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(buffer_image_copies, buffer_image_copy_count,
                               sizeof(buffer_image_copies[0]),
                               frame_header_v610->v610.buffer_image_copy_table_offset,
@@ -5604,7 +5633,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                               frame_header_v610->v610.image_copy_table_offset,
                               frame_header_v610->v610.image_copy_table_size);
     }
-    if (need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(fill_buffers, fill_buffer_count,
                               sizeof(fill_buffers[0]),
                               frame_header_v611->v611.fill_buffer_table_offset,
@@ -5614,31 +5643,31 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                               frame_header_v611->v611.update_buffer_table_offset,
                               frame_header_v611->v611.update_buffer_table_size);
     }
-    if (need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(clear_color_images, clear_color_image_count,
                               sizeof(clear_color_images[0]),
                               frame_header_v612->v612.clear_color_image_table_offset,
                               frame_header_v612->v612.clear_color_image_table_size);
     }
-    if (need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(clear_depth_stencil_images, clear_depth_stencil_image_count,
                               sizeof(clear_depth_stencil_images[0]),
                               frame_header_v613->v613.clear_depth_stencil_image_table_offset,
                               frame_header_v613->v613.clear_depth_stencil_image_table_size);
     }
-    if (need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(resolve_images, resolve_image_count,
                               sizeof(resolve_images[0]),
                               frame_header_v614->v614.resolve_image_table_offset,
                               frame_header_v614->v614.resolve_image_table_size);
     }
-    if (need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(blit_images, blit_image_count,
                               sizeof(blit_images[0]),
                               frame_header_v615->v615.blit_image_table_offset,
                               frame_header_v615->v615.blit_image_table_size);
     }
-    if (need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(clear_attachments_commands, clear_attachments_command_count,
                               sizeof(clear_attachments_commands[0]),
                               frame_header_v616->v616.clear_attachments_command_table_offset,
@@ -5652,17 +5681,23 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                               frame_header_v616->v616.clear_rect_table_offset,
                               frame_header_v616->v616.clear_rect_table_size);
     }
-    if (need_v617_query) {
+    if (need_v617_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(query_commands, query_command_count,
                               sizeof(query_commands[0]),
                               frame_header_v617->v617.query_command_table_offset,
                               frame_header_v617->v617.query_command_table_size);
     }
-    if (need_v618_copy_query) {
+    if (need_v618_copy_query || need_v619_submit_sync) {
         APPEND_GRAPHICS_TABLE(copy_query_results, copy_query_result_count,
                               sizeof(copy_query_results[0]),
                               frame_header_v618->v618.copy_query_result_table_offset,
                               frame_header_v618->v618.copy_query_result_table_size);
+    }
+    if (need_v619_submit_sync) {
+        APPEND_GRAPHICS_TABLE(submit_syncs, submit_sync_count,
+                              sizeof(submit_syncs[0]),
+                              frame_header_v619->v619.submit_sync_table_offset,
+                              frame_header_v619->v619.submit_sync_table_size);
     }
 #undef APPEND_GRAPHICS_TABLE
     frame_header->v61.extension_hash = 1469598103934665603ull;
@@ -5681,27 +5716,27 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
         frame_header->v61.extension_hash, buffer_barriers,
         sizeof(buffer_barriers[0]) * buffer_barrier_count);
-    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v62_specialization || need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v62->v62.specialization_entry_table_hash = fnv1a64_bytes(
             specialization_entries, sizeof(specialization_entries[0]) * specialization_entry_count);
         frame_header_v62->v62.extension_hash = frame_header_v62->v62.specialization_entry_table_hash;
     }
-    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v63_depth_stencil || need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v63->v63.depth_stencil_state_table_hash = fnv1a64_bytes(
             depth_stencil_states, sizeof(depth_stencil_states[0]) * depth_stencil_state_count);
         frame_header_v63->v63.extension_hash = frame_header_v63->v63.depth_stencil_state_table_hash;
     }
-    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v64_resolve_attachment || need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v64->v64.resolve_attachment_table_hash = fnv1a64_bytes(
             resolve_attachments, sizeof(resolve_attachments[0]) * resolve_attachment_count);
         frame_header_v64->v64.extension_hash = frame_header_v64->v64.resolve_attachment_table_hash;
     }
-    if (need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v65_static_pipeline_state || need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v65->v65.static_pipeline_state_table_hash = fnv1a64_bytes(
             static_pipeline_states, sizeof(static_pipeline_states[0]) * static_pipeline_state_count);
         frame_header_v65->v65.extension_hash = frame_header_v65->v65.static_pipeline_state_table_hash;
     }
-    if (need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v66_color_blend_state || need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v66->v66.color_blend_state_table_hash = fnv1a64_bytes(
             color_blend_states, sizeof(color_blend_states[0]) * color_blend_state_count);
         frame_header_v66->v66.color_blend_attachment_table_hash = fnv1a64_bytes(
@@ -5714,7 +5749,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
             frame_header_v66->v66.extension_hash, color_blend_attachments,
             sizeof(color_blend_attachments[0]) * color_blend_attachment_count);
     }
-    if (need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v67_viewport_scissor_state || need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v67->v67.viewport_scissor_state_table_hash = fnv1a64_bytes(
             viewport_scissor_states, sizeof(viewport_scissor_states[0]) * viewport_scissor_state_count);
         frame_header_v67->v67.viewport_table_hash = fnv1a64_bytes(
@@ -5732,17 +5767,17 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
             frame_header_v67->v67.extension_hash, scissor_entries,
             sizeof(scissor_entries[0]) * scissor_entry_count);
     }
-    if (need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v68_indirect_draw || need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v68->v68.indirect_draw_table_hash = fnv1a64_bytes(
             indirect_draws, sizeof(indirect_draws[0]) * indirect_draw_count);
         frame_header_v68->v68.extension_hash = frame_header_v68->v68.indirect_draw_table_hash;
     }
-    if (need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v69_buffer_copy || need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v69->v69.buffer_copy_table_hash = fnv1a64_bytes(
             buffer_copies, sizeof(buffer_copies[0]) * buffer_copy_count);
         frame_header_v69->v69.extension_hash = frame_header_v69->v69.buffer_copy_table_hash;
     }
-    if (need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v610_image_copy || need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v610->v610.buffer_image_copy_table_hash = fnv1a64_bytes(
             buffer_image_copies, sizeof(buffer_image_copies[0]) * buffer_image_copy_count);
         frame_header_v610->v610.image_copy_table_hash = fnv1a64_bytes(
@@ -5755,7 +5790,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
             frame_header_v610->v610.extension_hash, image_copies,
             sizeof(image_copies[0]) * image_copy_count);
     }
-    if (need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v611_buffer_write || need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v611->v611.fill_buffer_table_hash = fnv1a64_bytes(
             fill_buffers, sizeof(fill_buffers[0]) * fill_buffer_count);
         frame_header_v611->v611.update_buffer_table_hash = fnv1a64_bytes(
@@ -5776,27 +5811,27 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
                 (size_t)update_payload_data_size);
         }
     }
-    if (need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v612_clear_color || need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v612->v612.clear_color_image_table_hash = fnv1a64_bytes(
             clear_color_images, sizeof(clear_color_images[0]) * clear_color_image_count);
         frame_header_v612->v612.extension_hash = frame_header_v612->v612.clear_color_image_table_hash;
     }
-    if (need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v613_clear_depth_stencil || need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v613->v613.clear_depth_stencil_image_table_hash = fnv1a64_bytes(
             clear_depth_stencil_images, sizeof(clear_depth_stencil_images[0]) * clear_depth_stencil_image_count);
         frame_header_v613->v613.extension_hash = frame_header_v613->v613.clear_depth_stencil_image_table_hash;
     }
-    if (need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v614_resolve_image || need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v614->v614.resolve_image_table_hash = fnv1a64_bytes(
             resolve_images, sizeof(resolve_images[0]) * resolve_image_count);
         frame_header_v614->v614.extension_hash = frame_header_v614->v614.resolve_image_table_hash;
     }
-    if (need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v615_blit_image || need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v615->v615.blit_image_table_hash = fnv1a64_bytes(
             blit_images, sizeof(blit_images[0]) * blit_image_count);
         frame_header_v615->v615.extension_hash = frame_header_v615->v615.blit_image_table_hash;
     }
-    if (need_v616_clear_attachments || need_v617_query || need_v618_copy_query) {
+    if (need_v616_clear_attachments || need_v617_query || need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v616->v616.clear_attachments_command_table_hash = fnv1a64_bytes(
             clear_attachments_commands, sizeof(clear_attachments_commands[0]) * clear_attachments_command_count);
         frame_header_v616->v616.clear_attachment_table_hash = fnv1a64_bytes(
@@ -5814,15 +5849,20 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
             frame_header_v616->v616.extension_hash, clear_rects,
             sizeof(clear_rects[0]) * clear_rect_count);
     }
-    if (need_v617_query) {
+    if (need_v617_query || need_v619_submit_sync) {
         frame_header_v617->v617.query_command_table_hash = fnv1a64_bytes(
             query_commands, sizeof(query_commands[0]) * query_command_count);
         frame_header_v617->v617.extension_hash = frame_header_v617->v617.query_command_table_hash;
     }
-    if (need_v618_copy_query) {
+    if (need_v618_copy_query || need_v619_submit_sync) {
         frame_header_v618->v618.copy_query_result_table_hash = fnv1a64_bytes(
             copy_query_results, sizeof(copy_query_results[0]) * copy_query_result_count);
         frame_header_v618->v618.extension_hash = frame_header_v618->v618.copy_query_result_table_hash;
+    }
+    if (need_v619_submit_sync) {
+        frame_header_v619->v619.submit_sync_table_hash = fnv1a64_bytes(
+            submit_syncs, sizeof(submit_syncs[0]) * submit_sync_count);
+        frame_header_v619->v619.extension_hash = frame_header_v619->v619.submit_sync_table_hash;
     }
     header->frame_size = cursor;
     header->payload_hash = fnv1a64_bytes(frame + header->header_size,
@@ -5830,6 +5870,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(const PdockerVkCommandBuffer
     header->frame_hash = fnv1a64_bytes(frame, cursor);
     rc = send_vulkan_graphics_v6_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
     const char *graphics_label =
+        need_v619_submit_sync ? "VULKAN_GRAPHICS_V6.19" :
         need_v618_copy_query ? "VULKAN_GRAPHICS_V6.18" :
         need_v617_query ? "VULKAN_GRAPHICS_V6.17" :
         need_v616_clear_attachments ? "VULKAN_GRAPHICS_V6.16" :
@@ -14564,6 +14605,80 @@ static bool timeline_semaphore_wait_satisfied(const VkSemaphoreWaitInfo *pWaitIn
     return wait_any ? any : true;
 }
 
+static uint64_t submit_timeline_wait_value(
+        const VkTimelineSemaphoreSubmitInfo *timeline,
+        uint32_t index);
+static uint64_t submit_timeline_signal_value(
+        const VkTimelineSemaphoreSubmitInfo *timeline,
+        uint32_t index);
+
+static bool append_submit_sync_entry(
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
+        size_t *entry_count,
+        uint32_t sync_type,
+        const PdockerVkSemaphore *sem,
+        uint64_t value,
+        uint64_t stage_mask,
+        const PdockerVkFence *fence) {
+    if (!entries || !entry_count || *entry_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
+        return false;
+    }
+    PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entry = &entries[(*entry_count)++];
+    memset(entry, 0, sizeof(*entry));
+    entry->sync_type = sync_type;
+    entry->stage_mask = stage_mask;
+    if (sem) {
+        entry->semaphore_id = sem->semaphore_id;
+        entry->flags = sem->timeline
+            ? PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE
+            : PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_BINARY;
+        entry->value = sem->timeline ? value : 0;
+    }
+    if (fence) entry->fence_id = fence->fence_id;
+    return true;
+}
+
+static bool collect_legacy_submit_sync_entries(
+        const VkSubmitInfo *submit,
+        const VkTimelineSemaphoreSubmitInfo *timeline,
+        VkFence fence,
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
+        size_t *entry_count) {
+    if (entry_count) *entry_count = 0;
+    if (!submit || !entries || !entry_count) return false;
+    for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = submit->pWaitSemaphores
+            ? (PdockerVkSemaphore *)submit->pWaitSemaphores[i]
+            : NULL;
+        uint64_t value = sem && sem->timeline ? submit_timeline_wait_value(timeline, i) : 0;
+        uint64_t stage_mask = submit->pWaitDstStageMask ? (uint64_t)submit->pWaitDstStageMask[i] : 0;
+        if (!append_submit_sync_entry(entries, entry_count,
+                                      PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT,
+                                      sem, value, stage_mask, NULL)) {
+            return false;
+        }
+    }
+    for (uint32_t i = 0; i < submit->signalSemaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = submit->pSignalSemaphores
+            ? (PdockerVkSemaphore *)submit->pSignalSemaphores[i]
+            : NULL;
+        uint64_t value = sem && sem->timeline ? submit_timeline_signal_value(timeline, i) : 0;
+        if (!append_submit_sync_entry(entries, entry_count,
+                                      PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL,
+                                      sem, value, 0, NULL)) {
+            return false;
+        }
+    }
+    PdockerVkFence *submit_fence = (PdockerVkFence *)fence;
+    if (submit_fence &&
+        !append_submit_sync_entry(entries, entry_count,
+                                  PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE,
+                                  NULL, 0, 0, submit_fence)) {
+        return false;
+    }
+    return true;
+}
+
 static const VkTimelineSemaphoreSubmitInfo *submit_timeline_info_from_pnext(
         const void *pNext,
         bool *unsupported_pnext) {
@@ -14976,6 +15091,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         }
         VkResult semaphore_rc = validate_submit_wait_semaphores(&pSubmits[i], timeline_submit);
         if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        size_t submit_sync_count = 0;
+        if (!collect_legacy_submit_sync_entries(&pSubmits[i], timeline_submit, fence,
+                                                submit_sync_entries, &submit_sync_count)) {
+            trace_icd_runtime_failure("submit-sync-metadata-overflow", VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
         for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; ++j) {
             PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)pSubmits[i].pCommandBuffers[j];
             if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
@@ -14992,7 +15114,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             }
             if (cmd->graphics_unsupported) {
                 if (env_truthy_default("PDOCKER_VULKAN_GRAPHICS_V6_VALIDATE_PRODUCER", false)) {
-                    int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(cmd);
+                    int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count);
                     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                         fprintf(stderr,
                                 "pdocker-vulkan-icd: graphics V6.1 validation producer rc=%d\n",
@@ -15020,7 +15142,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 VkResult mixed_host_rc = execute_graphics_mixed_host_side_ops(
                     cmd, first_graphics_gpu_op, last_graphics_gpu_op, true, &mixed_stats);
                 if (mixed_host_rc != VK_SUCCESS) return mixed_host_rc;
-                int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(cmd);
+                int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count);
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                     fprintf(stderr,
                             "pdocker-vulkan-icd: graphics V6.1 mixed submit rc=%d prepost_ops=%zu bytes=%llu\n",
@@ -16006,6 +16128,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
     PdockerVkFence *fence = pdocker_alloc_handle(sizeof(*fence));
     if (!fence) return VK_ERROR_OUT_OF_HOST_MEMORY;
     fence->signaled = pCreateInfo && (pCreateInfo->flags & VK_FENCE_CREATE_SIGNALED_BIT);
+    fence->fence_id = next_vulkan_object_generation();
     *pFence = (VkFence)fence;
     return VK_SUCCESS;
 }
@@ -16097,6 +16220,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
     sem->timeline = timeline;
     sem->value = initial_value;
     sem->signaled = timeline ? (initial_value > 0) : false;
+    sem->semaphore_id = next_vulkan_object_generation();
     *pSemaphore = (VkSemaphore)sem;
     return VK_SUCCESS;
 }
