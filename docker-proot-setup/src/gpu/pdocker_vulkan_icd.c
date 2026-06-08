@@ -173,6 +173,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_VULKAN_MEMORY_MODEL          (1ull << 12)
 #define PDOCKER_VK_FEATURE_MAINTENANCE_4                (1ull << 13)
 #define PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8             (1ull << 14)
+#define PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE           (1ull << 15)
 
 struct PdockerVkMemory {
     size_t size;
@@ -396,6 +397,8 @@ struct PdockerVkFence {
 
 typedef struct PdockerVkSemaphore {
     bool signaled;
+    bool timeline;
+    uint64_t value;
 } PdockerVkSemaphore;
 
 struct PdockerVkEvent {
@@ -8867,6 +8870,7 @@ static void fill_pnext_features(void *pNext) {
                 }
                 p->bufferDeviceAddress = VK_FALSE;
                 p->vulkanMemoryModel = VK_FALSE;
+                p->timelineSemaphore = VK_TRUE;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
@@ -8899,6 +8903,13 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES: {
                 VkPhysicalDeviceSynchronization2Features *p = (VkPhysicalDeviceSynchronization2Features *)node;
                 p->synchronization2 = VK_TRUE;
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES: {
+                VkPhysicalDeviceTimelineSemaphoreFeatures *p = (VkPhysicalDeviceTimelineSemaphoreFeatures *)node;
+                p->timelineSemaphore = VK_TRUE;
                 break;
             }
 #endif
@@ -8991,6 +9002,7 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->shaderInt8) mask |= PDOCKER_VK_FEATURE_SHADER_INT8;
                 if (p->bufferDeviceAddress) mask |= PDOCKER_VK_FEATURE_BUFFER_DEVICE_ADDRESS;
                 if (p->vulkanMemoryModel) mask |= PDOCKER_VK_FEATURE_VULKAN_MEMORY_MODEL;
+                if (p->timelineSemaphore) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
@@ -9010,6 +9022,13 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
                 const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (const VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
                 if (p->indexTypeUint8) mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES: {
+                const VkPhysicalDeviceTimelineSemaphoreFeatures *p = (const VkPhysicalDeviceTimelineSemaphoreFeatures *)node;
+                if (p->timelineSemaphore) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
                 break;
             }
 #endif
@@ -9080,6 +9099,7 @@ static uint64_t advertised_feature_mask(void) {
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     mask |= PDOCKER_VK_FEATURE_MAINTENANCE_4;
 #endif
+    mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
     return mask;
 }
 
@@ -10036,7 +10056,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkExtensionProperties *pProperties) {
     (void)physicalDevice;
     (void)pLayerName;
-    VkExtensionProperties available[12];
+    VkExtensionProperties available[13];
     uint32_t available_count = 0;
 #define ADD_DEVICE_EXTENSION(name, version) do { \
         if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
@@ -10066,6 +10086,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME, VK_KHR_COPY_COMMANDS_2_SPEC_VERSION);
     ADD_DEVICE_EXTENSION(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION);
+#ifdef VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
+    ADD_DEVICE_EXTENSION(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME, VK_KHR_TIMELINE_SEMAPHORE_SPEC_VERSION);
+#endif
     ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION);
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (!caps || caps->ext_extended_dynamic_state) {
@@ -10104,6 +10127,9 @@ static bool device_extension_advertised_name(const char *name) {
 #endif
     if (strcmp(name, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME) == 0) return true;
     if (strcmp(name, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) == 0) return true;
+#ifdef VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
+    if (strcmp(name, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0) return true;
+#endif
     if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) return true;
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (strcmp(name, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) == 0) {
@@ -14375,13 +14401,37 @@ VKAPI_ATTR void VKAPI_CALL vkCmdUpdateBuffer(
     if (!append_command_op(cmd, &op)) free(payload);
 }
 
+static bool semaphore_wait_satisfied(const PdockerVkSemaphore *sem, uint64_t value) {
+    if (!sem) return false;
+    if (sem->timeline) return sem->value >= value;
+    (void)value;
+    return sem->signaled;
+}
+
+static void semaphore_complete_wait(PdockerVkSemaphore *sem) {
+    if (!sem || sem->timeline) return;
+    sem->signaled = false;
+}
+
+static void semaphore_complete_signal(PdockerVkSemaphore *sem, uint64_t value) {
+    if (!sem) return;
+    if (sem->timeline) {
+        if (sem->value < value) sem->value = value;
+        sem->signaled = true;
+        return;
+    }
+    (void)value;
+    sem->signaled = true;
+}
+
 static VkResult validate_submit_wait_semaphores(const VkSubmitInfo *submit) {
     if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
     for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pWaitSemaphores
             ? (PdockerVkSemaphore *)submit->pWaitSemaphores[i]
             : NULL;
-        if (!sem || !sem->signaled) {
+        uint64_t required_value = sem && sem->timeline ? 0 : 0;
+        if (!semaphore_wait_satisfied(sem, required_value)) {
             trace_icd_runtime_failure("semaphore-wait-unsignaled",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -14396,13 +14446,42 @@ static void complete_submit_semaphores(const VkSubmitInfo *submit) {
         PdockerVkSemaphore *sem = submit->pWaitSemaphores
             ? (PdockerVkSemaphore *)submit->pWaitSemaphores[i]
             : NULL;
-        if (sem) sem->signaled = false;
+        semaphore_complete_wait(sem);
     }
     for (uint32_t i = 0; i < submit->signalSemaphoreCount; ++i) {
         PdockerVkSemaphore *sem = submit->pSignalSemaphores
             ? (PdockerVkSemaphore *)submit->pSignalSemaphores[i]
             : NULL;
-        if (sem) sem->signaled = true;
+        semaphore_complete_signal(sem, sem && sem->timeline ? sem->value + 1 : 0);
+    }
+}
+
+static VkResult validate_submit2_wait_semaphores(const VkSubmitInfo2 *submit) {
+    if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t i = 0; i < submit->waitSemaphoreInfoCount; ++i) {
+        const VkSemaphoreSubmitInfo *info = submit->pWaitSemaphoreInfos ? &submit->pWaitSemaphoreInfos[i] : NULL;
+        PdockerVkSemaphore *sem = info ? (PdockerVkSemaphore *)info->semaphore : NULL;
+        uint64_t required_value = sem && sem->timeline ? info->value : 0;
+        if (!semaphore_wait_satisfied(sem, required_value)) {
+            trace_icd_runtime_failure("semaphore2-wait-unsignaled",
+                                      VK_ERROR_FEATURE_NOT_PRESENT);
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+    }
+    return VK_SUCCESS;
+}
+
+static void complete_submit2_semaphores(const VkSubmitInfo2 *submit) {
+    if (!submit) return;
+    for (uint32_t i = 0; i < submit->waitSemaphoreInfoCount; ++i) {
+        const VkSemaphoreSubmitInfo *info = submit->pWaitSemaphoreInfos ? &submit->pWaitSemaphoreInfos[i] : NULL;
+        PdockerVkSemaphore *sem = info ? (PdockerVkSemaphore *)info->semaphore : NULL;
+        semaphore_complete_wait(sem);
+    }
+    for (uint32_t i = 0; i < submit->signalSemaphoreInfoCount; ++i) {
+        const VkSemaphoreSubmitInfo *info = submit->pSignalSemaphoreInfos ? &submit->pSignalSemaphoreInfos[i] : NULL;
+        PdockerVkSemaphore *sem = info ? (PdockerVkSemaphore *)info->semaphore : NULL;
+        semaphore_complete_signal(sem, sem && sem->timeline ? info->value : 0);
     }
 }
 
@@ -14941,13 +15020,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         const VkSubmitInfo2 *src = &pSubmits[i];
         VkSubmitInfo *dst = &legacy_submits[i];
         dst->sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        dst->waitSemaphoreCount = src->waitSemaphoreInfoCount;
         dst->commandBufferCount = src->commandBufferInfoCount;
-        dst->signalSemaphoreCount = src->signalSemaphoreInfoCount;
         if (src->waitSemaphoreInfoCount > 0 && !src->pWaitSemaphoreInfos) {
             rc = VK_ERROR_INITIALIZATION_FAILED;
             break;
         }
+        rc = validate_submit2_wait_semaphores(src);
+        if (rc != VK_SUCCESS) break;
         if (src->commandBufferInfoCount > 0 && !src->pCommandBufferInfos) {
             rc = VK_ERROR_INITIALIZATION_FAILED;
             break;
@@ -14955,24 +15034,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         if (src->signalSemaphoreInfoCount > 0 && !src->pSignalSemaphoreInfos) {
             rc = VK_ERROR_INITIALIZATION_FAILED;
             break;
-        }
-        if (src->waitSemaphoreInfoCount > 0) {
-            VkSemaphore *waits = calloc(src->waitSemaphoreInfoCount, sizeof(*waits));
-            VkPipelineStageFlags *stages = calloc(src->waitSemaphoreInfoCount, sizeof(*stages));
-            if (!waits || !stages) {
-                free(waits);
-                free(stages);
-                rc = VK_ERROR_OUT_OF_HOST_MEMORY;
-                break;
-            }
-            for (uint32_t j = 0; j < src->waitSemaphoreInfoCount; ++j) {
-                waits[j] = src->pWaitSemaphoreInfos[j].semaphore;
-                stages[j] = src->pWaitSemaphoreInfos[j].stageMask
-                    ? (VkPipelineStageFlags)src->pWaitSemaphoreInfos[j].stageMask
-                    : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-            }
-            dst->pWaitSemaphores = waits;
-            dst->pWaitDstStageMask = stages;
         }
         if (src->commandBufferInfoCount > 0) {
             VkCommandBuffer *cmds = calloc(src->commandBufferInfoCount, sizeof(*cmds));
@@ -14985,19 +15046,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
             }
             dst->pCommandBuffers = cmds;
         }
-        if (src->signalSemaphoreInfoCount > 0) {
-            VkSemaphore *signals = calloc(src->signalSemaphoreInfoCount, sizeof(*signals));
-            if (!signals) {
-                rc = VK_ERROR_OUT_OF_HOST_MEMORY;
-                break;
+    }
+    if (rc == VK_SUCCESS) {
+        rc = vkQueueSubmit(queue, submitCount, legacy_submits, fence);
+        if (rc == VK_SUCCESS) {
+            for (uint32_t i = 0; i < submitCount; ++i) {
+                complete_submit2_semaphores(&pSubmits[i]);
             }
-            for (uint32_t j = 0; j < src->signalSemaphoreInfoCount; ++j) {
-                signals[j] = src->pSignalSemaphoreInfos[j].semaphore;
-            }
-            dst->pSignalSemaphores = signals;
         }
     }
-    if (rc == VK_SUCCESS) rc = vkQueueSubmit(queue, submitCount, legacy_submits, fence);
     free_submit_info_arrays(legacy_submits, submitCount);
     return rc;
 }
@@ -15722,6 +15779,30 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
     return (!waitAll && fenceCount > 0 && !any) ? VK_NOT_READY : VK_SUCCESS;
 }
 
+static bool semaphore_create_info_parse_pnext(const void *pNext, bool *timeline, uint64_t *initial_value) {
+    if (timeline) *timeline = false;
+    if (initial_value) *initial_value = 0;
+    for (const void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+            case VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO: {
+                const VkSemaphoreTypeCreateInfo *info = (const VkSemaphoreTypeCreateInfo *)node;
+                if (info->semaphoreType == VK_SEMAPHORE_TYPE_TIMELINE) {
+                    if (timeline) *timeline = true;
+                    if (initial_value) *initial_value = info->initialValue;
+                } else if (info->semaphoreType != VK_SEMAPHORE_TYPE_BINARY) {
+                    return false;
+                }
+                break;
+            }
+            default:
+                return false;
+        }
+        node = header.pNext;
+    }
+    return true;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
         VkDevice device,
         const VkSemaphoreCreateInfo *pCreateInfo,
@@ -15730,15 +15811,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
     (void)device;
     (void)pAllocator;
     if (!pSemaphore) return VK_ERROR_INITIALIZATION_FAILED;
-    PdockerVkSemaphore *sem = pdocker_alloc_handle(sizeof(*sem));
-    if (!sem) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    sem->signaled = false;
-    if (pCreateInfo && pCreateInfo->pNext) {
+    bool timeline = false;
+    uint64_t initial_value = 0;
+    if (pCreateInfo && !semaphore_create_info_parse_pnext(pCreateInfo->pNext, &timeline, &initial_value)) {
         trace_icd_runtime_failure("semaphore-pnext-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
-        free(sem);
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
+    PdockerVkSemaphore *sem = pdocker_alloc_handle(sizeof(*sem));
+    if (!sem) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    sem->timeline = timeline;
+    sem->value = initial_value;
+    sem->signaled = timeline ? (initial_value > 0) : false;
     *pSemaphore = (VkSemaphore)sem;
     return VK_SUCCESS;
 }
@@ -15751,6 +15835,50 @@ VKAPI_ATTR void VKAPI_CALL vkDestroySemaphore(
     (void)pAllocator;
     free((void *)semaphore);
 }
+VKAPI_ATTR VkResult VKAPI_CALL vkGetSemaphoreCounterValue(
+        VkDevice device,
+        VkSemaphore semaphore,
+        uint64_t *pValue) {
+    (void)device;
+    PdockerVkSemaphore *sem = (PdockerVkSemaphore *)semaphore;
+    if (!sem || !pValue || !sem->timeline) return VK_ERROR_FEATURE_NOT_PRESENT;
+    *pValue = sem->value;
+    return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkWaitSemaphores(
+        VkDevice device,
+        const VkSemaphoreWaitInfo *pWaitInfo,
+        uint64_t timeout) {
+    (void)device;
+    if (!pWaitInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    bool wait_any = (pWaitInfo->flags & VK_SEMAPHORE_WAIT_ANY_BIT) != 0;
+    bool any = false;
+    for (uint32_t i = 0; i < pWaitInfo->semaphoreCount; ++i) {
+        PdockerVkSemaphore *sem = pWaitInfo->pSemaphores
+            ? (PdockerVkSemaphore *)pWaitInfo->pSemaphores[i]
+            : NULL;
+        uint64_t value = pWaitInfo->pValues ? pWaitInfo->pValues[i] : 0;
+        bool ready = sem && sem->timeline && sem->value >= value;
+        any = any || ready;
+        if (!wait_any && !ready) return timeout == 0 ? VK_TIMEOUT : VK_NOT_READY;
+    }
+    return (wait_any && pWaitInfo->semaphoreCount > 0 && !any)
+        ? (timeout == 0 ? VK_TIMEOUT : VK_NOT_READY)
+        : VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkSignalSemaphore(
+        VkDevice device,
+        const VkSemaphoreSignalInfo *pSignalInfo) {
+    (void)device;
+    if (!pSignalInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    PdockerVkSemaphore *sem = (PdockerVkSemaphore *)pSignalInfo->semaphore;
+    if (!sem || !sem->timeline) return VK_ERROR_FEATURE_NOT_PRESENT;
+    semaphore_complete_signal(sem, pSignalInfo->value);
+    return VK_SUCCESS;
+}
+
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineCache(
         VkDevice device,
@@ -16038,6 +16166,12 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkWaitForFences);
     MAP_PROC(vkCreateSemaphore);
     MAP_PROC(vkDestroySemaphore);
+    MAP_PROC(vkGetSemaphoreCounterValue);
+    MAP_ALIAS("vkGetSemaphoreCounterValueKHR", vkGetSemaphoreCounterValue);
+    MAP_PROC(vkWaitSemaphores);
+    MAP_ALIAS("vkWaitSemaphoresKHR", vkWaitSemaphores);
+    MAP_PROC(vkSignalSemaphore);
+    MAP_ALIAS("vkSignalSemaphoreKHR", vkSignalSemaphore);
     MAP_PROC(vk_icdNegotiateLoaderICDInterfaceVersion);
 #undef MAP_ALIAS
 #undef MAP_PROC

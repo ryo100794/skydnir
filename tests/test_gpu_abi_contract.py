@@ -3946,6 +3946,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("semaphore-wait-unsignaled", icd)
         self.assertIn("sem->signaled = false;", icd)
         self.assertIn("sem->signaled = true;", icd)
+        self.assertIn("semaphore_complete_wait(sem);", icd)
+        self.assertIn("semaphore_complete_signal(sem", icd)
         self.assertIn("semaphore-pnext-unsupported", icd)
         submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
@@ -3960,6 +3962,39 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertNotIn("sizeof(PdockerHandle)", create_body)
         self.assertIn("PdockerVkSemaphore *sem", create_body)
+
+    def test_vulkan_timeline_semaphores_keep_counter_values(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE",
+            "bool timeline;",
+            "uint64_t value;",
+            "VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME",
+            "p->timelineSemaphore = VK_TRUE;",
+            "VkSemaphoreTypeCreateInfo",
+            "VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO",
+            "VK_SEMAPHORE_TYPE_TIMELINE",
+            "semaphore_create_info_parse_pnext",
+            "vkGetSemaphoreCounterValue",
+            "vkWaitSemaphores",
+            "vkSignalSemaphore",
+            'MAP_ALIAS("vkGetSemaphoreCounterValueKHR", vkGetSemaphoreCounterValue)',
+            'MAP_ALIAS("vkWaitSemaphoresKHR", vkWaitSemaphores)',
+            'MAP_ALIAS("vkSignalSemaphoreKHR", vkSignalSemaphore)',
+        ]:
+            self.assertIn(marker, icd)
+        queue_submit2_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
+        )[0]
+        self.assertIn("validate_submit2_wait_semaphores(src)", queue_submit2_body)
+        self.assertIn("complete_submit2_semaphores(&pSubmits[i])", queue_submit2_body)
+        self.assertIn("uint64_t required_value = sem && sem->timeline ? info->value : 0;", icd)
+        self.assertIn("src->pSignalSemaphoreInfos", queue_submit2_body)
+        self.assertNotIn("dst->waitSemaphoreCount = src->waitSemaphoreInfoCount", queue_submit2_body)
+        self.assertNotIn("dst->signalSemaphoreCount = src->signalSemaphoreInfoCount", queue_submit2_body)
+        self.assertIn("sem->timeline) return sem->value >= value;", icd)
+        self.assertIn("if (!sem || sem->timeline) return;", icd)
+        self.assertIn("if (sem->value < value) sem->value = value;", icd)
 
     def test_vulkan_create_device_validates_advertised_extensions_and_features(self):
         icd = VULKAN_ICD.read_text()
