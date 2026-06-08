@@ -559,6 +559,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V615_ABI_MINOR 15u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V616_ABI_MINOR 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V617_ABI_MINOR 17u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V618_ABI_MINOR 18u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
@@ -614,6 +615,8 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V617_HEADER_EXTENSION_SCHEMA_HASH 0x8d3f70ec4b7a9c21ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V617_QUERY_COMMAND_SCHEMA_HASH 0xe3769b15473cbe2dull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V617_QUERY_RESULT_SCHEMA_HASH 0x58e90c4d9a3f672bull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V618_HEADER_EXTENSION_SCHEMA_HASH 0x411688cb935c9fc0ull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V618_COPY_QUERY_RESULT_SCHEMA_HASH 0x2bac69814aa2f274ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES (8u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES 64u
@@ -653,6 +656,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_ATTACHMENTS (PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS * 4u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V616_MAX_CLEAR_RECTS (PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS * 4u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V618_MAX_COPY_QUERY_RESULTS PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS
 
 
 #define PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE 0x00000001u
@@ -1145,6 +1149,31 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(status, u32)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V617_QUERY_RESULT_FIELD_COUNT 3u
 
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V618_HEADER_EXTENSION_FIELDS(X) \
+    X(copy_query_result_count, u32) \
+    X(copy_query_result_entry_size, u32) \
+    X(copy_query_result_table_offset, u64) \
+    X(copy_query_result_table_size, u64) \
+    X(copy_query_result_schema_hash, u64) \
+    X(copy_query_result_table_hash, u64) \
+    X(extension_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V618_HEADER_EXTENSION_FIELD_COUNT 7u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V618_COPY_QUERY_RESULT_FIELDS(X) \
+    X(command_index, u32) \
+    X(dst_resource_index, u32) \
+    X(query_pool_id, u64) \
+    X(first_query, u32) \
+    X(query_count, u32) \
+    X(query_type, u32) \
+    X(flags, u32) \
+    X(result_fd_index, u32) \
+    X(reserved0, u32) \
+    X(dst_offset, u64) \
+    X(stride, u64) \
+    X(reserved1, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V618_COPY_QUERY_RESULT_FIELD_COUNT 12u
+
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR 1u
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_DEPTH 2u
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_STENCIL 3u
@@ -1177,6 +1206,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_GRAPHICS_V6_COMMAND_WRITE_TIMESTAMP 24u
 #define PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY 25u
 #define PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY 26u
+#define PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_QUERY_POOL_RESULTS 27u
 #define PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_RESET 1u
 #define PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_WRITE_TIMESTAMP 2u
 #define PDOCKER_GPU_GRAPHICS_V617_QUERY_OP_BEGIN 3u
@@ -2181,6 +2211,38 @@ typedef struct PdockerGpuVulkanGraphicsV617FrameHeader {
     PdockerGpuVulkanGraphicsV617HeaderExtension v617;
 } PdockerGpuVulkanGraphicsV617FrameHeader;
 
+typedef struct PdockerGpuVulkanGraphicsV618HeaderExtension {
+    uint32_t copy_query_result_count;
+    uint32_t copy_query_result_entry_size;
+    uint64_t copy_query_result_table_offset;
+    uint64_t copy_query_result_table_size;
+    uint64_t copy_query_result_schema_hash;
+    uint64_t copy_query_result_table_hash;
+    uint64_t extension_hash;
+} PdockerGpuVulkanGraphicsV618HeaderExtension;
+
+typedef struct PdockerGpuVulkanGraphicsV618FrameHeader {
+    PdockerGpuVulkanGraphicsV6FrameHeader base;
+    PdockerGpuVulkanGraphicsV61HeaderExtension v61;
+    PdockerGpuVulkanGraphicsV62HeaderExtension v62;
+    PdockerGpuVulkanGraphicsV63HeaderExtension v63;
+    PdockerGpuVulkanGraphicsV64HeaderExtension v64;
+    PdockerGpuVulkanGraphicsV65HeaderExtension v65;
+    PdockerGpuVulkanGraphicsV66HeaderExtension v66;
+    PdockerGpuVulkanGraphicsV67HeaderExtension v67;
+    PdockerGpuVulkanGraphicsV68HeaderExtension v68;
+    PdockerGpuVulkanGraphicsV69HeaderExtension v69;
+    PdockerGpuVulkanGraphicsV610HeaderExtension v610;
+    PdockerGpuVulkanGraphicsV611HeaderExtension v611;
+    PdockerGpuVulkanGraphicsV612HeaderExtension v612;
+    PdockerGpuVulkanGraphicsV613HeaderExtension v613;
+    PdockerGpuVulkanGraphicsV614HeaderExtension v614;
+    PdockerGpuVulkanGraphicsV615HeaderExtension v615;
+    PdockerGpuVulkanGraphicsV616HeaderExtension v616;
+    PdockerGpuVulkanGraphicsV617HeaderExtension v617;
+    PdockerGpuVulkanGraphicsV618HeaderExtension v618;
+} PdockerGpuVulkanGraphicsV618FrameHeader;
+
 typedef struct PdockerGpuVulkanGraphicsV62SpecializationEntry {
     uint32_t shader_stage_index;
     uint32_t constant_id;
@@ -2528,6 +2590,21 @@ typedef struct PdockerGpuVulkanGraphicsV617QueryResultEntry {
     uint32_t available;
     uint32_t status;
 } PdockerGpuVulkanGraphicsV617QueryResultEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV618CopyQueryResultEntry {
+    uint32_t command_index;
+    uint32_t dst_resource_index;
+    uint64_t query_pool_id;
+    uint32_t first_query;
+    uint32_t query_count;
+    uint32_t query_type;
+    uint32_t flags;
+    uint32_t result_fd_index;
+    uint32_t reserved0;
+    uint64_t dst_offset;
+    uint64_t stride;
+    uint64_t reserved1;
+} PdockerGpuVulkanGraphicsV618CopyQueryResultEntry;
 
 typedef struct PdockerGpuVulkanGraphicsV61DynamicOffsetEntry {
     uint32_t offset;
