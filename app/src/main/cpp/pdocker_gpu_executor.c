@@ -19016,16 +19016,16 @@ static int validate_vulkan_graphics_v6_frame_content(
             if (entry->reserved0 != 0 ||
                 (entry->flags & ~(PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE |
                                   PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_BINARY)) != 0 ||
-                mode_flags == 0 ||
                 mode_flags == (PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE |
                                PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_BINARY)) {
                 return -EPROTO;
             }
             if (entry->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT ||
                 entry->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL) {
-                if (entry->semaphore_id == 0 || entry->fence_id != 0) return -EPROTO;
+                if (mode_flags == 0 || entry->semaphore_id == 0 || entry->fence_id != 0) return -EPROTO;
             } else if (entry->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE) {
-                if (entry->fence_id == 0 || entry->semaphore_id != 0 || entry->stage_mask != 0) return -EPROTO;
+                if (mode_flags != 0 || entry->flags != 0 || entry->value != 0 ||
+                    entry->fence_id == 0 || entry->semaphore_id != 0 || entry->stage_mask != 0) return -EPROTO;
             } else {
                 return -EPROTO;
             }
@@ -24714,7 +24714,17 @@ typedef struct {
     VkSemaphore semaphore;
 } VulkanExecutorSubmitSyncEntry;
 
+#define PDOCKER_GPU_EXECUTOR_SUBMIT_FENCE_REGISTRY_SLOTS 128u
+
+typedef struct {
+    uint8_t used;
+    uint8_t signaled;
+    uint64_t id;
+    VkFence fence;
+} VulkanExecutorSubmitFenceEntry;
+
 static VulkanExecutorSubmitSyncEntry g_submit_sync_registry[PDOCKER_GPU_EXECUTOR_SUBMIT_SYNC_REGISTRY_SLOTS];
+static VulkanExecutorSubmitFenceEntry g_submit_fence_registry[PDOCKER_GPU_EXECUTOR_SUBMIT_FENCE_REGISTRY_SLOTS];
 
 static VulkanExecutorSubmitSyncEntry *find_executor_submit_sync_entry(uint64_t id) {
     if (id == 0) return NULL;
@@ -24776,15 +24786,90 @@ static int resolve_executor_submit_sync_semaphore(
     return 0;
 }
 
+
+static VulkanExecutorSubmitFenceEntry *find_executor_submit_fence_entry(uint64_t id) {
+    if (id == 0) return NULL;
+    for (uint32_t i = 0; i < PDOCKER_GPU_EXECUTOR_SUBMIT_FENCE_REGISTRY_SLOTS; ++i) {
+        if (g_submit_fence_registry[i].used && g_submit_fence_registry[i].id == id) {
+            return &g_submit_fence_registry[i];
+        }
+    }
+    return NULL;
+}
+
+static VulkanExecutorSubmitFenceEntry *allocate_executor_submit_fence_entry(uint64_t id) {
+    if (id == 0) return NULL;
+    for (uint32_t i = 0; i < PDOCKER_GPU_EXECUTOR_SUBMIT_FENCE_REGISTRY_SLOTS; ++i) {
+        if (!g_submit_fence_registry[i].used) {
+            memset(&g_submit_fence_registry[i], 0, sizeof(g_submit_fence_registry[i]));
+            g_submit_fence_registry[i].used = 1;
+            g_submit_fence_registry[i].id = id;
+            return &g_submit_fence_registry[i];
+        }
+    }
+    return NULL;
+}
+
+static int resolve_executor_submit_sync_fence(
+        VulkanRuntime *rt,
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync,
+        int create_if_missing,
+        VkFence *out,
+        VulkanExecutorSubmitFenceEntry **out_entry) {
+    if (!rt || !sync || !out || sync->fence_id == 0) return -EINVAL;
+    *out = VK_NULL_HANDLE;
+    if (out_entry) *out_entry = NULL;
+    VulkanExecutorSubmitFenceEntry *entry = find_executor_submit_fence_entry(sync->fence_id);
+    if (entry) {
+        *out = entry->fence;
+        if (out_entry) *out_entry = entry;
+        return *out ? 0 : -EPROTO;
+    }
+    if (!create_if_missing) return -ENOENT;
+    entry = allocate_executor_submit_fence_entry(sync->fence_id);
+    if (!entry) return -E2BIG;
+    VkFenceCreateInfo create_info;
+    memset(&create_info, 0, sizeof(create_info));
+    create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkResult vrc = vkCreateFence(rt->device, &create_info, NULL, &entry->fence);
+    if (vrc != VK_SUCCESS) {
+        memset(entry, 0, sizeof(*entry));
+        return -EIO;
+    }
+    *out = entry->fence;
+    if (out_entry) *out_entry = entry;
+    return 0;
+}
+
 static int submit_vulkan_graphics_v6_command_buffer(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
         VkCommandBuffer command_buffer) {
     if (!rt || !view || !view->header || !command_buffer || !rt->device || !rt->graphics_queue) return -EINVAL;
-    VkFence fence = VK_NULL_HANDLE;
-    VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    VkResult vrc = vkCreateFence(rt->device, &fci, NULL, &fence);
-    if (vrc != VK_SUCCESS) return -EIO;
+    const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *fence_sync = NULL;
+    if (view->is_v619 && view->header_v619 && view->submit_syncs) {
+        for (uint32_t i = 0; i < view->header_v619->v619.submit_sync_count; ++i) {
+            const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync = &view->submit_syncs[i];
+            if (sync->sync_type != PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE) continue;
+            if (fence_sync) return -E2BIG;
+            fence_sync = sync;
+        }
+    }
+    VkFence submit_fence = VK_NULL_HANDLE;
+    VkFence local_fence = VK_NULL_HANDLE;
+    VulkanExecutorSubmitFenceEntry *submit_fence_entry = NULL;
+    if (fence_sync) {
+        int rc = resolve_executor_submit_sync_fence(rt, fence_sync, 1, &submit_fence, &submit_fence_entry);
+        if (rc != 0) return rc;
+        VkResult reset_rc = vkResetFences(rt->device, 1, &submit_fence);
+        if (reset_rc != VK_SUCCESS) return -EIO;
+        if (submit_fence_entry) submit_fence_entry->signaled = 0;
+    } else {
+        VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VkResult create_rc = vkCreateFence(rt->device, &fci, NULL, &local_fence);
+        if (create_rc != VK_SUCCESS) return -EIO;
+        submit_fence = local_fence;
+    }
     VkSemaphore wait_semaphores[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     VkSemaphore signal_semaphores[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     VkPipelineStageFlags wait_stages[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
@@ -24793,6 +24878,8 @@ static int submit_vulkan_graphics_v6_command_buffer(
     uint32_t wait_count = 0;
     uint32_t signal_count = 0;
     int timeline_used = 0;
+    int submit_fail_rc = 0;
+    VkResult vrc = VK_SUCCESS;
     memset(wait_semaphores, 0, sizeof(wait_semaphores));
     memset(signal_semaphores, 0, sizeof(signal_semaphores));
     memset(wait_stages, 0, sizeof(wait_stages));
@@ -24807,7 +24894,7 @@ static int submit_vulkan_graphics_v6_command_buffer(
                     goto submit_fail;
                 }
                 int rc = resolve_executor_submit_sync_semaphore(rt, sync, 0, &wait_semaphores[wait_count]);
-                if (rc != 0) { vrc = VK_ERROR_FEATURE_NOT_PRESENT; goto submit_fail; }
+                if (rc != 0) { submit_fail_rc = rc; vrc = VK_ERROR_FEATURE_NOT_PRESENT; goto submit_fail; }
                 wait_stages[wait_count] = sync->stage_mask
                     ? (VkPipelineStageFlags)sync->stage_mask
                     : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
@@ -24820,7 +24907,7 @@ static int submit_vulkan_graphics_v6_command_buffer(
                     goto submit_fail;
                 }
                 int rc = resolve_executor_submit_sync_semaphore(rt, sync, 1, &signal_semaphores[signal_count]);
-                if (rc != 0) { vrc = VK_ERROR_FEATURE_NOT_PRESENT; goto submit_fail; }
+                if (rc != 0) { submit_fail_rc = rc; vrc = VK_ERROR_FEATURE_NOT_PRESENT; goto submit_fail; }
                 signal_values[signal_count] = sync->value;
                 if (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) timeline_used = 1;
                 signal_count++;
@@ -24845,19 +24932,20 @@ static int submit_vulkan_graphics_v6_command_buffer(
         .signalSemaphoreCount = signal_count,
         .pSignalSemaphores = signal_count ? signal_semaphores : NULL,
     };
-    vrc = vkQueueSubmit(rt->graphics_queue, 1, &submit, fence);
+    vrc = vkQueueSubmit(rt->graphics_queue, 1, &submit, submit_fence);
     if (vrc != VK_SUCCESS) goto submit_fail;
     const uint64_t timeout_ns =
         env_timeout_ns("PDOCKER_GPU_GRAPHICS_SUBMIT_TIMEOUT_MS", 30000, 1000, 600000);
-    vrc = vkWaitForFences(rt->device, 1, &fence, VK_TRUE, timeout_ns);
+    vrc = vkWaitForFences(rt->device, 1, &submit_fence, VK_TRUE, timeout_ns);
     if (vrc == VK_TIMEOUT) {
-        if (fence) vkDestroyFence(rt->device, fence, NULL);
+        if (local_fence) vkDestroyFence(rt->device, local_fence, NULL);
         return -ETIMEDOUT;
     }
     if (vrc != VK_SUCCESS) {
-        if (fence) vkDestroyFence(rt->device, fence, NULL);
+        if (local_fence) vkDestroyFence(rt->device, local_fence, NULL);
         return -EIO;
     }
+    if (submit_fence_entry) submit_fence_entry->signaled = 1;
     if (view->is_v619 && view->header_v619 && view->submit_syncs) {
         for (uint32_t i = 0; i < view->header_v619->v619.submit_sync_count; ++i) {
             const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync = &view->submit_syncs[i];
@@ -24866,13 +24954,12 @@ static int submit_vulkan_graphics_v6_command_buffer(
             if (entry && entry->timeline && entry->last_value < sync->value) entry->last_value = sync->value;
         }
     }
-    if (fence) vkDestroyFence(rt->device, fence, NULL);
+    if (local_fence) vkDestroyFence(rt->device, local_fence, NULL);
     return 0;
 submit_fail:
-    if (fence) vkDestroyFence(rt->device, fence, NULL);
-    return vrc == VK_ERROR_TOO_MANY_OBJECTS ? -E2BIG : -EIO;
+    if (local_fence) vkDestroyFence(rt->device, local_fence, NULL);
+    return submit_fail_rc ? submit_fail_rc : (vrc == VK_ERROR_TOO_MANY_OBJECTS ? -E2BIG : -EIO);
 }
-
 static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     const char *reason = NULL;
     int rc = preflight_vulkan_graphics_v6_replay_supported(view, &reason);
