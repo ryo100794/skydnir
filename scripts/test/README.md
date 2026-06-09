@@ -6,6 +6,7 @@ docs, CI, and manual commands unless a deliberate migration says otherwise.
 
 | Implementation | Stable wrapper |
 |---|---|
+| `android-vulkan-icd-device-socket-smoke.sh` | connected-device Vulkan ICD socket gate runner |
 | `smoke-opencl-bridge.sh` | [`../smoke-opencl-bridge.sh`](../smoke-opencl-bridge.sh) |
 | `smoke-vulkan-icd-bridge.sh` | [`../smoke-vulkan-icd-bridge.sh`](../smoke-vulkan-icd-bridge.sh) |
 | `smoke-vulkan-icd-storage-image.sh` | [`../smoke-vulkan-icd-storage-image.sh`](../smoke-vulkan-icd-storage-image.sh) |

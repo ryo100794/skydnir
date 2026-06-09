@@ -57,6 +57,13 @@ Use the existing Android smoke harness primitives instead of local host Vulkan:
    `docs/test/vulkan-icd-device-socket-latest.json` or an immutable
    `docs/test/runs/<run-id>/...` directory.
 
+## Runner
+
+Use `scripts/test/android-vulkan-icd-device-socket-smoke.sh` to generate the
+latest artifact. The runner stages the smoke client and ICD into an existing
+running container and records a non-promoting `success:false` artifact when a
+real guest Vulkan loader, app socket, or running container is unavailable.
+
 ## Promotion requirements
 
 A passing artifact must prove all of these facts from the same device run:

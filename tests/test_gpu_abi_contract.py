@@ -4300,6 +4300,26 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VULKAN_ICD_DEVICE_SOCKET_GATE.md", readme)
         self.assertIn("host-side ICD/object-transport", scripts_readme)
 
+    def test_vulkan_icd_device_socket_runner_is_guest_scoped(self):
+        script = (ROOT / "scripts/test/android-vulkan-icd-device-socket-smoke.sh").read_text()
+        doc = (ROOT / "docs/test/VULKAN_ICD_DEVICE_SOCKET_GATE.md").read_text()
+        for marker in [
+            '"schema": "skydnir.vulkan.icd.device-socket.v1"',
+            '"uses_host_vulkan_loader": False',
+            "VK_ICD_FILENAMES=/etc/vulkan/icd.d/pdocker-android.json",
+            "PDOCKER_GPU_QUEUE_SOCKET=/run/pdocker-gpu/pdocker-gpu.sock",
+            "docker cp pdocker/tmp/vulkan-icd-device-socket/client.c",
+            "docker cp pdocker/tmp/vulkan-icd-device-socket/pdocker-vulkan-icd.so",
+            "test -S /run/pdocker-gpu/pdocker-gpu.sock",
+            "cc /tmp/skydnir-vk-storage-image-smoke.c",
+            "grep -q 'storageImageMaxErr='",
+            "grep -q 'pdocker-vulkan-icd'",
+            "guest lacks cc/vulkan headers/libvulkan/socket prerequisites",
+        ]:
+            self.assertIn(marker, script)
+        self.assertIn("scripts/test/android-vulkan-icd-device-socket-smoke.sh", doc)
+        self.assertIn("non-promoting `success:false` artifact", doc)
+
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()
         allocate_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkFreeMemory", 1)[0]

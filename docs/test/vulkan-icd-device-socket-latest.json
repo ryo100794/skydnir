@@ -1,0 +1,30 @@
+{
+  "adb_serial": "",
+  "app_socket": "files/pdocker-runtime/gpu/pdocker-gpu.sock",
+  "checks": {
+    "adb_devices": "List of devices attached\n\n",
+    "app_socket": "",
+    "direct_preflight": "",
+    "docker_ps": "",
+    "guest_prereq": "",
+    "guest_run_stderr": "",
+    "guest_run_stdout": ""
+  },
+  "container": "",
+  "exit_code": 1,
+  "package": "io.github.ryo100794.pdocker.compat",
+  "promotion_requirements": [
+    "guest/container glibc Vulkan loader, not host -lvulkan",
+    "VK_ICD_FILENAMES=/etc/vulkan/icd.d/pdocker-android.json",
+    "PDOCKER_GPU_QUEUE_SOCKET=/run/pdocker-gpu/pdocker-gpu.sock",
+    "pdocker-vulkan-icd bridge log observed",
+    "storageImageMaxErr within tolerance",
+    "executor backend_impl android_vulkan valid true"
+  ],
+  "reason": "no connected adb device",
+  "required_icd_json": "/etc/vulkan/icd.d/pdocker-android.json",
+  "required_socket": "/run/pdocker-gpu/pdocker-gpu.sock",
+  "schema": "skydnir.vulkan.icd.device-socket.v1",
+  "success": false,
+  "uses_host_vulkan_loader": false
+}
