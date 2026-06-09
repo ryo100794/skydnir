@@ -4223,6 +4223,25 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("V5.1 frame required but disabled for this dispatch", icd)
         self.assertIn("because PDOCKER_VULKAN_ALIAS_COPIES is active", icd)
 
+    def test_vulkan_executor_has_storage_image_roundtrip_probe(self):
+        src = GPU_EXECUTOR.read_text()
+        self.assertIn("kStorageImageRoundtripSpv", src)
+        self.assertIn("bench_vulkan_storage_image_roundtrip", src)
+        self.assertIn('"--bench-vulkan-storage-image-roundtrip"', src)
+        for marker in [
+            "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE",
+            "VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT",
+            "VK_FORMAT_R8G8B8A8_UNORM",
+            "VK_IMAGE_LAYOUT_GENERAL",
+            "VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL",
+            "vkCmdCopyImageToBuffer",
+            "VK_BUFFER_USAGE_TRANSFER_DST_BIT",
+            "find_vulkan_memory_type_any",
+            'storage_image_roundtrip',
+            'direct-vulkan-storage-image-roundtrip',
+        ]:
+            self.assertIn(marker, src)
+
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()
         allocate_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkFreeMemory", 1)[0]

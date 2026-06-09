@@ -259,6 +259,49 @@ static const uint32_t kVectorAddSpv[] = {
     0x00000028, 0x00000027, 0x000100fd, 0x00010038,
 };
 
+static const uint32_t kStorageImageRoundtripSpv[] = {
+    0x07230203u, 0x00010000u, 0x0008000bu, 0x00000035u, 0x00000000u, 0x00020011u, 0x00000001u, 0x0006000bu,
+    0x00000001u, 0x4c534c47u, 0x6474732eu, 0x3035342eu, 0x00000000u, 0x0003000eu, 0x00000000u, 0x00000001u,
+    0x0006000fu, 0x00000005u, 0x00000004u, 0x6e69616du, 0x00000000u, 0x0000000du, 0x00060010u, 0x00000004u,
+    0x00000011u, 0x00000008u, 0x00000008u, 0x00000001u, 0x00030003u, 0x00000002u, 0x000001c2u, 0x00040005u,
+    0x00000004u, 0x6e69616du, 0x00000000u, 0x00030005u, 0x00000009u, 0x00000070u, 0x00080005u, 0x0000000du,
+    0x475f6c67u, 0x61626f6cu, 0x766e496cu, 0x7461636fu, 0x496e6f69u, 0x00000044u, 0x00030005u, 0x00000015u,
+    0x00000063u, 0x00050005u, 0x0000002fu, 0x4974756fu, 0x6567616du, 0x00000000u, 0x00040047u, 0x0000000du,
+    0x0000000bu, 0x0000001cu, 0x00030047u, 0x0000002fu, 0x00000019u, 0x00040047u, 0x0000002fu, 0x00000021u,
+    0x00000000u, 0x00040047u, 0x0000002fu, 0x00000022u, 0x00000000u, 0x00040047u, 0x00000034u, 0x0000000bu,
+    0x00000019u, 0x00020013u, 0x00000002u, 0x00030021u, 0x00000003u, 0x00000002u, 0x00040015u, 0x00000006u,
+    0x00000020u, 0x00000001u, 0x00040017u, 0x00000007u, 0x00000006u, 0x00000002u, 0x00040020u, 0x00000008u,
+    0x00000007u, 0x00000007u, 0x00040015u, 0x0000000au, 0x00000020u, 0x00000000u, 0x00040017u, 0x0000000bu,
+    0x0000000au, 0x00000003u, 0x00040020u, 0x0000000cu, 0x00000001u, 0x0000000bu, 0x0004003bu, 0x0000000cu,
+    0x0000000du, 0x00000001u, 0x00040017u, 0x0000000eu, 0x0000000au, 0x00000002u, 0x00030016u, 0x00000012u,
+    0x00000020u, 0x00040017u, 0x00000013u, 0x00000012u, 0x00000004u, 0x00040020u, 0x00000014u, 0x00000007u,
+    0x00000013u, 0x0004002bu, 0x0000000au, 0x00000016u, 0x00000000u, 0x00040020u, 0x00000017u, 0x00000007u,
+    0x00000006u, 0x0004002bu, 0x00000012u, 0x0000001bu, 0x437f0000u, 0x0004002bu, 0x0000000au, 0x0000001du,
+    0x00000001u, 0x0004002bu, 0x00000006u, 0x00000027u, 0x000000ffu, 0x0004002bu, 0x00000012u, 0x0000002bu,
+    0x3f800000u, 0x00090019u, 0x0000002du, 0x00000012u, 0x00000001u, 0x00000000u, 0x00000000u, 0x00000000u,
+    0x00000002u, 0x00000004u, 0x00040020u, 0x0000002eu, 0x00000000u, 0x0000002du, 0x0004003bu, 0x0000002eu,
+    0x0000002fu, 0x00000000u, 0x0004002bu, 0x0000000au, 0x00000033u, 0x00000008u, 0x0006002cu, 0x0000000bu,
+    0x00000034u, 0x00000033u, 0x00000033u, 0x0000001du, 0x00050036u, 0x00000002u, 0x00000004u, 0x00000000u,
+    0x00000003u, 0x000200f8u, 0x00000005u, 0x0004003bu, 0x00000008u, 0x00000009u, 0x00000007u, 0x0004003bu,
+    0x00000014u, 0x00000015u, 0x00000007u, 0x0004003du, 0x0000000bu, 0x0000000fu, 0x0000000du, 0x0007004fu,
+    0x0000000eu, 0x00000010u, 0x0000000fu, 0x0000000fu, 0x00000000u, 0x00000001u, 0x0004007cu, 0x00000007u,
+    0x00000011u, 0x00000010u, 0x0003003eu, 0x00000009u, 0x00000011u, 0x00050041u, 0x00000017u, 0x00000018u,
+    0x00000009u, 0x00000016u, 0x0004003du, 0x00000006u, 0x00000019u, 0x00000018u, 0x0004006fu, 0x00000012u,
+    0x0000001au, 0x00000019u, 0x00050088u, 0x00000012u, 0x0000001cu, 0x0000001au, 0x0000001bu, 0x00050041u,
+    0x00000017u, 0x0000001eu, 0x00000009u, 0x0000001du, 0x0004003du, 0x00000006u, 0x0000001fu, 0x0000001eu,
+    0x0004006fu, 0x00000012u, 0x00000020u, 0x0000001fu, 0x00050088u, 0x00000012u, 0x00000021u, 0x00000020u,
+    0x0000001bu, 0x00050041u, 0x00000017u, 0x00000022u, 0x00000009u, 0x00000016u, 0x0004003du, 0x00000006u,
+    0x00000023u, 0x00000022u, 0x00050041u, 0x00000017u, 0x00000024u, 0x00000009u, 0x0000001du, 0x0004003du,
+    0x00000006u, 0x00000025u, 0x00000024u, 0x000500c6u, 0x00000006u, 0x00000026u, 0x00000023u, 0x00000025u,
+    0x000500c7u, 0x00000006u, 0x00000028u, 0x00000026u, 0x00000027u, 0x0004006fu, 0x00000012u, 0x00000029u,
+    0x00000028u, 0x00050088u, 0x00000012u, 0x0000002au, 0x00000029u, 0x0000001bu, 0x00070050u, 0x00000013u,
+    0x0000002cu, 0x0000001cu, 0x00000021u, 0x0000002au, 0x0000002bu, 0x0003003eu, 0x00000015u, 0x0000002cu,
+    0x0004003du, 0x0000002du, 0x00000030u, 0x0000002fu, 0x0004003du, 0x00000007u, 0x00000031u, 0x00000009u,
+    0x0004003du, 0x00000013u, 0x00000032u, 0x00000015u, 0x00040063u, 0x00000030u, 0x00000031u, 0x00000032u,
+    0x000100fdu, 0x00010038u,
+};
+
+
 static const uint32_t kQ6kSafeSpv[] = {
     0x07230203u, 0x00010000u, 0x0008000bu, 0x0000016bu, 0x00000000u, 0x00020011u, 0x00000001u, 0x0006000bu,
     0x00000001u, 0x4c534c47u, 0x6474732eu, 0x3035342eu, 0x00000000u, 0x0003000eu, 0x00000000u, 0x00000001u,
@@ -781,6 +824,15 @@ static uint32_t find_vulkan_memory_type(VkPhysicalDevice physical_device, uint32
     vkGetPhysicalDeviceMemoryProperties(physical_device, &props);
     for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
         if ((type_bits & (1u << i)) && (props.memoryTypes[i].propertyFlags & flags) == flags) return i;
+    }
+    return UINT32_MAX;
+}
+
+static uint32_t find_vulkan_memory_type_any(VkPhysicalDevice physical_device, uint32_t type_bits) {
+    VkPhysicalDeviceMemoryProperties props;
+    vkGetPhysicalDeviceMemoryProperties(physical_device, &props);
+    for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
+        if (type_bits & (1u << i)) return i;
     }
     return UINT32_MAX;
 }
@@ -16176,6 +16228,400 @@ static int bench_vulkan_vector_add(int count) {
     return last;
 }
 
+static int bench_vulkan_storage_image_roundtrip(int count) {
+    if (count <= 0) count = 1;
+    /* The probe validates one complete image write/readback transaction. */
+    if (count != 1) count = 1;
+    const uint32_t width = 16;
+    const uint32_t height = 16;
+    const VkDeviceSize bytes = (VkDeviceSize)width * (VkDeviceSize)height * 4u;
+    const int was_ready = g_vulkan_runtime.ready;
+    if (init_vulkan_runtime(&g_vulkan_runtime) != 0) return -21;
+    VulkanRuntime *rt = &g_vulkan_runtime;
+
+    VkFormatProperties format_props;
+    vkGetPhysicalDeviceFormatProperties(rt->physical_device, VK_FORMAT_R8G8B8A8_UNORM, &format_props);
+    const VkFormatFeatureFlags required_features =
+        VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+    if ((format_props.optimalTilingFeatures & required_features) != required_features) {
+        fprintf(json_out(),
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"backend_impl\":\"android_vulkan\",\"backend_affinity\":\"same-api\","
+                "\"transport\":\"direct-vulkan-storage-image-roundtrip\","
+                "\"kernel\":\"storage_image_roundtrip\",\"image_format\":\"VK_FORMAT_R8G8B8A8_UNORM\","
+                "\"width\":%u,\"height\":%u,\"unsupported\":true,"
+                "\"reason\":\"format lacks storage-image or transfer-src support\","
+                "\"valid\":false}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                width, height);
+        fflush(json_out());
+        return 77;
+    }
+
+    VkShaderModule shader = VK_NULL_HANDLE;
+    VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
+    VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkImage image = VK_NULL_HANDLE;
+    VkDeviceMemory image_memory = VK_NULL_HANDLE;
+    VkImageView image_view = VK_NULL_HANDLE;
+    VulkanVectorBuffer readback;
+    memset(&readback, 0, sizeof(readback));
+    VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
+    VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    VkResult rc = VK_SUCCESS;
+    VkResult fail_result = VK_SUCCESS;
+    const char *fail_stage = "start";
+    int last = 0;
+
+    double setup_start = now_ms();
+    VkShaderModuleCreateInfo smci = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = sizeof(kStorageImageRoundtripSpv),
+        .pCode = kStorageImageRoundtripSpv,
+    };
+    fail_stage = "create-shader-module";
+    rc = vkCreateShaderModule(rt->device, &smci, NULL, &shader);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+
+    VkDescriptorSetLayoutBinding binding = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+    };
+    VkDescriptorSetLayoutCreateInfo dslci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &binding,
+    };
+    fail_stage = "create-descriptor-set-layout";
+    rc = vkCreateDescriptorSetLayout(rt->device, &dslci, NULL, &set_layout);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+
+    VkPipelineLayoutCreateInfo plci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &set_layout,
+    };
+    fail_stage = "create-pipeline-layout";
+    rc = vkCreatePipelineLayout(rt->device, &plci, NULL, &pipeline_layout);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+
+    VkComputePipelineCreateInfo cpci = {
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            .module = shader,
+            .pName = "main",
+        },
+        .layout = pipeline_layout,
+    };
+    fail_stage = "create-compute-pipeline";
+    rc = vkCreateComputePipelines(rt->device, VK_NULL_HANDLE, 1, &cpci, NULL, &pipeline);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .extent = {.width = width, .height = height, .depth = 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    fail_stage = "create-image";
+    rc = vkCreateImage(rt->device, &ici, NULL, &image);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+
+    VkMemoryRequirements image_req;
+    vkGetImageMemoryRequirements(rt->device, image, &image_req);
+    uint32_t image_memory_type = find_vulkan_memory_type(
+        rt->physical_device,
+        image_req.memoryTypeBits,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (image_memory_type == UINT32_MAX) {
+        image_memory_type = find_vulkan_memory_type_any(rt->physical_device, image_req.memoryTypeBits);
+    }
+    if (image_memory_type == UINT32_MAX) {
+        fail_stage = "find-image-memory-type";
+        goto fail;
+    }
+    VkMemoryAllocateInfo image_mai = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = image_req.size,
+        .memoryTypeIndex = image_memory_type,
+    };
+    fail_stage = "allocate-image-memory";
+    rc = vkAllocateMemory(rt->device, &image_mai, NULL, &image_memory);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+    fail_stage = "bind-image-memory";
+    rc = vkBindImageMemory(rt->device, image, image_memory, 0);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+
+    VkImageViewCreateInfo ivci = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    fail_stage = "create-image-view";
+    rc = vkCreateImageView(rt->device, &ivci, NULL, &image_view);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+
+    fail_stage = "create-readback-buffer";
+    if (create_vulkan_buffer_with_usage(
+            rt->physical_device,
+            rt->device,
+            (size_t)bytes,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            NULL,
+            &readback) != 0) {
+        goto fail;
+    }
+
+    VkDescriptorPoolSize pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .descriptorCount = 1,
+    };
+    VkDescriptorPoolCreateInfo dpci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size,
+    };
+    fail_stage = "create-descriptor-pool";
+    rc = vkCreateDescriptorPool(rt->device, &dpci, NULL, &descriptor_pool);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+    VkDescriptorSetAllocateInfo dsai = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = descriptor_pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &set_layout,
+    };
+    fail_stage = "allocate-descriptor-set";
+    rc = vkAllocateDescriptorSets(rt->device, &dsai, &descriptor_set);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+    VkDescriptorImageInfo image_info = {
+        .sampler = VK_NULL_HANDLE,
+        .imageView = image_view,
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+    };
+    VkWriteDescriptorSet write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = descriptor_set,
+        .dstBinding = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        .pImageInfo = &image_info,
+    };
+    vkUpdateDescriptorSets(rt->device, 1, &write, 0, NULL);
+
+    VkCommandBufferAllocateInfo cbai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = rt->command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    fail_stage = "allocate-command-buffer";
+    rc = vkAllocateCommandBuffers(rt->device, &cbai, &command_buffer);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+    VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    fail_stage = "create-fence";
+    rc = vkCreateFence(rt->device, &fci, NULL, &fence);
+    if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+    double setup_ms = now_ms() - setup_start;
+
+    for (int i = 0; i < count; ++i) {
+        memset(readback.map, 0, (size_t)bytes);
+        fail_stage = "reset-fence";
+        rc = vkResetFences(rt->device, 1, &fence);
+        if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+
+        double dispatch_start = now_ms();
+        VkCommandBufferBeginInfo cbi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        fail_stage = "begin-command-buffer";
+        rc = vkBeginCommandBuffer(command_buffer, &cbi);
+        if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+
+        VkImageSubresourceRange image_range = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        };
+        VkImageMemoryBarrier to_general = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = image,
+            .subresourceRange = image_range,
+        };
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 0, NULL, 0, NULL, 1, &to_general);
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                pipeline_layout, 0, 1, &descriptor_set, 0, NULL);
+        vkCmdDispatch(command_buffer, (width + 7u) / 8u, (height + 7u) / 8u, 1);
+
+        VkImageMemoryBarrier to_transfer = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = image,
+            .subresourceRange = image_range,
+        };
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, NULL, 0, NULL, 1, &to_transfer);
+
+        VkBufferImageCopy copy_region = {
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+            .imageOffset = {0, 0, 0},
+            .imageExtent = {.width = width, .height = height, .depth = 1},
+        };
+        vkCmdCopyImageToBuffer(command_buffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               readback.buffer, 1, &copy_region);
+
+        VkBufferMemoryBarrier readback_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = readback.buffer,
+            .offset = 0,
+            .size = bytes,
+        };
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT,
+                             0, 0, NULL, 1, &readback_barrier, 0, NULL);
+
+        fail_stage = "end-command-buffer";
+        rc = vkEndCommandBuffer(command_buffer);
+        if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+        VkSubmitInfo submit = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &command_buffer,
+        };
+        fail_stage = "queue-submit";
+        rc = vkQueueSubmit(rt->queue, 1, &submit, fence);
+        if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+        fail_stage = "wait-fence";
+        rc = vkWaitForFences(rt->device, 1, &fence, VK_TRUE, UINT64_MAX);
+        if (rc != VK_SUCCESS) { fail_result = rc; goto fail; }
+        double dispatch_ms = now_ms() - dispatch_start;
+
+        double max_err = 0.0;
+        const unsigned char *pixels = (const unsigned char *)readback.map;
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 0; x < width; ++x) {
+                const size_t base = ((size_t)y * width + x) * 4u;
+                const unsigned char expected[4] = {
+                    (unsigned char)x,
+                    (unsigned char)y,
+                    (unsigned char)(x ^ y),
+                    255u,
+                };
+                for (uint32_t c = 0; c < 4; ++c) {
+                    double e = fabs((double)pixels[base + c] - (double)expected[c]);
+                    if (e > max_err) max_err = e;
+                }
+            }
+        }
+        const int valid = max_err <= 1.0;
+        const double init_ms = (!was_ready && i == 0) ? rt->init_ms : 0.0;
+        const double compile_ms = (i == 0) ? setup_ms : 0.0;
+        fprintf(json_out(),
+                "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"backend_impl\":\"android_vulkan\",\"backend_affinity\":\"same-api\","
+                "\"backend_cached\":true,"
+                "\"transport\":\"direct-vulkan-storage-image-roundtrip\","
+                "\"kernel\":\"storage_image_roundtrip\","
+                "\"image_format\":\"VK_FORMAT_R8G8B8A8_UNORM\","
+                "\"width\":%u,\"height\":%u,"
+                "\"init_ms\":%.4f,\"compile_ms\":%.4f,\"upload_ms\":0.0000,"
+                "\"dispatch_ms\":%.4f,\"download_ms\":0.0000,\"total_ms\":%.4f,"
+                "\"max_abs_error\":%.8f,\"valid\":%s}\n",
+                PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
+                PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
+                width, height, init_ms, compile_ms, dispatch_ms,
+                init_ms + compile_ms + dispatch_ms, max_err,
+                valid ? "true" : "false");
+        fflush(json_out());
+        last = valid ? 0 : 6;
+        if (last != 0) break;
+    }
+
+    if (fence) vkDestroyFence(rt->device, fence, NULL);
+    if (command_buffer) vkFreeCommandBuffers(rt->device, rt->command_pool, 1, &command_buffer);
+    if (descriptor_pool) vkDestroyDescriptorPool(rt->device, descriptor_pool, NULL);
+    destroy_vulkan_vector_buffer(rt->device, &readback);
+    if (image_view) vkDestroyImageView(rt->device, image_view, NULL);
+    if (image_memory) vkFreeMemory(rt->device, image_memory, NULL);
+    if (image) vkDestroyImage(rt->device, image, NULL);
+    if (pipeline) vkDestroyPipeline(rt->device, pipeline, NULL);
+    if (pipeline_layout) vkDestroyPipelineLayout(rt->device, pipeline_layout, NULL);
+    if (set_layout) vkDestroyDescriptorSetLayout(rt->device, set_layout, NULL);
+    if (shader) vkDestroyShaderModule(rt->device, shader, NULL);
+    return last;
+
+fail:
+    fprintf(stderr, "pdocker-gpu-executor: Vulkan storage_image_roundtrip failed stage=%s rc=%d\n",
+            fail_stage, fail_result);
+    if (fence) vkDestroyFence(rt->device, fence, NULL);
+    if (command_buffer) vkFreeCommandBuffers(rt->device, rt->command_pool, 1, &command_buffer);
+    if (descriptor_pool) vkDestroyDescriptorPool(rt->device, descriptor_pool, NULL);
+    destroy_vulkan_vector_buffer(rt->device, &readback);
+    if (image_view) vkDestroyImageView(rt->device, image_view, NULL);
+    if (image_memory) vkFreeMemory(rt->device, image_memory, NULL);
+    if (image) vkDestroyImage(rt->device, image, NULL);
+    if (pipeline) vkDestroyPipeline(rt->device, pipeline, NULL);
+    if (pipeline_layout) vkDestroyPipelineLayout(rt->device, pipeline_layout, NULL);
+    if (set_layout) vkDestroyDescriptorSetLayout(rt->device, set_layout, NULL);
+    if (shader) vkDestroyShaderModule(rt->device, shader, NULL);
+    return -21;
+}
+
 static int bench_vulkan_vector_add_resident(int count) {
     if (count <= 0) count = 1;
     const size_t n = PDOCKER_GPU_VECTOR_ADD_DEFAULT_N;
@@ -26623,6 +27069,9 @@ int main(int argc, char **argv) {
     }
     if (argc > 1 && strcmp(argv[1], "--bench-vulkan-vector-add-resident") == 0) {
         return bench_vulkan_vector_add_resident(parse_count(argc > 2 ? argv[2] : NULL, 5));
+    }
+    if (argc > 1 && strcmp(argv[1], "--bench-vulkan-storage-image-roundtrip") == 0) {
+        return bench_vulkan_storage_image_roundtrip(parse_count(argc > 2 ? argv[2] : NULL, 1));
     }
     if (argc > 1 && strcmp(argv[1], "--bench-cpu-matmul256") == 0) {
         return bench_cpu_matmul256(parse_count(argc > 2 ? argv[2] : NULL, 5));
