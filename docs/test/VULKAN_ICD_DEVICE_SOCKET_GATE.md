@@ -64,6 +64,15 @@ latest artifact. The runner stages the smoke client and ICD into an existing
 running container and records a non-promoting `success:false` artifact when a
 real guest Vulkan loader, app socket, or running container is unavailable.
 
+Validate generated artifacts with:
+
+```sh
+python3 scripts/test/verify-vulkan-icd-device-socket-artifact.py docs/test/vulkan-icd-device-socket-latest.json
+```
+
+Use `--allow-planned-skip` only for disconnected or missing-prerequisite runs;
+that mode validates artifact shape but never promotes Vulkan passthrough.
+
 ## Promotion requirements
 
 A passing artifact must prove all of these facts from the same device run:

@@ -4320,6 +4320,22 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("scripts/test/android-vulkan-icd-device-socket-smoke.sh", doc)
         self.assertIn("non-promoting `success:false` artifact", doc)
 
+    def test_vulkan_icd_device_socket_artifact_verifier_is_strict(self):
+        verifier = (ROOT / "scripts/test/verify-vulkan-icd-device-socket-artifact.py").read_text()
+        doc = (ROOT / "docs/test/VULKAN_ICD_DEVICE_SOCKET_GATE.md").read_text()
+        for marker in [
+            'SCHEMA = "skydnir.vulkan.icd.device-socket.v1"',
+            'uses_host_vulkan_loader") is False',
+            "storageImageMaxErr=([0-9]+)",
+            "pdocker-vulkan-icd",
+            "fallback evidence is not accepted",
+            "--allow-planned-skip",
+            "verify_planned_skip",
+        ]:
+            self.assertIn(marker, verifier)
+        self.assertIn("verify-vulkan-icd-device-socket-artifact.py", doc)
+        self.assertIn("never promotes Vulkan passthrough", doc)
+
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()
         allocate_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkFreeMemory", 1)[0]

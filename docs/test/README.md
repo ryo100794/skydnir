@@ -71,6 +71,7 @@ run it, and where the latest result is stored.
   smoke through the pdocker GPU executor socket; planned-skip when the local
   executor Vulkan preflight is unavailable.
 - `scripts/test/android-vulkan-icd-device-socket-smoke.sh` — Connected-device runner for the glibc ICD -> app GPU executor socket promotion gate.
+- `scripts/test/verify-vulkan-icd-device-socket-artifact.py` — Verifies pass and planned-skip Vulkan ICD device-socket artifacts.
 - `scripts/test/smoke-vulkan-icd-storage-image.sh` — Host-side storage-image
   object-transport smoke. Real-device promotion requires
   `VULKAN_ICD_DEVICE_SOCKET_GATE.md`, not the host Vulkan loader.
