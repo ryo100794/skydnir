@@ -16,5 +16,10 @@ Prerequisites are unchanged from the wrapper commands: built GPU/native helper
 libraries or an Android device/ADB session may be required depending on the
 specific smoke.
 
+Note: `smoke-vulkan-icd-storage-image.sh` is host-side ICD/object-transport
+coverage because it links the local Vulkan loader with `-lvulkan`. Use
+`docs/test/VULKAN_ICD_DEVICE_SOCKET_GATE.md` for the real-device glibc ICD ->
+app GPU executor socket promotion contract.
+
 Policy: keep docs and CI on the stable wrappers unless the inventory,
 runbooks, and tests are migrated in the same focused change.

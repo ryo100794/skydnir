@@ -786,7 +786,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "APPEND_GRAPHICS_TABLE(vertex_bindings, vertex_binding_count",
             "APPEND_GRAPHICS_TABLE(attachments, attachment_count",
             "PdockerGpuVulkanGraphicsV6CommandEntry commands",
-            "send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count)",
+            "graphics_submit_sync_frame_bounds",
+            "filter_submit_sync_entries_for_graphics_frame",
+            "frame_submit_sync_entries",
+            "send_recorded_vulkan_graphics_v6_1_frame(\n                        cmd, frame_submit_sync_entries, frame_submit_sync_count)",
             "graphics_mixed_submit_plan",
             "execute_graphics_mixed_host_side_ops",
             "command_op_is_host_transfer_or_layout_op",
@@ -4277,6 +4280,26 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, script)
 
+    def test_vulkan_icd_device_socket_gate_documents_non_host_evidence(self):
+        doc = (ROOT / "docs" / "test" / "VULKAN_ICD_DEVICE_SOCKET_GATE.md").read_text()
+        readme = (ROOT / "docs" / "test" / "README.md").read_text()
+        scripts_readme = (ROOT / "scripts" / "test" / "README.md").read_text()
+        for marker in [
+            "glibc Vulkan loader in a guest/container",
+            "/etc/vulkan/icd.d/pdocker-android.json",
+            "PDOCKER_GPU_QUEUE_SOCKET=/run/pdocker-gpu/pdocker-gpu.sock",
+            "files/pdocker-runtime/gpu/pdocker-gpu.sock",
+            "libvulkan.so.1",
+            "storageImageMaxErr",
+            "backend_impl\":\"android_vulkan",
+            "success:false",
+        ]:
+            self.assertIn(marker, doc)
+        self.assertIn("host `-lvulkan`", doc)
+        self.assertIn("must not be treated as real-device evidence", doc)
+        self.assertIn("VULKAN_ICD_DEVICE_SOCKET_GATE.md", readme)
+        self.assertIn("host-side ICD/object-transport", scripts_readme)
+
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()
         allocate_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkFreeMemory", 1)[0]
@@ -4819,7 +4842,11 @@ class GpuAbiContractTest(unittest.TestCase):
             "collect_legacy_submit_sync_entries(&pSubmits[i], timeline_submit, fence",
             "if (g_submit_sync_override_entries)",
             "memcpy(submit_sync_entries, g_submit_sync_override_entries",
-            "send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count)",
+            "graphics_submit_sync_frame_bounds",
+            "filter_submit_sync_entries_for_graphics_frame",
+            "frame_submit_sync_entries",
+            "send_recorded_vulkan_graphics_v6_1_frame(\n                        cmd, frame_submit_sync_entries, frame_submit_sync_count)",
+            "send_recorded_vulkan_graphics_v6_1_frame(\n                    cmd, frame_submit_sync_entries, frame_submit_sync_count)",
             "submit-sync-metadata-overflow",
             "VULKAN_GRAPHICS_V6.19",
             "need_v619_submit_sync",
@@ -4844,8 +4871,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(icd.index("append_submit_sync_entry"), icd.index("collect_legacy_submit_sync_entries"))
         self.assertLess(
             icd.index("collect_legacy_submit_sync_entries"),
-            icd.index("send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count)"),
+            icd.index("filter_submit_sync_entries_for_graphics_frame"),
         )
+        submit_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1
+        )[0]
+        self.assertIn("graphics_submit_sync_frame_bounds(&pSubmits[i]", submit_body)
+        self.assertIn("j == first_graphics_submit_sync_cmd", submit_body)
+        self.assertIn("j == last_graphics_submit_sync_cmd", submit_body)
+        self.assertNotIn("send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count)", submit_body)
 
     def test_vulkan_semaphore_lifecycle_is_executor_backed(self):
         executor = GPU_EXECUTOR.read_text()
@@ -5671,10 +5705,10 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertLess(
             mixed_body.index("execute_graphics_mixed_host_side_ops("),
-            mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count)"),
+            mixed_body.index("filter_submit_sync_entries_for_graphics_frame"),
         )
         self.assertLess(
-            mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count)"),
+            mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(\n                    cmd, frame_submit_sync_entries, frame_submit_sync_count)"),
             mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
         )
 
