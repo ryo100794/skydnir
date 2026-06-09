@@ -931,7 +931,13 @@ static bool env_truthy_default(const char *name, bool default_value) {
 }
 
 static bool vulkan_v5_object_transport_enabled(void) {
-    return env_truthy_default("PDOCKER_VULKAN_ENABLE_V5_OBJECT_TRANSPORT", false);
+    /*
+     * Image, image-view, and sampler handles are part of the Vulkan object
+     * graph.  Treat V5 object transport as the default correctness path, while
+     * keeping a deliberate kill switch for device triage.
+     */
+    return env_truthy_default("PDOCKER_VULKAN_ENABLE_V5_OBJECT_TRANSPORT", true) &&
+           !env_truthy_default("PDOCKER_VULKAN_DISABLE_V5_OBJECT_TRANSPORT", false);
 }
 
 static uint64_t next_vulkan_object_generation(void) {
@@ -3499,7 +3505,12 @@ static int collect_graphics_image_entry(
     entry->usage = image->usage;
     entry->create_flags = image->flags;
     entry->sharing_mode = image->sharing_mode;
-    entry->initial_layout = image->initial_layout;
+    /*
+     * The ABI field name is legacy.  It carries the effective image layout at
+     * transport time so the executor does not replay barriers from stale
+     * creation-time layout state.
+     */
+    entry->initial_layout = image->current_layout;
     entry->generation = image->generation ? image->generation : generation;
     image_objects[index] = image;
     return (int)index;
@@ -6629,7 +6640,12 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         image_entries[i].usage = image->usage;
         image_entries[i].create_flags = image->flags;
         image_entries[i].sharing_mode = image->sharing_mode;
-        image_entries[i].initial_layout = image->initial_layout;
+        /*
+         * The ABI field name is legacy.  It carries the effective image layout
+         * at transport time so the executor starts from the same layout state
+         * tracked by the ICD.
+         */
+        image_entries[i].initial_layout = image->current_layout;
         image_entries[i].generation = image->generation;
     }
     for (size_t i = 0; i < image_view_count; ++i) {
@@ -10268,6 +10284,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
     (void)device;
     (void)pAllocator;
     if (!pAllocateInfo || !pMemory) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pAllocateInfo->memoryTypeIndex >= 2) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (pAllocateInfo->allocationSize == 0 ||
         pAllocateInfo->allocationSize > pdocker_vulkan_max_buffer_size()) {
         if (trace_allocations()) {
@@ -10374,11 +10391,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory(
         VkMemoryMapFlags flags,
         void **ppData) {
     (void)device;
-    (void)size;
     (void)flags;
     if (!memory || !ppData) return VK_ERROR_MEMORY_MAP_FAILED;
     PdockerVkMemory *m = (PdockerVkMemory *)memory;
     if ((size_t)offset > m->size) return VK_ERROR_MEMORY_MAP_FAILED;
+    if (size != VK_WHOLE_SIZE) {
+        if ((VkDeviceSize)offset > (VkDeviceSize)m->size ||
+            size > (VkDeviceSize)m->size - offset) {
+            return VK_ERROR_MEMORY_MAP_FAILED;
+        }
+    }
     if ((m->property_flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) == 0) {
         if (trace_allocations()) {
             fprintf(stderr,

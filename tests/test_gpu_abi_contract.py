@@ -4172,7 +4172,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(alias, proc_body)
 
-    def test_vulkan_image_sampler_object_apis_are_gated_and_tracked_for_v5_object_transport(self):
+    def test_vulkan_image_sampler_object_apis_are_enabled_by_default_and_tracked_for_v5_object_transport(self):
         icd = VULKAN_ICD.read_text()
         for symbol in [
             "vkCreateImage",
@@ -4190,7 +4190,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("unsupported_image_transport_result", icd)
         self.assertIn("V5 image/sampler object transport", icd)
         self.assertIn("vulkan_v5_object_transport_enabled", icd)
-        self.assertIn('"PDOCKER_VULKAN_ENABLE_V5_OBJECT_TRANSPORT"', icd)
+        self.assertIn('env_truthy_default("PDOCKER_VULKAN_ENABLE_V5_OBJECT_TRANSPORT", true)', icd)
+        self.assertIn('"PDOCKER_VULKAN_DISABLE_V5_OBJECT_TRANSPORT"', icd)
         self.assertIn("typedef struct PdockerVkImage PdockerVkImage;", icd)
         self.assertIn("typedef struct PdockerVkImageView PdockerVkImageView;", icd)
         self.assertIn("typedef struct PdockerVkSampler PdockerVkSampler;", icd)
@@ -4208,6 +4209,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('return unsupported_image_transport_result("vkCreateImageView");', icd)
         self.assertIn('return unsupported_image_transport_result("vkCreateSampler");', icd)
         self.assertIn("image->requirements_size = requirements_size;", icd)
+        self.assertIn("entry->initial_layout = image->current_layout;", icd)
+        self.assertNotIn("entry->initial_layout = image->initial_layout;", icd)
+        self.assertIn("image_entries[i].initial_layout = image->current_layout;", icd)
+        self.assertNotIn("image_entries[i].initial_layout = image->initial_layout;", icd)
         self.assertIn("vkBindImageMemory(device,", icd)
         self.assertIn("img->memory = mem;", icd)
         self.assertIn("view->image = image;", icd)
@@ -4217,6 +4222,16 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("descriptor_array_transport_required || image_descriptor_count > 0", icd)
         self.assertIn("V5.1 frame required but disabled for this dispatch", icd)
         self.assertIn("because PDOCKER_VULKAN_ALIAS_COPIES is active", icd)
+
+    def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
+        icd = VULKAN_ICD.read_text()
+        allocate_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkFreeMemory", 1)[0]
+        map_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkUnmapMemory", 1)[0]
+        self.assertIn("if (pAllocateInfo->memoryTypeIndex >= 2) return VK_ERROR_FEATURE_NOT_PRESENT;", allocate_body)
+        self.assertIn("if (size != VK_WHOLE_SIZE)", map_body)
+        self.assertIn("size > (VkDeviceSize)m->size - offset", map_body)
+        self.assertIn("return VK_ERROR_MEMORY_MAP_FAILED;", map_body)
+        self.assertNotIn("(void)size;", map_body)
 
     def test_vulkan_icd_advertises_conservative_image_format_properties(self):
         icd = VULKAN_ICD.read_text()
