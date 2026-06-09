@@ -4270,6 +4270,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "VK_BUFFER_USAGE_TRANSFER_DST_BIT",
             "storageImageMaxErr",
             "PDOCKER_GPU_QUEUE_SOCKET",
+            "EXTERNAL_SOCK",
+            "external PDOCKER_GPU_QUEUE_SOCKET is not a socket",
             "VK_ICD_FILENAMES",
             "--bench-vulkan-storage-image-roundtrip",
         ]:

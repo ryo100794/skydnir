@@ -8,7 +8,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EXECUTOR="$ROOT/app/src/main/jniLibs/arm64-v8a/libpdockergpuexecutor.so"
 ICD="$ROOT/docker-proot-setup/lib/pdocker-vulkan-icd.so"
 TMP="$(mktemp -d)"
-SOCK="${TMP}/pdocker-gpu.sock"
+EXTERNAL_SOCK="${PDOCKER_GPU_QUEUE_SOCKET:-}"
+if [[ -n "$EXTERNAL_SOCK" ]]; then
+    SOCK="$EXTERNAL_SOCK"
+else
+    SOCK="${TMP}/pdocker-gpu.sock"
+fi
 trap '[[ -n "${PID:-}" ]] && kill "$PID" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 
 cat >"$TMP/pdocker-vk-storage-image-smoke.c" <<'C'
@@ -326,24 +331,31 @@ cat >"$TMP/pdocker_icd.json" <<JSON
 {"file_format_version":"1.0.0","ICD":{"library_path":"$ICD","api_version":"1.2.0"}}
 JSON
 
-if ! timeout 30 "$EXECUTOR" --bench-vulkan-storage-image-roundtrip >"$TMP/executor-preflight.log" 2>&1; then
-    echo "smoke-vulkan-icd-storage-image: SKIP executor Vulkan storage-image preflight unavailable" >&2
-    cat "$TMP/executor-preflight.log" >&2
-    exit 0
-fi
+if [[ -n "$EXTERNAL_SOCK" ]]; then
+    [[ -S "$SOCK" ]] || {
+        echo "smoke-vulkan-icd-storage-image: external PDOCKER_GPU_QUEUE_SOCKET is not a socket: $SOCK" >&2
+        exit 1
+    }
+else
+    if ! timeout 30 "$EXECUTOR" --bench-vulkan-storage-image-roundtrip >"$TMP/executor-preflight.log" 2>&1; then
+        echo "smoke-vulkan-icd-storage-image: SKIP executor Vulkan storage-image preflight unavailable" >&2
+        cat "$TMP/executor-preflight.log" >&2
+        exit 0
+    fi
 
-"$EXECUTOR" --serve-socket "$SOCK" >"$TMP/executor.log" 2>&1 &
-PID=$!
-for _ in $(seq 1 100); do
-    [[ -S "$SOCK" ]] && break
-    sleep 0.05
-done
-[[ -S "$SOCK" ]] || { cat "$TMP/executor.log" >&2; exit 1; }
+    "$EXECUTOR" --serve-socket "$SOCK" >"$TMP/executor.log" 2>&1 &
+    PID=$!
+    for _ in $(seq 1 100); do
+        [[ -S "$SOCK" ]] && break
+        sleep 0.05
+    done
+    [[ -S "$SOCK" ]] || { cat "$TMP/executor.log" >&2; exit 1; }
+fi
 
 VK_ICD_FILENAMES="$TMP/pdocker_icd.json" \
 PDOCKER_GPU_QUEUE_SOCKET="$SOCK" \
 timeout 30 "$TMP/pdocker-vk-storage-image-smoke" || {
     rc=$?
-    cat "$TMP/executor.log" >&2
+    [[ -n "$EXTERNAL_SOCK" ]] || cat "$TMP/executor.log" >&2
     exit "$rc"
 }
