@@ -2604,6 +2604,16 @@ static int vulkan_image_mip_extent(
     return 1;
 }
 
+static VkImageLayout vulkan_image_create_initial_layout_for_transport(
+        VkImageTiling tiling,
+        VkImageLayout transported_layout) {
+    if (tiling == VK_IMAGE_TILING_LINEAR &&
+        transported_layout == VK_IMAGE_LAYOUT_PREINITIALIZED) {
+        return VK_IMAGE_LAYOUT_PREINITIALIZED;
+    }
+    return VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
 static int vulkan_image_tight_mip_size(
         const VulkanDispatchImageObject *image,
         uint32_t mip_level,
@@ -2818,17 +2828,14 @@ static int materialize_vulkan_dispatch_images(
             src->array_layers == 0 || src->memory_size > (uint64_t)SIZE_MAX) {
             return -EPROTO;
         }
-        if (src->initial_layout != VK_IMAGE_LAYOUT_UNDEFINED &&
-            src->initial_layout != VK_IMAGE_LAYOUT_PREINITIALIZED) {
-            return -EPROTO;
-        }
-        if (src->tiling == VK_IMAGE_TILING_OPTIMAL) {
-            if (src->initial_layout == VK_IMAGE_LAYOUT_PREINITIALIZED) {
-                return -ENOTSUP;
-            }
-        } else if (src->tiling != VK_IMAGE_TILING_LINEAR) {
+        if (src->tiling != VK_IMAGE_TILING_OPTIMAL &&
+            src->tiling != VK_IMAGE_TILING_LINEAR) {
             return -ENOTSUP;
         }
+        VkImageLayout create_initial_layout =
+            vulkan_image_create_initial_layout_for_transport(
+                (VkImageTiling)src->tiling,
+                (VkImageLayout)src->initial_layout);
         int mem_index = find_image_memory_object(
             memories, *memory_count, src->memory_resource_index);
         if (mem_index < 0) {
@@ -2851,7 +2858,7 @@ static int materialize_vulkan_dispatch_images(
         dst->memory_object_index = (size_t)mem_index;
         dst->memory_offset = (VkDeviceSize)src->memory_offset;
         dst->memory_size = (VkDeviceSize)src->memory_size;
-        dst->current_layout = (VkImageLayout)src->initial_layout;
+        dst->current_layout = create_initial_layout;
         dst->extent = (VkExtent3D){
             .width = src->extent_width,
             .height = src->extent_height,
@@ -2880,7 +2887,7 @@ static int materialize_vulkan_dispatch_images(
                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
                 : (VkImageUsageFlags)src->usage,
             .sharingMode = (VkSharingMode)src->sharing_mode,
-            .initialLayout = (VkImageLayout)src->initial_layout,
+            .initialLayout = create_initial_layout,
         };
         VkResult rc = vkCreateImage(device, &ici, NULL, &dst->image);
         if (rc != VK_SUCCESS) return -EIO;
