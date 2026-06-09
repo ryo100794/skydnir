@@ -8,6 +8,7 @@ docs, CI, and manual commands unless a deliberate migration says otherwise.
 |---|---|
 | `smoke-opencl-bridge.sh` | [`../smoke-opencl-bridge.sh`](../smoke-opencl-bridge.sh) |
 | `smoke-vulkan-icd-bridge.sh` | [`../smoke-vulkan-icd-bridge.sh`](../smoke-vulkan-icd-bridge.sh) |
+| `smoke-vulkan-icd-storage-image.sh` | [`../smoke-vulkan-icd-storage-image.sh`](../smoke-vulkan-icd-storage-image.sh) |
 | `smoke-vulkan-llama-init.sh` | [`../smoke-vulkan-llama-init.sh`](../smoke-vulkan-llama-init.sh) |
 | `verify-device-llama-template.sh` | [`../verify-device-llama-template.sh`](../verify-device-llama-template.sh) |
 

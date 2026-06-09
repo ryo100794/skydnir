@@ -4255,6 +4255,26 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, src)
 
+    def test_vulkan_icd_storage_image_smoke_exercises_object_transport(self):
+        script = (ROOT / "scripts/test/smoke-vulkan-icd-storage-image.sh").read_text()
+        wrapper = (ROOT / "scripts/smoke-vulkan-icd-storage-image.sh").read_text()
+        self.assertIn('exec "$ROOT/scripts/test/smoke-vulkan-icd-storage-image.sh" "$@"', wrapper)
+        for marker in [
+            "kStorageImageRoundtripSpv",
+            "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE",
+            "VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT",
+            "VK_FORMAT_R8G8B8A8_UNORM",
+            "VK_IMAGE_LAYOUT_GENERAL",
+            "VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL",
+            "vkCmdCopyImageToBuffer",
+            "VK_BUFFER_USAGE_TRANSFER_DST_BIT",
+            "storageImageMaxErr",
+            "PDOCKER_GPU_QUEUE_SOCKET",
+            "VK_ICD_FILENAMES",
+            "--bench-vulkan-storage-image-roundtrip",
+        ]:
+            self.assertIn(marker, script)
+
     def test_vulkan_memory_api_validates_map_ranges_and_type_index(self):
         icd = VULKAN_ICD.read_text()
         allocate_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1)[1].split("VKAPI_ATTR void VKAPI_CALL vkFreeMemory", 1)[0]

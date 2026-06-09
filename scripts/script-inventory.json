@@ -816,6 +816,19 @@
       }
     },
     {
+      "path": "scripts/smoke-vulkan-icd-storage-image.sh",
+      "category": "test-verification",
+      "stability": "device-helper",
+      "role": "Android/device, GPU, llama, or runtime benchmark/smoke helper.",
+      "migration": {
+        "target_dir": "scripts/test",
+        "candidate_path": "scripts/test/smoke-vulkan-icd-storage-image.sh",
+        "phase": "phase-1-test-helpers-after-manifest-update",
+        "action": "migrated-behind-wrapper",
+        "compat_wrapper": "stable verification entrypoints keep wrappers; helper wrappers remain until test manifests and docs stop referencing top-level paths"
+      }
+    },
+    {
       "path": "scripts/smoke-vulkan-llama-init.sh",
       "category": "test-verification",
       "stability": "device-helper",

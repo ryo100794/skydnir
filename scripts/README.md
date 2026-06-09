@@ -25,7 +25,7 @@ Every inventory entry now also carries a `migration` object with a proposed dest
 |---|---:|---|
 | `runtime-package-needed` | 1 | Needed to stage runtime/APK payloads or otherwise part of packaging flow. |
 | `build-developer` | 8 | Build, setup, fetch, or developer environment helper. |
-| `test-verification` | 88 | Test, smoke, benchmark, contract, or device verification helper. |
+| `test-verification` | 89 | Test, smoke, benchmark, contract, or device verification helper. |
 | `generated-maintenance` | 3 | Generated-doc/evidence maintenance or manifest data. |
 | `obsolete-suspect` | 1 | Unreferenced or weakly referenced candidate; not deleted without audit. |
 
@@ -55,6 +55,7 @@ inventory/README/verifier allowlist.
 | Stable wrapper | Implementation path |
 |---|---|
 | `scripts/smoke-opencl-bridge.sh` | `scripts/test/smoke-opencl-bridge.sh` |
+| `scripts/smoke-vulkan-icd-storage-image.sh` | `scripts/test/smoke-vulkan-icd-storage-image.sh` |
 | `scripts/smoke-vulkan-llama-init.sh` | `scripts/test/smoke-vulkan-llama-init.sh` |
 | `scripts/smoke-vulkan-icd-bridge.sh` | `scripts/test/smoke-vulkan-icd-bridge.sh` |
 | `scripts/verify-device-llama-template.sh` | `scripts/test/verify-device-llama-template.sh` |
@@ -163,6 +164,7 @@ remain gitignored and intentionally absent from the inventory.
 | `scripts/run_direct_syscall_scenarios.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/smoke-opencl-bridge.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/smoke-vulkan-icd-bridge.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
+| `scripts/smoke-vulkan-icd-storage-image.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/smoke-vulkan-llama-init.sh` | `device-helper` | Android/device, GPU, llama, or runtime benchmark/smoke helper. |
 | `scripts/verify-abnormal-events.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
 | `scripts/verify-archive-api-compat.py` | `test-helper` | Host-side verification/test driver or static contract gate. |
