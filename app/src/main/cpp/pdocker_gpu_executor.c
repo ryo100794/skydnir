@@ -46,6 +46,7 @@
 #define PDOCKER_GPU_MAX_PASSED_FDS 24
 #define PDOCKER_GPU_MAX_COMMAND_BYTES 4096
 #define PDOCKER_GPU_MAX_VULKAN_BINDINGS 16
+#define PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE 64
 #define PDOCKER_GPU_MAX_VULKAN_DESCRIPTOR_SETS 8
 #define PDOCKER_GPU_MAX_PUSH_BYTES 256
 #define PDOCKER_GPU_MAX_VULKAN_ENTRY_NAME 128
@@ -2361,6 +2362,12 @@ typedef struct {
 } VulkanDispatchImageMemoryObject;
 
 typedef struct {
+    VkImageSubresourceRange range;
+    VkImageLayout layout;
+    uint64_t generation;
+} VulkanReplayImageLayoutRange;
+
+typedef struct {
     uint64_t image_id;
     uint32_t source_index;
     uint32_t memory_resource_index;
@@ -2370,6 +2377,9 @@ typedef struct {
     VkImage image;
     VkMemoryRequirements requirements;
     VkImageLayout current_layout;
+    VulkanReplayImageLayoutRange layout_ranges[PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE];
+    uint32_t layout_range_count;
+    int has_layout_ranges;
     VkImageLayout descriptor_layout;
     VkExtent3D extent;
     VkFormat format;
@@ -22347,6 +22357,68 @@ static VkPipelineStageFlags vulkan_graphics_attachment_writeback_stage_mask(
     return stages;
 }
 
+
+static VulkanDispatchImageObject *vulkan_graphics_replay_image_by_source_index(
+        VulkanGraphicsReplayAttachments *attachments,
+        uint32_t source_index) {
+    if (!attachments) return NULL;
+    for (size_t i = 0; i < attachments->image_count; ++i) {
+        if (attachments->images[i].source_index == source_index) {
+            return &attachments->images[i];
+        }
+    }
+    return NULL;
+}
+
+static int vulkan_replay_image_layout_range_valid(
+        const VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range) {
+    if (!image || !range || range->aspectMask == 0 ||
+        range->levelCount == 0 || range->layerCount == 0 ||
+        range->baseMipLevel >= image->mip_levels ||
+        range->baseArrayLayer >= image->array_layers) {
+        return 0;
+    }
+    uint32_t level_end = range->baseMipLevel + range->levelCount;
+    uint32_t layer_end = range->baseArrayLayer + range->layerCount;
+    if (level_end < range->baseMipLevel || level_end > image->mip_levels ||
+        layer_end < range->baseArrayLayer || layer_end > image->array_layers) {
+        return 0;
+    }
+    return 1;
+}
+
+static int materialize_vulkan_graphics_v620_image_layout_ranges(
+        const VulkanGraphicsV6FrameView *view,
+        VulkanGraphicsReplayAttachments *attachments) {
+    if (!view || !attachments) return -EINVAL;
+    if (!view->is_v620 || !view->header_v620) return 0;
+    for (uint32_t i = 0; i < view->header_v620->v620.image_layout_range_count; ++i) {
+        const PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry *src = &view->image_layout_ranges[i];
+        VulkanDispatchImageObject *image = vulkan_graphics_replay_image_by_source_index(
+            attachments, src->image_index);
+        if (!image) return -EPROTO;
+        if (image->layout_range_count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE) {
+            return -E2BIG;
+        }
+        VkImageSubresourceRange range = {
+            .aspectMask = (VkImageAspectFlags)src->aspect_mask,
+            .baseMipLevel = src->base_mip_level,
+            .levelCount = src->level_count,
+            .baseArrayLayer = src->base_array_layer,
+            .layerCount = src->layer_count,
+        };
+        if (!vulkan_replay_image_layout_range_valid(image, &range)) return -ERANGE;
+        VulkanReplayImageLayoutRange *dst = &image->layout_ranges[image->layout_range_count++];
+        memset(dst, 0, sizeof(*dst));
+        dst->range = range;
+        dst->layout = (VkImageLayout)src->layout;
+        dst->generation = src->layout_generation;
+        image->has_layout_ranges = 1;
+    }
+    return 0;
+}
+
 static int materialize_vulkan_graphics_v6_attachments(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -22379,6 +22451,8 @@ static int materialize_vulkan_graphics_v6_attachments(
         &out->view_count,
         out->samplers,
         &out->sampler_count);
+    if (rc != 0) return rc;
+    rc = materialize_vulkan_graphics_v620_image_layout_ranges(view, out);
     if (rc != 0) return rc;
 
     for (uint32_t c = 0; c < view->header->command_count; ++c) {
@@ -24046,6 +24120,56 @@ static int graphics_push_metadata_for_command(
     return *out_meta ? 0 : -EPROTO;
 }
 
+
+static int record_vulkan_graphics_v620_initial_image_layout_ranges(
+        VkCommandBuffer command_buffer,
+        VulkanGraphicsReplayAttachments *attachments) {
+    if (!command_buffer || !attachments) return -EINVAL;
+    VkImageMemoryBarrier barriers[PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE];
+    uint32_t barrier_count = 0;
+    memset(barriers, 0, sizeof(barriers));
+    for (size_t image_index = 0; image_index < attachments->image_count; ++image_index) {
+        VulkanDispatchImageObject *image = &attachments->images[image_index];
+        if (!image->has_layout_ranges) continue;
+        for (uint32_t range_index = 0; range_index < image->layout_range_count; ++range_index) {
+            const VulkanReplayImageLayoutRange *range = &image->layout_ranges[range_index];
+            if (range->layout == image->current_layout) continue;
+            if (barrier_count >= PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE) {
+                vkCmdPipelineBarrier(command_buffer,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     0,
+                                     0, NULL,
+                                     0, NULL,
+                                     barrier_count, barriers);
+                barrier_count = 0;
+                memset(barriers, 0, sizeof(barriers));
+            }
+            barriers[barrier_count++] = (VkImageMemoryBarrier){
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = 0,
+                .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                .oldLayout = image->current_layout,
+                .newLayout = range->layout,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = image->image,
+                .subresourceRange = range->range,
+            };
+        }
+    }
+    if (barrier_count > 0) {
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                             0,
+                             0, NULL,
+                             0, NULL,
+                             barrier_count, barriers);
+    }
+    return 0;
+}
+
 static int record_vulkan_graphics_v6_command_buffer(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -24079,6 +24203,10 @@ static int record_vulkan_graphics_v6_command_buffer(
     };
     vrc = vkBeginCommandBuffer(command_buffer, &cbi);
     if (vrc != VK_SUCCESS) { rc = -EIO; goto cleanup; }
+    rc = record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);
+    if (rc != 0) goto cleanup;
+    rc = record_vulkan_graphics_v620_initial_image_layout_ranges(command_buffer, attachments);
+    if (rc != 0) goto cleanup;
 
     uint32_t bound_pipeline_index = UINT32_MAX;
     for (uint32_t ci = 0; ci < view->header->command_count; ++ci) {

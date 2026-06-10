@@ -4827,6 +4827,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "const int is_v620_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR;",
             "const int is_v619_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR || is_v620_header;",
             "validate_vulkan_graphics_v620_image_layout_ranges",
+            "VulkanReplayImageLayoutRange",
+            "PDOCKER_GPU_MAX_VULKAN_IMAGE_LAYOUT_RANGES_PER_IMAGE",
+            "materialize_vulkan_graphics_v620_image_layout_ranges",
+            "vulkan_graphics_replay_image_by_source_index",
+            "record_vulkan_graphics_v620_initial_image_layout_ranges",
+            "record_vulkan_graphics_v6_staged_image_uploads(command_buffer, attachments);",
         ]:
             self.assertIn(marker, executor)
 
