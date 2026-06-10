@@ -5105,6 +5105,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VkImageLayout current_layout;", icd)
         self.assertIn("uint64_t layout_generation;", icd)
         self.assertIn("bool layout_mixed;", icd)
+        self.assertIn("bool layout_range_overflow;", icd)
+        self.assertIn("PdockerVkImageLayoutRange layout_ranges[PDOCKER_VK_MAX_COPY_OPS];", icd)
+        self.assertIn("uint32_t layout_range_count;", icd)
         self.assertIn("PdockerVkImageBarrierOp", icd)
         self.assertIn("PDOCKER_VK_COMMAND_IMAGE_BARRIER", icd)
         self.assertIn("image_barrier_ops[PDOCKER_VK_MAX_COPY_OPS]", icd)
@@ -5115,6 +5118,14 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image->current_layout = pCreateInfo->initialLayout;", icd)
         self.assertIn("image->layout_generation = next_vulkan_object_generation();", icd)
         self.assertIn("image->layout_mixed = false;", icd)
+        self.assertIn("clear_image_layout_ranges", icd)
+        self.assertIn("image_layout_ranges_equal", icd)
+        self.assertIn("entry->layout = layout;", icd)
+        self.assertIn("update_image_layout_range_cache", icd)
+        self.assertIn("normalize_image_subresource_range(op->image, &op->range, &normalized_range)", icd)
+        self.assertIn("op->image->layout_range_overflow = true;", icd)
+        self.assertIn("Splitting partially-overlapping layout ranges is required", icd)
+        self.assertIn("image->layout_range_overflow = true;", icd)
         barrier_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer", 1
         )[0]
