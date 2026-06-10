@@ -24155,7 +24155,16 @@ static int record_vulkan_graphics_v6_staged_image_uploads(
                                    1,
                                    &region);
         }
-        image->current_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        VkImageSubresourceRange upload_range = {
+            .aspectMask = image->copy_aspect_mask,
+            .baseMipLevel = image->copy_base_mip,
+            .levelCount = image->copy_level_count,
+            .baseArrayLayer = image->copy_base_layer,
+            .layerCount = image->copy_layer_count,
+        };
+        int layout_rc = vulkan_replay_image_set_layout_for_range(
+            image, &upload_range, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        if (layout_rc != 0) return layout_rc;
         image->upload_pending = 0;
     }
     return 0;
