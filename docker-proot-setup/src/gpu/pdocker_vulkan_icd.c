@@ -3481,15 +3481,12 @@ static int collect_graphics_image_entry(
     int existing = find_image_table_index(image_objects, *image_count, image);
     if (existing >= 0) return existing;
     if (*image_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES) return -E2BIG;
-    if (image->layout_mixed) {
-        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
-            fprintf(stderr,
-                    "pdocker-vulkan-icd: V5 image transport rejected: mixed subresource layouts require per-subresource layout ABI image=%p generation=%llu\n",
-                    (void *)image,
-                    (unsigned long long)image->generation);
-        }
-        return -EOPNOTSUPP;
-    }
+    /*
+     * Graphics V6.20 can transport mixed per-subresource layouts using the
+     * image-layout range extension table.  V5.1 object transport still rejects
+     * mixed images in its own send path below, so accepting them here does not
+     * weaken older ABIs.
+     */
     if (image->memory->fd < 0) return -EINVAL;
     if (image->memory_offset > (VkDeviceSize)image->memory->size ||
         image->requirements_size > (VkDeviceSize)image->memory->size - image->memory_offset) {
@@ -3582,6 +3579,58 @@ static int collect_graphics_image_view_entry(
     entry->generation = view->generation ? view->generation : generation;
     image_view_objects[index] = view;
     return (int)index;
+}
+
+
+static int collect_graphics_image_layout_range_entries(
+        PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry *range_entries,
+        size_t *range_count,
+        PdockerVkImage *const *image_objects,
+        size_t image_count) {
+    if (!range_entries || !range_count || (!image_objects && image_count > 0)) return -EINVAL;
+    *range_count = 0;
+    for (size_t image_index = 0; image_index < image_count; ++image_index) {
+        const PdockerVkImage *image = image_objects[image_index];
+        if (!image || !image->layout_mixed) continue;
+        if (image->layout_range_overflow || image->layout_range_count == 0) {
+            if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: V6.20 frame rejected: image layout range cache incomplete image=%zu image_ptr=%p overflow=%d range_count=%u generation=%llu\n",
+                        image_index,
+                        (const void *)image,
+                        image ? (int)image->layout_range_overflow : -1,
+                        image ? image->layout_range_count : 0u,
+                        image ? (unsigned long long)image->generation : 0ull);
+            }
+            return -EOPNOTSUPP;
+        }
+        for (uint32_t i = 0; i < image->layout_range_count; ++i) {
+            const PdockerVkImageLayoutRange *src = &image->layout_ranges[i];
+            const VkImageSubresourceRange *range = &src->range;
+            if (range->aspectMask == 0 || range->levelCount == 0 || range->layerCount == 0 ||
+                range->baseMipLevel >= image->mip_levels ||
+                range->levelCount > image->mip_levels - range->baseMipLevel ||
+                range->baseArrayLayer >= image->array_layers ||
+                range->layerCount > image->array_layers - range->baseArrayLayer) {
+                return -ERANGE;
+            }
+            if (*range_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES) {
+                return -E2BIG;
+            }
+            PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry *dst = &range_entries[(*range_count)++];
+            memset(dst, 0, sizeof(*dst));
+            dst->image_index = (uint32_t)image_index;
+            dst->aspect_mask = range->aspectMask;
+            dst->base_mip_level = range->baseMipLevel;
+            dst->level_count = range->levelCount;
+            dst->base_array_layer = range->baseArrayLayer;
+            dst->layer_count = range->layerCount;
+            dst->layout = (uint32_t)src->layout;
+            dst->reserved0 = 0;
+            dst->layout_generation = src->generation ? src->generation : image->layout_generation;
+        }
+    }
+    return 0;
 }
 
 static int collect_graphics_sampler_entry(
@@ -4022,6 +4071,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     PdockerGpuVulkanGraphicsV617QueryCommandEntry query_commands[PDOCKER_GPU_VULKAN_GRAPHICS_V617_MAX_QUERY_COMMANDS];
     PdockerGpuVulkanGraphicsV618CopyQueryResultEntry copy_query_results[PDOCKER_GPU_VULKAN_GRAPHICS_V618_MAX_COPY_QUERY_RESULTS];
     PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_syncs[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry image_layout_ranges[PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES];
     int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS];
     memset(pipeline_objects, 0, sizeof(pipeline_objects));
     memset(memory_objects, 0, sizeof(memory_objects));
@@ -4073,6 +4123,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     memset(query_commands, 0, sizeof(query_commands));
     memset(copy_query_results, 0, sizeof(copy_query_results));
     memset(submit_syncs, 0, sizeof(submit_syncs));
+    memset(image_layout_ranges, 0, sizeof(image_layout_ranges));
     if (submit_sync_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
         close(socket_fd);
         return -E2BIG;
@@ -4094,7 +4145,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     bool pre_need_v616_clear_attachments = false;
     bool pre_need_v617_query = false;
     bool pre_need_v618_copy_query = false;
-    const bool need_v619_submit_sync = submit_sync_count > 0;
+    bool need_v619_submit_sync = submit_sync_count > 0;
     {
         for (uint32_t gi = 0; gi < cmd->graphics_command_op_count; ++gi) {
             if (cmd->graphics_command_ops[gi].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS) {
@@ -4152,6 +4203,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
         close(socket_fd);
         return -ENOMEM;
     }
+    PdockerGpuVulkanGraphicsV620FrameHeader *frame_header_v620 =
+        (PdockerGpuVulkanGraphicsV620FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV619FrameHeader *frame_header_v619 =
         (PdockerGpuVulkanGraphicsV619FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV618FrameHeader *frame_header_v618 =
@@ -4191,14 +4244,13 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     PdockerGpuVulkanGraphicsV61FrameHeader *frame_header =
         (PdockerGpuVulkanGraphicsV61FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV6FrameHeader *header = &frame_header->base;
-    size_t cursor = pre_need_v618_copy_query ? sizeof(PdockerGpuVulkanGraphicsV618FrameHeader) :
-        (pre_need_v617_query ? sizeof(PdockerGpuVulkanGraphicsV617FrameHeader) :
-        (pre_need_v616_clear_attachments ? sizeof(*frame_header_v616) :
-        (pre_need_v615_blit_image ? sizeof(*frame_header_v615) :
-        (pre_need_v614_resolve_image ? sizeof(*frame_header_v614) :
-        (pre_need_v613_clear_depth_stencil ? sizeof(*frame_header_v613) :
-        (pre_need_v612_clear_color ? sizeof(*frame_header_v612) :
-        (pre_need_v611_buffer_write ? sizeof(*frame_header_v611) : sizeof(*frame_header_v610))))))));
+    /*
+     * Some extension decisions, including V6.20 per-subresource layout ranges,
+     * are only known after walking the recorded command graph.  Reserve the
+     * largest known header before appending variable payloads so a later ABI
+     * upgrade cannot overlap data already written into the frame.
+     */
+    size_t cursor = sizeof(PdockerGpuVulkanGraphicsV620FrameHeader);
     size_t fd_count = 0;
     size_t resource_count = 0;
     size_t descriptor_count = 0;
@@ -5684,8 +5736,21 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     APPEND_INTERLEAVED_GRAPHICS_BUFFER_COPIES(UINT32_MAX);
 #undef APPEND_INTERLEAVED_GRAPHICS_BUFFER_COPIES
 
+    size_t image_layout_range_count = 0;
+    rc = collect_graphics_image_layout_range_entries(
+        image_layout_ranges, &image_layout_range_count, image_objects, image_count);
+    if (rc != 0) goto cleanup;
+    const bool need_v620_image_layout_range = image_layout_range_count > 0;
+    if (need_v620_image_layout_range) {
+        /* V6.20 is append-only after V6.19, so populate the V6.19 extension prefix too. */
+        need_v619_submit_sync = true;
+    }
+
     memcpy(header->magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, 8);
-    if (need_v619_submit_sync) {
+    if (need_v620_image_layout_range) {
+        header->header_size = sizeof(*frame_header_v620);
+        header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR;
+    } else if (need_v619_submit_sync) {
         header->header_size = sizeof(*frame_header_v619);
         header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR;
     } else if (need_v618_copy_query) {
@@ -5922,6 +5987,11 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
         frame_header_v619->v619.submit_sync_entry_size = sizeof(PdockerGpuVulkanGraphicsV619SubmitSyncEntry);
         frame_header_v619->v619.submit_sync_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V619_SUBMIT_SYNC_SCHEMA_HASH;
     }
+    if (need_v620_image_layout_range) {
+        frame_header_v620->v620.image_layout_range_count = (uint32_t)image_layout_range_count;
+        frame_header_v620->v620.image_layout_range_entry_size = sizeof(PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry);
+        frame_header_v620->v620.image_layout_range_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_SCHEMA_HASH;
+    }
 
 #define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
     do { \
@@ -6107,6 +6177,12 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
                               frame_header_v619->v619.submit_sync_table_offset,
                               frame_header_v619->v619.submit_sync_table_size);
     }
+    if (need_v620_image_layout_range) {
+        APPEND_GRAPHICS_TABLE(image_layout_ranges, image_layout_range_count,
+                              sizeof(image_layout_ranges[0]),
+                              frame_header_v620->v620.image_layout_range_table_offset,
+                              frame_header_v620->v620.image_layout_range_table_size);
+    }
 #undef APPEND_GRAPHICS_TABLE
     frame_header->v61.extension_hash = 1469598103934665603ull;
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
@@ -6272,12 +6348,18 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
             submit_syncs, sizeof(submit_syncs[0]) * submit_sync_count);
         frame_header_v619->v619.extension_hash = frame_header_v619->v619.submit_sync_table_hash;
     }
+    if (need_v620_image_layout_range) {
+        frame_header_v620->v620.image_layout_range_table_hash = fnv1a64_bytes(
+            image_layout_ranges, sizeof(image_layout_ranges[0]) * image_layout_range_count);
+        frame_header_v620->v620.extension_hash = frame_header_v620->v620.image_layout_range_table_hash;
+    }
     header->frame_size = cursor;
     header->payload_hash = fnv1a64_bytes(frame + header->header_size,
                                          cursor - header->header_size);
     header->frame_hash = fnv1a64_bytes(frame, cursor);
     rc = send_vulkan_graphics_v6_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
     const char *graphics_label =
+        need_v620_image_layout_range ? "VULKAN_GRAPHICS_V6.20" :
         need_v619_submit_sync ? "VULKAN_GRAPHICS_V6.19" :
         need_v618_copy_query ? "VULKAN_GRAPHICS_V6.18" :
         need_v617_query ? "VULKAN_GRAPHICS_V6.17" :

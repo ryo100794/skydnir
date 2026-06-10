@@ -1274,6 +1274,7 @@ class GpuAbiContractTest(unittest.TestCase):
         container_abi = CONTAINER_HEADER.read_text()
         executor = GPU_EXECUTOR.read_text()
         icd = VULKAN_ICD.read_text()
+        icd = VULKAN_ICD.read_text()
         for source in [abi, container_abi]:
             self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V63_ABI_MINOR 3u", source)
             self.assertIn("PdockerGpuVulkanGraphicsV63FrameHeader", source)
@@ -4719,6 +4720,7 @@ class GpuAbiContractTest(unittest.TestCase):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
         executor = GPU_EXECUTOR.read_text()
+        icd = VULKAN_ICD.read_text()
         expected_extension_fields = [
             ("image_layout_range_count", "u32"),
             ("image_layout_range_entry_size", "u32"),
@@ -4827,6 +4829,21 @@ class GpuAbiContractTest(unittest.TestCase):
             "validate_vulkan_graphics_v620_image_layout_ranges",
         ]:
             self.assertIn(marker, executor)
+
+        for marker in [
+            "PdockerGpuVulkanGraphicsV620FrameHeader *frame_header_v620",
+            "PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry image_layout_ranges[PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES]",
+            "collect_graphics_image_layout_range_entries",
+            "image->layout_range_overflow || image->layout_range_count == 0",
+            "*range_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES",
+            "frame_header_v620->v620.image_layout_range_count = (uint32_t)image_layout_range_count",
+            "frame_header_v620->v620.image_layout_range_entry_size = sizeof(PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry)",
+            "frame_header_v620->v620.image_layout_range_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
+            "APPEND_GRAPHICS_TABLE(image_layout_ranges, image_layout_range_count",
+            "frame_header_v620->v620.image_layout_range_table_hash = fnv1a64_bytes",
+            "need_v620_image_layout_range ? \"VULKAN_GRAPHICS_V6.20\"",
+        ]:
+            self.assertIn(marker, icd)
 
     def test_vulkan_graphics_v619_submit_sync_metadata_abi_is_append_only(self):
         abi = APP_HEADER.read_text()
