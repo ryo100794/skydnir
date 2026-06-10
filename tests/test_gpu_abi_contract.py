@@ -4715,6 +4715,98 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
 
+    def test_vulkan_graphics_image_layout_range_v620_abi_scaffold(self):
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+        expected_extension_fields = [
+            ("image_layout_range_count", "u32"),
+            ("image_layout_range_entry_size", "u32"),
+            ("image_layout_range_table_offset", "u64"),
+            ("image_layout_range_table_size", "u64"),
+            ("image_layout_range_schema_hash", "u64"),
+            ("image_layout_range_table_hash", "u64"),
+            ("extension_hash", "u64"),
+        ]
+        expected_range_fields = [
+            ("image_index", "u32"),
+            ("aspect_mask", "u32"),
+            ("base_mip_level", "u32"),
+            ("level_count", "u32"),
+            ("base_array_layer", "u32"),
+            ("layer_count", "u32"),
+            ("layout", "u32"),
+            ("reserved0", "u32"),
+            ("layout_generation", "u64"),
+        ]
+        for header_path, source in [(APP_HEADER, abi), (CONTAINER_HEADER, container_abi)]:
+            with self.subTest(header=str(header_path)):
+                self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR 20u", source)
+                self.assertIn("PdockerGpuVulkanGraphicsV620HeaderExtension", source)
+                self.assertIn("PdockerGpuVulkanGraphicsV620FrameHeader", source)
+                self.assertIn("PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry", source)
+                self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V620_HEADER_EXTENSION_FIELDS", source)
+                self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_FIELDS", source)
+                self.assertIn("PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES 4096u", source)
+                header_fields, header_count, declared_header_hash, computed_header_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V620_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V620_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V620_HEADER_EXTENSION_SCHEMA_HASH",
+                )
+                range_fields, range_count, declared_range_hash, computed_range_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
+                )
+                self.assertEqual(expected_extension_fields, header_fields)
+                self.assertEqual(expected_range_fields, range_fields)
+                self.assertEqual(7, header_count)
+                self.assertEqual(9, range_count)
+                self.assertEqual(declared_header_hash, computed_header_hash)
+                self.assertEqual(declared_range_hash, computed_range_hash)
+                self.assertEqual(
+                    [name for name, _ in expected_extension_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV620HeaderExtension"),
+                )
+                self.assertEqual(
+                    [name for name, _ in expected_range_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry"),
+                )
+                self.assertEqual(
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV619FrameHeader") + ["v620"],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV620FrameHeader"),
+                )
+
+        self.assertEqual(
+            vulkan_dispatch_v5_schema(
+                APP_HEADER,
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            vulkan_dispatch_v5_schema(
+                CONTAINER_HEADER,
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+        )
+        self.assertEqual(
+            vulkan_dispatch_v5_schema(
+                APP_HEADER,
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
+            ),
+            vulkan_dispatch_v5_schema(
+                CONTAINER_HEADER,
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
+            ),
+        )
+
     def test_vulkan_graphics_v619_submit_sync_metadata_abi_is_append_only(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
