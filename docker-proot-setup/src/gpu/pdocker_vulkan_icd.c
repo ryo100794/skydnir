@@ -1492,11 +1492,11 @@ static uint32_t conservative_format_bytes_per_pixel(VkFormat format) {
             return 16;
         default:
             /*
-             * Fail safe for block-compressed/depth/vendor formats: reserve a
-             * conservative RGBA32F-sized image footprint rather than returning
-             * a too-small requirement that would corrupt later bind validation.
+             * Unknown/block-compressed/vendor formats are not byte-linear in
+             * the bridge contract.  Do not fabricate a conservative footprint;
+             * callers must fail closed with VK_ERROR_FORMAT_NOT_SUPPORTED.
              */
-            return 16;
+            return 0;
     }
 }
 
@@ -1801,7 +1801,9 @@ static VkDeviceSize estimate_image_requirement_size(const VkImageCreateInfo *inf
     if (!checked_mul_u64(pixels, info->extent.depth ? info->extent.depth : 1, &pixels)) return 0;
     if (!checked_mul_u64(pixels, info->arrayLayers ? info->arrayLayers : 1, &pixels)) return 0;
     if (!checked_mul_u64(pixels, info->mipLevels ? info->mipLevels : 1, &pixels)) return 0;
-    if (!checked_mul_u64(pixels, conservative_format_bytes_per_pixel(info->format), &pixels)) return 0;
+    uint32_t bytes_per_pixel = conservative_format_bytes_per_pixel(info->format);
+    if (bytes_per_pixel == 0) return 0;
+    if (!checked_mul_u64(pixels, bytes_per_pixel, &pixels)) return 0;
     return align_device_size((VkDeviceSize)pixels, PDOCKER_VK_REQUIREMENT_ALIGNMENT);
 }
 
@@ -3470,6 +3472,15 @@ static int collect_graphics_image_entry(
     int existing = find_image_table_index(image_objects, *image_count, image);
     if (existing >= 0) return existing;
     if (*image_count >= PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_IMAGES) return -E2BIG;
+    if (image->layout_mixed) {
+        if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: V5 image transport rejected: mixed subresource layouts require per-subresource layout ABI image=%p generation=%llu\n",
+                    (void *)image,
+                    (unsigned long long)image->generation);
+        }
+        return -EOPNOTSUPP;
+    }
     if (image->memory->fd < 0) return -EINVAL;
     if (image->memory_offset > (VkDeviceSize)image->memory->size ||
         image->requirements_size > (VkDeviceSize)image->memory->size - image->memory_offset) {
@@ -6591,6 +6602,15 @@ static int send_generic_vulkan_dispatch_v5_1_op(
                     image ? (void *)image->memory : NULL,
                     image && image->memory ? image->memory->fd : -1);
             return -EINVAL;
+        }
+        if (image->layout_mixed) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: V5.1 frame rejected: mixed subresource layouts require per-subresource layout ABI dispatch_id=%llu image=%zu image_ptr=%p generation=%llu\n",
+                    (unsigned long long)dispatch_id,
+                    i,
+                    (void *)image,
+                    (unsigned long long)image->generation);
+            return -EOPNOTSUPP;
         }
         if (image->memory_offset > (VkDeviceSize)image->memory->size ||
             image->requirements_size > (VkDeviceSize)image->memory->size - image->memory_offset) {
@@ -9997,6 +10017,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     *pImage = VK_NULL_HANDLE;
     if (!vulkan_v5_object_transport_enabled()) {
         return unsupported_image_transport_result("vkCreateImage");
+    }
+    if (!pdocker_vk_format_bridge_supported(pCreateInfo->format)) {
+        return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
     VkDeviceSize requirements_size = estimate_image_requirement_size(pCreateInfo);
     if (requirements_size == 0 || requirements_size > pdocker_vulkan_max_buffer_size()) {
