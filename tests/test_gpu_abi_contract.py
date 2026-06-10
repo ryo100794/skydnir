@@ -5113,7 +5113,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("image_barrier_ops[PDOCKER_VK_MAX_COPY_OPS]", icd)
         self.assertIn("execute_recorded_image_barrier_op", icd)
         self.assertIn("record_image_barrier_op", icd)
+        self.assertIn("image_format_full_aspect_mask", icd)
         self.assertIn("image_subresource_range_is_whole_image", icd)
+        self.assertIn("range->aspectMask != full_aspects", icd)
         self.assertIn("trace_image_layout_mismatch", icd)
         self.assertIn("image->current_layout = pCreateInfo->initialLayout;", icd)
         self.assertIn("image->layout_generation = next_vulkan_object_generation();", icd)
@@ -5131,6 +5133,12 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("pImageMemoryBarriers && i < imageMemoryBarrierCount", barrier_body)
         self.assertIn("record_image_barrier_op(commandBuffer", barrier_body)
+        record_image_barrier_body = icd.split("static void record_image_barrier_op", 1)[1].split(
+            "static void record_memory_barrier_op", 1
+        )[0]
+        self.assertIn("cmd->graphics_unsupported = true;", record_image_barrier_body)
+        self.assertIn("command_buffer_mark_recording_failed(cmd, \"image-barrier-record-overflow\")", record_image_barrier_body)
+        self.assertIn("submit will fail closed", record_image_barrier_body)
         self.assertIn("dependencyFlags & ~VK_DEPENDENCY_BY_REGION_BIT", barrier_body)
         self.assertIn("record.flags = dependencyFlags & VK_DEPENDENCY_BY_REGION_BIT", barrier_body)
         barrier2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier2", 1)[1].split(

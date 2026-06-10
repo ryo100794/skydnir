@@ -14035,10 +14035,20 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
     }
 }
 
+static VkImageAspectFlags image_format_full_aspect_mask(VkFormat format) {
+    VkImageAspectFlags aspects = 0;
+    if (pdocker_vk_format_has_depth(format)) aspects |= VK_IMAGE_ASPECT_DEPTH_BIT;
+    if (pdocker_vk_format_has_stencil(format)) aspects |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    if (aspects == 0) aspects = VK_IMAGE_ASPECT_COLOR_BIT;
+    return aspects;
+}
+
 static bool image_subresource_range_is_whole_image(
         const PdockerVkImage *image,
         const VkImageSubresourceRange *range) {
     if (!image || !range) return false;
+    VkImageAspectFlags full_aspects = image_format_full_aspect_mask(image->format);
+    if (range->aspectMask != full_aspects) return false;
     uint32_t levels = range->levelCount == VK_REMAINING_MIP_LEVELS
         ? image->mip_levels - range->baseMipLevel
         : range->levelCount;
@@ -14221,9 +14231,11 @@ static void record_image_barrier_op(
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     if (!cmd || !image) return;
     if (cmd->image_barrier_op_count >= PDOCKER_VK_MAX_COPY_OPS) {
+        cmd->graphics_unsupported = true;
+        command_buffer_mark_recording_failed(cmd, "image-barrier-record-overflow");
         if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
             fprintf(stderr,
-                    "pdocker-vulkan-icd: image-barrier command buffer full max=%u\n",
+                    "pdocker-vulkan-icd: image-barrier command buffer full max=%u; submit will fail closed\n",
                     PDOCKER_VK_MAX_COPY_OPS);
         }
         return;
