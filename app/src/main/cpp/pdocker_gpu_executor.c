@@ -25158,7 +25158,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                                      &color,
                                      1,
                                      &range);
-                image->current_layout = (VkImageLayout)clear->image_layout;
+                rc = vulkan_replay_image_set_layout_for_range(
+                    image, &range, (VkImageLayout)clear->image_layout);
+                if (rc != 0) goto cleanup;
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE: {
@@ -25192,7 +25194,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                                             &value,
                                             1,
                                             &range);
-                image->current_layout = (VkImageLayout)clear->image_layout;
+                rc = vulkan_replay_image_set_layout_for_range(
+                    image, &range, (VkImageLayout)clear->image_layout);
+                if (rc != 0) goto cleanup;
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL:
@@ -25341,6 +25345,13 @@ static int record_vulkan_graphics_v6_command_buffer(
                     .imageOffset = {copy->image_offset_x, copy->image_offset_y, copy->image_offset_z},
                     .imageExtent = {copy->image_extent_width, copy->image_extent_height, copy->image_extent_depth},
                 };
+                VkImageSubresourceRange image_range = {
+                    .aspectMask = (VkImageAspectFlags)copy->aspect_mask,
+                    .baseMipLevel = copy->mip_level,
+                    .levelCount = 1,
+                    .baseArrayLayer = copy->base_array_layer,
+                    .layerCount = copy->layer_count,
+                };
                 if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER_TO_IMAGE) {
                     vkCmdCopyBufferToImage(command_buffer,
                                            replay_buffer->buffer.buffer,
@@ -25358,7 +25369,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                                            1,
                                            &region);
                 }
-                image->current_layout = (VkImageLayout)copy->image_layout;
+                rc = vulkan_replay_image_set_layout_for_range(
+                    image, &image_range, (VkImageLayout)copy->image_layout);
+                if (rc != 0) goto cleanup;
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_IMAGE: {
@@ -25395,8 +25408,26 @@ static int record_vulkan_graphics_v6_command_buffer(
                                (VkImageLayout)copy->dst_layout,
                                1,
                                &region);
-                src_image->current_layout = (VkImageLayout)copy->src_layout;
-                dst_image->current_layout = (VkImageLayout)copy->dst_layout;
+                VkImageSubresourceRange src_range = {
+                    .aspectMask = (VkImageAspectFlags)copy->src_aspect_mask,
+                    .baseMipLevel = copy->src_mip_level,
+                    .levelCount = 1,
+                    .baseArrayLayer = copy->src_base_array_layer,
+                    .layerCount = copy->layer_count,
+                };
+                VkImageSubresourceRange dst_range = {
+                    .aspectMask = (VkImageAspectFlags)copy->dst_aspect_mask,
+                    .baseMipLevel = copy->dst_mip_level,
+                    .levelCount = 1,
+                    .baseArrayLayer = copy->dst_base_array_layer,
+                    .layerCount = copy->layer_count,
+                };
+                rc = vulkan_replay_image_set_layout_for_range(
+                    src_image, &src_range, (VkImageLayout)copy->src_layout);
+                if (rc != 0) goto cleanup;
+                rc = vulkan_replay_image_set_layout_for_range(
+                    dst_image, &dst_range, (VkImageLayout)copy->dst_layout);
+                if (rc != 0) goto cleanup;
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESOLVE_IMAGE: {
@@ -25433,8 +25464,26 @@ static int record_vulkan_graphics_v6_command_buffer(
                                   (VkImageLayout)resolve->dst_layout,
                                   1,
                                   &region);
-                src_image->current_layout = (VkImageLayout)resolve->src_layout;
-                dst_image->current_layout = (VkImageLayout)resolve->dst_layout;
+                VkImageSubresourceRange src_range = {
+                    .aspectMask = (VkImageAspectFlags)resolve->src_aspect_mask,
+                    .baseMipLevel = resolve->src_mip_level,
+                    .levelCount = 1,
+                    .baseArrayLayer = resolve->src_base_array_layer,
+                    .layerCount = resolve->layer_count,
+                };
+                VkImageSubresourceRange dst_range = {
+                    .aspectMask = (VkImageAspectFlags)resolve->dst_aspect_mask,
+                    .baseMipLevel = resolve->dst_mip_level,
+                    .levelCount = 1,
+                    .baseArrayLayer = resolve->dst_base_array_layer,
+                    .layerCount = resolve->layer_count,
+                };
+                rc = vulkan_replay_image_set_layout_for_range(
+                    src_image, &src_range, (VkImageLayout)resolve->src_layout);
+                if (rc != 0) goto cleanup;
+                rc = vulkan_replay_image_set_layout_for_range(
+                    dst_image, &dst_range, (VkImageLayout)resolve->dst_layout);
+                if (rc != 0) goto cleanup;
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BLIT_IMAGE: {
@@ -25477,8 +25526,26 @@ static int record_vulkan_graphics_v6_command_buffer(
                                1,
                                &region,
                                (VkFilter)blit->filter);
-                src_image->current_layout = (VkImageLayout)blit->src_layout;
-                dst_image->current_layout = (VkImageLayout)blit->dst_layout;
+                VkImageSubresourceRange src_range = {
+                    .aspectMask = (VkImageAspectFlags)blit->src_aspect_mask,
+                    .baseMipLevel = blit->src_mip_level,
+                    .levelCount = 1,
+                    .baseArrayLayer = blit->src_base_array_layer,
+                    .layerCount = blit->layer_count,
+                };
+                VkImageSubresourceRange dst_range = {
+                    .aspectMask = (VkImageAspectFlags)blit->dst_aspect_mask,
+                    .baseMipLevel = blit->dst_mip_level,
+                    .levelCount = 1,
+                    .baseArrayLayer = blit->dst_base_array_layer,
+                    .layerCount = blit->layer_count,
+                };
+                rc = vulkan_replay_image_set_layout_for_range(
+                    src_image, &src_range, (VkImageLayout)blit->src_layout);
+                if (rc != 0) goto cleanup;
+                rc = vulkan_replay_image_set_layout_for_range(
+                    dst_image, &dst_range, (VkImageLayout)blit->dst_layout);
+                if (rc != 0) goto cleanup;
                 break;
             }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER: {
