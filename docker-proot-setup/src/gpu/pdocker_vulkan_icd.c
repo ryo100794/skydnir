@@ -15507,6 +15507,98 @@ static bool command_op_is_graphics_interleavable_transfer_op(PdockerVkCommandOpT
     }
 }
 
+static bool submit_sync_entries_include_wait(
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
+        size_t entry_count) {
+    if (!entries) return false;
+    for (size_t i = 0; i < entry_count; ++i) {
+        if (entries[i].sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool submit_sync_entries_include_completion(
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
+        size_t entry_count) {
+    if (!entries) return false;
+    for (size_t i = 0; i < entry_count; ++i) {
+        if (entries[i].sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL ||
+            entries[i].sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool command_buffer_has_recorded_submit_work(const PdockerVkCommandBuffer *cmd) {
+    return cmd && (
+        cmd->command_op_count > 0 ||
+        cmd->graphics_command_op_count > 0 ||
+        cmd->copy_op_count > 0 ||
+        cmd->image_copy_op_count > 0 ||
+        cmd->image_to_image_copy_op_count > 0 ||
+        cmd->image_clear_op_count > 0 ||
+        cmd->image_resolve_op_count > 0 ||
+        cmd->image_blit_op_count > 0 ||
+        cmd->depth_stencil_clear_op_count > 0 ||
+        cmd->dispatch_op_count > 0 ||
+        cmd->has_dispatch);
+}
+
+static bool submit_has_recorded_work_before_command(
+        const VkSubmitInfo *submit,
+        uint32_t command_index) {
+    if (!submit || !submit->pCommandBuffers) return false;
+    if (command_index >= submit->commandBufferCount) return false;
+    for (uint32_t i = 0; i < command_index && i < submit->commandBufferCount; ++i) {
+        if (command_buffer_has_recorded_submit_work(
+                (const PdockerVkCommandBuffer *)submit->pCommandBuffers[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool submit_has_recorded_work_after_command(
+        const VkSubmitInfo *submit,
+        uint32_t command_index) {
+    if (!submit || !submit->pCommandBuffers) return false;
+    if (command_index >= submit->commandBufferCount) return false;
+    for (uint32_t i = command_index + 1u; i < submit->commandBufferCount; ++i) {
+        if (command_buffer_has_recorded_submit_work(
+                (const PdockerVkCommandBuffer *)submit->pCommandBuffers[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool command_buffer_has_host_side_ops_before(
+        const PdockerVkCommandBuffer *cmd,
+        uint32_t first_gpu_op) {
+    if (!cmd || first_gpu_op == UINT32_MAX) return false;
+    for (uint32_t i = 0; i < cmd->command_op_count && i < first_gpu_op; ++i) {
+        if (command_op_is_host_transfer_or_layout_op(cmd->command_ops[i].type)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool command_buffer_has_host_side_ops_after(
+        const PdockerVkCommandBuffer *cmd,
+        uint32_t last_gpu_op) {
+    if (!cmd || last_gpu_op == UINT32_MAX) return false;
+    for (uint32_t i = last_gpu_op + 1u; i < cmd->command_op_count; ++i) {
+        if (command_op_is_host_transfer_or_layout_op(cmd->command_ops[i].type)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool graphics_mixed_submit_plan(
         const PdockerVkCommandBuffer *cmd,
         uint32_t *first_gpu_op_out,
@@ -15665,17 +15757,31 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
-                PdockerVkCopyStats mixed_stats;
-                memset(&mixed_stats, 0, sizeof(mixed_stats));
-                VkResult mixed_host_rc = execute_graphics_mixed_host_side_ops(
-                    cmd, first_graphics_gpu_op, last_graphics_gpu_op, true, &mixed_stats);
-                if (mixed_host_rc != VK_SUCCESS) return mixed_host_rc;
                 PdockerGpuVulkanGraphicsV619SubmitSyncEntry frame_submit_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
                 size_t frame_submit_sync_count = filter_submit_sync_entries_for_graphics_frame(
                     submit_sync_entries, submit_sync_count,
                     j == first_graphics_submit_sync_cmd,
                     j == last_graphics_submit_sync_cmd,
                     frame_submit_sync_entries);
+                if (submit_sync_entries_include_wait(frame_submit_sync_entries, frame_submit_sync_count) &&
+                    (submit_has_recorded_work_before_command(&pSubmits[i], j) ||
+                     command_buffer_has_host_side_ops_before(cmd, first_graphics_gpu_op))) {
+                    trace_icd_runtime_failure("submit-sync-wait-after-prior-work-unimplemented",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                if (submit_sync_entries_include_completion(frame_submit_sync_entries, frame_submit_sync_count) &&
+                    (submit_has_recorded_work_after_command(&pSubmits[i], j) ||
+                     command_buffer_has_host_side_ops_after(cmd, last_graphics_gpu_op))) {
+                    trace_icd_runtime_failure("submit-sync-signal-or-fence-before-trailing-submit-work-unimplemented",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
+                PdockerVkCopyStats mixed_stats;
+                memset(&mixed_stats, 0, sizeof(mixed_stats));
+                VkResult mixed_host_rc = execute_graphics_mixed_host_side_ops(
+                    cmd, first_graphics_gpu_op, last_graphics_gpu_op, true, &mixed_stats);
+                if (mixed_host_rc != VK_SUCCESS) return mixed_host_rc;
                 int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(
                     cmd, frame_submit_sync_entries, frame_submit_sync_count);
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {

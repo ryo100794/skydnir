@@ -789,6 +789,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "graphics_submit_sync_frame_bounds",
             "filter_submit_sync_entries_for_graphics_frame",
             "frame_submit_sync_entries",
+            "submit_sync_entries_include_wait",
+            "submit_sync_entries_include_completion",
+            "command_buffer_has_recorded_submit_work",
+            "submit_has_recorded_work_before_command",
+            "submit_has_recorded_work_after_command",
+            "command_buffer_has_host_side_ops_before",
+            "command_buffer_has_host_side_ops_after",
+            "submit-sync-wait-after-prior-work-unimplemented",
+            "submit-sync-signal-or-fence-before-trailing-submit-work-unimplemented",
             "send_recorded_vulkan_graphics_v6_1_frame(\n                        cmd, frame_submit_sync_entries, frame_submit_sync_count)",
             "graphics_mixed_submit_plan",
             "execute_graphics_mixed_host_side_ops",
@@ -5740,8 +5749,23 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (cmd->command_op_count > 0)", 1
         )[0]
         self.assertLess(
-            mixed_body.index("execute_graphics_mixed_host_side_ops("),
             mixed_body.index("filter_submit_sync_entries_for_graphics_frame"),
+            mixed_body.index("execute_graphics_mixed_host_side_ops("),
+        )
+        for marker in [
+            "submit_sync_entries_include_wait(frame_submit_sync_entries, frame_submit_sync_count)",
+            "submit_has_recorded_work_before_command(&pSubmits[i], j)",
+            "command_buffer_has_host_side_ops_before(cmd, first_graphics_gpu_op)",
+            "submit_sync_entries_include_completion(frame_submit_sync_entries, frame_submit_sync_count)",
+            "submit_has_recorded_work_after_command(&pSubmits[i], j)",
+            "command_buffer_has_host_side_ops_after(cmd, last_graphics_gpu_op)",
+            "submit-sync-wait-after-prior-work-unimplemented",
+            "submit-sync-signal-or-fence-before-trailing-submit-work-unimplemented",
+        ]:
+            self.assertIn(marker, mixed_body)
+        self.assertLess(
+            mixed_body.index("submit-sync-signal-or-fence-before-trailing-submit-work-unimplemented"),
+            mixed_body.index("execute_graphics_mixed_host_side_ops("),
         )
         self.assertLess(
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(\n                    cmd, frame_submit_sync_entries, frame_submit_sync_count)"),
