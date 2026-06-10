@@ -196,6 +196,12 @@ typedef struct {
     VkDeviceSize size;
 } PdockerVkCopyAlias;
 
+typedef struct {
+    VkImageSubresourceRange range;
+    VkImageLayout layout;
+    uint64_t generation;
+} PdockerVkImageLayoutRange;
+
 struct PdockerVkBuffer {
     size_t size;
     VkDeviceSize requirements_size;
@@ -221,6 +227,9 @@ struct PdockerVkImage {
     VkImageLayout current_layout;
     uint64_t layout_generation;
     bool layout_mixed;
+    bool layout_range_overflow;
+    PdockerVkImageLayoutRange layout_ranges[PDOCKER_VK_MAX_COPY_OPS];
+    uint32_t layout_range_count;
     VkDeviceSize requirements_size;
     VkDeviceSize requirements_alignment;
     uint32_t memory_type_bits;
@@ -10041,6 +10050,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     image->current_layout = pCreateInfo->initialLayout;
     image->layout_generation = next_vulkan_object_generation();
     image->layout_mixed = false;
+    image->layout_range_overflow = false;
+    image->layout_range_count = 0;
     image->requirements_alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
     image->requirements_size = requirements_size;
     image->memory_type_bits = 0x3;
@@ -14085,6 +14096,73 @@ static void trace_image_layout_mismatch(
     }
 }
 
+static void clear_image_layout_ranges(PdockerVkImage *image) {
+    if (!image) return;
+    image->layout_range_count = 0;
+    image->layout_range_overflow = false;
+}
+
+static bool image_layout_ranges_overlap(
+        const VkImageSubresourceRange *a,
+        const VkImageSubresourceRange *b) {
+    if (!a || !b) return false;
+    if ((a->aspectMask & b->aspectMask) == 0) return false;
+    uint32_t a_level_end = a->baseMipLevel + a->levelCount;
+    uint32_t b_level_end = b->baseMipLevel + b->levelCount;
+    uint32_t a_layer_end = a->baseArrayLayer + a->layerCount;
+    uint32_t b_layer_end = b->baseArrayLayer + b->layerCount;
+    return a->baseMipLevel < b_level_end && b->baseMipLevel < a_level_end &&
+           a->baseArrayLayer < b_layer_end && b->baseArrayLayer < a_layer_end;
+}
+
+static bool image_layout_ranges_equal(
+        const VkImageSubresourceRange *a,
+        const VkImageSubresourceRange *b) {
+    return a && b &&
+           a->aspectMask == b->aspectMask &&
+           a->baseMipLevel == b->baseMipLevel &&
+           a->levelCount == b->levelCount &&
+           a->baseArrayLayer == b->baseArrayLayer &&
+           a->layerCount == b->layerCount;
+}
+
+static void update_image_layout_range_cache(
+        PdockerVkImage *image,
+        const VkImageSubresourceRange *normalized_range,
+        VkImageLayout layout) {
+    if (!image || !normalized_range) return;
+    for (uint32_t i = 0; i < image->layout_range_count; ++i) {
+        PdockerVkImageLayoutRange *entry = &image->layout_ranges[i];
+        if (image_layout_ranges_equal(&entry->range, normalized_range)) {
+            entry->layout = layout;
+            entry->generation = image->layout_generation;
+            return;
+        }
+    }
+    for (uint32_t i = 0; i < image->layout_range_count; ++i) {
+        PdockerVkImageLayoutRange *entry = &image->layout_ranges[i];
+        if (image_layout_ranges_overlap(&entry->range, normalized_range)) {
+            /*
+             * Splitting partially-overlapping layout ranges is required for a
+             * lossless transport table.  Until that splitter is implemented,
+             * keep the precise-cache invalid rather than replacing a range and
+             * silently lying about uncovered subresources.
+             */
+            image->layout_range_overflow = true;
+            return;
+        }
+    }
+    if (image->layout_range_count >= PDOCKER_VK_MAX_COPY_OPS) {
+        image->layout_range_overflow = true;
+        return;
+    }
+    PdockerVkImageLayoutRange *entry = &image->layout_ranges[image->layout_range_count++];
+    memset(entry, 0, sizeof(*entry));
+    entry->range = *normalized_range;
+    entry->layout = layout;
+    entry->generation = image->layout_generation;
+}
+
 static void execute_recorded_image_barrier_op(PdockerVkImageBarrierOp *op) {
     if (!op || !op->image) return;
     if (op->old_layout != VK_IMAGE_LAYOUT_UNDEFINED &&
@@ -14107,13 +14185,21 @@ static void execute_recorded_image_barrier_op(PdockerVkImageBarrierOp *op) {
                     op->dst_queue_family_index);
         }
     }
-    if (!image_subresource_range_is_whole_image(op->image, &op->range)) {
+    op->image->layout_generation = next_vulkan_object_generation();
+    VkImageSubresourceRange normalized_range = op->range;
+    bool normalized = normalize_image_subresource_range(op->image, &op->range, &normalized_range);
+    if (!normalized || !image_subresource_range_is_whole_image(op->image, &normalized_range)) {
         op->image->layout_mixed = true;
+        if (normalized) {
+            update_image_layout_range_cache(op->image, &normalized_range, op->new_layout);
+        } else {
+            op->image->layout_range_overflow = true;
+        }
     } else {
         op->image->current_layout = op->new_layout;
         op->image->layout_mixed = false;
+        clear_image_layout_ranges(op->image);
     }
-    op->image->layout_generation = next_vulkan_object_generation();
     (void)op->src_access_mask;
     (void)op->dst_access_mask;
     (void)op->src_stage_mask;
