@@ -22438,6 +22438,13 @@ static int materialize_vulkan_graphics_v620_image_layout_ranges(
     return 0;
 }
 
+static void vulkan_graphics_planning_set_image_layout(
+        VulkanDispatchImageObject *image,
+        VkImageLayout layout) {
+    if (!image || image->has_layout_ranges) return;
+    image->current_layout = layout;
+}
+
 static int materialize_vulkan_graphics_v6_attachments(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -22556,8 +22563,9 @@ static int materialize_vulkan_graphics_v6_attachments(
                 }
                 writeback_image = resolve_image;
                 writeback_view = resolve_view;
-                resolve_image->current_layout =
-                    (VkImageLayout)view->images[resolve_image->source_index].initial_layout;
+                vulkan_graphics_planning_set_image_layout(
+                    resolve_image,
+                    (VkImageLayout)view->images[resolve_image->source_index].initial_layout);
             } else if (attachment->samples != VK_SAMPLE_COUNT_1_BIT) {
                 return -EOPNOTSUPP;
             }
@@ -22567,7 +22575,8 @@ static int materialize_vulkan_graphics_v6_attachments(
             if (effective_store_op == VK_ATTACHMENT_STORE_OP_STORE) {
                 writeback_image->writeback_needed = 1;
             }
-            image->current_layout = (VkImageLayout)view->images[image->source_index].initial_layout;
+            vulkan_graphics_planning_set_image_layout(
+                image, (VkImageLayout)view->images[image->source_index].initial_layout);
         }
     }
     if (view->is_v610 && view->header_v610) {
@@ -22587,11 +22596,13 @@ static int materialize_vulkan_graphics_v6_attachments(
             if (range_rc != 0) return range_rc;
             if (copy->direction == PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_BUFFER_TO_IMAGE) {
                 image->writeback_needed = 1;
-                image->current_layout = (VkImageLayout)copy->image_layout;
+                vulkan_graphics_planning_set_image_layout(
+                    image, (VkImageLayout)copy->image_layout);
             } else if (copy->direction == PDOCKER_GPU_GRAPHICS_V610_BUFFER_IMAGE_COPY_DIRECTION_IMAGE_TO_BUFFER) {
                 image->descriptor_layout = (VkImageLayout)copy->image_layout;
                 image->descriptor_layout_seen = 1;
-                image->current_layout = (VkImageLayout)view->images[image->source_index].initial_layout;
+                vulkan_graphics_planning_set_image_layout(
+                    image, (VkImageLayout)view->images[image->source_index].initial_layout);
             } else {
                 return -EPROTO;
             }
@@ -22622,9 +22633,11 @@ static int materialize_vulkan_graphics_v6_attachments(
             if (dst_rc != 0) return dst_rc;
             src_image->descriptor_layout = (VkImageLayout)copy->src_layout;
             src_image->descriptor_layout_seen = 1;
-            src_image->current_layout = (VkImageLayout)view->images[src_image->source_index].initial_layout;
+            vulkan_graphics_planning_set_image_layout(
+                src_image, (VkImageLayout)view->images[src_image->source_index].initial_layout);
             dst_image->writeback_needed = 1;
-            dst_image->current_layout = (VkImageLayout)copy->dst_layout;
+            vulkan_graphics_planning_set_image_layout(
+                dst_image, (VkImageLayout)copy->dst_layout);
         }
     }
     if (view->is_v614 && view->header_v614) {
@@ -22659,9 +22672,11 @@ static int materialize_vulkan_graphics_v6_attachments(
             if (dst_rc != 0) return dst_rc;
             src_image->descriptor_layout = (VkImageLayout)resolve->src_layout;
             src_image->descriptor_layout_seen = 1;
-            src_image->current_layout = (VkImageLayout)view->images[src_image->source_index].initial_layout;
+            vulkan_graphics_planning_set_image_layout(
+                src_image, (VkImageLayout)view->images[src_image->source_index].initial_layout);
             dst_image->writeback_needed = 1;
-            dst_image->current_layout = (VkImageLayout)resolve->dst_layout;
+            vulkan_graphics_planning_set_image_layout(
+                dst_image, (VkImageLayout)resolve->dst_layout);
         }
     }
     if (view->is_v615 && view->header_v615) {
@@ -22696,9 +22711,11 @@ static int materialize_vulkan_graphics_v6_attachments(
             if (dst_rc != 0) return dst_rc;
             src_image->descriptor_layout = (VkImageLayout)blit->src_layout;
             src_image->descriptor_layout_seen = 1;
-            src_image->current_layout = (VkImageLayout)view->images[src_image->source_index].initial_layout;
+            vulkan_graphics_planning_set_image_layout(
+                src_image, (VkImageLayout)view->images[src_image->source_index].initial_layout);
             dst_image->writeback_needed = 1;
-            dst_image->current_layout = (VkImageLayout)blit->dst_layout;
+            vulkan_graphics_planning_set_image_layout(
+                dst_image, (VkImageLayout)blit->dst_layout);
         }
     }
     if (view->is_v612 && view->header_v612) {
@@ -22718,7 +22735,8 @@ static int materialize_vulkan_graphics_v6_attachments(
                 image, &range, VK_IMAGE_ASPECT_COLOR_BIT);
             if (range_rc != 0) return range_rc;
             image->writeback_needed = 1;
-            image->current_layout = (VkImageLayout)clear->image_layout;
+            vulkan_graphics_planning_set_image_layout(
+                image, (VkImageLayout)clear->image_layout);
         }
     }
     if (view->is_v613 && view->header_v613) {
@@ -22742,7 +22760,8 @@ static int materialize_vulkan_graphics_v6_attachments(
                 image, &range, (VkImageAspectFlags)clear->aspect_mask);
             if (range_rc != 0) return range_rc;
             image->writeback_needed = 1;
-            image->current_layout = (VkImageLayout)clear->image_layout;
+            vulkan_graphics_planning_set_image_layout(
+                image, (VkImageLayout)clear->image_layout);
         }
     }
     return 0;
