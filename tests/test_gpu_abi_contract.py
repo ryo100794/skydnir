@@ -4718,6 +4718,7 @@ class GpuAbiContractTest(unittest.TestCase):
     def test_vulkan_graphics_image_layout_range_v620_abi_scaffold(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
+        executor = GPU_EXECUTOR.read_text()
         expected_extension_fields = [
             ("image_layout_range_count", "u32"),
             ("image_layout_range_entry_size", "u32"),
@@ -4806,6 +4807,26 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
             ),
         )
+
+        for marker in [
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR",
+            "sizeof(PdockerGpuVulkanGraphicsV620FrameHeader)",
+            "PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry",
+            "header_v620->v620.image_layout_range_count",
+            "image_layout_range_entry_size != sizeof(PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry)",
+            "image_layout_range_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES",
+            "FrameRange ranges[44]",
+            "view->image_layout_ranges",
+            "image_layout_range_table_hash",
+            "header_v620->v620.extension_hash != image_layout_range_table_hash",
+            "const int is_v620 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR;",
+            "const int is_v619 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR || is_v620;",
+            "const int is_v620_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR;",
+            "const int is_v619_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR || is_v620_header;",
+            "validate_vulkan_graphics_v620_image_layout_ranges",
+        ]:
+            self.assertIn(marker, executor)
 
     def test_vulkan_graphics_v619_submit_sync_metadata_abi_is_append_only(self):
         abi = APP_HEADER.read_text()
