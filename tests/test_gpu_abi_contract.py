@@ -4225,11 +4225,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('return unsupported_image_transport_result("vkCreateImage");', icd)
         self.assertIn('return unsupported_image_transport_result("vkCreateImageView");', icd)
         self.assertIn('return unsupported_image_transport_result("vkCreateSampler");', icd)
+        self.assertIn("if (!pdocker_vk_format_bridge_supported(pCreateInfo->format))", icd)
+        self.assertIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;", icd)
+        self.assertIn("uint32_t bytes_per_pixel = conservative_format_bytes_per_pixel(info->format);", icd)
+        self.assertIn("if (bytes_per_pixel == 0) return 0;", icd)
         self.assertIn("image->requirements_size = requirements_size;", icd)
         self.assertIn("entry->initial_layout = image->current_layout;", icd)
         self.assertNotIn("entry->initial_layout = image->initial_layout;", icd)
         self.assertIn("image_entries[i].initial_layout = image->current_layout;", icd)
         self.assertNotIn("image_entries[i].initial_layout = image->initial_layout;", icd)
+        self.assertIn("mixed subresource layouts require per-subresource layout ABI", icd)
+        self.assertIn("if (image->layout_mixed)", icd)
+        self.assertIn("return -EOPNOTSUPP;", icd)
         executor = GPU_EXECUTOR.read_text()
         self.assertIn("vulkan_image_create_initial_layout_for_transport", executor)
         materialize = executor.split("static int materialize_vulkan_dispatch_images", 1)[1].split("static int run_vulkan_dispatch_fd", 1)[0]
@@ -4395,6 +4402,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_FORMAT_D32_SFLOAT", icd)
         self.assertIn("VK_FORMAT_D32_SFLOAT_S8_UINT", icd)
         self.assertNotIn("case VK_FORMAT_D16_UNORM_S8_UINT:\n            return true;", icd)
+        self.assertIn("Unknown/block-compressed/vendor formats are not byte-linear", icd)
+        self.assertIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;", image_props)
 
     def test_vulkan_icd_records_buffer_image_copy_commands_before_dispatch(self):
         icd = VULKAN_ICD.read_text()
