@@ -21513,7 +21513,6 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
-                uint32_t matched_barriers = 0;
                 uint32_t matched_memory_barriers = 0;
                 uint32_t matched_buffer_barriers = 0;
                 uint32_t matched_image_barriers = 0;
@@ -21521,14 +21520,12 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     const PdockerGpuVulkanGraphicsV61MemoryBarrierEntry *barrier =
                         &view->memory_barriers[b];
                     if (barrier->command_index != i) continue;
-                    matched_barriers++;
                     matched_memory_barriers++;
                 }
                 for (uint32_t b = 0; b < header_v61->v61.buffer_barrier_count; ++b) {
                     const PdockerGpuVulkanGraphicsV61BufferBarrierEntry *barrier =
                         &view->buffer_barriers[b];
                     if (barrier->command_index != i) continue;
-                    matched_barriers++;
                     matched_buffer_barriers++;
                     if (!vulkan_graphics_barrier_queue_family_replayable(
                             barrier->src_queue_family_index,
@@ -21542,7 +21539,6 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     const PdockerGpuVulkanGraphicsV61ImageBarrierEntry *barrier =
                         &view->image_barriers[b];
                     if (barrier->command_index != i) continue;
-                    matched_barriers++;
                     matched_image_barriers++;
                     if (!vulkan_graphics_barrier_queue_family_replayable(
                             barrier->src_queue_family_index,
@@ -21552,11 +21548,9 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         return -EOPNOTSUPP;
                     }
                 }
-                if (matched_barriers == 0) {
-                    reason = "graphics barrier without memory/buffer/image barriers is not supported";
-                    if (reason_out) *reason_out = reason;
-                    return -EOPNOTSUPP;
-                }
+                /* A synchronization2 dependency with no barrier arrays is a legal no-op.
+                 * Keep it replayable so the bridge does not reject generic Vulkan
+                 * command streams that use empty barriers for ordering structure. */
                 if (matched_memory_barriers > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
                     matched_buffer_barriers > PDOCKER_GPU_MAX_VULKAN_BINDINGS ||
                     matched_image_barriers > PDOCKER_GPU_MAX_VULKAN_BINDINGS) {
@@ -25766,10 +25760,9 @@ static int record_vulkan_graphics_v6_command_buffer(
                         (VkImageLayout)barrier->new_layout);
                     if (layout_rc != 0) { rc = layout_rc; goto cleanup; }
                 }
-                if (memory_barrier_count == 0 && buffer_barrier_count == 0 && image_barrier_count == 0) {
-                    rc = -EOPNOTSUPP;
-                    goto cleanup;
-                }
+                /* Vulkan permits an empty VkDependencyInfo. Replay it as a no-op
+                 * barrier instead of treating a legal synchronization2 command as
+                 * unsupported. */
                 VkDependencyInfo dependency = {
                     .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
                     .dependencyFlags = command->flags & VK_DEPENDENCY_BY_REGION_BIT,

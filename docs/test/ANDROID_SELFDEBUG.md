@@ -137,10 +137,11 @@ different build is being tested.
 ```sh
 cd /root/tl/pdocker-android
 
-# Bump versionCode when pdockerd assets change. PdockerdRuntime.extractAsset
-# only refreshes staged assets when versionCode changes; otherwise filesDir may
-# keep the old daemon after adb install -r.
-$EDITOR app/build.gradle.kts   # versionCode = N+1, versionName = "0.x.y"
+# Same-version debug reinstalls are supported. PdockerdRuntime.prepare()
+# force-refreshes pdockerd assets and recreates runtime symlinks to
+# nativeLibraryDir, so adb install -r can be used during local iteration.
+# Bump versionCode only for release/versioned package semantics.
+$EDITOR app/build.gradle.kts   # optional: versionCode = N+1, versionName = "0.x.y"
 
 export PATH="$HOME/opt/gradle-8.7/bin:$HOME/android-sdk/cmdline-tools/latest/bin:$PATH"
 export ANDROID_HOME=$HOME/android-sdk
@@ -226,21 +227,25 @@ If pdockerd does not start, or `/_ping` does not answer after starting:
    hardlinks. Use the bridge-selected fallback, such as
    `PDOCKER_LINK_MODE=symlink`.
 
-## Why versionCode Matters
+## Runtime Payload Freshness
 
-`PdockerdRuntime.prepare()` compares the current APK `versionCode` with the
-staged `.apk-version` file. If it has not changed, asset extraction is skipped.
+`PdockerdRuntime.prepare()` records the current APK `versionCode` in the staged
+`.apk-version` file, but debug freshness no longer depends on that marker alone.
+The daemon asset and runtime manifest are force-refreshed on every prepare, and
+native executable payloads are symlinks that are deleted and recreated to point
+at the current `applicationInfo.nativeLibraryDir`.
 
 That means:
 
-- `adb install -r` with the same versionCode can leave the old pdockerd in
-  `filesDir`.
-- New daemon or bridge fixes may appear to have no effect.
-- Seeing the exact same previous error after a fix usually means the old asset
-  was reused.
+- `adb install -r` with the same versionCode is valid for local debug loops.
+- New daemon or bridge fixes should be visible after the app/service restarts.
+- Seeing the exact same previous error after a fix usually means the running
+  process was not restarted or the tested path is not the staged runtime path.
 
 Rule: after changing `pdockerd_bridge.py` or `docker-proot-setup/bin/pdockerd`,
-bump `versionCode`.
+run `bash scripts/copy-native.sh`, rebuild the APK, reinstall it, and restart the
+app/service. A versionCode bump is only required when you need a versioned
+release artifact.
 
 ## Known Pitfalls
 

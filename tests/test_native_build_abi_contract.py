@@ -121,6 +121,48 @@ class NativeBuildAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(needle, verifier)
 
+    def test_runtime_prepare_refreshes_same_version_debug_payloads(self):
+        runtime_path = (
+            ROOT
+            / "app"
+            / "src"
+            / "main"
+            / "kotlin"
+            / "io"
+            / "github"
+            / "ryo100794"
+            / "pdocker"
+            / "PdockerdRuntime.kt"
+        )
+        runtime = runtime_path.read_text()
+        self.assertIn("Debug/dev installs often reuse the same versionCode", runtime)
+        self.assertIn('extractAsset(ctx, "pdockerd/pdockerd", File(bin, "pdockerd"), force = true)', runtime)
+        self.assertIn(
+            'extractAsset(ctx, "pdockerd/llama-gpu-env-manifest.json", File(bin, "llama-gpu-env-manifest.json"), force = true)',
+            runtime,
+        )
+        self.assertIn('optionalLinkTo(File(nativeDir, "libpdockergpuexecutor.so"), File(gpuBin, "pdocker-gpu-executor"))', runtime)
+        self.assertIn("java.nio.file.Files.deleteIfExists(link.toPath())", runtime)
+        self.assertIn("createSymbolicLink(link.toPath(), target.toPath())", runtime)
+        self.assertLess(
+            runtime.index("java.nio.file.Files.deleteIfExists(link.toPath())"),
+            runtime.index("createSymbolicLink(link.toPath(), target.toPath())"),
+        )
+
+    def test_selfdebug_doc_allows_same_version_reinstall_payload_refresh(self):
+        doc = (ROOT / "docs" / "test" / "ANDROID_SELFDEBUG.md").read_text()
+        self.assertIn("Same-version debug reinstalls are supported", doc)
+        self.assertIn("force-refreshes pdockerd assets", doc)
+        self.assertIn("runtime symlinks", doc)
+        stale_claims = [
+            "only refreshes staged assets when versionCode changes",
+            "same versionCode can leave the old pdockerd",
+            "old asset was reused",
+            "bump `versionCode`",
+        ]
+        for claim in stale_claims:
+            self.assertNotIn(claim, doc)
+
     def test_fdroid_no_crane_gate_is_wired_without_changing_normal_apk(self):
         copy_native = (ROOT / "scripts" / "copy-native.sh").read_text()
         gradle = (ROOT / "app" / "build.gradle.kts").read_text()

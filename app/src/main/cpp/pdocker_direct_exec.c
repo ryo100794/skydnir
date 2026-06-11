@@ -5358,29 +5358,6 @@ static int run_command(int argc, char **argv) {
     char helper_path[PATH_MAX];
     char helper_dir[PATH_MAX];
     const char *loader = NULL;
-    if (realpath(argv[0], helper_path)) {
-        strncpy(helper_dir, helper_path, sizeof(helper_dir) - 1);
-        helper_dir[sizeof(helper_dir) - 1] = '\0';
-        char *slash = strrchr(helper_dir, '/');
-        if (slash) {
-            *slash = '\0';
-            const char *helper_ld_candidates[] = {
-                "skydnir-ld-musl-aarch64",
-                "libskydnirldmusl.so",
-                "libskydnir-ld-musl-aarch64.so",
-                "pdocker-ld-linux-aarch64",
-                "libpdocker-ld-linux-aarch64.so",
-                NULL,
-            };
-            for (int i = 0; helper_ld_candidates[i]; ++i) {
-                if (snprintf(ldpath, sizeof(ldpath), "%s/%s", helper_dir, helper_ld_candidates[i]) < (int)sizeof(ldpath) &&
-                    access(ldpath, X_OK) == 0) {
-                    loader = ldpath;
-                    goto loader_found;
-                }
-            }
-        }
-    }
     const char *ld_candidates[] = {
         "lib/aarch64-linux-gnu/ld-linux-aarch64.so.1",
         "lib/ld-linux-aarch64.so.1",
@@ -5399,7 +5376,32 @@ static int run_command(int argc, char **argv) {
             break;
         }
     }
-loader_found:
+    const char *allow_helper_loader = getenv("SKYDNIR_DIRECT_ALLOW_HELPER_LOADER");
+    if (!allow_helper_loader) allow_helper_loader = getenv("PDOCKER_DIRECT_ALLOW_HELPER_LOADER");
+    if (!loader && allow_helper_loader && strcmp(allow_helper_loader, "1") == 0 &&
+        realpath(argv[0], helper_path)) {
+        strncpy(helper_dir, helper_path, sizeof(helper_dir) - 1);
+        helper_dir[sizeof(helper_dir) - 1] = '\0';
+        char *slash = strrchr(helper_dir, '/');
+        if (slash) {
+            *slash = '\0';
+            const char *helper_ld_candidates[] = {
+                "skydnir-ld-musl-aarch64",
+                "libskydnirldmusl.so",
+                "libskydnir-ld-musl-aarch64.so",
+                "pdocker-ld-linux-aarch64",
+                "libpdocker-ld-linux-aarch64.so",
+                NULL,
+            };
+            for (int i = 0; helper_ld_candidates[i]; ++i) {
+                if (snprintf(ldpath, sizeof(ldpath), "%s/%s", helper_dir, helper_ld_candidates[i]) < (int)sizeof(ldpath) &&
+                    access(ldpath, X_OK) == 0) {
+                    loader = ldpath;
+                    break;
+                }
+            }
+        }
+    }
     if (!loader) {
         fprintf(stderr, "pdocker-direct-executor: rootfs dynamic loader not found under %s\n", rootfs);
         free(env_items);

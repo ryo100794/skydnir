@@ -2515,12 +2515,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "static int submit_vulkan_graphics_v6_command_buffer", 1
         )[0]
         self.assertNotIn("graphics barrier replay is not implemented", preflight)
-        self.assertIn("graphics barrier without memory/buffer/image barriers is not supported", preflight)
+        self.assertNotIn("graphics barrier without memory/buffer/image barriers is not supported", preflight)
+        self.assertIn("A synchronization2 dependency with no barrier arrays is a legal no-op", preflight)
         self.assertIn("graphics barrier batch exceeds replay stack limit", preflight)
         self.assertIn("matched_memory_barriers > PDOCKER_GPU_MAX_VULKAN_BINDINGS", preflight)
         self.assertIn("PdockerGpuVulkanGraphicsV61ImageBarrierEntry", executor)
         self.assertIn("PFN_vkCmdPipelineBarrier2 cmd_pipeline_barrier2", executor)
         self.assertIn("rt->cmd_pipeline_barrier2(command_buffer, &dependency)", recorder)
+        self.assertNotIn("memory_barrier_count == 0 && buffer_barrier_count == 0 && image_barrier_count == 0", recorder)
+        self.assertIn("Vulkan permits an empty VkDependencyInfo", recorder)
         self.assertIn("VkMemoryBarrier2 memory_barriers_to_record", recorder)
         self.assertIn("VkBufferMemoryBarrier2 buffer_barriers_to_record", recorder)
         self.assertIn("VkImageMemoryBarrier2 image_barriers_to_record", recorder)
