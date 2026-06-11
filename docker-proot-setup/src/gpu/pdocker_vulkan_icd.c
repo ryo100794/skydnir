@@ -15418,6 +15418,17 @@ static bool command_buffer_needs_graphics_submit_sync_frame(const PdockerVkComma
     return false;
 }
 
+static bool submit_has_graphics_submit_sync_frame(const VkSubmitInfo *submit) {
+    if (!submit || !submit->pCommandBuffers) return false;
+    for (uint32_t i = 0; i < submit->commandBufferCount; ++i) {
+        if (command_buffer_needs_graphics_submit_sync_frame(
+                (const PdockerVkCommandBuffer *)submit->pCommandBuffers[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void graphics_submit_sync_frame_bounds(
         const VkSubmitInfo *submit,
         uint32_t *first_graphics_cmd,
@@ -15599,7 +15610,8 @@ static uint64_t submit_timeline_signal_value(
 
 static VkResult validate_submit_wait_semaphores(
         const VkSubmitInfo *submit,
-        const VkTimelineSemaphoreSubmitInfo *timeline) {
+        const VkTimelineSemaphoreSubmitInfo *timeline,
+        bool allow_executor_tracked_queue_waits) {
     if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult timeline_rc = validate_submit_timeline_info(submit, timeline);
     if (timeline_rc != VK_SUCCESS) return timeline_rc;
@@ -15609,6 +15621,9 @@ static VkResult validate_submit_wait_semaphores(
             : NULL;
         uint64_t required_value = sem && sem->timeline ? submit_timeline_wait_value(timeline, i) : 0;
         if (!semaphore_wait_satisfied(sem, required_value)) {
+            if (allow_executor_tracked_queue_waits && sem && sem->executor_tracked) {
+                continue;
+            }
             trace_icd_runtime_failure("semaphore-wait-unsignaled",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -16011,7 +16026,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             trace_icd_runtime_failure("submit-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        VkResult semaphore_rc = validate_submit_wait_semaphores(&pSubmits[i], timeline_submit);
+        const bool allow_executor_tracked_queue_waits = submit_has_graphics_submit_sync_frame(&pSubmits[i]);
+        VkResult semaphore_rc = validate_submit_wait_semaphores(
+            &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits);
         if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
         PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
         size_t submit_sync_count = 0;

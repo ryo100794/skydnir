@@ -4067,6 +4067,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("validate_submit_wait_semaphores", icd)
         self.assertIn("complete_submit_semaphores", icd)
         self.assertIn("semaphore-wait-unsignaled", icd)
+        self.assertIn("allow_executor_tracked_queue_waits && sem && sem->executor_tracked", icd)
         self.assertIn("sem->signaled = false;", icd)
         self.assertIn("sem->signaled = true;", icd)
         self.assertIn("semaphore_complete_wait(sem);", icd)
@@ -4078,7 +4079,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("(void)fence;", submit_body)
         self.assertIn("submit_timeline_info_from_pnext(pSubmits[i].pNext", submit_body)
         self.assertIn("submit-pnext-unsupported", submit_body)
-        self.assertIn("validate_submit_wait_semaphores(&pSubmits[i], timeline_submit)", submit_body)
+        self.assertIn("submit_has_graphics_submit_sync_frame(&pSubmits[i])", submit_body)
+        self.assertIn("allow_executor_tracked_queue_waits", submit_body)
+        self.assertIn("validate_submit_wait_semaphores(\n            &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits)", submit_body)
         self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit);", submit_body)
         self.assertIn("submit_fence->signaled = false;", submit_body)
         self.assertIn("submit_fence->signaled = true;", submit_body)
@@ -4125,7 +4128,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
         self.assertIn("submit_timeline_info_from_pnext(pSubmits[i].pNext", submit_body)
-        self.assertIn("validate_submit_wait_semaphores(&pSubmits[i], timeline_submit)", submit_body)
+        self.assertIn("validate_submit_wait_semaphores(\n            &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits)", submit_body)
         self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit)", submit_body)
         queue_submit2_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
