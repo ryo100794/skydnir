@@ -4146,7 +4146,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit2-wait-pnext-unsupported",
             "submit2-command-pnext-unsupported",
             "submit2-signal-pnext-unsupported",
+            "submit2-wait-device-index-unsupported",
+            "submit2-signal-device-index-unsupported",
+            "submit2-command-device-mask-unsupported",
             "info->pNext",
+            "info->deviceIndex != 0",
+            "info->deviceMask != 0",
         ]:
             self.assertIn(marker, icd)
         self.assertIn("uint64_t required_value = sem && sem->timeline ? info->value : 0;", icd)
