@@ -4146,14 +4146,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit2-wait-pnext-unsupported",
             "submit2-command-pnext-unsupported",
             "submit2-signal-pnext-unsupported",
+            "info->pNext",
+        ]:
+            self.assertIn(marker, icd)
+        for marker in [
             "submit2-wait-device-index-unsupported",
             "submit2-signal-device-index-unsupported",
             "submit2-command-device-mask-unsupported",
-            "info->pNext",
             "info->deviceIndex != 0",
             "info->deviceMask != 0",
         ]:
-            self.assertIn(marker, icd)
+            self.assertNotIn(marker, icd)
         self.assertIn("uint64_t required_value = sem && sem->timeline ? info->value : 0;", icd)
         self.assertIn("src->pSignalSemaphoreInfos", queue_submit2_body)
         self.assertIn("collect_submit2_submit_sync_entries(src, submit2_fence", queue_submit2_body)
@@ -4999,7 +5002,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "need_v621_submit2_metadata",
             "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR;",
             "frame_header_v621->v621.submit_info_count",
+            "submit_sync_infos[submit_sync_info_count].device_index = device_index;",
             "APPEND_GRAPHICS_TABLE(submit_infos, submit_info_count",
+            "APPEND_GRAPHICS_TABLE(submit_sync_infos, submit_sync_info_count",
             "frame_header_v621->v621.submit_info_table_hash",
             "VULKAN_GRAPHICS_V6.21",
         ]:
@@ -5017,6 +5022,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "view->submit_sync_infos",
             "submit_info_table_hash",
             "submit_sync_info_table_hash",
+            "vulkan_graphics_v621_submit_sync_device_index",
+            "wait_infos[i].deviceIndex = wait_device_indices[i];",
+            "signal_infos[i].deviceIndex = signal_device_indices[i];",
             "PDOCKER_GPU_GRAPHICS_V621_SUBMIT_KIND_SUBMIT2",
             "submit_info->command_buffer_device_mask",
             ".flags = submit_info ? submit_info->submit_flags : 0",

@@ -4182,6 +4182,34 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
                 g_submit2_metadata_override->pCommandBufferInfos[g_submit2_metadata_command_index].deviceMask;
         }
         submit_info_count = 1;
+        uint32_t wait_submit2_index = 0;
+        uint32_t signal_submit2_index = 0;
+        for (size_t submit_sync_index = 0; submit_sync_index < submit_sync_count; ++submit_sync_index) {
+            const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync = &submit_syncs[submit_sync_index];
+            uint32_t device_index = 0;
+            bool has_submit2_sync_metadata = false;
+            if (sync->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT) {
+                if (g_submit2_metadata_override->pWaitSemaphoreInfos &&
+                    wait_submit2_index < g_submit2_metadata_override->waitSemaphoreInfoCount) {
+                    device_index = g_submit2_metadata_override->pWaitSemaphoreInfos[wait_submit2_index].deviceIndex;
+                    has_submit2_sync_metadata = true;
+                }
+                wait_submit2_index++;
+            } else if (sync->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL) {
+                if (g_submit2_metadata_override->pSignalSemaphoreInfos &&
+                    signal_submit2_index < g_submit2_metadata_override->signalSemaphoreInfoCount) {
+                    device_index = g_submit2_metadata_override->pSignalSemaphoreInfos[signal_submit2_index].deviceIndex;
+                    has_submit2_sync_metadata = true;
+                }
+                signal_submit2_index++;
+            }
+            if (has_submit2_sync_metadata &&
+                submit_sync_info_count < PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS) {
+                submit_sync_infos[submit_sync_info_count].submit_sync_index = (uint32_t)submit_sync_index;
+                submit_sync_infos[submit_sync_info_count].device_index = device_index;
+                submit_sync_info_count++;
+            }
+        }
     }
     memset(fds, -1, sizeof(fds));
 
@@ -15766,11 +15794,6 @@ static VkResult validate_submit2_wait_semaphores(
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        if (info->deviceIndex != 0) {
-            trace_icd_runtime_failure("submit2-wait-device-index-unsupported",
-                                      VK_ERROR_FEATURE_NOT_PRESENT);
-            return VK_ERROR_FEATURE_NOT_PRESENT;
-        }
         PdockerVkSemaphore *sem = info ? (PdockerVkSemaphore *)info->semaphore : NULL;
         uint64_t required_value = sem && sem->timeline ? info->value : 0;
         if (!semaphore_wait_satisfied(sem, required_value)) {
@@ -15795,11 +15818,6 @@ static VkResult validate_submit2_signal_semaphores(const VkSubmitInfo2 *submit) 
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        if (info->deviceIndex != 0) {
-            trace_icd_runtime_failure("submit2-signal-device-index-unsupported",
-                                      VK_ERROR_FEATURE_NOT_PRESENT);
-            return VK_ERROR_FEATURE_NOT_PRESENT;
-        }
     }
     return VK_SUCCESS;
 }
@@ -15811,11 +15829,6 @@ static VkResult validate_submit2_command_buffers(const VkSubmitInfo2 *submit) {
         if (!info) return VK_ERROR_INITIALIZATION_FAILED;
         if (info->pNext) {
             trace_icd_runtime_failure("submit2-command-pnext-unsupported",
-                                      VK_ERROR_FEATURE_NOT_PRESENT);
-            return VK_ERROR_FEATURE_NOT_PRESENT;
-        }
-        if (info->deviceMask != 0) {
-            trace_icd_runtime_failure("submit2-command-device-mask-unsupported",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }

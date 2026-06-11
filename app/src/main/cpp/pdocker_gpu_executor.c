@@ -26527,6 +26527,17 @@ static void reset_vulkan_graphics_submit_diag(VulkanGraphicsSubmitDiag *diag) {
     diag->vk_result = VK_SUCCESS;
 }
 
+static uint32_t vulkan_graphics_v621_submit_sync_device_index(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t submit_sync_index) {
+    if (!view || !view->is_v621 || !view->header_v621 || !view->submit_sync_infos) return 0;
+    for (uint32_t i = 0; i < view->header_v621->v621.submit_sync_info_count; ++i) {
+        const PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry *entry = &view->submit_sync_infos[i];
+        if (entry->submit_sync_index == submit_sync_index) return entry->device_index;
+    }
+    return 0;
+}
+
 static int submit_vulkan_graphics_v6_command_buffer(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
@@ -26584,6 +26595,8 @@ static int submit_vulkan_graphics_v6_command_buffer(
     VkPipelineStageFlags wait_stages[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     VkPipelineStageFlags2 wait_stage_masks2[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     VkPipelineStageFlags2 signal_stage_masks2[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    uint32_t wait_device_indices[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    uint32_t signal_device_indices[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     uint64_t wait_values[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     uint64_t signal_values[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     uint32_t wait_count = 0;
@@ -26596,6 +26609,8 @@ static int submit_vulkan_graphics_v6_command_buffer(
     memset(wait_stages, 0, sizeof(wait_stages));
     memset(wait_stage_masks2, 0, sizeof(wait_stage_masks2));
     memset(signal_stage_masks2, 0, sizeof(signal_stage_masks2));
+    memset(wait_device_indices, 0, sizeof(wait_device_indices));
+    memset(signal_device_indices, 0, sizeof(signal_device_indices));
     memset(wait_values, 0, sizeof(wait_values));
     memset(signal_values, 0, sizeof(signal_values));
     if (view->is_v619 && view->header_v619 && view->submit_syncs) {
@@ -26613,6 +26628,8 @@ static int submit_vulkan_graphics_v6_command_buffer(
                 wait_stages[wait_count] =
                     vulkan_legacy_submit_stage_mask_from_stage2(wait_stage_masks2[wait_count]);
                 wait_values[wait_count] = sync->value;
+                wait_device_indices[wait_count] =
+                    vulkan_graphics_v621_submit_sync_device_index(view, i);
                 if (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) timeline_used = 1;
                 wait_count++;
             } else if (sync->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL) {
@@ -26625,6 +26642,8 @@ static int submit_vulkan_graphics_v6_command_buffer(
                 if (rc != 0) { submit_fail_rc = rc; vrc = VK_ERROR_FEATURE_NOT_PRESENT; goto submit_fail; }
                 signal_stage_masks2[signal_count] = vulkan_submit_stage_mask2_or_all(sync->stage_mask);
                 signal_values[signal_count] = sync->value;
+                signal_device_indices[signal_count] =
+                    vulkan_graphics_v621_submit_sync_device_index(view, i);
                 if (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) timeline_used = 1;
                 signal_count++;
             }
@@ -26651,14 +26670,14 @@ static int submit_vulkan_graphics_v6_command_buffer(
             wait_infos[i].semaphore = wait_semaphores[i];
             wait_infos[i].value = wait_values[i];
             wait_infos[i].stageMask = wait_stage_masks2[i];
-            wait_infos[i].deviceIndex = 0;
+            wait_infos[i].deviceIndex = wait_device_indices[i];
         }
         for (uint32_t i = 0; i < signal_count; ++i) {
             signal_infos[i].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
             signal_infos[i].semaphore = signal_semaphores[i];
             signal_infos[i].value = signal_values[i];
             signal_infos[i].stageMask = signal_stage_masks2[i];
-            signal_infos[i].deviceIndex = 0;
+            signal_infos[i].deviceIndex = signal_device_indices[i];
         }
         VkCommandBufferSubmitInfo command_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
