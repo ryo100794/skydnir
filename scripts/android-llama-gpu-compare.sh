@@ -2704,7 +2704,7 @@ def env_bool(name):
 
 def extract_executor_json_events(text):
     events = []
-    markers = ("generic dispatch response:", "q6 compact response:")
+    markers = ("generic dispatch response:", "q6 compact response:", "dispatch response:")
     starts = []
     for marker in markers:
         search_from = 0
@@ -3170,6 +3170,10 @@ generic_spirv_attempted = (
 executor_submit_generic_dispatch_error = json_string_field_seen("error", "submit-generic-dispatch")
 generic_spirv_dispatch_failed = "generic SPIR-V dispatch failed" in log
 queue_submit_blocker = "vk::Queue::submit: ErrorFeatureNotPresent" in log
+direct_socket_rewrite_blocker = (
+    "connect AF_UNIX rewrite failed" in log
+    and "/run/pdocker-gpu/pdocker-gpu.sock" in log
+)
 pipeline_feature_blocker = any(
     e.get("error") == "create-generic-compute-pipeline" and int(e.get("vk_result") or 0) == -13
     for e in executor_events
@@ -3230,6 +3234,7 @@ evidence = {
         and executor_submit_generic_dispatch_error
     ),
     "queue_submit_blocker": queue_submit_blocker,
+    "direct_socket_rewrite_blocker": direct_socket_rewrite_blocker,
     "spirv_dispatch_blocker": (
         "real SPIR-V dispatch is not lowered yet" in log
         or queue_submit_blocker
@@ -3301,6 +3306,9 @@ elif service_completion_wrong_output:
         "HTTP /health, /v1/models, and deterministic /completion returned, "
         "but the required prompt check failed at the service boundary"
     )
+elif direct_socket_rewrite_blocker:
+    blocker_class = "direct_socket_rewrite_failed"
+    blocker_detail = "direct executor failed to rewrite the container GPU AF_UNIX socket path before Vulkan queue submission"
 elif runtime_freshness["summary"] == "fail":
     blocker_class = "runtime_freshness_mismatch"
     blocker_detail = "expected GPU executor build marker was not observed; test may be running stale native code or missing executor evidence"

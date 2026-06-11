@@ -2562,6 +2562,19 @@ static int send_executor_fence_wait(
     return rc;
 }
 
+static int send_executor_fence_signal(PdockerVkFence *fence) {
+    if (!fence || !fence->executor_tracked || fence->fence_id == 0) return 0;
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "VULKAN_FENCE_SIGNAL %llu\n",
+             (unsigned long long)fence->fence_id);
+    int result = VK_ERROR_UNKNOWN;
+    int rc = send_executor_text_command(cmd, &result, NULL, NULL);
+    if (rc == 0 && result == VK_SUCCESS) {
+        fence->signaled = true;
+    }
+    return rc == 0 && result != VK_SUCCESS ? -EIO : rc;
+}
+
 static bool dispatch_response_is_graphics_transport(const char *transport_name) {
     return transport_name && strstr(transport_name, "VULKAN_GRAPHICS_V6") != NULL;
 }
@@ -2637,6 +2650,18 @@ static int read_dispatch_response_status(int socket_fd, const char *transport_na
         }
         if (graphics_transport) {
             if (strstr(line, "\"valid\":false") != NULL) {
+                /*
+                 * A failed graphics replay is the highest-value diagnostic for
+                 * Android-side Vulkan passthrough.  Do not hide it behind
+                 * PDOCKER_VULKAN_ICD_DEBUG: without this line the container log
+                 * only shows a generic vkQueueSubmit failure and the actual
+                 * executor stage/error is lost when ADB drops.
+                 */
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: %s dispatch failure response: %s",
+                        transport_name ? transport_name : "generic",
+                        line);
+                if (line[line_off - 1] != '\n') fprintf(stderr, "\n");
                 rc = -EIO;
                 break;
             }
@@ -4146,6 +4171,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     bool pre_need_v617_query = false;
     bool pre_need_v618_copy_query = false;
     bool need_v619_submit_sync = submit_sync_count > 0;
+    const char *frame_build_phase = "pre-scan-command-features";
+    const char *graphics_label = "VULKAN_GRAPHICS_V6.1";
     {
         for (uint32_t gi = 0; gi < cmd->graphics_command_op_count; ++gi) {
             if (cmd->graphics_command_ops[gi].command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS) {
@@ -4316,6 +4343,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     bool need_v618_copy_query = pre_need_v618_copy_query;
     uint64_t submit_id = __sync_add_and_fetch(&g_generic_dispatch_sequence, 1);
     int rc = 0;
+    frame_build_phase = "pipeline-collect";
 
     for (uint32_t i = 0; i < cmd->graphics_command_op_count; ++i) {
         const PdockerVkGraphicsCommandRecord *record = &cmd->graphics_command_ops[i];
@@ -4641,6 +4669,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
         pipeline_objects[pipeline_count++] = pipeline;
     }
 
+    frame_build_phase = "dynamic-state-collect";
     for (uint32_t i = 0; i < cmd->dynamic_state_count; ++i) {
         if (dynamic_state_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_DYNAMIC_STATES) {
             rc = -E2BIG;
@@ -5737,6 +5766,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
 #undef APPEND_INTERLEAVED_GRAPHICS_BUFFER_COPIES
 
     size_t image_layout_range_count = 0;
+    frame_build_phase = "image-layout-range-collect";
     rc = collect_graphics_image_layout_range_entries(
         image_layout_ranges, &image_layout_range_count, image_objects, image_count);
     if (rc != 0) goto cleanup;
@@ -5993,6 +6023,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
         frame_header_v620->v620.image_layout_range_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_SCHEMA_HASH;
     }
 
+    frame_build_phase = "frame-append-tables";
 #define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
     do { \
         if ((count_) > 0) { \
@@ -6357,8 +6388,9 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     header->payload_hash = fnv1a64_bytes(frame + header->header_size,
                                          cursor - header->header_size);
     header->frame_hash = fnv1a64_bytes(frame, cursor);
+    frame_build_phase = "send-frame";
     rc = send_vulkan_graphics_v6_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
-    const char *graphics_label =
+    graphics_label =
         need_v620_image_layout_range ? "VULKAN_GRAPHICS_V6.20" :
         need_v619_submit_sync ? "VULKAN_GRAPHICS_V6.19" :
         need_v618_copy_query ? "VULKAN_GRAPHICS_V6.18" :
@@ -6378,9 +6410,25 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
         need_v64_resolve_attachment ? "VULKAN_GRAPHICS_V6.4" :
         need_v63_depth_stencil ? "VULKAN_GRAPHICS_V6.3" :
         need_v62_specialization ? "VULKAN_GRAPHICS_V6.2" : "VULKAN_GRAPHICS_V6.1";
-    if (rc == 0) rc = read_dispatch_response_status(socket_fd, graphics_label);
+    if (rc == 0) {
+        frame_build_phase = "read-response";
+        rc = read_dispatch_response_status(socket_fd, graphics_label);
+    }
 
 cleanup:
+    if (rc != 0) {
+        fprintf(stderr,
+                "pdocker-vulkan-icd: %s frame send failed rc=%d phase=%s "
+                "submit_id=%llu resources=%zu descriptors=%zu images=%zu image_views=%zu "
+                "pipelines=%zu shader_stages=%zu commands=%zu submit_sync=%zu layout_ranges=%zu "
+                "need_v620=%d fd_count=%zu cursor=%zu\n",
+                graphics_label ? graphics_label : "VULKAN_GRAPHICS_V6", rc,
+                frame_build_phase ? frame_build_phase : "unknown",
+                (unsigned long long)submit_id, resource_count, descriptor_count,
+                image_count, image_view_count, pipeline_count, shader_stage_count,
+                command_count, submit_sync_count, image_layout_range_count,
+                (image_layout_range_count > 0) ? 1 : 0, fd_count, cursor);
+    }
     free(frame);
     close(socket_fd);
     return rc;
@@ -15390,6 +15438,23 @@ static size_t filter_submit_sync_entries_for_graphics_frame(
     return out_count;
 }
 
+static size_t filter_submit_sync_entries_without_completion(
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
+        size_t entry_count,
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry *out) {
+    if (!entries || !out || entry_count == 0) return 0;
+    size_t out_count = 0;
+    for (size_t i = 0; i < entry_count; ++i) {
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entry = &entries[i];
+        if (entry->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL ||
+            entry->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE) {
+            continue;
+        }
+        out[out_count++] = *entry;
+    }
+    return out_count;
+}
+
 static const VkTimelineSemaphoreSubmitInfo *submit_timeline_info_from_pnext(
         const void *pNext,
         bool *unsupported_pnext) {
@@ -15976,9 +16041,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 if (submit_sync_entries_include_completion(frame_submit_sync_entries, frame_submit_sync_count) &&
                     (submit_has_recorded_work_after_command(&pSubmits[i], j) ||
                      command_buffer_has_host_side_ops_after(cmd, last_graphics_gpu_op))) {
-                    trace_icd_runtime_failure("submit-sync-signal-or-fence-before-trailing-submit-work-unimplemented",
-                                              VK_ERROR_FEATURE_NOT_PRESENT);
-                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                    PdockerGpuVulkanGraphicsV619SubmitSyncEntry deferred_frame_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+                    size_t deferred_frame_sync_count = filter_submit_sync_entries_without_completion(
+                        frame_submit_sync_entries, frame_submit_sync_count, deferred_frame_sync_entries);
+                    memcpy(frame_submit_sync_entries, deferred_frame_sync_entries,
+                           deferred_frame_sync_count * sizeof(frame_submit_sync_entries[0]));
+                    frame_submit_sync_count = deferred_frame_sync_count;
+                    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                        fprintf(stderr,
+                                "pdocker-vulkan-icd: deferred graphics submit completion sync until trailing host-side work finishes\n");
+                    }
                 }
                 PdockerVkCopyStats mixed_stats;
                 memset(&mixed_stats, 0, sizeof(mixed_stats));
@@ -16243,7 +16315,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         }
         complete_submit_semaphores(&pSubmits[i], timeline_submit);
     }
-    if (submit_fence) submit_fence->signaled = true;
+    if (submit_fence) {
+        submit_fence->signaled = true;
+        (void)send_executor_fence_signal(submit_fence);
+    }
     return VK_SUCCESS;
 }
 
@@ -16308,7 +16383,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         if (rc != VK_SUCCESS) return rc;
         complete_submit2_semaphores(src);
     }
-    if (submit_fence) submit_fence->signaled = true;
+    if (submit_fence) {
+        submit_fence->signaled = true;
+        (void)send_executor_fence_signal(submit_fence);
+    }
     return VK_SUCCESS;
 }
 
@@ -17041,6 +17119,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(
     if (bridge_available()) {
         int rc = send_executor_fence_reset(fenceCount, pFences);
         if (rc != 0) return VK_ERROR_DEVICE_LOST;
+        for (uint32_t i = 0; i < fenceCount; ++i) {
+            PdockerVkFence *fence = (PdockerVkFence *)pFences[i];
+            if (fence) fence->signaled = false;
+        }
         return VK_SUCCESS;
     }
     for (uint32_t i = 0; i < fenceCount; ++i) {
@@ -17053,12 +17135,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(
 VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus(VkDevice device, VkFence fence) {
     (void)device;
     PdockerVkFence *f = (PdockerVkFence *)fence;
-    if (f && f->executor_tracked) {
+    if (!f || f->signaled) return VK_SUCCESS;
+    if (f->executor_tracked) {
         VkResult result = VK_ERROR_UNKNOWN;
         if (send_executor_fence_status(f, &result) == 0) return result;
         return VK_ERROR_DEVICE_LOST;
     }
-    return (!f || f->signaled) ? VK_SUCCESS : VK_NOT_READY;
+    return VK_NOT_READY;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
@@ -17069,6 +17152,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
         uint64_t timeout) {
     (void)device;
     if (fenceCount > 0 && !pFences) return VK_ERROR_INITIALIZATION_FAILED;
+    if (fences_wait_satisfied(fenceCount, pFences, waitAll)) return VK_SUCCESS;
     if (bridge_available()) {
         VkResult result = VK_ERROR_UNKNOWN;
         int rc = send_executor_fence_wait(fenceCount, pFences, waitAll, timeout, &result);

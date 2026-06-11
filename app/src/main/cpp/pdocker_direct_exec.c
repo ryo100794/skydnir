@@ -3551,17 +3551,29 @@ static int rewrite_unix_sockaddr_arg(pid_t pid, struct user_pt_regs *regs,
         return 0;
     }
 
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", rewritten);
-    unsigned long long scratch = (regs->sp - 24576u) & ~15ULL;
-    if (write_tracee_data(pid, scratch, &addr, sizeof(addr)) != 0) {
+    struct sockaddr_un rewritten_addr;
+    memset(&rewritten_addr, 0, sizeof(rewritten_addr));
+    rewritten_addr.sun_family = AF_UNIX;
+    snprintf(rewritten_addr.sun_path, sizeof(rewritten_addr.sun_path), "%s", rewritten);
+    size_t rewritten_len = offsetof(struct sockaddr_un, sun_path) + strlen(rewritten) + 1;
+    if (len >= rewritten_len) {
+        size_t write_len = to_read >= rewritten_len ? to_read : rewritten_len;
+        if (write_len > sizeof(rewritten_addr)) write_len = sizeof(rewritten_addr);
+        if (write_tracee_data(pid, addr_ptr, &rewritten_addr, write_len) == 0) {
+            regs->regs[2] = (unsigned long long)rewritten_len;
+            TRACE_LOG("pdocker-direct-trace: pid=%d rewrite-in-place %s AF_UNIX %s -> %s\n",
+                      (int)pid, context, guest, rewritten);
+            return 1;
+        }
+    }
+    unsigned long long scratch = (regs->sp - 8192u) & ~15ULL;
+    if (write_tracee_data(pid, scratch, &rewritten_addr, rewritten_len) != 0) {
         fprintf(stderr, "pdocker-direct-trace: pid=%d %s AF_UNIX rewrite failed: %s -> %s (%s)\n",
                 (int)pid, context, guest, rewritten, strerror(errno));
         return 0;
     }
     regs->regs[1] = scratch;
-    regs->regs[2] = (unsigned long long)(offsetof(struct sockaddr_un, sun_path) + strlen(rewritten) + 1);
+    regs->regs[2] = (unsigned long long)rewritten_len;
     TRACE_LOG("pdocker-direct-trace: pid=%d rewrite %s AF_UNIX %s -> %s\n",
               (int)pid, context, guest, rewritten);
     return 1;

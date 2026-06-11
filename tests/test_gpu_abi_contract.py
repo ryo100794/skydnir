@@ -797,7 +797,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "command_buffer_has_host_side_ops_before",
             "command_buffer_has_host_side_ops_after",
             "submit-sync-wait-after-prior-work-unimplemented",
-            "submit-sync-signal-or-fence-before-trailing-submit-work-unimplemented",
+            "filter_submit_sync_entries_without_completion",
+            "deferred graphics submit completion sync until trailing host-side work finishes",
             "send_recorded_vulkan_graphics_v6_1_frame(\n                        cmd, frame_submit_sync_entries, frame_submit_sync_count)",
             "graphics_mixed_submit_plan",
             "execute_graphics_mixed_host_side_ops",
@@ -1824,6 +1825,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "static int recv_vulkan_graphics_v6_header_with_fds", 1
         )[0]
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-queue-submit\\"', run_body)
+        for marker in [
+            'VulkanGraphicsSubmitDiag submit_diag',
+            '\\"submit_stage\\"',
+            '\\"vk_result\\"',
+            '\\"wait_count\\"',
+            '\\"signal_count\\"',
+            '\\"timeline_used\\"',
+        ]:
+            self.assertIn(marker, run_body)
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-storage-buffer-writeback\\"', run_body)
         self.assertIn('\\"stage\\":\\"vulkan-graphics-v6-attachment-writeback\\"', run_body)
         self.assertIn("free_vulkan_graphics_v6_replay_command_buffer", run_body)
@@ -3624,6 +3634,24 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("binding_upload_ms[i] = now_ms() - binding_start;", source)
         self.assertIn("binding_download_ms[i] = now_ms() - binding_start;", source)
 
+    def test_llama_gpu_compare_parses_graphics_dispatch_response_events(self):
+        compare = LLAMA_COMPARE.read_text()
+        self.assertIn('"dispatch response:"', compare)
+        self.assertIn('markers = ("generic dispatch response:", "q6 compact response:", "dispatch response:")', compare)
+        self.assertIn('event.get("executor") == "pdocker-gpu-executor"', compare)
+
+    def test_llama_gpu_compare_classifies_direct_gpu_socket_rewrite_before_stale_marker(self):
+        compare = LLAMA_COMPARE.read_text()
+        self.assertIn("direct_socket_rewrite_blocker", compare)
+        self.assertIn("connect AF_UNIX rewrite failed", compare)
+        self.assertIn("/run/pdocker-gpu/pdocker-gpu.sock", compare)
+        self.assertIn('blocker_class = "direct_socket_rewrite_failed"', compare)
+        self.assertIn("failed to rewrite the container GPU AF_UNIX socket path", compare)
+        self.assertLess(
+            compare.index('blocker_class = "direct_socket_rewrite_failed"'),
+            compare.index('blocker_class = "runtime_freshness_mismatch"'),
+        )
+
     def test_llama_gpu_compare_restarts_stale_daemon_and_checks_runtime_marker(self):
         compare = LLAMA_COMPARE.read_text()
         service = PDOCKERD_SERVICE.read_text()
@@ -4052,7 +4080,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("validate_submit_wait_semaphores(&pSubmits[i], timeline_submit)", submit_body)
         self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit);", submit_body)
         self.assertIn("submit_fence->signaled = false;", submit_body)
-        self.assertIn("submit_fence) submit_fence->signaled = true;", submit_body)
+        self.assertIn("submit_fence->signaled = true;", submit_body)
+        self.assertIn("send_executor_fence_signal(submit_fence)", submit_body)
         create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroySemaphore", 1
         )[0]
@@ -5002,7 +5031,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkTimelineSemaphoreSubmitInfo timeline_info",
             "timeline_info.pWaitSemaphoreValues = wait_count ? wait_values : NULL;",
             "timeline_info.pSignalSemaphoreValues = signal_count ? signal_values : NULL;",
-            "rc = submit_vulkan_graphics_v6_command_buffer(&g_vulkan_runtime, view, replay_command_buffer);",
+            "rc = submit_vulkan_graphics_v6_command_buffer(\n        &g_vulkan_runtime, view, replay_command_buffer, &submit_diag);",
         ]:
             self.assertIn(marker, executor)
         self.assertIn("const int is_v619 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR;", executor)
@@ -5139,6 +5168,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VULKAN_FENCE_CREATE",
             "VULKAN_FENCE_RESET",
             "VULKAN_FENCE_STATUS",
+            "VULKAN_FENCE_SIGNAL",
             "VULKAN_FENCE_WAIT",
             "VULKAN_FENCE_DESTROY",
             "print_vulkan_fence_result",
@@ -5162,10 +5192,12 @@ class GpuAbiContractTest(unittest.TestCase):
             "send_executor_fence_destroy",
             "send_executor_fence_reset",
             "send_executor_fence_status",
+            "send_executor_fence_signal",
             "send_executor_fence_wait",
             "VULKAN_FENCE_CREATE %llu %u",
             "VULKAN_FENCE_RESET %u",
             "VULKAN_FENCE_STATUS %llu",
+            "VULKAN_FENCE_SIGNAL %llu",
             "VULKAN_FENCE_WAIT %u %llu %u",
             "VULKAN_FENCE_DESTROY %llu",
             "bridge_available()",
@@ -5173,6 +5205,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "send_executor_fence_destroy(f)",
             "send_executor_fence_reset(fenceCount, pFences)",
             "send_executor_fence_status(f, &result)",
+            "send_executor_fence_signal(submit_fence)",
             "send_executor_fence_wait(fenceCount, pFences, waitAll, timeout, &result)",
         ]:
             self.assertIn(marker, icd)
@@ -5180,8 +5213,22 @@ class GpuAbiContractTest(unittest.TestCase):
         fence_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
         )[0]
-        self.assertIn("if (f && f->executor_tracked)", fence_body)
-        self.assertNotIn("return (!f || f->signaled) ? VK_SUCCESS : VK_NOT_READY;", fence_body.split("if (f && f->executor_tracked)", 1)[0])
+        self.assertIn("if (!f || f->signaled) return VK_SUCCESS;", fence_body)
+        self.assertIn("if (f->executor_tracked)", fence_body)
+        self.assertNotIn("return (!f || f->signaled) ? VK_SUCCESS : VK_NOT_READY;", fence_body)
+
+        wait_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1)[1].split(
+            "static bool semaphore_create_info_parse_pnext", 1
+        )[0]
+        self.assertIn("fences_wait_satisfied(fenceCount, pFences, waitAll)", wait_body)
+        self.assertLess(
+            wait_body.index("fences_wait_satisfied(fenceCount, pFences, waitAll)"),
+            wait_body.index("send_executor_fence_wait(fenceCount, pFences, waitAll, timeout, &result)"),
+        )
+        reset_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkResetFences", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus", 1
+        )[0]
+        self.assertIn("if (fence) fence->signaled = false;", reset_body)
 
     def test_vulkan_icd_supports_query_pool_and_timestamp_api(self):
         icd = VULKAN_ICD.read_text()
@@ -5924,12 +5971,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit_has_recorded_work_after_command(&pSubmits[i], j)",
             "command_buffer_has_host_side_ops_after(cmd, last_graphics_gpu_op)",
             "submit-sync-wait-after-prior-work-unimplemented",
-            "submit-sync-signal-or-fence-before-trailing-submit-work-unimplemented",
+            "filter_submit_sync_entries_without_completion(",
+            "frame_submit_sync_count = deferred_frame_sync_count;",
+            "deferred graphics submit completion sync until trailing host-side work finishes",
         ]:
             self.assertIn(marker, mixed_body)
+        self.assertNotIn("submit-sync-signal-or-fence-before-trailing-submit-work-unimplemented", mixed_body)
         self.assertLess(
-            mixed_body.index("submit-sync-signal-or-fence-before-trailing-submit-work-unimplemented"),
-            mixed_body.index("execute_graphics_mixed_host_side_ops("),
+            mixed_body.index("filter_submit_sync_entries_without_completion("),
+            mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame("),
         )
         self.assertLess(
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(\n                    cmd, frame_submit_sync_entries, frame_submit_sync_count)"),

@@ -18959,7 +18959,7 @@ static void describe_vulkan_graphics_v6_frame(
     if (!view || !view->header) {
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-describe\",\"valid\":false,"
                 "\"error\":\"invalid frame view\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -18972,7 +18972,7 @@ static void describe_vulkan_graphics_v6_frame(
     const PdockerGpuVulkanGraphicsV619FrameHeader *header_v619 = view->header_v619;
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"backend_impl\":\"android_vulkan\",\"backend_affinity\":\"same-api\","
             "\"stage\":\"vulkan-graphics-v6-describe\",\"valid\":true,"
             "\"execution_implemented\":false,"
@@ -25877,7 +25877,7 @@ static void print_vulkan_fence_result(const char *stage, VkResult result, int si
     FILE *out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"%s\",\"valid\":true,\"result\":%d,\"signaled\":%s}\n",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
             PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
@@ -25933,7 +25933,7 @@ static void print_vulkan_event_result(const char *stage, VkResult result, int si
     FILE *out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"%s\",\"valid\":true,\"result\":%d,\"signaled\":%s}\n",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
             PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
@@ -26047,7 +26047,7 @@ static void print_vulkan_semaphore_result(const char *stage, VkResult result, ui
     FILE *out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"%s\",\"valid\":true,\"result\":%d,\"value\":%llu}\n",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
             PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
@@ -26296,9 +26296,29 @@ static int handle_vulkan_fence_command(const char *cmd) {
             json_fail("vulkan-fence-status", "unknown fence");
             return -ENOENT;
         }
+        if (entry->signaled) {
+            print_vulkan_fence_result("vulkan-fence-status", VK_SUCCESS, 1);
+            return 0;
+        }
         VkResult vrc = vkGetFenceStatus(rt->device, entry->fence);
         entry->signaled = (vrc == VK_SUCCESS) ? 1u : 0u;
         print_vulkan_fence_result("vulkan-fence-status", vrc, entry->signaled);
+        return 0;
+    }
+    if (strncmp(cmd, "VULKAN_FENCE_SIGNAL ", 20) == 0) {
+        const char *cursor = cmd + 20;
+        uint64_t id = 0;
+        if (parse_u64_token(&cursor, &id) != 0 || id == 0) {
+            json_fail("vulkan-fence-signal", "invalid fence signal command");
+            return -EINVAL;
+        }
+        VulkanExecutorSubmitFenceEntry *entry = find_executor_submit_fence_entry(id);
+        if (!entry || !entry->fence) {
+            json_fail("vulkan-fence-signal", "unknown fence");
+            return -ENOENT;
+        }
+        entry->signaled = 1;
+        print_vulkan_fence_result("vulkan-fence-signal", VK_SUCCESS, 1);
         return 0;
     }
     if (strncmp(cmd, "VULKAN_FENCE_RESET ", 19) == 0) {
@@ -26345,6 +26365,22 @@ static int handle_vulkan_fence_command(const char *cmd) {
             json_fail("vulkan-fence-wait", "unknown fence");
             return rc;
         }
+        int logical_signaled = fence_count == 0 ? 1 : (wait_all ? 1 : 0);
+        for (uint32_t i = 0; i < fence_count; ++i) {
+            if (wait_all) {
+                if (!entries[i]->signaled) {
+                    logical_signaled = 0;
+                    break;
+                }
+            } else if (entries[i]->signaled) {
+                logical_signaled = 1;
+                break;
+            }
+        }
+        if (logical_signaled) {
+            print_vulkan_fence_result("vulkan-fence-wait", VK_SUCCESS, 1);
+            return 0;
+        }
         VkResult vrc = vkWaitForFences(rt->device, fence_count, fences, wait_all ? VK_TRUE : VK_FALSE, timeout_ns);
         int any_signaled = 0;
         if (vrc == VK_SUCCESS) {
@@ -26360,10 +26396,28 @@ static int handle_vulkan_fence_command(const char *cmd) {
     return -EINVAL;
 }
 
+typedef struct VulkanGraphicsSubmitDiag {
+    const char *stage;
+    VkResult vk_result;
+    int native_rc;
+    uint32_t wait_count;
+    uint32_t signal_count;
+    int timeline_used;
+} VulkanGraphicsSubmitDiag;
+
+static void reset_vulkan_graphics_submit_diag(VulkanGraphicsSubmitDiag *diag) {
+    if (!diag) return;
+    memset(diag, 0, sizeof(*diag));
+    diag->stage = "init";
+    diag->vk_result = VK_SUCCESS;
+}
+
 static int submit_vulkan_graphics_v6_command_buffer(
         VulkanRuntime *rt,
         const VulkanGraphicsV6FrameView *view,
-        VkCommandBuffer command_buffer) {
+        VkCommandBuffer command_buffer,
+        VulkanGraphicsSubmitDiag *diag) {
+    reset_vulkan_graphics_submit_diag(diag);
     if (!rt || !view || !view->header || !command_buffer || !rt->device || !rt->graphics_queue) return -EINVAL;
     const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *fence_sync = NULL;
     if (view->is_v619 && view->header_v619 && view->submit_syncs) {
@@ -26378,15 +26432,36 @@ static int submit_vulkan_graphics_v6_command_buffer(
     VkFence local_fence = VK_NULL_HANDLE;
     VulkanExecutorSubmitFenceEntry *submit_fence_entry = NULL;
     if (fence_sync) {
+        if (diag) diag->stage = "resolve-fence";
         int rc = resolve_executor_submit_sync_fence(rt, fence_sync, 1, &submit_fence, &submit_fence_entry);
-        if (rc != 0) return rc;
+        if (rc != 0) {
+            if (diag) {
+                diag->native_rc = rc;
+                diag->vk_result = VK_ERROR_FEATURE_NOT_PRESENT;
+            }
+            return rc;
+        }
+        if (diag) diag->stage = "reset-fence";
         VkResult reset_rc = vkResetFences(rt->device, 1, &submit_fence);
-        if (reset_rc != VK_SUCCESS) return -EIO;
+        if (reset_rc != VK_SUCCESS) {
+            if (diag) {
+                diag->vk_result = reset_rc;
+                diag->native_rc = -EIO;
+            }
+            return -EIO;
+        }
         if (submit_fence_entry) submit_fence_entry->signaled = 0;
     } else {
+        if (diag) diag->stage = "create-local-fence";
         VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         VkResult create_rc = vkCreateFence(rt->device, &fci, NULL, &local_fence);
-        if (create_rc != VK_SUCCESS) return -EIO;
+        if (create_rc != VK_SUCCESS) {
+            if (diag) {
+                diag->vk_result = create_rc;
+                diag->native_rc = -EIO;
+            }
+            return -EIO;
+        }
         submit_fence = local_fence;
     }
     VkSemaphore wait_semaphores[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
@@ -26408,6 +26483,7 @@ static int submit_vulkan_graphics_v6_command_buffer(
         for (uint32_t i = 0; i < view->header_v619->v619.submit_sync_count; ++i) {
             const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *sync = &view->submit_syncs[i];
             if (sync->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT) {
+                if (diag) diag->stage = "resolve-wait-semaphore";
                 if (wait_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
                     vrc = VK_ERROR_TOO_MANY_OBJECTS;
                     goto submit_fail;
@@ -26421,6 +26497,7 @@ static int submit_vulkan_graphics_v6_command_buffer(
                 if (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) timeline_used = 1;
                 wait_count++;
             } else if (sync->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL) {
+                if (diag) diag->stage = "resolve-signal-semaphore";
                 if (signal_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
                     vrc = VK_ERROR_TOO_MANY_OBJECTS;
                     goto submit_fail;
@@ -26451,10 +26528,17 @@ static int submit_vulkan_graphics_v6_command_buffer(
         .signalSemaphoreCount = signal_count,
         .pSignalSemaphores = signal_count ? signal_semaphores : NULL,
     };
+    if (diag) {
+        diag->stage = "queue-submit";
+        diag->wait_count = wait_count;
+        diag->signal_count = signal_count;
+        diag->timeline_used = timeline_used;
+    }
     vrc = vkQueueSubmit(rt->graphics_queue, 1, &submit, submit_fence);
     if (vrc != VK_SUCCESS) goto submit_fail;
     const uint64_t timeout_ns =
         env_timeout_ns("PDOCKER_GPU_GRAPHICS_SUBMIT_TIMEOUT_MS", 30000, 1000, 600000);
+    if (diag) diag->stage = "wait-submit-fence";
     vrc = vkWaitForFences(rt->device, 1, &submit_fence, VK_TRUE, timeout_ns);
     if (vrc == VK_TIMEOUT) {
         if (local_fence) vkDestroyFence(rt->device, local_fence, NULL);
@@ -26477,6 +26561,13 @@ static int submit_vulkan_graphics_v6_command_buffer(
     return 0;
 submit_fail:
     if (local_fence) vkDestroyFence(rt->device, local_fence, NULL);
+    if (diag) {
+        diag->vk_result = vrc;
+        diag->native_rc = submit_fail_rc ? submit_fail_rc : (vrc == VK_ERROR_TOO_MANY_OBJECTS ? -E2BIG : -EIO);
+        diag->wait_count = wait_count;
+        diag->signal_count = signal_count;
+        diag->timeline_used = timeline_used;
+    }
     return submit_fail_rc ? submit_fail_rc : (vrc == VK_ERROR_TOO_MANY_OBJECTS ? -E2BIG : -EIO);
 }
 static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
@@ -26486,7 +26577,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         FILE *out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-replay-preflight\",\"valid\":false,"
                 "\"execution_implemented\":false,\"error\":\"%s\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26499,7 +26590,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         FILE *out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":true,"
                 "\"execution_implemented\":true,\"no_op\":true,"
                 "\"command_count\":0,\"submit_id\":%llu}\n",
@@ -26514,7 +26605,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         FILE *out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-runtime-preflight\",\"valid\":false,"
                 "\"execution_implemented\":false,\"error\":\"%s\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26543,7 +26634,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         FILE *out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-pipeline-materialize\",\"valid\":false,"
                 "\"execution_implemented\":false,\"error\":\"%s\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26559,7 +26650,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     FILE *out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-pipeline-materialize\",\"valid\":true,"
             "\"execution_implemented\":true,\"pipeline_count\":%u,"
             "\"submit_id\":%llu}\n",
@@ -26574,7 +26665,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-attachment-materialize\",\"valid\":false,"
                 "\"execution_implemented\":false,\"error\":\"%s\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26590,7 +26681,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-attachment-materialize\",\"valid\":true,"
             "\"execution_implemented\":true,\"image_count\":%zu,"
             "\"image_view_count\":%zu,\"submit_id\":%llu}\n",
@@ -26605,7 +26696,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-buffer-materialize\",\"valid\":false,"
                 "\"execution_implemented\":false,\"error\":\"%s\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26621,7 +26712,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-buffer-materialize\",\"valid\":true,"
             "\"execution_implemented\":true,\"buffer_count\":%u,"
             "\"submit_id\":%llu}\n",
@@ -26638,7 +26729,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-descriptor-materialize\",\"valid\":false,"
                 "\"execution_implemented\":false,\"error\":\"%s\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26654,7 +26745,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-descriptor-materialize\",\"valid\":true,"
             "\"execution_implemented\":true,\"bind_count\":%u,"
             "\"submit_id\":%llu}\n",
@@ -26669,7 +26760,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-query-materialize\",\"valid\":false,"
                 "\"execution_implemented\":false,\"error\":\"%s\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26685,7 +26776,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-query-materialize\",\"valid\":true,"
             "\"execution_implemented\":true,\"pool_count\":%u,"
             "\"submit_id\":%llu}\n",
@@ -26704,7 +26795,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-command-record\",\"valid\":false,"
                 "\"execution_implemented\":false,\"error\":\"%s\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26720,7 +26811,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-command-record\",\"valid\":true,"
             "\"execution_implemented\":true,\"command_count\":%u,"
             "\"submit_id\":%llu}\n",
@@ -26730,17 +26821,26 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
             (unsigned long long)view->header->submit_id);
     fflush(out);
 
-    rc = submit_vulkan_graphics_v6_command_buffer(&g_vulkan_runtime, view, replay_command_buffer);
+    VulkanGraphicsSubmitDiag submit_diag;
+    rc = submit_vulkan_graphics_v6_command_buffer(
+        &g_vulkan_runtime, view, replay_command_buffer, &submit_diag);
     if (rc != 0) {
         out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-queue-submit\",\"valid\":false,"
-                "\"execution_implemented\":false,\"error\":\"%s\"}\n",
+                "\"execution_implemented\":false,\"error\":\"%s\","
+                "\"submit_stage\":\"%s\",\"vk_result\":%d,"
+                "\"native_rc\":%d,\"wait_count\":%u,\"signal_count\":%u,"
+                "\"timeline_used\":%d,\"submit_id\":%llu}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
                 PDOCKER_GPU_EXECUTOR_ROLE, PDOCKER_GPU_LLM_ENGINE_LOCATION,
-                strerror(-rc));
+                strerror(-rc), submit_diag.stage ? submit_diag.stage : "unknown",
+                (int)submit_diag.vk_result, rc,
+                submit_diag.wait_count, submit_diag.signal_count,
+                submit_diag.timeline_used,
+                (unsigned long long)view->header->submit_id);
         fflush(out);
         free_vulkan_graphics_v6_replay_command_buffer(
             g_vulkan_runtime.device, replay_command_pool, &replay_command_buffer);
@@ -26753,7 +26853,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-queue-submit\",\"valid\":true,"
             "\"execution_implemented\":true,\"submit_id\":%llu}\n",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26768,7 +26868,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-query-writeback\",\"valid\":false,"
                 "\"execution_implemented\":false,\"error\":\"%s\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26786,7 +26886,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-query-writeback\",\"valid\":true,"
             "\"execution_implemented\":true,\"result_count\":%u,"
             "\"submit_id\":%llu}\n",
@@ -26808,7 +26908,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-storage-buffer-writeback\",\"valid\":false,"
                 "\"execution_implemented\":false,\"error\":\"%s\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26824,7 +26924,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-storage-buffer-writeback\",\"valid\":true,"
             "\"execution_implemented\":true,\"buffer_count\":%u,"
             "\"bytes\":%llu,\"submit_id\":%llu}\n",
@@ -26840,7 +26940,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         out = json_out();
         fprintf(out,
                 "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+                "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
                 "\"stage\":\"vulkan-graphics-v6-attachment-writeback\",\"valid\":false,"
                 "\"execution_implemented\":false,\"error\":\"%s\"}\n",
                 PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26856,7 +26956,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-attachment-writeback\",\"valid\":true,"
             "\"execution_implemented\":true,\"submit_id\":%llu}\n",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
@@ -26871,7 +26971,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
     out = json_out();
     fprintf(out,
             "{\"executor\":\"pdocker-gpu-executor\",\"api\":\"%s\",\"abi_version\":\"%s\","
-            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,"
+            "\"role\":\"%s\",\"llm_engine\":\"%s\",\"device_independent\":true,\"executor_build_marker\":\"" PDOCKER_GPU_EXECUTOR_BUILD_MARKER "\","
             "\"stage\":\"vulkan-graphics-v6-replay\",\"valid\":true,"
             "\"execution_implemented\":true,\"submit_id\":%llu}\n",
             PDOCKER_GPU_COMMAND_API, PDOCKER_GPU_ABI_VERSION,
