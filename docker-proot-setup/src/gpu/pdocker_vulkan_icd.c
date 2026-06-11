@@ -15418,17 +15418,6 @@ static bool command_buffer_needs_graphics_submit_sync_frame(const PdockerVkComma
     return false;
 }
 
-static bool submit_has_graphics_submit_sync_frame(const VkSubmitInfo *submit) {
-    if (!submit || !submit->pCommandBuffers) return false;
-    for (uint32_t i = 0; i < submit->commandBufferCount; ++i) {
-        if (command_buffer_needs_graphics_submit_sync_frame(
-                (const PdockerVkCommandBuffer *)submit->pCommandBuffers[i])) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static void graphics_submit_sync_frame_bounds(
         const VkSubmitInfo *submit,
         uint32_t *first_graphics_cmd,
@@ -15539,7 +15528,7 @@ static size_t filter_submit_sync_entries_completion_only(
     return out_count;
 }
 
-static int send_vulkan_submit_completion_sync_frame(
+static int send_vulkan_submit_sync_only_frame(
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
         size_t entry_count) {
     if (entry_count == 0) return 0;
@@ -15681,7 +15670,9 @@ static void complete_submit_semaphores(
     }
 }
 
-static VkResult validate_submit2_wait_semaphores(const VkSubmitInfo2 *submit) {
+static VkResult validate_submit2_wait_semaphores(
+        const VkSubmitInfo2 *submit,
+        bool allow_executor_tracked_queue_waits) {
     if (!submit) return VK_ERROR_INITIALIZATION_FAILED;
     if (submit->pNext) {
         trace_icd_runtime_failure("submit2-pnext-unsupported",
@@ -15699,6 +15690,9 @@ static VkResult validate_submit2_wait_semaphores(const VkSubmitInfo2 *submit) {
         PdockerVkSemaphore *sem = info ? (PdockerVkSemaphore *)info->semaphore : NULL;
         uint64_t required_value = sem && sem->timeline ? info->value : 0;
         if (!semaphore_wait_satisfied(sem, required_value)) {
+            if (allow_executor_tracked_queue_waits && sem && sem->executor_tracked) {
+                continue;
+            }
             trace_icd_runtime_failure("semaphore2-wait-unsignaled",
                                       VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -15900,6 +15894,26 @@ static bool submit_sync_entries_include_completion(
     return false;
 }
 
+static bool submit_has_executor_tracked_wait_sync(const VkSubmitInfo *submit) {
+    if (!submit || !submit->pWaitSemaphores) return false;
+    for (uint32_t i = 0; i < submit->waitSemaphoreCount; ++i) {
+        const PdockerVkSemaphore *sem = (const PdockerVkSemaphore *)submit->pWaitSemaphores[i];
+        if (sem && sem->executor_tracked) return true;
+    }
+    return false;
+}
+
+static bool submit_has_executor_tracked_completion_sync(const VkSubmitInfo *submit, VkFence fence) {
+    if (submit && submit->pSignalSemaphores) {
+        for (uint32_t i = 0; i < submit->signalSemaphoreCount; ++i) {
+            const PdockerVkSemaphore *sem = (const PdockerVkSemaphore *)submit->pSignalSemaphores[i];
+            if (sem && sem->executor_tracked) return true;
+        }
+    }
+    const PdockerVkFence *submit_fence = (const PdockerVkFence *)fence;
+    return submit_fence && submit_fence->executor_tracked;
+}
+
 static bool command_buffer_has_recorded_submit_work(const PdockerVkCommandBuffer *cmd) {
     return cmd && (
         cmd->command_op_count > 0 ||
@@ -16057,7 +16071,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             trace_icd_runtime_failure("submit-pnext-unsupported", VK_ERROR_FEATURE_NOT_PRESENT);
             return VK_ERROR_FEATURE_NOT_PRESENT;
         }
-        const bool allow_executor_tracked_queue_waits = submit_has_graphics_submit_sync_frame(&pSubmits[i]);
+        if (pSubmits[i].commandBufferCount > 0 && !pSubmits[i].pCommandBuffers) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        const bool allow_executor_tracked_queue_waits = bridge_available() &&
+            (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(&pSubmits[i]));
         VkResult semaphore_rc = validate_submit_wait_semaphores(
             &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits);
         if (semaphore_rc != VK_SUCCESS) return semaphore_rc;
@@ -16081,6 +16099,28 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         graphics_submit_sync_frame_bounds(&pSubmits[i],
                                           &first_graphics_submit_sync_cmd,
                                           &last_graphics_submit_sync_cmd);
+        const bool submit_has_graphics_sync_frame = first_graphics_submit_sync_cmd != UINT32_MAX;
+        const bool submit_wait_sync_needs_executor = bridge_available() &&
+            (g_submit_sync_override_entries || submit_has_executor_tracked_wait_sync(&pSubmits[i]));
+        const bool submit_completion_sync_needs_executor = bridge_available() &&
+            (g_submit_sync_override_entries || submit_has_executor_tracked_completion_sync(&pSubmits[i], fence));
+        bool submit_waits_split_before_command_loop = false;
+        if (submit_wait_sync_needs_executor &&
+            submit_sync_entries_include_wait(submit_sync_entries, submit_sync_count) &&
+            (!submit_has_graphics_sync_frame ||
+             submit_has_recorded_work_before_command(&pSubmits[i], first_graphics_submit_sync_cmd))) {
+            PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_wait_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+            size_t submit_wait_sync_count = filter_submit_sync_entries_wait_only(
+                submit_sync_entries, submit_sync_count, submit_wait_sync_entries);
+            int submit_wait_sync_rc = send_vulkan_submit_sync_only_frame(
+                submit_wait_sync_entries, submit_wait_sync_count);
+            if (submit_wait_sync_rc != 0) {
+                trace_icd_runtime_failure("submit-pre-wait-sync-failed",
+                                          VK_ERROR_FEATURE_NOT_PRESENT);
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+            }
+            submit_waits_split_before_command_loop = submit_wait_sync_count > 0;
+        }
         for (uint32_t j = 0; j < pSubmits[i].commandBufferCount; ++j) {
             PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)pSubmits[i].pCommandBuffers[j];
             if (!cmd) return VK_ERROR_INITIALIZATION_FAILED;
@@ -16136,11 +16176,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 PdockerGpuVulkanGraphicsV619SubmitSyncEntry pre_wait_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
                 size_t pre_wait_sync_count = 0;
                 if (submit_sync_entries_include_wait(frame_submit_sync_entries, frame_submit_sync_count) &&
-                    (submit_has_recorded_work_before_command(&pSubmits[i], j) ||
+                    (submit_waits_split_before_command_loop ||
                      command_buffer_has_host_side_ops_before(cmd, first_graphics_gpu_op))) {
                     PdockerGpuVulkanGraphicsV619SubmitSyncEntry frame_sync_without_waits[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
-                    pre_wait_sync_count = filter_submit_sync_entries_wait_only(
-                        frame_submit_sync_entries, frame_submit_sync_count, pre_wait_sync_entries);
+                    if (!submit_waits_split_before_command_loop) {
+                        pre_wait_sync_count = filter_submit_sync_entries_wait_only(
+                            frame_submit_sync_entries, frame_submit_sync_count, pre_wait_sync_entries);
+                    }
                     size_t frame_sync_without_wait_count = filter_submit_sync_entries_without_waits(
                         frame_submit_sync_entries, frame_submit_sync_count, frame_sync_without_waits);
                     memcpy(frame_submit_sync_entries, frame_sync_without_waits,
@@ -16148,7 +16190,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                     frame_submit_sync_count = frame_sync_without_wait_count;
                     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                         fprintf(stderr,
-                                "pdocker-vulkan-icd: split graphics submit wait sync before prior host-side work\n");
+                                submit_waits_split_before_command_loop
+                                    ? "pdocker-vulkan-icd: stripped graphics submit wait sync already split before command loop\n"
+                                    : "pdocker-vulkan-icd: split graphics submit wait sync before prior host-side work\n");
                     }
                 }
                 PdockerGpuVulkanGraphicsV619SubmitSyncEntry deferred_completion_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
@@ -16171,7 +16215,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 }
                 PdockerVkCopyStats mixed_stats;
                 memset(&mixed_stats, 0, sizeof(mixed_stats));
-                int pre_wait_sync_rc = send_vulkan_submit_completion_sync_frame(
+                int pre_wait_sync_rc = send_vulkan_submit_sync_only_frame(
                     pre_wait_sync_entries, pre_wait_sync_count);
                 if (pre_wait_sync_rc != 0) {
                     trace_icd_runtime_failure("graphics-v6-pre-wait-sync-failed",
@@ -16198,7 +16242,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 mixed_host_rc = execute_graphics_mixed_host_side_ops(
                     cmd, first_graphics_gpu_op, last_graphics_gpu_op, false, &mixed_stats);
                 if (mixed_host_rc != VK_SUCCESS) return mixed_host_rc;
-                int deferred_sync_rc = send_vulkan_submit_completion_sync_frame(
+                int deferred_sync_rc = send_vulkan_submit_sync_only_frame(
                     deferred_completion_sync_entries, deferred_completion_sync_count);
                 if (deferred_sync_rc != 0) {
                     trace_icd_runtime_failure("graphics-v6-deferred-completion-sync-failed",
@@ -16444,6 +16488,19 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
             int rc = send_vector_add_3fd(n, a->memory->fd, b->memory->fd, out->memory->fd);
             if (rc != 0) return VK_ERROR_DEVICE_LOST;
         }
+        if (!submit_has_graphics_sync_frame && submit_completion_sync_needs_executor &&
+            submit_sync_entries_include_completion(submit_sync_entries, submit_sync_count)) {
+            PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_completion_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+            size_t submit_completion_sync_count = filter_submit_sync_entries_completion_only(
+                submit_sync_entries, submit_sync_count, submit_completion_sync_entries);
+            int submit_completion_sync_rc = send_vulkan_submit_sync_only_frame(
+                submit_completion_sync_entries, submit_completion_sync_count);
+            if (submit_completion_sync_rc != 0) {
+                trace_icd_runtime_failure("submit-completion-sync-failed",
+                                          VK_ERROR_FEATURE_NOT_PRESENT);
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+            }
+        }
         complete_submit_semaphores(&pSubmits[i], timeline_submit);
     }
     if (submit_fence) {
@@ -16472,7 +16529,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
         if (src->waitSemaphoreInfoCount > 0 && !src->pWaitSemaphoreInfos) {
             return VK_ERROR_INITIALIZATION_FAILED;
         }
-        VkResult rc = validate_submit2_wait_semaphores(src);
+        VkResult rc = validate_submit2_wait_semaphores(src, bridge_available());
         if (rc != VK_SUCCESS) return rc;
         if (src->commandBufferInfoCount > 0 && !src->pCommandBufferInfos) {
             return VK_ERROR_INITIALIZATION_FAILED;

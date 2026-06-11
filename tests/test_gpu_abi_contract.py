@@ -4082,7 +4082,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("(void)fence;", submit_body)
         self.assertIn("submit_timeline_info_from_pnext(pSubmits[i].pNext", submit_body)
         self.assertIn("submit-pnext-unsupported", submit_body)
-        self.assertIn("submit_has_graphics_submit_sync_frame(&pSubmits[i])", submit_body)
+        self.assertIn("submit_has_executor_tracked_wait_sync(&pSubmits[i])", submit_body)
+        self.assertIn("submit_has_executor_tracked_completion_sync(&pSubmits[i], fence)", submit_body)
         self.assertIn("allow_executor_tracked_queue_waits", submit_body)
         self.assertIn("validate_submit_wait_semaphores(\n            &pSubmits[i], timeline_submit, allow_executor_tracked_queue_waits)", submit_body)
         self.assertIn("complete_submit_semaphores(&pSubmits[i], timeline_submit);", submit_body)
@@ -4136,7 +4137,7 @@ class GpuAbiContractTest(unittest.TestCase):
         queue_submit2_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2", 1)[1].split(
             "VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle", 1
         )[0]
-        self.assertIn("validate_submit2_wait_semaphores(src)", queue_submit2_body)
+        self.assertIn("validate_submit2_wait_semaphores(src, bridge_available())", queue_submit2_body)
         self.assertIn("validate_submit2_command_buffers(src)", queue_submit2_body)
         self.assertIn("validate_submit2_signal_semaphores(src)", queue_submit2_body)
         self.assertIn("complete_submit2_semaphores(src)", queue_submit2_body)
@@ -5963,6 +5964,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
         )[0]
         self.assertNotIn("graphics_only_submit", submit_body)
+        for marker in [
+            "submit_wait_sync_needs_executor",
+            "submit_completion_sync_needs_executor",
+            "submit_waits_split_before_command_loop",
+            "submit_has_recorded_work_before_command(&pSubmits[i], first_graphics_submit_sync_cmd)",
+            "submit-pre-wait-sync-failed",
+            "submit-completion-sync-failed",
+        ]:
+            self.assertIn(marker, submit_body)
         mixed_body = submit_body.split("if (command_buffer_needs_graphics_submit_sync_frame(cmd))", 1)[1].split(
             "if (cmd->command_op_count > 0)", 1
         )[0]
@@ -5972,7 +5982,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         for marker in [
             "submit_sync_entries_include_wait(frame_submit_sync_entries, frame_submit_sync_count)",
-            "submit_has_recorded_work_before_command(&pSubmits[i], j)",
+            "submit_waits_split_before_command_loop",
             "command_buffer_has_host_side_ops_before(cmd, first_graphics_gpu_op)",
             "submit_sync_entries_include_completion(frame_submit_sync_entries, frame_submit_sync_count)",
             "submit_has_recorded_work_after_command(&pSubmits[i], j)",
@@ -5985,7 +5995,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "filter_submit_sync_entries_without_completion(",
             "frame_submit_sync_count = deferred_frame_sync_count;",
             "deferred graphics submit completion sync until trailing host-side work finishes",
-            "send_vulkan_submit_completion_sync_frame(",
+            "send_vulkan_submit_sync_only_frame(",
             "graphics-v6-deferred-completion-sync-failed",
         ]:
             self.assertIn(marker, mixed_body)
@@ -6003,7 +6013,7 @@ class GpuAbiContractTest(unittest.TestCase):
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame("),
         )
         self.assertLess(
-            mixed_body.index("send_vulkan_submit_completion_sync_frame(\n                    pre_wait_sync_entries, pre_wait_sync_count)"),
+            mixed_body.index("send_vulkan_submit_sync_only_frame(\n                    pre_wait_sync_entries, pre_wait_sync_count)"),
             mixed_body.index("execute_graphics_mixed_host_side_ops("),
         )
         self.assertLess(
@@ -6012,7 +6022,7 @@ class GpuAbiContractTest(unittest.TestCase):
         )
         self.assertLess(
             mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
-            mixed_body.index("send_vulkan_submit_completion_sync_frame(\n                    deferred_completion_sync_entries, deferred_completion_sync_count)"),
+            mixed_body.index("send_vulkan_submit_sync_only_frame(\n                    deferred_completion_sync_entries, deferred_completion_sync_count)"),
         )
 
     def test_vulkan_compute_push_constants_do_not_create_graphics_frame(self):
