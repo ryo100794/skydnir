@@ -796,7 +796,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit_has_recorded_work_after_command",
             "command_buffer_has_host_side_ops_before",
             "command_buffer_has_host_side_ops_after",
-            "submit-sync-wait-after-prior-work-unimplemented",
+            "filter_submit_sync_entries_wait_only",
+            "filter_submit_sync_entries_without_waits",
+            "split graphics submit wait sync before prior host-side work",
+            "graphics-v6-pre-wait-sync-failed",
             "filter_submit_sync_entries_without_completion",
             "deferred graphics submit completion sync until trailing host-side work finishes",
             "send_recorded_vulkan_graphics_v6_1_frame(\n                        cmd, frame_submit_sync_entries, frame_submit_sync_count)",
@@ -5974,7 +5977,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit_sync_entries_include_completion(frame_submit_sync_entries, frame_submit_sync_count)",
             "submit_has_recorded_work_after_command(&pSubmits[i], j)",
             "command_buffer_has_host_side_ops_after(cmd, last_graphics_gpu_op)",
-            "submit-sync-wait-after-prior-work-unimplemented",
+            "filter_submit_sync_entries_wait_only(",
+            "filter_submit_sync_entries_without_waits(",
+            "split graphics submit wait sync before prior host-side work",
+            "graphics-v6-pre-wait-sync-failed",
             "filter_submit_sync_entries_completion_only(",
             "filter_submit_sync_entries_without_completion(",
             "frame_submit_sync_count = deferred_frame_sync_count;",
@@ -5986,6 +5992,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("PdockerVkCommandBuffer *sync_cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*sync_cmd));", icd)
         self.assertIn("send_recorded_vulkan_graphics_v6_1_frame(sync_cmd, entries, entry_count)", icd)
         self.assertNotIn("PdockerVkCommandBuffer sync_cmd;", icd)
+        self.assertNotIn("submit-sync-wait-after-prior-work-unimplemented", mixed_body)
         self.assertNotIn("submit-sync-signal-or-fence-before-trailing-submit-work-unimplemented", mixed_body)
         self.assertLess(
             mixed_body.index("filter_submit_sync_entries_completion_only("),
@@ -5996,12 +6003,16 @@ class GpuAbiContractTest(unittest.TestCase):
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame("),
         )
         self.assertLess(
+            mixed_body.index("send_vulkan_submit_completion_sync_frame(\n                    pre_wait_sync_entries, pre_wait_sync_count)"),
+            mixed_body.index("execute_graphics_mixed_host_side_ops("),
+        )
+        self.assertLess(
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(\n                    cmd, frame_submit_sync_entries, frame_submit_sync_count)"),
             mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
         )
         self.assertLess(
             mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
-            mixed_body.index("send_vulkan_submit_completion_sync_frame("),
+            mixed_body.index("send_vulkan_submit_completion_sync_frame(\n                    deferred_completion_sync_entries, deferred_completion_sync_count)"),
         )
 
     def test_vulkan_compute_push_constants_do_not_create_graphics_frame(self):

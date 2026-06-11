@@ -15475,6 +15475,37 @@ static size_t filter_submit_sync_entries_for_graphics_frame(
     return out_count;
 }
 
+static size_t filter_submit_sync_entries_wait_only(
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
+        size_t entry_count,
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry *out) {
+    if (!entries || !out || entry_count == 0) return 0;
+    size_t out_count = 0;
+    for (size_t i = 0; i < entry_count; ++i) {
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entry = &entries[i];
+        if (entry->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT) {
+            out[out_count++] = *entry;
+        }
+    }
+    return out_count;
+}
+
+static size_t filter_submit_sync_entries_without_waits(
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
+        size_t entry_count,
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry *out) {
+    if (!entries || !out || entry_count == 0) return 0;
+    size_t out_count = 0;
+    for (size_t i = 0; i < entry_count; ++i) {
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entry = &entries[i];
+        if (entry->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_WAIT) {
+            continue;
+        }
+        out[out_count++] = *entry;
+    }
+    return out_count;
+}
+
 static size_t filter_submit_sync_entries_without_completion(
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
         size_t entry_count,
@@ -16102,12 +16133,23 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                     j == first_graphics_submit_sync_cmd,
                     j == last_graphics_submit_sync_cmd,
                     frame_submit_sync_entries);
+                PdockerGpuVulkanGraphicsV619SubmitSyncEntry pre_wait_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+                size_t pre_wait_sync_count = 0;
                 if (submit_sync_entries_include_wait(frame_submit_sync_entries, frame_submit_sync_count) &&
                     (submit_has_recorded_work_before_command(&pSubmits[i], j) ||
                      command_buffer_has_host_side_ops_before(cmd, first_graphics_gpu_op))) {
-                    trace_icd_runtime_failure("submit-sync-wait-after-prior-work-unimplemented",
-                                              VK_ERROR_FEATURE_NOT_PRESENT);
-                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                    PdockerGpuVulkanGraphicsV619SubmitSyncEntry frame_sync_without_waits[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+                    pre_wait_sync_count = filter_submit_sync_entries_wait_only(
+                        frame_submit_sync_entries, frame_submit_sync_count, pre_wait_sync_entries);
+                    size_t frame_sync_without_wait_count = filter_submit_sync_entries_without_waits(
+                        frame_submit_sync_entries, frame_submit_sync_count, frame_sync_without_waits);
+                    memcpy(frame_submit_sync_entries, frame_sync_without_waits,
+                           frame_sync_without_wait_count * sizeof(frame_submit_sync_entries[0]));
+                    frame_submit_sync_count = frame_sync_without_wait_count;
+                    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+                        fprintf(stderr,
+                                "pdocker-vulkan-icd: split graphics submit wait sync before prior host-side work\n");
+                    }
                 }
                 PdockerGpuVulkanGraphicsV619SubmitSyncEntry deferred_completion_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
                 size_t deferred_completion_sync_count = 0;
@@ -16129,6 +16171,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 }
                 PdockerVkCopyStats mixed_stats;
                 memset(&mixed_stats, 0, sizeof(mixed_stats));
+                int pre_wait_sync_rc = send_vulkan_submit_completion_sync_frame(
+                    pre_wait_sync_entries, pre_wait_sync_count);
+                if (pre_wait_sync_rc != 0) {
+                    trace_icd_runtime_failure("graphics-v6-pre-wait-sync-failed",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
                 VkResult mixed_host_rc = execute_graphics_mixed_host_side_ops(
                     cmd, first_graphics_gpu_op, last_graphics_gpu_op, true, &mixed_stats);
                 if (mixed_host_rc != VK_SUCCESS) return mixed_host_rc;
