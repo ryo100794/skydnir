@@ -4036,6 +4036,10 @@ static int collect_graphics_descriptor_entries(
     return 0;
 }
 
+static _Thread_local const VkSubmitInfo2 *g_submit2_metadata_override;
+static _Thread_local uint32_t g_submit2_metadata_command_index =
+    PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE;
+
 static int send_recorded_vulkan_graphics_v6_1_frame(
         const PdockerVkCommandBuffer *cmd,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
@@ -4097,6 +4101,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     PdockerGpuVulkanGraphicsV618CopyQueryResultEntry copy_query_results[PDOCKER_GPU_VULKAN_GRAPHICS_V618_MAX_COPY_QUERY_RESULTS];
     PdockerGpuVulkanGraphicsV619SubmitSyncEntry submit_syncs[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry image_layout_ranges[PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES];
+    PdockerGpuVulkanGraphicsV621SubmitInfoEntry submit_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS];
+    PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry submit_sync_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS];
     int fds[PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS];
     memset(pipeline_objects, 0, sizeof(pipeline_objects));
     memset(memory_objects, 0, sizeof(memory_objects));
@@ -4149,6 +4155,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     memset(copy_query_results, 0, sizeof(copy_query_results));
     memset(submit_syncs, 0, sizeof(submit_syncs));
     memset(image_layout_ranges, 0, sizeof(image_layout_ranges));
+    memset(submit_infos, 0, sizeof(submit_infos));
+    memset(submit_sync_infos, 0, sizeof(submit_sync_infos));
     if (submit_sync_count > PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS) {
         close(socket_fd);
         return -E2BIG;
@@ -4159,6 +4167,21 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     }
     if (submit_sync_count > 0) {
         memcpy(submit_syncs, submit_sync_entries, submit_sync_count * sizeof(submit_syncs[0]));
+    }
+    size_t submit_info_count = 0;
+    size_t submit_sync_info_count = 0;
+    if (g_submit2_metadata_override) {
+        submit_infos[0].submit_kind = PDOCKER_GPU_GRAPHICS_V621_SUBMIT_KIND_SUBMIT2;
+        submit_infos[0].submit_flags = g_submit2_metadata_override->flags;
+        submit_infos[0].command_buffer_index = g_submit2_metadata_command_index;
+        submit_infos[0].command_buffer_device_mask = 0;
+        if (g_submit2_metadata_command_index != PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE &&
+            g_submit2_metadata_override->pCommandBufferInfos &&
+            g_submit2_metadata_command_index < g_submit2_metadata_override->commandBufferInfoCount) {
+            submit_infos[0].command_buffer_device_mask =
+                g_submit2_metadata_override->pCommandBufferInfos[g_submit2_metadata_command_index].deviceMask;
+        }
+        submit_info_count = 1;
     }
     memset(fds, -1, sizeof(fds));
 
@@ -4230,6 +4253,8 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
         close(socket_fd);
         return -ENOMEM;
     }
+    PdockerGpuVulkanGraphicsV621FrameHeader *frame_header_v621 =
+        (PdockerGpuVulkanGraphicsV621FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV620FrameHeader *frame_header_v620 =
         (PdockerGpuVulkanGraphicsV620FrameHeader *)frame;
     PdockerGpuVulkanGraphicsV619FrameHeader *frame_header_v619 =
@@ -4277,7 +4302,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
      * largest known header before appending variable payloads so a later ABI
      * upgrade cannot overlap data already written into the frame.
      */
-    size_t cursor = sizeof(PdockerGpuVulkanGraphicsV620FrameHeader);
+    size_t cursor = sizeof(PdockerGpuVulkanGraphicsV621FrameHeader);
     size_t fd_count = 0;
     size_t resource_count = 0;
     size_t descriptor_count = 0;
@@ -5770,14 +5795,22 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     rc = collect_graphics_image_layout_range_entries(
         image_layout_ranges, &image_layout_range_count, image_objects, image_count);
     if (rc != 0) goto cleanup;
-    const bool need_v620_image_layout_range = image_layout_range_count > 0;
-    if (need_v620_image_layout_range) {
+    bool need_v620_image_layout_range = image_layout_range_count > 0;
+    const bool need_v621_submit2_metadata = submit_info_count > 0 || submit_sync_info_count > 0;
+    if (need_v621_submit2_metadata) {
+        /* V6.21 is append-only after V6.20, so populate V6.19/V6.20 prefixes too. */
+        need_v620_image_layout_range = true;
+        need_v619_submit_sync = true;
+    } else if (need_v620_image_layout_range) {
         /* V6.20 is append-only after V6.19, so populate the V6.19 extension prefix too. */
         need_v619_submit_sync = true;
     }
 
     memcpy(header->magic, PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAGIC, 8);
-    if (need_v620_image_layout_range) {
+    if (need_v621_submit2_metadata) {
+        header->header_size = sizeof(*frame_header_v621);
+        header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR;
+    } else if (need_v620_image_layout_range) {
         header->header_size = sizeof(*frame_header_v620);
         header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR;
     } else if (need_v619_submit_sync) {
@@ -6022,6 +6055,14 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
         frame_header_v620->v620.image_layout_range_entry_size = sizeof(PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry);
         frame_header_v620->v620.image_layout_range_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_SCHEMA_HASH;
     }
+    if (need_v621_submit2_metadata) {
+        frame_header_v621->v621.submit_info_count = (uint32_t)submit_info_count;
+        frame_header_v621->v621.submit_info_entry_size = sizeof(PdockerGpuVulkanGraphicsV621SubmitInfoEntry);
+        frame_header_v621->v621.submit_info_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_INFO_SCHEMA_HASH;
+        frame_header_v621->v621.submit_sync_info_count = (uint32_t)submit_sync_info_count;
+        frame_header_v621->v621.submit_sync_info_entry_size = sizeof(PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry);
+        frame_header_v621->v621.submit_sync_info_schema_hash = PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_SYNC_INFO_SCHEMA_HASH;
+    }
 
     frame_build_phase = "frame-append-tables";
 #define APPEND_GRAPHICS_TABLE(data_, count_, entry_size_, offset_field_, size_field_) \
@@ -6214,6 +6255,16 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
                               frame_header_v620->v620.image_layout_range_table_offset,
                               frame_header_v620->v620.image_layout_range_table_size);
     }
+    if (need_v621_submit2_metadata) {
+        APPEND_GRAPHICS_TABLE(submit_infos, submit_info_count,
+                              sizeof(submit_infos[0]),
+                              frame_header_v621->v621.submit_info_table_offset,
+                              frame_header_v621->v621.submit_info_table_size);
+        APPEND_GRAPHICS_TABLE(submit_sync_infos, submit_sync_info_count,
+                              sizeof(submit_sync_infos[0]),
+                              frame_header_v621->v621.submit_sync_info_table_offset,
+                              frame_header_v621->v621.submit_sync_info_table_size);
+    }
 #undef APPEND_GRAPHICS_TABLE
     frame_header->v61.extension_hash = 1469598103934665603ull;
     frame_header->v61.extension_hash = fnv1a64_update_bytes(
@@ -6384,6 +6435,19 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
             image_layout_ranges, sizeof(image_layout_ranges[0]) * image_layout_range_count);
         frame_header_v620->v620.extension_hash = frame_header_v620->v620.image_layout_range_table_hash;
     }
+    if (need_v621_submit2_metadata) {
+        frame_header_v621->v621.submit_info_table_hash = fnv1a64_bytes(
+            submit_infos, sizeof(submit_infos[0]) * submit_info_count);
+        frame_header_v621->v621.submit_sync_info_table_hash = fnv1a64_bytes(
+            submit_sync_infos, sizeof(submit_sync_infos[0]) * submit_sync_info_count);
+        frame_header_v621->v621.extension_hash = 1469598103934665603ull;
+        frame_header_v621->v621.extension_hash = fnv1a64_update_bytes(
+            frame_header_v621->v621.extension_hash, submit_infos,
+            sizeof(submit_infos[0]) * submit_info_count);
+        frame_header_v621->v621.extension_hash = fnv1a64_update_bytes(
+            frame_header_v621->v621.extension_hash, submit_sync_infos,
+            sizeof(submit_sync_infos[0]) * submit_sync_info_count);
+    }
     header->frame_size = cursor;
     header->payload_hash = fnv1a64_bytes(frame + header->header_size,
                                          cursor - header->header_size);
@@ -6391,6 +6455,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
     frame_build_phase = "send-frame";
     rc = send_vulkan_graphics_v6_frame_with_fds(socket_fd, frame, cursor, fds, fd_count);
     graphics_label =
+        need_v621_submit2_metadata ? "VULKAN_GRAPHICS_V6.21" :
         need_v620_image_layout_range ? "VULKAN_GRAPHICS_V6.20" :
         need_v619_submit_sync ? "VULKAN_GRAPHICS_V6.19" :
         need_v618_copy_query ? "VULKAN_GRAPHICS_V6.18" :
@@ -15408,6 +15473,20 @@ static void clear_submit_sync_override(void) {
     g_submit_sync_override_count = 0;
 }
 
+static void set_submit2_metadata_override(const VkSubmitInfo2 *submit) {
+    g_submit2_metadata_override = submit;
+    g_submit2_metadata_command_index = PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE;
+}
+
+static void set_submit2_metadata_command_index(uint32_t command_index) {
+    g_submit2_metadata_command_index = command_index;
+}
+
+static void clear_submit2_metadata_override(void) {
+    g_submit2_metadata_override = NULL;
+    g_submit2_metadata_command_index = PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE;
+}
+
 static bool command_buffer_needs_graphics_submit_sync_frame(const PdockerVkCommandBuffer *cmd) {
     if (!cmd) return false;
     for (uint32_t i = 0; i < cmd->graphics_command_op_count; ++i) {
@@ -16158,8 +16237,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                         j == first_graphics_submit_sync_cmd,
                         j == last_graphics_submit_sync_cmd,
                         frame_submit_sync_entries);
+                    set_submit2_metadata_command_index(j);
                     int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(
                         cmd, frame_submit_sync_entries, frame_submit_sync_count);
+                    set_submit2_metadata_command_index(PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE);
                     if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                         fprintf(stderr,
                                 "pdocker-vulkan-icd: graphics V6.1 validation producer rc=%d\n",
@@ -16240,8 +16321,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 VkResult mixed_host_rc = execute_graphics_mixed_host_side_ops(
                     cmd, first_graphics_gpu_op, last_graphics_gpu_op, true, &mixed_stats);
                 if (mixed_host_rc != VK_SUCCESS) return mixed_host_rc;
+                set_submit2_metadata_command_index(j);
                 int graphics_rc = send_recorded_vulkan_graphics_v6_1_frame(
                     cmd, frame_submit_sync_entries, frame_submit_sync_count);
+                set_submit2_metadata_command_index(PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE);
                 if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
                     fprintf(stderr,
                             "pdocker-vulkan-icd: graphics V6.1 mixed submit rc=%d prepost_ops=%zu bytes=%llu\n",
@@ -16580,7 +16663,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
             legacy_submit.pCommandBuffers = cmds;
         }
         set_submit_sync_override(submit2_sync_entries, submit2_sync_count);
+        set_submit2_metadata_override(src);
         rc = vkQueueSubmit(queue, 1, &legacy_submit, VK_NULL_HANDLE);
+        clear_submit2_metadata_override();
         clear_submit_sync_override();
         free(cmds);
         if (rc != VK_SUCCESS) return rc;

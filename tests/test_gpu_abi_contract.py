@@ -4860,13 +4860,13 @@ class GpuAbiContractTest(unittest.TestCase):
             "image_layout_range_entry_size != sizeof(PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry)",
             "image_layout_range_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V620_IMAGE_LAYOUT_RANGE_SCHEMA_HASH",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES",
-            "FrameRange ranges[44]",
+            "is_v620 ? 44u",
             "view->image_layout_ranges",
             "image_layout_range_table_hash",
             "header_v620->v620.extension_hash != image_layout_range_table_hash",
-            "const int is_v620 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR;",
+            "const int is_v620 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR || is_v621;",
             "const int is_v619 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR || is_v620;",
-            "const int is_v620_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR;",
+            "const int is_v620_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR || is_v621_header;",
             "const int is_v619_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR || is_v620_header;",
             "validate_vulkan_graphics_v620_image_layout_ranges",
             "VulkanReplayImageLayoutRange",
@@ -4983,6 +4983,50 @@ class GpuAbiContractTest(unittest.TestCase):
                     c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV620FrameHeader") + ["v621"],
                     c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV621FrameHeader"),
                 )
+
+    def test_vulkan_graphics_v621_submit2_metadata_is_wired_through_icd_and_executor(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for marker in [
+            "PdockerGpuVulkanGraphicsV621SubmitInfoEntry submit_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS]",
+            "PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry submit_sync_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS]",
+            "g_submit2_metadata_override",
+            "set_submit2_metadata_override(src);",
+            "clear_submit2_metadata_override();",
+            "set_submit2_metadata_command_index(j);",
+            "PDOCKER_GPU_GRAPHICS_V621_SUBMIT_KIND_SUBMIT2",
+            "need_v621_submit2_metadata",
+            "header->abi_minor = PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR;",
+            "frame_header_v621->v621.submit_info_count",
+            "APPEND_GRAPHICS_TABLE(submit_infos, submit_info_count",
+            "frame_header_v621->v621.submit_info_table_hash",
+            "VULKAN_GRAPHICS_V6.21",
+        ]:
+            self.assertIn(marker, icd)
+
+        for marker in [
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR",
+            "sizeof(PdockerGpuVulkanGraphicsV621FrameHeader)",
+            "const int is_v621",
+            "header_v621->v621.submit_info_count",
+            "header_v621->v621.submit_sync_info_count",
+            "view->header_v621",
+            "view->is_v621",
+            "view->submit_infos",
+            "view->submit_sync_infos",
+            "submit_info_table_hash",
+            "submit_sync_info_table_hash",
+            "PDOCKER_GPU_GRAPHICS_V621_SUBMIT_KIND_SUBMIT2",
+            "submit_info->command_buffer_device_mask",
+            ".flags = submit_info ? submit_info->submit_flags : 0",
+        ]:
+            self.assertIn(marker, executor)
+
+        self.assertIn("FrameRange ranges[46]", executor)
+        self.assertIn("is_v621 ? 46u", executor)
+        self.assertNotIn("reserved0 = g_submit2", icd)
+        self.assertNotIn("reserved0 = submit2", executor)
 
     def test_vulkan_graphics_v619_submit_sync_metadata_abi_is_append_only(self):
         abi = APP_HEADER.read_text()
