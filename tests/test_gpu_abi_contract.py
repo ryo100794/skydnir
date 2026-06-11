@@ -4893,6 +4893,97 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, icd)
 
+    def test_vulkan_graphics_v621_submit2_metadata_abi_is_append_only(self):
+        expected_extension_fields = [
+            ("submit_info_count", "u32"),
+            ("submit_info_entry_size", "u32"),
+            ("submit_info_table_offset", "u64"),
+            ("submit_info_table_size", "u64"),
+            ("submit_info_schema_hash", "u64"),
+            ("submit_info_table_hash", "u64"),
+            ("submit_sync_info_count", "u32"),
+            ("submit_sync_info_entry_size", "u32"),
+            ("submit_sync_info_table_offset", "u64"),
+            ("submit_sync_info_table_size", "u64"),
+            ("submit_sync_info_schema_hash", "u64"),
+            ("submit_sync_info_table_hash", "u64"),
+            ("extension_hash", "u64"),
+        ]
+        expected_submit_info_fields = [
+            ("submit_kind", "u32"),
+            ("submit_flags", "u32"),
+            ("command_buffer_index", "u32"),
+            ("command_buffer_device_mask", "u32"),
+            ("reserved0", "u64"),
+        ]
+        expected_submit_sync_info_fields = [
+            ("submit_sync_index", "u32"),
+            ("device_index", "u32"),
+            ("reserved0", "u32"),
+            ("reserved1", "u32"),
+        ]
+
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            source = header_path.read_text()
+            with self.subTest(header=str(header_path)):
+                for marker in [
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR 21u",
+                    "PdockerGpuVulkanGraphicsV621HeaderExtension",
+                    "PdockerGpuVulkanGraphicsV621FrameHeader",
+                    "PdockerGpuVulkanGraphicsV621SubmitInfoEntry",
+                    "PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry",
+                    "PDOCKER_GPU_GRAPHICS_V621_SUBMIT_KIND_LEGACY",
+                    "PDOCKER_GPU_GRAPHICS_V621_SUBMIT_KIND_SUBMIT2",
+                    "PDOCKER_GPU_GRAPHICS_V621_COMMAND_BUFFER_INDEX_NONE",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS 1u",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS",
+                ]:
+                    self.assertIn(marker, source)
+
+                extension_fields, extension_count, declared_extension_hash, computed_extension_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_HEADER_EXTENSION_SCHEMA_HASH",
+                )
+                submit_info_fields, submit_info_count, declared_submit_info_hash, computed_submit_info_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_INFO_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_INFO_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_INFO_SCHEMA_HASH",
+                )
+                submit_sync_info_fields, submit_sync_info_count, declared_submit_sync_info_hash, computed_submit_sync_info_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_SYNC_INFO_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_SYNC_INFO_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_SYNC_INFO_SCHEMA_HASH",
+                )
+                self.assertEqual(expected_extension_fields, extension_fields)
+                self.assertEqual(expected_submit_info_fields, submit_info_fields)
+                self.assertEqual(expected_submit_sync_info_fields, submit_sync_info_fields)
+                self.assertEqual(13, extension_count)
+                self.assertEqual(5, submit_info_count)
+                self.assertEqual(4, submit_sync_info_count)
+                self.assertEqual(declared_extension_hash, computed_extension_hash)
+                self.assertEqual(declared_submit_info_hash, computed_submit_info_hash)
+                self.assertEqual(declared_submit_sync_info_hash, computed_submit_sync_info_hash)
+                self.assertEqual(
+                    [name for name, _ in expected_extension_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV621HeaderExtension"),
+                )
+                self.assertEqual(
+                    [name for name, _ in expected_submit_info_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV621SubmitInfoEntry"),
+                )
+                self.assertEqual(
+                    [name for name, _ in expected_submit_sync_info_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry"),
+                )
+                self.assertEqual(
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV620FrameHeader") + ["v621"],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV621FrameHeader"),
+                )
+
     def test_vulkan_graphics_v619_submit_sync_metadata_abi_is_append_only(self):
         abi = APP_HEADER.read_text()
         container_abi = CONTAINER_HEADER.read_text()
