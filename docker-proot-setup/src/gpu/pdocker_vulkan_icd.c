@@ -13966,6 +13966,24 @@ static void validate_bound_descriptor_layouts_before_dispatch(PdockerVkCommandBu
     }
 }
 
+static bool shader_stage_flags_include_graphics(VkShaderStageFlags stage_flags) {
+    return (stage_flags & VK_SHADER_STAGE_ALL_GRAPHICS) != 0;
+}
+
+static bool graphics_record_requires_submit_frame(uint32_t command_type) {
+    switch (command_type) {
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
+        case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS:
+            return true;
+        default:
+            return false;
+    }
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(
         VkCommandBuffer commandBuffer,
         uint32_t groupCountX,
@@ -14153,13 +14171,15 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(
         PdockerVkPipelineLayout *captured_layout = (PdockerVkPipelineLayout *)layout;
         op->layout_id = captured_layout ? captured_layout->layout_id : 0;
         op->value_hash = fnv1a64_bytes(pValues, size);
-        PdockerVkGraphicsCommandRecord record;
-        memset(&record, 0, sizeof(record));
-        record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS;
-        record.layout_id = op->layout_id;
-        record.flags = (uint32_t)stageFlags;
-        record.push_op_index = cmd->push_constant_op_count - 1u;
-        (void)append_graphics_command_record(cmd, &record);
+        if (shader_stage_flags_include_graphics(stageFlags)) {
+            PdockerVkGraphicsCommandRecord record;
+            memset(&record, 0, sizeof(record));
+            record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS;
+            record.layout_id = op->layout_id;
+            record.flags = (uint32_t)stageFlags;
+            record.push_op_index = cmd->push_constant_op_count - 1u;
+            (void)append_graphics_command_record(cmd, &record);
+        }
     } else {
         cmd->graphics_unsupported = true;
     }
@@ -15389,7 +15409,13 @@ static void clear_submit_sync_override(void) {
 }
 
 static bool command_buffer_needs_graphics_submit_sync_frame(const PdockerVkCommandBuffer *cmd) {
-    return cmd && cmd->graphics_command_op_count > 0;
+    if (!cmd) return false;
+    for (uint32_t i = 0; i < cmd->graphics_command_op_count; ++i) {
+        if (graphics_record_requires_submit_frame(cmd->graphics_command_ops[i].command_type)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void graphics_submit_sync_frame_bounds(
@@ -16013,7 +16039,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                                           VK_ERROR_FEATURE_NOT_PRESENT);
                 return VK_ERROR_FEATURE_NOT_PRESENT;
             }
-            if (cmd->graphics_command_op_count > 0) {
+            if (command_buffer_needs_graphics_submit_sync_frame(cmd)) {
                 uint32_t first_graphics_gpu_op = UINT32_MAX;
                 uint32_t last_graphics_gpu_op = 0;
                 const char *mixed_submit_reason = NULL;

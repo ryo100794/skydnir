@@ -2130,6 +2130,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "PDOCKER_GPU_GRAPHICS_V6_COMMAND_UPDATE_BUFFER",
             "execute_recorded_fill_op(op)",
             "execute_recorded_update_op(op)",
+            "graphics_record_requires_submit_frame",
         ]:
             self.assertIn(marker, icd)
 
@@ -5956,7 +5957,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1
         )[0]
         self.assertNotIn("graphics_only_submit", submit_body)
-        mixed_body = submit_body.split("if (cmd->graphics_command_op_count > 0)", 1)[1].split(
+        mixed_body = submit_body.split("if (command_buffer_needs_graphics_submit_sync_frame(cmd))", 1)[1].split(
             "if (cmd->command_op_count > 0)", 1
         )[0]
         self.assertLess(
@@ -5985,6 +5986,27 @@ class GpuAbiContractTest(unittest.TestCase):
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(\n                    cmd, frame_submit_sync_entries, frame_submit_sync_count)"),
             mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
         )
+
+    def test_vulkan_compute_push_constants_do_not_create_graphics_frame(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("shader_stage_flags_include_graphics", icd)
+        self.assertIn("VK_SHADER_STAGE_ALL_GRAPHICS", icd)
+        push_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants", 1)[1].split(
+            "static VkImageAspectFlags image_format_full_aspect_mask", 1
+        )[0]
+        self.assertIn("graphics_record_requires_submit_frame", icd)
+        self.assertIn("command_buffer_needs_graphics_submit_sync_frame", icd)
+        self.assertIn("if (shader_stage_flags_include_graphics(stageFlags))", push_body)
+        self.assertIn("append_graphics_command_record(cmd, &record)", push_body)
+        self.assertLess(
+            push_body.index("if (shader_stage_flags_include_graphics(stageFlags))"),
+            push_body.index("append_graphics_command_record(cmd, &record)"),
+        )
+        dispatch_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdDispatch", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBase", 1
+        )[0]
+        self.assertIn("op->push_constant_ops", dispatch_body)
+        self.assertIn("command_op.type = PDOCKER_VK_COMMAND_DISPATCH", dispatch_body)
 
     def test_vulkan_command_buffer_replays_all_recorded_dispatches(self):
         source = VULKAN_ICD.read_text()

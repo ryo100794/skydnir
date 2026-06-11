@@ -92,6 +92,106 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         result = self.compile_and_run(source)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_compute_only_push_constants_do_not_mark_command_buffer_as_graphics(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                if (!cmd) return 9;
+                uint32_t value = 0x12345678u;
+
+                vkCmdPushConstants((VkCommandBuffer)cmd, VK_NULL_HANDLE,
+                                   VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(value), &value);
+                if (cmd->push_constant_op_count != 1) {{
+                    fprintf(stderr, "compute push constant was not captured\\n");
+                    return 2;
+                }}
+                if (cmd->graphics_command_op_count != 0) {{
+                    fprintf(stderr, "compute-only push constant incorrectly created graphics record count=%u\\n",
+                            cmd->graphics_command_op_count);
+                    return 3;
+                }}
+
+                cmd->graphics_pipeline = (PdockerVkPipeline *)0x1;
+                vkCmdPushConstants((VkCommandBuffer)cmd, VK_NULL_HANDLE,
+                                   VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(value), &value);
+                if (cmd->push_constant_op_count != 2) {{
+                    fprintf(stderr, "graphics push constant was not captured\\n");
+                    return 4;
+                }}
+                if (cmd->graphics_command_op_count != 1 ||
+                    cmd->graphics_command_ops[0].command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS) {{
+                    fprintf(stderr, "graphics push constant did not create exactly one graphics record count=%u\\n",
+                            cmd->graphics_command_op_count);
+                    return 5;
+                }}
+                free(cmd);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_compute_only_barrier_and_query_do_not_mark_command_buffer_as_graphics(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <stdlib.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*cmd));
+                if (!cmd) return 9;
+
+                VkMemoryBarrier barrier;
+                memset(&barrier, 0, sizeof(barrier));
+                barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+                barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+                barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                vkCmdPipelineBarrier((VkCommandBuffer)cmd,
+                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                     0, 1, &barrier, 0, NULL, 0, NULL);
+                if (command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
+                    fprintf(stderr, "compute-only barrier incorrectly requires graphics submit count=%u\\n",
+                            cmd->graphics_command_op_count);
+                    return 2;
+                }}
+
+                VkQueryPool query_pool = VK_NULL_HANDLE;
+                VkQueryPoolCreateInfo query_info;
+                memset(&query_info, 0, sizeof(query_info));
+                query_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+                query_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+                query_info.queryCount = 2;
+                if (vkCreateQueryPool(VK_NULL_HANDLE, &query_info, NULL, &query_pool) != VK_SUCCESS || !query_pool) {{
+                    fprintf(stderr, "query pool create failed\\n");
+                    return 3;
+                }}
+                vkCmdWriteTimestamp((VkCommandBuffer)cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, query_pool, 0);
+                if (command_buffer_needs_graphics_submit_sync_frame(cmd)) {{
+                    fprintf(stderr, "compute-only query incorrectly requires graphics submit count=%u\\n",
+                            cmd->graphics_command_op_count);
+                    return 4;
+                }}
+                vkDestroyQueryPool(VK_NULL_HANDLE, query_pool, NULL);
+                free(cmd);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
