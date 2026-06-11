@@ -193,5 +193,185 @@ class VulkanIcdSyncHarnessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
+    def test_binary_semaphore_queue_submit_signal_wait_state_machine_executes_c_code(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <unistd.h>
+            #include "{ICD_SOURCE}"
+
+            int main(void) {{
+                unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+                VkSemaphore sem_a = VK_NULL_HANDLE;
+                VkSemaphore sem_b = VK_NULL_HANDLE;
+                VkSemaphoreCreateInfo sem_info;
+                memset(&sem_info, 0, sizeof(sem_info));
+                sem_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+                if (vkCreateSemaphore(VK_NULL_HANDLE, &sem_info, NULL, &sem_a) != VK_SUCCESS || !sem_a) return 2;
+                if (vkCreateSemaphore(VK_NULL_HANDLE, &sem_info, NULL, &sem_b) != VK_SUCCESS || !sem_b) return 3;
+
+                VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+                VkSubmitInfo submit;
+                memset(&submit, 0, sizeof(submit));
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                submit.waitSemaphoreCount = 1;
+                submit.pWaitSemaphores = &sem_a;
+                submit.pWaitDstStageMask = &wait_stage;
+                if (vkQueueSubmit(VK_NULL_HANDLE, 1, &submit, VK_NULL_HANDLE) != VK_ERROR_FEATURE_NOT_PRESENT) {{
+                    fprintf(stderr, "unsignaled binary wait did not fail closed\\n");
+                    return 4;
+                }}
+
+                memset(&submit, 0, sizeof(submit));
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                submit.signalSemaphoreCount = 1;
+                submit.pSignalSemaphores = &sem_a;
+                if (vkQueueSubmit(VK_NULL_HANDLE, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {{
+                    fprintf(stderr, "binary signal submit failed\\n");
+                    return 5;
+                }}
+                if (!((PdockerVkSemaphore *)sem_a)->signaled) {{
+                    fprintf(stderr, "binary signal did not update local state\\n");
+                    return 6;
+                }}
+
+                VkFence fence = VK_NULL_HANDLE;
+                VkFenceCreateInfo fence_info;
+                memset(&fence_info, 0, sizeof(fence_info));
+                fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+                if (vkCreateFence(VK_NULL_HANDLE, &fence_info, NULL, &fence) != VK_SUCCESS || !fence) return 7;
+
+                memset(&submit, 0, sizeof(submit));
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                submit.waitSemaphoreCount = 1;
+                submit.pWaitSemaphores = &sem_a;
+                submit.pWaitDstStageMask = &wait_stage;
+                submit.signalSemaphoreCount = 1;
+                submit.pSignalSemaphores = &sem_b;
+                if (vkQueueSubmit(VK_NULL_HANDLE, 1, &submit, fence) != VK_SUCCESS) {{
+                    fprintf(stderr, "binary wait/signal submit failed\\n");
+                    return 8;
+                }}
+                if (((PdockerVkSemaphore *)sem_a)->signaled) {{
+                    fprintf(stderr, "binary wait did not consume waited semaphore\\n");
+                    return 9;
+                }}
+                if (!((PdockerVkSemaphore *)sem_b)->signaled) {{
+                    fprintf(stderr, "binary signal target not signaled\\n");
+                    return 10;
+                }}
+                if (vkWaitForFences(VK_NULL_HANDLE, 1, &fence, VK_TRUE, 0) != VK_SUCCESS) {{
+                    fprintf(stderr, "submit fence not signaled\\n");
+                    return 11;
+                }}
+
+                vkDestroyFence(VK_NULL_HANDLE, fence, NULL);
+                vkDestroySemaphore(VK_NULL_HANDLE, sem_a, NULL);
+                vkDestroySemaphore(VK_NULL_HANDLE, sem_b, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_timeline_semaphore_submit_wait_signal_and_counter_executes_c_code(self):
+        source = textwrap.dedent(
+            f"""
+            #include <stdint.h>
+            #include <stdio.h>
+            #include <string.h>
+            #include <unistd.h>
+            #include "{ICD_SOURCE}"
+
+            static VkSemaphore make_timeline(uint64_t initial_value) {{
+                VkSemaphore sem = VK_NULL_HANDLE;
+                VkSemaphoreTypeCreateInfo type_info;
+                memset(&type_info, 0, sizeof(type_info));
+                type_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+                type_info.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+                type_info.initialValue = initial_value;
+                VkSemaphoreCreateInfo create_info;
+                memset(&create_info, 0, sizeof(create_info));
+                create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+                create_info.pNext = &type_info;
+                if (vkCreateSemaphore(VK_NULL_HANDLE, &create_info, NULL, &sem) != VK_SUCCESS) return VK_NULL_HANDLE;
+                return sem;
+            }}
+
+            int main(void) {{
+                unsetenv("PDOCKER_GPU_QUEUE_SOCKET");
+                VkSemaphore wait_sem = make_timeline(5);
+                VkSemaphore signal_sem = make_timeline(0);
+                if (!wait_sem || !signal_sem) return 2;
+                uint64_t value = 0;
+                if (vkGetSemaphoreCounterValue(VK_NULL_HANDLE, wait_sem, &value) != VK_SUCCESS || value != 5) {{
+                    fprintf(stderr, "initial timeline value mismatch value=%llu\\n", (unsigned long long)value);
+                    return 3;
+                }}
+
+                VkSemaphoreWaitInfo wait_info;
+                memset(&wait_info, 0, sizeof(wait_info));
+                wait_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+                wait_info.semaphoreCount = 1;
+                wait_info.pSemaphores = &wait_sem;
+                uint64_t wait_value = 6;
+                wait_info.pValues = &wait_value;
+                if (vkWaitSemaphores(VK_NULL_HANDLE, &wait_info, 0) != VK_TIMEOUT) {{
+                    fprintf(stderr, "unsatisfied timeline wait did not time out\\n");
+                    return 4;
+                }}
+                VkSemaphoreSignalInfo signal_info;
+                memset(&signal_info, 0, sizeof(signal_info));
+                signal_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
+                signal_info.semaphore = wait_sem;
+                signal_info.value = 6;
+                if (vkSignalSemaphore(VK_NULL_HANDLE, &signal_info) != VK_SUCCESS) return 5;
+                if (vkWaitSemaphores(VK_NULL_HANDLE, &wait_info, 0) != VK_SUCCESS) {{
+                    fprintf(stderr, "satisfied timeline wait failed\\n");
+                    return 6;
+                }}
+
+                VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+                VkSubmitInfo submit;
+                memset(&submit, 0, sizeof(submit));
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                submit.waitSemaphoreCount = 1;
+                submit.pWaitSemaphores = &wait_sem;
+                submit.pWaitDstStageMask = &wait_stage;
+                submit.signalSemaphoreCount = 1;
+                submit.pSignalSemaphores = &signal_sem;
+                uint64_t submit_wait_value = 6;
+                uint64_t submit_signal_value = 9;
+                VkTimelineSemaphoreSubmitInfo timeline;
+                memset(&timeline, 0, sizeof(timeline));
+                timeline.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+                timeline.waitSemaphoreValueCount = 1;
+                timeline.pWaitSemaphoreValues = &submit_wait_value;
+                timeline.signalSemaphoreValueCount = 1;
+                timeline.pSignalSemaphoreValues = &submit_signal_value;
+                submit.pNext = &timeline;
+                if (vkQueueSubmit(VK_NULL_HANDLE, 1, &submit, VK_NULL_HANDLE) != VK_SUCCESS) {{
+                    fprintf(stderr, "timeline submit wait/signal failed\\n");
+                    return 7;
+                }}
+                if (vkGetSemaphoreCounterValue(VK_NULL_HANDLE, signal_sem, &value) != VK_SUCCESS || value != 9) {{
+                    fprintf(stderr, "timeline submit signal value mismatch value=%llu\\n", (unsigned long long)value);
+                    return 8;
+                }}
+
+                vkDestroySemaphore(VK_NULL_HANDLE, wait_sem, NULL);
+                vkDestroySemaphore(VK_NULL_HANDLE, signal_sem, NULL);
+                return 0;
+            }}
+            """
+        )
+        result = self.compile_and_run(source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+
 if __name__ == "__main__":
     unittest.main()
