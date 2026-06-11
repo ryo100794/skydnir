@@ -4040,7 +4040,7 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
         const PdockerVkCommandBuffer *cmd,
         const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *submit_sync_entries,
         size_t submit_sync_count) {
-    if (!cmd || cmd->graphics_command_op_count == 0) {
+    if (!cmd || (cmd->graphics_command_op_count == 0 && submit_sync_count == 0)) {
         return send_empty_vulkan_graphics_v6_1_validation_frame();
     }
     int socket_fd = connect_queue();
@@ -15481,6 +15481,34 @@ static size_t filter_submit_sync_entries_without_completion(
     return out_count;
 }
 
+static size_t filter_submit_sync_entries_completion_only(
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
+        size_t entry_count,
+        PdockerGpuVulkanGraphicsV619SubmitSyncEntry *out) {
+    if (!entries || !out || entry_count == 0) return 0;
+    size_t out_count = 0;
+    for (size_t i = 0; i < entry_count; ++i) {
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entry = &entries[i];
+        if (entry->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_SIGNAL ||
+            entry->sync_type == PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_FENCE) {
+            out[out_count++] = *entry;
+        }
+    }
+    return out_count;
+}
+
+static int send_vulkan_submit_completion_sync_frame(
+        const PdockerGpuVulkanGraphicsV619SubmitSyncEntry *entries,
+        size_t entry_count) {
+    if (entry_count == 0) return 0;
+    if (!entries) return -EINVAL;
+    PdockerVkCommandBuffer *sync_cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*sync_cmd));
+    if (!sync_cmd) return -ENOMEM;
+    int rc = send_recorded_vulkan_graphics_v6_1_frame(sync_cmd, entries, entry_count);
+    free(sync_cmd);
+    return rc;
+}
+
 static const VkTimelineSemaphoreSubmitInfo *submit_timeline_info_from_pnext(
         const void *pNext,
         bool *unsupported_pnext) {
@@ -16064,10 +16092,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                                               VK_ERROR_FEATURE_NOT_PRESENT);
                     return VK_ERROR_FEATURE_NOT_PRESENT;
                 }
+                PdockerGpuVulkanGraphicsV619SubmitSyncEntry deferred_completion_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+                size_t deferred_completion_sync_count = 0;
                 if (submit_sync_entries_include_completion(frame_submit_sync_entries, frame_submit_sync_count) &&
                     (submit_has_recorded_work_after_command(&pSubmits[i], j) ||
                      command_buffer_has_host_side_ops_after(cmd, last_graphics_gpu_op))) {
                     PdockerGpuVulkanGraphicsV619SubmitSyncEntry deferred_frame_sync_entries[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+                    deferred_completion_sync_count = filter_submit_sync_entries_completion_only(
+                        frame_submit_sync_entries, frame_submit_sync_count, deferred_completion_sync_entries);
                     size_t deferred_frame_sync_count = filter_submit_sync_entries_without_completion(
                         frame_submit_sync_entries, frame_submit_sync_count, deferred_frame_sync_entries);
                     memcpy(frame_submit_sync_entries, deferred_frame_sync_entries,
@@ -16100,6 +16132,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
                 mixed_host_rc = execute_graphics_mixed_host_side_ops(
                     cmd, first_graphics_gpu_op, last_graphics_gpu_op, false, &mixed_stats);
                 if (mixed_host_rc != VK_SUCCESS) return mixed_host_rc;
+                int deferred_sync_rc = send_vulkan_submit_completion_sync_frame(
+                    deferred_completion_sync_entries, deferred_completion_sync_count);
+                if (deferred_sync_rc != 0) {
+                    trace_icd_runtime_failure("graphics-v6-deferred-completion-sync-failed",
+                                              VK_ERROR_FEATURE_NOT_PRESENT);
+                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                }
                 continue;
             }
             if (cmd->command_op_count > 0) {

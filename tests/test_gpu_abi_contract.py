@@ -5972,12 +5972,22 @@ class GpuAbiContractTest(unittest.TestCase):
             "submit_has_recorded_work_after_command(&pSubmits[i], j)",
             "command_buffer_has_host_side_ops_after(cmd, last_graphics_gpu_op)",
             "submit-sync-wait-after-prior-work-unimplemented",
+            "filter_submit_sync_entries_completion_only(",
             "filter_submit_sync_entries_without_completion(",
             "frame_submit_sync_count = deferred_frame_sync_count;",
             "deferred graphics submit completion sync until trailing host-side work finishes",
+            "send_vulkan_submit_completion_sync_frame(",
+            "graphics-v6-deferred-completion-sync-failed",
         ]:
             self.assertIn(marker, mixed_body)
+        self.assertIn("PdockerVkCommandBuffer *sync_cmd = (PdockerVkCommandBuffer *)calloc(1, sizeof(*sync_cmd));", icd)
+        self.assertIn("send_recorded_vulkan_graphics_v6_1_frame(sync_cmd, entries, entry_count)", icd)
+        self.assertNotIn("PdockerVkCommandBuffer sync_cmd;", icd)
         self.assertNotIn("submit-sync-signal-or-fence-before-trailing-submit-work-unimplemented", mixed_body)
+        self.assertLess(
+            mixed_body.index("filter_submit_sync_entries_completion_only("),
+            mixed_body.index("filter_submit_sync_entries_without_completion("),
+        )
         self.assertLess(
             mixed_body.index("filter_submit_sync_entries_without_completion("),
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame("),
@@ -5985,6 +5995,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertLess(
             mixed_body.index("send_recorded_vulkan_graphics_v6_1_frame(\n                    cmd, frame_submit_sync_entries, frame_submit_sync_count)"),
             mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
+        )
+        self.assertLess(
+            mixed_body.rindex("execute_graphics_mixed_host_side_ops("),
+            mixed_body.index("send_vulkan_submit_completion_sync_frame("),
         )
 
     def test_vulkan_compute_push_constants_do_not_create_graphics_frame(self):
