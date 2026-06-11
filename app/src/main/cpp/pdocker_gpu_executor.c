@@ -1317,6 +1317,7 @@ typedef struct {
     PFN_vkCmdDrawIndexedIndirectCount cmd_draw_indexed_indirect_count;
     PFN_vkCmdDispatchBase cmd_dispatch_base;
     PFN_vkCmdPipelineBarrier2 cmd_pipeline_barrier2;
+    PFN_vkQueueSubmit2 queue_submit2;
     PFN_vkGetSemaphoreCounterValue get_semaphore_counter_value;
     PFN_vkWaitSemaphores wait_semaphores;
     PFN_vkSignalSemaphore signal_semaphore;
@@ -11178,6 +11179,12 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     if (!rt->cmd_pipeline_barrier2) {
         rt->cmd_pipeline_barrier2 =
             (PFN_vkCmdPipelineBarrier2)vkGetDeviceProcAddr(rt->device, "vkCmdPipelineBarrier2KHR");
+    }
+    rt->queue_submit2 =
+        (PFN_vkQueueSubmit2)vkGetDeviceProcAddr(rt->device, "vkQueueSubmit2");
+    if (!rt->queue_submit2) {
+        rt->queue_submit2 =
+            (PFN_vkQueueSubmit2)vkGetDeviceProcAddr(rt->device, "vkQueueSubmit2KHR");
     }
     rt->get_semaphore_counter_value =
         (PFN_vkGetSemaphoreCounterValue)vkGetDeviceProcAddr(rt->device, "vkGetSemaphoreCounterValue");
@@ -26396,6 +26403,17 @@ static int handle_vulkan_fence_command(const char *cmd) {
     return -EINVAL;
 }
 
+static VkPipelineStageFlags2 vulkan_submit_stage_mask2_or_all(uint64_t stage_mask) {
+    return stage_mask ? (VkPipelineStageFlags2)stage_mask : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+}
+
+static VkPipelineStageFlags vulkan_legacy_submit_stage_mask_from_stage2(
+        VkPipelineStageFlags2 stage_mask) {
+    if (!stage_mask) return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    VkPipelineStageFlags legacy = (VkPipelineStageFlags)(stage_mask & UINT32_MAX);
+    return legacy ? legacy : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+}
+
 typedef struct VulkanGraphicsSubmitDiag {
     const char *stage;
     VkResult vk_result;
@@ -26467,6 +26485,8 @@ static int submit_vulkan_graphics_v6_command_buffer(
     VkSemaphore wait_semaphores[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     VkSemaphore signal_semaphores[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     VkPipelineStageFlags wait_stages[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    VkPipelineStageFlags2 wait_stage_masks2[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+    VkPipelineStageFlags2 signal_stage_masks2[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     uint64_t wait_values[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     uint64_t signal_values[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
     uint32_t wait_count = 0;
@@ -26477,6 +26497,8 @@ static int submit_vulkan_graphics_v6_command_buffer(
     memset(wait_semaphores, 0, sizeof(wait_semaphores));
     memset(signal_semaphores, 0, sizeof(signal_semaphores));
     memset(wait_stages, 0, sizeof(wait_stages));
+    memset(wait_stage_masks2, 0, sizeof(wait_stage_masks2));
+    memset(signal_stage_masks2, 0, sizeof(signal_stage_masks2));
     memset(wait_values, 0, sizeof(wait_values));
     memset(signal_values, 0, sizeof(signal_values));
     if (view->is_v619 && view->header_v619 && view->submit_syncs) {
@@ -26490,9 +26512,9 @@ static int submit_vulkan_graphics_v6_command_buffer(
                 }
                 int rc = resolve_executor_submit_sync_semaphore(rt, sync, 0, &wait_semaphores[wait_count]);
                 if (rc != 0) { submit_fail_rc = rc; vrc = VK_ERROR_FEATURE_NOT_PRESENT; goto submit_fail; }
-                wait_stages[wait_count] = sync->stage_mask
-                    ? (VkPipelineStageFlags)sync->stage_mask
-                    : VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+                wait_stage_masks2[wait_count] = vulkan_submit_stage_mask2_or_all(sync->stage_mask);
+                wait_stages[wait_count] =
+                    vulkan_legacy_submit_stage_mask_from_stage2(wait_stage_masks2[wait_count]);
                 wait_values[wait_count] = sync->value;
                 if (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) timeline_used = 1;
                 wait_count++;
@@ -26504,37 +26526,81 @@ static int submit_vulkan_graphics_v6_command_buffer(
                 }
                 int rc = resolve_executor_submit_sync_semaphore(rt, sync, 1, &signal_semaphores[signal_count]);
                 if (rc != 0) { submit_fail_rc = rc; vrc = VK_ERROR_FEATURE_NOT_PRESENT; goto submit_fail; }
+                signal_stage_masks2[signal_count] = vulkan_submit_stage_mask2_or_all(sync->stage_mask);
                 signal_values[signal_count] = sync->value;
                 if (sync->flags & PDOCKER_GPU_GRAPHICS_V619_SUBMIT_SYNC_TIMELINE) timeline_used = 1;
                 signal_count++;
             }
         }
     }
-    VkTimelineSemaphoreSubmitInfo timeline_info;
-    memset(&timeline_info, 0, sizeof(timeline_info));
-    timeline_info.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    timeline_info.waitSemaphoreValueCount = wait_count;
-    timeline_info.pWaitSemaphoreValues = wait_count ? wait_values : NULL;
-    timeline_info.signalSemaphoreValueCount = signal_count;
-    timeline_info.pSignalSemaphoreValues = signal_count ? signal_values : NULL;
-    VkSubmitInfo submit = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .pNext = timeline_used ? &timeline_info : NULL,
-        .waitSemaphoreCount = wait_count,
-        .pWaitSemaphores = wait_count ? wait_semaphores : NULL,
-        .pWaitDstStageMask = wait_count ? wait_stages : NULL,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &command_buffer,
-        .signalSemaphoreCount = signal_count,
-        .pSignalSemaphores = signal_count ? signal_semaphores : NULL,
-    };
-    if (diag) {
-        diag->stage = "queue-submit";
-        diag->wait_count = wait_count;
-        diag->signal_count = signal_count;
-        diag->timeline_used = timeline_used;
+    if (rt->queue_submit2) {
+        VkSemaphoreSubmitInfo wait_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        VkSemaphoreSubmitInfo signal_infos[PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS];
+        memset(wait_infos, 0, sizeof(wait_infos));
+        memset(signal_infos, 0, sizeof(signal_infos));
+        for (uint32_t i = 0; i < wait_count; ++i) {
+            wait_infos[i].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            wait_infos[i].semaphore = wait_semaphores[i];
+            wait_infos[i].value = wait_values[i];
+            wait_infos[i].stageMask = wait_stage_masks2[i];
+            wait_infos[i].deviceIndex = 0;
+        }
+        for (uint32_t i = 0; i < signal_count; ++i) {
+            signal_infos[i].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            signal_infos[i].semaphore = signal_semaphores[i];
+            signal_infos[i].value = signal_values[i];
+            signal_infos[i].stageMask = signal_stage_masks2[i];
+            signal_infos[i].deviceIndex = 0;
+        }
+        VkCommandBufferSubmitInfo command_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+            .commandBuffer = command_buffer,
+            .deviceMask = 0,
+        };
+        VkSubmitInfo2 submit2 = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+            .flags = 0,
+            .waitSemaphoreInfoCount = wait_count,
+            .pWaitSemaphoreInfos = wait_count ? wait_infos : NULL,
+            .commandBufferInfoCount = 1,
+            .pCommandBufferInfos = &command_info,
+            .signalSemaphoreInfoCount = signal_count,
+            .pSignalSemaphoreInfos = signal_count ? signal_infos : NULL,
+        };
+        if (diag) {
+            diag->stage = "queue-submit2";
+            diag->wait_count = wait_count;
+            diag->signal_count = signal_count;
+            diag->timeline_used = timeline_used;
+        }
+        vrc = rt->queue_submit2(rt->graphics_queue, 1, &submit2, submit_fence);
+    } else {
+        VkTimelineSemaphoreSubmitInfo timeline_info;
+        memset(&timeline_info, 0, sizeof(timeline_info));
+        timeline_info.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+        timeline_info.waitSemaphoreValueCount = wait_count;
+        timeline_info.pWaitSemaphoreValues = wait_count ? wait_values : NULL;
+        timeline_info.signalSemaphoreValueCount = signal_count;
+        timeline_info.pSignalSemaphoreValues = signal_count ? signal_values : NULL;
+        VkSubmitInfo submit = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = timeline_used ? &timeline_info : NULL,
+            .waitSemaphoreCount = wait_count,
+            .pWaitSemaphores = wait_count ? wait_semaphores : NULL,
+            .pWaitDstStageMask = wait_count ? wait_stages : NULL,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &command_buffer,
+            .signalSemaphoreCount = signal_count,
+            .pSignalSemaphores = signal_count ? signal_semaphores : NULL,
+        };
+        if (diag) {
+            diag->stage = "queue-submit";
+            diag->wait_count = wait_count;
+            diag->signal_count = signal_count;
+            diag->timeline_used = timeline_used;
+        }
+        vrc = vkQueueSubmit(rt->graphics_queue, 1, &submit, submit_fence);
     }
-    vrc = vkQueueSubmit(rt->graphics_queue, 1, &submit, submit_fence);
     if (vrc != VK_SUCCESS) goto submit_fail;
     const uint64_t timeout_ns =
         env_timeout_ns("PDOCKER_GPU_GRAPHICS_SUBMIT_TIMEOUT_MS", 30000, 1000, 600000);

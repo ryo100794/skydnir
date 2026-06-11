@@ -5108,6 +5108,34 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("j == last_graphics_submit_sync_cmd", submit_body)
         self.assertNotIn("send_recorded_vulkan_graphics_v6_1_frame(cmd, submit_sync_entries, submit_sync_count)", submit_body)
 
+    def test_vulkan_executor_preserves_submit2_stage_masks_when_available(self):
+        executor = GPU_EXECUTOR.read_text()
+
+        for marker in [
+            "PFN_vkQueueSubmit2 queue_submit2;",
+            'vkGetDeviceProcAddr(rt->device, "vkQueueSubmit2")',
+            'vkGetDeviceProcAddr(rt->device, "vkQueueSubmit2KHR")',
+            "static VkPipelineStageFlags2 vulkan_submit_stage_mask2_or_all",
+            "VkPipelineStageFlags2 wait_stage_masks2",
+            "VkPipelineStageFlags2 signal_stage_masks2",
+            "VkSemaphoreSubmitInfo wait_infos",
+            "VkSemaphoreSubmitInfo signal_infos",
+            "VkCommandBufferSubmitInfo command_info",
+            "VkSubmitInfo2 submit2",
+            ".stageMask = wait_stage_masks2[i];",
+            ".stageMask = signal_stage_masks2[i];",
+            "vrc = rt->queue_submit2(rt->graphics_queue, 1, &submit2, submit_fence);",
+            "vulkan_legacy_submit_stage_mask_from_stage2",
+        ]:
+            self.assertIn(marker, executor)
+
+        submit_body = executor.split("static int submit_vulkan_graphics_v6_command_buffer", 1)[1].split(
+            "static int run_vulkan_graphics_v6_frame", 1
+        )[0]
+        self.assertLess(submit_body.index("if (rt->queue_submit2)"), submit_body.index("vkQueueSubmit(rt->graphics_queue"))
+        self.assertLess(submit_body.index("VkSubmitInfo2 submit2"), submit_body.index("vrc = rt->queue_submit2"))
+        self.assertNotIn("(VkPipelineStageFlags)sync->stage_mask", submit_body)
+
     def test_vulkan_semaphore_lifecycle_is_executor_backed(self):
         executor = GPU_EXECUTOR.read_text()
         icd = VULKAN_ICD.read_text()
