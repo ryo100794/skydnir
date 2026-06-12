@@ -4039,6 +4039,8 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("queueFlags = pdocker_vk_advertised_queue_flags();", qf_body)
         self.assertIn("queueFlags = pdocker_vk_advertised_queue_flags();", qf2_body)
+        self.assertIn("zero_vk_out_struct_preserve_chain(&pQueueFamilyProperties[0], sizeof(pQueueFamilyProperties[0]), header);", qf2_body)
+        self.assertNotIn("memset(&pQueueFamilyProperties[0].queueFamilyProperties", qf2_body)
         self.assertIn("queueCount = PDOCKER_VK_ADVERTISED_QUEUE_COUNT", qf_body)
         self.assertIn("queueCount = PDOCKER_VK_ADVERTISED_QUEUE_COUNT", qf2_body)
         self.assertIn("#define PDOCKER_VK_ADVERTISED_QUEUE_COUNT 1u", icd)

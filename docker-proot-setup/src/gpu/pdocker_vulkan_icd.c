@@ -10177,7 +10177,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2(
         return;
     }
     if (*pQueueFamilyPropertyCount >= 1) {
-        memset(&pQueueFamilyProperties[0].queueFamilyProperties, 0, sizeof(pQueueFamilyProperties[0].queueFamilyProperties));
+        PdockerVkStructHeader header = read_vk_struct_header(&pQueueFamilyProperties[0]);
+        zero_vk_out_struct_preserve_chain(&pQueueFamilyProperties[0], sizeof(pQueueFamilyProperties[0]), header);
         pQueueFamilyProperties[0].queueFamilyProperties.queueFlags = pdocker_vk_advertised_queue_flags();
         pQueueFamilyProperties[0].queueFamilyProperties.queueCount = PDOCKER_VK_ADVERTISED_QUEUE_COUNT;
         pQueueFamilyProperties[0].queueFamilyProperties.timestampValidBits = 64;
