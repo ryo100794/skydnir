@@ -9536,6 +9536,7 @@ static void fill_pnext_features(void *pNext) {
         switch (header.sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES: {
                 VkPhysicalDeviceVulkan11Features *p = (VkPhysicalDeviceVulkan11Features *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 if (caps) {
                     bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE");
                     p->storageBuffer16BitAccess = disabled ? VK_FALSE : caps->storage16.storageBuffer16BitAccess;
@@ -9553,6 +9554,7 @@ static void fill_pnext_features(void *pNext) {
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES: {
                 VkPhysicalDevice16BitStorageFeatures *p = (VkPhysicalDevice16BitStorageFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 if (caps) {
                     bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_16BIT_STORAGE");
                     p->storageBuffer16BitAccess = disabled ? VK_FALSE : caps->storage16.storageBuffer16BitAccess;
@@ -9570,6 +9572,7 @@ static void fill_pnext_features(void *pNext) {
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES: {
                 VkPhysicalDeviceVulkan12Features *p = (VkPhysicalDeviceVulkan12Features *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 if (caps) {
                     bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
                     p->storageBuffer8BitAccess = disabled ? VK_FALSE : caps->storage8.storageBuffer8BitAccess;
@@ -9592,6 +9595,7 @@ static void fill_pnext_features(void *pNext) {
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
                 VkPhysicalDevice8BitStorageFeatures *p = (VkPhysicalDevice8BitStorageFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 if (caps) {
                     bool disabled = env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
                     p->storageBuffer8BitAccess = disabled ? VK_FALSE : caps->storage8.storageBuffer8BitAccess;
@@ -9606,6 +9610,7 @@ static void fill_pnext_features(void *pNext) {
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES: {
                 VkPhysicalDeviceShaderFloat16Int8Features *p = (VkPhysicalDeviceShaderFloat16Int8Features *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 if (caps) {
                     bool storage8_disabled = env_disabled("PDOCKER_VULKAN_DISABLE_8BIT_STORAGE");
                     p->shaderFloat16 = caps->float16_int8.shaderFloat16;
@@ -9619,6 +9624,7 @@ static void fill_pnext_features(void *pNext) {
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES: {
                 VkPhysicalDeviceSynchronization2Features *p = (VkPhysicalDeviceSynchronization2Features *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->synchronization2 = VK_TRUE;
                 break;
             }
@@ -9626,6 +9632,7 @@ static void fill_pnext_features(void *pNext) {
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES: {
                 VkPhysicalDeviceTimelineSemaphoreFeatures *p = (VkPhysicalDeviceTimelineSemaphoreFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->timelineSemaphore = VK_TRUE;
                 break;
             }
@@ -9633,6 +9640,7 @@ static void fill_pnext_features(void *pNext) {
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES: {
                 VkPhysicalDeviceDynamicRenderingFeatures *p = (VkPhysicalDeviceDynamicRenderingFeatures *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->dynamicRendering = VK_TRUE;
                 break;
             }
@@ -9640,6 +9648,7 @@ static void fill_pnext_features(void *pNext) {
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
                 VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->extendedDynamicState = caps ? (caps->ext_extended_dynamic_state ? VK_TRUE : VK_FALSE) : VK_TRUE;
                 break;
             }
@@ -9647,6 +9656,7 @@ static void fill_pnext_features(void *pNext) {
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT: {
                 VkPhysicalDeviceIndexTypeUint8FeaturesEXT *p = (VkPhysicalDeviceIndexTypeUint8FeaturesEXT *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->indexTypeUint8 = (caps && caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8)
                     ? VK_TRUE
                     : VK_FALSE;
@@ -9656,6 +9666,7 @@ static void fill_pnext_features(void *pNext) {
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES: {
                 VkPhysicalDeviceMaintenance4Features *p = (VkPhysicalDeviceMaintenance4Features *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->maintenance4 = VK_TRUE;
                 break;
             }
@@ -10019,6 +10030,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2(
         VkPhysicalDevice physicalDevice,
         VkPhysicalDeviceProperties2 *pProperties) {
     if (!pProperties) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pProperties);
+    zero_vk_out_struct_preserve_chain(pProperties, sizeof(*pProperties), header);
     vkGetPhysicalDeviceProperties(physicalDevice, &pProperties->properties);
     fill_pnext_properties(pProperties->pNext);
 }
@@ -10035,6 +10048,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2(
         VkPhysicalDeviceFeatures2 *pFeatures) {
     if (!pFeatures) return;
     (void)physicalDevice;
+    PdockerVkStructHeader header = read_vk_struct_header(pFeatures);
+    zero_vk_out_struct_preserve_chain(pFeatures, sizeof(*pFeatures), header);
     fill_physical_device_features(&pFeatures->features);
     fill_pnext_features(pFeatures->pNext);
 }

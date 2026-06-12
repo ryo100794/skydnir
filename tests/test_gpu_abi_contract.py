@@ -4083,6 +4083,48 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn("zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);", segment)
 
 
+    def test_vulkan_physical_device_properties2_and_features2_outputs_are_fully_initialized(self):
+        icd = VULKAN_ICD.read_text()
+        props2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties2", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures", 1
+        )[0]
+        self.assertIn("PdockerVkStructHeader header = read_vk_struct_header(pProperties);", props2_body)
+        self.assertIn("zero_vk_out_struct_preserve_chain(pProperties, sizeof(*pProperties), header);", props2_body)
+        self.assertIn("vkGetPhysicalDeviceProperties(physicalDevice, &pProperties->properties);", props2_body)
+        self.assertIn("fill_pnext_properties(pProperties->pNext);", props2_body)
+        features2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFeatures2", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties", 1
+        )[0]
+        self.assertIn("PdockerVkStructHeader header = read_vk_struct_header(pFeatures);", features2_body)
+        self.assertIn("zero_vk_out_struct_preserve_chain(pFeatures, sizeof(*pFeatures), header);", features2_body)
+        self.assertIn("fill_physical_device_features(&pFeatures->features);", features2_body)
+        self.assertIn("fill_pnext_features(pFeatures->pNext);", features2_body)
+
+
+    def test_vulkan_feature_pnext_structs_are_fully_initialized(self):
+        icd = VULKAN_ICD.read_text()
+        body = icd.split("static void fill_pnext_features", 1)[1].split(
+            "static uint64_t feature_mask_from_base_features", 1
+        )[0]
+        for struct_name in [
+            "VkPhysicalDeviceVulkan11Features",
+            "VkPhysicalDevice16BitStorageFeatures",
+            "VkPhysicalDeviceVulkan12Features",
+            "VkPhysicalDevice8BitStorageFeatures",
+            "VkPhysicalDeviceShaderFloat16Int8Features",
+            "VkPhysicalDeviceSynchronization2Features",
+            "VkPhysicalDeviceTimelineSemaphoreFeatures",
+            "VkPhysicalDeviceDynamicRenderingFeatures",
+            "VkPhysicalDeviceExtendedDynamicStateFeaturesEXT",
+            "VkPhysicalDeviceIndexTypeUint8FeaturesEXT",
+            "VkPhysicalDeviceMaintenance4Features",
+        ]:
+            if struct_name not in body:
+                continue
+            segment = body.split(f"{struct_name} *p", 1)[1].split("break;", 1)[0]
+            self.assertIn("zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);", segment)
+
+
     def test_vulkan_command_recording_overflow_fails_closed(self):
         icd = VULKAN_ICD.read_text()
         for marker in [
