@@ -4280,6 +4280,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "nanosleep(&ts, &ts)",
             "return VK_TIMEOUT;",
             "semaphore-wait-pnext-unsupported",
+            "semaphore-signal-pnext-unsupported",
+            "semaphore-flags-unsupported",
+            "pCreateInfo && pCreateInfo->flags != 0",
+            "pSignalInfo->pNext",
         ]:
             self.assertIn(marker, icd)
         fence_wait_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences", 1)[1].split(

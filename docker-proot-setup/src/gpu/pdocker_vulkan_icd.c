@@ -17856,6 +17856,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSemaphore(
     if (!pSemaphore) return VK_ERROR_INITIALIZATION_FAILED;
     bool timeline = false;
     uint64_t initial_value = 0;
+    if (pCreateInfo && pCreateInfo->flags != 0) {
+        trace_icd_runtime_failure("semaphore-flags-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     if (pCreateInfo && !semaphore_create_info_parse_pnext(pCreateInfo->pNext, &timeline, &initial_value)) {
         trace_icd_runtime_failure("semaphore-pnext-unsupported",
                                   VK_ERROR_FEATURE_NOT_PRESENT);
@@ -17945,6 +17950,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkSignalSemaphore(
         const VkSemaphoreSignalInfo *pSignalInfo) {
     (void)device;
     if (!pSignalInfo) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pSignalInfo->pNext) {
+        trace_icd_runtime_failure("semaphore-signal-pnext-unsupported",
+                                  VK_ERROR_FEATURE_NOT_PRESENT);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     PdockerVkSemaphore *sem = (PdockerVkSemaphore *)pSignalInfo->semaphore;
     if (!sem || !sem->timeline) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (sem->executor_tracked) {
