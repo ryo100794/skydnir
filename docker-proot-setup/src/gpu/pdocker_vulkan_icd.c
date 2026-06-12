@@ -10111,8 +10111,20 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceSparseImageFormatProperties(
     *pPropertyCount = 0;
 }
 
+#define PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT 1u
+#define PDOCKER_VK_ADVERTISED_QUEUE_COUNT 1u
+
 static VkQueueFlags pdocker_vk_advertised_queue_flags(void) {
     return VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT;
+}
+
+static bool pdocker_vk_queue_request_valid(
+        uint32_t queueFamilyIndex,
+        uint32_t queueIndex,
+        VkDeviceQueueCreateFlags flags) {
+    return queueFamilyIndex < PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT &&
+           queueIndex < PDOCKER_VK_ADVERTISED_QUEUE_COUNT &&
+           flags == 0;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(
@@ -10128,7 +10140,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(
     if (*pQueueFamilyPropertyCount >= 1) {
         memset(&pQueueFamilyProperties[0], 0, sizeof(pQueueFamilyProperties[0]));
         pQueueFamilyProperties[0].queueFlags = pdocker_vk_advertised_queue_flags();
-        pQueueFamilyProperties[0].queueCount = 2;
+        pQueueFamilyProperties[0].queueCount = PDOCKER_VK_ADVERTISED_QUEUE_COUNT;
         pQueueFamilyProperties[0].timestampValidBits = 64;
         pQueueFamilyProperties[0].minImageTransferGranularity.width = 1;
         pQueueFamilyProperties[0].minImageTransferGranularity.height = 1;
@@ -10150,7 +10162,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2(
     if (*pQueueFamilyPropertyCount >= 1) {
         memset(&pQueueFamilyProperties[0].queueFamilyProperties, 0, sizeof(pQueueFamilyProperties[0].queueFamilyProperties));
         pQueueFamilyProperties[0].queueFamilyProperties.queueFlags = pdocker_vk_advertised_queue_flags();
-        pQueueFamilyProperties[0].queueFamilyProperties.queueCount = 2;
+        pQueueFamilyProperties[0].queueFamilyProperties.queueCount = PDOCKER_VK_ADVERTISED_QUEUE_COUNT;
         pQueueFamilyProperties[0].queueFamilyProperties.timestampValidBits = 64;
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.width = 1;
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.height = 1;
@@ -10875,6 +10887,29 @@ static VkResult validate_device_extensions(const VkDeviceCreateInfo *pCreateInfo
     return VK_SUCCESS;
 }
 
+static VkResult validate_device_queue_create_infos(const VkDeviceCreateInfo *pCreateInfo) {
+    if (!pCreateInfo) return VK_SUCCESS;
+    for (uint32_t i = 0; i < pCreateInfo->queueCreateInfoCount; ++i) {
+        const VkDeviceQueueCreateInfo *qci = pCreateInfo->pQueueCreateInfos
+            ? &pCreateInfo->pQueueCreateInfos[i]
+            : NULL;
+        if (!qci || qci->queueCount == 0 ||
+            qci->queueFamilyIndex >= PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT ||
+            qci->queueCount > PDOCKER_VK_ADVERTISED_QUEUE_COUNT ||
+            qci->flags != 0) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: create-device rejected queue request family=%u count=%u flags=0x%x advertised_families=%u advertised_queues=%u\n",
+                    qci ? qci->queueFamilyIndex : UINT32_MAX,
+                    qci ? qci->queueCount : 0,
+                    qci ? (unsigned)qci->flags : 0,
+                    PDOCKER_VK_ADVERTISED_QUEUE_FAMILY_COUNT,
+                    PDOCKER_VK_ADVERTISED_QUEUE_COUNT);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+    }
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceLayerProperties(
         VkPhysicalDevice physicalDevice,
         uint32_t *pPropertyCount,
@@ -10901,6 +10936,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     trace_device_create_features(pCreateInfo);
     VkResult extension_rc = validate_device_extensions(pCreateInfo);
     if (extension_rc != VK_SUCCESS) return extension_rc;
+    VkResult queue_rc = validate_device_queue_create_infos(pCreateInfo);
+    if (queue_rc != VK_SUCCESS) return queue_rc;
     uint64_t requested_feature_mask = requested_feature_mask_from_device_create_info(pCreateInfo);
     uint64_t supported_feature_mask = advertised_feature_mask();
     uint64_t unsupported_feature_mask = 0;
@@ -10941,17 +10978,28 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue(
         uint32_t queueIndex,
         VkQueue *pQueue) {
     (void)device;
-    (void)queueFamilyIndex;
-    (void)queueIndex;
-    if (pQueue) *pQueue = (VkQueue)&g_queue;
+    if (!pQueue) return;
+    *pQueue = pdocker_vk_queue_request_valid(queueFamilyIndex, queueIndex, 0)
+        ? (VkQueue)&g_queue
+        : VK_NULL_HANDLE;
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
         VkDevice device,
         const VkDeviceQueueInfo2 *pQueueInfo,
         VkQueue *pQueue) {
-    (void)pQueueInfo;
-    vkGetDeviceQueue(device, 0, 0, pQueue);
+    (void)device;
+    if (!pQueue) return;
+    if (!pQueueInfo) {
+        *pQueue = VK_NULL_HANDLE;
+        return;
+    }
+    *pQueue = pdocker_vk_queue_request_valid(
+            pQueueInfo->queueFamilyIndex,
+            pQueueInfo->queueIndex,
+            pQueueInfo->flags)
+        ? (VkQueue)&g_queue
+        : VK_NULL_HANDLE;
 }
 
 static bool descriptor_type_supported_by_v4_transport(VkDescriptorType type) {

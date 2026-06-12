@@ -4039,8 +4039,19 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("queueFlags = pdocker_vk_advertised_queue_flags();", qf_body)
         self.assertIn("queueFlags = pdocker_vk_advertised_queue_flags();", qf2_body)
+        self.assertIn("queueCount = PDOCKER_VK_ADVERTISED_QUEUE_COUNT", qf_body)
+        self.assertIn("queueCount = PDOCKER_VK_ADVERTISED_QUEUE_COUNT", qf2_body)
+        self.assertIn("#define PDOCKER_VK_ADVERTISED_QUEUE_COUNT 1u", icd)
+        self.assertIn("pdocker_vk_queue_request_valid", icd)
+        self.assertIn("validate_device_queue_create_infos", icd)
+        queue_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue", 1)[1].split(
+            "static bool descriptor_type_supported", 1
+        )[0]
+        self.assertIn("VK_NULL_HANDLE", queue_body)
         self.assertNotIn("queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT", qf_body)
         self.assertNotIn("queueFlags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT", qf2_body)
+        self.assertNotIn("queueCount = 2", qf_body)
+        self.assertNotIn("queueCount = 2", qf2_body)
 
 
     def test_vulkan_command_recording_overflow_fails_closed(self):
