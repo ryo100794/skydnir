@@ -10713,6 +10713,83 @@ VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements2(
     fill_memory_requirements2_pnext(pnext);
 }
 
+static void fill_buffer_create_memory_requirements(
+        const VkBufferCreateInfo *pCreateInfo,
+        VkMemoryRequirements *pMemoryRequirements) {
+    if (!pMemoryRequirements) return;
+    memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
+    if (!pCreateInfo || pCreateInfo->size == 0 ||
+        pCreateInfo->size > pdocker_vulkan_max_buffer_size()) {
+        return;
+    }
+    pMemoryRequirements->size = align_device_size(pCreateInfo->size, PDOCKER_VK_REQUIREMENT_ALIGNMENT);
+    pMemoryRequirements->alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+    pMemoryRequirements->memoryTypeBits = 0x3;
+}
+
+static void fill_image_create_memory_requirements(
+        const VkImageCreateInfo *pCreateInfo,
+        VkMemoryRequirements *pMemoryRequirements) {
+    if (!pMemoryRequirements) return;
+    memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements));
+    if (!pCreateInfo) return;
+    VkResult validate_rc = validate_image_create_info_for_transport(pCreateInfo);
+    VkDeviceSize requirements_size = validate_rc == VK_SUCCESS
+        ? estimate_image_requirement_size(pCreateInfo)
+        : 0;
+    if (requirements_size == 0 || requirements_size > pdocker_vulkan_max_buffer_size()) {
+        return;
+    }
+    pMemoryRequirements->size = requirements_size;
+    pMemoryRequirements->alignment = PDOCKER_VK_REQUIREMENT_ALIGNMENT;
+    pMemoryRequirements->memoryTypeBits = 0x3;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceBufferMemoryRequirements(
+        VkDevice device,
+        const VkDeviceBufferMemoryRequirements *pInfo,
+        VkMemoryRequirements2 *pMemoryRequirements) {
+    (void)device;
+    if (!pMemoryRequirements) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pMemoryRequirements);
+    void *pnext = (void *)header.pNext;
+    zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);
+    fill_buffer_create_memory_requirements(pInfo ? pInfo->pCreateInfo : NULL,
+                                           &pMemoryRequirements->memoryRequirements);
+    fill_memory_requirements2_pnext(pnext);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageMemoryRequirements(
+        VkDevice device,
+        const VkDeviceImageMemoryRequirements *pInfo,
+        VkMemoryRequirements2 *pMemoryRequirements) {
+    (void)device;
+    if (!pMemoryRequirements) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pMemoryRequirements);
+    void *pnext = (void *)header.pNext;
+    zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);
+    if (!pInfo || pInfo->planeAspect == 0) {
+        fill_image_create_memory_requirements(pInfo ? pInfo->pCreateInfo : NULL,
+                                              &pMemoryRequirements->memoryRequirements);
+    }
+    fill_memory_requirements2_pnext(pnext);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSparseMemoryRequirements(
+        VkDevice device,
+        const VkDeviceImageMemoryRequirements *pInfo,
+        uint32_t *pSparseMemoryRequirementCount,
+        VkSparseImageMemoryRequirements2 *pSparseMemoryRequirements) {
+    (void)device;
+    (void)pInfo;
+    if (!pSparseMemoryRequirementCount) return;
+    if (!pSparseMemoryRequirements) {
+        *pSparseMemoryRequirementCount = 0;
+        return;
+    }
+    *pSparseMemoryRequirementCount = 0;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
         VkDevice device,
         const VkMemoryAllocateInfo *pAllocateInfo,
@@ -17918,6 +17995,12 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkGetImageMemoryRequirements);
     MAP_PROC(vkGetImageMemoryRequirements2);
     MAP_ALIAS("vkGetImageMemoryRequirements2KHR", vkGetImageMemoryRequirements2);
+    MAP_PROC(vkGetDeviceBufferMemoryRequirements);
+    MAP_ALIAS("vkGetDeviceBufferMemoryRequirementsKHR", vkGetDeviceBufferMemoryRequirements);
+    MAP_PROC(vkGetDeviceImageMemoryRequirements);
+    MAP_ALIAS("vkGetDeviceImageMemoryRequirementsKHR", vkGetDeviceImageMemoryRequirements);
+    MAP_PROC(vkGetDeviceImageSparseMemoryRequirements);
+    MAP_ALIAS("vkGetDeviceImageSparseMemoryRequirementsKHR", vkGetDeviceImageSparseMemoryRequirements);
     MAP_PROC(vkGetImageSubresourceLayout);
     MAP_PROC(vkAllocateMemory);
     MAP_PROC(vkFreeMemory);

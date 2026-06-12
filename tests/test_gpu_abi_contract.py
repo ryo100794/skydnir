@@ -4310,6 +4310,15 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("create-device rejected unsupported feature_mask", icd)
         self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", icd)
         for marker in [
+            "VK_KHR_MAINTENANCE_4_EXTENSION_NAME",
+            "p->maintenance4 = VK_TRUE;",
+            "PDOCKER_VK_FEATURE_MAINTENANCE_4",
+            "vkGetDeviceBufferMemoryRequirements",
+            "vkGetDeviceImageMemoryRequirements",
+            "vkGetDeviceImageSparseMemoryRequirements",
+            'MAP_ALIAS("vkGetDeviceBufferMemoryRequirementsKHR", vkGetDeviceBufferMemoryRequirements)',
+            'MAP_ALIAS("vkGetDeviceImageMemoryRequirementsKHR", vkGetDeviceImageMemoryRequirements)',
+            'MAP_ALIAS("vkGetDeviceImageSparseMemoryRequirementsKHR", vkGetDeviceImageSparseMemoryRequirements)',
             "PDOCKER_VK_FEATURE_SYNCHRONIZATION_2",
             "PDOCKER_VK_FEATURE_DYNAMIC_RENDERING",
             "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE",
@@ -4329,6 +4338,29 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("advertised_feature_mask()", create_body)
         self.assertIn("requested_features_supported(requested_feature_mask, supported_feature_mask", create_body)
         self.assertIn("device->requested_feature_mask = requested_feature_mask;", create_body)
+
+    def test_vulkan_maintenance4_memory_requirement_apis_are_mapped_and_conservative(self):
+        icd = VULKAN_ICD.read_text()
+        for marker in [
+            "static void fill_buffer_create_memory_requirements",
+            "static void fill_image_create_memory_requirements",
+            "VKAPI_ATTR void VKAPI_CALL vkGetDeviceBufferMemoryRequirements",
+            "VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageMemoryRequirements",
+            "VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSparseMemoryRequirements",
+            "fill_memory_requirements2_pnext(pnext);",
+            "pCreateInfo->size > pdocker_vulkan_max_buffer_size()",
+            "estimate_image_requirement_size(pCreateInfo)",
+            "pInfo->planeAspect == 0",
+            "*pSparseMemoryRequirementCount = 0;",
+            'MAP_PROC(vkGetDeviceBufferMemoryRequirements)',
+            'MAP_ALIAS("vkGetDeviceBufferMemoryRequirementsKHR", vkGetDeviceBufferMemoryRequirements)',
+            'MAP_PROC(vkGetDeviceImageMemoryRequirements)',
+            'MAP_ALIAS("vkGetDeviceImageMemoryRequirementsKHR", vkGetDeviceImageMemoryRequirements)',
+            'MAP_PROC(vkGetDeviceImageSparseMemoryRequirements)',
+            'MAP_ALIAS("vkGetDeviceImageSparseMemoryRequirementsKHR", vkGetDeviceImageSparseMemoryRequirements)',
+        ]:
+            self.assertIn(marker, icd)
+
 
     def test_vulkan_proc_table_exposes_khr_aliases_for_advertised_core2_apis(self):
         icd = VULKAN_ICD.read_text()
