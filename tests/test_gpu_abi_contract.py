@@ -668,6 +668,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdSetDepthBias",
             "vkCmdSetBlendConstants",
             "vkCmdSetDepthBounds",
+            "vkCmdSetDepthBoundsTestEnable",
+            "vkCmdSetDepthBoundsTestEnableEXT",
             "vkCmdSetStencilCompareMask",
             "vkCmdSetStencilWriteMask",
             "vkCmdSetStencilReference",
@@ -1179,6 +1181,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd_set_depth_test_enable",
             "cmd_set_depth_write_enable",
             "cmd_set_depth_compare_op",
+            "cmd_set_depth_bounds_test_enable",
             "cmd_set_stencil_test_enable",
             "cmd_set_stencil_op",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_CULL_MODE)",
@@ -1187,6 +1190,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BIAS)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_BLEND_CONSTANTS)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BOUNDS)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_WRITE_MASK)",
             "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_REFERENCE)",
@@ -1205,6 +1209,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdSetDepthBias(command_buffer",
             "vkCmdSetBlendConstants(command_buffer",
             "vkCmdSetDepthBounds(command_buffer",
+            "rt->cmd_set_depth_bounds_test_enable(command_buffer, value);",
             "vkCmdSetStencilCompareMask(command_buffer",
             "vkCmdSetStencilWriteMask(command_buffer",
             "vkCmdSetStencilReference(command_buffer",
@@ -1231,6 +1236,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "DEPTH_BOUNDS", "STENCIL_COMPARE_MASK", "STENCIL_WRITE_MASK",
             "STENCIL_REFERENCE", "DEPTH_TEST_ENABLE", "DEPTH_WRITE_ENABLE",
             "DEPTH_COMPARE_OP", "STENCIL_TEST_ENABLE", "STENCIL_OP",
+            "DEPTH_BOUNDS_TEST_ENABLE",
         ]
         for bit, name in enumerate(states):
             marker = f"case VK_DYNAMIC_STATE_{name}: return {bit}u;"

@@ -1311,6 +1311,7 @@ typedef struct {
     PFN_vkCmdSetDepthTestEnableEXT cmd_set_depth_test_enable;
     PFN_vkCmdSetDepthWriteEnableEXT cmd_set_depth_write_enable;
     PFN_vkCmdSetDepthCompareOpEXT cmd_set_depth_compare_op;
+    PFN_vkCmdSetDepthBoundsTestEnableEXT cmd_set_depth_bounds_test_enable;
     PFN_vkCmdSetStencilTestEnableEXT cmd_set_stencil_test_enable;
     PFN_vkCmdSetStencilOpEXT cmd_set_stencil_op;
     PFN_vkCmdDrawIndirectCount cmd_draw_indirect_count;
@@ -1346,6 +1347,7 @@ static uint32_t vulkan_graphics_dynamic_state_bit_index(uint32_t state_type) {
         case VK_DYNAMIC_STATE_DEPTH_COMPARE_OP: return 14u;
         case VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE: return 15u;
         case VK_DYNAMIC_STATE_STENCIL_OP: return 16u;
+        case VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE: return 17u;
         default: return UINT32_MAX;
     }
 }
@@ -1377,6 +1379,8 @@ static int vulkan_graphics_dynamic_state_payload_supported(
             return (state->first_index == 0 && state->count == 4 && state->data_size == sizeof(float) * 4u) ? 0 : -EPROTO;
         case VK_DYNAMIC_STATE_DEPTH_BOUNDS:
             return (state->first_index == 0 && state->count == 2 && state->data_size == sizeof(float) * 2u) ? 0 : -EPROTO;
+        case VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE:
+            return (state->first_index == 0 && state->count == 1 && state->data_size == sizeof(VkBool32)) ? 0 : -EPROTO;
         case VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK:
         case VK_DYNAMIC_STATE_STENCIL_WRITE_MASK:
         case VK_DYNAMIC_STATE_STENCIL_REFERENCE:
@@ -11251,6 +11255,12 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     if (!rt->cmd_set_depth_compare_op) {
         rt->cmd_set_depth_compare_op =
             (PFN_vkCmdSetDepthCompareOpEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetDepthCompareOpEXT");
+    }
+    rt->cmd_set_depth_bounds_test_enable =
+        (PFN_vkCmdSetDepthBoundsTestEnableEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetDepthBoundsTestEnable");
+    if (!rt->cmd_set_depth_bounds_test_enable) {
+        rt->cmd_set_depth_bounds_test_enable =
+            (PFN_vkCmdSetDepthBoundsTestEnableEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetDepthBoundsTestEnableEXT");
     }
     rt->cmd_set_stencil_test_enable =
         (PFN_vkCmdSetStencilTestEnableEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetStencilTestEnable");
@@ -22197,6 +22207,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BIAS) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_BLEND_CONSTANTS) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BOUNDS) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_WRITE_MASK) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_STENCIL_REFERENCE) |
@@ -22215,6 +22226,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_DEPTH_BIAS);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_BLEND_CONSTANTS);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_DEPTH_BOUNDS);
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_STENCIL_WRITE_MASK);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_STENCIL_REFERENCE);
@@ -24797,6 +24809,21 @@ static int record_vulkan_graphics_v6_command_buffer(
                                 goto cleanup;
                             }
                             vkCmdSetDepthBounds(command_buffer, values[0], values[1]);
+                            break;
+                        }
+                        case VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE: {
+                            if (!rt->enabled_extended_dynamic_state.extendedDynamicState ||
+                                !rt->cmd_set_depth_bounds_test_enable) {
+                                rc = -EOPNOTSUPP;
+                                goto cleanup;
+                            }
+                            VkBool32 value = VK_FALSE;
+                            memcpy(&value, data, sizeof(value));
+                            if (value && !rt->enabled_features.depthBounds) {
+                                rc = -EOPNOTSUPP;
+                                goto cleanup;
+                            }
+                            rt->cmd_set_depth_bounds_test_enable(command_buffer, value);
                             break;
                         }
                         case VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK: {

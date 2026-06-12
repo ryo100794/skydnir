@@ -131,6 +131,7 @@ static uint32_t pdocker_vk_graphics_dynamic_state_bit_index(VkDynamicState state
         case VK_DYNAMIC_STATE_DEPTH_COMPARE_OP: return 14u;
         case VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE: return 15u;
         case VK_DYNAMIC_STATE_STENCIL_OP: return 16u;
+        case VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE: return 17u;
         default: return UINT32_MAX;
     }
 }
@@ -13858,6 +13859,20 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBounds(
                                         0, 2, values, sizeof(values));
 }
 
+VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBoundsTestEnable(
+        VkCommandBuffer commandBuffer,
+        VkBool32 depthBoundsTestEnable) {
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE,
+                                        0, 1, &depthBoundsTestEnable, sizeof(depthBoundsTestEnable));
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdSetDepthBoundsTestEnableEXT(
+        VkCommandBuffer commandBuffer,
+        VkBool32 depthBoundsTestEnable) {
+    vkCmdSetDepthBoundsTestEnable(commandBuffer, depthBoundsTestEnable);
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdSetStencilCompareMask(
         VkCommandBuffer commandBuffer,
         VkStencilFaceFlags faceMask,
@@ -18166,6 +18181,8 @@ static PFN_vkVoidFunction proc_address(const char *pName) {
     MAP_PROC(vkCmdSetDepthBias);
     MAP_PROC(vkCmdSetBlendConstants);
     MAP_PROC(vkCmdSetDepthBounds);
+    MAP_PROC(vkCmdSetDepthBoundsTestEnable);
+    MAP_PROC(vkCmdSetDepthBoundsTestEnableEXT);
     MAP_PROC(vkCmdSetStencilCompareMask);
     MAP_PROC(vkCmdSetStencilWriteMask);
     MAP_PROC(vkCmdSetStencilReference);
