@@ -4339,6 +4339,35 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("requested_features_supported(requested_feature_mask, supported_feature_mask", create_body)
         self.assertIn("device->requested_feature_mask = requested_feature_mask;", create_body)
 
+    def test_vulkan_copy_commands2_reject_unsupported_pnext(self):
+        icd = VULKAN_ICD.read_text()
+        body = icd.split("static bool copy_commands2_region_has_pnext", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer", 1
+        )[0]
+        for marker in [
+            "static bool copy_commands2_reject_unsupported_pnext",
+            "read_vk_struct_header(region)",
+            "header.pNext != NULL",
+            "command_buffer_mark_recording_failed(cmd, reason);",
+            "copy-buffer2-pnext-unsupported",
+            "copy-image2-pnext-unsupported",
+            "copy-buffer-to-image2-pnext-unsupported",
+            "copy-image-to-buffer2-pnext-unsupported",
+            "blit-image2-pnext-unsupported",
+            "resolve-image2-pnext-unsupported",
+        ]:
+            self.assertIn(marker, body)
+        for api in [
+            "pCopyBufferInfo->pNext",
+            "pCopyImageInfo->pNext",
+            "pCopyBufferToImageInfo->pNext",
+            "pCopyImageToBufferInfo->pNext",
+            "pBlitImageInfo->pNext",
+            "pResolveImageInfo->pNext",
+        ]:
+            self.assertIn(api, body)
+
+
     def test_vulkan_maintenance4_memory_requirement_apis_are_mapped_and_conservative(self):
         icd = VULKAN_ICD.read_text()
         for marker in [

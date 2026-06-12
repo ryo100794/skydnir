@@ -15376,11 +15376,43 @@ VKAPI_ATTR void VKAPI_CALL vkCmdClearDepthStencilImage(
     }
 }
 
+static bool copy_commands2_region_has_pnext(const void *region, size_t region_size) {
+    if (!region || region_size < sizeof(PdockerVkStructHeader)) return false;
+    PdockerVkStructHeader header = read_vk_struct_header(region);
+    return header.pNext != NULL;
+}
+
+static bool copy_commands2_reject_unsupported_pnext(
+        PdockerVkCommandBuffer *cmd,
+        const void *top_level_pnext,
+        const void *regions,
+        uint32_t region_count,
+        size_t region_stride,
+        const char *reason) {
+    if (top_level_pnext) {
+        command_buffer_mark_recording_failed(cmd, reason);
+        return true;
+    }
+    const unsigned char *bytes = (const unsigned char *)regions;
+    for (uint32_t i = 0; bytes && i < region_count; ++i) {
+        if (copy_commands2_region_has_pnext(bytes + ((size_t)i * region_stride), region_stride)) {
+            command_buffer_mark_recording_failed(cmd, reason);
+            return true;
+        }
+    }
+    return false;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer2(
         VkCommandBuffer commandBuffer,
         const VkCopyBufferInfo2 *pCopyBufferInfo) {
     if (!pCopyBufferInfo || !pCopyBufferInfo->pRegions) return;
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (copy_commands2_reject_unsupported_pnext(cmd, pCopyBufferInfo->pNext,
+                                                pCopyBufferInfo->pRegions,
+                                                pCopyBufferInfo->regionCount,
+                                                sizeof(pCopyBufferInfo->pRegions[0]),
+                                                "copy-buffer2-pnext-unsupported")) return;
     PdockerVkBuffer *src = (PdockerVkBuffer *)pCopyBufferInfo->srcBuffer;
     PdockerVkBuffer *dst = (PdockerVkBuffer *)pCopyBufferInfo->dstBuffer;
     if (!cmd || !src || !dst || !src->memory || !dst->memory) return;
@@ -15403,6 +15435,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage2(
         VkCommandBuffer commandBuffer,
         const VkCopyImageInfo2 *pCopyImageInfo) {
     if (!pCopyImageInfo || !pCopyImageInfo->pRegions) return;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (copy_commands2_reject_unsupported_pnext(cmd, pCopyImageInfo->pNext,
+                                                pCopyImageInfo->pRegions,
+                                                pCopyImageInfo->regionCount,
+                                                sizeof(pCopyImageInfo->pRegions[0]),
+                                                "copy-image2-pnext-unsupported")) return;
     for (uint32_t i = 0; i < pCopyImageInfo->regionCount; ++i) {
         const VkImageCopy2 *r2 = &pCopyImageInfo->pRegions[i];
         VkImageCopy r = {
@@ -15426,6 +15464,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage2(
         VkCommandBuffer commandBuffer,
         const VkCopyBufferToImageInfo2 *pCopyBufferToImageInfo) {
     if (!pCopyBufferToImageInfo || !pCopyBufferToImageInfo->pRegions) return;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (copy_commands2_reject_unsupported_pnext(cmd, pCopyBufferToImageInfo->pNext,
+                                                pCopyBufferToImageInfo->pRegions,
+                                                pCopyBufferToImageInfo->regionCount,
+                                                sizeof(pCopyBufferToImageInfo->pRegions[0]),
+                                                "copy-buffer-to-image2-pnext-unsupported")) return;
     for (uint32_t i = 0; i < pCopyBufferToImageInfo->regionCount; ++i) {
         const VkBufferImageCopy2 *r2 = &pCopyBufferToImageInfo->pRegions[i];
         VkBufferImageCopy r = {
@@ -15449,6 +15493,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer2(
         VkCommandBuffer commandBuffer,
         const VkCopyImageToBufferInfo2 *pCopyImageToBufferInfo) {
     if (!pCopyImageToBufferInfo || !pCopyImageToBufferInfo->pRegions) return;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (copy_commands2_reject_unsupported_pnext(cmd, pCopyImageToBufferInfo->pNext,
+                                                pCopyImageToBufferInfo->pRegions,
+                                                pCopyImageToBufferInfo->regionCount,
+                                                sizeof(pCopyImageToBufferInfo->pRegions[0]),
+                                                "copy-image-to-buffer2-pnext-unsupported")) return;
     for (uint32_t i = 0; i < pCopyImageToBufferInfo->regionCount; ++i) {
         const VkBufferImageCopy2 *r2 = &pCopyImageToBufferInfo->pRegions[i];
         VkBufferImageCopy r = {
@@ -15472,6 +15522,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage2(
         VkCommandBuffer commandBuffer,
         const VkBlitImageInfo2 *pBlitImageInfo) {
     if (!pBlitImageInfo || !pBlitImageInfo->pRegions) return;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (copy_commands2_reject_unsupported_pnext(cmd, pBlitImageInfo->pNext,
+                                                pBlitImageInfo->pRegions,
+                                                pBlitImageInfo->regionCount,
+                                                sizeof(pBlitImageInfo->pRegions[0]),
+                                                "blit-image2-pnext-unsupported")) return;
     for (uint32_t i = 0; i < pBlitImageInfo->regionCount; ++i) {
         const VkImageBlit2 *r2 = &pBlitImageInfo->pRegions[i];
         VkImageBlit r = {
@@ -15495,6 +15551,12 @@ VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage2(
         VkCommandBuffer commandBuffer,
         const VkResolveImageInfo2 *pResolveImageInfo) {
     if (!pResolveImageInfo || !pResolveImageInfo->pRegions) return;
+    PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
+    if (copy_commands2_reject_unsupported_pnext(cmd, pResolveImageInfo->pNext,
+                                                pResolveImageInfo->pRegions,
+                                                pResolveImageInfo->regionCount,
+                                                sizeof(pResolveImageInfo->pRegions[0]),
+                                                "resolve-image2-pnext-unsupported")) return;
     for (uint32_t i = 0; i < pResolveImageInfo->regionCount; ++i) {
         const VkImageResolve2 *r2 = &pResolveImageInfo->pRegions[i];
         VkImageResolve r = {
