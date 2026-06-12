@@ -4278,6 +4278,16 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(alias, proc_body)
 
+    def test_vulkan_physical_memory_properties2_output_is_fully_initialized(self):
+        icd = VULKAN_ICD.read_text()
+        body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties2", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer", 1
+        )[0]
+        self.assertIn("PdockerVkStructHeader header = read_vk_struct_header(pMemoryProperties);", body)
+        self.assertIn("zero_vk_out_struct_preserve_chain(pMemoryProperties, sizeof(*pMemoryProperties), header);", body)
+        self.assertIn("vkGetPhysicalDeviceMemoryProperties(physicalDevice, &pMemoryProperties->memoryProperties);", body)
+
+
     def test_vulkan_memory_requirements2_outputs_are_fully_initialized(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("fill_memory_requirements2_pnext", icd)

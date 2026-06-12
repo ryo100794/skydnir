@@ -10214,6 +10214,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties2(
         VkPhysicalDevice physicalDevice,
         VkPhysicalDeviceMemoryProperties2 *pMemoryProperties) {
     if (!pMemoryProperties) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pMemoryProperties);
+    zero_vk_out_struct_preserve_chain(pMemoryProperties, sizeof(*pMemoryProperties), header);
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &pMemoryProperties->memoryProperties);
 }
 
