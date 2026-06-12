@@ -10389,13 +10389,38 @@ VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements(
     pMemoryRequirements->memoryTypeBits = img ? img->memory_type_bits : 0;
 }
 
+static void fill_memory_requirements2_pnext(void *pNext) {
+    for (void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        if (header.sType == VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS) {
+            VkMemoryDedicatedRequirements *dedicated = (VkMemoryDedicatedRequirements *)node;
+            zero_vk_out_struct_preserve_chain(dedicated, sizeof(*dedicated), header);
+            dedicated->prefersDedicatedAllocation = VK_FALSE;
+            dedicated->requiresDedicatedAllocation = VK_FALSE;
+            if (trace_allocations()) {
+                fprintf(stderr,
+                        "pdocker-vulkan-icd: memory-requirements2 dedicated prefers=0 requires=0\n");
+            }
+        } else if (trace_allocations()) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: memory-requirements2 ignored pnext sType=%d\n",
+                    (int)header.sType);
+        }
+        node = (void *)header.pNext;
+    }
+}
+
 VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements2(
         VkDevice device,
         const VkImageMemoryRequirementsInfo2 *pInfo,
         VkMemoryRequirements2 *pMemoryRequirements) {
     if (!pMemoryRequirements) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pMemoryRequirements);
+    void *pnext = (void *)header.pNext;
+    zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);
     vkGetImageMemoryRequirements(device, pInfo ? pInfo->image : VK_NULL_HANDLE,
                                  &pMemoryRequirements->memoryRequirements);
+    fill_memory_requirements2_pnext(pnext);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout(
@@ -10586,24 +10611,11 @@ VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements2(
         const VkBufferMemoryRequirementsInfo2 *pInfo,
         VkMemoryRequirements2 *pMemoryRequirements) {
     if (!pInfo || !pMemoryRequirements) return;
+    PdockerVkStructHeader header = read_vk_struct_header(pMemoryRequirements);
+    void *pnext = (void *)header.pNext;
+    zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);
     vkGetBufferMemoryRequirements(device, pInfo->buffer, &pMemoryRequirements->memoryRequirements);
-    for (void *node = pMemoryRequirements->pNext; node;) {
-        PdockerVkStructHeader header = read_vk_struct_header(node);
-        if (header.sType == VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS) {
-            VkMemoryDedicatedRequirements *dedicated = (VkMemoryDedicatedRequirements *)node;
-            dedicated->prefersDedicatedAllocation = VK_FALSE;
-            dedicated->requiresDedicatedAllocation = VK_FALSE;
-            if (trace_allocations()) {
-                fprintf(stderr,
-                        "pdocker-vulkan-icd: memory-requirements2 dedicated prefers=0 requires=0\n");
-            }
-        } else if (trace_allocations()) {
-            fprintf(stderr,
-                    "pdocker-vulkan-icd: memory-requirements2 ignored pnext sType=%d\n",
-                    (int)header.sType);
-        }
-        node = (void *)header.pNext;
-    }
+    fill_memory_requirements2_pnext(pnext);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(

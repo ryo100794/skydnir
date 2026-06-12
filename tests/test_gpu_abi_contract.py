@@ -4278,6 +4278,28 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(alias, proc_body)
 
+    def test_vulkan_memory_requirements2_outputs_are_fully_initialized(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("fill_memory_requirements2_pnext", icd)
+        helper_body = icd.split("static void fill_memory_requirements2_pnext", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements2", 1
+        )[0]
+        self.assertIn("zero_vk_out_struct_preserve_chain(dedicated, sizeof(*dedicated), header);", helper_body)
+        self.assertIn("dedicated->prefersDedicatedAllocation = VK_FALSE;", helper_body)
+        self.assertIn("dedicated->requiresDedicatedAllocation = VK_FALSE;", helper_body)
+        image_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements2", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkGetImageSubresourceLayout", 1
+        )[0]
+        self.assertIn("zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);", image_body)
+        self.assertIn("fill_memory_requirements2_pnext(pnext);", image_body)
+        buffer_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements2", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory", 1
+        )[0]
+        self.assertIn("zero_vk_out_struct_preserve_chain(pMemoryRequirements, sizeof(*pMemoryRequirements), header);", buffer_body)
+        self.assertIn("fill_memory_requirements2_pnext(pnext);", buffer_body)
+        self.assertNotIn("for (void *node = pMemoryRequirements->pNext", buffer_body)
+
+
     def test_vulkan_image_sampler_object_apis_are_enabled_by_default_and_tracked_for_v5_object_transport(self):
         icd = VULKAN_ICD.read_text()
         for symbol in [
