@@ -9066,7 +9066,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps ? caps->ext_16bit_storage : advertised_storage16()", extension_body)
         self.assertIn("caps ? caps->ext_8bit_storage : advertised_storage8()", extension_body)
         self.assertIn("caps ? caps->ext_shader_float16_int8 : advertised_storage8()", extension_body)
-        self.assertIn("!caps || caps->ext_storage_buffer_storage_class", extension_body)
+        self.assertIn("advertised_storage_buffer_storage_class()", extension_body)
+        self.assertIn("return (caps && caps->ext_storage_buffer_storage_class) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertNotIn("!caps || caps->ext_storage_buffer_storage_class", extension_body)
         self.assertIn("PDOCKER_VULKAN_ICD_DEBUG", icd)
 
     def test_llama_gpu_dispatch_lifecycle_logs_are_recorded(self):

@@ -1382,6 +1382,7 @@ static void maybe_dump_spirv(const VkShaderModuleCreateInfo *info) {
 static VkBool32 executor_advertised_shader_int64_or(VkBool32 legacy);
 static VkBool32 executor_advertised_storage16_or(VkBool32 legacy);
 static VkBool32 executor_advertised_storage8_or(VkBool32 legacy);
+static VkBool32 advertised_storage_buffer_storage_class(void);
 
 static VkBool32 advertised_shader_int64(void) {
     /*
@@ -9255,6 +9256,11 @@ static VkBool32 executor_advertised_storage8_or(VkBool32 legacy) {
         : VK_FALSE;
 }
 
+static VkBool32 advertised_storage_buffer_storage_class(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->ext_storage_buffer_storage_class) ? VK_TRUE : VK_FALSE;
+}
+
 static void trace_executor_advertisement_caps_once(void) {
     static int traced = 0;
     if (traced || !getenv("PDOCKER_VULKAN_ICD_DEBUG")) return;
@@ -11050,7 +11056,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
     if (caps ? caps->ext_shader_float16_int8 : advertised_storage8()) {
         ADD_DEVICE_EXTENSION(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_KHR_SHADER_FLOAT16_INT8_SPEC_VERSION);
     }
-    if (!caps || caps->ext_storage_buffer_storage_class) {
+    if (advertised_storage_buffer_storage_class()) {
         ADD_DEVICE_EXTENSION(VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME,
                              VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION);
     }
@@ -11093,7 +11099,7 @@ static bool device_extension_advertised_name(const char *name) {
         return caps ? caps->ext_shader_float16_int8 : advertised_storage8();
     }
     if (strcmp(name, VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME) == 0) {
-        return !caps || caps->ext_storage_buffer_storage_class;
+        return advertised_storage_buffer_storage_class();
     }
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     if (strcmp(name, VK_KHR_MAINTENANCE_4_EXTENSION_NAME) == 0) return true;
