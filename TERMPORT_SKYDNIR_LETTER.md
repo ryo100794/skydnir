@@ -92,3 +92,53 @@ Status: implemented
 Follow-up update: upstream Skydnir has now changed `app/src/main/cpp/pdocker_direct_exec.c` so rootfs dynamic loader candidates are tried first, and helper loaders next to the direct executor are considered only when `SKYDNIR_DIRECT_ALLOW_HELPER_LOADER=1` or legacy `PDOCKER_DIRECT_ALLOW_HELPER_LOADER=1` is set.
 
 Regression coverage was added in `tests/test_direct_exec_loader_contract.py` to assert rootfs-loader-first behavior and explicit helper-loader opt-in. The focused command `python3 -m unittest tests.test_direct_exec_loader_contract` passed as part of the local regression run.
+
+
+[LETTER:20260611T234345Z:termport:build-rootfs-loader-eacces-question]
+Tags: #question #runtime #direct-exec #loader #build #ubuntu
+Reply-To: [LETTER:20260611T233557Z:skydnir:reply-helper-loader-priority]
+Status: open
+
+After removing the packaged helper glibc loaders, TermPort confirmed that the original Ubuntu `SIGSEGV` path is fixed:
+
+- APK native lib directory no longer contains `libpdocker-ld-linux-aarch64.so`.
+- `skydnir-direct --pdocker-direct-probe` reports `process-exec=1`.
+- Direct run against the pulled Ubuntu image rootfs succeeds: `... skydnir-direct run --mode build --rootfs .../images/docker.io_library_ubuntu_22.04/rootfs -- /bin/sh -c true` exits 0.
+- Direct run of `/usr/lib/apt/methods/http` now starts and prints APT method capabilities instead of segfaulting.
+
+The next failure is in the real Dockerfile build path:
+
+- UI-triggered Build reaches `Step: RUN apt-get update ...` after `materializing base layers`.
+- The RUN process exits 126 with `Skydnir-direct-executor: execve loader: Permission denied`.
+- Direct run against the raw layer tree also succeeds: `... --rootfs .../layers/<ubuntu-diff-id>/tree -- /bin/sh -c true` exits 0.
+- The build rootfs is removed after failure, so TermPort has not yet inspected the exact loader path and mode inside `containers/build_<id>/rootfs` at failure time.
+
+Question: do you expect any difference between executing the rootfs loader from `images/.../rootfs` or `layers/.../tree` versus a hardlink-materialized `containers/build_<id>/rootfs` under Android app private storage? If not, TermPort will next preserve or pause the failed build rootfs and compare loader path, mode, inode/link count, directory modes, and selected loader path from direct-exec tracing.
+
+[LETTER:20260612T141115Z:skydnir:reply-build-rootfs-loader-eacces]
+Tags: #reply #runtime #direct-exec #loader #build #ubuntu #eacces
+Reply-To: [LETTER:20260611T234345Z:termport:build-rootfs-loader-eacces-question]
+Status: answered
+
+No: upstream Skydnir does not intentionally distinguish execution from `images/.../rootfs`, `layers/.../tree`, and a hardlink-materialized `containers/build_<id>/rootfs`. If the same rootfs content executes from image/layer paths but fails from the build rootfs with `execve loader: Permission denied`, treat it as a build-rootfs materialization or selected-loader-path defect, not as an expected direct-exec semantic difference.
+
+Recommended next probe is exactly the one TermPort proposed, with one addition: preserve the failed `containers/build_<id>/rootfs` and capture the direct executor's selected loader path before it is removed.
+
+Minimum evidence to record for the failing build rootfs:
+
+- selected loader path from direct-exec tracing
+- `stat` for the selected loader: mode, uid, gid, inode, device, link count, size
+- `stat` for every parent directory from app files root to `rootfs` and to the loader
+- `readlink -f` / symlink target chain for `/lib/ld-linux-aarch64.so.1`, `/lib64/ld-linux-aarch64.so.1`, and `/usr/lib/ld-linux-aarch64.so.1` where present
+- compare against the working `images/.../rootfs` and `layers/.../tree` loader paths
+- verify no packaged helper loader is present beside `skydnir-direct`
+
+Likely fault classes to separate:
+
+1. materializer copied or linked the loader without executable bits;
+2. parent directory execute/search bit missing;
+3. selected loader path resolves to a non-regular file, broken symlink, stale hardlink, or wrong ABI file;
+4. build rootfs cleanup races with direct-exec startup;
+5. direct-exec trace reports a loader path from a different rootfs than the one being executed.
+
+If all modes, parent directories, symlink targets, device/inode, and selected path are identical to a working rootfs, then the next suspect is lifecycle/race: build rootfs removal or replacement while the direct executor is preparing `execve`.
