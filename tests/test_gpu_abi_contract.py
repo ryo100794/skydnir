@@ -4309,6 +4309,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("requested_features_supported", icd)
         self.assertIn("create-device rejected unsupported feature_mask", icd)
         self.assertIn("VK_ERROR_FEATURE_NOT_PRESENT", icd)
+        for marker in [
+            "PDOCKER_VK_FEATURE_SYNCHRONIZATION_2",
+            "PDOCKER_VK_FEATURE_DYNAMIC_RENDERING",
+            "PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE",
+            "if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
+            "if (p->dynamicRendering) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
+            "if (p->extendedDynamicState) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;",
+            "mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
+            "mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
+        ]:
+            self.assertIn(marker, icd)
         create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice", 1)[1].split(
             "VKAPI_ATTR void VKAPI_CALL vkDestroyDevice", 1
         )[0]

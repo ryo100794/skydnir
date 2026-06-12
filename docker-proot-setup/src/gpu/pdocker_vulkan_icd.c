@@ -174,6 +174,9 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_MAINTENANCE_4                (1ull << 13)
 #define PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8             (1ull << 14)
 #define PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE           (1ull << 15)
+#define PDOCKER_VK_FEATURE_SYNCHRONIZATION_2            (1ull << 16)
+#define PDOCKER_VK_FEATURE_DYNAMIC_RENDERING            (1ull << 17)
+#define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE       (1ull << 18)
 
 struct PdockerVkMemory {
     size_t size;
@@ -9753,10 +9756,31 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 break;
             }
 #endif
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES: {
+                const VkPhysicalDeviceSynchronization2Features *p = (const VkPhysicalDeviceSynchronization2Features *)node;
+                if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+                break;
+            }
+#endif
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES: {
                 const VkPhysicalDeviceTimelineSemaphoreFeatures *p = (const VkPhysicalDeviceTimelineSemaphoreFeatures *)node;
                 if (p->timelineSemaphore) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES: {
+                const VkPhysicalDeviceDynamicRenderingFeatures *p = (const VkPhysicalDeviceDynamicRenderingFeatures *)node;
+                if (p->dynamicRendering) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
+                const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (const VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
+                if (p->extendedDynamicState) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
                 break;
             }
 #endif
@@ -9827,7 +9851,14 @@ static uint64_t advertised_feature_mask(void) {
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     mask |= PDOCKER_VK_FEATURE_MAINTENANCE_4;
 #endif
+    mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
     mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
+    mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
+    if (!caps || caps->ext_extended_dynamic_state) {
+        mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
+    }
+#endif
     return mask;
 }
 
