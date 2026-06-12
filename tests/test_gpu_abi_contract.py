@@ -4054,6 +4054,33 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("queueCount = 2", qf2_body)
 
 
+    def test_vulkan_properties_pnext_structs_are_fully_initialized(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("zero_vk_out_struct_preserve_chain", icd)
+        helper_body = icd.split("static void zero_vk_out_struct_preserve_chain", 1)[1].split(
+            "static void trace_pnext_chain", 1
+        )[0]
+        self.assertIn("memset(node, 0, size);", helper_body)
+        self.assertIn("out->sType = header.sType;", helper_body)
+        self.assertIn("out->pNext = header.pNext;", helper_body)
+        props_body = icd.split("static void fill_pnext_properties", 1)[1].split(
+            "static void fill_physical_device_features", 1
+        )[0]
+        for struct_name in [
+            "VkPhysicalDeviceMaintenance3Properties",
+            "VkPhysicalDeviceSubgroupProperties",
+            "VkPhysicalDeviceDriverProperties",
+            "VkPhysicalDeviceVulkan11Properties",
+            "VkPhysicalDeviceVulkan12Properties",
+        ]:
+            self.assertIn(f"{struct_name} *p", props_body)
+            segment = props_body.split(f"{struct_name} *p", 1)[1].split("break;", 1)[0]
+            self.assertIn("zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);", segment)
+        if "VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES" in props_body:
+            segment = props_body.split("VkPhysicalDeviceMaintenance4Properties *p", 1)[1].split("break;", 1)[0]
+            self.assertIn("zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);", segment)
+
+
     def test_vulkan_command_recording_overflow_fails_closed(self):
         icd = VULKAN_ICD.read_text()
         for marker in [

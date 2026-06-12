@@ -1997,6 +1997,17 @@ static PdockerVkStructHeader read_vk_struct_header(const void *node) {
     return header;
 }
 
+static void zero_vk_out_struct_preserve_chain(
+        void *node,
+        size_t size,
+        PdockerVkStructHeader header) {
+    if (!node || size < sizeof(PdockerVkStructHeader)) return;
+    memset(node, 0, size);
+    PdockerVkStructHeader *out = (PdockerVkStructHeader *)node;
+    out->sType = header.sType;
+    out->pNext = header.pNext;
+}
+
 static void trace_pnext_chain(const char *prefix, const void *pNext) {
     if (!trace_allocations()) return;
     const void *node = pNext;
@@ -9446,6 +9457,7 @@ static void fill_pnext_properties(void *pNext) {
         switch (header.sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES: {
                 VkPhysicalDeviceMaintenance3Properties *p = (VkPhysicalDeviceMaintenance3Properties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->maxPerSetDescriptors = pdocker_vk_max_per_set_descriptors();
                 p->maxMemoryAllocationSize = pdocker_vulkan_max_buffer_size();
                 break;
@@ -9453,12 +9465,14 @@ static void fill_pnext_properties(void *pNext) {
 #ifdef VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES: {
                 VkPhysicalDeviceMaintenance4Properties *p = (VkPhysicalDeviceMaintenance4Properties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->maxBufferSize = pdocker_vulkan_max_buffer_size();
                 break;
             }
 #endif
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES: {
                 VkPhysicalDeviceSubgroupProperties *p = (VkPhysicalDeviceSubgroupProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->subgroupSize = advertised_subgroup_size();
                 p->supportedStages = VK_SHADER_STAGE_COMPUTE_BIT;
                 p->supportedOperations = advertised_subgroup_operations();
@@ -9467,6 +9481,7 @@ static void fill_pnext_properties(void *pNext) {
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES: {
                 VkPhysicalDeviceDriverProperties *p = (VkPhysicalDeviceDriverProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->driverID = VK_DRIVER_ID_MESA_LLVMPIPE;
                 snprintf(p->driverName, sizeof(p->driverName), "pdocker-vulkan-bridge");
                 snprintf(p->driverInfo, sizeof(p->driverInfo), "pdocker neutral Vulkan bridge");
@@ -9478,6 +9493,7 @@ static void fill_pnext_properties(void *pNext) {
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES: {
                 VkPhysicalDeviceVulkan11Properties *p = (VkPhysicalDeviceVulkan11Properties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->subgroupSize = advertised_subgroup_size();
                 p->subgroupSupportedStages = VK_SHADER_STAGE_COMPUTE_BIT;
                 p->subgroupSupportedOperations = advertised_subgroup_operations();
@@ -9490,6 +9506,7 @@ static void fill_pnext_properties(void *pNext) {
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES: {
                 VkPhysicalDeviceVulkan12Properties *p = (VkPhysicalDeviceVulkan12Properties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
                 p->driverID = VK_DRIVER_ID_MESA_LLVMPIPE;
                 snprintf(p->driverName, sizeof(p->driverName), "pdocker-vulkan-bridge");
                 snprintf(p->driverInfo, sizeof(p->driverInfo), "pdocker neutral Vulkan bridge");
