@@ -10268,6 +10268,46 @@ static VkResult unsupported_image_transport_result(const char *api_name) {
     return VK_ERROR_FEATURE_NOT_PRESENT;
 }
 
+static VkResult unsupported_image_pnext_result(const char *api_name, const void *pNext) {
+    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+        PdockerVkStructHeader header = read_vk_struct_header(pNext);
+        fprintf(stderr,
+                "pdocker-vulkan-icd: %s pNext sType=%d is unsupported by image object transport; rejecting instead of ignoring it\n",
+                api_name ? api_name : "image-api",
+                (int)header.sType);
+    }
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+
+static VkResult validate_image_create_info_for_transport(const VkImageCreateInfo *info) {
+    if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+    if (info->pNext) return unsupported_image_pnext_result("vkCreateImage", info->pNext);
+    VkImageFormatProperties props;
+    return vkGetPhysicalDeviceImageFormatProperties(
+        (VkPhysicalDevice)&g_device,
+        info->format,
+        info->imageType,
+        info->tiling,
+        info->usage,
+        info->flags,
+        &props);
+}
+
+static VkResult validate_image_view_create_info_for_transport(const VkImageViewCreateInfo *info) {
+    if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+    if (info->pNext) return unsupported_image_pnext_result("vkCreateImageView", info->pNext);
+    if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!pdocker_vk_format_bridge_supported(info->format)) return VK_ERROR_FORMAT_NOT_SUPPORTED;
+    return VK_SUCCESS;
+}
+
+static VkResult validate_sampler_create_info_for_transport(const VkSamplerCreateInfo *info) {
+    if (!info) return VK_ERROR_INITIALIZATION_FAILED;
+    if (info->pNext) return unsupported_image_pnext_result("vkCreateSampler", info->pNext);
+    if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
+    return VK_SUCCESS;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
         VkDevice device,
         const VkImageCreateInfo *pCreateInfo,
@@ -10280,9 +10320,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     if (!vulkan_v5_object_transport_enabled()) {
         return unsupported_image_transport_result("vkCreateImage");
     }
-    if (!pdocker_vk_format_bridge_supported(pCreateInfo->format)) {
-        return VK_ERROR_FORMAT_NOT_SUPPORTED;
-    }
+    VkResult validate_rc = validate_image_create_info_for_transport(pCreateInfo);
+    if (validate_rc != VK_SUCCESS) return validate_rc;
     VkDeviceSize requirements_size = estimate_image_requirement_size(pCreateInfo);
     if (requirements_size == 0 || requirements_size > pdocker_vulkan_max_buffer_size()) {
         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
@@ -10452,6 +10491,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
     if (!vulkan_v5_object_transport_enabled()) {
         return unsupported_image_transport_result("vkCreateImageView");
     }
+    VkResult validate_rc = validate_image_view_create_info_for_transport(pCreateInfo);
+    if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkImage *image = (PdockerVkImage *)pCreateInfo->image;
     if (!image) return VK_ERROR_INITIALIZATION_FAILED;
     PdockerVkImageView *view = pdocker_alloc_handle(sizeof(*view));
@@ -10487,6 +10528,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(
     if (!vulkan_v5_object_transport_enabled()) {
         return unsupported_image_transport_result("vkCreateSampler");
     }
+    VkResult validate_rc = validate_sampler_create_info_for_transport(pCreateInfo);
+    if (validate_rc != VK_SUCCESS) return validate_rc;
     PdockerVkSampler *sampler = pdocker_alloc_handle(sizeof(*sampler));
     if (!sampler) return VK_ERROR_OUT_OF_HOST_MEMORY;
     sampler->mag_filter = pCreateInfo->magFilter;

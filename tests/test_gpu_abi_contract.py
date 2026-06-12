@@ -4314,7 +4314,30 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn('return unsupported_image_transport_result("vkCreateImage");', icd)
         self.assertIn('return unsupported_image_transport_result("vkCreateImageView");', icd)
         self.assertIn('return unsupported_image_transport_result("vkCreateSampler");', icd)
-        self.assertIn("if (!pdocker_vk_format_bridge_supported(pCreateInfo->format))", icd)
+        self.assertIn("unsupported_image_pnext_result", icd)
+        self.assertIn("validate_image_create_info_for_transport", icd)
+        self.assertIn("validate_image_view_create_info_for_transport", icd)
+        self.assertIn("validate_sampler_create_info_for_transport", icd)
+        image_validate_body = icd.split("static VkResult validate_image_create_info_for_transport", 1)[1].split(
+            "static VkResult validate_image_view_create_info_for_transport", 1
+        )[0]
+        self.assertIn("if (info->pNext) return unsupported_image_pnext_result", image_validate_body)
+        self.assertIn("vkGetPhysicalDeviceImageFormatProperties", image_validate_body)
+        create_image_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyImage", 1
+        )[0]
+        self.assertIn("validate_image_create_info_for_transport(pCreateInfo)", create_image_body)
+        self.assertNotIn("if (!pdocker_vk_format_bridge_supported(pCreateInfo->format))", create_image_body)
+        image_view_validate_body = icd.split("static VkResult validate_image_view_create_info_for_transport", 1)[1].split(
+            "static VkResult validate_sampler_create_info_for_transport", 1
+        )[0]
+        self.assertIn("if (info->pNext) return unsupported_image_pnext_result", image_view_validate_body)
+        self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", image_view_validate_body)
+        sampler_validate_body = icd.split("static VkResult validate_sampler_create_info_for_transport", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage", 1
+        )[0]
+        self.assertIn("if (info->pNext) return unsupported_image_pnext_result", sampler_validate_body)
+        self.assertIn("if (info->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", sampler_validate_body)
         self.assertIn("return VK_ERROR_FORMAT_NOT_SUPPORTED;", icd)
         self.assertIn("uint32_t bytes_per_pixel = conservative_format_bytes_per_pixel(info->format);", icd)
         self.assertIn("if (bytes_per_pixel == 0) return 0;", icd)
