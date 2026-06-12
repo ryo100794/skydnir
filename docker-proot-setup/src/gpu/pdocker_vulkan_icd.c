@@ -10181,6 +10181,52 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties(
     }
 }
 
+static void fill_queue_family_properties2_pnext(void *pNext) {
+    for (void *node = pNext; node;) {
+        PdockerVkStructHeader header = read_vk_struct_header(node);
+        switch (header.sType) {
+#ifdef VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES
+            case VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES: {
+                VkQueueFamilyGlobalPriorityProperties *p = (VkQueueFamilyGlobalPriorityProperties *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR
+            case VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR: {
+                VkQueueFamilyVideoPropertiesKHR *p = (VkQueueFamilyVideoPropertiesKHR *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR
+            case VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR: {
+                VkQueueFamilyQueryResultStatusPropertiesKHR *p = (VkQueueFamilyQueryResultStatusPropertiesKHR *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_NV
+            case VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_NV: {
+                VkQueueFamilyCheckpointPropertiesNV *p = (VkQueueFamilyCheckpointPropertiesNV *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+#endif
+#ifdef VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_2_NV
+            case VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_2_NV: {
+                VkQueueFamilyCheckpointProperties2NV *p = (VkQueueFamilyCheckpointProperties2NV *)node;
+                zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
+                break;
+            }
+#endif
+            default:
+                break;
+        }
+        node = (void *)header.pNext;
+    }
+}
+
 VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2(
         VkPhysicalDevice physicalDevice,
         uint32_t *pQueueFamilyPropertyCount,
@@ -10200,6 +10246,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2(
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.width = 1;
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.height = 1;
         pQueueFamilyProperties[0].queueFamilyProperties.minImageTransferGranularity.depth = 1;
+        fill_queue_family_properties2_pnext((void *)header.pNext);
         *pQueueFamilyPropertyCount = 1;
     }
 }

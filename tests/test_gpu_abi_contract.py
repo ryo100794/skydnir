@@ -4040,7 +4040,22 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("queueFlags = pdocker_vk_advertised_queue_flags();", qf_body)
         self.assertIn("queueFlags = pdocker_vk_advertised_queue_flags();", qf2_body)
         self.assertIn("zero_vk_out_struct_preserve_chain(&pQueueFamilyProperties[0], sizeof(pQueueFamilyProperties[0]), header);", qf2_body)
+        self.assertIn("fill_queue_family_properties2_pnext((void *)header.pNext);", qf2_body)
         self.assertNotIn("memset(&pQueueFamilyProperties[0].queueFamilyProperties", qf2_body)
+        qf2_pnext_body = icd.split("static void fill_queue_family_properties2_pnext", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceQueueFamilyProperties2", 1
+        )[0]
+        for struct_name in [
+            "VkQueueFamilyGlobalPriorityProperties",
+            "VkQueueFamilyVideoPropertiesKHR",
+            "VkQueueFamilyQueryResultStatusPropertiesKHR",
+            "VkQueueFamilyCheckpointPropertiesNV",
+            "VkQueueFamilyCheckpointProperties2NV",
+        ]:
+            if struct_name not in qf2_pnext_body:
+                continue
+            segment = qf2_pnext_body.split(f"{struct_name} *p", 1)[1].split("break;", 1)[0]
+            self.assertIn("zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);", segment)
         self.assertIn("queueCount = PDOCKER_VK_ADVERTISED_QUEUE_COUNT", qf_body)
         self.assertIn("queueCount = PDOCKER_VK_ADVERTISED_QUEUE_COUNT", qf2_body)
         self.assertIn("#define PDOCKER_VK_ADVERTISED_QUEUE_COUNT 1u", icd)
