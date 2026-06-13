@@ -1281,6 +1281,7 @@ typedef struct {
     VkPhysicalDevice16BitStorageFeatures physical_storage16;
     VkPhysicalDevice8BitStorageFeatures physical_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features physical_float16_int8;
+    VkPhysicalDeviceSynchronization2Features physical_synchronization2;
     VkPhysicalDeviceDynamicRenderingFeatures physical_dynamic_rendering;
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT physical_extended_dynamic_state;
     VkPhysicalDeviceIndexTypeUint8FeaturesEXT physical_index_type_uint8;
@@ -1290,6 +1291,7 @@ typedef struct {
     VkPhysicalDevice16BitStorageFeatures enabled_storage16;
     VkPhysicalDevice8BitStorageFeatures enabled_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
+    VkPhysicalDeviceSynchronization2Features enabled_synchronization2;
     VkPhysicalDeviceDynamicRenderingFeatures enabled_dynamic_rendering;
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT enabled_extended_dynamic_state;
     VkPhysicalDeviceIndexTypeUint8FeaturesEXT enabled_index_type_uint8;
@@ -1800,6 +1802,12 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"storagePushConstant8\":%u,"
             "\"shaderFloat16\":%u,"
             "\"shaderInt8\":%u,"
+            "\"timelineSemaphore\":%u,"
+            "\"synchronization2\":%u,"
+            "\"dynamicRendering\":%u,"
+            "\"queueSubmit2\":%u,"
+            "\"cmdPipelineBarrier2\":%u,"
+            "\"dynamicRenderingUsable\":%u,"
             "\"core11_storageBuffer16BitAccess\":%u,"
             "\"core11_uniformAndStorageBuffer16BitAccess\":%u,"
             "\"core11_storagePushConstant16\":%u,"
@@ -1817,6 +1825,9 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"VK_KHR_8bit_storage\":%u,"
             "\"VK_KHR_shader_float16_int8\":%u,"
             "\"VK_KHR_storage_buffer_storage_class\":%u,"
+            "\"VK_KHR_timeline_semaphore\":%u,"
+            "\"VK_KHR_synchronization2\":%u,"
+            "\"VK_KHR_dynamic_rendering\":%u,"
             "\"VK_EXT_extended_dynamic_state\":%u,"
             "\"VK_EXT_index_type_uint8\":%u}}",
             rt ? rt->enabled_features.shaderInt64 : 0,
@@ -1828,6 +1839,12 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_storage8.storagePushConstant8 : 0,
             rt ? rt->enabled_float16_int8.shaderFloat16 : 0,
             rt ? rt->enabled_float16_int8.shaderInt8 : 0,
+            rt && rt->enabled_vulkan12.timelineSemaphore && rt->get_semaphore_counter_value && rt->wait_semaphores && rt->signal_semaphore ? 1u : 0u,
+            rt && rt->enabled_synchronization2.synchronization2 && rt->queue_submit2 && rt->cmd_pipeline_barrier2 ? 1u : 0u,
+            rt && rt->graphics_ready ? 1u : 0u,
+            rt && rt->queue_submit2 ? 1u : 0u,
+            rt && rt->cmd_pipeline_barrier2 ? 1u : 0u,
+            rt && rt->graphics_ready ? 1u : 0u,
             rt ? rt->enabled_vulkan11.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_vulkan11.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->enabled_vulkan11.storagePushConstant16 : 0,
@@ -1844,6 +1861,9 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_ext_8bit_storage : 0,
             rt ? rt->enabled_ext_shader_float16_int8 : 0,
             rt ? rt->enabled_ext_storage_buffer_storage_class : 0,
+            rt && rt->enabled_vulkan12.timelineSemaphore && rt->get_semaphore_counter_value && rt->wait_semaphores && rt->signal_semaphore ? 1u : 0u,
+            rt && rt->enabled_synchronization2.synchronization2 && rt->queue_submit2 && rt->cmd_pipeline_barrier2 ? 1u : 0u,
+            rt && rt->graphics_ready ? 1u : 0u,
             rt ? rt->enabled_ext_extended_dynamic_state : 0,
             rt ? rt->enabled_ext_index_type_uint8 : 0);
 }
@@ -10819,6 +10839,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     memset(&rt->physical_storage16, 0, sizeof(rt->physical_storage16));
     memset(&rt->physical_storage8, 0, sizeof(rt->physical_storage8));
     memset(&rt->physical_float16_int8, 0, sizeof(rt->physical_float16_int8));
+    memset(&rt->physical_synchronization2, 0, sizeof(rt->physical_synchronization2));
     memset(&rt->physical_dynamic_rendering, 0, sizeof(rt->physical_dynamic_rendering));
     memset(&rt->physical_extended_dynamic_state, 0, sizeof(rt->physical_extended_dynamic_state));
     memset(&rt->physical_index_type_uint8, 0, sizeof(rt->physical_index_type_uint8));
@@ -10828,6 +10849,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->physical_storage16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
     rt->physical_storage8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
     rt->physical_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    rt->physical_synchronization2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
     rt->physical_dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
     rt->physical_extended_dynamic_state.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
     rt->physical_index_type_uint8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT;
@@ -10846,7 +10868,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_vulkan12.pNext = &rt->physical_storage16;
         rt->physical_storage16.pNext = &rt->physical_storage8;
         rt->physical_storage8.pNext = &rt->physical_float16_int8;
-        rt->physical_float16_int8.pNext = &rt->physical_dynamic_rendering;
+        rt->physical_float16_int8.pNext = &rt->physical_synchronization2;
+        rt->physical_synchronization2.pNext = &rt->physical_dynamic_rendering;
         rt->physical_dynamic_rendering.pNext = &rt->physical_extended_dynamic_state;
         rt->physical_extended_dynamic_state.pNext = &rt->physical_index_type_uint8;
         get_features2(rt->physical_device, &features2);
@@ -10856,6 +10879,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_storage16.pNext = NULL;
         rt->physical_storage8.pNext = NULL;
         rt->physical_float16_int8.pNext = NULL;
+        rt->physical_synchronization2.pNext = NULL;
         rt->physical_dynamic_rendering.pNext = NULL;
         rt->physical_extended_dynamic_state.pNext = NULL;
         rt->physical_index_type_uint8.pNext = NULL;
@@ -10923,6 +10947,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     VkPhysicalDevice16BitStorageFeatures enabled_storage16;
     VkPhysicalDevice8BitStorageFeatures enabled_storage8;
     VkPhysicalDeviceShaderFloat16Int8Features enabled_float16_int8;
+    VkPhysicalDeviceSynchronization2Features enabled_synchronization2;
     VkPhysicalDeviceDynamicRenderingFeatures enabled_dynamic_rendering;
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT enabled_extended_dynamic_state;
     VkPhysicalDeviceIndexTypeUint8FeaturesEXT enabled_index_type_uint8;
@@ -10931,6 +10956,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     memset(&enabled_storage16, 0, sizeof(enabled_storage16));
     memset(&enabled_storage8, 0, sizeof(enabled_storage8));
     memset(&enabled_float16_int8, 0, sizeof(enabled_float16_int8));
+    memset(&enabled_synchronization2, 0, sizeof(enabled_synchronization2));
     memset(&enabled_dynamic_rendering, 0, sizeof(enabled_dynamic_rendering));
     memset(&enabled_extended_dynamic_state, 0, sizeof(enabled_extended_dynamic_state));
     memset(&enabled_index_type_uint8, 0, sizeof(enabled_index_type_uint8));
@@ -10965,9 +10991,11 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_storage8.uniformAndStorageBuffer8BitAccess = rt->physical_storage8.uniformAndStorageBuffer8BitAccess;
     enabled_storage8.storagePushConstant8 = rt->physical_storage8.storagePushConstant8;
     enabled_float16_int8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
+    enabled_synchronization2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
     enabled_dynamic_rendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
     enabled_extended_dynamic_state.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
     enabled_index_type_uint8.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT;
+    enabled_synchronization2.synchronization2 = rt->physical_synchronization2.synchronization2;
     enabled_dynamic_rendering.dynamicRendering = rt->physical_dynamic_rendering.dynamicRendering;
     enabled_extended_dynamic_state.extendedDynamicState = rt->physical_extended_dynamic_state.extendedDynamicState;
     enabled_index_type_uint8.indexTypeUint8 = rt->physical_index_type_uint8.indexTypeUint8;
@@ -10999,6 +11027,15 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
          enabled_vulkan11.storageInputOutput16)) {
         enabled_vulkan11.pNext = device_features_pnext;
         device_features_pnext = &enabled_vulkan11;
+    }
+    const int synchronization2_available =
+        enabled_synchronization2.synchronization2 &&
+        (rt->api_version >= VK_API_VERSION_1_3 ||
+         vulkan_device_extension_supported(rt->physical_device,
+                                           VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME));
+    if (synchronization2_available) {
+        enabled_synchronization2.pNext = device_features_pnext;
+        device_features_pnext = &enabled_synchronization2;
     }
     const int dynamic_rendering_available =
         enabled_dynamic_rendering.dynamicRendering &&
@@ -11094,6 +11131,13 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
             (rt->api_version >= VK_API_VERSION_1_3 ||
              enabled_extension_count > dynamic_rendering_before);
     }
+    if (enabled_synchronization2.synchronization2) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+    }
 #ifdef VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
     if (enabled_vulkan12.timelineSemaphore && rt->api_version < VK_API_VERSION_1_2) {
         append_vulkan_device_extension(rt->physical_device,
@@ -11138,6 +11182,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->enabled_storage16 = enabled_storage16;
     rt->enabled_storage8 = enabled_storage8;
     rt->enabled_float16_int8 = enabled_float16_int8;
+    rt->enabled_synchronization2 = enabled_synchronization2;
     rt->enabled_dynamic_rendering = enabled_dynamic_rendering;
     rt->enabled_extended_dynamic_state = enabled_extended_dynamic_state;
     rt->enabled_index_type_uint8 = enabled_index_type_uint8;
@@ -11146,6 +11191,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     rt->enabled_storage16.pNext = NULL;
     rt->enabled_storage8.pNext = NULL;
     rt->enabled_float16_int8.pNext = NULL;
+    rt->enabled_synchronization2.pNext = NULL;
     rt->enabled_dynamic_rendering.pNext = NULL;
     rt->enabled_extended_dynamic_state.pNext = NULL;
     rt->enabled_index_type_uint8.pNext = NULL;

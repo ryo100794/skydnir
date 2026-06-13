@@ -635,7 +635,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME", icd)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME", icd)
         self.assertIn("VkPhysicalDeviceDynamicRenderingFeatures", icd)
-        self.assertIn("p->dynamicRendering = VK_TRUE;", icd)
+        self.assertIn("p->dynamicRendering = advertised_dynamic_rendering();", icd)
         for name in [
             "vkCreateGraphicsPipelines",
             "vkCreateRenderPass",
@@ -4209,7 +4209,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "bool timeline;",
             "uint64_t value;",
             "VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME",
-            "p->timelineSemaphore = VK_TRUE;",
+            "p->timelineSemaphore = advertised_timeline_semaphore();",
             "VkSemaphoreTypeCreateInfo",
             "VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO",
             "VK_SEMAPHORE_TYPE_TIMELINE",
@@ -4335,8 +4335,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (p->synchronization2) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
             "if (p->dynamicRendering) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
             "if (p->extendedDynamicState) mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;",
-            "mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
-            "mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
+            "if (advertised_synchronization2()) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;",
+            "if (advertised_dynamic_rendering()) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;",
         ]:
             self.assertIn(marker, icd)
         create_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice", 1)[1].split(
@@ -4879,7 +4879,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME", icd)
         self.assertIn("ADD_DEVICE_EXTENSION(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME", icd)
         self.assertIn("VkPhysicalDeviceSynchronization2Features", icd)
-        self.assertIn("p->synchronization2 = VK_TRUE;", icd)
+        self.assertIn("p->synchronization2 = advertised_synchronization2();", icd)
         for name in [
             "vkQueueSubmit2",
             "vkCmdPipelineBarrier2",
@@ -9022,6 +9022,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "storage8.storageBuffer8BitAccess",
             "float16_int8.shaderInt8",
             "subgroup.supportedOperations",
+            "timeline_semaphore",
+            "synchronization2",
+            "dynamic_rendering",
+            "ext_timeline_semaphore",
+            "ext_synchronization2",
+            "ext_dynamic_rendering",
+            "advertised_timeline_semaphore",
+            "advertised_synchronization2",
+            "advertised_dynamic_rendering",
             "executor_advertisement_source_enabled",
             "PDOCKER_VULKAN_ADVERTISEMENT_SOURCE",
             'strcmp(source, "executor") == 0',
@@ -9060,6 +9069,9 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps->storage16.uniformAndStorageBuffer16BitAccess", pnext_body)
         self.assertIn("caps->storage8.uniformAndStorageBuffer8BitAccess", pnext_body)
         self.assertIn("caps->float16_int8.shaderFloat16", pnext_body)
+        self.assertIn("p->timelineSemaphore = advertised_timeline_semaphore();", pnext_body)
+        self.assertIn("p->synchronization2 = advertised_synchronization2();", pnext_body)
+        self.assertIn("p->dynamicRendering = advertised_dynamic_rendering();", pnext_body)
         extension_body = icd.split("vkEnumerateDeviceExtensionProperties", 1)[1].split(
             "#undef ADD_DEVICE_EXTENSION", 1
         )[0]
@@ -9067,7 +9079,13 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps ? caps->ext_8bit_storage : advertised_storage8()", extension_body)
         self.assertIn("caps ? caps->ext_shader_float16_int8 : advertised_storage8()", extension_body)
         self.assertIn("advertised_storage_buffer_storage_class()", extension_body)
+        self.assertIn("advertised_timeline_semaphore()", extension_body)
+        self.assertIn("advertised_synchronization2()", extension_body)
+        self.assertIn("advertised_dynamic_rendering()", extension_body)
         self.assertIn("return (caps && caps->ext_storage_buffer_storage_class) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->timeline_semaphore && caps->ext_timeline_semaphore) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->synchronization2 && caps->ext_synchronization2) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->dynamic_rendering && caps->ext_dynamic_rendering) ? VK_TRUE : VK_FALSE;", icd)
         self.assertNotIn("!caps || caps->ext_storage_buffer_storage_class", extension_body)
         self.assertIn("PDOCKER_VULKAN_ICD_DEBUG", icd)
 

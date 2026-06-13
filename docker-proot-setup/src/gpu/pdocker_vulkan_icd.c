@@ -9063,6 +9063,12 @@ typedef struct {
     bool ext_8bit_storage;
     bool ext_shader_float16_int8;
     bool ext_storage_buffer_storage_class;
+    bool timeline_semaphore;
+    bool synchronization2;
+    bool dynamic_rendering;
+    bool ext_timeline_semaphore;
+    bool ext_synchronization2;
+    bool ext_dynamic_rendering;
     bool ext_extended_dynamic_state;
     bool ext_index_type_uint8;
 } PdockerVkAdvertisedCaps;
@@ -9163,6 +9169,9 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32(json, "shaderFloat16", &caps->float16_int8.shaderFloat16);
     json_read_u32(json, "shaderInt8", &caps->float16_int8.shaderInt8);
     json_read_u32(json, "indexTypeUint8", &caps->index_type_uint8.indexTypeUint8);
+    if (json_read_u32(json, "timelineSemaphore", &value)) caps->timeline_semaphore = value != 0;
+    if (json_read_u32(json, "synchronization2", &value)) caps->synchronization2 = value != 0;
+    if (json_read_u32(json, "dynamicRendering", &value)) caps->dynamic_rendering = value != 0;
     json_read_u32(json, "subgroupSize", &caps->subgroup.subgroupSize);
     json_read_u32(json, "supportedStages", &caps->subgroup.supportedStages);
     json_read_u32(json, "supportedOperations", &caps->subgroup.supportedOperations);
@@ -9171,6 +9180,9 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "VK_KHR_8bit_storage", &value)) caps->ext_8bit_storage = value != 0;
     if (json_read_u32(json, "VK_KHR_shader_float16_int8", &value)) caps->ext_shader_float16_int8 = value != 0;
     if (json_read_u32(json, "VK_KHR_storage_buffer_storage_class", &value)) caps->ext_storage_buffer_storage_class = value != 0;
+    if (json_read_u32(json, "VK_KHR_timeline_semaphore", &value)) caps->ext_timeline_semaphore = value != 0;
+    if (json_read_u32(json, "VK_KHR_synchronization2", &value)) caps->ext_synchronization2 = value != 0;
+    if (json_read_u32(json, "VK_KHR_dynamic_rendering", &value)) caps->ext_dynamic_rendering = value != 0;
     if (json_read_u32(json, "VK_EXT_extended_dynamic_state", &value)) caps->ext_extended_dynamic_state = value != 0;
     if (json_read_u32(json, "VK_EXT_index_type_uint8", &value)) caps->ext_index_type_uint8 = value != 0;
     return caps->api_version != 0;
@@ -9259,6 +9271,21 @@ static VkBool32 executor_advertised_storage8_or(VkBool32 legacy) {
 static VkBool32 advertised_storage_buffer_storage_class(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->ext_storage_buffer_storage_class) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_timeline_semaphore(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->timeline_semaphore && caps->ext_timeline_semaphore) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_synchronization2(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->synchronization2 && caps->ext_synchronization2) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_dynamic_rendering(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->dynamic_rendering && caps->ext_dynamic_rendering) ? VK_TRUE : VK_FALSE;
 }
 
 static void trace_executor_advertisement_caps_once(void) {
@@ -9600,7 +9627,7 @@ static void fill_pnext_features(void *pNext) {
                 }
                 p->bufferDeviceAddress = VK_FALSE;
                 p->vulkanMemoryModel = VK_FALSE;
-                p->timelineSemaphore = VK_TRUE;
+                p->timelineSemaphore = advertised_timeline_semaphore();
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
@@ -9635,7 +9662,7 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES: {
                 VkPhysicalDeviceSynchronization2Features *p = (VkPhysicalDeviceSynchronization2Features *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->synchronization2 = VK_TRUE;
+                p->synchronization2 = advertised_synchronization2();
                 break;
             }
 #endif
@@ -9643,7 +9670,7 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES: {
                 VkPhysicalDeviceTimelineSemaphoreFeatures *p = (VkPhysicalDeviceTimelineSemaphoreFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->timelineSemaphore = VK_TRUE;
+                p->timelineSemaphore = advertised_timeline_semaphore();
                 break;
             }
 #endif
@@ -9651,7 +9678,7 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES: {
                 VkPhysicalDeviceDynamicRenderingFeatures *p = (VkPhysicalDeviceDynamicRenderingFeatures *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->dynamicRendering = VK_TRUE;
+                p->dynamicRendering = advertised_dynamic_rendering();
                 break;
             }
 #endif
@@ -9858,9 +9885,9 @@ static uint64_t advertised_feature_mask(void) {
 #ifdef VK_KHR_MAINTENANCE_4_EXTENSION_NAME
     mask |= PDOCKER_VK_FEATURE_MAINTENANCE_4;
 #endif
-    mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
-    mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
-    mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;
+    if (advertised_synchronization2()) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
+    if (advertised_timeline_semaphore()) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
+    if (advertised_dynamic_rendering()) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (!caps || caps->ext_extended_dynamic_state) {
         mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
@@ -11064,11 +11091,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
     ADD_DEVICE_EXTENSION(VK_KHR_MAINTENANCE_4_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_SPEC_VERSION);
 #endif
     ADD_DEVICE_EXTENSION(VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME, VK_KHR_COPY_COMMANDS_2_SPEC_VERSION);
-    ADD_DEVICE_EXTENSION(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION);
+    if (advertised_synchronization2()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION);
+    }
 #ifdef VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
-    ADD_DEVICE_EXTENSION(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME, VK_KHR_TIMELINE_SEMAPHORE_SPEC_VERSION);
+    if (advertised_timeline_semaphore()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME, VK_KHR_TIMELINE_SEMAPHORE_SPEC_VERSION);
+    }
 #endif
-    ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION);
+    if (advertised_dynamic_rendering()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION);
+    }
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (!caps || caps->ext_extended_dynamic_state) {
         ADD_DEVICE_EXTENSION(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
@@ -11105,11 +11138,11 @@ static bool device_extension_advertised_name(const char *name) {
     if (strcmp(name, VK_KHR_MAINTENANCE_4_EXTENSION_NAME) == 0) return true;
 #endif
     if (strcmp(name, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME) == 0) return true;
-    if (strcmp(name, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) == 0) return true;
+    if (strcmp(name, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) == 0) return advertised_synchronization2();
 #ifdef VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME
-    if (strcmp(name, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0) return true;
+    if (strcmp(name, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0) return advertised_timeline_semaphore();
 #endif
-    if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) return true;
+    if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) return advertised_dynamic_rendering();
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (strcmp(name, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) == 0) {
         return !caps || caps->ext_extended_dynamic_state;
