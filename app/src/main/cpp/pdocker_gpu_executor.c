@@ -21667,7 +21667,31 @@ static int preflight_vulkan_graphics_v6_replay_supported(
     return 0;
 }
 
-static int preflight_vulkan_graphics_v6_runtime_supported(const char **reason_out) {
+static int vulkan_graphics_v6_frame_needs_dynamic_rendering(const VulkanGraphicsV6FrameView *view) {
+    if (!view || !view->header || !view->commands) return 0;
+    for (uint32_t i = 0; i < view->header->command_count; ++i) {
+        switch (view->commands[i].command_type) {
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_RENDERING:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_INDEX_BUFFER:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_PUSH_CONSTANTS:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_CLEAR_ATTACHMENTS:
+                return 1;
+            default:
+                break;
+        }
+    }
+    return 0;
+}
+
+static int preflight_vulkan_graphics_v6_runtime_supported(
+        const VulkanGraphicsV6FrameView *view,
+        const char **reason_out) {
     const char *reason = "unsupported graphics runtime";
     if (reason_out) *reason_out = reason;
     if (init_vulkan_runtime(&g_vulkan_runtime) != 0) {
@@ -21682,11 +21706,12 @@ static int preflight_vulkan_graphics_v6_runtime_supported(const char **reason_ou
         if (reason_out) *reason_out = reason;
         return -EOPNOTSUPP;
     }
-    if (!g_vulkan_runtime.enabled_dynamic_rendering.dynamicRendering ||
-        !(g_vulkan_runtime.api_version >= VK_API_VERSION_1_3 ||
-          g_vulkan_runtime.enabled_ext_dynamic_rendering) ||
-        !g_vulkan_runtime.cmd_begin_rendering ||
-        !g_vulkan_runtime.cmd_end_rendering) {
+    if (vulkan_graphics_v6_frame_needs_dynamic_rendering(view) &&
+        (!g_vulkan_runtime.enabled_dynamic_rendering.dynamicRendering ||
+         !(g_vulkan_runtime.api_version >= VK_API_VERSION_1_3 ||
+           g_vulkan_runtime.enabled_ext_dynamic_rendering) ||
+         !g_vulkan_runtime.cmd_begin_rendering ||
+         !g_vulkan_runtime.cmd_end_rendering)) {
         reason = "dynamic rendering is not enabled on the Android Vulkan device";
         if (reason_out) *reason_out = reason;
         return -EOPNOTSUPP;
@@ -26895,7 +26920,7 @@ static int run_vulkan_graphics_v6_frame(const VulkanGraphicsV6FrameView *view) {
         fflush(out);
         return 0;
     }
-    rc = preflight_vulkan_graphics_v6_runtime_supported(&reason);
+    rc = preflight_vulkan_graphics_v6_runtime_supported(view, &reason);
     if (rc != 0) {
         FILE *out = json_out();
         fprintf(out,

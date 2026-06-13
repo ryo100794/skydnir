@@ -2592,7 +2592,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", icd)
         self.assertNotIn("eventCount > 1", icd)
         self.assertIn("command_op_is_graphics_frame_op", icd)
-        self.assertIn("type == PDOCKER_VK_COMMAND_IMAGE_BARRIER", icd)
+        self.assertIn("case PDOCKER_VK_COMMAND_IMAGE_BARRIER:", icd)
         self.assertIn("sizeof(image_barriers[0]) * image_barrier_count", icd)
         self.assertIn("sizeof(memory_barriers[0]) * memory_barrier_count", icd)
         self.assertIn("sizeof(buffer_barriers[0]) * buffer_barrier_count", icd)
@@ -6407,9 +6407,13 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("command_op_is_graphics_interleavable_transfer_op", icd)
         self.assertIn("cmd->graphics_command_ops[record_index].command_op_sequence", plan_body)
+        self.assertIn("!command_op_is_graphics_frame_op(type)", plan_body)
+        self.assertIn("!command_op_is_graphics_interleavable_transfer_op(type)", plan_body)
+        self.assertIn("first_gpu_op == UINT32_MAX || op_index < first_gpu_op", plan_body)
+        self.assertIn("op_index > last_gpu_op", plan_body)
         self.assertIn("graphics-mixed-host-op-inside-gpu-frame-unimplemented", plan_body)
-        interleavable_body = icd.split("static bool command_op_is_graphics_interleavable_transfer_op", 1)[1].split(
-            "static bool graphics_mixed_submit_plan", 1
+        interleavable_body = icd.split("static bool command_op_is_graphics_interleavable_transfer_op(PdockerVkCommandOpType type) {", 1)[1].split(
+            "static bool submit_sync_entries_include_wait", 1
         )[0]
         for allowed in [
             "case PDOCKER_VK_COMMAND_COPY:",
@@ -6511,6 +6515,46 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn("op->push_constant_ops", dispatch_body)
         self.assertIn("command_op.type = PDOCKER_VK_COMMAND_DISPATCH", dispatch_body)
+
+    def test_vulkan_transfer_and_query_only_command_buffers_use_executor_replay(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+        needs_body = icd.split("static bool command_buffer_needs_graphics_submit_sync_frame", 1)[1].split(
+            "static void graphics_submit_sync_frame_bounds", 1
+        )[0]
+        self.assertIn("cmd->command_op_count", needs_body)
+        self.assertIn("command_op_is_graphics_frame_op(type)", needs_body)
+        self.assertIn("command_op_is_graphics_interleavable_transfer_op(type)", needs_body)
+        frame_op_body = icd.split("static bool command_op_is_graphics_frame_op", 1)[1].split(
+            "static bool command_op_is_host_transfer_or_layout_op", 1
+        )[0]
+        for marker in [
+            "case PDOCKER_VK_COMMAND_COPY:",
+            "case PDOCKER_VK_COMMAND_IMAGE_COPY:",
+            "case PDOCKER_VK_COMMAND_IMAGE_TO_IMAGE_COPY:",
+            "case PDOCKER_VK_COMMAND_CLEAR_COLOR_IMAGE:",
+            "case PDOCKER_VK_COMMAND_RESOLVE_IMAGE:",
+            "case PDOCKER_VK_COMMAND_BLIT_IMAGE:",
+            "case PDOCKER_VK_COMMAND_CLEAR_DEPTH_STENCIL_IMAGE:",
+            "case PDOCKER_VK_COMMAND_FILL:",
+            "case PDOCKER_VK_COMMAND_UPDATE:",
+            "case PDOCKER_VK_COMMAND_COPY_QUERY_RESULTS:",
+        ]:
+            self.assertIn(marker, frame_op_body)
+        self.assertIn("vulkan_graphics_v6_frame_needs_dynamic_rendering", executor)
+        runtime_body = executor.split("static int preflight_vulkan_graphics_v6_runtime_supported", 1)[1].split(
+            "#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES", 1
+        )[0]
+        self.assertIn("const VulkanGraphicsV6FrameView *view", runtime_body)
+        self.assertIn("vulkan_graphics_v6_frame_needs_dynamic_rendering(view)", runtime_body)
+        needs_rendering_body = executor.split("static int vulkan_graphics_v6_frame_needs_dynamic_rendering", 1)[1].split(
+            "static int preflight_vulkan_graphics_v6_runtime_supported", 1
+        )[0]
+        self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING", needs_rendering_body)
+        self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW", needs_rendering_body)
+        self.assertNotIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER:", needs_rendering_body)
+        self.assertIn("preflight_vulkan_graphics_v6_runtime_supported(view, &reason)", executor)
+
 
     def test_vulkan_command_buffer_replays_all_recorded_dispatches(self):
         source = VULKAN_ICD.read_text()
