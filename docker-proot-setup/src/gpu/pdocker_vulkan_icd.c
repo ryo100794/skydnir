@@ -465,6 +465,7 @@ typedef struct {
     VkImageLayout depth_stencil_resolve_layout;
     VkResolveModeFlagBits depth_resolve_mode;
     VkResolveModeFlagBits stencil_resolve_mode;
+    uint32_t view_mask;
     bool unsupported;
 } PdockerVkSubpassState;
 
@@ -12389,7 +12390,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             } else {
                 const PdockerVkSubpassState *subpass = &rp->subpasses[ci->subpass];
                 pipeline->dynamic_rendering_pipeline = true;
-                pipeline->dynamic_rendering_view_mask = 0;
+                pipeline->dynamic_rendering_view_mask = subpass->view_mask;
                 pipeline->dynamic_rendering_color_attachment_count = subpass->color_attachment_count;
                 for (uint32_t c = 0; c < subpass->color_attachment_count; ++c) {
                     uint32_t attachment = subpass->color_attachments[c];
@@ -12451,10 +12452,12 @@ static void capture_render_pass_subpass_state(
         const VkAttachmentReference *resolve_attachments,
         const VkAttachmentReference *depth_stencil_attachment,
         uint32_t input_attachment_count,
-        uint32_t preserve_attachment_count) {
+        uint32_t preserve_attachment_count,
+        uint32_t view_mask) {
     if (!rp || subpass_index >= PDOCKER_VK_MAX_STORAGE_BUFFERS) return;
     PdockerVkSubpassState *dst = &rp->subpasses[subpass_index];
     memset(dst, 0, sizeof(*dst));
+    dst->view_mask = view_mask;
     if (input_attachment_count != 0 || preserve_attachment_count != 0) {
         dst->unsupported = true;
     }
@@ -12525,7 +12528,7 @@ static void capture_render_pass_subpass_state2(
         }
         return;
     }
-    bool unsupported = subpass->flags != 0 || subpass->viewMask != 0;
+    bool unsupported = subpass->flags != 0;
     const VkSubpassDescriptionDepthStencilResolve *depth_stencil_resolve = NULL;
     for (const VkBaseInStructure *chain = (const VkBaseInStructure *)subpass->pNext;
          chain;
@@ -12582,7 +12585,8 @@ static void capture_render_pass_subpass_state2(
         subpass->pResolveAttachments ? resolve_refs : NULL,
         subpass->pDepthStencilAttachment ? &depth_stencil_ref : NULL,
         subpass->inputAttachmentCount,
-        subpass->preserveAttachmentCount);
+        subpass->preserveAttachmentCount,
+        subpass->viewMask);
     if (depth_stencil_resolve && rp && subpass_index < PDOCKER_VK_MAX_STORAGE_BUFFERS) {
         PdockerVkSubpassState *dst = &rp->subpasses[subpass_index];
         const VkAttachmentReference2 *resolve_ref =
@@ -12714,7 +12718,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass(
             src ? src->pResolveAttachments : NULL,
             src ? src->pDepthStencilAttachment : NULL,
             src ? src->inputAttachmentCount : 0,
-            src ? src->preserveAttachmentCount : 0);
+            src ? src->preserveAttachmentCount : 0,
+            0);
         if (!src || src->flags != 0) rp->subpasses[sp].unsupported = true;
     }
     if (pCreateInfo) {

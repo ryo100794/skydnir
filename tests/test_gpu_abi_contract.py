@@ -967,6 +967,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkImageLayout depth_stencil_resolve_layout;",
             "VkResolveModeFlagBits depth_resolve_mode;",
             "VkResolveModeFlagBits stencil_resolve_mode;",
+            "uint32_t view_mask;",
             "PdockerVkSubpassState subpasses[PDOCKER_VK_MAX_STORAGE_BUFFERS];",
             "bool subpass_overflow;",
             "capture_render_pass_subpass_state(",
@@ -981,6 +982,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "subpass->pDepthStencilAttachment",
             "subpass->inputAttachmentCount",
             "subpass->preserveAttachmentCount",
+            "subpass->viewMask",
+            "dst->view_mask = view_mask;",
             "input_attachment_count != 0 || preserve_attachment_count != 0",
             "append_render_pass_begin_layout_transitions",
             "append_render_pass_end_layout_transitions",
@@ -1156,7 +1159,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "if (!pipeline->dynamic_rendering_pipeline && pipeline->render_pass) {",
             "render_pass_subpass_can_normalize_to_dynamic_rendering(rp, ci->subpass)",
             "pipeline->dynamic_rendering_pipeline = true;",
-            "pipeline->dynamic_rendering_view_mask = 0;",
+            "pipeline->dynamic_rendering_view_mask = subpass->view_mask;",
             "pipeline->dynamic_rendering_color_attachment_count = subpass->color_attachment_count;",
             "uint32_t attachment = subpass->color_attachments[c];",
             "pipeline->dynamic_rendering_color_formats[c] =",
@@ -1417,6 +1420,9 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "cmd->active_rendering_view_mask = pRenderingInfo->viewMask;",
             "pipeline->dynamic_rendering_view_mask = rendering->viewMask;",
+            "pipeline->dynamic_rendering_view_mask = subpass->view_mask;",
+            "dst->view_mask = view_mask;",
+            "subpass->viewMask",
             "p->multiview = caps->multiview;",
             "if (p->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;",
             "if (caps->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;",
@@ -1424,6 +1430,7 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, icd)
         self.assertNotIn("pRenderingInfo->flags != 0 || pRenderingInfo->viewMask != 0", icd)
         self.assertNotIn("if (rendering->viewMask != 0)", icd)
+        self.assertNotIn("subpass->flags != 0 || subpass->viewMask != 0", icd)
         for marker in [
             "enabled_vulkan11.multiview = rt->physical_vulkan11.multiview;",
             "enabled_vulkan11.multiview))",
