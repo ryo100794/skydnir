@@ -9006,6 +9006,13 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, body)
         self.assertIn("write_json_string_literal(out, rt ? rt->physical_properties.deviceName : \"offline\")", body)
+        enabled_body = source.split("static void write_android_vulkan_enabled_features_report", 1)[1].split(
+            "static void log_vulkan_feature_gap", 1
+        )[0]
+        self.assertIn('\\"drawIndirectCount\\":%u', enabled_body)
+        self.assertIn('\\"drawIndexedIndirectCount\\":%u', enabled_body)
+        self.assertIn("rt && rt->cmd_draw_indirect_count ? 1u : 0u", enabled_body)
+        self.assertIn("rt && rt->cmd_draw_indexed_indirect_count ? 1u : 0u", enabled_body)
 
     def test_vulkan_icd_can_shadow_query_executor_advertisement_caps(self):
         icd = VULKAN_ICD.read_text()
@@ -9028,9 +9035,13 @@ class GpuAbiContractTest(unittest.TestCase):
             "ext_timeline_semaphore",
             "ext_synchronization2",
             "ext_dynamic_rendering",
+            "draw_indirect_count",
+            "draw_indexed_indirect_count",
             "advertised_timeline_semaphore",
             "advertised_synchronization2",
             "advertised_dynamic_rendering",
+            "advertised_draw_indirect_count",
+            "advertised_draw_indexed_indirect_count",
             "executor_advertisement_source_enabled",
             "PDOCKER_VULKAN_ADVERTISEMENT_SOURCE",
             'strcmp(source, "executor") == 0',
@@ -9070,6 +9081,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("caps->storage8.uniformAndStorageBuffer8BitAccess", pnext_body)
         self.assertIn("caps->float16_int8.shaderFloat16", pnext_body)
         self.assertIn("p->timelineSemaphore = advertised_timeline_semaphore();", pnext_body)
+        self.assertIn("p->drawIndirectCount = advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count();", pnext_body)
         self.assertIn("p->synchronization2 = advertised_synchronization2();", pnext_body)
         self.assertIn("p->dynamicRendering = advertised_dynamic_rendering();", pnext_body)
         extension_body = icd.split("vkEnumerateDeviceExtensionProperties", 1)[1].split(
@@ -9086,6 +9098,17 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("return (caps && caps->timeline_semaphore && caps->ext_timeline_semaphore) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->synchronization2 && caps->ext_synchronization2) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->dynamic_rendering && caps->ext_dynamic_rendering) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->draw_indirect_count) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->draw_indexed_indirect_count) ? VK_TRUE : VK_FALSE;", icd)
+        proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split("#define MAP_PROC", 1)[0]
+        self.assertIn("executor_advertisement_source_enabled()", proc_body)
+        self.assertIn("!advertised_draw_indirect_count()", proc_body)
+        self.assertIn("!advertised_draw_indexed_indirect_count()", proc_body)
+        self.assertIn("PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT", icd)
+        self.assertIn("if (p->drawIndirectCount) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;", icd)
+        self.assertIn("mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;", icd)
+        self.assertIn("vkCmdDrawIndirectCountKHR", proc_body)
+        self.assertIn("vkCmdDrawIndexedIndirectCountKHR", proc_body)
         self.assertNotIn("!caps || caps->ext_storage_buffer_storage_class", extension_body)
         self.assertIn("PDOCKER_VULKAN_ICD_DEBUG", icd)
 

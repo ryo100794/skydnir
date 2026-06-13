@@ -1808,6 +1808,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"queueSubmit2\":%u,"
             "\"cmdPipelineBarrier2\":%u,"
             "\"dynamicRenderingUsable\":%u,"
+            "\"drawIndirectCount\":%u,"
+            "\"drawIndexedIndirectCount\":%u,"
             "\"core11_storageBuffer16BitAccess\":%u,"
             "\"core11_uniformAndStorageBuffer16BitAccess\":%u,"
             "\"core11_storagePushConstant16\":%u,"
@@ -1845,6 +1847,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt && rt->queue_submit2 ? 1u : 0u,
             rt && rt->cmd_pipeline_barrier2 ? 1u : 0u,
             rt && rt->graphics_ready ? 1u : 0u,
+            rt && rt->cmd_draw_indirect_count ? 1u : 0u,
+            rt && rt->cmd_draw_indexed_indirect_count ? 1u : 0u,
             rt ? rt->enabled_vulkan11.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_vulkan11.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->enabled_vulkan11.storagePushConstant16 : 0,

@@ -178,6 +178,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_SYNCHRONIZATION_2            (1ull << 16)
 #define PDOCKER_VK_FEATURE_DYNAMIC_RENDERING            (1ull << 17)
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE       (1ull << 18)
+#define PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT          (1ull << 19)
 
 struct PdockerVkMemory {
     size_t size;
@@ -9069,6 +9070,8 @@ typedef struct {
     bool ext_timeline_semaphore;
     bool ext_synchronization2;
     bool ext_dynamic_rendering;
+    bool draw_indirect_count;
+    bool draw_indexed_indirect_count;
     bool ext_extended_dynamic_state;
     bool ext_index_type_uint8;
 } PdockerVkAdvertisedCaps;
@@ -9183,6 +9186,8 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "VK_KHR_timeline_semaphore", &value)) caps->ext_timeline_semaphore = value != 0;
     if (json_read_u32(json, "VK_KHR_synchronization2", &value)) caps->ext_synchronization2 = value != 0;
     if (json_read_u32(json, "VK_KHR_dynamic_rendering", &value)) caps->ext_dynamic_rendering = value != 0;
+    if (json_read_u32(json, "drawIndirectCount", &value)) caps->draw_indirect_count = value != 0;
+    if (json_read_u32(json, "drawIndexedIndirectCount", &value)) caps->draw_indexed_indirect_count = value != 0;
     if (json_read_u32(json, "VK_EXT_extended_dynamic_state", &value)) caps->ext_extended_dynamic_state = value != 0;
     if (json_read_u32(json, "VK_EXT_index_type_uint8", &value)) caps->ext_index_type_uint8 = value != 0;
     return caps->api_version != 0;
@@ -9286,6 +9291,16 @@ static VkBool32 advertised_synchronization2(void) {
 static VkBool32 advertised_dynamic_rendering(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->dynamic_rendering && caps->ext_dynamic_rendering) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_draw_indirect_count(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->draw_indirect_count) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_draw_indexed_indirect_count(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->draw_indexed_indirect_count) ? VK_TRUE : VK_FALSE;
 }
 
 static void trace_executor_advertisement_caps_once(void) {
@@ -9628,6 +9643,7 @@ static void fill_pnext_features(void *pNext) {
                 p->bufferDeviceAddress = VK_FALSE;
                 p->vulkanMemoryModel = VK_FALSE;
                 p->timelineSemaphore = advertised_timeline_semaphore();
+                p->drawIndirectCount = advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count();
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
@@ -9768,6 +9784,7 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->bufferDeviceAddress) mask |= PDOCKER_VK_FEATURE_BUFFER_DEVICE_ADDRESS;
                 if (p->vulkanMemoryModel) mask |= PDOCKER_VK_FEATURE_VULKAN_MEMORY_MODEL;
                 if (p->timelineSemaphore) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
+                if (p->drawIndirectCount) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
@@ -9888,6 +9905,9 @@ static uint64_t advertised_feature_mask(void) {
     if (advertised_synchronization2()) mask |= PDOCKER_VK_FEATURE_SYNCHRONIZATION_2;
     if (advertised_timeline_semaphore()) mask |= PDOCKER_VK_FEATURE_TIMELINE_SEMAPHORE;
     if (advertised_dynamic_rendering()) mask |= PDOCKER_VK_FEATURE_DYNAMIC_RENDERING;
+    if (advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()) {
+        mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;
+    }
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (!caps || caps->ext_extended_dynamic_state) {
         mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
@@ -9946,14 +9966,15 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES: {
                 const VkPhysicalDeviceVulkan12Features *p = (const VkPhysicalDeviceVulkan12Features *)node;
                 fprintf(stderr,
-                        "pdocker-vulkan-icd: create-device vk12_features={storage8:%u,ubo_ssbo8:%u,push8:%u,float16:%u,int8:%u,bufferDeviceAddress:%u,vulkanMemoryModel:%u}\n",
+                        "pdocker-vulkan-icd: create-device vk12_features={storage8:%u,ubo_ssbo8:%u,push8:%u,float16:%u,int8:%u,bufferDeviceAddress:%u,vulkanMemoryModel:%u,drawIndirectCount:%u}\n",
                         p->storageBuffer8BitAccess,
                         p->uniformAndStorageBuffer8BitAccess,
                         p->storagePushConstant8,
                         p->shaderFloat16,
                         p->shaderInt8,
                         p->bufferDeviceAddress,
-                        p->vulkanMemoryModel);
+                        p->vulkanMemoryModel,
+                        p->drawIndirectCount);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES: {
@@ -18076,6 +18097,20 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 
 static PFN_vkVoidFunction proc_address(const char *pName) {
     if (!pName) return NULL;
+    if (executor_advertisement_source_enabled()) {
+        if ((strcmp(pName, "vkCmdDrawIndirectCount") == 0 ||
+             strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0 ||
+             strcmp(pName, "vkCmdDrawIndirectCountAMD") == 0) &&
+            !advertised_draw_indirect_count()) {
+            return NULL;
+        }
+        if ((strcmp(pName, "vkCmdDrawIndexedIndirectCount") == 0 ||
+             strcmp(pName, "vkCmdDrawIndexedIndirectCountKHR") == 0 ||
+             strcmp(pName, "vkCmdDrawIndexedIndirectCountAMD") == 0) &&
+            !advertised_draw_indexed_indirect_count()) {
+            return NULL;
+        }
+    }
 #define MAP_PROC(name) if (strcmp(pName, #name) == 0) return (PFN_vkVoidFunction)name
 #define MAP_ALIAS(alias, name) if (strcmp(pName, (alias)) == 0) return (PFN_vkVoidFunction)name
     MAP_PROC(vkGetInstanceProcAddr);
