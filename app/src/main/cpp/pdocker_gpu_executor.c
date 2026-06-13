@@ -1336,6 +1336,19 @@ typedef struct {
 
 static VulkanRuntime g_vulkan_runtime;
 
+#define PDOCKER_GPU_EXECUTOR_EVENT_REGISTRY_SLOTS 128u
+
+typedef struct {
+    uint8_t used;
+    uint8_t signaled;
+    uint64_t id;
+    VkEvent event;
+} VulkanExecutorEventEntry;
+
+static VulkanExecutorEventEntry g_event_registry[PDOCKER_GPU_EXECUTOR_EVENT_REGISTRY_SLOTS];
+static VulkanExecutorEventEntry *find_executor_event_entry(uint64_t id);
+static VulkanExecutorEventEntry *allocate_executor_event_entry(uint64_t id);
+
 static uint32_t vulkan_graphics_dynamic_state_bit_index(uint32_t state_type) {
     switch ((VkDynamicState)state_type) {
         case VK_DYNAMIC_STATE_VIEWPORT: return 0u;
@@ -20567,6 +20580,9 @@ static int validate_vulkan_graphics_v6_frame_content(
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_QUERY_POOL_RESULTS:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT:
                 break;
             default:
                 return -EPROTO;
@@ -20662,6 +20678,20 @@ static int validate_vulkan_graphics_v6_frame_content(
              command->descriptor_count != 0 || command->vertex_binding_count != 0 ||
              command->attachment_count != 0 || command->dynamic_state_count != 0 ||
              command->push_size != 0 || command->index_buffer_resource_index != UINT32_MAX)) return -EPROTO;
+        if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT ||
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT) &&
+            (command->pipeline_index != UINT32_MAX || command->first_descriptor != 0 ||
+             command->descriptor_count != 0 || command->vertex_binding_count != 0 ||
+             command->attachment_count != 0 || command->dynamic_state_count != 0 ||
+             command->push_size != 0 || command->index_buffer_resource_index != UINT32_MAX ||
+             command->pipeline_layout_id == 0 || command->index_offset == 0 ||
+             command->index_offset > UINT32_MAX || command->push_hash > UINT32_MAX)) return -EPROTO;
+        if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
+             command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT) &&
+            command->push_hash != 0) return -EPROTO;
+        if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT &&
+            command->push_hash == 0) return -EPROTO;
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW &&
             command->index_buffer_resource_index != UINT32_MAX) return -EPROTO;
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) {
@@ -21726,6 +21756,29 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 }
                 if (!find_vulkan_graphics_v613_clear_depth_stencil_image(view, i)) {
                     reason = "graphics clear depth stencil image requires V6.13 metadata";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                break;
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT:
+                if (command->pipeline_layout_id == 0 || command->index_offset == 0 ||
+                    command->index_offset > UINT32_MAX || command->push_hash > UINT32_MAX) {
+                    reason = "invalid graphics event command metadata";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
+                     command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT) &&
+                    command->push_hash != 0) {
+                    reason = "invalid graphics event set/reset destination stage";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
+                }
+                if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT &&
+                    command->push_hash == 0) {
+                    reason = "invalid graphics event wait destination stage";
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
                 }
@@ -25939,6 +25992,33 @@ static int record_vulkan_graphics_v6_command_buffer(
                 if (rc != 0) goto cleanup;
                 break;
             }
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:
+            case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT: {
+                VulkanExecutorEventEntry *entry = find_executor_event_entry(command->pipeline_layout_id);
+                if (!entry || !entry->event || command->index_offset == 0 ||
+                    command->index_offset > UINT32_MAX || command->push_hash > UINT32_MAX) {
+                    rc = -EPROTO;
+                    goto cleanup;
+                }
+                const VkPipelineStageFlags src_stage_mask = (VkPipelineStageFlags)command->index_offset;
+                const VkPipelineStageFlags dst_stage_mask = (VkPipelineStageFlags)command->push_hash;
+                if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT) {
+                    if (command->push_hash != 0) { rc = -EPROTO; goto cleanup; }
+                    vkCmdSetEvent(command_buffer, entry->event, src_stage_mask);
+                    entry->signaled = 1u;
+                } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT) {
+                    if (command->push_hash != 0) { rc = -EPROTO; goto cleanup; }
+                    vkCmdResetEvent(command_buffer, entry->event, src_stage_mask);
+                    entry->signaled = 0u;
+                } else {
+                    if (dst_stage_mask == 0) { rc = -EPROTO; goto cleanup; }
+                    VkEvent event = entry->event;
+                    vkCmdWaitEvents(command_buffer, 1, &event, src_stage_mask, dst_stage_mask,
+                                    0, NULL, 0, NULL, 0, NULL);
+                }
+                break;
+            }
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER: {
                 VkMemoryBarrier2 memory_barriers_to_record[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
                 VkBufferMemoryBarrier2 buffer_barriers_to_record[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -26082,18 +26162,8 @@ typedef struct {
     VkFence fence;
 } VulkanExecutorSubmitFenceEntry;
 
-#define PDOCKER_GPU_EXECUTOR_EVENT_REGISTRY_SLOTS 128u
-
-typedef struct {
-    uint8_t used;
-    uint8_t signaled;
-    uint64_t id;
-    VkEvent event;
-} VulkanExecutorEventEntry;
-
 static VulkanExecutorSubmitSyncEntry g_submit_sync_registry[PDOCKER_GPU_EXECUTOR_SUBMIT_SYNC_REGISTRY_SLOTS];
 static VulkanExecutorSubmitFenceEntry g_submit_fence_registry[PDOCKER_GPU_EXECUTOR_SUBMIT_FENCE_REGISTRY_SLOTS];
-static VulkanExecutorEventEntry g_event_registry[PDOCKER_GPU_EXECUTOR_EVENT_REGISTRY_SLOTS];
 
 static VulkanExecutorSubmitSyncEntry *find_executor_submit_sync_entry(uint64_t id) {
     if (id == 0) return NULL;

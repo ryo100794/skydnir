@@ -650,6 +650,8 @@ typedef struct {
     void *payload;
     PdockerVkEvent *event;
     bool event_signaled;
+    VkPipelineStageFlags2 event_src_stage_mask;
+    VkPipelineStageFlags2 event_dst_stage_mask;
     PdockerVkQueryPool *query_pool;
     PdockerVkBuffer *query_dst_buffer;
     uint32_t query_index;
@@ -5630,6 +5632,31 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
                 dst->layer_count = src->layer_count;
             }
             need_v616_clear_attachments = true;
+        } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
+                   record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT ||
+                   record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT) {
+            if (record->command_op_sequence >= cmd->command_op_count) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            const PdockerVkCommandOp *op = &cmd->command_ops[record->command_op_sequence];
+            const bool is_set_event = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT;
+            const bool is_reset_event = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT;
+            const bool is_wait_event = record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT;
+            if (((is_set_event || is_reset_event) && op->type != PDOCKER_VK_COMMAND_EVENT) ||
+                (is_wait_event && op->type != PDOCKER_VK_COMMAND_EVENT_WAIT) ||
+                !op->event || op->event->event_id == 0) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            if ((is_set_event && !op->event_signaled) ||
+                (is_reset_event && op->event_signaled)) {
+                rc = -EPROTO;
+                goto cleanup;
+            }
+            command->pipeline_layout_id = op->event->event_id;
+            command->index_offset = (uint64_t)op->event_src_stage_mask;
+            command->push_hash = (uint64_t)op->event_dst_stage_mask;
         } else if (record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_QUERY ||
                    record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_END_QUERY ||
                    record->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_QUERY_POOL ||
@@ -16466,6 +16493,8 @@ static bool command_op_is_graphics_frame_op(PdockerVkCommandOpType type) {
         case PDOCKER_VK_COMMAND_GRAPHICS_DRAW:
         case PDOCKER_VK_COMMAND_IMAGE_BARRIER:
         case PDOCKER_VK_COMMAND_BARRIER:
+        case PDOCKER_VK_COMMAND_EVENT:
+        case PDOCKER_VK_COMMAND_EVENT_WAIT:
         case PDOCKER_VK_COMMAND_QUERY_BEGIN:
         case PDOCKER_VK_COMMAND_QUERY_END:
         case PDOCKER_VK_COMMAND_QUERY_RESET:
@@ -16484,11 +16513,6 @@ static bool command_op_is_graphics_frame_op(PdockerVkCommandOpType type) {
         default:
             return false;
     }
-}
-
-static bool command_op_is_event_op(PdockerVkCommandOpType type) {
-    return type == PDOCKER_VK_COMMAND_EVENT ||
-           type == PDOCKER_VK_COMMAND_EVENT_WAIT;
 }
 
 static bool command_op_is_host_transfer_or_layout_op(PdockerVkCommandOpType type) {
@@ -16750,10 +16774,6 @@ static bool graphics_mixed_submit_plan(
     }
     for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
         PdockerVkCommandOpType type = cmd->command_ops[op_index].type;
-        if (command_op_is_event_op(type)) {
-            if (reason_out) *reason_out = "graphics-mixed-event-command-unimplemented";
-            return false;
-        }
         if (command_op_is_graphics_frame_op(type)) continue;
         if (!command_op_is_host_transfer_or_layout_op(type)) {
             if (reason_out) *reason_out = "graphics-mixed-submit-unimplemented";
@@ -17423,9 +17443,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkResetEvent(
     return VK_SUCCESS;
 }
 
+static VkPipelineStageFlags2 normalize_event_stage_mask(VkPipelineStageFlags2 stage_mask) {
+    return stage_mask ? stage_mask : (VkPipelineStageFlags2)VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+}
+
 static void record_event_command(VkCommandBuffer commandBuffer,
                                  VkEvent event,
-                                 bool signaled) {
+                                 bool signaled,
+                                 VkPipelineStageFlags2 stage_mask) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     PdockerVkEvent *e = (PdockerVkEvent *)event;
     if (!cmd || !e) return;
@@ -17434,10 +17459,20 @@ static void record_event_command(VkCommandBuffer commandBuffer,
     op.type = PDOCKER_VK_COMMAND_EVENT;
     op.event = e;
     op.event_signaled = signaled;
+    op.event_src_stage_mask = normalize_event_stage_mask(stage_mask);
+    PdockerVkGraphicsCommandRecord record;
+    memset(&record, 0, sizeof(record));
+    record.command_type = signaled
+        ? PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT
+        : PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT;
+    if (!append_graphics_command_record(cmd, &record)) return;
     (void)append_command_op(cmd, &op);
 }
 
-static void record_event_wait_command(VkCommandBuffer commandBuffer, VkEvent event) {
+static void record_event_wait_command(VkCommandBuffer commandBuffer,
+                                      VkEvent event,
+                                      VkPipelineStageFlags2 src_stage_mask,
+                                      VkPipelineStageFlags2 dst_stage_mask) {
     PdockerVkCommandBuffer *cmd = (PdockerVkCommandBuffer *)commandBuffer;
     PdockerVkEvent *e = (PdockerVkEvent *)event;
     if (!cmd || !e) {
@@ -17448,6 +17483,12 @@ static void record_event_wait_command(VkCommandBuffer commandBuffer, VkEvent eve
     memset(&op, 0, sizeof(op));
     op.type = PDOCKER_VK_COMMAND_EVENT_WAIT;
     op.event = e;
+    op.event_src_stage_mask = normalize_event_stage_mask(src_stage_mask);
+    op.event_dst_stage_mask = normalize_event_stage_mask(dst_stage_mask);
+    PdockerVkGraphicsCommandRecord record;
+    memset(&record, 0, sizeof(record));
+    record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT;
+    if (!append_graphics_command_record(cmd, &record)) return;
     (void)append_command_op(cmd, &op);
 }
 
@@ -17455,16 +17496,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags stageMask) {
-    (void)stageMask;
-    record_event_command(commandBuffer, event, true);
+    record_event_command(commandBuffer, event, true, (VkPipelineStageFlags2)stageMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags stageMask) {
-    (void)stageMask;
-    record_event_command(commandBuffer, event, false);
+    record_event_command(commandBuffer, event, false, (VkPipelineStageFlags2)stageMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
@@ -17489,7 +17528,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
             if (cmd) cmd->graphics_unsupported = true;
             return;
         }
-        record_event_wait_command(commandBuffer, pEvents[i]);
+        record_event_wait_command(commandBuffer, pEvents[i],
+                                  (VkPipelineStageFlags2)srcStageMask,
+                                  (VkPipelineStageFlags2)dstStageMask);
     }
     vkCmdPipelineBarrier(commandBuffer,
                          srcStageMask,
@@ -17625,15 +17666,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
     if (dependency_info_has_supported_barrier_payload(pDependencyInfo)) {
         vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo);
     }
-    record_event_command(commandBuffer, event, true);
+    record_event_command(commandBuffer, event, true, (VkPipelineStageFlags2)VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags2 stageMask) {
-    (void)stageMask;
-    record_event_command(commandBuffer, event, false);
+    record_event_command(commandBuffer, event, false, (VkPipelineStageFlags2)stageMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
@@ -17651,7 +17691,9 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
             if (cmd) cmd->graphics_unsupported = true;
             return;
         }
-        record_event_wait_command(commandBuffer, pEvents[i]);
+        record_event_wait_command(commandBuffer, pEvents[i],
+                                  (VkPipelineStageFlags2)VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                  (VkPipelineStageFlags2)VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
         vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i]);
     }
 }

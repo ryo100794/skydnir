@@ -4882,23 +4882,47 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("case PDOCKER_VK_COMMAND_EVENT_WAIT:", replay_body)
         self.assertIn("op->event->signaled = op->event_signaled", replay_body)
         self.assertIn("execute_recorded_event_wait_op(op)", replay_body)
-        self.assertIn("record_event_wait_command(commandBuffer, pEvents[i])", icd)
+        self.assertIn("record_event_wait_command(commandBuffer, pEvents[i],", icd)
         self.assertIn("event-wait-unsignaled", icd)
 
-    def test_vulkan_event_commands_fail_closed_inside_executor_frames(self):
+    def test_vulkan_event_commands_are_graphics_v6_replayable(self):
         icd = VULKAN_ICD.read_text()
-        self.assertIn("static bool command_op_is_event_op", icd)
-        self.assertIn("type == PDOCKER_VK_COMMAND_EVENT", icd)
-        self.assertIn("type == PDOCKER_VK_COMMAND_EVENT_WAIT", icd)
+        executor = GPU_EXECUTOR.read_text()
+        abi = APP_HEADER.read_text()
+        container_abi = CONTAINER_HEADER.read_text()
+
+        for source in [abi, container_abi]:
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT", source)
+            self.assertIn("PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT", source)
+
+        for marker in [
+            "VkPipelineStageFlags2 event_src_stage_mask",
+            "VkPipelineStageFlags2 event_dst_stage_mask",
+            "record.command_type = signaled",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT",
+            "PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT",
+            "command->pipeline_layout_id = op->event->event_id",
+            "command->index_offset = (uint64_t)op->event_src_stage_mask",
+            "command->push_hash = (uint64_t)op->event_dst_stage_mask",
+        ]:
+            self.assertIn(marker, icd)
         plan_body = icd.split("static bool graphics_mixed_submit_plan", 1)[1].split(
             "static VkResult execute_graphics_mixed_host_side_ops", 1
         )[0]
-        self.assertIn("command_op_is_event_op(type)", plan_body)
-        self.assertIn("graphics-mixed-event-command-unimplemented", plan_body)
-        self.assertLess(
-            plan_body.index("command_op_is_event_op(type)"),
-            plan_body.rindex("command_op_is_graphics_frame_op(type)"),
-        )
+        self.assertNotIn("graphics-mixed-event-command-unimplemented", plan_body)
+
+        for marker in [
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:",
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:",
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT:",
+            "find_executor_event_entry(command->pipeline_layout_id)",
+            "vkCmdSetEvent(command_buffer, entry->event, src_stage_mask)",
+            "vkCmdResetEvent(command_buffer, entry->event, src_stage_mask)",
+            "vkCmdWaitEvents(command_buffer, 1, &event, src_stage_mask, dst_stage_mask",
+        ]:
+            self.assertIn(marker, executor)
 
     def test_vulkan_event_lifecycle_is_executor_backed(self):
         executor = GPU_EXECUTOR.read_text()
@@ -4988,7 +5012,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("cmd->graphics_unsupported = true", set_event2_body)
         self.assertIn("dependency_info_has_supported_barrier_payload(pDependencyInfo)", set_event2_body)
         self.assertIn("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)", set_event2_body)
-        self.assertLess(set_event2_body.index("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)"), set_event2_body.index("record_event_command(commandBuffer, event, true)"))
+        self.assertLess(set_event2_body.index("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)"), set_event2_body.index("record_event_command(commandBuffer, event, true, (VkPipelineStageFlags2)VK_PIPELINE_STAGE_ALL_COMMANDS_BIT)"))
         wait_events2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2", 1)[1].split(
             "static bool query_range_valid", 1
         )[0]
