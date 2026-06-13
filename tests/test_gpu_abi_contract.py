@@ -1243,15 +1243,35 @@ class GpuAbiContractTest(unittest.TestCase):
             self.assertIn(marker, executor)
             self.assertIn(marker, icd)
         for marker in [
-            "case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 0u;",
-            "case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 1u;",
-            "vkCmdSetViewport(commandBuffer, 0, viewportCount, pViewports);",
-            "vkCmdSetScissor(commandBuffer, 0, scissorCount, pScissors);",
+            "case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 18u;",
+            "case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 19u;",
+            "VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,",
+            "VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,",
+            "pViewports ? (size_t)viewportCount * sizeof(VkViewport) : 0",
+            "pScissors ? (size_t)scissorCount * sizeof(VkRect2D) : 0",
+            "pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT)",
+            "pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT)",
         ]:
             self.assertIn(marker, icd)
+        self.assertNotIn("vkCmdSetViewport(commandBuffer, 0, viewportCount, pViewports);", icd)
+        self.assertNotIn("vkCmdSetScissor(commandBuffer, 0, scissorCount, pScissors);", icd)
         for marker in [
-            "case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 0u;",
-            "case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 1u;",
+            "case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 18u;",
+            "case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 19u;",
+            "PFN_vkCmdSetViewportWithCountEXT cmd_set_viewport_with_count;",
+            "PFN_vkCmdSetScissorWithCountEXT cmd_set_scissor_with_count;",
+            'vkGetDeviceProcAddr(rt->device, "vkCmdSetViewportWithCount")',
+            'vkGetDeviceProcAddr(rt->device, "vkCmdSetViewportWithCountEXT")',
+            'vkGetDeviceProcAddr(rt->device, "vkCmdSetScissorWithCount")',
+            'vkGetDeviceProcAddr(rt->device, "vkCmdSetScissorWithCountEXT")',
+            "case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT:",
+            "rt->cmd_set_viewport_with_count(command_buffer, state->count",
+            "case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT:",
+            "rt->cmd_set_scissor_with_count(command_buffer, state->count",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT)",
+            "vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT)",
+            "ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT);",
+            "ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT);",
         ]:
             self.assertIn(marker, executor)
 

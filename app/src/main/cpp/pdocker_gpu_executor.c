@@ -1313,6 +1313,8 @@ typedef struct {
     uint8_t graphics_ready;
     PFN_vkCmdBeginRenderingKHR cmd_begin_rendering;
     PFN_vkCmdEndRenderingKHR cmd_end_rendering;
+    PFN_vkCmdSetViewportWithCountEXT cmd_set_viewport_with_count;
+    PFN_vkCmdSetScissorWithCountEXT cmd_set_scissor_with_count;
     PFN_vkCmdSetCullModeEXT cmd_set_cull_mode;
     PFN_vkCmdSetFrontFaceEXT cmd_set_front_face;
     PFN_vkCmdSetPrimitiveTopologyEXT cmd_set_primitive_topology;
@@ -1355,9 +1357,9 @@ static VulkanExecutorEventEntry *allocate_executor_event_entry(uint64_t id);
 static uint32_t vulkan_graphics_dynamic_state_bit_index(uint32_t state_type) {
     switch ((VkDynamicState)state_type) {
         case VK_DYNAMIC_STATE_VIEWPORT: return 0u;
-        case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 0u;
         case VK_DYNAMIC_STATE_SCISSOR: return 1u;
-        case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 1u;
+        case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 18u;
+        case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 19u;
         case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
         case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
         case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;
@@ -1389,8 +1391,14 @@ static int vulkan_graphics_dynamic_state_payload_supported(
     switch ((VkDynamicState)state->state_type) {
         case VK_DYNAMIC_STATE_VIEWPORT:
             return (state->count > 0 && state->data_size == (uint64_t)state->count * sizeof(VkViewport)) ? 0 : -EPROTO;
+        case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT:
+            return (state->first_index == 0 && state->count > 0 &&
+                    state->data_size == (uint64_t)state->count * sizeof(VkViewport)) ? 0 : -EPROTO;
         case VK_DYNAMIC_STATE_SCISSOR:
             return (state->count > 0 && state->data_size == (uint64_t)state->count * sizeof(VkRect2D)) ? 0 : -EPROTO;
+        case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT:
+            return (state->first_index == 0 && state->count > 0 &&
+                    state->data_size == (uint64_t)state->count * sizeof(VkRect2D)) ? 0 : -EPROTO;
         case VK_DYNAMIC_STATE_LINE_WIDTH:
             return (state->first_index == 0 && state->count == 1 && state->data_size == sizeof(float)) ? 0 : -EPROTO;
         case VK_DYNAMIC_STATE_CULL_MODE:
@@ -11433,6 +11441,18 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     if (!rt->cmd_end_rendering) {
         rt->cmd_end_rendering =
             (PFN_vkCmdEndRenderingKHR)vkGetDeviceProcAddr(rt->device, "vkCmdEndRendering");
+    }
+    rt->cmd_set_viewport_with_count =
+        (PFN_vkCmdSetViewportWithCountEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetViewportWithCount");
+    if (!rt->cmd_set_viewport_with_count) {
+        rt->cmd_set_viewport_with_count =
+            (PFN_vkCmdSetViewportWithCountEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetViewportWithCountEXT");
+    }
+    rt->cmd_set_scissor_with_count =
+        (PFN_vkCmdSetScissorWithCountEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetScissorWithCount");
+    if (!rt->cmd_set_scissor_with_count) {
+        rt->cmd_set_scissor_with_count =
+            (PFN_vkCmdSetScissorWithCountEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetScissorWithCountEXT");
     }
     rt->cmd_set_cull_mode =
         (PFN_vkCmdSetCullModeEXT)vkGetDeviceProcAddr(rt->device, "vkCmdSetCullMode");
@@ -22355,10 +22375,14 @@ static int materialize_vulkan_graphics_v6_pipelines(
         };
         const PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry *viewport_scissor_state =
             find_vulkan_graphics_v67_viewport_scissor_state(view, pidx);
-        const uint64_t viewport_dynamic_bit = vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT);
-        const uint64_t scissor_dynamic_bit = vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR);
-        const int dynamic_viewport = (src->dynamic_state_mask & viewport_dynamic_bit) != 0;
-        const int dynamic_scissor = (src->dynamic_state_mask & scissor_dynamic_bit) != 0;
+        const uint64_t viewport_dynamic_bits =
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT);
+        const uint64_t scissor_dynamic_bits =
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT);
+        const int dynamic_viewport = (src->dynamic_state_mask & viewport_dynamic_bits) != 0;
+        const int dynamic_scissor = (src->dynamic_state_mask & scissor_dynamic_bits) != 0;
         VkViewport static_viewports[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE];
         VkRect2D static_scissors[PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_SCISSORS_PER_PIPELINE];
         memset(static_viewports, 0, sizeof(static_viewports));
@@ -22499,6 +22523,8 @@ static int materialize_vulkan_graphics_v6_pipelines(
         const uint64_t supported_dynamic_state_mask =
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT) |
+            vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_LINE_WIDTH) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_CULL_MODE) |
             vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_FRONT_FACE) |
@@ -22518,6 +22544,8 @@ static int materialize_vulkan_graphics_v6_pipelines(
         if ((src->dynamic_state_mask & ~supported_dynamic_state_mask) != 0) return -EOPNOTSUPP;
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_VIEWPORT);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_SCISSOR);
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT);
+        ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_LINE_WIDTH);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_CULL_MODE);
         ADD_GRAPHICS_DYNAMIC_STATE_IF_PRESENT(src->dynamic_state_mask, VK_DYNAMIC_STATE_FRONT_FACE);
@@ -25026,9 +25054,27 @@ static int record_vulkan_graphics_v6_command_buffer(
                             vkCmdSetViewport(command_buffer, state->first_index, state->count,
                                              (const VkViewport *)data);
                             break;
+                        case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT:
+                            if (!rt->enabled_extended_dynamic_state.extendedDynamicState ||
+                                !rt->cmd_set_viewport_with_count) {
+                                rc = -EOPNOTSUPP;
+                                goto cleanup;
+                            }
+                            rt->cmd_set_viewport_with_count(command_buffer, state->count,
+                                                            (const VkViewport *)data);
+                            break;
                         case VK_DYNAMIC_STATE_SCISSOR:
                             vkCmdSetScissor(command_buffer, state->first_index, state->count,
                                             (const VkRect2D *)data);
+                            break;
+                        case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT:
+                            if (!rt->enabled_extended_dynamic_state.extendedDynamicState ||
+                                !rt->cmd_set_scissor_with_count) {
+                                rc = -EOPNOTSUPP;
+                                goto cleanup;
+                            }
+                            rt->cmd_set_scissor_with_count(command_buffer, state->count,
+                                                           (const VkRect2D *)data);
                             break;
                         case VK_DYNAMIC_STATE_LINE_WIDTH: {
                             float line_width = 1.0f;

@@ -115,9 +115,9 @@ typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
 static uint32_t pdocker_vk_graphics_dynamic_state_bit_index(VkDynamicState state) {
     switch (state) {
         case VK_DYNAMIC_STATE_VIEWPORT: return 0u;
-        case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 0u;
         case VK_DYNAMIC_STATE_SCISSOR: return 1u;
-        case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 1u;
+        case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 18u;
+        case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 19u;
         case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
         case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
         case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;
@@ -12309,10 +12309,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         }
         if (ci->pViewportState) {
             const VkPipelineViewportStateCreateInfo *vs = ci->pViewportState;
-            const bool viewport_dynamic =
-                (captured_dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT)) != 0;
-            const bool scissor_dynamic =
-                (captured_dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR)) != 0;
+            const uint64_t viewport_dynamic_bits =
+                pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT) |
+                pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT);
+            const uint64_t scissor_dynamic_bits =
+                pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR) |
+                pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT);
+            const bool viewport_dynamic = (captured_dynamic_state_mask & viewport_dynamic_bits) != 0;
+            const bool scissor_dynamic = (captured_dynamic_state_mask & scissor_dynamic_bits) != 0;
             pipeline->viewport_count = vs->viewportCount;
             pipeline->scissor_count = vs->scissorCount;
             if (vs->viewportCount > PDOCKER_GPU_VULKAN_GRAPHICS_V67_MAX_VIEWPORTS_PER_PIPELINE) {
@@ -14173,14 +14177,24 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetViewportWithCount(
         VkCommandBuffer commandBuffer,
         uint32_t viewportCount,
         const VkViewport *pViewports) {
-    vkCmdSetViewport(commandBuffer, 0, viewportCount, pViewports);
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
+                                        0,
+                                        viewportCount,
+                                        pViewports,
+                                        pViewports ? (size_t)viewportCount * sizeof(VkViewport) : 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetScissorWithCount(
         VkCommandBuffer commandBuffer,
         uint32_t scissorCount,
         const VkRect2D *pScissors) {
-    vkCmdSetScissor(commandBuffer, 0, scissorCount, pScissors);
+    record_graphics_dynamic_state_bytes((PdockerVkCommandBuffer *)commandBuffer,
+                                        VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
+                                        0,
+                                        scissorCount,
+                                        pScissors,
+                                        pScissors ? (size_t)scissorCount * sizeof(VkRect2D) : 0);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdSetCullMode(
