@@ -1303,6 +1303,8 @@ typedef struct {
     uint8_t enabled_ext_dynamic_rendering;
     uint8_t enabled_ext_extended_dynamic_state;
     uint8_t enabled_ext_index_type_uint8;
+    uint8_t enabled_ext_draw_indirect_count_khr;
+    uint8_t enabled_ext_draw_indirect_count_amd;
     uint8_t enabled_chain_compat_feature_structs;
     uint8_t graphics_ready;
     PFN_vkCmdBeginRenderingKHR cmd_begin_rendering;
@@ -1830,6 +1832,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"VK_KHR_timeline_semaphore\":%u,"
             "\"VK_KHR_synchronization2\":%u,"
             "\"VK_KHR_dynamic_rendering\":%u,"
+            "\"VK_KHR_draw_indirect_count\":%u,"
+            "\"VK_AMD_draw_indirect_count\":%u,"
             "\"VK_EXT_extended_dynamic_state\":%u,"
             "\"VK_EXT_index_type_uint8\":%u}}",
             rt ? rt->enabled_features.shaderInt64 : 0,
@@ -1868,6 +1872,8 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt && rt->enabled_vulkan12.timelineSemaphore && rt->get_semaphore_counter_value && rt->wait_semaphores && rt->signal_semaphore ? 1u : 0u,
             rt && rt->enabled_synchronization2.synchronization2 && rt->queue_submit2 && rt->cmd_pipeline_barrier2 ? 1u : 0u,
             rt && rt->graphics_ready ? 1u : 0u,
+            rt ? rt->enabled_ext_draw_indirect_count_khr : 0,
+            rt ? rt->enabled_ext_draw_indirect_count_amd : 0,
             rt ? rt->enabled_ext_extended_dynamic_state : 0,
             rt ? rt->enabled_ext_index_type_uint8 : 0);
 }
@@ -10985,6 +10991,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
     enabled_vulkan12.shaderInt8 =
         rt->physical_vulkan12.shaderInt8 || rt->physical_float16_int8.shaderInt8;
     enabled_vulkan12.timelineSemaphore = rt->physical_vulkan12.timelineSemaphore;
+    enabled_vulkan12.drawIndirectCount = rt->physical_vulkan12.drawIndirectCount;
     enabled_storage16.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
     enabled_storage16.storageBuffer16BitAccess = rt->physical_storage16.storageBuffer16BitAccess;
     enabled_storage16.uniformAndStorageBuffer16BitAccess = rt->physical_storage16.uniformAndStorageBuffer16BitAccess;
@@ -11020,7 +11027,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
          enabled_vulkan12.storagePushConstant8 ||
          enabled_vulkan12.shaderFloat16 ||
          enabled_vulkan12.shaderInt8 ||
-         enabled_vulkan12.timelineSemaphore)) {
+         enabled_vulkan12.timelineSemaphore ||
+         enabled_vulkan12.drawIndirectCount)) {
         enabled_vulkan12.pNext = device_features_pnext;
         device_features_pnext = &enabled_vulkan12;
     }
@@ -11149,6 +11157,30 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
                                        &enabled_extension_count,
                                        (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
                                        VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+    }
+#endif
+#ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
+    const uint32_t draw_indirect_count_khr_before = enabled_extension_count;
+    if (enabled_vulkan12.drawIndirectCount) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME);
+        rt->enabled_ext_draw_indirect_count_khr =
+            enabled_extension_count > draw_indirect_count_khr_before;
+    }
+#endif
+#ifdef VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME
+    const uint32_t draw_indirect_count_amd_before = enabled_extension_count;
+    if (enabled_vulkan12.drawIndirectCount) {
+        append_vulkan_device_extension(rt->physical_device,
+                                       enabled_extensions,
+                                       &enabled_extension_count,
+                                       (uint32_t)(sizeof(enabled_extensions) / sizeof(enabled_extensions[0])),
+                                       VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME);
+        rt->enabled_ext_draw_indirect_count_amd =
+            enabled_extension_count > draw_indirect_count_amd_before;
     }
 #endif
     const uint32_t storage_class_before = enabled_extension_count;

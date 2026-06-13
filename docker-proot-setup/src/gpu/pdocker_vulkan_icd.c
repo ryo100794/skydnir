@@ -9303,6 +9303,15 @@ static VkBool32 advertised_draw_indexed_indirect_count(void) {
     return (caps && caps->draw_indexed_indirect_count) ? VK_TRUE : VK_FALSE;
 }
 
+static VkBool32 advertised_extended_dynamic_state(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+#ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
+    return (!caps || caps->ext_extended_dynamic_state) ? VK_TRUE : VK_FALSE;
+#else
+    return VK_FALSE;
+#endif
+}
+
 static void trace_executor_advertisement_caps_once(void) {
     static int traced = 0;
     if (traced || !getenv("PDOCKER_VULKAN_ICD_DEBUG")) return;
@@ -11083,7 +11092,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         VkExtensionProperties *pProperties) {
     (void)physicalDevice;
     (void)pLayerName;
-    VkExtensionProperties available[13];
+    VkExtensionProperties available[15];
     uint32_t available_count = 0;
 #define ADD_DEVICE_EXTENSION(name, version) do { \
         if (available_count < (uint32_t)(sizeof(available) / sizeof(available[0]))) { \
@@ -11123,6 +11132,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
     if (advertised_dynamic_rendering()) {
         ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION);
     }
+#ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
+    if (advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()) {
+        ADD_DEVICE_EXTENSION(VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME,
+                             VK_KHR_DRAW_INDIRECT_COUNT_SPEC_VERSION);
+    }
+#endif
+#ifdef VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME
+    if (advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()) {
+        ADD_DEVICE_EXTENSION(VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME,
+                             VK_AMD_DRAW_INDIRECT_COUNT_SPEC_VERSION);
+    }
+#endif
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (!caps || caps->ext_extended_dynamic_state) {
         ADD_DEVICE_EXTENSION(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
@@ -11164,6 +11185,16 @@ static bool device_extension_advertised_name(const char *name) {
     if (strcmp(name, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME) == 0) return advertised_timeline_semaphore();
 #endif
     if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) return advertised_dynamic_rendering();
+#ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
+    if (strcmp(name, VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == 0) {
+        return advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count();
+    }
+#endif
+#ifdef VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME
+    if (strcmp(name, VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == 0) {
+        return advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count();
+    }
+#endif
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (strcmp(name, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) == 0) {
         return !caps || caps->ext_extended_dynamic_state;
@@ -18095,22 +18126,90 @@ VKAPI_ATTR VkResult VKAPI_CALL vkMergePipelineCaches(
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName);
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName);
 
-static PFN_vkVoidFunction proc_address(const char *pName) {
-    if (!pName) return NULL;
-    if (executor_advertisement_source_enabled()) {
-        if ((strcmp(pName, "vkCmdDrawIndirectCount") == 0 ||
-             strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0 ||
-             strcmp(pName, "vkCmdDrawIndirectCountAMD") == 0) &&
-            !advertised_draw_indirect_count()) {
-            return NULL;
-        }
-        if ((strcmp(pName, "vkCmdDrawIndexedIndirectCount") == 0 ||
-             strcmp(pName, "vkCmdDrawIndexedIndirectCountKHR") == 0 ||
-             strcmp(pName, "vkCmdDrawIndexedIndirectCountAMD") == 0) &&
-            !advertised_draw_indexed_indirect_count()) {
-            return NULL;
-        }
+static bool proc_address_hidden_by_advertisement(const char *pName) {
+    if (!pName) return true;
+    if (strcmp(pName, "vkDestroySurfaceKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSurfaceSupportKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSurfaceFormatsKHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceSurfacePresentModesKHR") == 0 ||
+        strcmp(pName, "vkCreateSwapchainKHR") == 0 ||
+        strcmp(pName, "vkDestroySwapchainKHR") == 0 ||
+        strcmp(pName, "vkGetSwapchainImagesKHR") == 0 ||
+        strcmp(pName, "vkAcquireNextImageKHR") == 0 ||
+        strcmp(pName, "vkAcquireNextImage2KHR") == 0 ||
+        strcmp(pName, "vkQueuePresentKHR") == 0) {
+        return true;
     }
+    if ((strcmp(pName, "vkCmdBeginRendering") == 0 ||
+         strcmp(pName, "vkCmdBeginRenderingKHR") == 0 ||
+         strcmp(pName, "vkCmdEndRendering") == 0 ||
+         strcmp(pName, "vkCmdEndRenderingKHR") == 0) &&
+        !advertised_dynamic_rendering()) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdPipelineBarrier2") == 0 ||
+         strcmp(pName, "vkCmdPipelineBarrier2KHR") == 0 ||
+         strcmp(pName, "vkQueueSubmit2") == 0 ||
+         strcmp(pName, "vkQueueSubmit2KHR") == 0 ||
+         strcmp(pName, "vkCmdSetEvent2") == 0 ||
+         strcmp(pName, "vkCmdSetEvent2KHR") == 0 ||
+         strcmp(pName, "vkCmdResetEvent2") == 0 ||
+         strcmp(pName, "vkCmdResetEvent2KHR") == 0 ||
+         strcmp(pName, "vkCmdWaitEvents2") == 0 ||
+         strcmp(pName, "vkCmdWaitEvents2KHR") == 0 ||
+         strcmp(pName, "vkCmdWriteTimestamp2") == 0 ||
+         strcmp(pName, "vkCmdWriteTimestamp2KHR") == 0) &&
+        !advertised_synchronization2()) {
+        return true;
+    }
+    if ((strcmp(pName, "vkGetSemaphoreCounterValue") == 0 ||
+         strcmp(pName, "vkGetSemaphoreCounterValueKHR") == 0 ||
+         strcmp(pName, "vkWaitSemaphores") == 0 ||
+         strcmp(pName, "vkWaitSemaphoresKHR") == 0 ||
+         strcmp(pName, "vkSignalSemaphore") == 0 ||
+         strcmp(pName, "vkSignalSemaphoreKHR") == 0) &&
+        !advertised_timeline_semaphore()) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdSetCullMode") == 0 ||
+         strcmp(pName, "vkCmdSetCullModeEXT") == 0 ||
+         strcmp(pName, "vkCmdSetFrontFace") == 0 ||
+         strcmp(pName, "vkCmdSetFrontFaceEXT") == 0 ||
+         strcmp(pName, "vkCmdSetPrimitiveTopology") == 0 ||
+         strcmp(pName, "vkCmdSetPrimitiveTopologyEXT") == 0 ||
+         strcmp(pName, "vkCmdSetDepthTestEnable") == 0 ||
+         strcmp(pName, "vkCmdSetDepthTestEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetDepthWriteEnable") == 0 ||
+         strcmp(pName, "vkCmdSetDepthWriteEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetDepthCompareOp") == 0 ||
+         strcmp(pName, "vkCmdSetDepthCompareOpEXT") == 0 ||
+         strcmp(pName, "vkCmdSetDepthBoundsTestEnable") == 0 ||
+         strcmp(pName, "vkCmdSetDepthBoundsTestEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetStencilTestEnable") == 0 ||
+         strcmp(pName, "vkCmdSetStencilTestEnableEXT") == 0 ||
+         strcmp(pName, "vkCmdSetStencilOp") == 0 ||
+         strcmp(pName, "vkCmdSetStencilOpEXT") == 0) &&
+        !advertised_extended_dynamic_state()) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdDrawIndirectCount") == 0 ||
+         strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0 ||
+         strcmp(pName, "vkCmdDrawIndirectCountAMD") == 0) &&
+        !advertised_draw_indirect_count()) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdDrawIndexedIndirectCount") == 0 ||
+         strcmp(pName, "vkCmdDrawIndexedIndirectCountKHR") == 0 ||
+         strcmp(pName, "vkCmdDrawIndexedIndirectCountAMD") == 0) &&
+        !advertised_draw_indexed_indirect_count()) {
+        return true;
+    }
+    return false;
+}
+
+static PFN_vkVoidFunction proc_address(const char *pName) {
+    if (!pName || proc_address_hidden_by_advertisement(pName)) return NULL;
 #define MAP_PROC(name) if (strcmp(pName, #name) == 0) return (PFN_vkVoidFunction)name
 #define MAP_ALIAS(alias, name) if (strcmp(pName, (alias)) == 0) return (PFN_vkVoidFunction)name
     MAP_PROC(vkGetInstanceProcAddr);

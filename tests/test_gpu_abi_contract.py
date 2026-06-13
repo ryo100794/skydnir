@@ -9011,8 +9011,12 @@ class GpuAbiContractTest(unittest.TestCase):
         )[0]
         self.assertIn('\\"drawIndirectCount\\":%u', enabled_body)
         self.assertIn('\\"drawIndexedIndirectCount\\":%u', enabled_body)
+        self.assertIn('\\"VK_KHR_draw_indirect_count\\":%u', enabled_body)
+        self.assertIn('\\"VK_AMD_draw_indirect_count\\":%u', enabled_body)
         self.assertIn("rt && rt->cmd_draw_indirect_count ? 1u : 0u", enabled_body)
         self.assertIn("rt && rt->cmd_draw_indexed_indirect_count ? 1u : 0u", enabled_body)
+        self.assertIn("rt ? rt->enabled_ext_draw_indirect_count_khr : 0", enabled_body)
+        self.assertIn("rt ? rt->enabled_ext_draw_indirect_count_amd : 0", enabled_body)
 
     def test_vulkan_icd_can_shadow_query_executor_advertisement_caps(self):
         icd = VULKAN_ICD.read_text()
@@ -9094,21 +9098,39 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("advertised_timeline_semaphore()", extension_body)
         self.assertIn("advertised_synchronization2()", extension_body)
         self.assertIn("advertised_dynamic_rendering()", extension_body)
+        self.assertIn("VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME", extension_body)
+        self.assertIn("VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME", extension_body)
+        self.assertIn("advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()", extension_body)
         self.assertIn("return (caps && caps->ext_storage_buffer_storage_class) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->timeline_semaphore && caps->ext_timeline_semaphore) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->synchronization2 && caps->ext_synchronization2) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->dynamic_rendering && caps->ext_dynamic_rendering) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->draw_indirect_count) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->draw_indexed_indirect_count) ? VK_TRUE : VK_FALSE;", icd)
+        proc_gate_body = icd.split("static bool proc_address_hidden_by_advertisement", 1)[1].split(
+            "static PFN_vkVoidFunction proc_address", 1
+        )[0]
         proc_body = icd.split("static PFN_vkVoidFunction proc_address", 1)[1].split("#define MAP_PROC", 1)[0]
-        self.assertIn("executor_advertisement_source_enabled()", proc_body)
-        self.assertIn("!advertised_draw_indirect_count()", proc_body)
-        self.assertIn("!advertised_draw_indexed_indirect_count()", proc_body)
+        self.assertIn("proc_address_hidden_by_advertisement(pName)", proc_body)
+        for marker in [
+            "!advertised_dynamic_rendering()",
+            "!advertised_synchronization2()",
+            "!advertised_timeline_semaphore()",
+            "!advertised_extended_dynamic_state()",
+            "!advertised_draw_indirect_count()",
+            "!advertised_draw_indexed_indirect_count()",
+            "vkCmdBeginRenderingKHR",
+            "vkQueueSubmit2KHR",
+            "vkGetSemaphoreCounterValueKHR",
+            "vkCmdSetCullModeEXT",
+            "vkCreateSwapchainKHR",
+        ]:
+            self.assertIn(marker, proc_gate_body)
         self.assertIn("PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT", icd)
         self.assertIn("if (p->drawIndirectCount) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;", icd)
         self.assertIn("mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;", icd)
-        self.assertIn("vkCmdDrawIndirectCountKHR", proc_body)
-        self.assertIn("vkCmdDrawIndexedIndirectCountKHR", proc_body)
+        self.assertIn("vkCmdDrawIndirectCountKHR", proc_gate_body)
+        self.assertIn("vkCmdDrawIndexedIndirectCountKHR", proc_gate_body)
         self.assertNotIn("!caps || caps->ext_storage_buffer_storage_class", extension_body)
         self.assertIn("PDOCKER_VULKAN_ICD_DEBUG", icd)
 
