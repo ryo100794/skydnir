@@ -4918,11 +4918,28 @@ class GpuAbiContractTest(unittest.TestCase):
             "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:",
             "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT:",
             "find_executor_event_entry(command->pipeline_layout_id)",
-            "vkCmdSetEvent(command_buffer, entry->event, src_stage_mask)",
-            "vkCmdResetEvent(command_buffer, entry->event, src_stage_mask)",
-            "vkCmdWaitEvents(command_buffer, 1, &event, src_stage_mask, dst_stage_mask",
+            "PFN_vkCmdSetEvent2 cmd_set_event2",
+            "PFN_vkCmdResetEvent2 cmd_reset_event2",
+            "PFN_vkCmdWaitEvents2 cmd_wait_events2",
+            "rt->cmd_set_event2",
+            "rt->cmd_reset_event2",
+            "rt->cmd_wait_events2",
+            "const VkPipelineStageFlags2 src_stage_mask2",
+            "const int legacy_stage_masks",
+            "vkCmdSetEvent(command_buffer, entry->event, (VkPipelineStageFlags)command->index_offset)",
+            "vkCmdResetEvent(command_buffer, entry->event, (VkPipelineStageFlags)command->index_offset)",
+            "vkCmdWaitEvents(command_buffer, 1, &event,",
+            "rt->cmd_set_event2(command_buffer, entry->event, &dependency)",
+            "rt->cmd_reset_event2(command_buffer, entry->event, src_stage_mask2)",
+            "rt->cmd_wait_events2(command_buffer, 1, &event, &dependency)",
         ]:
             self.assertIn(marker, executor)
+
+        event_replay_body = executor.split("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:", 1)[1].split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:", 1
+        )[0]
+        self.assertNotIn("command->index_offset > UINT32_MAX", event_replay_body)
+        self.assertNotIn("command->push_hash > UINT32_MAX", event_replay_body)
 
     def test_vulkan_event_lifecycle_is_executor_backed(self):
         executor = GPU_EXECUTOR.read_text()

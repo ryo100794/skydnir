@@ -1326,6 +1326,9 @@ typedef struct {
     PFN_vkCmdDrawIndexedIndirectCount cmd_draw_indexed_indirect_count;
     PFN_vkCmdDispatchBase cmd_dispatch_base;
     PFN_vkCmdPipelineBarrier2 cmd_pipeline_barrier2;
+    PFN_vkCmdSetEvent2 cmd_set_event2;
+    PFN_vkCmdResetEvent2 cmd_reset_event2;
+    PFN_vkCmdWaitEvents2 cmd_wait_events2;
     PFN_vkQueueSubmit2 queue_submit2;
     PFN_vkGetSemaphoreCounterValue get_semaphore_counter_value;
     PFN_vkWaitSemaphores wait_semaphores;
@@ -11375,6 +11378,24 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->cmd_pipeline_barrier2 =
             (PFN_vkCmdPipelineBarrier2)vkGetDeviceProcAddr(rt->device, "vkCmdPipelineBarrier2KHR");
     }
+    rt->cmd_set_event2 =
+        (PFN_vkCmdSetEvent2)vkGetDeviceProcAddr(rt->device, "vkCmdSetEvent2");
+    if (!rt->cmd_set_event2) {
+        rt->cmd_set_event2 =
+            (PFN_vkCmdSetEvent2)vkGetDeviceProcAddr(rt->device, "vkCmdSetEvent2KHR");
+    }
+    rt->cmd_reset_event2 =
+        (PFN_vkCmdResetEvent2)vkGetDeviceProcAddr(rt->device, "vkCmdResetEvent2");
+    if (!rt->cmd_reset_event2) {
+        rt->cmd_reset_event2 =
+            (PFN_vkCmdResetEvent2)vkGetDeviceProcAddr(rt->device, "vkCmdResetEvent2KHR");
+    }
+    rt->cmd_wait_events2 =
+        (PFN_vkCmdWaitEvents2)vkGetDeviceProcAddr(rt->device, "vkCmdWaitEvents2");
+    if (!rt->cmd_wait_events2) {
+        rt->cmd_wait_events2 =
+            (PFN_vkCmdWaitEvents2)vkGetDeviceProcAddr(rt->device, "vkCmdWaitEvents2KHR");
+    }
     rt->queue_submit2 =
         (PFN_vkQueueSubmit2)vkGetDeviceProcAddr(rt->device, "vkQueueSubmit2");
     if (!rt->queue_submit2) {
@@ -20685,8 +20706,7 @@ static int validate_vulkan_graphics_v6_frame_content(
              command->descriptor_count != 0 || command->vertex_binding_count != 0 ||
              command->attachment_count != 0 || command->dynamic_state_count != 0 ||
              command->push_size != 0 || command->index_buffer_resource_index != UINT32_MAX ||
-             command->pipeline_layout_id == 0 || command->index_offset == 0 ||
-             command->index_offset > UINT32_MAX || command->push_hash > UINT32_MAX)) return -EPROTO;
+             command->pipeline_layout_id == 0 || command->index_offset == 0)) return -EPROTO;
         if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT) &&
             command->push_hash != 0) return -EPROTO;
@@ -21763,8 +21783,7 @@ static int preflight_vulkan_graphics_v6_replay_supported(
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT:
-                if (command->pipeline_layout_id == 0 || command->index_offset == 0 ||
-                    command->index_offset > UINT32_MAX || command->push_hash > UINT32_MAX) {
+                if (command->pipeline_layout_id == 0 || command->index_offset == 0) {
                     reason = "invalid graphics event command metadata";
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
@@ -25996,26 +26015,68 @@ static int record_vulkan_graphics_v6_command_buffer(
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT: {
                 VulkanExecutorEventEntry *entry = find_executor_event_entry(command->pipeline_layout_id);
-                if (!entry || !entry->event || command->index_offset == 0 ||
-                    command->index_offset > UINT32_MAX || command->push_hash > UINT32_MAX) {
+                if (!entry || !entry->event || command->index_offset == 0) {
                     rc = -EPROTO;
                     goto cleanup;
                 }
-                const VkPipelineStageFlags src_stage_mask = (VkPipelineStageFlags)command->index_offset;
-                const VkPipelineStageFlags dst_stage_mask = (VkPipelineStageFlags)command->push_hash;
+                const VkPipelineStageFlags2 src_stage_mask2 = (VkPipelineStageFlags2)command->index_offset;
+                const VkPipelineStageFlags2 dst_stage_mask2 = (VkPipelineStageFlags2)command->push_hash;
+                const int legacy_stage_masks =
+                    command->index_offset <= UINT32_MAX && command->push_hash <= UINT32_MAX;
                 if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT) {
                     if (command->push_hash != 0) { rc = -EPROTO; goto cleanup; }
-                    vkCmdSetEvent(command_buffer, entry->event, src_stage_mask);
+                    if (legacy_stage_masks) {
+                        vkCmdSetEvent(command_buffer, entry->event, (VkPipelineStageFlags)command->index_offset);
+                    } else {
+                        if (!rt->cmd_set_event2) { rc = -EOPNOTSUPP; goto cleanup; }
+                        VkMemoryBarrier2 event_scope = {
+                            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                            .srcStageMask = src_stage_mask2,
+                            .srcAccessMask = 0,
+                            .dstStageMask = 0,
+                            .dstAccessMask = 0,
+                        };
+                        VkDependencyInfo dependency = {
+                            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                            .memoryBarrierCount = 1,
+                            .pMemoryBarriers = &event_scope,
+                        };
+                        rt->cmd_set_event2(command_buffer, entry->event, &dependency);
+                    }
                     entry->signaled = 1u;
                 } else if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT) {
                     if (command->push_hash != 0) { rc = -EPROTO; goto cleanup; }
-                    vkCmdResetEvent(command_buffer, entry->event, src_stage_mask);
+                    if (legacy_stage_masks) {
+                        vkCmdResetEvent(command_buffer, entry->event, (VkPipelineStageFlags)command->index_offset);
+                    } else {
+                        if (!rt->cmd_reset_event2) { rc = -EOPNOTSUPP; goto cleanup; }
+                        rt->cmd_reset_event2(command_buffer, entry->event, src_stage_mask2);
+                    }
                     entry->signaled = 0u;
                 } else {
-                    if (dst_stage_mask == 0) { rc = -EPROTO; goto cleanup; }
+                    if (dst_stage_mask2 == 0) { rc = -EPROTO; goto cleanup; }
                     VkEvent event = entry->event;
-                    vkCmdWaitEvents(command_buffer, 1, &event, src_stage_mask, dst_stage_mask,
-                                    0, NULL, 0, NULL, 0, NULL);
+                    if (legacy_stage_masks) {
+                        vkCmdWaitEvents(command_buffer, 1, &event,
+                                        (VkPipelineStageFlags)command->index_offset,
+                                        (VkPipelineStageFlags)command->push_hash,
+                                        0, NULL, 0, NULL, 0, NULL);
+                    } else {
+                        if (!rt->cmd_wait_events2) { rc = -EOPNOTSUPP; goto cleanup; }
+                        VkMemoryBarrier2 event_scope = {
+                            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                            .srcStageMask = src_stage_mask2,
+                            .srcAccessMask = 0,
+                            .dstStageMask = dst_stage_mask2,
+                            .dstAccessMask = 0,
+                        };
+                        VkDependencyInfo dependency = {
+                            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                            .memoryBarrierCount = 1,
+                            .pMemoryBarriers = &event_scope,
+                        };
+                        rt->cmd_wait_events2(command_buffer, 1, &event, &dependency);
+                    }
                 }
                 break;
             }
