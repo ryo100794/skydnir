@@ -1253,6 +1253,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "pScissors ? (size_t)scissorCount * sizeof(VkRect2D) : 0",
             "pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT)",
             "pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT)",
+            "const uint64_t viewport_dynamic_bits =",
+            "const uint64_t scissor_dynamic_bits =",
+            "(pipeline->dynamic_state_mask & viewport_dynamic_bits) != 0;",
+            "(pipeline->dynamic_state_mask & scissor_dynamic_bits) != 0;",
         ]:
             self.assertIn(marker, icd)
         self.assertNotIn("vkCmdSetViewport(commandBuffer, 0, viewportCount, pViewports);", icd)

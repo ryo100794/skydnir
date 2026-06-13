@@ -4582,10 +4582,16 @@ static int send_recorded_vulkan_graphics_v6_1_frame(
             }
             need_v66_color_blend_state = true;
         }
+        const uint64_t viewport_dynamic_bits =
+            pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT) |
+            pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT);
+        const uint64_t scissor_dynamic_bits =
+            pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR) |
+            pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT);
         const bool viewport_dynamic =
-            (pipeline->dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT)) != 0;
+            (pipeline->dynamic_state_mask & viewport_dynamic_bits) != 0;
         const bool scissor_dynamic =
-            (pipeline->dynamic_state_mask & pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_SCISSOR)) != 0;
+            (pipeline->dynamic_state_mask & scissor_dynamic_bits) != 0;
         const bool need_viewport_scissor_state =
             (pipeline->viewport_count > 0 && !viewport_dynamic) ||
             (pipeline->scissor_count > 0 && !scissor_dynamic) ||
