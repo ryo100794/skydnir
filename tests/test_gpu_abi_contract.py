@@ -9055,6 +9055,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "advertised_draw_indirect_count_khr",
             "advertised_draw_indirect_count_amd",
             "advertised_extended_dynamic_state",
+            "advertised_api_version",
+            "advertised_api_1_3",
             "executor_advertisement_source_enabled",
             "PDOCKER_VULKAN_ADVERTISEMENT_SOURCE",
             'strcmp(source, "executor") == 0',
@@ -9133,10 +9135,18 @@ class GpuAbiContractTest(unittest.TestCase):
             "!advertised_synchronization2()",
             "!advertised_timeline_semaphore()",
             "!advertised_extended_dynamic_state()",
-            "!advertised_draw_indirect_count()",
-            "!advertised_draw_indexed_indirect_count()",
             "!advertised_draw_indirect_count_khr()",
             "!advertised_draw_indirect_count_amd()",
+            "!advertised_api_1_3()",
+            "vkGetPhysicalDeviceProperties2KHR",
+            "vkGetBufferMemoryRequirements2KHR",
+            "vkBindBufferMemory2KHR",
+            "vkCreateRenderPass2KHR",
+            "vkCmdBeginRenderPass2KHR",
+            "vkGetDeviceBufferMemoryRequirements",
+            "vkCmdBeginRendering",
+            "vkCmdCopyBuffer2",
+            "vkQueueSubmit2",
             "vkCmdBeginRenderingKHR",
             "vkQueueSubmit2KHR",
             "vkGetSemaphoreCounterValueKHR",
@@ -9147,6 +9157,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCreateSwapchainKHR",
         ]:
             self.assertIn(marker, proc_gate_body)
+        self.assertIn("advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()", proc_gate_body)
         self.assertIn("PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT", icd)
         self.assertIn("if (p->drawIndirectCount) mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;", icd)
         self.assertIn("mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;", icd)

@@ -9332,6 +9332,17 @@ static VkBool32 advertised_extended_dynamic_state(void) {
 #endif
 }
 
+static uint32_t advertised_api_version(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    uint32_t version = (caps && caps->api_version) ? caps->api_version : pdocker_api_version();
+    uint32_t maximum = pdocker_api_version();
+    return version > maximum ? maximum : version;
+}
+
+static VkBool32 advertised_api_1_3(void) {
+    return advertised_api_version() >= VK_MAKE_VERSION(1, 3, 0) ? VK_TRUE : VK_FALSE;
+}
+
 static void trace_executor_advertisement_caps_once(void) {
     static int traced = 0;
     if (traced || !getenv("PDOCKER_VULKAN_ICD_DEBUG")) return;
@@ -18161,6 +18172,52 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         strcmp(pName, "vkQueuePresentKHR") == 0) {
         return true;
     }
+    if (strcmp(pName, "vkGetPhysicalDeviceProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceFeatures2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceQueueFamilyProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetPhysicalDeviceMemoryProperties2KHR") == 0 ||
+        strcmp(pName, "vkGetBufferMemoryRequirements2KHR") == 0 ||
+        strcmp(pName, "vkGetImageMemoryRequirements2KHR") == 0 ||
+        strcmp(pName, "vkBindBufferMemory2KHR") == 0 ||
+        strcmp(pName, "vkBindImageMemory2KHR") == 0 ||
+        strcmp(pName, "vkCreateRenderPass2KHR") == 0 ||
+        strcmp(pName, "vkCmdBeginRenderPass2KHR") == 0 ||
+        strcmp(pName, "vkCmdNextSubpass2KHR") == 0 ||
+        strcmp(pName, "vkCmdEndRenderPass2KHR") == 0) {
+        return true;
+    }
+    if (!advertised_api_1_3() &&
+        (strcmp(pName, "vkGetDeviceBufferMemoryRequirements") == 0 ||
+         strcmp(pName, "vkGetDeviceImageMemoryRequirements") == 0 ||
+         strcmp(pName, "vkGetDeviceImageSparseMemoryRequirements") == 0 ||
+         strcmp(pName, "vkCmdBeginRendering") == 0 ||
+         strcmp(pName, "vkCmdEndRendering") == 0 ||
+         strcmp(pName, "vkCmdBindVertexBuffers2") == 0 ||
+         strcmp(pName, "vkCmdSetViewportWithCount") == 0 ||
+         strcmp(pName, "vkCmdSetScissorWithCount") == 0 ||
+         strcmp(pName, "vkCmdSetCullMode") == 0 ||
+         strcmp(pName, "vkCmdSetFrontFace") == 0 ||
+         strcmp(pName, "vkCmdSetPrimitiveTopology") == 0 ||
+         strcmp(pName, "vkCmdSetDepthTestEnable") == 0 ||
+         strcmp(pName, "vkCmdSetDepthWriteEnable") == 0 ||
+         strcmp(pName, "vkCmdSetDepthCompareOp") == 0 ||
+         strcmp(pName, "vkCmdSetDepthBoundsTestEnable") == 0 ||
+         strcmp(pName, "vkCmdSetStencilTestEnable") == 0 ||
+         strcmp(pName, "vkCmdSetStencilOp") == 0 ||
+         strcmp(pName, "vkCmdPipelineBarrier2") == 0 ||
+         strcmp(pName, "vkCmdCopyBuffer2") == 0 ||
+         strcmp(pName, "vkCmdCopyBufferToImage2") == 0 ||
+         strcmp(pName, "vkCmdCopyImageToBuffer2") == 0 ||
+         strcmp(pName, "vkCmdCopyImage2") == 0 ||
+         strcmp(pName, "vkCmdResolveImage2") == 0 ||
+         strcmp(pName, "vkCmdBlitImage2") == 0 ||
+         strcmp(pName, "vkQueueSubmit2") == 0 ||
+         strcmp(pName, "vkCmdSetEvent2") == 0 ||
+         strcmp(pName, "vkCmdResetEvent2") == 0 ||
+         strcmp(pName, "vkCmdWaitEvents2") == 0 ||
+         strcmp(pName, "vkCmdWriteTimestamp2") == 0)) {
+        return true;
+    }
     if ((strcmp(pName, "vkCmdBeginRendering") == 0 ||
          strcmp(pName, "vkCmdBeginRenderingKHR") == 0 ||
          strcmp(pName, "vkCmdEndRendering") == 0 ||
@@ -18222,10 +18279,9 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         !advertised_extended_dynamic_state()) {
         return true;
     }
-    if (strcmp(pName, "vkCmdDrawIndirectCount") == 0 && !advertised_draw_indirect_count()) {
-        return true;
-    }
-    if (strcmp(pName, "vkCmdDrawIndexedIndirectCount") == 0 && !advertised_draw_indexed_indirect_count()) {
+    if ((strcmp(pName, "vkCmdDrawIndirectCount") == 0 ||
+         strcmp(pName, "vkCmdDrawIndexedIndirectCount") == 0) &&
+        !(advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count())) {
         return true;
     }
     if ((strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0 ||
