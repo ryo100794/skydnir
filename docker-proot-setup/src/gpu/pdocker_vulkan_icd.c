@@ -3738,8 +3738,10 @@ static int append_graphics_attachment_entry(
         uint64_t generation) {
     if (!attachments || !attachment_count || !frame || !cursor || !src) return -EINVAL;
     if (*attachment_count >= PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_ATTACHMENTS) return -E2BIG;
-    if (!src->valid) {
-        if (role != PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR) return 0;
+    const bool unused_color_attachment =
+        role == PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR &&
+        (!src->valid || (!src->image_view && !src->resolve_image_view));
+    if (unused_color_attachment) {
         PdockerGpuVulkanGraphicsV6AttachmentEntry *entry = &attachments[(*attachment_count)++];
         memset(entry, 0, sizeof(*entry));
         entry->attachment_role = role;
