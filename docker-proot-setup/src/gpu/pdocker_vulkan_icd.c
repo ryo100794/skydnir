@@ -7173,31 +7173,12 @@ static int resolve_vulkan_dispatch_group_counts(
         uint32_t *group_count_y,
         uint32_t *group_count_z) {
     if (!op || !group_count_x || !group_count_y || !group_count_z) return -EINVAL;
-    if (!op->dispatch_indirect) {
-        *group_count_x = op->dispatch_x;
-        *group_count_y = op->dispatch_y;
-        *group_count_z = op->dispatch_z;
-        return 0;
+    if (op->dispatch_indirect) {
+        return -EOPNOTSUPP;
     }
-    const PdockerVkBuffer *buffer = op->dispatch_indirect_buffer;
-    if (!buffer || !buffer->memory || !buffer->memory->map ||
-        buffer->memory->map == MAP_FAILED || op->dispatch_indirect_offset % 4u != 0) {
-        return -EINVAL;
-    }
-    if (op->dispatch_indirect_offset > buffer->size ||
-        (VkDeviceSize)sizeof(uint32_t) * 3u > buffer->size - op->dispatch_indirect_offset) {
-        return -ERANGE;
-    }
-    VkDeviceSize absolute = buffer->memory_offset + op->dispatch_indirect_offset;
-    if (absolute < buffer->memory_offset || absolute > (VkDeviceSize)buffer->memory->size ||
-        (VkDeviceSize)sizeof(uint32_t) * 3u > (VkDeviceSize)buffer->memory->size - absolute) {
-        return -ERANGE;
-    }
-    uint32_t counts[3] = {0, 0, 0};
-    memcpy(counts, (const char *)buffer->memory->map + absolute, sizeof(counts));
-    *group_count_x = counts[0];
-    *group_count_y = counts[1];
-    *group_count_z = counts[2];
+    *group_count_x = op->dispatch_x;
+    *group_count_y = op->dispatch_y;
+    *group_count_z = op->dispatch_z;
     return 0;
 }
 

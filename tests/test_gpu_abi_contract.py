@@ -4021,7 +4021,12 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("op->dispatch_indirect = true;", dispatch_body)
         self.assertIn("MAP_PROC(vkCmdDispatchIndirect);", icd)
         self.assertIn("resolve_vulkan_dispatch_group_counts", icd)
-        self.assertIn("dispatch_indirect_offset % 4u", icd)
+        resolve_body = icd.split("static int resolve_vulkan_dispatch_group_counts", 1)[1].split(
+            "static int send_generic_vulkan_dispatch_op", 1
+        )[0]
+        self.assertIn("op->dispatch_indirect", resolve_body)
+        self.assertIn("return -EOPNOTSUPP;", resolve_body)
+        self.assertNotIn("memcpy(counts", resolve_body)
         self.assertIn("generic dispatch rejected: indirect group counts", icd)
         self.assertIn("base_group_x", executor)
         self.assertIn("cmd_dispatch_base", executor)
