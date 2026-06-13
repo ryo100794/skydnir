@@ -2043,3 +2043,20 @@ Acceptance before promoting ARM32 beyond packaging:
 - Port direct execution to 32-bit ARM register/syscall handling and validate `docker run`/`compose up` on an ARM32 device.
 - Build or replace the image fetch helper from source for ARM32.
 - Add Android smoke coverage proving `/version`, `/info`, image pull, build, run, exec, and compose paths on `linux/arm/v7`.
+
+## P1: TermPort Compat Direct-Exec Contract Evidence
+
+Status: **evidence mirrored from TermPort on 2026-06-13; upstream smoke still needed**.
+
+Facts from the TermPort port:
+
+- TermPort reproduced app-process `execve(loader)` `EACCES` when Skydnir direct-exec ran from a modern `targetSdk=34` APK process, while the same preserved Ubuntu rootfs and `skydnir-direct` command succeeded from `adb run-as`.
+- Upstream letter review confirmed that the supported no-helper execution contract is the compat flavor: `targetSdk=28`, direct process execution enabled, and rootfs-loader-first.
+- TermPort changed its embedded Skydnir execution APK contract to `targetSdk=28`, kept helper loaders absent by default, and verified an Ubuntu 22.04 image build, container start, and interactive `sh -it` prompt/command path on device.
+- Generic APK-native glibc helper loader fallback remains rejected for arbitrary images because loader/libc private ABI mismatches can crash or fail unsafely; any helper mode needs a source-build recipe, provenance, image-libc compatibility checks, opt-in behavior, and fail-closed tests before it is F-Droid-ready.
+
+Acceptance:
+
+- Upstream compat Android smoke documents `targetSdk=28` in the installed package and covers `docker run ubuntu:22.04`, Dockerfile build, container start, non-TTY exec, and TTY `sh -it`.
+- Modern-target Android app-process execution is either delegated to a compat execution component or disabled with a precise capability reason.
+- No helper-loader binary is packaged unless the matching source-build input and compatibility checks are present.
