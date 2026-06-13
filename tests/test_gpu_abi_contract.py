@@ -9050,6 +9050,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "advertised_draw_indexed_indirect_count",
             "advertised_draw_indirect_count_khr",
             "advertised_draw_indirect_count_amd",
+            "advertised_extended_dynamic_state",
             "executor_advertisement_source_enabled",
             "PDOCKER_VULKAN_ADVERTISEMENT_SOURCE",
             'strcmp(source, "executor") == 0',
@@ -9092,6 +9093,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->drawIndirectCount = advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count();", pnext_body)
         self.assertIn("p->synchronization2 = advertised_synchronization2();", pnext_body)
         self.assertIn("p->dynamicRendering = advertised_dynamic_rendering();", pnext_body)
+        self.assertIn("p->extendedDynamicState = advertised_extended_dynamic_state();", pnext_body)
         extension_body = icd.split("vkEnumerateDeviceExtensionProperties", 1)[1].split(
             "#undef ADD_DEVICE_EXTENSION", 1
         )[0]
@@ -9102,6 +9104,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("advertised_timeline_semaphore()", extension_body)
         self.assertIn("advertised_synchronization2()", extension_body)
         self.assertIn("advertised_dynamic_rendering()", extension_body)
+        self.assertIn("advertised_extended_dynamic_state()", extension_body)
         self.assertIn("VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME", extension_body)
         self.assertIn("VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME", extension_body)
         self.assertIn("advertised_draw_indirect_count_khr()", extension_body)
@@ -9114,6 +9117,8 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("return (caps && caps->dynamic_rendering && caps->ext_dynamic_rendering) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->draw_indirect_count) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->draw_indexed_indirect_count) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertIn("return (caps && caps->ext_extended_dynamic_state) ? VK_TRUE : VK_FALSE;", icd)
+        self.assertNotIn("!caps || caps->ext_extended_dynamic_state", icd)
         proc_gate_body = icd.split("static bool proc_address_hidden_by_advertisement", 1)[1].split(
             "static PFN_vkVoidFunction proc_address", 1
         )[0]

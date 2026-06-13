@@ -9326,7 +9326,7 @@ static VkBool32 advertised_draw_indirect_count_amd(void) {
 static VkBool32 advertised_extended_dynamic_state(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
-    return (!caps || caps->ext_extended_dynamic_state) ? VK_TRUE : VK_FALSE;
+    return (caps && caps->ext_extended_dynamic_state) ? VK_TRUE : VK_FALSE;
 #else
     return VK_FALSE;
 #endif
@@ -9731,7 +9731,7 @@ static void fill_pnext_features(void *pNext) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT: {
                 VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *p = (VkPhysicalDeviceExtendedDynamicStateFeaturesEXT *)node;
                 zero_vk_out_struct_preserve_chain(p, sizeof(*p), header);
-                p->extendedDynamicState = caps ? (caps->ext_extended_dynamic_state ? VK_TRUE : VK_FALSE) : VK_TRUE;
+                p->extendedDynamicState = advertised_extended_dynamic_state();
                 break;
             }
 #endif
@@ -9938,7 +9938,7 @@ static uint64_t advertised_feature_mask(void) {
         mask |= PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT;
     }
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
-    if (!caps || caps->ext_extended_dynamic_state) {
+    if (advertised_extended_dynamic_state()) {
         mask |= PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE;
     }
 #endif
@@ -11165,7 +11165,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
     }
 #endif
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
-    if (!caps || caps->ext_extended_dynamic_state) {
+    if (advertised_extended_dynamic_state()) {
         ADD_DEVICE_EXTENSION(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
                              VK_EXT_EXTENDED_DYNAMIC_STATE_SPEC_VERSION);
     }
@@ -11217,7 +11217,7 @@ static bool device_extension_advertised_name(const char *name) {
 #endif
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
     if (strcmp(name, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) == 0) {
-        return !caps || caps->ext_extended_dynamic_state;
+        return advertised_extended_dynamic_state();
     }
 #endif
 #ifdef VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME
