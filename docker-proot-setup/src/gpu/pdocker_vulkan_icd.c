@@ -18168,6 +18168,9 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         !advertised_dynamic_rendering()) {
         return true;
     }
+    if (strcmp(pName, "vkCmdDispatchBaseKHR") == 0) {
+        return true;
+    }
     if ((strcmp(pName, "vkCmdPipelineBarrier2") == 0 ||
          strcmp(pName, "vkCmdPipelineBarrier2KHR") == 0 ||
          strcmp(pName, "vkQueueSubmit2") == 0 ||

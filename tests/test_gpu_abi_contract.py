@@ -4010,6 +4010,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("VKAPI_ATTR void VKAPI_CALL vkCmdDispatchBase", dispatch_body)
         self.assertIn("op->base_group_x = baseGroupX;", dispatch_body)
         self.assertIn('MAP_ALIAS("vkCmdDispatchBaseKHR", vkCmdDispatchBaseKHR);', icd)
+        proc_gate_body = icd.split("static bool proc_address_hidden_by_advertisement", 1)[1].split(
+            "static PFN_vkVoidFunction proc_address", 1
+        )[0]
+        self.assertIn('strcmp(pName, "vkCmdDispatchBaseKHR") == 0', proc_gate_body)
         self.assertIn("base_group_x=%u base_group_y=%u base_group_z=%u", icd)
         dispatch_send_body = icd.split("static int send_generic_vulkan_dispatch_op", 1)[1].split("static int send_generic_vulkan_dispatch(", 1)[0]
         self.assertLess(dispatch_send_body.index("api_buffer_ids[i]"), dispatch_send_body.index("base_group_x=%u"))
