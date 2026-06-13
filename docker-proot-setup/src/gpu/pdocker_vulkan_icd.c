@@ -4036,7 +4036,11 @@ static int collect_graphics_descriptor_entries(
                     (binding->dynamic ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_DYNAMIC : 0u) |
                     (binding->range == VK_WHOLE_SIZE ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_WHOLE_SIZE : 0u) |
                     (array_element ? PDOCKER_GPU_V5_DESCRIPTOR_FLAG_ARRAY_ENTRY : 0u);
-                descriptor->access_flags = PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE;
+                descriptor->access_flags =
+                    (binding->descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
+                     binding->descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC)
+                        ? (PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE)
+                        : PDOCKER_GPU_V5_ACCESS_READ;
                 descriptor->resource_index = (uint32_t)buffer_index;
                 descriptor->image_view_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;
                 descriptor->sampler_index = PDOCKER_GPU_V5_DESCRIPTOR_OBJECT_NONE;

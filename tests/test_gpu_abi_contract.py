@@ -3942,6 +3942,33 @@ class GpuAbiContractTest(unittest.TestCase):
             update_body.index("dst->storage_buffers[dst_binding][dst_array] ="),
         )
 
+    def test_graphics_uniform_buffer_descriptors_are_read_only(self):
+        icd = VULKAN_ICD.read_text()
+        collect_body = icd.split("static int collect_graphics_descriptor_entries", 1)[1].split(
+            "static int append_recorded_graphics_descriptor_bind_snapshot", 1
+        )[0]
+        self.assertIn("binding->descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER", collect_body)
+        self.assertIn("binding->descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC", collect_body)
+        self.assertIn("? (PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE)", collect_body)
+        self.assertIn(": PDOCKER_GPU_V5_ACCESS_READ", collect_body)
+        self.assertNotIn(
+            "descriptor->access_flags = PDOCKER_GPU_V5_ACCESS_READ | PDOCKER_GPU_V5_ACCESS_WRITE;",
+            collect_body,
+        )
+
+        object_descriptor_body = collect_body.split(
+            "if (descriptor_type_supported_by_v5_object_transport", 1
+        )[1].split("continue;", 1)[0]
+        self.assertIn("descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", object_descriptor_body)
+        self.assertIn(": PDOCKER_GPU_V5_ACCESS_READ", object_descriptor_body)
+
+        buffer_descriptor_body = collect_body.split(
+            "if (!descriptor_type_supported_by_v4_transport(binding->descriptor_type))", 1
+        )[1].split("descriptor->resource_index = (uint32_t)buffer_index;", 1)[0]
+        self.assertIn("binding->descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER", buffer_descriptor_body)
+        self.assertIn("binding->descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC", buffer_descriptor_body)
+        self.assertIn(": PDOCKER_GPU_V5_ACCESS_READ", buffer_descriptor_body)
+
     def test_vulkan_v4_transport_supports_uniform_buffer_descriptor_type(self):
         icd = VULKAN_ICD.read_text()
         self.assertIn("type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER", icd)
