@@ -181,6 +181,7 @@ static uint64_t g_generic_dispatch_sequence = 0;
 #define PDOCKER_VK_FEATURE_DYNAMIC_RENDERING            (1ull << 17)
 #define PDOCKER_VK_FEATURE_EXTENDED_DYNAMIC_STATE       (1ull << 18)
 #define PDOCKER_VK_FEATURE_DRAW_INDIRECT_COUNT          (1ull << 19)
+#define PDOCKER_VK_FEATURE_MULTIVIEW                    (1ull << 20)
 
 struct PdockerVkMemory {
     size_t size;
@@ -9169,6 +9170,7 @@ typedef struct {
     char device_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
     VkPhysicalDeviceLimits limits;
     VkPhysicalDeviceFeatures features;
+    VkBool32 multiview;
     VkPhysicalDevice16BitStorageFeatures storage16;
     VkPhysicalDevice8BitStorageFeatures storage8;
     VkPhysicalDeviceShaderFloat16Int8Features float16_int8;
@@ -9278,6 +9280,7 @@ static bool parse_executor_advertisement_caps_json(
     json_read_u32_array3(json, "maxComputeWorkGroupCount", caps->limits.maxComputeWorkGroupCount);
 
     json_read_u32(json, "shaderInt64", &caps->features.shaderInt64);
+    json_read_u32(json, "multiview", &caps->multiview);
     json_read_u32(json, "storageBuffer16BitAccess", &caps->storage16.storageBuffer16BitAccess);
     json_read_u32(json, "uniformAndStorageBuffer16BitAccess", &caps->storage16.uniformAndStorageBuffer16BitAccess);
     json_read_u32(json, "storagePushConstant16", &caps->storage16.storagePushConstant16);
@@ -9749,12 +9752,14 @@ static void fill_pnext_features(void *pNext) {
                     p->uniformAndStorageBuffer16BitAccess = disabled ? VK_FALSE : caps->storage16.uniformAndStorageBuffer16BitAccess;
                     p->storagePushConstant16 = disabled ? VK_FALSE : caps->storage16.storagePushConstant16;
                     p->storageInputOutput16 = disabled ? VK_FALSE : caps->storage16.storageInputOutput16;
+                    p->multiview = caps->multiview;
                 } else {
                     VkBool32 storage16 = advertised_storage16();
                     p->storageBuffer16BitAccess = storage16;
                     p->uniformAndStorageBuffer16BitAccess = VK_FALSE;
                     p->storagePushConstant16 = VK_FALSE;
                     p->storageInputOutput16 = VK_FALSE;
+                    p->multiview = VK_FALSE;
                 }
                 break;
             }
@@ -9919,6 +9924,7 @@ static uint64_t feature_mask_from_pnext_chain(const void *pNext) {
                 if (p->storageBuffer16BitAccess) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
                 if (p->uniformAndStorageBuffer16BitAccess) mask |= PDOCKER_VK_FEATURE_UNIFORM_STORAGE_BUFFER_16;
                 if (p->storagePushConstant16) mask |= PDOCKER_VK_FEATURE_STORAGE_PUSH_CONSTANT_16;
+                if (p->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES: {
@@ -10046,6 +10052,7 @@ static uint64_t advertised_feature_mask(void) {
         if (caps->ext_index_type_uint8 && caps->index_type_uint8.indexTypeUint8) {
             mask |= PDOCKER_VK_FEATURE_INDEX_TYPE_UINT8;
         }
+        if (caps->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;
     } else {
         if (advertised_storage16()) mask |= PDOCKER_VK_FEATURE_STORAGE_BUFFER_16;
         if (advertised_storage8()) {
@@ -10100,11 +10107,12 @@ static void trace_device_create_features(const VkDeviceCreateInfo *pCreateInfo) 
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES: {
                 const VkPhysicalDeviceVulkan11Features *p = (const VkPhysicalDeviceVulkan11Features *)node;
                 fprintf(stderr,
-                        "pdocker-vulkan-icd: create-device vk11_features={storage16:%u,ubo_ssbo16:%u,push16:%u,io16:%u}\n",
+                        "pdocker-vulkan-icd: create-device vk11_features={storage16:%u,ubo_ssbo16:%u,push16:%u,io16:%u,multiview:%u}\n",
                         p->storageBuffer16BitAccess,
                         p->uniformAndStorageBuffer16BitAccess,
                         p->storagePushConstant16,
-                        p->storageInputOutput16);
+                        p->storageInputOutput16,
+                        p->multiview);
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES: {
@@ -12358,9 +12366,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
                     (const VkPipelineRenderingCreateInfo *)chain;
                 pipeline->dynamic_rendering_pipeline = true;
                 pipeline->dynamic_rendering_view_mask = rendering->viewMask;
-                if (rendering->viewMask != 0) {
-                    pipeline->graphics_unsupported = true;
-                }
                 pipeline->dynamic_rendering_color_attachment_count =
                     clamp_u32(rendering->colorAttachmentCount, PDOCKER_VK_MAX_STORAGE_BUFFERS);
                 if (rendering->colorAttachmentCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
@@ -12639,7 +12644,7 @@ static bool command_buffer_begin_inheritance_supported(
             case VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO: {
                 const VkCommandBufferInheritanceRenderingInfo *rendering =
                     (const VkCommandBufferInheritanceRenderingInfo *)chain;
-                if (rendering->flags != 0 || rendering->viewMask != 0 ||
+                if (rendering->flags != 0 ||
                     rendering->colorAttachmentCount > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
                     return false;
                 }
@@ -13151,7 +13156,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBeginRendering(
         if (pRenderingInfo->pNext) {
             cmd->graphics_unsupported = true;
         }
-        if (pRenderingInfo->flags != 0 || pRenderingInfo->viewMask != 0) {
+        if (pRenderingInfo->flags != 0) {
             cmd->graphics_unsupported = true;
         }
         cmd->active_render_area = pRenderingInfo->renderArea;

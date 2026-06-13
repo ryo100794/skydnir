@@ -1742,7 +1742,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
-            "core11_storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
+            "core11_storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u,multiview:%u} "
             "core12_storage8={ssbo:%u,ubo_ssbo:%u,push:%u,float16:%u,int8:%u} "
             "subgroup={size:%u,stages:0x%x,ops:0x%x} "
             "limits={push:%u,shared:%u,per_stage_storage:%u,set_storage:%u,max_bound_sets:%u,workgroup_invocations:%u}\n",
@@ -1767,6 +1767,7 @@ static void log_vulkan_feature_trace(const VulkanRuntime *rt) {
             rt->physical_vulkan11.uniformAndStorageBuffer16BitAccess,
             rt->physical_vulkan11.storagePushConstant16,
             rt->physical_vulkan11.storageInputOutput16,
+            rt->physical_vulkan11.multiview,
             rt->physical_vulkan12.storageBuffer8BitAccess,
             rt->physical_vulkan12.uniformAndStorageBuffer8BitAccess,
             rt->physical_vulkan12.storagePushConstant8,
@@ -1796,7 +1797,7 @@ static void log_vulkan_enabled_feature_trace(
             "storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
             "storage8={ssbo:%u,ubo_ssbo:%u,push:%u} "
             "float16=%u int8=%u indexTypeUint8=%u "
-            "core11_storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u} "
+            "core11_storage16={ssbo:%u,ubo_ssbo:%u,push:%u,io:%u,multiview:%u} "
             "core12_storage8={ssbo:%u,ubo_ssbo:%u,push:%u,float16:%u,int8:%u}\n",
             PDOCKER_GPU_EXECUTOR_BUILD_MARKER,
             features ? features->shaderInt64 : 0,
@@ -1814,6 +1815,7 @@ static void log_vulkan_enabled_feature_trace(
             vulkan11 ? vulkan11->uniformAndStorageBuffer16BitAccess : 0,
             vulkan11 ? vulkan11->storagePushConstant16 : 0,
             vulkan11 ? vulkan11->storageInputOutput16 : 0,
+            vulkan11 ? vulkan11->multiview : 0,
             vulkan12 ? vulkan12->storageBuffer8BitAccess : 0,
             vulkan12 ? vulkan12->uniformAndStorageBuffer8BitAccess : 0,
             vulkan12 ? vulkan12->storagePushConstant8 : 0,
@@ -1837,6 +1839,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"timelineSemaphore\":%u,"
             "\"synchronization2\":%u,"
             "\"dynamicRendering\":%u,"
+            "\"multiview\":%u,"
             "\"queueSubmit2\":%u,"
             "\"cmdPipelineBarrier2\":%u,"
             "\"dynamicRenderingUsable\":%u,"
@@ -1845,6 +1848,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             "\"core11_storageBuffer16BitAccess\":%u,"
             "\"core11_uniformAndStorageBuffer16BitAccess\":%u,"
             "\"core11_storagePushConstant16\":%u,"
+            "\"core11_multiview\":%u,"
             "\"core12_storageBuffer8BitAccess\":%u,"
             "\"core12_uniformAndStorageBuffer8BitAccess\":%u,"
             "\"core12_storagePushConstant8\":%u,"
@@ -1878,6 +1882,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt && rt->enabled_vulkan12.timelineSemaphore && rt->get_semaphore_counter_value && rt->wait_semaphores && rt->signal_semaphore ? 1u : 0u,
             rt && rt->enabled_synchronization2.synchronization2 && rt->queue_submit2 && rt->cmd_pipeline_barrier2 ? 1u : 0u,
             rt && rt->graphics_ready ? 1u : 0u,
+            rt ? rt->enabled_vulkan11.multiview : 0,
             rt && rt->queue_submit2 ? 1u : 0u,
             rt && rt->cmd_pipeline_barrier2 ? 1u : 0u,
             rt && rt->graphics_ready ? 1u : 0u,
@@ -1886,6 +1891,7 @@ static void write_android_vulkan_enabled_features_report(FILE *out, const Vulkan
             rt ? rt->enabled_vulkan11.storageBuffer16BitAccess : 0,
             rt ? rt->enabled_vulkan11.uniformAndStorageBuffer16BitAccess : 0,
             rt ? rt->enabled_vulkan11.storagePushConstant16 : 0,
+            rt ? rt->enabled_vulkan11.multiview : 0,
             rt ? rt->enabled_vulkan12.storageBuffer8BitAccess : 0,
             rt ? rt->enabled_vulkan12.uniformAndStorageBuffer8BitAccess : 0,
             rt ? rt->enabled_vulkan12.storagePushConstant8 : 0,
@@ -11101,6 +11107,7 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         rt->physical_vulkan11.storagePushConstant16 || rt->physical_storage16.storagePushConstant16;
     enabled_vulkan11.storageInputOutput16 =
         rt->physical_vulkan11.storageInputOutput16 || rt->physical_storage16.storageInputOutput16;
+    enabled_vulkan11.multiview = rt->physical_vulkan11.multiview;
     enabled_vulkan12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     enabled_vulkan12.storageBuffer8BitAccess =
         rt->physical_vulkan12.storageBuffer8BitAccess || rt->physical_storage8.storageBuffer8BitAccess;
@@ -11158,7 +11165,8 @@ static int init_vulkan_runtime(VulkanRuntime *rt) {
         (enabled_vulkan11.storageBuffer16BitAccess ||
          enabled_vulkan11.uniformAndStorageBuffer16BitAccess ||
          enabled_vulkan11.storagePushConstant16 ||
-         enabled_vulkan11.storageInputOutput16)) {
+         enabled_vulkan11.storageInputOutput16 ||
+         enabled_vulkan11.multiview)) {
         enabled_vulkan11.pNext = device_features_pnext;
         device_features_pnext = &enabled_vulkan11;
     }
@@ -21445,8 +21453,9 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
-                if (command->rendering_view_mask != 0) {
-                    reason = "dynamic rendering multiview is not supported";
+                if (command->rendering_view_mask != 0 &&
+                    !g_vulkan_runtime.enabled_vulkan11.multiview) {
+                    reason = "dynamic rendering multiview requires enabled Vulkan 1.1 multiview";
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
@@ -22573,7 +22582,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
         for (uint32_t c = 0; c < src->color_attachment_count; ++c) {
             color_formats[c] = (VkFormat)formats[c];
         }
-        if (src->dynamic_rendering_view_mask != 0) return -EOPNOTSUPP;
+        if (src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview) return -EOPNOTSUPP;
         VkPipelineRenderingCreateInfo rendering = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
             .viewMask = src->dynamic_rendering_view_mask,

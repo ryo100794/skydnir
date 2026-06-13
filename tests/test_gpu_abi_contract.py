@@ -1411,21 +1411,30 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("pipeline->color_blend_logic_op_enable = cb->logicOpEnable", icd)
         self.assertNotIn("attachment->blendEnable ||", icd)
 
-    def test_vulkan_graphics_dynamic_rendering_unsupported_state_is_fail_closed(self):
+    def test_vulkan_graphics_dynamic_rendering_multiview_is_passthrough_when_advertised(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
         for marker in [
-            "pRenderingInfo->flags != 0 || pRenderingInfo->viewMask != 0",
-            "if (rendering->viewMask != 0)",
-            "pipeline->graphics_unsupported = true;",
+            "cmd->active_rendering_view_mask = pRenderingInfo->viewMask;",
+            "pipeline->dynamic_rendering_view_mask = rendering->viewMask;",
+            "p->multiview = caps->multiview;",
+            "if (p->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;",
+            "if (caps->multiview) mask |= PDOCKER_VK_FEATURE_MULTIVIEW;",
         ]:
             self.assertIn(marker, icd)
+        self.assertNotIn("pRenderingInfo->flags != 0 || pRenderingInfo->viewMask != 0", icd)
+        self.assertNotIn("if (rendering->viewMask != 0)", icd)
         for marker in [
-            "dynamic rendering flags are not supported",
-            "dynamic rendering multiview is not supported",
-            "if (src->dynamic_rendering_view_mask != 0) return -EOPNOTSUPP;",
+            "enabled_vulkan11.multiview = rt->physical_vulkan11.multiview;",
+            "enabled_vulkan11.multiview))",
+            "command->rendering_view_mask != 0 &&",
+            "!g_vulkan_runtime.enabled_vulkan11.multiview",
+            "dynamic rendering multiview requires enabled Vulkan 1.1 multiview",
+            "if (src->dynamic_rendering_view_mask != 0 && !rt->enabled_vulkan11.multiview) return -EOPNOTSUPP;",
         ]:
             self.assertIn(marker, executor)
+        self.assertNotIn("dynamic rendering multiview is not supported", executor)
+        self.assertNotIn("if (src->dynamic_rendering_view_mask != 0) return -EOPNOTSUPP;", executor)
 
     def test_vulkan_graphics_unused_color_attachment_slots_are_preserved(self):
         abi = APP_HEADER.read_text()
@@ -9287,6 +9296,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "storage16.storageBuffer16BitAccess",
             "storage8.storageBuffer8BitAccess",
             "float16_int8.shaderInt8",
+            "multiview",
             "subgroup.supportedOperations",
             "timeline_semaphore",
             "synchronization2",
@@ -9350,6 +9360,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("p->drawIndirectCount = advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count();", pnext_body)
         self.assertIn("p->synchronization2 = advertised_synchronization2();", pnext_body)
         self.assertIn("p->dynamicRendering = advertised_dynamic_rendering();", pnext_body)
+        self.assertIn("p->multiview = caps->multiview;", pnext_body)
         self.assertIn("p->extendedDynamicState = advertised_extended_dynamic_state();", pnext_body)
         extension_body = icd.split("vkEnumerateDeviceExtensionProperties", 1)[1].split(
             "#undef ADD_DEVICE_EXTENSION", 1
