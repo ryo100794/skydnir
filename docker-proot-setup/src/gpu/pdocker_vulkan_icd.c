@@ -12290,8 +12290,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         pipeline->graphics_unsupported = false;
         pipeline->line_width = 1.0f;
         const VkGraphicsPipelineCreateInfo *ci = &pCreateInfos[i];
+        if (ci->flags != 0 || ci->basePipelineHandle != VK_NULL_HANDLE ||
+            ci->basePipelineIndex >= 0) {
+            pipeline->graphics_unsupported = true;
+        }
         uint64_t captured_dynamic_state_mask = 0;
         if (ci->pDynamicState) {
+            if (ci->pDynamicState->pNext || ci->pDynamicState->flags != 0) {
+                pipeline->graphics_unsupported = true;
+            }
             for (uint32_t d = 0; d < ci->pDynamicState->dynamicStateCount; ++d) {
                 VkDynamicState state = ci->pDynamicState->pDynamicStates[d];
                 captured_dynamic_state_mask |= pdocker_vk_graphics_dynamic_state_bit(state);
@@ -12301,12 +12308,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         pipeline->layout = (PdockerVkPipelineLayout *)ci->layout;
         pipeline->render_pass = (PdockerVkRenderPass *)ci->renderPass;
         pipeline->shader_stage_count = ci->stageCount;
+        if (ci->stageCount > 0 && !ci->pStages) {
+            pipeline->graphics_unsupported = true;
+        }
         uint32_t captured_stages = clamp_u32(ci->stageCount, PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS);
         if (ci->stageCount > PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS) {
             pipeline->graphics_unsupported = true;
         }
         for (uint32_t stage_i = 0; stage_i < captured_stages; ++stage_i) {
             const VkPipelineShaderStageCreateInfo *stage = ci->pStages ? &ci->pStages[stage_i] : NULL;
+            if (!stage || stage->pNext || stage->flags != 0) {
+                pipeline->graphics_unsupported = true;
+            }
             pipeline->shader_stage_flags |= stage ? stage->stage : 0;
             pipeline->graphics_stage_flags[stage_i] = stage ? stage->stage : 0;
             pipeline->graphics_stage_modules[stage_i] = stage ? (PdockerVkShaderModule *)stage->module : NULL;
@@ -12334,10 +12347,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             }
         }
         if (ci->pInputAssemblyState) {
+            if (ci->pInputAssemblyState->pNext || ci->pInputAssemblyState->flags != 0) {
+                pipeline->graphics_unsupported = true;
+            }
             pipeline->topology = ci->pInputAssemblyState->topology;
             pipeline->primitive_restart_enable = ci->pInputAssemblyState->primitiveRestartEnable;
         }
         if (ci->pRasterizationState) {
+            if (ci->pRasterizationState->pNext || ci->pRasterizationState->flags != 0) {
+                pipeline->graphics_unsupported = true;
+            }
             pipeline->polygon_mode = ci->pRasterizationState->polygonMode;
             pipeline->cull_mode = ci->pRasterizationState->cullMode;
             pipeline->front_face = ci->pRasterizationState->frontFace;
@@ -12351,6 +12370,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         }
         if (ci->pMultisampleState) {
             const VkPipelineMultisampleStateCreateInfo *ms = ci->pMultisampleState;
+            if (ms->pNext || ms->flags != 0) {
+                pipeline->graphics_unsupported = true;
+            }
             pipeline->rasterization_samples = ms->rasterizationSamples;
             pipeline->sample_shading_enable = ms->sampleShadingEnable == VK_TRUE;
             pipeline->min_sample_shading = ms->minSampleShading;
@@ -12377,6 +12399,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             : 0;
         if (ci->pColorBlendState) {
             const VkPipelineColorBlendStateCreateInfo *cb = ci->pColorBlendState;
+            if (cb->pNext || cb->flags != 0) {
+                pipeline->graphics_unsupported = true;
+            }
             pipeline->color_blend_logic_op_enable = cb->logicOpEnable;
             pipeline->color_blend_logic_op = cb->logicOp;
             memcpy(pipeline->color_blend_constants, cb->blendConstants, sizeof(pipeline->color_blend_constants));
@@ -12395,6 +12420,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         }
         if (ci->pDepthStencilState) {
             const VkPipelineDepthStencilStateCreateInfo *ds = ci->pDepthStencilState;
+            if (ds->pNext || ds->flags != 0) {
+                pipeline->graphics_unsupported = true;
+            }
             pipeline->depth_stencil_flags =
                 (ds->depthTestEnable ? PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE : 0u) |
                 (ds->depthWriteEnable ? PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_WRITE_ENABLE : 0u) |
@@ -12408,6 +12436,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
         }
         if (ci->pViewportState) {
             const VkPipelineViewportStateCreateInfo *vs = ci->pViewportState;
+            if (vs->pNext || vs->flags != 0) {
+                pipeline->graphics_unsupported = true;
+            }
             const uint64_t viewport_dynamic_bits =
                 pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT) |
                 pdocker_vk_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT);
@@ -12471,7 +12502,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
                 }
                 pipeline->dynamic_rendering_depth_format = rendering->depthAttachmentFormat;
                 pipeline->dynamic_rendering_stencil_format = rendering->stencilAttachmentFormat;
+                if (rendering->colorAttachmentCount > 0 && !rendering->pColorAttachmentFormats) {
+                    pipeline->graphics_unsupported = true;
+                }
+            } else {
+                pipeline->graphics_unsupported = true;
             }
+        }
+        if (ci->pTessellationState ||
+            (pipeline->shader_stage_flags & (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                                             VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT)) != 0) {
+            pipeline->graphics_unsupported = true;
         }
         if (!pipeline->dynamic_rendering_pipeline && pipeline->render_pass) {
             PdockerVkRenderPass *rp = pipeline->render_pass;
@@ -12501,6 +12542,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines(
             }
         }
         if (ci->pVertexInputState) {
+            if (ci->pVertexInputState->pNext || ci->pVertexInputState->flags != 0) {
+                pipeline->graphics_unsupported = true;
+            }
             pipeline->vertex_binding_count = clamp_u32(
                 ci->pVertexInputState->vertexBindingDescriptionCount,
                 PDOCKER_VK_MAX_GRAPHICS_VERTEX_BINDINGS);
@@ -13774,7 +13818,7 @@ static bool populate_single_subpass_render_pass_rendering_state(
     cmd->active_render_area = begin->renderArea;
     cmd->active_rendering_flags = 0;
     cmd->active_rendering_layer_count = fb->layers ? fb->layers : 1;
-    cmd->active_rendering_view_mask = 0;
+    cmd->active_rendering_view_mask = subpass->view_mask;
     return true;
 }
 

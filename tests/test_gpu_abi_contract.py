@@ -1171,6 +1171,33 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, pipeline_body)
 
+    def test_vulkan_graphics_pipeline_unsupported_metadata_is_fail_closed(self):
+        icd = VULKAN_ICD.read_text()
+        pipeline_body = icd.split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkCreateGraphicsPipelines", 1
+        )[1].split("VKAPI_ATTR void VKAPI_CALL vkDestroyPipeline", 1)[0]
+        for marker in [
+            "ci->flags != 0 || ci->basePipelineHandle != VK_NULL_HANDLE",
+            "ci->basePipelineIndex >= 0",
+            "ci->pDynamicState->pNext || ci->pDynamicState->flags != 0",
+            "ci->stageCount > 0 && !ci->pStages",
+            "!stage || stage->pNext || stage->flags != 0",
+            "ci->pInputAssemblyState->pNext || ci->pInputAssemblyState->flags != 0",
+            "ci->pRasterizationState->pNext || ci->pRasterizationState->flags != 0",
+            "ms->pNext || ms->flags != 0",
+            "cb->pNext || cb->flags != 0",
+            "ds->pNext || ds->flags != 0",
+            "vs->pNext || vs->flags != 0",
+            "ci->pVertexInputState->pNext || ci->pVertexInputState->flags != 0",
+            "rendering->colorAttachmentCount > 0 && !rendering->pColorAttachmentFormats",
+            "pipeline->shader_stage_flags & (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |",
+            "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT",
+        ]:
+            self.assertIn(marker, pipeline_body)
+        self.assertIn("""} else {
+                pipeline->graphics_unsupported = true;
+            }""", pipeline_body)
+
 
     def test_vulkan_graphics_executor_replays_dynamic_states(self):
         executor = GPU_EXECUTOR.read_text()
@@ -1424,6 +1451,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->active_rendering_view_mask = pRenderingInfo->viewMask;",
             "pipeline->dynamic_rendering_view_mask = rendering->viewMask;",
             "pipeline->dynamic_rendering_view_mask = subpass->view_mask;",
+            "cmd->active_rendering_view_mask = subpass->view_mask;",
             "dst->view_mask = view_mask;",
             "subpass->viewMask",
             "p->multiview = caps->multiview;",
