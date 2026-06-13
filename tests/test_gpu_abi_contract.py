@@ -9041,11 +9041,15 @@ class GpuAbiContractTest(unittest.TestCase):
             "ext_dynamic_rendering",
             "draw_indirect_count",
             "draw_indexed_indirect_count",
+            "ext_draw_indirect_count_khr",
+            "ext_draw_indirect_count_amd",
             "advertised_timeline_semaphore",
             "advertised_synchronization2",
             "advertised_dynamic_rendering",
             "advertised_draw_indirect_count",
             "advertised_draw_indexed_indirect_count",
+            "advertised_draw_indirect_count_khr",
+            "advertised_draw_indirect_count_amd",
             "executor_advertisement_source_enabled",
             "PDOCKER_VULKAN_ADVERTISEMENT_SOURCE",
             'strcmp(source, "executor") == 0',
@@ -9100,7 +9104,10 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("advertised_dynamic_rendering()", extension_body)
         self.assertIn("VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME", extension_body)
         self.assertIn("VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME", extension_body)
-        self.assertIn("advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()", extension_body)
+        self.assertIn("advertised_draw_indirect_count_khr()", extension_body)
+        self.assertIn("advertised_draw_indirect_count_amd()", extension_body)
+        self.assertIn("VK_KHR_draw_indirect_count", icd)
+        self.assertIn("VK_AMD_draw_indirect_count", icd)
         self.assertIn("return (caps && caps->ext_storage_buffer_storage_class) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->timeline_semaphore && caps->ext_timeline_semaphore) ? VK_TRUE : VK_FALSE;", icd)
         self.assertIn("return (caps && caps->synchronization2 && caps->ext_synchronization2) ? VK_TRUE : VK_FALSE;", icd)
@@ -9119,6 +9126,8 @@ class GpuAbiContractTest(unittest.TestCase):
             "!advertised_extended_dynamic_state()",
             "!advertised_draw_indirect_count()",
             "!advertised_draw_indexed_indirect_count()",
+            "!advertised_draw_indirect_count_khr()",
+            "!advertised_draw_indirect_count_amd()",
             "vkCmdBeginRenderingKHR",
             "vkQueueSubmit2KHR",
             "vkGetSemaphoreCounterValueKHR",

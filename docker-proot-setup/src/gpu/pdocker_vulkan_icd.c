@@ -9072,6 +9072,8 @@ typedef struct {
     bool ext_dynamic_rendering;
     bool draw_indirect_count;
     bool draw_indexed_indirect_count;
+    bool ext_draw_indirect_count_khr;
+    bool ext_draw_indirect_count_amd;
     bool ext_extended_dynamic_state;
     bool ext_index_type_uint8;
 } PdockerVkAdvertisedCaps;
@@ -9188,6 +9190,8 @@ static bool parse_executor_advertisement_caps_json(
     if (json_read_u32(json, "VK_KHR_dynamic_rendering", &value)) caps->ext_dynamic_rendering = value != 0;
     if (json_read_u32(json, "drawIndirectCount", &value)) caps->draw_indirect_count = value != 0;
     if (json_read_u32(json, "drawIndexedIndirectCount", &value)) caps->draw_indexed_indirect_count = value != 0;
+    if (json_read_u32(json, "VK_KHR_draw_indirect_count", &value)) caps->ext_draw_indirect_count_khr = value != 0;
+    if (json_read_u32(json, "VK_AMD_draw_indirect_count", &value)) caps->ext_draw_indirect_count_amd = value != 0;
     if (json_read_u32(json, "VK_EXT_extended_dynamic_state", &value)) caps->ext_extended_dynamic_state = value != 0;
     if (json_read_u32(json, "VK_EXT_index_type_uint8", &value)) caps->ext_index_type_uint8 = value != 0;
     return caps->api_version != 0;
@@ -9301,6 +9305,22 @@ static VkBool32 advertised_draw_indirect_count(void) {
 static VkBool32 advertised_draw_indexed_indirect_count(void) {
     const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
     return (caps && caps->draw_indexed_indirect_count) ? VK_TRUE : VK_FALSE;
+}
+
+static VkBool32 advertised_draw_indirect_count_khr(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->ext_draw_indirect_count_khr &&
+            caps->draw_indirect_count && caps->draw_indexed_indirect_count)
+        ? VK_TRUE
+        : VK_FALSE;
+}
+
+static VkBool32 advertised_draw_indirect_count_amd(void) {
+    const PdockerVkAdvertisedCaps *caps = executor_advertisement_caps_if_enabled();
+    return (caps && caps->ext_draw_indirect_count_amd &&
+            caps->draw_indirect_count && caps->draw_indexed_indirect_count)
+        ? VK_TRUE
+        : VK_FALSE;
 }
 
 static VkBool32 advertised_extended_dynamic_state(void) {
@@ -11133,13 +11153,13 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
         ADD_DEVICE_EXTENSION(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_SPEC_VERSION);
     }
 #ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
-    if (advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()) {
+    if (advertised_draw_indirect_count_khr()) {
         ADD_DEVICE_EXTENSION(VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME,
                              VK_KHR_DRAW_INDIRECT_COUNT_SPEC_VERSION);
     }
 #endif
 #ifdef VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME
-    if (advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count()) {
+    if (advertised_draw_indirect_count_amd()) {
         ADD_DEVICE_EXTENSION(VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME,
                              VK_AMD_DRAW_INDIRECT_COUNT_SPEC_VERSION);
     }
@@ -11187,12 +11207,12 @@ static bool device_extension_advertised_name(const char *name) {
     if (strcmp(name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0) return advertised_dynamic_rendering();
 #ifdef VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME
     if (strcmp(name, VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == 0) {
-        return advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count();
+        return advertised_draw_indirect_count_khr();
     }
 #endif
 #ifdef VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME
     if (strcmp(name, VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == 0) {
-        return advertised_draw_indirect_count() && advertised_draw_indexed_indirect_count();
+        return advertised_draw_indirect_count_amd();
     }
 #endif
 #ifdef VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME
@@ -18193,16 +18213,20 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         !advertised_extended_dynamic_state()) {
         return true;
     }
-    if ((strcmp(pName, "vkCmdDrawIndirectCount") == 0 ||
-         strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0 ||
-         strcmp(pName, "vkCmdDrawIndirectCountAMD") == 0) &&
-        !advertised_draw_indirect_count()) {
+    if (strcmp(pName, "vkCmdDrawIndirectCount") == 0 && !advertised_draw_indirect_count()) {
         return true;
     }
-    if ((strcmp(pName, "vkCmdDrawIndexedIndirectCount") == 0 ||
-         strcmp(pName, "vkCmdDrawIndexedIndirectCountKHR") == 0 ||
+    if (strcmp(pName, "vkCmdDrawIndexedIndirectCount") == 0 && !advertised_draw_indexed_indirect_count()) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdDrawIndirectCountKHR") == 0 ||
+         strcmp(pName, "vkCmdDrawIndexedIndirectCountKHR") == 0) &&
+        !advertised_draw_indirect_count_khr()) {
+        return true;
+    }
+    if ((strcmp(pName, "vkCmdDrawIndirectCountAMD") == 0 ||
          strcmp(pName, "vkCmdDrawIndexedIndirectCountAMD") == 0) &&
-        !advertised_draw_indexed_indirect_count()) {
+        !advertised_draw_indirect_count_amd()) {
         return true;
     }
     return false;
