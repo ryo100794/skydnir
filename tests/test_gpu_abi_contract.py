@@ -4453,6 +4453,55 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("for (void *node = pMemoryRequirements->pNext", buffer_body)
 
 
+    def test_vulkan_core_create_infos_reject_unsupported_pnext_and_flags(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("unsupported_create_info_pnext_result", icd)
+        for api in [
+            "vkCreateBuffer",
+            "vkCreateDescriptorSetLayout",
+            "vkCreatePipelineLayout",
+            "vkCreateDescriptorPool",
+            "vkAllocateDescriptorSets",
+            "vkCreateShaderModule",
+            "vkCreateQueryPool",
+        ]:
+            self.assertIn(f'unsupported_create_info_pnext_result("{api}"', icd)
+        create_buffer_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyBuffer", 1
+        )[0]
+        self.assertIn("if (pCreateInfo->pNext)", create_buffer_body)
+        self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", create_buffer_body)
+        descriptor_layout_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorSetLayout", 1
+        )[0]
+        self.assertIn("if (!pCreateInfo || !pSetLayout)", descriptor_layout_body)
+        self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", descriptor_layout_body)
+        pipeline_layout_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyPipelineLayout", 1
+        )[0]
+        self.assertIn("if (!pCreateInfo || !pPipelineLayout)", pipeline_layout_body)
+        self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", pipeline_layout_body)
+        descriptor_pool_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyDescriptorPool", 1
+        )[0]
+        self.assertIn("if (!pCreateInfo || !pDescriptorPool)", descriptor_pool_body)
+        self.assertIn("pCreateInfo->flags & ~VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT", descriptor_pool_body)
+        allocate_sets_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets", 1)[1].split(
+            "VKAPI_ATTR VkResult VKAPI_CALL vkFreeDescriptorSets", 1
+        )[0]
+        self.assertIn("if (pAllocateInfo->pNext)", allocate_sets_body)
+        shader_module_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyShaderModule", 1
+        )[0]
+        self.assertIn("pCreateInfo->codeSize % sizeof(uint32_t)", shader_module_body)
+        self.assertIn("!pCreateInfo->pCode", shader_module_body)
+        query_pool_body = icd.split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool", 1)[1].split(
+            "VKAPI_ATTR void VKAPI_CALL vkDestroyQueryPool", 1
+        )[0]
+        self.assertIn("if (pCreateInfo->pNext)", query_pool_body)
+        self.assertIn("if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;", query_pool_body)
+
+
     def test_vulkan_image_sampler_object_apis_are_enabled_by_default_and_tracked_for_v5_object_transport(self):
         icd = VULKAN_ICD.read_text()
         for symbol in [

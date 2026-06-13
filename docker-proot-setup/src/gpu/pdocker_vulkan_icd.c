@@ -10407,6 +10407,8 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceMemoryProperties2(
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &pMemoryProperties->memoryProperties);
 }
 
+static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext);
+
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
         VkDevice device,
         const VkBufferCreateInfo *pCreateInfo,
@@ -10415,6 +10417,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(
     (void)device;
     (void)pAllocator;
     if (!pCreateInfo || !pBuffer) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateBuffer", pCreateInfo->pNext);
+    if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (pCreateInfo->size == 0 || pCreateInfo->size > pdocker_vulkan_max_buffer_size()) {
         if (trace_allocations()) {
             fprintf(stderr,
@@ -10447,6 +10451,18 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyBuffer(
     (void)device;
     (void)pAllocator;
     free((void *)buffer);
+}
+
+static VkResult unsupported_create_info_pnext_result(const char *api_name, const void *pNext) {
+    if (trace_allocations() || getenv("PDOCKER_VULKAN_ICD_DEBUG")) {
+        PdockerVkStructHeader header = read_vk_struct_header(pNext);
+        fprintf(stderr,
+                "pdocker-vulkan-icd: %s pNext sType=%d is unsupported by current transport; rejecting instead of ignoring it\n",
+                api_name,
+                (int)header.sType);
+    }
+    trace_icd_runtime_failure(api_name, VK_ERROR_FEATURE_NOT_PRESENT);
+    return VK_ERROR_FEATURE_NOT_PRESENT;
 }
 
 static VkResult unsupported_image_transport_result(const char *api_name) {
@@ -11453,9 +11469,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorSetLayout(
         const VkAllocationCallbacks *pAllocator,
         VkDescriptorSetLayout *pSetLayout) {
     (void)device;
-    (void)pCreateInfo;
     (void)pAllocator;
-    if (!pSetLayout) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pCreateInfo || !pSetLayout) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pCreateInfo->pNext) {
+        return unsupported_create_info_pnext_result("vkCreateDescriptorSetLayout", pCreateInfo->pNext);
+    }
+    if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     PdockerVkDescriptorSetLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
     for (uint32_t i = 0; pCreateInfo && i < pCreateInfo->bindingCount; ++i) {
@@ -11509,7 +11528,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreatePipelineLayout(
         VkPipelineLayout *pPipelineLayout) {
     (void)device;
     (void)pAllocator;
-    if (!pPipelineLayout) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pCreateInfo || !pPipelineLayout) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreatePipelineLayout", pCreateInfo->pNext);
+    if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     PdockerVkPipelineLayout *layout = pdocker_alloc_handle(sizeof(*layout));
     if (!layout) return VK_ERROR_OUT_OF_HOST_MEMORY;
     layout->layout_id = next_vulkan_object_generation();
@@ -11568,9 +11589,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDescriptorPool(
         const VkAllocationCallbacks *pAllocator,
         VkDescriptorPool *pDescriptorPool) {
     (void)device;
-    (void)pCreateInfo;
     (void)pAllocator;
-    if (!pDescriptorPool) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!pCreateInfo || !pDescriptorPool) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateDescriptorPool", pCreateInfo->pNext);
+    if ((pCreateInfo->flags & ~VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT) != 0) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     *pDescriptorPool = (VkDescriptorPool)pdocker_alloc_handle(sizeof(PdockerHandle));
     return *pDescriptorPool ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
 }
@@ -11600,6 +11624,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(
         VkDescriptorSet *pDescriptorSets) {
     (void)device;
     if (!pAllocateInfo || !pDescriptorSets) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pAllocateInfo->pNext) return unsupported_create_info_pnext_result("vkAllocateDescriptorSets", pAllocateInfo->pNext);
     for (uint32_t i = 0; i < pAllocateInfo->descriptorSetCount; ++i) {
         PdockerVkDescriptorSet *set = pdocker_alloc_handle(sizeof(*set));
         if (!set) return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -11848,6 +11873,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
     (void)device;
     (void)pAllocator;
     if (!pCreateInfo || !pShaderModule) return VK_ERROR_INITIALIZATION_FAILED;
+    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateShaderModule", pCreateInfo->pNext);
+    if (pCreateInfo->flags != 0 || !pCreateInfo->pCode || pCreateInfo->codeSize == 0 ||
+        (pCreateInfo->codeSize % sizeof(uint32_t)) != 0) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     PdockerVkShaderModule *shader = pdocker_alloc_handle(sizeof(*shader));
     if (!shader) return VK_ERROR_OUT_OF_HOST_MEMORY;
     shader->code_size = pCreateInfo->codeSize;
@@ -17655,6 +17685,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateQueryPool(
         pCreateInfo->queryCount > PDOCKER_VK_MAX_QUERY_COUNT) {
         return VK_ERROR_INITIALIZATION_FAILED;
     }
+    if (pCreateInfo->pNext) return unsupported_create_info_pnext_result("vkCreateQueryPool", pCreateInfo->pNext);
+    if (pCreateInfo->flags != 0) return VK_ERROR_FEATURE_NOT_PRESENT;
     if (pCreateInfo->queryType != VK_QUERY_TYPE_TIMESTAMP &&
         pCreateInfo->queryType != VK_QUERY_TYPE_OCCLUSION) {
         trace_icd_runtime_failure("query-type-unsupported",
