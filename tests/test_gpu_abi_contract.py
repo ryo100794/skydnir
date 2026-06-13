@@ -3078,6 +3078,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V611_UPDATE_BUFFER_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V622_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V622_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V622_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -5455,6 +5465,114 @@ class GpuAbiContractTest(unittest.TestCase):
                     c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV621FrameHeader"),
                 )
 
+    def test_vulkan_graphics_v622_multisample_state_metadata_is_append_only(self):
+        expected_extension_fields = [
+            ("multisample_state_count", "u32"),
+            ("multisample_state_entry_size", "u32"),
+            ("multisample_state_table_offset", "u64"),
+            ("multisample_state_table_size", "u64"),
+            ("multisample_state_schema_hash", "u64"),
+            ("multisample_state_table_hash", "u64"),
+            ("extension_hash", "u64"),
+        ]
+        expected_multisample_fields = [
+            ("pipeline_index", "u32"),
+            ("flags", "u32"),
+            ("min_sample_shading_bits", "u32"),
+            ("sample_mask_word_count", "u32"),
+            ("sample_mask0", "u32"),
+            ("reserved0", "u32"),
+            ("reserved1", "u64"),
+        ]
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            source = header_path.read_text()
+            with self.subTest(header=str(header_path)):
+                for marker in [
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR 22u",
+                    "PdockerGpuVulkanGraphicsV622HeaderExtension",
+                    "PdockerGpuVulkanGraphicsV622FrameHeader",
+                    "PdockerGpuVulkanGraphicsV622MultisampleStateEntry",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_SAMPLE_MASK_WORDS 1u",
+                    "PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_SHADING_ENABLE",
+                    "PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_MASK_PRESENT",
+                    "PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_COVERAGE_ENABLE",
+                    "PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_ONE_ENABLE",
+                ]:
+                    self.assertIn(marker, source)
+                extension_fields, extension_count, declared_extension_hash, computed_extension_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V622_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V622_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V622_HEADER_EXTENSION_SCHEMA_HASH",
+                )
+                multisample_fields, multisample_count, declared_multisample_hash, computed_multisample_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_SCHEMA_HASH",
+                )
+                self.assertEqual(expected_extension_fields, extension_fields)
+                self.assertEqual(expected_multisample_fields, multisample_fields)
+                self.assertEqual(7, extension_count)
+                self.assertEqual(7, multisample_count)
+                self.assertNotEqual(0, declared_extension_hash)
+                self.assertNotEqual(0, declared_multisample_hash)
+                self.assertEqual(declared_extension_hash, computed_extension_hash)
+                self.assertEqual(declared_multisample_hash, computed_multisample_hash)
+                self.assertEqual(
+                    [name for name, _ in expected_extension_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV622HeaderExtension"),
+                )
+                self.assertEqual(
+                    [name for name, _ in expected_multisample_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV622MultisampleStateEntry"),
+                )
+                self.assertEqual(
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV621FrameHeader") + ["v622"],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV622FrameHeader"),
+                )
+                self.assertNotIn("sampleShadingEnable", source)
+
+    def test_vulkan_graphics_v622_multisample_state_is_wired_through_icd_and_executor(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for marker in [
+            "PdockerGpuVulkanGraphicsV622MultisampleStateEntry multisample_states[PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES]",
+            "PdockerGpuVulkanGraphicsV622FrameHeader *frame_header_v622",
+            "sizeof(PdockerGpuVulkanGraphicsV622FrameHeader)",
+            "need_v622_multisample_state",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR",
+            "frame_header_v622->v622.multisample_state_count",
+            "APPEND_GRAPHICS_TABLE(multisample_states, multisample_state_count",
+            "frame_header_v622->v622.multisample_state_table_hash",
+            "VULKAN_GRAPHICS_V6.22",
+            "sampleShadingEnable",
+            "alphaToCoverageEnable",
+            "alphaToOneEnable",
+        ]:
+            self.assertIn(marker, icd)
+
+        for marker in [
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR",
+            "sizeof(PdockerGpuVulkanGraphicsV622FrameHeader)",
+            "const int is_v622",
+            "header_v622->v622.multisample_state_count",
+            "FrameRange ranges[47]",
+            "is_v622 ? 47u",
+            "view->header_v622",
+            "view->is_v622",
+            "view->multisample_states",
+            "find_vulkan_graphics_v622_multisample_state",
+            "multisample_state_table_hash",
+            "msci.sampleShadingEnable",
+            "msci.pSampleMask",
+            "enabled_features.sampleRateShading",
+            "enabled_features.alphaToOne",
+        ]:
+            self.assertIn(marker, executor)
+
     def test_vulkan_graphics_v621_submit2_metadata_is_wired_through_icd_and_executor(self):
         icd = VULKAN_ICD.read_text()
         executor = GPU_EXECUTOR.read_text()
@@ -5499,7 +5617,6 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, executor)
 
-        self.assertIn("FrameRange ranges[46]", executor)
         self.assertIn("is_v621 ? 46u", executor)
         self.assertNotIn("reserved0 = g_submit2", icd)
         self.assertNotIn("reserved0 = submit2", executor)

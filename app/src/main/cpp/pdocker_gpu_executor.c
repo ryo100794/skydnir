@@ -18073,6 +18073,8 @@ static int validate_vulkan_graphics_v6_header_prefix(
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV620FrameHeader)) return -EPROTO;
     } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR) {
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV621FrameHeader)) return -EPROTO;
+    } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR) {
+        if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV622FrameHeader)) return -EPROTO;
     } else {
         return -EPROTO;
     }
@@ -18134,7 +18136,10 @@ static int validate_vulkan_graphics_v6_header(
         (const PdockerGpuVulkanGraphicsV620FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV621FrameHeader *header_v621 =
         (const PdockerGpuVulkanGraphicsV621FrameHeader *)header;
-    const int is_v621 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR;
+    const PdockerGpuVulkanGraphicsV622FrameHeader *header_v622 =
+        (const PdockerGpuVulkanGraphicsV622FrameHeader *)header;
+    const int is_v622 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR;
+    const int is_v621 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR || is_v622;
     const int is_v620 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR || is_v621;
     /* const int is_v619 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR; */
     const int is_v619 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR || is_v620;
@@ -18201,6 +18206,7 @@ static int validate_vulkan_graphics_v6_header(
         (is_v620 && header_v620->v620.image_layout_range_count > PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES) ||
         (is_v621 && header_v621->v621.submit_info_count > PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS) ||
         (is_v621 && header_v621->v621.submit_sync_info_count > PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS) ||
+        (is_v622 && header_v622->v622.multisample_state_count > PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES) ||
         header->command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) {
         return -E2BIG;
     }
@@ -18361,8 +18367,13 @@ static int validate_vulkan_graphics_v6_header(
          header_v621->v621.submit_sync_info_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_SYNC_INFO_SCHEMA_HASH)) {
         return -EPROTO;
     }
-    /* FrameRange ranges[43] was the V6.19 table-count guard; V6.20 appends one range, V6.21 appends two ranges. */
-    FrameRange ranges[46] = {
+    if (is_v622 &&
+        (header_v622->v622.multisample_state_entry_size != sizeof(PdockerGpuVulkanGraphicsV622MultisampleStateEntry) ||
+         header_v622->v622.multisample_state_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_SCHEMA_HASH)) {
+        return -EPROTO;
+    }
+    /* FrameRange ranges[43] was the V6.19 table-count guard; V6.20 appends one range, V6.21 appends two ranges, V6.22 appends one range. */
+    FrameRange ranges[47] = {
         {header->resource_table_offset, header->resource_table_size},
         {header->descriptor_table_offset, header->descriptor_table_size},
         {header->image_table_offset, header->image_table_size},
@@ -18443,6 +18454,8 @@ static int validate_vulkan_graphics_v6_header(
          is_v621 ? header_v621->v621.submit_info_table_size : 0},
         {is_v621 ? header_v621->v621.submit_sync_info_table_offset : 0,
          is_v621 ? header_v621->v621.submit_sync_info_table_size : 0},
+        {is_v622 ? header_v622->v622.multisample_state_table_offset : 0,
+         is_v622 ? header_v622->v622.multisample_state_table_size : 0},
     };
     if (!table_range_valid(header->resource_table_offset, header->resource_table_size,
                            header->resource_count, header->resource_entry_size,
@@ -18731,7 +18744,16 @@ static int validate_vulkan_graphics_v6_header(
                             header->frame_size, header->header_size))) {
         return -EPROTO;
     }
-    if (!frame_ranges_do_not_overlap(ranges, is_v621 ? 46u : (is_v620 ? 44u : (is_v619 ? 43u : (is_v618 ? 42u : (is_v617 ? 41u : (is_v616 ? 40u : (is_v615 ? 37u : (is_v614 ? 36u : (is_v613 ? 35u : (is_v612 ? 34u : (is_v611 ? 33u : (is_v610 ? 30u : (is_v69 ? 28u : (is_v68 ? 27u : (is_v67 ? 26u : (is_v66 ? 23u : (is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u)))))))))))))))))))))) {
+    if (is_v622 &&
+        !table_range_valid(header_v622->v622.multisample_state_table_offset,
+                           header_v622->v622.multisample_state_table_size,
+                           header_v622->v622.multisample_state_count,
+                           header_v622->v622.multisample_state_entry_size,
+                           __alignof__(PdockerGpuVulkanGraphicsV622MultisampleStateEntry),
+                           header->frame_size, header->header_size)) {
+        return -EPROTO;
+    }
+    if (!frame_ranges_do_not_overlap(ranges, is_v622 ? 47u : (is_v621 ? 46u : (is_v620 ? 44u : (is_v619 ? 43u : (is_v618 ? 42u : (is_v617 ? 41u : (is_v616 ? 40u : (is_v615 ? 37u : (is_v614 ? 36u : (is_v613 ? 35u : (is_v612 ? 34u : (is_v611 ? 33u : (is_v610 ? 30u : (is_v69 ? 28u : (is_v68 ? 27u : (is_v67 ? 26u : (is_v66 ? 23u : (is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u))))))))))))))))))))))) {
         return -EPROTO;
     }
     return 0;
@@ -18772,6 +18794,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV619FrameHeader *header_v619;
     const PdockerGpuVulkanGraphicsV620FrameHeader *header_v620;
     const PdockerGpuVulkanGraphicsV621FrameHeader *header_v621;
+    const PdockerGpuVulkanGraphicsV622FrameHeader *header_v622;
     const int *passed_fds;
     size_t passed_fd_count;
     int is_v61;
@@ -18795,6 +18818,7 @@ typedef struct VulkanGraphicsV6FrameView {
     int is_v619;
     int is_v620;
     int is_v621;
+    int is_v622;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images;
@@ -18840,6 +18864,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV620ImageLayoutRangeEntry *image_layout_ranges;
     const PdockerGpuVulkanGraphicsV621SubmitInfoEntry *submit_infos;
     const PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry *submit_sync_infos;
+    const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *multisample_states;
 } VulkanGraphicsV6FrameView;
 
 static int init_vulkan_graphics_v6_frame_view(
@@ -18853,7 +18878,8 @@ static int init_vulkan_graphics_v6_frame_view(
         (const PdockerGpuVulkanGraphicsV6FrameHeader *)frame;
     int rc = validate_vulkan_graphics_v6_header(header, passed_fd_count);
     if (rc != 0) return rc;
-    const int is_v621_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR;
+    const int is_v622_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR;
+    const int is_v621_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR || is_v622_header;
     const int is_v620_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR || is_v621_header;
     /* const int is_v619_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR; */
     const int is_v619_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR || is_v620_header;
@@ -18940,6 +18966,9 @@ static int init_vulkan_graphics_v6_frame_view(
     const PdockerGpuVulkanGraphicsV621FrameHeader *header_v621 = is_v621_header
             ? (const PdockerGpuVulkanGraphicsV621FrameHeader *)frame
             : NULL;
+    const PdockerGpuVulkanGraphicsV622FrameHeader *header_v622 = is_v622_header
+            ? (const PdockerGpuVulkanGraphicsV622FrameHeader *)frame
+            : NULL;
     view->frame = frame;
     view->header = header;
     view->header_v61 = header_v61;
@@ -18963,6 +18992,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->header_v619 = header_v619;
     view->header_v620 = header_v620;
     view->header_v621 = header_v621;
+    view->header_v622 = header_v622;
     view->passed_fds = passed_fds;
     view->passed_fd_count = passed_fd_count;
     view->is_v61 = header_v61 != NULL;
@@ -18986,6 +19016,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->is_v619 = header_v619 != NULL;
     view->is_v620 = header_v620 != NULL;
     view->is_v621 = header_v621 != NULL;
+    view->is_v622 = header_v622 != NULL;
     view->resources =
         (const PdockerGpuVulkanDispatchV5ResourceEntry *)graphics_v6_table_ptr(
             frame, header, header->resource_table_offset, header->resource_table_size);
@@ -19282,6 +19313,15 @@ static int init_vulkan_graphics_v6_frame_view(
                 header_v621->v621.submit_sync_info_table_size);
         if ((header_v621->v621.submit_info_count && !view->submit_infos) ||
             (header_v621->v621.submit_sync_info_count && !view->submit_sync_infos)) {
+            return -EPROTO;
+        }
+    }
+    if (view->is_v622) {
+        view->multisample_states =
+            (const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *)graphics_v6_table_ptr(
+                frame, header, header_v622->v622.multisample_state_table_offset,
+                header_v622->v622.multisample_state_table_size);
+        if (header_v622->v622.multisample_state_count && !view->multisample_states) {
             return -EPROTO;
         }
     }
@@ -19698,6 +19738,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV619FrameHeader *header_v619 = view.header_v619;
     const PdockerGpuVulkanGraphicsV620FrameHeader *header_v620 = view.header_v620;
     const PdockerGpuVulkanGraphicsV621FrameHeader *header_v621 = view.header_v621;
+    const PdockerGpuVulkanGraphicsV622FrameHeader *header_v622 = view.header_v622;
     const int is_v61 = view.is_v61;
     const int is_v62 = view.is_v62;
     const int is_v63 = view.is_v63;
@@ -19718,6 +19759,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const int is_v619 = view.is_v619;
     const int is_v620 = view.is_v620;
     const int is_v621 = view.is_v621;
+    const int is_v622 = view.is_v622;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources = view.resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = view.descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images = view.images;
@@ -20080,6 +20122,38 @@ static int validate_vulkan_graphics_v6_frame_content(
                 entry->reserved0 != 0 || entry->reserved1 != 0) {
                 return -EPROTO;
             }
+        }
+    }
+    if (is_v622) {
+        uint64_t multisample_state_table_hash = fnv1a64_update(
+            1469598103934665603ull, view.multisample_states,
+            (size_t)header_v622->v622.multisample_state_table_size);
+        if (multisample_state_table_hash != header_v622->v622.multisample_state_table_hash ||
+            header_v622->v622.extension_hash != multisample_state_table_hash) {
+            return -EPROTO;
+        }
+        uint8_t seen_multisample_pipeline[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
+        memset(seen_multisample_pipeline, 0, sizeof(seen_multisample_pipeline));
+        const uint32_t allowed_flags =
+            PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_SHADING_ENABLE |
+            PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_MASK_PRESENT |
+            PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_COVERAGE_ENABLE |
+            PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_ONE_ENABLE;
+        for (uint32_t m = 0; m < header_v622->v622.multisample_state_count; ++m) {
+            const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *entry = &view.multisample_states[m];
+            if (entry->pipeline_index >= header->pipeline_count ||
+                seen_multisample_pipeline[entry->pipeline_index] ||
+                (entry->flags & ~allowed_flags) != 0 ||
+                entry->sample_mask_word_count > PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_SAMPLE_MASK_WORDS ||
+                entry->reserved0 != 0 || entry->reserved1 != 0) {
+                return -EPROTO;
+            }
+            if ((entry->flags & PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_MASK_PRESENT) != 0) {
+                if (entry->sample_mask_word_count != 1u) return -EPROTO;
+            } else if (entry->sample_mask_word_count != 0 || entry->sample_mask0 != 0) {
+                return -EPROTO;
+            }
+            seen_multisample_pipeline[entry->pipeline_index] = 1;
         }
     }
     if (is_v68) {
@@ -21148,6 +21222,18 @@ find_vulkan_graphics_v66_color_blend_state(
     return NULL;
 }
 
+static const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *
+find_vulkan_graphics_v622_multisample_state(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t pipeline_index) {
+    if (!view || !view->is_v622 || !view->header_v622 || !view->multisample_states) return NULL;
+    for (uint32_t i = 0; i < view->header_v622->v622.multisample_state_count; ++i) {
+        const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *entry = &view->multisample_states[i];
+        if (entry->pipeline_index == pipeline_index) return entry;
+    }
+    return NULL;
+}
+
 static const PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry *
 find_vulkan_graphics_v67_viewport_scissor_state(
         const VulkanGraphicsV6FrameView *view,
@@ -21562,6 +21648,22 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     reason = "invalid graphics pipeline multisample count";
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
+                }
+                const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *multisample_state =
+                    find_vulkan_graphics_v622_multisample_state(view, command->pipeline_index);
+                if (multisample_state) {
+                    if ((multisample_state->flags & PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_SHADING_ENABLE) != 0 &&
+                        !g_vulkan_runtime.enabled_features.sampleRateShading) {
+                        reason = "sample shading pipeline replay requires sampleRateShading";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                    if ((multisample_state->flags & PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_ONE_ENABLE) != 0 &&
+                        !g_vulkan_runtime.enabled_features.alphaToOne) {
+                        reason = "alpha-to-one pipeline replay requires alphaToOne";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
                 }
                 for (uint32_t stage_i = 0;
                      stage_i < pipeline->shader_stage_count;
@@ -22466,10 +22568,29 @@ static int materialize_vulkan_graphics_v6_pipelines(
                 ? float_from_u32_bits(static_state->line_width_bits)
                 : 1.0f,
         };
+        const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *multisample_state =
+            find_vulkan_graphics_v622_multisample_state(view, pidx);
+        VkSampleMask sample_mask_words[PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_SAMPLE_MASK_WORDS] = {0};
         VkPipelineMultisampleStateCreateInfo msci = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
             .rasterizationSamples = (VkSampleCountFlagBits)src->rasterization_samples,
         };
+        if (multisample_state) {
+            msci.sampleShadingEnable =
+                (multisample_state->flags & PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_SHADING_ENABLE)
+                    ? VK_TRUE : VK_FALSE;
+            msci.minSampleShading = float_from_u32_bits(multisample_state->min_sample_shading_bits);
+            msci.alphaToCoverageEnable =
+                (multisample_state->flags & PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_COVERAGE_ENABLE)
+                    ? VK_TRUE : VK_FALSE;
+            msci.alphaToOneEnable =
+                (multisample_state->flags & PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_ONE_ENABLE)
+                    ? VK_TRUE : VK_FALSE;
+            if ((multisample_state->flags & PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_MASK_PRESENT) != 0) {
+                sample_mask_words[0] = multisample_state->sample_mask0;
+                msci.pSampleMask = sample_mask_words;
+            }
+        }
         VkPipelineColorBlendAttachmentState blend_attachments[16];
         memset(blend_attachments, 0, sizeof(blend_attachments));
         for (uint32_t c = 0; c < src->color_attachment_count; ++c) {

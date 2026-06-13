@@ -564,6 +564,7 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR 19u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR 20u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR 21u
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR 22u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SUBMIT 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_FRAME_HEADER_SCHEMA_HASH 0x8787f343f2f4f255ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_SHADER_STAGE_SCHEMA_HASH 0xc9b21285e5a281b8ull
@@ -628,6 +629,8 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V621_HEADER_EXTENSION_SCHEMA_HASH 0x0a36ab7730ca92c0ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_INFO_SCHEMA_HASH 0x7d60bc1f8b66cc18ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_SYNC_INFO_SCHEMA_HASH 0x3d7b6dc8b615786eull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V622_HEADER_EXTENSION_SCHEMA_HASH 0x0509e9f8f7c7376eull
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_SCHEMA_HASH 0xa6413f4bdcebaba5ull
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_FRAME_BYTES (8u * 1024u * 1024u)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_SHADER_STAGES 16u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES 64u
@@ -672,6 +675,8 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V620_MAX_IMAGE_LAYOUT_RANGES 4096u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS 1u
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS PDOCKER_GPU_VULKAN_GRAPHICS_V619_MAX_SUBMIT_SYNCS
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_SAMPLE_MASK_WORDS 1u
 
 
 #define PDOCKER_GPU_GRAPHICS_V63_DEPTH_STENCIL_DEPTH_TEST_ENABLE 0x00000001u
@@ -1264,6 +1269,31 @@ typedef struct PdockerGpuVulkanDispatchV5SpecializationEntry {
     X(reserved0, u32) \
     X(reserved1, u32)
 #define PDOCKER_GPU_VULKAN_GRAPHICS_V621_SUBMIT_SYNC_INFO_FIELD_COUNT 4u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V622_HEADER_EXTENSION_FIELDS(X) \
+    X(multisample_state_count, u32) \
+    X(multisample_state_entry_size, u32) \
+    X(multisample_state_table_offset, u64) \
+    X(multisample_state_table_size, u64) \
+    X(multisample_state_schema_hash, u64) \
+    X(multisample_state_table_hash, u64) \
+    X(extension_hash, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V622_HEADER_EXTENSION_FIELD_COUNT 7u
+
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_FIELDS(X) \
+    X(pipeline_index, u32) \
+    X(flags, u32) \
+    X(min_sample_shading_bits, u32) \
+    X(sample_mask_word_count, u32) \
+    X(sample_mask0, u32) \
+    X(reserved0, u32) \
+    X(reserved1, u64)
+#define PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_FIELD_COUNT 7u
+
+#define PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_SHADING_ENABLE 0x00000001u
+#define PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_MASK_PRESENT 0x00000002u
+#define PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_COVERAGE_ENABLE 0x00000004u
+#define PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_ONE_ENABLE 0x00000008u
 
 
 #define PDOCKER_GPU_GRAPHICS_V6_ATTACHMENT_COLOR 1u
@@ -2426,6 +2456,16 @@ typedef struct PdockerGpuVulkanGraphicsV621HeaderExtension {
     uint64_t extension_hash;
 } PdockerGpuVulkanGraphicsV621HeaderExtension;
 
+typedef struct PdockerGpuVulkanGraphicsV622HeaderExtension {
+    uint32_t multisample_state_count;
+    uint32_t multisample_state_entry_size;
+    uint64_t multisample_state_table_offset;
+    uint64_t multisample_state_table_size;
+    uint64_t multisample_state_schema_hash;
+    uint64_t multisample_state_table_hash;
+    uint64_t extension_hash;
+} PdockerGpuVulkanGraphicsV622HeaderExtension;
+
 typedef struct PdockerGpuVulkanGraphicsV621FrameHeader {
     PdockerGpuVulkanGraphicsV6FrameHeader base;
     PdockerGpuVulkanGraphicsV61HeaderExtension v61;
@@ -2450,6 +2490,32 @@ typedef struct PdockerGpuVulkanGraphicsV621FrameHeader {
     PdockerGpuVulkanGraphicsV620HeaderExtension v620;
     PdockerGpuVulkanGraphicsV621HeaderExtension v621;
 } PdockerGpuVulkanGraphicsV621FrameHeader;
+
+typedef struct PdockerGpuVulkanGraphicsV622FrameHeader {
+    PdockerGpuVulkanGraphicsV6FrameHeader base;
+    PdockerGpuVulkanGraphicsV61HeaderExtension v61;
+    PdockerGpuVulkanGraphicsV62HeaderExtension v62;
+    PdockerGpuVulkanGraphicsV63HeaderExtension v63;
+    PdockerGpuVulkanGraphicsV64HeaderExtension v64;
+    PdockerGpuVulkanGraphicsV65HeaderExtension v65;
+    PdockerGpuVulkanGraphicsV66HeaderExtension v66;
+    PdockerGpuVulkanGraphicsV67HeaderExtension v67;
+    PdockerGpuVulkanGraphicsV68HeaderExtension v68;
+    PdockerGpuVulkanGraphicsV69HeaderExtension v69;
+    PdockerGpuVulkanGraphicsV610HeaderExtension v610;
+    PdockerGpuVulkanGraphicsV611HeaderExtension v611;
+    PdockerGpuVulkanGraphicsV612HeaderExtension v612;
+    PdockerGpuVulkanGraphicsV613HeaderExtension v613;
+    PdockerGpuVulkanGraphicsV614HeaderExtension v614;
+    PdockerGpuVulkanGraphicsV615HeaderExtension v615;
+    PdockerGpuVulkanGraphicsV616HeaderExtension v616;
+    PdockerGpuVulkanGraphicsV617HeaderExtension v617;
+    PdockerGpuVulkanGraphicsV618HeaderExtension v618;
+    PdockerGpuVulkanGraphicsV619HeaderExtension v619;
+    PdockerGpuVulkanGraphicsV620HeaderExtension v620;
+    PdockerGpuVulkanGraphicsV621HeaderExtension v621;
+    PdockerGpuVulkanGraphicsV622HeaderExtension v622;
+} PdockerGpuVulkanGraphicsV622FrameHeader;
 
 typedef struct PdockerGpuVulkanGraphicsV62SpecializationEntry {
     uint32_t shader_stage_index;
@@ -2850,6 +2916,16 @@ typedef struct PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry {
     uint32_t reserved0;
     uint32_t reserved1;
 } PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry;
+
+typedef struct PdockerGpuVulkanGraphicsV622MultisampleStateEntry {
+    uint32_t pipeline_index;
+    uint32_t flags;
+    uint32_t min_sample_shading_bits;
+    uint32_t sample_mask_word_count;
+    uint32_t sample_mask0;
+    uint32_t reserved0;
+    uint64_t reserved1;
+} PdockerGpuVulkanGraphicsV622MultisampleStateEntry;
 
 typedef struct PdockerGpuVulkanGraphicsV61DynamicOffsetEntry {
     uint32_t offset;
