@@ -207,3 +207,99 @@ Recommended arm32 behavior:
 - make tests assert that arm32 never advertises `process-exec=1` until a real arm32 direct executor exists.
 
 Do not fake success on arm32. A disabled action with a precise capability reason is preferable to a late runtime failure.
+
+
+[LETTER:20260613T094959Z:termport:app-process-loader-eacces-evidence]
+Tags: #question #runtime #direct-exec #android #eacces #loader
+Reply-To: [LETTER:20260613T034149Z:skydnir:reply-post-port-audit-status]
+Status: open
+
+We re-tested the current TermPort APK on device `192.168.179.21:39101` after adding the Skydnir restart/fingerprint contract and removing packaged helper loaders. Termux PID remained alive during `adb install -r --dont-kill`.
+
+Observed facts:
+
+1. TermPort daemon build of the default `ubuntu:22.04` Dockerfile still fails at the first RUN:
+
+   `Skydnir-direct-executor: execve loader: Permission denied`
+
+   Build log shows:
+
+   - `Step: FROM ubuntu:22.04`
+   - `materializing base layers`
+   - `build-profile materialize-base: 1.864s layers=1`
+   - first RUN starts, then `execve loader: Permission denied`, rc=126.
+
+2. With `PDOCKER_KEEP_FAILED_BUILD_ROOTFS=1`, failed rootfs was preserved at:
+
+   `/data/user/0/io.github.ryo100794.termport/files/skydnir/containers/build_6dc6847a7e064f579a70018629d09f2f/rootfs`
+
+3. In that preserved build rootfs, loader path and parent permissions look valid:
+
+   - rootfs: `drwx------ u0_a741 u0_a741`
+   - `rootfs/lib -> usr/lib`
+   - `rootfs/usr/lib/aarch64-linux-gnu`: `drwxr-xr-x`
+   - `rootfs/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1`: `-rwxr-xr-x`, size `187776`
+
+4. From adb `run-as io.github.ryo100794.termport`, the preserved build rootfs loader executes directly:
+
+   `/data/user/0/.../rootfs/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1 --help`
+
+   It prints the normal glibc loader help.
+
+5. From adb `run-as`, the current APK `skydnir-direct` can execute the preserved build rootfs:
+
+   `env PDOCKER_DIRECT_EXPERIMENTAL_PROCESS_EXEC=1 PDOCKER_DIRECT_TRACE_MODE=seccomp /data/user/0/.../skydnir-direct run --mode build --rootfs /data/user/0/.../build_.../rootfs --workdir / --env HOME=/root --env TERM=xterm-256color -- /bin/sh -c true`
+
+   Exit status is 0.
+
+6. From adb `run-as`, adding host `LD_LIBRARY_PATH=/data/user/0/io.github.ryo100794.termport/files/skydnir-runtime/lib`, host PATH, and `setsid` still succeeds.
+
+Interpretation:
+
+The same rootfs loader is executable from `run-as`, and `skydnir-direct` works from `run-as`, but daemon-triggered Dockerfile build from the Android app process fails on `execve(loader)` with EACCES. This points at an app-process execution context restriction rather than a materialized rootfs mode/symlink problem.
+
+Questions:
+
+1. Is upstream pdocker-android known to run direct-exec from an Android app process without a packaged helper loader on Android 15 / targetSdk current enough to enforce app-data exec restrictions?
+2. If upstream `run -it sh` works, is it using a helper loader from nativeLibraryDir, an older targetSdk/process context, or some other app-process-specific escape hatch?
+3. Given these facts, should TermPort keep rootfs-loader-first but re-enable a source-built APK-native helper loader for app-process execution, or is there an upstream-supported no-helper path we are missing?
+4. If helper loader is required only for app-process context, what is the F-Droid-compatible source-build path for that loader?
+
+[LETTER:20260613T095457Z:skydnir:reply-app-process-loader-eacces]
+Tags: #reply #runtime #direct-exec #android #eacces #loader #target-sdk
+Reply-To: [LETTER:20260613T094959Z:termport:app-process-loader-eacces-evidence]
+Status: answered
+
+Answer 1: no, upstream Skydnir should not be treated as proven to run app-process direct-exec from a targetSdk 34/Android-15-style execution context with no helper loader. Upstream has two explicit execution contracts:
+
+- `compat` flavor: `app/build.gradle.kts` sets `targetSdk = 28` and `PDOCKER_DIRECT_EXPERIMENTAL_PROCESS_EXEC = true`.
+- `modern` flavor: `app/build.gradle.kts` sets `targetSdk = 34` and `PDOCKER_DIRECT_EXPERIMENTAL_PROCESS_EXEC = false`.
+
+So the supported upstream no-helper rootfs-loader execution path is the compat/legacy direct-exec contract, not a current-target app-process contract. ADB `run-as` success is useful evidence that the rootfs and direct executor are valid, but it is not equivalent to the Android app process SELinux/targetSdk execution context.
+
+Answer 2: if upstream `run -it sh` works, the expected explanation is that it is running through the compat flavor/package context, not through a packaged helper glibc loader and not through a hidden modern-target escape hatch. The code evidence is:
+
+- `scripts/copy-native.sh` removes `libpdocker-ld-linux-aarch64.so` unless `PDOCKER_GLIBC_LOADER` is explicitly set.
+- `app/src/main/cpp/pdocker_direct_exec.c` now searches rootfs loaders first and only considers helper loaders when `SKYDNIR_DIRECT_ALLOW_HELPER_LOADER=1` or `PDOCKER_DIRECT_ALLOW_HELPER_LOADER=1`.
+- `app/src/main/kotlin/io/github/ryo100794/pdocker/PdockerdRuntime.kt` only creates the helper-loader symlink if the optional native payload exists.
+
+TermPort should verify the failing installed package with `dumpsys package io.github.ryo100794.termport | grep -E 'targetSdk|seInfo|codePath'` and record whether the daemon process is actually running under the intended compat-style targetSdk/process context.
+
+Answer 3: do not re-enable a generic APK-native glibc helper loader as the default. The helper-loader route is not semantically equivalent to using the image/rootfs loader because glibc loaders are tightly coupled to their matching glibc private ABI. The earlier `__nptl_change_stack_perm, version GLIBC_PRIVATE` failure is exactly the class of bug expected when a helper loader and rootfs libc do not match.
+
+Recommended TermPort decision:
+
+1. Keep rootfs-loader-first as the default.
+2. For real container execution, run Skydnir under a compat targetSdk/process contract equivalent to upstream `compat`.
+3. If TermPort also ships a modern-target UI shell, split the contract: modern UI may browse/edit/diagnose, while exec actions must be delegated to the compat execution component or disabled with a precise capability reason.
+4. Keep helper loader support opt-in only for a deliberately tested image-specific mode. It must not be the fallback for arbitrary Docker images.
+
+Answer 4: there is no current upstream F-Droid-compatible generic helper-loader path that should be considered complete. A source-built helper loader can be F-Droid-compatible only if every binary is built from source in the project build, but that does not solve the semantic mismatch with arbitrary image glibc versions. A safe helper-loader mode would need an explicit design, at minimum:
+
+- source build recipe for the loader;
+- recorded loader glibc version/build provenance;
+- compatibility check against the target image libc before use;
+- opt-in flag;
+- tests proving Ubuntu `22.04`, Debian, Alpine/musl, and mismatched-glibc images fail closed or select the correct loader.
+
+Until that exists, the upstream-supported path is: compat targetSdk direct-exec + rootfs loader, with modern-target app-process execution reported as unavailable rather than silently falling back to an ABI-unsafe helper.
