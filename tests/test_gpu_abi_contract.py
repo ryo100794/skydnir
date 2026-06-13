@@ -932,7 +932,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "rp->attachments[a].format = src->format;",
             "rp->attachments[a].load_op = src->loadOp;",
             "cmd->active_clear_values[i]",
-            "cmd->active_subpass += 1;",
+            "uint32_t next_subpass = cmd->active_subpass + 1u;",
             "VkDeviceSize base_offset;",
             "VkDeviceSize dynamic_offset;",
             "api_dynamic_offsets[binding_count] = binding->dynamic_offset;",
@@ -985,15 +985,17 @@ class GpuAbiContractTest(unittest.TestCase):
             "subpass->viewMask",
             "dst->view_mask = view_mask;",
             "input_attachment_count != 0 || preserve_attachment_count != 0",
-            "append_render_pass_begin_layout_transitions",
-            "append_render_pass_end_layout_transitions",
+            "append_render_pass_subpass_layout_transitions",
+            "append_render_pass_final_layout_transitions",
             "record_render_pass_attachment_transition",
             "view->image->layout_mixed",
             "capture_render_pass_dependencies(",
             "capture_render_pass_dependencies2(",
             "capture_single_subpass_dependency",
             "VK_SUBPASS_EXTERNAL && dst_subpass == 0",
-            "src_subpass == 0 && dst_subpass == VK_SUBPASS_EXTERNAL",
+            "src_subpass != VK_SUBPASS_EXTERNAL && dst_subpass == VK_SUBPASS_EXTERNAL",
+            "src_subpass + 1u == dst_subpass",
+            "rp->subpass_dependencies[dst_subpass]",
             "pCreateInfo->pNext || pCreateInfo->flags != 0",
             "src->flags != 0",
             "const VkSubpassDescriptionDepthStencilResolve *depth_stencil_resolve = NULL;",
@@ -1048,17 +1050,18 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, render_pass2_body)
 
-    def test_vulkan_begin_render_pass_normalizes_single_subpass_to_dynamic_rendering(self):
+    def test_vulkan_begin_render_pass_normalizes_subpass_to_dynamic_rendering(self):
         icd = VULKAN_ICD.read_text()
         normalize_body = icd.split(
-            "static bool populate_single_subpass_render_pass_rendering_state", 1
+            "static bool populate_render_pass_subpass_rendering_state", 1
         )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass", 1)[0]
         begin_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdBeginRenderPass", 1
         )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1)[0]
         for marker in [
-            "populate_single_subpass_render_pass_rendering_state",
+            "populate_render_pass_subpass_rendering_state",
             "contents != VK_SUBPASS_CONTENTS_INLINE",
+            "render_pass_subpass_can_normalize_to_dynamic_rendering(rp, subpass_index)",
             "cmd->active_color_attachment_count = subpass->color_attachment_count;",
             "cmd->active_color_attachments[c]",
             "cmd->active_color_attachments[c].resolve_mode = VK_RESOLVE_MODE_AVERAGE_BIT;",
@@ -1069,8 +1072,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "cmd->active_depth_attachment.resolve_image_view",
             "cmd->active_stencil_attachment.resolve_image_view",
             "cmd->active_rendering_layer_count = fb->layers ? fb->layers : 1;",
-            "append_render_pass_begin_layout_transitions(cmd)",
-            "append_graphics_rendering_snapshot(cmd, &rendering_snapshot_index)",
+            "cmd->active_rendering_view_mask = subpass->view_mask;",
+            "append_render_pass_subpass_layout_transitions(cmd, 0, &rp->begin_dependency)",
+            "append_graphics_begin_rendering_command(cmd)",
             "record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING;",
             "record.rendering_snapshot_index = rendering_snapshot_index;",
             "cmd->dynamic_rendering_active = true;",
@@ -1084,13 +1088,13 @@ class GpuAbiContractTest(unittest.TestCase):
         icd = VULKAN_ICD.read_text()
         transition_body = icd.split(
             "static bool record_render_pass_attachment_transition", 1
-        )[1].split("static bool append_render_pass_begin_layout_transitions", 1)[0]
-        begin_transition_body = icd.split(
-            "static bool append_render_pass_begin_layout_transitions", 1
-        )[1].split("static bool append_render_pass_end_layout_transitions", 1)[0]
-        end_transition_body = icd.split(
-            "static bool append_render_pass_end_layout_transitions", 1
-        )[1].split("static bool populate_single_subpass_render_pass_rendering_state", 1)[0]
+        )[1].split("static bool render_pass_track_attachment_layout", 1)[0]
+        subpass_transition_body = icd.split(
+            "static bool append_render_pass_subpass_layout_transitions", 1
+        )[1].split("static bool append_render_pass_final_layout_transitions", 1)[0]
+        final_transition_body = icd.split(
+            "static bool append_render_pass_final_layout_transitions", 1
+        )[1].split("static bool populate_render_pass_subpass_rendering_state", 1)[0]
         normalize_gate = icd.split(
             "static bool render_pass_subpass_can_normalize_to_dynamic_rendering", 1
         )[1].split("VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass", 1)[0]
@@ -1102,49 +1106,56 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, transition_body)
         for marker in [
-            "VkImageLayout initial_layout = rp->attachments[color_index].initial_layout;",
-            "render_pass_begin_src_access_mask(initial_layout)",
-            "render_pass_begin_src_stage_mask(initial_layout)",
+            "cmd->active_render_pass_attachment_seen[color_index]",
+            "rp->attachments[color_index].initial_layout",
+            "render_pass_begin_src_access_mask(old_layout)",
+            "render_pass_begin_src_stage_mask(old_layout)",
             "render_pass_attachment_access_mask(false, false)",
             "render_pass_resolve_attachment_access_mask()",
             "attachment->resolve_image_layout",
             "subpass->depth_stencil_resolve_layout",
             "cmd->active_depth_attachment.resolve_image_view",
             "render_pass_layout_is_read_only(cmd->active_depth_attachment.image_layout)",
-            "rp->begin_dependency.seen",
+            "dependency && dependency->seen",
             "record_memory_barrier_op((VkCommandBuffer)cmd",
+            "render_pass_track_attachment_layout",
             "append_graphics_barrier_record_for_ranges",
         ]:
-            self.assertIn(marker, begin_transition_body)
+            self.assertIn(marker, subpass_transition_body)
         for marker in [
-            "rp->attachments[color_index].final_layout",
-            "rp->attachments[resolve_index].final_layout",
-            "render_pass_resolve_attachment_access_mask()",
-            "subpass->depth_stencil_resolve_layout",
-            "cmd->active_depth_attachment.resolve_image_view",
-            "render_pass_layout_is_read_only(cmd->active_depth_attachment.image_layout)",
+            "rp->attachments[a].final_layout",
+            "cmd->active_render_pass_attachment_seen[a]",
+            "cmd->active_render_pass_attachment_layouts[a]",
+            "cmd->active_render_pass_attachment_views[a]",
             "rp->end_dependency.seen",
             "record_memory_barrier_op((VkCommandBuffer)cmd",
             "append_graphics_barrier_record_for_ranges",
         ]:
-            self.assertIn(marker, end_transition_body)
+            self.assertIn(marker, final_transition_body)
         for marker in [
             "rp->attachment_overflow",
             "rp->subpass_overflow",
-            "rp->subpass_count != 1",
+            "subpass_index >= rp->subpass_count",
             "return !subpass->unsupported;",
         ]:
             self.assertIn(marker, normalize_gate)
+        self.assertNotIn("rp->subpass_count != 1", normalize_gate)
 
-    def test_vulkan_next_subpass_remains_fail_closed(self):
+    def test_vulkan_next_subpass_normalizes_to_end_barrier_begin_sequence(self):
         icd = VULKAN_ICD.read_text()
         next_body = icd.split(
             "VKAPI_ATTR void VKAPI_CALL vkCmdNextSubpass", 1
         )[1].split("VKAPI_ATTR void VKAPI_CALL vkCmdEndRenderPass", 1)[0]
         for marker in [
-            "cmd->active_subpass += 1;",
+            "uint32_t next_subpass = cmd->active_subpass + 1u;",
+            "!render_pass_subpass_can_normalize_to_dynamic_rendering(rp, next_subpass)",
+            "append_graphics_end_rendering_command(cmd)",
+            "populate_render_pass_subpass_rendering_state(",
+            "append_render_pass_subpass_layout_transitions(",
+            "&rp->subpass_dependencies[next_subpass]",
+            "append_graphics_begin_rendering_command(cmd)",
+            "cmd->active_subpass = next_subpass;",
             "cmd->active_subpass_contents = contents;",
-            "cmd->graphics_unsupported = true;",
         ]:
             self.assertIn(marker, next_body)
         self.assertIn("vkCmdNextSubpass(commandBuffer, pSubpassBeginInfo", icd)
