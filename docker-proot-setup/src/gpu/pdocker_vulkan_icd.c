@@ -115,7 +115,9 @@ typedef struct PdockerVkFramebuffer PdockerVkFramebuffer;
 static uint32_t pdocker_vk_graphics_dynamic_state_bit_index(VkDynamicState state) {
     switch (state) {
         case VK_DYNAMIC_STATE_VIEWPORT: return 0u;
+        case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 0u;
         case VK_DYNAMIC_STATE_SCISSOR: return 1u;
+        case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 1u;
         case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
         case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
         case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;

@@ -1355,7 +1355,9 @@ static VulkanExecutorEventEntry *allocate_executor_event_entry(uint64_t id);
 static uint32_t vulkan_graphics_dynamic_state_bit_index(uint32_t state_type) {
     switch ((VkDynamicState)state_type) {
         case VK_DYNAMIC_STATE_VIEWPORT: return 0u;
+        case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 0u;
         case VK_DYNAMIC_STATE_SCISSOR: return 1u;
+        case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 1u;
         case VK_DYNAMIC_STATE_LINE_WIDTH: return 2u;
         case VK_DYNAMIC_STATE_CULL_MODE: return 3u;
         case VK_DYNAMIC_STATE_FRONT_FACE: return 4u;

@@ -1242,6 +1242,18 @@ class GpuAbiContractTest(unittest.TestCase):
             marker = f"case VK_DYNAMIC_STATE_{name}: return {bit}u;"
             self.assertIn(marker, executor)
             self.assertIn(marker, icd)
+        for marker in [
+            "case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 0u;",
+            "case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 1u;",
+            "vkCmdSetViewport(commandBuffer, 0, viewportCount, pViewports);",
+            "vkCmdSetScissor(commandBuffer, 0, scissorCount, pScissors);",
+        ]:
+            self.assertIn(marker, icd)
+        for marker in [
+            "case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT: return 0u;",
+            "case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT: return 1u;",
+        ]:
+            self.assertIn(marker, executor)
 
     def test_vulkan_graphics_pipeline_static_viewport_scissor_is_serialized(self):
         icd = VULKAN_ICD.read_text()
