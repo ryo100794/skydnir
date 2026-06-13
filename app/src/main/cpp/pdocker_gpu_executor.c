@@ -21418,11 +21418,6 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
-                if (command->attachment_count == 0) {
-                    reason = "dynamic rendering without attachments is not supported";
-                    if (reason_out) *reason_out = reason;
-                    return -EOPNOTSUPP;
-                }
                 if (command->flags != 0) {
                     reason = "dynamic rendering flags are not supported";
                     if (reason_out) *reason_out = reason;
@@ -22896,7 +22891,6 @@ static int materialize_vulkan_graphics_v6_attachments(
     for (uint32_t c = 0; c < view->header->command_count; ++c) {
         const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[c];
         if (command->command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING) continue;
-        if (command->attachment_count == 0) return -EOPNOTSUPP;
         for (uint32_t a = 0; a < command->attachment_count; ++a) {
             const PdockerGpuVulkanGraphicsV6AttachmentEntry *attachment =
                 &view->attachments[command->attachment_first + a];

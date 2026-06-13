@@ -2541,6 +2541,25 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("vulkan_graphics_replay_queue_family_index", recorder)
         self.assertNotIn("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:\n                rc = -EOPNOTSUPP", recorder)
 
+    def test_vulkan_graphics_no_attachment_dynamic_rendering_is_replayable(self):
+        executor = GPU_EXECUTOR.read_text()
+        preflight = executor.split(
+            "static int preflight_vulkan_graphics_v6_replay_supported", 1
+        )[1].split("static int preflight_vulkan_graphics_v6_runtime_supported", 1)[0]
+        materializer = executor.split(
+            "static int materialize_vulkan_graphics_v6_attachments", 1
+        )[1].split("static void destroy_vulkan_graphics_replay_attachments", 1)[0]
+        recorder = executor.split(
+            "static int record_vulkan_graphics_v6_command_buffer", 1
+        )[1].split("static int submit_vulkan_graphics_v6_command_buffer", 1)[0]
+
+        self.assertNotIn("dynamic rendering without attachments is not supported", preflight)
+        self.assertNotIn("command->attachment_count == 0", materializer)
+        self.assertIn(".colorAttachmentCount = color_attachment_count", recorder)
+        self.assertIn(".pColorAttachments = color_attachment_count ? color_attachments : NULL", recorder)
+        self.assertIn(".pDepthAttachment = depth_attachment_ptr", recorder)
+        self.assertIn(".pStencilAttachment = stencil_attachment_ptr", recorder)
+
     def test_vulkan_graphics_queue_family_barrier_is_safely_normalized(self):
         executor = GPU_EXECUTOR.read_text()
         helper = executor.split(
