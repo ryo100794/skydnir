@@ -20706,12 +20706,10 @@ static int validate_vulkan_graphics_v6_frame_content(
              command->descriptor_count != 0 || command->vertex_binding_count != 0 ||
              command->attachment_count != 0 || command->dynamic_state_count != 0 ||
              command->push_size != 0 || command->index_buffer_resource_index != UINT32_MAX ||
-             command->pipeline_layout_id == 0 || command->index_offset == 0)) return -EPROTO;
+             command->pipeline_layout_id == 0)) return -EPROTO;
         if ((command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT ||
              command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT) &&
             command->push_hash != 0) return -EPROTO;
-        if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT &&
-            command->push_hash == 0) return -EPROTO;
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW &&
             command->index_buffer_resource_index != UINT32_MAX) return -EPROTO;
         if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED) {
@@ -21783,7 +21781,7 @@ static int preflight_vulkan_graphics_v6_replay_supported(
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT:
-                if (command->pipeline_layout_id == 0 || command->index_offset == 0) {
+                if (command->pipeline_layout_id == 0) {
                     reason = "invalid graphics event command metadata";
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
@@ -21792,12 +21790,6 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                      command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT) &&
                     command->push_hash != 0) {
                     reason = "invalid graphics event set/reset destination stage";
-                    if (reason_out) *reason_out = reason;
-                    return -EPROTO;
-                }
-                if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT &&
-                    command->push_hash == 0) {
-                    reason = "invalid graphics event wait destination stage";
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
                 }
@@ -26015,14 +26007,16 @@ static int record_vulkan_graphics_v6_command_buffer(
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_RESET_EVENT:
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT: {
                 VulkanExecutorEventEntry *entry = find_executor_event_entry(command->pipeline_layout_id);
-                if (!entry || !entry->event || command->index_offset == 0) {
+                if (!entry || !entry->event) {
                     rc = -EPROTO;
                     goto cleanup;
                 }
                 const VkPipelineStageFlags2 src_stage_mask2 = (VkPipelineStageFlags2)command->index_offset;
                 const VkPipelineStageFlags2 dst_stage_mask2 = (VkPipelineStageFlags2)command->push_hash;
                 const int legacy_stage_masks =
-                    command->index_offset <= UINT32_MAX && command->push_hash <= UINT32_MAX;
+                    command->index_offset != 0 &&
+                    command->index_offset <= UINT32_MAX &&
+                    command->push_hash <= UINT32_MAX;
                 if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT) {
                     if (command->push_hash != 0) { rc = -EPROTO; goto cleanup; }
                     if (legacy_stage_masks) {
@@ -26038,8 +26032,8 @@ static int record_vulkan_graphics_v6_command_buffer(
                         };
                         VkDependencyInfo dependency = {
                             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                            .memoryBarrierCount = 1,
-                            .pMemoryBarriers = &event_scope,
+                            .memoryBarrierCount = src_stage_mask2 ? 1u : 0u,
+                            .pMemoryBarriers = src_stage_mask2 ? &event_scope : NULL,
                         };
                         rt->cmd_set_event2(command_buffer, entry->event, &dependency);
                     }
@@ -26054,7 +26048,6 @@ static int record_vulkan_graphics_v6_command_buffer(
                     }
                     entry->signaled = 0u;
                 } else {
-                    if (dst_stage_mask2 == 0) { rc = -EPROTO; goto cleanup; }
                     VkEvent event = entry->event;
                     if (legacy_stage_masks) {
                         vkCmdWaitEvents(command_buffer, 1, &event,
@@ -26072,8 +26065,8 @@ static int record_vulkan_graphics_v6_command_buffer(
                         };
                         VkDependencyInfo dependency = {
                             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                            .memoryBarrierCount = 1,
-                            .pMemoryBarriers = &event_scope,
+                            .memoryBarrierCount = (src_stage_mask2 || dst_stage_mask2) ? 1u : 0u,
+                            .pMemoryBarriers = (src_stage_mask2 || dst_stage_mask2) ? &event_scope : NULL,
                         };
                         rt->cmd_wait_events2(command_buffer, 1, &event, &dependency);
                     }

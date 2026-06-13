@@ -17459,7 +17459,7 @@ static void record_event_command(VkCommandBuffer commandBuffer,
     op.type = PDOCKER_VK_COMMAND_EVENT;
     op.event = e;
     op.event_signaled = signaled;
-    op.event_src_stage_mask = normalize_event_stage_mask(stage_mask);
+    op.event_src_stage_mask = stage_mask;
     PdockerVkGraphicsCommandRecord record;
     memset(&record, 0, sizeof(record));
     record.command_type = signaled
@@ -17483,8 +17483,8 @@ static void record_event_wait_command(VkCommandBuffer commandBuffer,
     memset(&op, 0, sizeof(op));
     op.type = PDOCKER_VK_COMMAND_EVENT_WAIT;
     op.event = e;
-    op.event_src_stage_mask = normalize_event_stage_mask(src_stage_mask);
-    op.event_dst_stage_mask = normalize_event_stage_mask(dst_stage_mask);
+    op.event_src_stage_mask = src_stage_mask;
+    op.event_dst_stage_mask = dst_stage_mask;
     PdockerVkGraphicsCommandRecord record;
     memset(&record, 0, sizeof(record));
     record.command_type = PDOCKER_GPU_GRAPHICS_V6_COMMAND_WAIT_EVENT;
@@ -17496,14 +17496,14 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags stageMask) {
-    record_event_command(commandBuffer, event, true, (VkPipelineStageFlags2)stageMask);
+    record_event_command(commandBuffer, event, true, normalize_event_stage_mask((VkPipelineStageFlags2)stageMask));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags stageMask) {
-    record_event_command(commandBuffer, event, false, (VkPipelineStageFlags2)stageMask);
+    record_event_command(commandBuffer, event, false, normalize_event_stage_mask((VkPipelineStageFlags2)stageMask));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
@@ -17529,8 +17529,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents(
             return;
         }
         record_event_wait_command(commandBuffer, pEvents[i],
-                                  (VkPipelineStageFlags2)srcStageMask,
-                                  (VkPipelineStageFlags2)dstStageMask);
+                                  normalize_event_stage_mask((VkPipelineStageFlags2)srcStageMask),
+                                  normalize_event_stage_mask((VkPipelineStageFlags2)dstStageMask));
     }
     vkCmdPipelineBarrier(commandBuffer,
                          srcStageMask,
@@ -17715,7 +17715,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2(
         VkCommandBuffer commandBuffer,
         VkEvent event,
         VkPipelineStageFlags2 stageMask) {
-    record_event_command(commandBuffer, event, false, (VkPipelineStageFlags2)stageMask);
+    record_event_command(commandBuffer, event, false, stageMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(

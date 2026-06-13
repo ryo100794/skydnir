@@ -4906,6 +4906,10 @@ class GpuAbiContractTest(unittest.TestCase):
             "command->pipeline_layout_id = op->event->event_id",
             "command->index_offset = (uint64_t)op->event_src_stage_mask",
             "command->push_hash = (uint64_t)op->event_dst_stage_mask",
+            "op.event_src_stage_mask = stage_mask",
+            "op.event_dst_stage_mask = dst_stage_mask",
+            "normalize_event_stage_mask((VkPipelineStageFlags2)srcStageMask)",
+            "record_event_command(commandBuffer, event, false, stageMask)",
         ]:
             self.assertIn(marker, icd)
         plan_body = icd.split("static bool graphics_mixed_submit_plan", 1)[1].split(
@@ -4926,6 +4930,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "rt->cmd_wait_events2",
             "const VkPipelineStageFlags2 src_stage_mask2",
             "const int legacy_stage_masks",
+            "command->index_offset != 0",
+            "memoryBarrierCount = src_stage_mask2 ? 1u : 0u",
+            "memoryBarrierCount = (src_stage_mask2 || dst_stage_mask2) ? 1u : 0u",
             "vkCmdSetEvent(command_buffer, entry->event, (VkPipelineStageFlags)command->index_offset)",
             "vkCmdResetEvent(command_buffer, entry->event, (VkPipelineStageFlags)command->index_offset)",
             "vkCmdWaitEvents(command_buffer, 1, &event,",
@@ -4935,7 +4942,7 @@ class GpuAbiContractTest(unittest.TestCase):
         ]:
             self.assertIn(marker, executor)
 
-        event_replay_body = executor.split("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_EVENT:", 1)[1].split(
+        event_replay_body = executor.split("static int record_vulkan_graphics_v6_command_buffer", 1)[1].split(
             "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BARRIER:", 1
         )[0]
         self.assertNotIn("command->index_offset > UINT32_MAX", event_replay_body)
