@@ -9136,6 +9136,9 @@ class GpuAbiContractTest(unittest.TestCase):
             "vkCmdBeginRenderingKHR",
             "vkQueueSubmit2KHR",
             "vkGetSemaphoreCounterValueKHR",
+            "vkCmdBindVertexBuffers2EXT",
+            "vkCmdSetViewportWithCountEXT",
+            "vkCmdSetScissorWithCountEXT",
             "vkCmdSetCullModeEXT",
             "vkCreateSwapchainKHR",
         ]:

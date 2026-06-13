@@ -18192,7 +18192,13 @@ static bool proc_address_hidden_by_advertisement(const char *pName) {
         !advertised_timeline_semaphore()) {
         return true;
     }
-    if ((strcmp(pName, "vkCmdSetCullMode") == 0 ||
+    if ((strcmp(pName, "vkCmdBindVertexBuffers2") == 0 ||
+         strcmp(pName, "vkCmdBindVertexBuffers2EXT") == 0 ||
+         strcmp(pName, "vkCmdSetViewportWithCount") == 0 ||
+         strcmp(pName, "vkCmdSetViewportWithCountEXT") == 0 ||
+         strcmp(pName, "vkCmdSetScissorWithCount") == 0 ||
+         strcmp(pName, "vkCmdSetScissorWithCountEXT") == 0 ||
+         strcmp(pName, "vkCmdSetCullMode") == 0 ||
          strcmp(pName, "vkCmdSetCullModeEXT") == 0 ||
          strcmp(pName, "vkCmdSetFrontFace") == 0 ||
          strcmp(pName, "vkCmdSetFrontFaceEXT") == 0 ||
