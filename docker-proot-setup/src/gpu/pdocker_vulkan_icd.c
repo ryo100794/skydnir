@@ -6666,6 +6666,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         uint64_t specialization_hash,
         const char *option_text,
         size_t option_text_size,
+        PdockerVkBuffer *dispatch_indirect_buffer,
+        VkDeviceSize dispatch_indirect_offset,
         const uint32_t *api_descriptor_sets,
         const uint32_t *api_descriptor_array_elements,
         const uint32_t *bindings,
@@ -6729,9 +6731,47 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         sampler_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_SAMPLERS) {
         return -E2BIG;
     }
-    const size_t resource_count = binding_count * 2u + image_count;
+    const bool has_dispatch_indirect = dispatch_indirect_buffer != NULL;
+    uint32_t dispatch_indirect_resource_index = UINT32_MAX;
+    bool append_dispatch_indirect_resource = false;
+    if (has_dispatch_indirect) {
+        if ((dispatch_indirect_offset & 3u) != 0) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: V5.1 frame rejected: unaligned dispatch indirect offset dispatch_id=%llu offset=%llu\n",
+                    (unsigned long long)dispatch_id,
+                    (unsigned long long)dispatch_indirect_offset);
+            return -EINVAL;
+        }
+        if (!dispatch_indirect_buffer->memory || dispatch_indirect_buffer->memory->fd < 0 ||
+            dispatch_indirect_buffer->memory_offset > (VkDeviceSize)dispatch_indirect_buffer->memory->size ||
+            (VkDeviceSize)dispatch_indirect_buffer->size >
+                (VkDeviceSize)dispatch_indirect_buffer->memory->size - dispatch_indirect_buffer->memory_offset ||
+            dispatch_indirect_offset > (VkDeviceSize)dispatch_indirect_buffer->size ||
+            12u > (VkDeviceSize)dispatch_indirect_buffer->size - dispatch_indirect_offset) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: V5.1 frame rejected: invalid dispatch indirect buffer dispatch_id=%llu buffer=%p memory=%p offset=%llu size=%zu\n",
+                    (unsigned long long)dispatch_id,
+                    (void *)dispatch_indirect_buffer,
+                    dispatch_indirect_buffer ? (void *)dispatch_indirect_buffer->memory : NULL,
+                    (unsigned long long)dispatch_indirect_offset,
+                    dispatch_indirect_buffer ? dispatch_indirect_buffer->size : 0);
+            return -ERANGE;
+        }
+        for (size_t i = 0; i < binding_count; ++i) {
+            if (api_buffer_ids[i] == (uintptr_t)dispatch_indirect_buffer) {
+                dispatch_indirect_resource_index = (uint32_t)(i * 2u + 1u);
+                break;
+            }
+        }
+        if (dispatch_indirect_resource_index == UINT32_MAX) {
+            append_dispatch_indirect_resource = true;
+        }
+    }
+    const size_t hidden_dispatch_indirect_resources = append_dispatch_indirect_resource ? 2u : 0u;
+    const size_t hidden_dispatch_indirect_fds = append_dispatch_indirect_resource ? 1u : 0u;
+    const size_t resource_count = binding_count * 2u + image_count + hidden_dispatch_indirect_resources;
     const size_t descriptor_count = binding_count + image_descriptor_count;
-    const size_t fd_count = 1u + binding_count + image_count;
+    const size_t fd_count = 1u + binding_count + image_count + hidden_dispatch_indirect_fds;
     if (resource_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_RESOURCES ||
         descriptor_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_DESCRIPTORS ||
         fd_count > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FDS) {
@@ -6917,6 +6957,35 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         image_entries[i].initial_layout = image->current_layout;
         image_entries[i].generation = image->generation;
     }
+    if (append_dispatch_indirect_resource) {
+        PdockerVkMemory *memory = dispatch_indirect_buffer->memory;
+        const uint32_t memory_index = (uint32_t)resource_index++;
+        const uint32_t buffer_index = (uint32_t)resource_index++;
+        resources[memory_index].resource_type = PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY;
+        resources[memory_index].resource_flags =
+            PDOCKER_GPU_V5_RESOURCE_FLAG_HOST_FD_BACKED |
+            PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
+        resources[memory_index].resource_id = (uint64_t)(uintptr_t)memory;
+        resources[memory_index].parent_resource_index = PDOCKER_GPU_V5_RESOURCE_PARENT_NONE;
+        resources[memory_index].fd_index = (uint32_t)fd_index;
+        resources[memory_index].memory_offset = 0;
+        resources[memory_index].size = (uint64_t)memory->size;
+        resources[memory_index].memory_property_flags =
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        resources[memory_index].external_offset = 0;
+        resources[memory_index].generation = dispatch_id;
+
+        resources[buffer_index].resource_type = PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER;
+        resources[buffer_index].resource_flags = PDOCKER_GPU_V5_RESOURCE_FLAG_MUTABLE;
+        resources[buffer_index].resource_id = (uint64_t)(uintptr_t)dispatch_indirect_buffer;
+        resources[buffer_index].parent_resource_index = memory_index;
+        resources[buffer_index].fd_index = PDOCKER_GPU_V5_RESOURCE_FD_NONE;
+        resources[buffer_index].memory_offset = (uint64_t)dispatch_indirect_buffer->memory_offset;
+        resources[buffer_index].size = (uint64_t)dispatch_indirect_buffer->size;
+        resources[buffer_index].generation = dispatch_id;
+        fds[fd_index++] = memory->fd;
+        dispatch_indirect_resource_index = buffer_index;
+    }
     for (size_t i = 0; i < image_view_count; ++i) {
         PdockerVkImageView *view = image_view_objects ? image_view_objects[i] : NULL;
         if (!view || !view->image) {
@@ -7030,6 +7099,24 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         specs[i].size = specialization_entries[i].size;
     }
 
+    char dispatch_indirect_options[4096];
+    const char *effective_option_text = option_text ? option_text : "";
+    size_t effective_option_text_size = option_text ? option_text_size : 0;
+    if (has_dispatch_indirect) {
+        const char *separator = effective_option_text_size ? " " : "";
+        int n = snprintf(dispatch_indirect_options, sizeof(dispatch_indirect_options),
+                         "%.*s%sdispatch_indirect_resource=%u dispatch_indirect_offset=%llu",
+                         (int)effective_option_text_size, effective_option_text,
+                         separator,
+                         dispatch_indirect_resource_index,
+                         (unsigned long long)dispatch_indirect_offset);
+        if (n < 0 || (size_t)n >= sizeof(dispatch_indirect_options)) {
+            return -ENAMETOOLONG;
+        }
+        effective_option_text = dispatch_indirect_options;
+        effective_option_text_size = (size_t)n;
+    }
+
     size_t frame_capacity =
         sizeof(PdockerGpuVulkanDispatchV5ObjectFrameHeader) +
         align_size_8(sizeof(PdockerGpuVulkanDispatchV5ResourceEntry) * resource_count) +
@@ -7041,7 +7128,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
         align_size_8(specialization_data_size) +
         align_size_8(push_size) +
         align_size_8(entry_name_size) +
-        align_size_8(option_text_size) +
+        align_size_8(effective_option_text_size) +
         64u;
     if (frame_capacity > PDOCKER_GPU_VULKAN_DISPATCH_V5_MAX_FRAME_BYTES) return -EMSGSIZE;
     unsigned char *frame = (unsigned char *)calloc(1, frame_capacity);
@@ -7074,8 +7161,8 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     header->push_size = push_size;
     header->push_hash = push_hash;
     header->entry_name_size = entry_name_size;
-    header->option_text_size = option_text_size;
-    header->option_hash = fnv1a64_bytes(option_text, option_text_size);
+    header->option_text_size = effective_option_text_size;
+    header->option_hash = fnv1a64_bytes(effective_option_text, effective_option_text_size);
     header->resource_hash = fnv1a64_bytes(resources, sizeof(resources[0]) * resource_count);
     header->descriptor_hash = fnv1a64_bytes(descriptors, sizeof(descriptors[0]) * descriptor_count);
     header->dispatch_hash = dispatch_hash;
@@ -7138,7 +7225,7 @@ static int send_generic_vulkan_dispatch_v5_1_op(
     if (rc != 0) goto cleanup;
     rc = frame_append_bytes(frame, frame_capacity, &cursor, entry_name, entry_name_size, &header->entry_name_offset);
     if (rc != 0) goto cleanup;
-    rc = frame_append_bytes(frame, frame_capacity, &cursor, option_text, option_text_size, &header->option_text_offset);
+    rc = frame_append_bytes(frame, frame_capacity, &cursor, effective_option_text, effective_option_text_size, &header->option_text_offset);
     if (rc != 0) goto cleanup;
     header->frame_size = cursor;
     header->frame_hash = fnv1a64_bytes(frame, cursor);
@@ -7459,17 +7546,23 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     uint32_t dispatch_x = 0;
     uint32_t dispatch_y = 0;
     uint32_t dispatch_z = 0;
-    int dispatch_count_rc = resolve_vulkan_dispatch_group_counts(
-        op, &dispatch_x, &dispatch_y, &dispatch_z);
-    if (dispatch_count_rc != 0) {
-        fprintf(stderr,
-                "pdocker-vulkan-icd: generic dispatch rejected: indirect group counts dispatch_id=%llu rc=%d indirect=%u buffer=%p offset=%llu\n",
-                (unsigned long long)dispatch_id,
-                dispatch_count_rc,
-                op->dispatch_indirect ? 1u : 0u,
-                (void *)op->dispatch_indirect_buffer,
-                (unsigned long long)op->dispatch_indirect_offset);
-        return dispatch_count_rc;
+    if (op->dispatch_indirect) {
+        dispatch_x = 1;
+        dispatch_y = 1;
+        dispatch_z = 1;
+    } else {
+        int dispatch_count_rc = resolve_vulkan_dispatch_group_counts(
+            op, &dispatch_x, &dispatch_y, &dispatch_z);
+        if (dispatch_count_rc != 0) {
+            fprintf(stderr,
+                    "pdocker-vulkan-icd: generic dispatch rejected: group counts dispatch_id=%llu rc=%d indirect=%u buffer=%p offset=%llu\n",
+                    (unsigned long long)dispatch_id,
+                    dispatch_count_rc,
+                    op->dispatch_indirect ? 1u : 0u,
+                    (void *)op->dispatch_indirect_buffer,
+                    (unsigned long long)op->dispatch_indirect_offset);
+            return dispatch_count_rc;
+        }
     }
     char push_hex[PDOCKER_VK_MAX_PUSH_BYTES * 2 + 1];
     hex_encode(op->push_constants, push_size, push_hex, sizeof(push_hex));
@@ -7635,6 +7728,9 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
     dispatch_hash = fnv1a64_update_u32(dispatch_hash, op->base_group_x);
     dispatch_hash = fnv1a64_update_u32(dispatch_hash, op->base_group_y);
     dispatch_hash = fnv1a64_update_u32(dispatch_hash, op->base_group_z);
+    dispatch_hash = fnv1a64_update_u32(dispatch_hash, op->dispatch_indirect ? 1u : 0u);
+    dispatch_hash = fnv1a64_update_u64(dispatch_hash, (uint64_t)(uintptr_t)op->dispatch_indirect_buffer);
+    dispatch_hash = fnv1a64_update_u64(dispatch_hash, (uint64_t)op->dispatch_indirect_offset);
     uint64_t descriptor_hash = 1469598103934665603ull;
     descriptor_hash = fnv1a64_update_u64(descriptor_hash, (uint64_t)binding_count);
     for (size_t i = 0; i < binding_count; ++i) {
@@ -7833,7 +7929,7 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
         close_spirv_probe_replay(&probe);
         return socket_fd;
     }
-    const bool requires_v5_frame = descriptor_array_transport_required || image_descriptor_count > 0;
+    const bool requires_v5_frame = descriptor_array_transport_required || image_descriptor_count > 0 || op->dispatch_indirect;
     if ((vulkan_v5_frame_enabled() || requires_v5_frame) && !copy_alias_enabled()) {
         const char *option_text = "";
         size_t option_text_size = 0;
@@ -7867,6 +7963,8 @@ static int send_generic_vulkan_dispatch_op(const PdockerVkDispatchOp *op) {
             specialization_hash,
             option_text,
             option_text_size,
+            op->dispatch_indirect ? op->dispatch_indirect_buffer : NULL,
+            op->dispatch_indirect_offset,
             api_descriptor_sets,
             api_descriptor_array_elements,
             bindings,

@@ -904,6 +904,7 @@ typedef struct {
     size_t api_memory_size;
     uint64_t api_memory_id;
     uint64_t api_buffer_id;
+    uint32_t resource_index;
 } VulkanDispatchBinding;
 
 typedef struct {
@@ -1180,6 +1181,9 @@ typedef struct {
     uint32_t base_group_x;
     uint32_t base_group_y;
     uint32_t base_group_z;
+    int has_dispatch_indirect;
+    uint32_t dispatch_indirect_resource_index;
+    uint64_t dispatch_indirect_offset;
     int has_receive_evidence;
     PdockerReceiveEvidence receive_evidence;
     PdockerSenderReconcileEvidence sender_reconcile;
@@ -2353,6 +2357,78 @@ static void destroy_vulkan_vector_buffer(VkDevice device, VulkanVectorBuffer *bu
 
 static int read_fd_exact(int fd, void *buf, size_t size, off_t offset);
 
+static int create_vulkan_indirect_buffer_from_fd(
+        VkPhysicalDevice physical_device,
+        VkDevice device,
+        int fd,
+        size_t bytes,
+        off_t fd_offset,
+        VulkanVectorBuffer *out) {
+    if (fd < 0 || bytes == 0 || !out) return -EINVAL;
+    int rc = create_vulkan_buffer_with_usage(
+        physical_device,
+        device,
+        bytes,
+        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        NULL,
+        out);
+    if (rc != 0) return rc;
+    if (read_fd_exact(fd, out->map, bytes, fd_offset) != 0) {
+        destroy_vulkan_vector_buffer(device, out);
+        return -EIO;
+    }
+    return 0;
+}
+
+static int materialize_vulkan_dispatch_indirect_buffer(
+        VkPhysicalDevice physical_device,
+        VkDevice device,
+        const VulkanDispatchV5ObjectTables *object_tables,
+        uint32_t resource_index,
+        uint64_t indirect_offset,
+        VulkanVectorBuffer *out) {
+    if (!object_tables || !object_tables->resources || !object_tables->passed_fds || !out ||
+        resource_index >= object_tables->resource_count ||
+        (indirect_offset & 3u) != 0) {
+        return -EINVAL;
+    }
+    const PdockerGpuVulkanDispatchV5ResourceEntry *buffer =
+        &object_tables->resources[resource_index];
+    if (buffer->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_BUFFER ||
+        buffer->parent_resource_index >= object_tables->resource_count) {
+        return -EPROTO;
+    }
+    const PdockerGpuVulkanDispatchV5ResourceEntry *memory =
+        &object_tables->resources[buffer->parent_resource_index];
+    if (memory->resource_type != PDOCKER_GPU_V5_RESOURCE_TYPE_MEMORY ||
+        memory->fd_index == PDOCKER_GPU_V5_RESOURCE_FD_NONE ||
+        memory->fd_index >= object_tables->passed_fd_count ||
+        object_tables->passed_fds[memory->fd_index] < 0) {
+        return -EBADF;
+    }
+    if (buffer->memory_offset > memory->size ||
+        buffer->size > memory->size - buffer->memory_offset ||
+        indirect_offset > buffer->size ||
+        12u > buffer->size - indirect_offset) {
+        return -ERANGE;
+    }
+    if (memory->external_offset > UINT64_MAX - buffer->memory_offset) return -EOVERFLOW;
+    uint64_t fd_offset_u64 = memory->external_offset + buffer->memory_offset;
+    if (fd_offset_u64 > (uint64_t)LLONG_MAX) return -EOVERFLOW;
+    uint64_t transport_size_u64 = indirect_offset + 12u;
+    if (transport_size_u64 > (uint64_t)SIZE_MAX) return -EOVERFLOW;
+    return create_vulkan_indirect_buffer_from_fd(
+        physical_device,
+        device,
+        object_tables->passed_fds[memory->fd_index],
+        (size_t)transport_size_u64,
+        (off_t)fd_offset_u64,
+        out);
+}
+
 typedef struct {
     uint64_t memory_id;
     int fd;
@@ -3278,7 +3354,8 @@ static int create_strict_vulkan_object_graph(
                 .size = (VkDeviceSize)bindings[i].api_buffer_size,
                 .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                         VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                         VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             };
             double op_start = now_ms();
@@ -3993,6 +4070,25 @@ static int parse_vulkan_dispatch_option(VulkanDispatchOptions *options, const ch
             parsed > UINT32_MAX) return -1;
         options->has_base_group = 1;
         options->base_group_z = (uint32_t)parsed;
+        return 0;
+    }
+
+    if (strncmp(token, "dispatch_indirect_resource=", 27) == 0 ||
+        strncmp(token, "dispatch_indirect_resource_index=", 33) == 0) {
+        const char *value = strchr(token, '=');
+        uint64_t parsed = 0;
+        if (!value || parse_u64_token_value(value + 1, &parsed) != 0 ||
+            parsed > UINT32_MAX) return -1;
+        options->has_dispatch_indirect = 1;
+        options->dispatch_indirect_resource_index = (uint32_t)parsed;
+        return 0;
+    }
+    if (strncmp(token, "dispatch_indirect_offset=", 25) == 0) {
+        const char *value = strchr(token, '=');
+        uint64_t parsed = 0;
+        if (!value || parse_u64_token_value(value + 1, &parsed) != 0) return -1;
+        options->has_dispatch_indirect = 1;
+        options->dispatch_indirect_offset = parsed;
         return 0;
     }
 
@@ -12268,6 +12364,8 @@ static int run_vulkan_dispatch_fd(
     uint32_t *shader_code = (uint32_t *)malloc(shader_size);
     VulkanVectorBuffer temp_buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     VulkanVectorBuffer alias_temp_buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
+    VulkanVectorBuffer dispatch_indirect_temp_buffer;
+    int dispatch_indirect_temp_buffer_used = 0;
     VulkanVectorBuffer *vk_buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     VulkanStrictMemoryObject strict_memories[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     VulkanStrictBufferObject strict_buffers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
@@ -12343,6 +12441,10 @@ static int run_vulkan_dispatch_fd(
     int q6_final_store_pre_barrier_inserted = 0;
     const int strict_passthrough = strict_vulkan_passthrough_requested(options);
     const int strict_reconciliation = strict_vulkan_reconciliation_requested(options);
+    if (options && options->has_dispatch_indirect && (base_x || base_y || base_z)) {
+        json_fail("vulkan-dispatch", "dispatch indirect cannot be combined with base group");
+        return 64;
+    }
     const int strict_device_local_staging =
         strict_passthrough &&
         (options && options->has_strict_device_local_staging
@@ -12497,6 +12599,7 @@ static int run_vulkan_dispatch_fd(
     ino_t binding_fd_ino[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
     memset(temp_buffers, 0, sizeof(temp_buffers));
     memset(alias_temp_buffers, 0, sizeof(alias_temp_buffers));
+    memset(&dispatch_indirect_temp_buffer, 0, sizeof(dispatch_indirect_temp_buffer));
     memset(vk_buffers, 0, sizeof(vk_buffers));
     memset(strict_memories, 0, sizeof(strict_memories));
     memset(strict_buffers, 0, sizeof(strict_buffers));
@@ -13536,6 +13639,23 @@ static int run_vulkan_dispatch_fd(
         }
     }
 
+    if (options && options->has_dispatch_indirect) {
+        fail_stage = "materialize-dispatch-indirect-buffer";
+        int indirect_rc = materialize_vulkan_dispatch_indirect_buffer(
+            rt->physical_device,
+            rt->device,
+            object_tables,
+            options->dispatch_indirect_resource_index,
+            options->dispatch_indirect_offset,
+            &dispatch_indirect_temp_buffer);
+        if (indirect_rc != 0) {
+            json_fail("vulkan-dispatch", "failed to materialize dispatch indirect buffer");
+            ret = indirect_rc == -ENOMEM ? 75 : 64;
+            goto cleanup;
+        }
+        dispatch_indirect_temp_buffer_used = 1;
+    }
+
     if (specialization_count > 0) {
         for (size_t i = 0; i < specialization_count; ++i) {
             if (specializations[i].offset + specializations[i].size > specialization_data_size) {
@@ -14374,7 +14494,16 @@ static int run_vulkan_dispatch_fd(
                              image_pre_barrier_count, image_pre_barriers);
     }
     if (push_size) vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, (uint32_t)push_size, push);
-    if (base_x || base_y || base_z) {
+    if (options && options->has_dispatch_indirect) {
+        if (!dispatch_indirect_temp_buffer_used || !dispatch_indirect_temp_buffer.buffer) {
+            json_fail("vulkan-dispatch", "dispatch indirect buffer is unavailable");
+            ret = 64;
+            goto cleanup;
+        }
+        vkCmdDispatchIndirect(command_buffer,
+                              dispatch_indirect_temp_buffer.buffer,
+                              (VkDeviceSize)options->dispatch_indirect_offset);
+    } else if (base_x || base_y || base_z) {
         if (!rt->cmd_dispatch_base) {
             json_fail("vulkan-dispatch", "vkCmdDispatchBase is unavailable");
             ret = 64;
@@ -15960,6 +16089,7 @@ cleanup:
     for (size_t i = 0; i < binding_alias_count; ++i) {
         destroy_vulkan_vector_buffer(rt->device, &alias_temp_buffers[i]);
     }
+    destroy_vulkan_vector_buffer(rt->device, &dispatch_indirect_temp_buffer);
     if (strict_object_graph_cache_entry) {
         if (ret != 0 && strict_object_graph_cache_hit) {
             strict_object_graph_cache_entry->in_use = 0;
@@ -17714,6 +17844,7 @@ static int convert_vulkan_dispatch_v5_to_v4_bindings(
         binding->api_memory_size = (size_t)memory->size;
         binding->api_memory_id = memory->resource_id;
         binding->api_buffer_id = buffer->resource_id;
+        binding->resource_index = d->resource_index;
         binding_fds[buffer_descriptor_count] = passed_fds[memory->fd_index];
         buffer_descriptor_count++;
     }
@@ -27430,6 +27561,9 @@ static int handle_vulkan_dispatch_v5_frame(int cfd) {
     size_t binding_count = 0;
     size_t image_descriptor_count = 0;
     memset(bindings, 0, sizeof(bindings));
+    for (size_t i = 0; i < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) {
+        bindings[i].resource_index = UINT32_MAX;
+    }
     memset(image_descriptors, 0, sizeof(image_descriptors));
     memset(&object_tables, 0, sizeof(object_tables));
     for (size_t i = 0; i < PDOCKER_GPU_MAX_VULKAN_BINDINGS; ++i) binding_fds[i] = -1;
