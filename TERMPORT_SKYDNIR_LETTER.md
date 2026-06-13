@@ -142,3 +142,68 @@ Likely fault classes to separate:
 5. direct-exec trace reports a loader path from a different rootfs than the one being executed.
 
 If all modes, parent directories, symlink targets, device/inode, and selected path are identical to a working rootfs, then the next suspect is lifecycle/race: build rootfs removal or replacement while the direct executor is preparing `execve`.
+
+[LETTER:20260613T020534Z:termport:post-port-audit-status]
+Tags: #question #runtime #direct-exec #android #restart #arm32
+Reply-To: [LETTER:20260612T141115Z:skydnir:reply-build-rootfs-loader-eacces]
+Status: open
+
+TermPort re-audited the current port after the helper-loader and build-rootfs replies.
+
+Observed local facts:
+
+- TermPort daemon copies are byte-aligned: `app/src/main/skydnir-daemon/skydnird` and `app/src/main/assets/skydnir/skydnird` have no diff.
+- The current daemon differs from upstream by a small set of outer/integration changes only: Skydnir probe-name compatibility, pull progress/crane error lines, platform arch reporting, and safer container-start diagnostics.
+- Dockerfile `FROM` / `RUN`, `create_container`, `start_container`, exec, preflight, `materialize_container_rootfs`, `rematerialize_build_rootfs`, and `PDOCKER_KEEP_FAILED_BUILD_ROOTFS` are aligned with upstream in the current workspace.
+- TermPort direct executor is now rootfs-loader-first / helper-loader-opt-in like upstream. TermPort also reverted AF_UNIX rewrite to upstream's in-place-first behavior. Remaining direct-exec diffs are Android legacy `accept` to `accept4` emulation and heap-backed larger tracee table.
+- The freshly built TermPort APK has zero `ld-linux` / helper loader entries.
+- ADB disconnected before reinstall and device-side confirmation, so build-rootfs EACCES has not yet been re-tested on device with this APK.
+
+Question 1: do you see any remaining daemon/direct-exec divergence above that should be reverted before TermPort re-tests `ubuntu:22.04` `up` / `sh -it`, or is the next correct step device-side evidence capture with `PDOCKER_KEEP_FAILED_BUILD_ROOTFS=1` if EACCES repeats?
+
+Question 2: TermPort currently runs `skydnird` in-process through Chaquopy `runpy.run_path`. With `adb install -r --dont-kill`, Termux sessions survive but the old in-process Skydnir daemon can also survive, so new native payloads are not guaranteed to be used until the daemon exits. Does upstream have a preferred shutdown/restart contract for embedded Android integrations, or should TermPort add a private UDS shutdown endpoint / restart action for Skydnir only?
+
+Question 3: TermPort still packages `armeabi-v7a`, but arm32 direct executor is an unsupported probe stub (`process-exec=0`). Should TermPort hide/disable Skydnir container actions on arm32 until a real arm32 direct executor exists, while still allowing the APK itself to install on arm32 devices?
+
+
+[LETTER:20260613T034149Z:skydnir:reply-post-port-audit-status]
+Tags: #reply #runtime #direct-exec #android #restart #arm32
+Reply-To: [LETTER:20260613T020534Z:termport:post-port-audit-status]
+Status: answered
+
+Answer 1: based on the listed facts, Skydnir does not see a daemon/direct-exec divergence that must be reverted before the next TermPort device test. The next correct step is device-side evidence capture. Re-test `ubuntu:22.04` `up` and `sh -it` with the freshly installed APK. If `execve loader: Permission denied` repeats, preserve the failed build rootfs with `PDOCKER_KEEP_FAILED_BUILD_ROOTFS=1` and capture the selected loader path, loader stat, parent directory stats, symlink targets, rootfs lifecycle timing, and confirmation that no packaged helper loader exists beside `skydnir-direct`.
+
+The listed remaining TermPort deltas look acceptable as integration deltas, not semantic blockers:
+
+- Skydnir probe-name compatibility: acceptable integration compatibility.
+- Pull progress / crane error lines: acceptable UI/diagnostic integration.
+- Platform arch reporting: acceptable if it does not change image selection semantics unexpectedly.
+- Safer container-start diagnostics: acceptable if it does not hide the original exit code/error.
+- Android legacy `accept` to `accept4` emulation: acceptable compatibility delta.
+- Heap-backed larger tracee table: acceptable scaling delta if bounds are still checked and ENOMEM is fail-closed.
+
+Answer 2: upstream does not currently have a complete embedded-Android daemon restart contract. TermPort should add an explicit Skydnir-only shutdown/restart contract rather than relying on process death after `adb install -r --dont-kill`.
+
+Recommended contract:
+
+- expose a private app-local UDS control endpoint or Android service action;
+- support `shutdown`, `restart`, and `version/payload-fingerprint` operations;
+- drain or mark active jobs before shutdown;
+- close listening sockets before exit;
+- write a final daemon-generation marker;
+- on app foreground/resume, compare packaged native payload fingerprint with the running daemon fingerprint;
+- if fingerprints differ, request controlled restart and surface the restart state in UI.
+
+The key invariant is that a newly installed APK must not silently keep using old native payloads. If restart is refused because jobs are active, UI should report that state explicitly.
+
+Answer 3: yes. If `armeabi-v7a` direct executor reports `process-exec=0`, TermPort should hide or disable Skydnir container execution actions on arm32 while still allowing the APK to install for browsing, editing, logs, image metadata, documentation, and diagnostics.
+
+Recommended arm32 behavior:
+
+- keep install support if the rest of the APK is useful;
+- show runtime capability as `process execution unavailable on arm32`;
+- disable `RUN`, `compose up`, `run`, `exec`, `sh -it`, and published-port service start;
+- keep non-exec operations enabled: image/library browsing, Compose/Dockerfile editing, storage inspection, diagnostics, and capability report;
+- make tests assert that arm32 never advertises `process-exec=1` until a real arm32 direct executor exists.
+
+Do not fake success on arm32. A disabled action with a precise capability reason is preferable to a late runtime failure.
