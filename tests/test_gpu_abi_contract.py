@@ -5011,14 +5011,18 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("dependency_info_has_unsupported_pnext(pDependencyInfo)", set_event2_body)
         self.assertIn("cmd->graphics_unsupported = true", set_event2_body)
         self.assertIn("dependency_info_has_supported_barrier_payload(pDependencyInfo)", set_event2_body)
+        self.assertIn("dependency_info_src_stage_mask", icd)
+        self.assertIn("dependency_info_dst_stage_mask", icd)
         self.assertIn("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)", set_event2_body)
-        self.assertLess(set_event2_body.index("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)"), set_event2_body.index("record_event_command(commandBuffer, event, true, (VkPipelineStageFlags2)VK_PIPELINE_STAGE_ALL_COMMANDS_BIT)"))
+        self.assertLess(set_event2_body.index("vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)"), set_event2_body.index("record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo))"))
         wait_events2_body = icd.split("VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2", 1)[1].split(
             "static bool query_range_valid", 1
         )[0]
         self.assertIn("eventCount > 0 && (!pEvents || !pDependencyInfos)", wait_events2_body)
         self.assertIn("for (uint32_t i = 0; i < eventCount; ++i)", wait_events2_body)
         self.assertIn("if (!pEvents[i])", wait_events2_body)
+        self.assertIn("dependency_info_src_stage_mask(&pDependencyInfos[i])", wait_events2_body)
+        self.assertIn("dependency_info_dst_stage_mask(&pDependencyInfos[i])", wait_events2_body)
         self.assertIn("vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i])", wait_events2_body)
         self.assertNotIn("eventCount > 1", wait_events2_body)
 

@@ -17654,6 +17654,48 @@ static bool dependency_info_has_supported_barrier_payload(const VkDependencyInfo
                     info->imageMemoryBarrierCount != 0);
 }
 
+static VkPipelineStageFlags2 dependency_info_src_stage_mask(const VkDependencyInfo *info) {
+    VkPipelineStageFlags2 mask = 0;
+    if (!info) return 0;
+    if (info->pMemoryBarriers) {
+        for (uint32_t i = 0; i < info->memoryBarrierCount; ++i) {
+            mask |= info->pMemoryBarriers[i].srcStageMask;
+        }
+    }
+    if (info->pBufferMemoryBarriers) {
+        for (uint32_t i = 0; i < info->bufferMemoryBarrierCount; ++i) {
+            mask |= info->pBufferMemoryBarriers[i].srcStageMask;
+        }
+    }
+    if (info->pImageMemoryBarriers) {
+        for (uint32_t i = 0; i < info->imageMemoryBarrierCount; ++i) {
+            mask |= info->pImageMemoryBarriers[i].srcStageMask;
+        }
+    }
+    return mask;
+}
+
+static VkPipelineStageFlags2 dependency_info_dst_stage_mask(const VkDependencyInfo *info) {
+    VkPipelineStageFlags2 mask = 0;
+    if (!info) return 0;
+    if (info->pMemoryBarriers) {
+        for (uint32_t i = 0; i < info->memoryBarrierCount; ++i) {
+            mask |= info->pMemoryBarriers[i].dstStageMask;
+        }
+    }
+    if (info->pBufferMemoryBarriers) {
+        for (uint32_t i = 0; i < info->bufferMemoryBarrierCount; ++i) {
+            mask |= info->pBufferMemoryBarriers[i].dstStageMask;
+        }
+    }
+    if (info->pImageMemoryBarriers) {
+        for (uint32_t i = 0; i < info->imageMemoryBarrierCount; ++i) {
+            mask |= info->pImageMemoryBarriers[i].dstStageMask;
+        }
+    }
+    return mask;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
         VkCommandBuffer commandBuffer,
         VkEvent event,
@@ -17666,7 +17708,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdSetEvent2(
     if (dependency_info_has_supported_barrier_payload(pDependencyInfo)) {
         vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo);
     }
-    record_event_command(commandBuffer, event, true, (VkPipelineStageFlags2)VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+    record_event_command(commandBuffer, event, true, dependency_info_src_stage_mask(pDependencyInfo));
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdResetEvent2(
@@ -17692,8 +17734,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWaitEvents2(
             return;
         }
         record_event_wait_command(commandBuffer, pEvents[i],
-                                  (VkPipelineStageFlags2)VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                                  (VkPipelineStageFlags2)VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+                                  dependency_info_src_stage_mask(&pDependencyInfos[i]),
+                                  dependency_info_dst_stage_mask(&pDependencyInfos[i]));
         vkCmdPipelineBarrier2(commandBuffer, &pDependencyInfos[i]);
     }
 }
