@@ -1007,7 +1007,6 @@ class GpuAbiContractTest(unittest.TestCase):
             "subpass->pResolveAttachments[i].aspectMask != 0",
             "subpass->pDepthStencilAttachment->pNext",
             "subpass->pDepthStencilAttachment->aspectMask != 0",
-            "pCreateInfo->correlatedViewMaskCount != 0",
             "src->pNext || src->flags != 0",
             "dst->unsupported = true;",
             "pdocker_vk_format_is_depth_stencil",
@@ -1431,6 +1430,7 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("pRenderingInfo->flags != 0 || pRenderingInfo->viewMask != 0", icd)
         self.assertNotIn("if (rendering->viewMask != 0)", icd)
         self.assertNotIn("subpass->flags != 0 || subpass->viewMask != 0", icd)
+        self.assertNotIn("pCreateInfo->correlatedViewMaskCount != 0", icd)
         for marker in [
             "enabled_vulkan11.multiview = rt->physical_vulkan11.multiview;",
             "enabled_vulkan11.multiview))",

@@ -12743,8 +12743,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateRenderPass2(
     if (!rp) return VK_ERROR_OUT_OF_HOST_MEMORY;
     rp->attachment_count = pCreateInfo ? pCreateInfo->attachmentCount : 0;
     rp->subpass_count = pCreateInfo ? pCreateInfo->subpassCount : 0;
-    if (pCreateInfo && (pCreateInfo->pNext || pCreateInfo->flags != 0 ||
-                        pCreateInfo->correlatedViewMaskCount != 0)) {
+    if (pCreateInfo && (pCreateInfo->pNext || pCreateInfo->flags != 0)) {
         rp->subpass_overflow = true;
     }
     if (rp->attachment_count > PDOCKER_VK_MAX_STORAGE_BUFFERS) {
