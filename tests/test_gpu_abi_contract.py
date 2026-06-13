@@ -4874,6 +4874,21 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertIn("record_event_wait_command(commandBuffer, pEvents[i])", icd)
         self.assertIn("event-wait-unsignaled", icd)
 
+    def test_vulkan_event_commands_fail_closed_inside_executor_frames(self):
+        icd = VULKAN_ICD.read_text()
+        self.assertIn("static bool command_op_is_event_op", icd)
+        self.assertIn("type == PDOCKER_VK_COMMAND_EVENT", icd)
+        self.assertIn("type == PDOCKER_VK_COMMAND_EVENT_WAIT", icd)
+        plan_body = icd.split("static bool graphics_mixed_submit_plan", 1)[1].split(
+            "static VkResult execute_graphics_mixed_host_side_ops", 1
+        )[0]
+        self.assertIn("command_op_is_event_op(type)", plan_body)
+        self.assertIn("graphics-mixed-event-command-unimplemented", plan_body)
+        self.assertLess(
+            plan_body.index("command_op_is_event_op(type)"),
+            plan_body.rindex("command_op_is_graphics_frame_op(type)"),
+        )
+
     def test_vulkan_event_lifecycle_is_executor_backed(self):
         executor = GPU_EXECUTOR.read_text()
         icd = VULKAN_ICD.read_text()

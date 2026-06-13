@@ -16407,6 +16407,11 @@ static bool command_op_is_graphics_frame_op(PdockerVkCommandOpType type) {
     }
 }
 
+static bool command_op_is_event_op(PdockerVkCommandOpType type) {
+    return type == PDOCKER_VK_COMMAND_EVENT ||
+           type == PDOCKER_VK_COMMAND_EVENT_WAIT;
+}
+
 static bool command_op_is_host_transfer_or_layout_op(PdockerVkCommandOpType type) {
     switch (type) {
         case PDOCKER_VK_COMMAND_COPY:
@@ -16666,6 +16671,10 @@ static bool graphics_mixed_submit_plan(
     }
     for (uint32_t op_index = 0; op_index < cmd->command_op_count; ++op_index) {
         PdockerVkCommandOpType type = cmd->command_ops[op_index].type;
+        if (command_op_is_event_op(type)) {
+            if (reason_out) *reason_out = "graphics-mixed-event-command-unimplemented";
+            return false;
+        }
         if (command_op_is_graphics_frame_op(type)) continue;
         if (!command_op_is_host_transfer_or_layout_op(type)) {
             if (reason_out) *reason_out = "graphics-mixed-submit-unimplemented";
