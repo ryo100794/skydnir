@@ -5721,8 +5721,40 @@ class GpuAbiContractTest(unittest.TestCase):
             "VkPipelineTessellationStateCreateInfo tsci",
             ".pTessellationState = tessellation_state ? &tsci : NULL",
             ".stageFlags = pipeline_descriptor_stage_flags",
+            "vulkan_graphics_v6_dynamic_primitive_topology_value",
+            "tessellation draw requires patch-list primitive topology",
+            "tessellation indexed draw requires patch-list primitive topology",
+            "tessellation patch control points exceed Android Vulkan device limit",
         ]:
             self.assertIn(marker, executor)
+
+    def test_vulkan_graphics_v623_runtime_checks_are_after_runtime_init(self):
+        executor = GPU_EXECUTOR.read_text()
+        replay_preflight_body = executor.split(
+            "static int preflight_vulkan_graphics_v6_replay_supported", 1
+        )[1].split("static int vulkan_graphics_v6_frame_needs_dynamic_rendering", 1)[0]
+        runtime_preflight_body = executor.split(
+            "static int preflight_vulkan_graphics_v6_runtime_supported", 1
+        )[1].split("#define PDOCKER_GPU_GRAPHICS_REPLAY_MAX_SHADER_STAGES", 1)[0]
+        record_body = executor.split(
+            "static int record_vulkan_graphics_v6_command_buffer", 1
+        )[1].split("static int submit_vulkan_graphics_v6_command_buffer", 1)[0]
+
+        self.assertNotIn("g_vulkan_runtime.enabled_features.tessellationShader", replay_preflight_body)
+        self.assertNotIn("g_vulkan_runtime.physical_properties.limits.maxTessellationPatchSize", replay_preflight_body)
+        self.assertNotIn("g_vulkan_runtime.enabled_vulkan11.multiview", replay_preflight_body)
+        self.assertNotIn("g_vulkan_runtime.enabled_features.sampleRateShading", replay_preflight_body)
+        self.assertNotIn("g_vulkan_runtime.enabled_features.alphaToOne", replay_preflight_body)
+        self.assertIn("init_vulkan_runtime(&g_vulkan_runtime)", runtime_preflight_body)
+        self.assertIn("g_vulkan_runtime.enabled_features.tessellationShader", runtime_preflight_body)
+        self.assertIn("g_vulkan_runtime.physical_properties.limits.maxTessellationPatchSize", runtime_preflight_body)
+        self.assertIn("g_vulkan_runtime.enabled_vulkan11.multiview", runtime_preflight_body)
+        self.assertIn("VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY", replay_preflight_body)
+        self.assertIn("tessellation draw requires patch-list primitive topology", replay_preflight_body)
+        self.assertIn("tessellation indexed draw requires patch-list primitive topology", replay_preflight_body)
+        self.assertIn("bound_pipeline_tessellated", record_body)
+        self.assertIn("dynamic_primitive_topology_valid", record_body)
+        self.assertIn("VK_PRIMITIVE_TOPOLOGY_PATCH_LIST", record_body)
 
     def test_vulkan_graphics_v621_submit2_metadata_is_wired_through_icd_and_executor(self):
         icd = VULKAN_ICD.read_text()

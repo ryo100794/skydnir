@@ -21570,6 +21570,39 @@ find_vulkan_graphics_v64_resolve_attachment(
         const VulkanGraphicsV6FrameView *view,
         uint32_t attachment_index);
 
+static VkShaderStageFlags vulkan_graphics_v6_pipeline_stage_flags(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline) {
+    if (!view || !view->header || !pipeline ||
+        pipeline->shader_stage_first > view->header->shader_stage_count ||
+        pipeline->shader_stage_count > view->header->shader_stage_count - pipeline->shader_stage_first) {
+        return 0;
+    }
+    VkShaderStageFlags stage_flags = 0;
+    for (uint32_t stage_i = 0; stage_i < pipeline->shader_stage_count; ++stage_i) {
+        const PdockerGpuVulkanGraphicsV6ShaderStageEntry *stage =
+            &view->shader_stages[pipeline->shader_stage_first + stage_i];
+        stage_flags |= (VkShaderStageFlags)stage->stage_flags;
+    }
+    return stage_flags;
+}
+
+static int vulkan_graphics_v6_dynamic_primitive_topology_value(
+        const VulkanGraphicsV6FrameView *view,
+        const PdockerGpuVulkanGraphicsV6DynamicStateEntry *state,
+        VkPrimitiveTopology *topology_out) {
+    if (!view || !view->header || !state || !topology_out) return -EINVAL;
+    if (state->state_type != VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY) return 0;
+    if (vulkan_graphics_dynamic_state_payload_supported(state) != 0 ||
+        !payload_range_valid(state->data_offset, state->data_size, view->header->frame_size)) {
+        return -EPROTO;
+    }
+    VkPrimitiveTopology value = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    memcpy(&value, view->frame + state->data_offset, sizeof(value));
+    *topology_out = value;
+    return 1;
+}
+
 static int preflight_vulkan_graphics_v6_replay_supported(
         const VulkanGraphicsV6FrameView *view,
         const char **reason_out) {
@@ -21598,6 +21631,11 @@ static int preflight_vulkan_graphics_v6_replay_supported(
     }
     int rendering_active = 0;
     int pipeline_bound = 0;
+    int dynamic_primitive_topology_valid = 0;
+    int bound_pipeline_tessellated = 0;
+    int bound_pipeline_dynamic_primitive_topology = 0;
+    VkPrimitiveTopology dynamic_primitive_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPrimitiveTopology bound_pipeline_static_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     int rc = 0;
     const PdockerGpuVulkanGraphicsV6CommandEntry *active_rendering_command = NULL;
     for (uint32_t i = 0; i < header->command_count; ++i) {
@@ -21611,12 +21649,6 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                 }
                 if (command->flags != 0) {
                     reason = "dynamic rendering flags are not supported";
-                    if (reason_out) *reason_out = reason;
-                    return -EOPNOTSUPP;
-                }
-                if (command->rendering_view_mask != 0 &&
-                    !g_vulkan_runtime.enabled_vulkan11.multiview) {
-                    reason = "dynamic rendering multiview requires enabled Vulkan 1.1 multiview";
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
@@ -21724,22 +21756,6 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (reason_out) *reason_out = reason;
                     return -EOPNOTSUPP;
                 }
-                const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *multisample_state =
-                    find_vulkan_graphics_v622_multisample_state(view, command->pipeline_index);
-                if (multisample_state) {
-                    if ((multisample_state->flags & PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_SHADING_ENABLE) != 0 &&
-                        !g_vulkan_runtime.enabled_features.sampleRateShading) {
-                        reason = "sample shading pipeline replay requires sampleRateShading";
-                        if (reason_out) *reason_out = reason;
-                        return -EOPNOTSUPP;
-                    }
-                    if ((multisample_state->flags & PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_ONE_ENABLE) != 0 &&
-                        !g_vulkan_runtime.enabled_features.alphaToOne) {
-                        reason = "alpha-to-one pipeline replay requires alphaToOne";
-                        if (reason_out) *reason_out = reason;
-                        return -EOPNOTSUPP;
-                    }
-                }
                 VkShaderStageFlags pipeline_stage_flags = 0;
                 for (uint32_t stage_i = 0;
                      stage_i < pipeline->shader_stage_count;
@@ -21777,14 +21793,8 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
-                    if (!g_vulkan_runtime.enabled_features.tessellationShader) {
-                        reason = "tessellation shader replay requires tessellationShader";
-                        if (reason_out) *reason_out = reason;
-                        return -EOPNOTSUPP;
-                    }
                     if (pipeline->topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST ||
-                        tessellation_state->patch_control_points >
-                            g_vulkan_runtime.physical_properties.limits.maxTessellationPatchSize) {
+                        tessellation_state->patch_control_points == 0) {
                         reason = "invalid tessellation pipeline patch state";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
@@ -21795,6 +21805,11 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     return -EPROTO;
                 }
                 pipeline_bound = 1;
+                bound_pipeline_tessellated = tessellation_stage_flags != 0;
+                bound_pipeline_static_topology = (VkPrimitiveTopology)pipeline->topology;
+                bound_pipeline_dynamic_primitive_topology =
+                    (pipeline->dynamic_state_mask &
+                     vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY)) != 0;
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE:
                 for (uint32_t d = 0; d < command->dynamic_state_count; ++d) {
@@ -21813,6 +21828,18 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
+                    VkPrimitiveTopology dynamic_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+                    int topology_rc = vulkan_graphics_v6_dynamic_primitive_topology_value(
+                        view, state, &dynamic_topology);
+                    if (topology_rc < 0) {
+                        reason = "invalid graphics dynamic primitive topology payload";
+                        if (reason_out) *reason_out = reason;
+                        return topology_rc;
+                    }
+                    if (topology_rc > 0) {
+                        dynamic_primitive_topology = dynamic_topology;
+                        dynamic_primitive_topology_valid = 1;
+                    }
                 }
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_VERTEX_BUFFERS:
@@ -21830,6 +21857,16 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
                 }
+                if (bound_pipeline_tessellated &&
+                    ((bound_pipeline_dynamic_primitive_topology &&
+                      (!dynamic_primitive_topology_valid ||
+                       dynamic_primitive_topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST)) ||
+                     (!bound_pipeline_dynamic_primitive_topology &&
+                      bound_pipeline_static_topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST))) {
+                    reason = "tessellation draw requires patch-list primitive topology";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_DRAW_INDEXED:
                 if (!rendering_active) {
@@ -21841,6 +21878,16 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                     reason = "indexed draw without bound graphics pipeline";
                     if (reason_out) *reason_out = reason;
                     return -EPROTO;
+                }
+                if (bound_pipeline_tessellated &&
+                    ((bound_pipeline_dynamic_primitive_topology &&
+                      (!dynamic_primitive_topology_valid ||
+                       dynamic_primitive_topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST)) ||
+                     (!bound_pipeline_dynamic_primitive_topology &&
+                      bound_pipeline_static_topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST))) {
+                    reason = "tessellation indexed draw requires patch-list primitive topology";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
                 }
                 if (vulkan_graphics_index_stride(command->index_type, &(uint64_t){0}) != 0) {
                     reason = "unsupported graphics index type";
@@ -22150,6 +22197,66 @@ static int preflight_vulkan_graphics_v6_runtime_supported(
         reason = "dynamic rendering is not enabled on the Android Vulkan device";
         if (reason_out) *reason_out = reason;
         return -EOPNOTSUPP;
+    }
+    if (view && view->header && view->commands) {
+        for (uint32_t i = 0; i < view->header->command_count; ++i) {
+            const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[i];
+            if (command->command_type == PDOCKER_GPU_GRAPHICS_V6_COMMAND_BEGIN_RENDERING &&
+                command->rendering_view_mask != 0 &&
+                !g_vulkan_runtime.enabled_vulkan11.multiview) {
+                reason = "dynamic rendering multiview requires enabled Vulkan 1.1 multiview";
+                if (reason_out) *reason_out = reason;
+                return -EOPNOTSUPP;
+            }
+            if (command->command_type != PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_PIPELINE) continue;
+            if (command->pipeline_index >= view->header->pipeline_count) {
+                reason = "invalid graphics runtime pipeline bind";
+                if (reason_out) *reason_out = reason;
+                return -EPROTO;
+            }
+            const PdockerGpuVulkanGraphicsV6PipelineEntry *pipeline =
+                &view->pipelines[command->pipeline_index];
+            const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *multisample_state =
+                find_vulkan_graphics_v622_multisample_state(view, command->pipeline_index);
+            if (multisample_state) {
+                if ((multisample_state->flags & PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_SAMPLE_SHADING_ENABLE) != 0 &&
+                    !g_vulkan_runtime.enabled_features.sampleRateShading) {
+                    reason = "sample shading pipeline replay requires sampleRateShading";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                if ((multisample_state->flags & PDOCKER_GPU_GRAPHICS_V622_MULTISAMPLE_ALPHA_TO_ONE_ENABLE) != 0 &&
+                    !g_vulkan_runtime.enabled_features.alphaToOne) {
+                    reason = "alpha-to-one pipeline replay requires alphaToOne";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+            }
+            const VkShaderStageFlags tessellation_stage_flags =
+                vulkan_graphics_v6_pipeline_stage_flags(view, pipeline) &
+                (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                 VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
+            if (tessellation_stage_flags != 0) {
+                const PdockerGpuVulkanGraphicsV623TessellationStateEntry *tessellation_state =
+                    find_vulkan_graphics_v623_tessellation_state(view, command->pipeline_index);
+                if (!tessellation_state) {
+                    reason = "tessellation shader replay requires V6.23 patch metadata";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                if (!g_vulkan_runtime.enabled_features.tessellationShader) {
+                    reason = "tessellation shader replay requires tessellationShader";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+                if (tessellation_state->patch_control_points >
+                    g_vulkan_runtime.physical_properties.limits.maxTessellationPatchSize) {
+                    reason = "tessellation patch control points exceed Android Vulkan device limit";
+                    if (reason_out) *reason_out = reason;
+                    return -EOPNOTSUPP;
+                }
+            }
+        }
     }
     if (!g_vulkan_runtime.graphics_ready) {
         reason = "graphics runtime preflight is not ready";
@@ -25057,6 +25164,11 @@ static int record_vulkan_graphics_v6_command_buffer(
     if (rc != 0) goto cleanup;
 
     uint32_t bound_pipeline_index = UINT32_MAX;
+    int dynamic_primitive_topology_valid = 0;
+    int bound_pipeline_tessellated = 0;
+    int bound_pipeline_dynamic_primitive_topology = 0;
+    VkPrimitiveTopology dynamic_primitive_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPrimitiveTopology bound_pipeline_static_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     for (uint32_t ci = 0; ci < view->header->command_count; ++ci) {
         const PdockerGpuVulkanGraphicsV6CommandEntry *command = &view->commands[ci];
         switch (command->command_type) {
@@ -25295,6 +25407,16 @@ static int record_vulkan_graphics_v6_command_buffer(
                 vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                   pipelines[command->pipeline_index].pipeline);
                 bound_pipeline_index = command->pipeline_index;
+                const PdockerGpuVulkanGraphicsV6PipelineEntry *bound_pipeline_src =
+                    &view->pipelines[command->pipeline_index];
+                bound_pipeline_static_topology = (VkPrimitiveTopology)bound_pipeline_src->topology;
+                bound_pipeline_dynamic_primitive_topology =
+                    (bound_pipeline_src->dynamic_state_mask &
+                     vulkan_graphics_dynamic_state_bit(VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY)) != 0;
+                bound_pipeline_tessellated =
+                    (vulkan_graphics_v6_pipeline_stage_flags(view, bound_pipeline_src) &
+                     (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                      VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT)) != 0;
                 break;
             case PDOCKER_GPU_GRAPHICS_V6_COMMAND_SET_DYNAMIC_STATE:
                 for (uint32_t d = 0; d < command->dynamic_state_count; ++d) {
@@ -25308,6 +25430,17 @@ static int record_vulkan_graphics_v6_command_buffer(
                     const void *data = view->frame + state->data_offset;
                     rc = vulkan_graphics_dynamic_state_payload_supported(state);
                     if (rc != 0) goto cleanup;
+                    VkPrimitiveTopology dynamic_topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+                    int topology_rc = vulkan_graphics_v6_dynamic_primitive_topology_value(
+                        view, state, &dynamic_topology);
+                    if (topology_rc < 0) {
+                        rc = topology_rc;
+                        goto cleanup;
+                    }
+                    if (topology_rc > 0) {
+                        dynamic_primitive_topology = dynamic_topology;
+                        dynamic_primitive_topology_valid = 1;
+                    }
                     switch ((VkDynamicState)state->state_type) {
                         case VK_DYNAMIC_STATE_VIEWPORT:
                             vkCmdSetViewport(command_buffer, state->first_index, state->count,
@@ -25592,6 +25725,15 @@ static int record_vulkan_graphics_v6_command_buffer(
                     rc = -EPROTO;
                     goto cleanup;
                 }
+                if (bound_pipeline_tessellated &&
+                    ((bound_pipeline_dynamic_primitive_topology &&
+                      (!dynamic_primitive_topology_valid ||
+                       dynamic_primitive_topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST)) ||
+                     (!bound_pipeline_dynamic_primitive_topology &&
+                      bound_pipeline_static_topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST))) {
+                    rc = -EOPNOTSUPP;
+                    goto cleanup;
+                }
                 const PdockerGpuVulkanGraphicsV68IndirectDrawEntry *indirect =
                     find_vulkan_graphics_v68_indirect_draw(view, ci);
                 if (indirect) {
@@ -25650,6 +25792,15 @@ static int record_vulkan_graphics_v6_command_buffer(
                 if (command->pipeline_index >= pipeline_count ||
                     command->pipeline_index != bound_pipeline_index) {
                     rc = -EPROTO;
+                    goto cleanup;
+                }
+                if (bound_pipeline_tessellated &&
+                    ((bound_pipeline_dynamic_primitive_topology &&
+                      (!dynamic_primitive_topology_valid ||
+                       dynamic_primitive_topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST)) ||
+                     (!bound_pipeline_dynamic_primitive_topology &&
+                      bound_pipeline_static_topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST))) {
+                    rc = -EOPNOTSUPP;
                     goto cleanup;
                 }
                 uint64_t index_stride = 0;
