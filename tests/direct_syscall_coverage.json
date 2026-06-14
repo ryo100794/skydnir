@@ -15,6 +15,7 @@
     "bind_volume_path_mediation",
     "linkat_hardlink_semantics",
     "proc_self_exe_no_mutation",
+    "proc_mount_chroot_isolation",
     "run_changed_path_manifest"
   ],
   "path_variant_matrix": [
@@ -681,6 +682,21 @@
       ],
       "contract": "Dockerfile RUN snapshotting must consume a conservative changed-path manifest for traced or statically-known filesystem mutations; current fast coverage locks down chmod wildcard path manifests while broader traced mutation manifests remain open.",
       "heavy_case": "host.local.run-changed-path-parser"
+    },
+    {
+      "id": "direct.proc-mount-chroot-isolation-contract",
+      "tier": "fast-static",
+      "areas": [
+        "proc_mount_chroot_isolation",
+        "syscall_errno_parity"
+      ],
+      "sources": [
+        "TERMPORT_SKYDNIR_LETTER.md",
+        "app/src/main/cpp/pdocker_direct_exec.c",
+        "docker-proot-setup/bin/pdockerd"
+      ],
+      "contract": "Direct-exec procfs, mount, chroot, and process-list behavior is one fail-closed container-view contract: /proc/self/root, /proc/self/status, /proc/self/mountinfo, /proc/mounts, and mount output must not leak Android app-private paths; chroot syscall 51 must return EPERM rather than ENOSYS, SIGSYS, or Bad system call; mount data must be synthetic or denied; and a live `sleep` child must appear in synthetic ps output.",
+      "heavy_case": "android.direct.proc-mount-chroot-isolation"
     }
   ],
   "heavy_cases": [
@@ -711,6 +727,13 @@
       "command": "PDOCKER_PACKAGE=\"${PDOCKER_PACKAGE:-io.github.ryo100794.pdocker}\"; ROOTFS=\"${ROOTFS:?set ROOTFS to the app-visible rootfs path}\"; adb shell \"run-as $PDOCKER_PACKAGE sh -lc 'cd files && PDOCKER_DIRECT_TRACE_SYSCALLS=1 pdocker-runtime/docker-bin/pdocker-direct run --mode exec --rootfs $ROOTFS --workdir / -- /bin/sh -lc \\\"set -eu; exe=\\\\\\$(readlink /proc/self/exe); test \\\\\\\"\\\\\\$exe\\\\\\\" = /bin/sh; d=/tmp/pdocker-direct-links; rm -rf \\\\\\$d; mkdir -p \\\\\\$d; echo ok > \\\\\\$d/src; ln \\\\\\$d/src \\\\\\$d/hard; ln -s src \\\\\\$d/sym; test \\\\\\\"\\\\\\$(cat \\\\\\$d/hard)\\\\\\\" = ok; test \\\\\\\"\\\\\\$(readlink \\\\\\$d/sym)\\\\\\\" = src; echo proc_links_ok\\\"'\"",
       "runnable": true,
       "checks": "/proc/self/exe reports the guest executable; link/symlink emulations preserve content-visible behavior. This case is not sufficient for linkat hardlink closure because it does not prove inode identity or link-count preservation."
+    },
+    {
+      "id": "android.direct.proc-mount-chroot-isolation",
+      "tier": "heavy-android",
+      "command": "Planned non-promoting Android device gate: run pdocker-direct with a shell/Python isolation probe that checks readlink /proc/self/root returns / or fails with EPERM/EACCES, cat /proc/self/status does not expose Android UID/GID/groups, cat /proc/self/mountinfo and cat /proc/mounts plus mount output contain no /data/user/0, /data/data, package name, or containers/<id>/rootfs path, mount data is synthetic or denied, raw chroot syscall 51 on / returns EPERM and never ENOSYS/SIGSYS/Bad system call, and sleep 3 & ps -e shows the live sleep child before wait.",
+      "runnable": false,
+      "checks": "No Android app-private path leak through /proc/self/root, /proc/self/status, /proc/self/mountinfo, /proc/mounts, or mount output; chroot syscall 51 returns EPERM rather than ENOSYS or Bad system call; mount output is synthetic or denied; synthetic ps includes the live sleep child from sleep 3 & ps -e."
     },
     {
       "id": "android.direct.linkat-hardlink-semantics",

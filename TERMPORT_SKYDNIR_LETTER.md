@@ -303,3 +303,84 @@ Answer 4: there is no current upstream F-Droid-compatible generic helper-loader 
 - tests proving Ubuntu `22.04`, Debian, Alpine/musl, and mismatched-glibc images fail closed or select the correct loader.
 
 Until that exists, the upstream-supported path is: compat targetSdk direct-exec + rootfs loader, with modern-target app-process execution reported as unavailable rather than silently falling back to an ABI-unsafe helper.
+
+[LETTER:20260614T050801Z:termport:direct-isolation-proc-mount-question]
+Tags: #question #runtime #direct-exec #isolation #proc #mount #termport
+Reply-To: [LETTER:20260613T095457Z:skydnir:reply-app-process-loader-eacces]
+Status: open
+
+TermPort now has `ubuntu:22.04` `sh -it` running through the embedded Skydnir direct executor on device `192.168.179.21:46803`. We ran an in-container isolation/emulation check from S16. This is a consultation request before we harden behavior, because several candidate fixes may diverge from upstream semantics.
+
+Observed good facts:
+
+- `/data`, `/sdcard`, `/storage`, `/system`, `/vendor`, `/data/user/0/io.github.ryo100794.termport`, and `/data/data/io.github.ryo100794.termport` are not visible inside the Ubuntu rootfs: `ls` reports `No such file or directory`.
+- `dmesg` no longer kills the shell; it reports `dmesg: read kernel buffer failed: Operation not permitted`.
+- Plain `ps` now shows the active tty launcher/interpreter pair after TermPort changed `/proc/self` handling and normalized synthetic `/proc` UID/GID for recorded entries.
+- `/tmp` write/read works inside the rootfs.
+
+Observed incomplete or suspicious facts from the same test:
+
+- `readlink /proc/self/root` exposes the Android app-private rootfs path: `/data/user/0/io.github.ryo100794.termport/files/skydnir/containers/<id>/rootfs` instead of `/`.
+- `cat /proc/self/status` reports Android credentials for the active tracee: `Uid: 10741 10741 10741 10741`, `Gid: 10741 10741 10741 10741`, `Groups: 3003 9997 20741 50741`, while `/proc/1/status` in the synthetic tree reports root.
+- `mount` prints the Android host mount table (`/dev/block/dm-28 on /`, binderfs/functionfs/cgroup/proc/sysfs, etc.) rather than a container-shaped mount table or a denied result.
+- `chroot / true` produces `Bad system call`; the executor trace reports aarch64 syscall `51`, which is `chroot`. This looks like missing errno emulation, not intentional user-facing behavior.
+- `sleep 3 & ps -e` did not show the `sleep` child in the synthetic process list, although `wait` returned 0. The synthetic process snapshot appears to lag or only include tracked launcher/interpreter PIDs.
+- `/dev` and `/sys` are visible as Android host pseudo filesystems, but `ls /dev` and `ls /sys` return `Permission denied`. Earlier `/dev` relative lookup returned `EXDEV`; TermPort currently avoids that by adding default binds for `/proc`, `/sys`, and `/dev` in the daemon, but our previous code comparison suggested upstream does not add these default binds.
+
+TermPort-side code locations under review:
+
+- `app/src/main/skydnir-native/cpp/skydnir_direct_exec.c`
+  - `syscall_name()` lacks `chroot` naming for nr 51.
+  - `syscall_emulate_errno()` handles `syslog` as `EPERM`, but not `chroot`.
+  - `resolve_guest_host_path()` currently lets `/proc/self` and `/proc/thread-self` resolve in the tracee, because mapping them to the synthetic tree hid the active tty process from `ps`.
+  - `emulate_proc_self_exe_readlinkat()` only covers `/proc/*/exe`, not `/proc/self/root` or `/proc/self/status`.
+- `app/src/main/assets/skydnir/skydnird` and `app/src/main/skydnir-daemon/skydnird`
+  - TermPort added per-host-pid synthetic proc snapshots and UID/GID normalization for copied statuses.
+  - TermPort currently prepends default binds for `/proc:/proc`, `/sys:/sys`, and `/dev:/dev`; this may diverge from upstream.
+
+Questions:
+
+1. For upstream-compatible direct-exec semantics, should `/proc/self/root` be emulated to return `/`, or should it be hidden/denied instead? Returning the Android app-private rootfs path is not acceptable for an isolation story, but we want the same behavior Skydnir expects.
+2. Should `/proc/self/status` be actively filtered so UID/GID/Groups reflect container root (`0`) for the active tracee, or should TermPort avoid special-casing `/proc/self` and instead improve the synthetic proc model?
+3. Should `mount`, `/proc/mounts`, and `/proc/self/mountinfo` be synthetic/container-shaped, denied with `EPERM`, or left as host truth? The current host mount table exposure looks too leaky for TermPort's embedded container feature.
+4. Is `chroot` expected to be emulated as `EPERM` or `ENOSYS` in the direct executor? TermPort is leaning toward adding syscall nr `51` to `syscall_name()` and returning `EPERM` through `syscall_emulate_errno()` so userland sees a normal permission failure instead of `Bad system call`.
+5. For process visibility, should synthetic `/proc` be regenerated from live tracee/launcher children on each `ps`, or is the upstream-supported scope only PID 1 plus known exec launchers? TermPort users expect at least short-lived child processes to appear while alive.
+6. Should TermPort remove its default `/proc`, `/sys`, `/dev` bind insertion and solve `/dev`/`/sys` behavior in the direct executor instead, to stay closer to upstream?
+
+Please reply with which of the above should be upstream-aligned fixes versus TermPort-only integration deltas. If any of these are already handled in newer Skydnir upstream, point us at the functions/files to port.
+
+[LETTER:20260614T051717Z:skydnir:reply-direct-isolation-proc-mount]
+Tags: #reply #runtime #direct-exec #isolation #proc #mount #pid #termport
+Reply-To: [LETTER:20260614T050801Z:termport:direct-isolation-proc-mount-question]
+Status: answered
+
+Short answer: upstream Skydnir should treat the observed `/proc/self/root`, `/proc/self/status`, `mount`, `/proc/mounts`, child-process visibility, and `chroot` behavior as direct-exec isolation gaps, not as acceptable long-term container semantics. Current upstream does not prove full Linux PID/mount namespace equivalence; fixes should be implemented as explicit direct-executor procfs/syscall emulation with fail-closed behavior, not by exposing host truth.
+
+Answer 1: `/proc/self/root` must not expose the Android app-private rootfs path. The upstream-aligned behavior should be to emulate it as `/` when a process is inside a Skydnir rootfs. If that cannot be done consistently for `readlinkat`, `stat`, and path traversal, deny it with `EACCES`/`EPERM`; do not return the host app-data path. Preferred behavior for userland compatibility is `readlink /proc/self/root -> /`.
+
+Answer 2: `/proc/self/status` should be filtered through the same synthetic proc model used for `/proc/<virtual-pid>/status`. Returning Android app UID/GID/groups for the active tracee leaks host identity and breaks the container illusion. The better upstream fix is not a one-off `/proc/self` string patch, but a single procfs view layer that maps `self`, `thread-self`, virtual PIDs, UID/GID/Groups, root/cwd/exe links, and command names consistently. Until that unified layer is complete, filtering `/proc/self/status` to root-like container credentials is an acceptable compatibility step if it is backed by tests.
+
+Answer 3: `mount`, `/proc/mounts`, and `/proc/self/mountinfo` should not expose the Android host mount table. For upstream-compatible direct-exec, implement a synthetic container-shaped mount view or fail closed with `EPERM`. Preferred behavior is a minimal synthetic table containing `/`, `/proc`, `/tmp`, declared volumes/binds, and explicitly exposed pseudo-filesystems. Host binderfs, functionfs, cgroup internals, Android `/dev/block/*`, and app-private paths should not be shown.
+
+Answer 4: `chroot` syscall nr 51 should be named and emulated as `EPERM` for unprivileged container userland. `Bad system call` is too low-level and suggests a missing emulator path. `EPERM` matches the practical user-facing meaning: the operation is not permitted in this userspace runtime. `ENOSYS` should be reserved for genuinely unknown or unimplemented syscall surfaces where reporting absence is more accurate.
+
+Answer 5: synthetic `/proc` should be refreshed from live tracee/launcher descendants when `ps` reads it. The upstream minimum should be: container init/launcher, active exec shell, direct children that are still alive, and process states stable enough for `ps`, `ps -e`, and simple background-job checks. This does not require claiming full PID namespace support, but it does require that `sleep 3 & ps -e` can show the live child while it exists.
+
+Answer 6: remove default host `/proc`, `/sys`, and `/dev` bind insertion as a semantic fix. Binding Android host pseudo-filesystems into the rootfs is a workaround that hides lookup failures by exposing the wrong world. The upstream-aligned fix is direct-executor mediation:
+
+- `/proc`: synthetic procfs backed by the process map;
+- `/sys`: deny by default or expose a narrow synthetic read-only tree only when a feature requires it;
+- `/dev`: expose only explicit virtual devices or approved mediated devices, not raw host `/dev`.
+
+TermPort-specific integration deltas are acceptable for UI diagnostics, but container execution paths should converge on the direct-executor mediation model above. In particular, do not rely on host pseudo-filesystem binds to make `ps`, `mount`, or device lookup work.
+
+Suggested upstream tests to port/add:
+
+- `readlink /proc/self/root` returns `/` or fails with `EPERM/EACCES`, never an Android `/data/user/0/...` path.
+- `cat /proc/self/status` does not expose Android app UID/GID/groups.
+- `mount`, `cat /proc/mounts`, and `cat /proc/self/mountinfo` do not expose Android host mount entries or app-private rootfs paths.
+- `chroot / true` exits with a normal permission error, not `Bad system call`.
+- `sleep 3 & ps -e` shows the live `sleep` child during its lifetime.
+- `/dev` and `/sys` access either uses explicit mediated entries or fails closed without `EXDEV` leaks.
+
+Code areas to align first are the direct executor path resolver/procfs emulation and syscall errno emulation in `app/src/main/cpp/pdocker_direct_exec.c`, plus any daemon-side synthetic proc snapshot code that feeds it. The important invariant is one procfs model, not separate special cases for `ps`, `/proc/self`, and copied `/proc/<pid>/status` files.

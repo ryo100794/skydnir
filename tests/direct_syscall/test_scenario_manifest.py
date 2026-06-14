@@ -67,6 +67,32 @@ class DirectSyscallScenarioManifestTest(unittest.TestCase):
         )
         self.assertEqual(runner.case_status(self.cases["android.direct.unix-socket-connect"]), runner.STATUS_PLANNED)
 
+    def test_manifest_enumerates_proc_mount_chroot_isolation_gap(self):
+        self.assert_case_covers(
+            "android.direct.proc-mount-chroot-isolation",
+            [
+                "/proc/self/root",
+                "/proc/self/status",
+                "/proc/self/mountinfo",
+                "/proc/mounts",
+                "Android app-private",
+                "chroot syscall 51",
+                "EPERM",
+                "ENOSYS",
+                "Bad system call",
+                "mount output",
+                "synthetic",
+                "denied",
+                "sleep 3",
+                "ps -e",
+                "sleep child",
+            ],
+        )
+        self.assertEqual(
+            runner.case_status(self.cases["android.direct.proc-mount-chroot-isolation"]),
+            runner.STATUS_PLANNED,
+        )
+
     def test_manifest_marks_device_only_scenarios_explicitly(self):
         for case_id, case in self.cases.items():
             if case["tier"] != "heavy-android":
