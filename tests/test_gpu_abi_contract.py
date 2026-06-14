@@ -2062,6 +2062,49 @@ class GpuAbiContractTest(unittest.TestCase):
         self.assertNotIn("range->levelCount > image->mip_levels - range->baseMipLevel", bodyless)
         self.assertNotIn("replay_view->range.levelCount >", bodyless)
 
+    def test_vulkan_graphics_descriptor_image_upload_is_aspect_aware(self):
+        executor = GPU_EXECUTOR.read_text()
+        descriptor_copy_helper = executor.split(
+            "static int vulkan_graphics_merge_descriptor_image_copy_range", 1
+        )[1].split("static int vulkan_graphics_barrier_queue_family_replayable", 1)[0]
+        descriptor_aspect_helper = executor.split(
+            "static int vulkan_graphics_descriptor_image_aspect_supported", 1
+        )[1].split("static int vulkan_graphics_merge_descriptor_image_copy_range", 1)[0]
+        staged_body = executor.split(
+            "static int record_vulkan_graphics_v6_staged_image_uploads", 1
+        )[1].split("static int graphics_push_metadata_for_command", 1)[0]
+        record_body = executor.split(
+            "static int record_vulkan_graphics_v6_command_buffer", 1
+        )[1].split("static int submit_vulkan_graphics_v6_command_buffer", 1)[0]
+        bind_body = record_body.split(
+            "case PDOCKER_GPU_GRAPHICS_V6_COMMAND_BIND_DESCRIPTOR_SETS:", 1
+        )[1].split("case PDOCKER_GPU_GRAPHICS_V6_COMMAND_COPY_BUFFER:", 1)[0]
+        layout_body = executor.split(
+            "static int vulkan_image_descriptor_read_only_layout_valid", 1
+        )[1].split("static VkImageUsageFlags vulkan_required_usage_for_image_descriptor", 1)[0]
+
+        self.assertIn("range->aspectMask", descriptor_aspect_helper)
+        self.assertIn("vulkan_image_single_aspect_supported_for_format(image->format, aspect)", descriptor_aspect_helper)
+        self.assertIn("descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE", descriptor_aspect_helper)
+        self.assertIn("aspect != VK_IMAGE_ASPECT_COLOR_BIT", descriptor_aspect_helper)
+        self.assertIn("vulkan_graphics_descriptor_image_aspect_supported", descriptor_copy_helper)
+        self.assertIn("vulkan_graphics_merge_image_copy_range_for_aspect(image, range, aspect)", descriptor_copy_helper)
+        self.assertNotIn("image, range, VK_IMAGE_ASPECT_COLOR_BIT", descriptor_copy_helper)
+
+        self.assertIn("vulkan_image_tight_subresource_offset_for_aspect", staged_body)
+        self.assertIn("vulkan_image_tight_copy_size_for_aspect", staged_body)
+        self.assertIn("copy_size > (uint64_t)image->staging.size - buffer_offset", staged_body)
+        self.assertIn(".aspectMask = image->copy_aspect_mask", staged_body)
+
+        self.assertIn("vulkan_graphics_attachment_writeback_access_mask(view_obj->range.aspectMask)", bind_body)
+        self.assertIn("vulkan_graphics_attachment_writeback_stage_mask(view_obj->range.aspectMask)", bind_body)
+        self.assertNotIn("VK_PIPELINE_STAGE_HOST_BIT |\n                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT", bind_body)
+        self.assertNotIn("VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT", bind_body)
+
+        self.assertIn("VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL", layout_body)
+        self.assertIn("VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL", layout_body)
+        self.assertIn("VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL", layout_body)
+
     def test_vulkan_graphics_depth_stencil_writeback_bounds_are_aspect_aware(self):
         source = GPU_EXECUTOR.read_text()
         bpp_helper = source.split(

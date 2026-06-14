@@ -24,22 +24,21 @@ or closes.
   call out the post-V6.13 graphics ABI chain: resolve image, blit image, clear
   attachments, query/copy-query, submit sync/submit2, image-layout ranges,
   multisample state, and tessellation state.
-- [next] **V6.1 image-barrier VK_REMAINING/aspect slice**: After the V6.10
-  pure color/depth/stencil copy-aspect work and V6.23 tessellation metadata,
-  the next active Vulkan implementation slice is the older V6.1 explicit image
-  barrier lane. Normalize `VK_REMAINING_MIP_LEVELS` and
-  `VK_REMAINING_ARRAY_LAYERS` to concrete bounded mip/layer ranges before the
-  ABI boundary, validate image-barrier aspect masks against the serialized
-  image format, reject unsupported metadata/plane/multiplanar/compressed or
-  ambiguous packed depth+stencil ranges fail-closed, and keep true
-  cross-family ownership transfer plus broader synchronization out of scope.
-  Acceptance: positive barrier1/barrier2 fixtures for color, pure depth, and
-  pure stencil concrete ranges; negative fixtures for unnormalized
-  `VK_REMAINING_*`, empty/out-of-bounds ranges, invalid aspects for the image
-  format, and unsupported plane/metadata aspects; `tests.test_gpu_abi_contract`
-  plus `tests.test_llama_gpu_env_parity` stay green after the future code
-  slice, with synchronized ABI headers and native payload freshness checks if
-  implementation changes touch the graphics ABI or executor.
+- [done] **V6.1 image-barrier VK_REMAINING/aspect slice**: V6.1 explicit image
+  barriers now normalize `VK_REMAINING_MIP_LEVELS` and
+  `VK_REMAINING_ARRAY_LAYERS` before serialization, validate image-barrier
+  aspect masks against image format on both producer and executor sides, and
+  reject unsupported or ambiguous ranges fail-closed.
+- [doing] **graphics descriptor image aspect-aware upload slice**: Executor P6
+  is being widened from color-only descriptor upload to bounded single-aspect
+  color, pure depth (`D16`/`D32`), and pure stencil (`S8`) sampled/combined/input
+  descriptors.  Keep storage images color-only and packed dual-aspect
+  depth/stencil descriptors fail-closed until the copy-range model can represent
+  them explicitly. Acceptance: descriptor copy-range helper derives the aspect
+  from image-view range, staged upload uses `_for_aspect` offset/copy-size
+  helpers with bounds checks, descriptor bind barriers use aspect-derived
+  source access/stage masks, and `tests.test_gpu_abi_contract` plus native/APK
+  gates remain green.
 - [planned] **residual graphics evidence gaps**: Do not promote full Vulkan
   pass-through until remaining fail-closed lanes have explicit ABI/evidence:
   V6.1 image-barrier range/aspect normalization, packed depth+stencil copy

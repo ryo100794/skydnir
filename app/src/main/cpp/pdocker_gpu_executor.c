@@ -983,6 +983,14 @@ static int vulkan_descriptor_type_requires_sampler(VkDescriptorType type) {
            type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 }
 
+static int vulkan_image_descriptor_read_only_layout_valid(VkImageLayout layout) {
+    return layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ||
+           layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL ||
+           layout == VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL ||
+           layout == VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL ||
+           layout == VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
+}
+
 static int vulkan_image_descriptor_layout_valid(
         VkDescriptorType type,
         VkImageLayout layout) {
@@ -991,14 +999,13 @@ static int vulkan_image_descriptor_layout_valid(
             return layout == VK_IMAGE_LAYOUT_GENERAL;
         case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
         case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-            return layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ||
+            return vulkan_image_descriptor_read_only_layout_valid(layout) ||
                    layout == VK_IMAGE_LAYOUT_GENERAL;
         case VK_DESCRIPTOR_TYPE_SAMPLER:
             return 1;
         case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-            return layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ||
-                   layout == VK_IMAGE_LAYOUT_GENERAL ||
-                   layout == VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL;
+            return vulkan_image_descriptor_read_only_layout_valid(layout) ||
+                   layout == VK_IMAGE_LAYOUT_GENERAL;
         default:
             return 0;
     }
@@ -23119,20 +23126,42 @@ static int vulkan_graphics_merge_attachment_copy_range(
         image, range, vulkan_graphics_attachment_aspect_mask(role));
 }
 
-static int vulkan_graphics_merge_descriptor_image_copy_range(
-        VulkanDispatchImageObject *image,
+static int vulkan_graphics_descriptor_image_aspect_supported(
+        const VulkanDispatchImageObject *image,
         const VkImageSubresourceRange *range,
-        VkDescriptorType descriptor_type) {
+        VkDescriptorType descriptor_type,
+        VkImageAspectFlags *out_aspect) {
+    if (!image || !range || !out_aspect) return 0;
+    VkImageAspectFlags aspect = range->aspectMask;
+    if (!vulkan_image_single_aspect_supported_for_format(image->format, aspect)) {
+        return 0;
+    }
+    if (descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE &&
+        aspect != VK_IMAGE_ASPECT_COLOR_BIT) {
+        return 0;
+    }
     switch (descriptor_type) {
         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
         case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
         case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
         case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-            return vulkan_graphics_merge_image_copy_range_for_aspect(
-                image, range, VK_IMAGE_ASPECT_COLOR_BIT);
+            *out_aspect = aspect;
+            return 1;
         default:
-            return -EOPNOTSUPP;
+            return 0;
     }
+}
+
+static int vulkan_graphics_merge_descriptor_image_copy_range(
+        VulkanDispatchImageObject *image,
+        const VkImageSubresourceRange *range,
+        VkDescriptorType descriptor_type) {
+    VkImageAspectFlags aspect = 0;
+    if (!vulkan_graphics_descriptor_image_aspect_supported(
+            image, range, descriptor_type, &aspect)) {
+        return -EOPNOTSUPP;
+    }
+    return vulkan_graphics_merge_image_copy_range_for_aspect(image, range, aspect);
 }
 
 
@@ -24992,11 +25021,17 @@ static int record_vulkan_graphics_v6_staged_image_uploads(
              mip < image->copy_base_mip + image->copy_level_count;
              ++mip) {
             uint64_t buffer_offset = 0;
+            uint64_t copy_size = 0;
             VkExtent3D mip_extent;
-            if (!vulkan_image_tight_subresource_offset(
-                    image, mip, image->copy_base_layer, &buffer_offset) ||
+            if (!vulkan_image_tight_subresource_offset_for_aspect(
+                    image, mip, image->copy_base_layer,
+                    image->copy_aspect_mask, &buffer_offset) ||
+                !vulkan_image_tight_copy_size_for_aspect(
+                    image, mip, image->copy_layer_count,
+                    image->copy_aspect_mask, &copy_size) ||
                 !vulkan_image_mip_extent(image, mip, &mip_extent) ||
-                buffer_offset > (uint64_t)image->staging.size) {
+                buffer_offset > (uint64_t)image->staging.size ||
+                copy_size > (uint64_t)image->staging.size - buffer_offset) {
                 return -EINVAL;
             }
             VkBufferImageCopy region = {
@@ -25943,8 +25978,7 @@ static int record_vulkan_graphics_v6_command_buffer(
                 if (rc != 0) goto cleanup;
                 VkImageMemoryBarrier image_barriers[PDOCKER_GPU_MAX_VULKAN_BINDINGS];
                 uint32_t image_barrier_count = 0;
-                VkPipelineStageFlags image_src_stages = VK_PIPELINE_STAGE_HOST_BIT |
-                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+                VkPipelineStageFlags image_src_stages = 0;
                 for (uint32_t d = 0; d < command->descriptor_count; ++d) {
                     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptor =
                         &view->descriptors[command->first_descriptor + d];
@@ -25979,13 +26013,24 @@ static int record_vulkan_graphics_v6_command_buffer(
                     VkImageLayout old_layout = image->current_layout;
                     int layout_rc = vulkan_replay_image_layout_for_range(image, &view_obj->range, &old_layout);
                     if (layout_rc != 0) { rc = layout_rc; goto cleanup; }
+                    VkAccessFlags src_access_mask = 0;
+                    VkPipelineStageFlags src_stage_mask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+                    if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+                        src_access_mask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                        src_stage_mask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+                    } else if (old_layout == VK_IMAGE_LAYOUT_PREINITIALIZED) {
+                        src_access_mask = VK_ACCESS_HOST_WRITE_BIT;
+                        src_stage_mask = VK_PIPELINE_STAGE_HOST_BIT;
+                    } else if (old_layout != VK_IMAGE_LAYOUT_UNDEFINED) {
+                        src_access_mask =
+                            vulkan_graphics_attachment_writeback_access_mask(view_obj->range.aspectMask);
+                        src_stage_mask =
+                            vulkan_graphics_attachment_writeback_stage_mask(view_obj->range.aspectMask);
+                    }
+                    image_src_stages |= src_stage_mask;
                     image_barriers[image_barrier_count++] = (VkImageMemoryBarrier){
                         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                        .srcAccessMask = old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-                            ? VK_ACCESS_TRANSFER_WRITE_BIT
-                            : (old_layout == VK_IMAGE_LAYOUT_PREINITIALIZED
-                                ? VK_ACCESS_HOST_WRITE_BIT
-                                : (VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT)),
+                        .srcAccessMask = src_access_mask,
                         .dstAccessMask = descriptor_type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
                             ? (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT)
                             : VK_ACCESS_SHADER_READ_BIT,
@@ -25996,9 +26041,6 @@ static int record_vulkan_graphics_v6_command_buffer(
                         .image = image->image,
                         .subresourceRange = view_obj->range,
                     };
-                    if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-                        image_src_stages |= VK_PIPELINE_STAGE_TRANSFER_BIT;
-                    }
                     layout_rc = vulkan_replay_image_set_layout_for_range(image, &view_obj->range,
                                                                          (VkImageLayout)descriptor->image_layout);
                     if (layout_rc != 0) { rc = layout_rc; goto cleanup; }
