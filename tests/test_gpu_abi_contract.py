@@ -3127,6 +3127,16 @@ class GpuAbiContractTest(unittest.TestCase):
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_SCHEMA_HASH",
             ),
             (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V623_HEADER_EXTENSION_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V623_HEADER_EXTENSION_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V623_HEADER_EXTENSION_SCHEMA_HASH",
+            ),
+            (
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V623_TESSELLATION_STATE_FIELDS",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V623_TESSELLATION_STATE_FIELD_COUNT",
+                "PDOCKER_GPU_VULKAN_GRAPHICS_V623_TESSELLATION_STATE_SCHEMA_HASH",
+            ),
+            (
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELDS",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_FIELD_COUNT",
                 "PDOCKER_GPU_VULKAN_GRAPHICS_V6_COMMAND_SCHEMA_HASH",
@@ -5580,7 +5590,7 @@ class GpuAbiContractTest(unittest.TestCase):
         for marker in [
             "PdockerGpuVulkanGraphicsV622MultisampleStateEntry multisample_states[PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES]",
             "PdockerGpuVulkanGraphicsV622FrameHeader *frame_header_v622",
-            "sizeof(PdockerGpuVulkanGraphicsV622FrameHeader)",
+            "sizeof(*frame_header_v622)",
             "need_v622_multisample_state",
             "PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR",
             "frame_header_v622->v622.multisample_state_count",
@@ -5598,7 +5608,7 @@ class GpuAbiContractTest(unittest.TestCase):
             "sizeof(PdockerGpuVulkanGraphicsV622FrameHeader)",
             "const int is_v622",
             "header_v622->v622.multisample_state_count",
-            "FrameRange ranges[47]",
+            "FrameRange ranges[48]",
             "is_v622 ? 47u",
             "view->header_v622",
             "view->is_v622",
@@ -5609,6 +5619,108 @@ class GpuAbiContractTest(unittest.TestCase):
             "msci.pSampleMask",
             "enabled_features.sampleRateShading",
             "enabled_features.alphaToOne",
+        ]:
+            self.assertIn(marker, executor)
+
+
+    def test_vulkan_graphics_v623_tessellation_state_abi_is_append_only(self):
+        expected_extension_fields = [
+            ("tessellation_state_count", "u32"),
+            ("tessellation_state_entry_size", "u32"),
+            ("tessellation_state_table_offset", "u64"),
+            ("tessellation_state_table_size", "u64"),
+            ("tessellation_state_schema_hash", "u64"),
+            ("tessellation_state_table_hash", "u64"),
+            ("extension_hash", "u64"),
+        ]
+        expected_tessellation_fields = [
+            ("pipeline_index", "u32"),
+            ("patch_control_points", "u32"),
+            ("flags", "u32"),
+            ("reserved0", "u32"),
+            ("reserved1", "u64"),
+        ]
+        for header_path in [APP_HEADER, CONTAINER_HEADER]:
+            source = header_path.read_text()
+            with self.subTest(header=str(header_path)):
+                for marker in [
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR 23u",
+                    "PdockerGpuVulkanGraphicsV623HeaderExtension",
+                    "PdockerGpuVulkanGraphicsV623FrameHeader",
+                    "PdockerGpuVulkanGraphicsV623TessellationStateEntry",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V623_MAX_TESSELLATION_STATES PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES",
+                    "patch_control_points",
+                ]:
+                    self.assertIn(marker, source)
+                extension_fields, extension_count, declared_extension_hash, computed_extension_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V623_HEADER_EXTENSION_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V623_HEADER_EXTENSION_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V623_HEADER_EXTENSION_SCHEMA_HASH",
+                )
+                tessellation_fields, tessellation_count, declared_tessellation_hash, computed_tessellation_hash = vulkan_dispatch_v5_schema(
+                    header_path,
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V623_TESSELLATION_STATE_FIELDS",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V623_TESSELLATION_STATE_FIELD_COUNT",
+                    "PDOCKER_GPU_VULKAN_GRAPHICS_V623_TESSELLATION_STATE_SCHEMA_HASH",
+                )
+                self.assertEqual(expected_extension_fields, extension_fields)
+                self.assertEqual(expected_tessellation_fields, tessellation_fields)
+                self.assertEqual(7, extension_count)
+                self.assertEqual(5, tessellation_count)
+                self.assertEqual(declared_extension_hash, computed_extension_hash)
+                self.assertEqual(declared_tessellation_hash, computed_tessellation_hash)
+                self.assertEqual(
+                    [name for name, _ in expected_extension_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV623HeaderExtension"),
+                )
+                self.assertEqual(
+                    [name for name, _ in expected_tessellation_fields],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV623TessellationStateEntry"),
+                )
+                self.assertEqual(
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV622FrameHeader") + ["v623"],
+                    c_struct_field_names(header_path, "PdockerGpuVulkanGraphicsV623FrameHeader"),
+                )
+
+    def test_vulkan_graphics_v623_tessellation_state_is_wired_through_icd_and_executor(self):
+        icd = VULKAN_ICD.read_text()
+        executor = GPU_EXECUTOR.read_text()
+
+        for marker in [
+            "PdockerGpuVulkanGraphicsV623TessellationStateEntry tessellation_states[PDOCKER_GPU_VULKAN_GRAPHICS_V623_MAX_TESSELLATION_STATES]",
+            "PdockerGpuVulkanGraphicsV623FrameHeader *frame_header_v623",
+            "sizeof(PdockerGpuVulkanGraphicsV623FrameHeader)",
+            "need_v623_tessellation_state",
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR",
+            "frame_header_v623->v623.tessellation_state_count",
+            "APPEND_GRAPHICS_TABLE(tessellation_states, tessellation_state_count",
+            "frame_header_v623->v623.tessellation_state_table_hash",
+            "VULKAN_GRAPHICS_V6.23",
+            "pTessellationState",
+            "patchControlPoints",
+            "VK_PRIMITIVE_TOPOLOGY_PATCH_LIST",
+        ]:
+            self.assertIn(marker, icd)
+
+        for marker in [
+            "PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR",
+            "sizeof(PdockerGpuVulkanGraphicsV623FrameHeader)",
+            "const int is_v623",
+            "header_v623->v623.tessellation_state_count",
+            "FrameRange ranges[48]",
+            "is_v623 ? 48u",
+            "view->header_v623",
+            "view->is_v623",
+            "view->tessellation_states",
+            "find_vulkan_graphics_v623_tessellation_state",
+            "tessellation_state_table_hash",
+            "enabled_features.tessellationShader",
+            "maxTessellationPatchSize",
+            "VK_PRIMITIVE_TOPOLOGY_PATCH_LIST",
+            "VkPipelineTessellationStateCreateInfo tsci",
+            ".pTessellationState = tessellation_state ? &tsci : NULL",
+            ".stageFlags = pipeline_descriptor_stage_flags",
         ]:
             self.assertIn(marker, executor)
 

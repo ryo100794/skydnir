@@ -18075,6 +18075,8 @@ static int validate_vulkan_graphics_v6_header_prefix(
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV621FrameHeader)) return -EPROTO;
     } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR) {
         if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV622FrameHeader)) return -EPROTO;
+    } else if (header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR) {
+        if (header->header_size != sizeof(PdockerGpuVulkanGraphicsV623FrameHeader)) return -EPROTO;
     } else {
         return -EPROTO;
     }
@@ -18138,7 +18140,10 @@ static int validate_vulkan_graphics_v6_header(
         (const PdockerGpuVulkanGraphicsV621FrameHeader *)header;
     const PdockerGpuVulkanGraphicsV622FrameHeader *header_v622 =
         (const PdockerGpuVulkanGraphicsV622FrameHeader *)header;
-    const int is_v622 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR;
+    const PdockerGpuVulkanGraphicsV623FrameHeader *header_v623 =
+        (const PdockerGpuVulkanGraphicsV623FrameHeader *)header;
+    const int is_v623 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR;
+    const int is_v622 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR || is_v623;
     const int is_v621 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR || is_v622;
     const int is_v620 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR || is_v621;
     /* const int is_v619 = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR; */
@@ -18207,6 +18212,7 @@ static int validate_vulkan_graphics_v6_header(
         (is_v621 && header_v621->v621.submit_info_count > PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_INFOS) ||
         (is_v621 && header_v621->v621.submit_sync_info_count > PDOCKER_GPU_VULKAN_GRAPHICS_V621_MAX_SUBMIT_SYNC_INFOS) ||
         (is_v622 && header_v622->v622.multisample_state_count > PDOCKER_GPU_VULKAN_GRAPHICS_V622_MAX_MULTISAMPLE_STATES) ||
+        (is_v623 && header_v623->v623.tessellation_state_count > PDOCKER_GPU_VULKAN_GRAPHICS_V623_MAX_TESSELLATION_STATES) ||
         header->command_count > PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_COMMANDS) {
         return -E2BIG;
     }
@@ -18372,8 +18378,13 @@ static int validate_vulkan_graphics_v6_header(
          header_v622->v622.multisample_state_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V622_MULTISAMPLE_STATE_SCHEMA_HASH)) {
         return -EPROTO;
     }
-    /* FrameRange ranges[43] was the V6.19 table-count guard; V6.20 appends one range, V6.21 appends two ranges, V6.22 appends one range. */
-    FrameRange ranges[47] = {
+    if (is_v623 &&
+        (header_v623->v623.tessellation_state_entry_size != sizeof(PdockerGpuVulkanGraphicsV623TessellationStateEntry) ||
+         header_v623->v623.tessellation_state_schema_hash != PDOCKER_GPU_VULKAN_GRAPHICS_V623_TESSELLATION_STATE_SCHEMA_HASH)) {
+        return -EPROTO;
+    }
+    /* FrameRange ranges[43] was the V6.19 table-count guard; V6.20 appends one range, V6.21 appends two ranges, V6.22 appends one range, V6.23 appends one range. */
+    FrameRange ranges[48] = {
         {header->resource_table_offset, header->resource_table_size},
         {header->descriptor_table_offset, header->descriptor_table_size},
         {header->image_table_offset, header->image_table_size},
@@ -18456,6 +18467,8 @@ static int validate_vulkan_graphics_v6_header(
          is_v621 ? header_v621->v621.submit_sync_info_table_size : 0},
         {is_v622 ? header_v622->v622.multisample_state_table_offset : 0,
          is_v622 ? header_v622->v622.multisample_state_table_size : 0},
+        {is_v623 ? header_v623->v623.tessellation_state_table_offset : 0,
+         is_v623 ? header_v623->v623.tessellation_state_table_size : 0},
     };
     if (!table_range_valid(header->resource_table_offset, header->resource_table_size,
                            header->resource_count, header->resource_entry_size,
@@ -18753,7 +18766,16 @@ static int validate_vulkan_graphics_v6_header(
                            header->frame_size, header->header_size)) {
         return -EPROTO;
     }
-    if (!frame_ranges_do_not_overlap(ranges, is_v622 ? 47u : (is_v621 ? 46u : (is_v620 ? 44u : (is_v619 ? 43u : (is_v618 ? 42u : (is_v617 ? 41u : (is_v616 ? 40u : (is_v615 ? 37u : (is_v614 ? 36u : (is_v613 ? 35u : (is_v612 ? 34u : (is_v611 ? 33u : (is_v610 ? 30u : (is_v69 ? 28u : (is_v68 ? 27u : (is_v67 ? 26u : (is_v66 ? 23u : (is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u))))))))))))))))))))))) {
+    if (is_v623 &&
+        !table_range_valid(header_v623->v623.tessellation_state_table_offset,
+                           header_v623->v623.tessellation_state_table_size,
+                           header_v623->v623.tessellation_state_count,
+                           header_v623->v623.tessellation_state_entry_size,
+                           __alignof__(PdockerGpuVulkanGraphicsV623TessellationStateEntry),
+                           header->frame_size, header->header_size)) {
+        return -EPROTO;
+    }
+    if (!frame_ranges_do_not_overlap(ranges, is_v623 ? 48u : (is_v622 ? 47u : (is_v621 ? 46u : (is_v620 ? 44u : (is_v619 ? 43u : (is_v618 ? 42u : (is_v617 ? 41u : (is_v616 ? 40u : (is_v615 ? 37u : (is_v614 ? 36u : (is_v613 ? 35u : (is_v612 ? 34u : (is_v611 ? 33u : (is_v610 ? 30u : (is_v69 ? 28u : (is_v68 ? 27u : (is_v67 ? 26u : (is_v66 ? 23u : (is_v65 ? 21u : (is_v64 ? 20u : (is_v63 ? 19u : (is_v62 ? 18u : (is_v61 ? 17u : 12u)))))))))))))))))))))))) {
         return -EPROTO;
     }
     return 0;
@@ -18795,6 +18817,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV620FrameHeader *header_v620;
     const PdockerGpuVulkanGraphicsV621FrameHeader *header_v621;
     const PdockerGpuVulkanGraphicsV622FrameHeader *header_v622;
+    const PdockerGpuVulkanGraphicsV623FrameHeader *header_v623;
     const int *passed_fds;
     size_t passed_fd_count;
     int is_v61;
@@ -18819,6 +18842,7 @@ typedef struct VulkanGraphicsV6FrameView {
     int is_v620;
     int is_v621;
     int is_v622;
+    int is_v623;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images;
@@ -18865,6 +18889,7 @@ typedef struct VulkanGraphicsV6FrameView {
     const PdockerGpuVulkanGraphicsV621SubmitInfoEntry *submit_infos;
     const PdockerGpuVulkanGraphicsV621SubmitSyncInfoEntry *submit_sync_infos;
     const PdockerGpuVulkanGraphicsV622MultisampleStateEntry *multisample_states;
+    const PdockerGpuVulkanGraphicsV623TessellationStateEntry *tessellation_states;
 } VulkanGraphicsV6FrameView;
 
 static int init_vulkan_graphics_v6_frame_view(
@@ -18878,7 +18903,8 @@ static int init_vulkan_graphics_v6_frame_view(
         (const PdockerGpuVulkanGraphicsV6FrameHeader *)frame;
     int rc = validate_vulkan_graphics_v6_header(header, passed_fd_count);
     if (rc != 0) return rc;
-    const int is_v622_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR;
+    const int is_v623_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V623_ABI_MINOR;
+    const int is_v622_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V622_ABI_MINOR || is_v623_header;
     const int is_v621_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V621_ABI_MINOR || is_v622_header;
     const int is_v620_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V620_ABI_MINOR || is_v621_header;
     /* const int is_v619_header = header->abi_minor == PDOCKER_GPU_VULKAN_GRAPHICS_V619_ABI_MINOR; */
@@ -18969,6 +18995,9 @@ static int init_vulkan_graphics_v6_frame_view(
     const PdockerGpuVulkanGraphicsV622FrameHeader *header_v622 = is_v622_header
             ? (const PdockerGpuVulkanGraphicsV622FrameHeader *)frame
             : NULL;
+    const PdockerGpuVulkanGraphicsV623FrameHeader *header_v623 = is_v623_header
+            ? (const PdockerGpuVulkanGraphicsV623FrameHeader *)frame
+            : NULL;
     view->frame = frame;
     view->header = header;
     view->header_v61 = header_v61;
@@ -18993,6 +19022,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->header_v620 = header_v620;
     view->header_v621 = header_v621;
     view->header_v622 = header_v622;
+    view->header_v623 = header_v623;
     view->passed_fds = passed_fds;
     view->passed_fd_count = passed_fd_count;
     view->is_v61 = header_v61 != NULL;
@@ -19017,6 +19047,7 @@ static int init_vulkan_graphics_v6_frame_view(
     view->is_v620 = header_v620 != NULL;
     view->is_v621 = header_v621 != NULL;
     view->is_v622 = header_v622 != NULL;
+    view->is_v623 = header_v623 != NULL;
     view->resources =
         (const PdockerGpuVulkanDispatchV5ResourceEntry *)graphics_v6_table_ptr(
             frame, header, header->resource_table_offset, header->resource_table_size);
@@ -19322,6 +19353,15 @@ static int init_vulkan_graphics_v6_frame_view(
                 frame, header, header_v622->v622.multisample_state_table_offset,
                 header_v622->v622.multisample_state_table_size);
         if (header_v622->v622.multisample_state_count && !view->multisample_states) {
+            return -EPROTO;
+        }
+    }
+    if (view->is_v623) {
+        view->tessellation_states =
+            (const PdockerGpuVulkanGraphicsV623TessellationStateEntry *)graphics_v6_table_ptr(
+                frame, header, header_v623->v623.tessellation_state_table_offset,
+                header_v623->v623.tessellation_state_table_size);
+        if (header_v623->v623.tessellation_state_count && !view->tessellation_states) {
             return -EPROTO;
         }
     }
@@ -19739,6 +19779,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const PdockerGpuVulkanGraphicsV620FrameHeader *header_v620 = view.header_v620;
     const PdockerGpuVulkanGraphicsV621FrameHeader *header_v621 = view.header_v621;
     const PdockerGpuVulkanGraphicsV622FrameHeader *header_v622 = view.header_v622;
+    const PdockerGpuVulkanGraphicsV623FrameHeader *header_v623 = view.header_v623;
     const int is_v61 = view.is_v61;
     const int is_v62 = view.is_v62;
     const int is_v63 = view.is_v63;
@@ -19760,6 +19801,7 @@ static int validate_vulkan_graphics_v6_frame_content(
     const int is_v620 = view.is_v620;
     const int is_v621 = view.is_v621;
     const int is_v622 = view.is_v622;
+    const int is_v623 = view.is_v623;
     const PdockerGpuVulkanDispatchV5ResourceEntry *resources = view.resources;
     const PdockerGpuVulkanDispatchV5DescriptorObjectEntry *descriptors = view.descriptors;
     const PdockerGpuVulkanDispatchV5ImageEntry *images = view.images;
@@ -20154,6 +20196,27 @@ static int validate_vulkan_graphics_v6_frame_content(
                 return -EPROTO;
             }
             seen_multisample_pipeline[entry->pipeline_index] = 1;
+        }
+    }
+    if (is_v623) {
+        uint64_t tessellation_state_table_hash = fnv1a64_update(
+            1469598103934665603ull, view.tessellation_states,
+            (size_t)header_v623->v623.tessellation_state_table_size);
+        if (tessellation_state_table_hash != header_v623->v623.tessellation_state_table_hash ||
+            header_v623->v623.extension_hash != tessellation_state_table_hash) {
+            return -EPROTO;
+        }
+        uint8_t seen_tessellation_pipeline[PDOCKER_GPU_VULKAN_GRAPHICS_V6_MAX_PIPELINES];
+        memset(seen_tessellation_pipeline, 0, sizeof(seen_tessellation_pipeline));
+        for (uint32_t m = 0; m < header_v623->v623.tessellation_state_count; ++m) {
+            const PdockerGpuVulkanGraphicsV623TessellationStateEntry *entry = &view.tessellation_states[m];
+            if (entry->pipeline_index >= header->pipeline_count ||
+                seen_tessellation_pipeline[entry->pipeline_index] ||
+                entry->patch_control_points == 0 ||
+                entry->flags != 0 || entry->reserved0 != 0 || entry->reserved1 != 0) {
+                return -EPROTO;
+            }
+            seen_tessellation_pipeline[entry->pipeline_index] = 1;
         }
     }
     if (is_v68) {
@@ -21234,6 +21297,18 @@ find_vulkan_graphics_v622_multisample_state(
     return NULL;
 }
 
+static const PdockerGpuVulkanGraphicsV623TessellationStateEntry *
+find_vulkan_graphics_v623_tessellation_state(
+        const VulkanGraphicsV6FrameView *view,
+        uint32_t pipeline_index) {
+    if (!view || !view->is_v623 || !view->header_v623 || !view->tessellation_states) return NULL;
+    for (uint32_t i = 0; i < view->header_v623->v623.tessellation_state_count; ++i) {
+        const PdockerGpuVulkanGraphicsV623TessellationStateEntry *entry = &view->tessellation_states[i];
+        if (entry->pipeline_index == pipeline_index) return entry;
+    }
+    return NULL;
+}
+
 static const PdockerGpuVulkanGraphicsV67ViewportScissorStateEntry *
 find_vulkan_graphics_v67_viewport_scissor_state(
         const VulkanGraphicsV6FrameView *view,
@@ -21665,22 +21740,59 @@ static int preflight_vulkan_graphics_v6_replay_supported(
                         return -EOPNOTSUPP;
                     }
                 }
+                VkShaderStageFlags pipeline_stage_flags = 0;
                 for (uint32_t stage_i = 0;
                      stage_i < pipeline->shader_stage_count;
                      ++stage_i) {
                     const PdockerGpuVulkanGraphicsV6ShaderStageEntry *stage =
                         &view->shader_stages[pipeline->shader_stage_first + stage_i];
                     const uint32_t stage_flags = stage->stage_flags;
-                    if ((stage_flags & ~(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)) != 0) {
-                        reason = "non vertex/fragment graphics shaders are not implemented";
+                    const uint32_t supported_stage_flags =
+                        VK_SHADER_STAGE_VERTEX_BIT |
+                        VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                        VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT |
+                        VK_SHADER_STAGE_FRAGMENT_BIT;
+                    if ((stage_flags & ~supported_stage_flags) != 0 || stage_flags == 0) {
+                        reason = "unsupported graphics shader stage is not implemented";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
+                    pipeline_stage_flags |= stage_flags;
                     if (stage->specialization_size != 0 && !view->is_v62) {
                         reason = "graphics shader specialization replay requires V6.2 metadata";
                         if (reason_out) *reason_out = reason;
                         return -EOPNOTSUPP;
                     }
+                }
+                const VkShaderStageFlags tessellation_stage_flags =
+                    pipeline_stage_flags & (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                                            VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
+                const PdockerGpuVulkanGraphicsV623TessellationStateEntry *tessellation_state =
+                    find_vulkan_graphics_v623_tessellation_state(view, command->pipeline_index);
+                if (tessellation_stage_flags != 0) {
+                    if (tessellation_stage_flags != (VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                                                     VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT) ||
+                        !tessellation_state) {
+                        reason = "tessellation shader replay requires V6.23 patch metadata";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                    if (!g_vulkan_runtime.enabled_features.tessellationShader) {
+                        reason = "tessellation shader replay requires tessellationShader";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                    if (pipeline->topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST ||
+                        tessellation_state->patch_control_points >
+                            g_vulkan_runtime.physical_properties.limits.maxTessellationPatchSize) {
+                        reason = "invalid tessellation pipeline patch state";
+                        if (reason_out) *reason_out = reason;
+                        return -EOPNOTSUPP;
+                    }
+                } else if (tessellation_state) {
+                    reason = "V6.23 tessellation metadata without tessellation shader stages";
+                    if (reason_out) *reason_out = reason;
+                    return -EPROTO;
                 }
                 pipeline_bound = 1;
                 break;
@@ -22354,6 +22466,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
         memset(specialization_infos, 0, sizeof(specialization_infos));
         memset(specialization_entries, 0, sizeof(specialization_entries));
         memset(entry_names, 0, sizeof(entry_names));
+        VkShaderStageFlags pipeline_descriptor_stage_flags = 0;
         for (uint32_t sidx = 0; sidx < src->shader_stage_count; ++sidx) {
             const uint32_t absolute_stage_index = src->shader_stage_first + sidx;
             const PdockerGpuVulkanGraphicsV6ShaderStageEntry *stage =
@@ -22386,6 +22499,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
                 };
                 specialization_info = &specialization_infos[sidx];
             }
+            pipeline_descriptor_stage_flags |= stage->stage_flags;
             shader_stages[sidx] = (VkPipelineShaderStageCreateInfo){
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                 .stage = (VkShaderStageFlagBits)stage->stage_flags,
@@ -22422,7 +22536,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
                     .binding = b,
                     .descriptorType = set_binding_types[set][b],
                     .descriptorCount = set_binding_descriptor_counts[set][b],
-                    .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                    .stageFlags = pipeline_descriptor_stage_flags,
                 };
             }
             VkDescriptorSetLayoutCreateInfo dslci = {
@@ -22591,6 +22705,20 @@ static int materialize_vulkan_graphics_v6_pipelines(
                 msci.pSampleMask = sample_mask_words;
             }
         }
+        const PdockerGpuVulkanGraphicsV623TessellationStateEntry *tessellation_state =
+            find_vulkan_graphics_v623_tessellation_state(view, pidx);
+        VkPipelineTessellationStateCreateInfo tsci = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
+        };
+        if (tessellation_state) {
+            if (!rt->enabled_features.tessellationShader ||
+                src->topology != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST ||
+                tessellation_state->patch_control_points == 0 ||
+                tessellation_state->patch_control_points > rt->physical_properties.limits.maxTessellationPatchSize) {
+                return -EOPNOTSUPP;
+            }
+            tsci.patchControlPoints = tessellation_state->patch_control_points;
+        }
         VkPipelineColorBlendAttachmentState blend_attachments[16];
         memset(blend_attachments, 0, sizeof(blend_attachments));
         for (uint32_t c = 0; c < src->color_attachment_count; ++c) {
@@ -22726,6 +22854,7 @@ static int materialize_vulkan_graphics_v6_pipelines(
             .pInputAssemblyState = &iasci,
             .pViewportState = &vpsci,
             .pRasterizationState = &rsci,
+            .pTessellationState = tessellation_state ? &tsci : NULL,
             .pMultisampleState = &msci,
             .pColorBlendState = &cbsci,
             .pDepthStencilState = (src->depth_stencil_flags != 0 ||
